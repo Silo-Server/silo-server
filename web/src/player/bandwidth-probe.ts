@@ -1,41 +1,35 @@
 import { fetchWithSession } from "@/api/client";
 import { v2, V2_CLIENT_HEADERS } from "@/api/v2/request";
 import { storage } from "@/utils/storage";
+import {
+  PROBE_FIRST_BYTE_DEADLINE_MS,
+  ProbeMeter,
+  type ProbeMode,
+  type ProbeResult,
+} from "./probe-meter";
 
 /**
- * Measured throughput on the path media takes, for `bandwidth_estimate_kbps`.
+ * The connection speed test (docs/design/2026-10-17-buffering-quality.md,
+ * Connection speed test), for `bandwidth_estimate_kbps`.
  *
  * Browsers will not tell us: Chromium caps `navigator.connection.downlink` at
  * 10 Mbps and Safari and Firefox have no such API, while Auto quality needs to
  * know whether a viewer can sustain a 4K source at 60–100 Mbps. So the app
- * downloads random bytes from the server in the background, times them, and
- * caches the result for playback to read. With connection_speed_v1 the probe
- * runs against the URL the server advertises and the result is reported back.
+ * times random bytes from the server, on one connection as playback uses.
+ *
+ * The server keeps the reading for this device on the connection it is using
+ * now. The app looks for it a few seconds after sign-in, when a hidden tab is
+ * shown again and after a new connection type, and runs the quick test only
+ * when no reading proves the link. There is no timer. The best reading is
+ * kept here so playback starts can read it at once.
  */
 
-/** Bytes requested; the time budget usually ends the transfer first. */
-const PROBE_BYTES = 40_000_000;
-/** How long to keep timing once bytes flow. Enough to see past TCP ramp-up. */
-const PROBE_TIME_BUDGET_MS = 2_000;
-/** A probe that has not delivered its first byte by then is abandoned. */
-const PROBE_FIRST_BYTE_DEADLINE_MS = 10_000;
-/**
- * Slack past the time budget before a read that has stopped returning is cut
- * off; the rate is then taken from the bytes that did arrive.
- */
-const PROBE_STALLED_READ_GRACE_MS = 500;
-/** Ramp-up excluded from the rate when the probe ran long enough to spare it. */
-const PROBE_WARMUP_MS = 300;
-/** Shortest timed window, or smallest byte count, that yields a usable rate. */
-const PROBE_MIN_WINDOW_MS = 200;
-const PROBE_MIN_BYTES = 1_000_000;
-/** Let the first screen settle before spending bandwidth on a probe. */
-const PROBE_START_DELAY_MS = 5_000;
-/** How long a measurement stands in for the network before it is re-taken. */
-export const BANDWIDTH_ESTIMATE_TTL_MS = 30 * 60 * 1000;
-/** The contract bounds `bandwidth_estimate_kbps` to this range. */
-const MIN_ESTIMATE_KBPS = 100;
-const MAX_ESTIMATE_KBPS = 1_000_000;
+/** Let the first screen settle before reading or spending bandwidth. */
+const LOOK_DELAY_MS = 5_000;
+/** How long a reading lasts when the server does not say. */
+const DEFAULT_READING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** The probe without connection_speed_v1, which keeps nothing for us. */
+const DEFAULT_PROBE_URL = "/api/v2/playback/bandwidth-probe";
 
 /**
  * The slice of the Network Information API we use. It is not in the DOM lib
@@ -52,43 +46,37 @@ export function networkInformation(): NetworkInformationLike | undefined {
   return (navigator as Navigator & { connection?: NetworkInformationLike }).connection;
 }
 
-interface StoredEstimate {
+/** The best reading for this connection, for playback starts to send. */
+interface StoredReading {
   kbps: number;
   measuredAt: number;
-}
-
-function clampKbps(kbps: number): number | undefined {
-  if (!Number.isFinite(kbps) || kbps < MIN_ESTIMATE_KBPS) return undefined;
-  return Math.min(Math.round(kbps), MAX_ESTIMATE_KBPS);
+  maxAgeMs: number;
 }
 
 /**
  * The entry this page last wrote. localStorage can be full or unavailable,
- * and its writes then fail silently; this copy keeps the measurement in
- * effect for this page anyway.
+ * and its writes then fail silently; this copy keeps the reading in effect
+ * for this page anyway.
  */
 let pageEntry: string | undefined;
 
-function parseStored(raw: string | null | undefined, now: number): StoredEstimate | undefined {
+function parseStored(raw: string | null | undefined, now: number): StoredReading | undefined {
   if (!raw) return undefined;
   try {
-    const parsed = JSON.parse(raw) as Partial<StoredEstimate> & { observed?: unknown };
-    // A limit an older build recorded after a stall is not a measurement; the
-    // server learns those now. It shares the key and expires within the TTL.
-    if (parsed.observed) return undefined;
-    if (typeof parsed.kbps !== "number" || typeof parsed.measuredAt !== "number") return undefined;
-    if (now - parsed.measuredAt > BANDWIDTH_ESTIMATE_TTL_MS || parsed.measuredAt > now)
+    const parsed = JSON.parse(raw) as Partial<StoredReading>;
+    const { kbps, measuredAt, maxAgeMs } = parsed;
+    // An entry an older build wrote has no lifetime; the next look replaces it.
+    if (typeof kbps !== "number" || typeof measuredAt !== "number" || typeof maxAgeMs !== "number")
       return undefined;
-    const kbps = clampKbps(parsed.kbps);
-    if (kbps === undefined) return undefined;
-    return { kbps, measuredAt: parsed.measuredAt };
+    if (measuredAt > now || now - measuredAt > maxAgeMs || kbps < 1) return undefined;
+    return { kbps, measuredAt, maxAgeMs };
   } catch {
     return undefined;
   }
 }
 
 /** The newer of this page's entry and the shared one another tab may have written. */
-function readStored(now: number): StoredEstimate | undefined {
+function readStored(now: number): StoredReading | undefined {
   const page = parseStored(pageEntry, now);
   const shared = parseStored(storage.get(storage.KEYS.BANDWIDTH_ESTIMATE), now);
   if (!page) return shared;
@@ -96,39 +84,42 @@ function readStored(now: number): StoredEstimate | undefined {
   return shared.measuredAt > page.measuredAt ? shared : page;
 }
 
-function writeStored(kbps: number, now: number): void {
-  const entry: StoredEstimate = { kbps, measuredAt: now };
-  pageEntry = JSON.stringify(entry);
+function writeStored(reading: StoredReading): void {
+  pageEntry = JSON.stringify(reading);
   storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, pageEntry);
 }
 
-/** Drops the cached estimate, in this page and in localStorage. */
+/** Drops the kept reading, in this page and in localStorage. */
 export function forgetBandwidthEstimate(): void {
   pageEntry = undefined;
   storage.remove(storage.KEYS.BANDWIDTH_ESTIMATE);
 }
 
-/** The cached measurement in kbps, or undefined when none is fresh. */
+/** The kept reading in kbps, or undefined when none is within its lifetime. */
 export function readMeasuredBandwidthKbps(now = Date.now()): number | undefined {
   return readStored(now)?.kbps;
 }
 
-/** One timed probe: the rate and the sample it was taken from. */
-export interface ProbeMeasurement {
-  kbps: number;
-  bytes: number;
-  duration_ms: number;
+export class ProbeRateLimited extends Error {
+  constructor(readonly retryAfter: number) {
+    super(`Try again in ${retryAfter} seconds`);
+  }
 }
 
 /**
- * Times one probe download. Returns undefined when the probe failed, was
- * aborted, or moved too little data in too short a window to mean anything.
+ * Runs one test against `url`: `size` from the mode, the clock from the first
+ * byte, and the meter deciding when to stop. Returns undefined when the probe
+ * failed, was aborted, or measured nothing; rejects with ProbeRateLimited for
+ * a 429.
  */
 export async function measureBandwidth(
   signal: AbortSignal,
+  mode: ProbeMode,
+  targetKbps?: number,
+  url = DEFAULT_PROBE_URL,
   clock: () => number = () => performance.now(),
-  probeURL = "/api/v2/playback/bandwidth-probe",
-): Promise<ProbeMeasurement | undefined> {
+): Promise<ProbeResult | undefined> {
+  const meter = new ProbeMeter(mode, targetKbps);
   // The caller's signal cancels the probe; the first-byte deadline abandons a
   // request or body that never starts flowing.
   const controller = new AbortController();
@@ -139,23 +130,11 @@ export async function measureBandwidth(
     () => controller.abort(),
     PROBE_FIRST_BYTE_DEADLINE_MS,
   );
-  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
-  const clearTimers = () => {
-    clearTimeout(firstByteTimer);
-    clearTimeout(budgetTimer);
-    firstByteTimer = undefined;
-    budgetTimer = undefined;
-  };
-
-  // The clock starts at the first chunk, so request latency and server
-  // setup do not count against the link.
+  let ticker: ReturnType<typeof setInterval> | undefined;
   let start: number | undefined;
-  let warm: { at: number; bytes: number } | undefined;
-  let bytes = 0;
-  let now = 0;
   try {
     const { res } = await fetchWithSession(
-      `${probeURL}${probeURL.includes("?") ? "&" : "?"}size=${PROBE_BYTES}`,
+      `${url}${url.includes("?") ? "&" : "?"}size=${meter.limits.bytes}`,
       {
         method: "GET",
         headers: {
@@ -180,94 +159,147 @@ export async function measureBandwidth(
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        now = clock();
+        const now = clock();
         if (start === undefined) {
           start = now;
           clearTimeout(firstByteTimer);
           firstByteTimer = undefined;
-          // Ends a read that stops returning, which the check below would
-          // never reach: cancelling resolves the pending read as done. The
-          // silent stretch counts against the rate, so the window ends now
-          // rather than at the last chunk.
-          budgetTimer = setTimeout(() => {
-            now = clock();
-            void reader.cancel().catch(() => undefined);
-          }, PROBE_TIME_BUDGET_MS + PROBE_STALLED_READ_GRACE_MS);
-          continue;
+          // Windows close on the clock, not only when bytes arrive: a read
+          // that stops returning still ends the test at its limit, and the
+          // silence counts against the rate.
+          const begun = start;
+          ticker = setInterval(() => {
+            if (meter.tick(clock() - begun)) void reader.cancel().catch(() => undefined);
+          }, 100);
         }
-        bytes += value.byteLength;
-        if (!warm && now - start >= PROBE_WARMUP_MS) warm = { at: now, bytes };
-        if (now - start >= PROBE_TIME_BUDGET_MS) break;
+        if (meter.add(now - start, value.byteLength)) break;
       }
     } finally {
       // Closing the body ends the transfer; the server stops at its next write.
       await reader.cancel().catch(() => undefined);
     }
   } finally {
-    clearTimers();
+    clearTimeout(firstByteTimer);
+    clearInterval(ticker);
     signal.removeEventListener("abort", forwardAbort);
   }
-  if (start === undefined || now <= start) return undefined;
-  const elapsed = now - start;
-  if (elapsed < PROBE_MIN_WINDOW_MS && bytes < PROBE_MIN_BYTES) return undefined;
-  // Prefer the rate after ramp-up when at least as much time followed it.
-  if (warm && now - warm.at >= warm.at - start) {
-    const duration_ms = Math.max(1, Math.round(now - warm.at));
-    const kbps = clampKbps(((bytes - warm.bytes) * 8) / (now - warm.at));
-    return kbps === undefined ? undefined : { kbps, bytes: bytes - warm.bytes, duration_ms };
-  }
-  // bytes * 8 bits / ms = kbit/s.
-  const kbps = clampKbps((bytes * 8) / elapsed);
-  return kbps === undefined
-    ? undefined
-    : { kbps, bytes, duration_ms: Math.max(1, Math.round(elapsed)) };
+  if (start === undefined || signal.aborted) return undefined;
+  return (meter.outcome ?? meter.finish(clock() - start)).result ?? undefined;
 }
 
-export class ProbeRateLimited extends Error {
-  constructor(readonly retryAfter: number) {
-    super(`Try again in ${retryAfter} seconds`);
-  }
+/** The capability fields the test reads. */
+interface ProbeSchedule {
+  url: string;
+  targetKbps?: number;
+  automatic: boolean;
+  maxAgeMs: number;
+  /** connection_speed_v1: results are reported and the server keeps the reading. */
+  reporting: boolean;
 }
-async function collectProbe(signal: AbortSignal): Promise<number | undefined> {
+
+async function probeSchedule(): Promise<ProbeSchedule> {
   const cap = await v2("GET /api/v2/playback/capabilities");
   const reporting = cap.features.includes("connection_speed_v1") && !!cap.bandwidth_probe_url;
-  if (signal.aborted || !probeAllowed()) return undefined;
-  const result = await measureBandwidth(
-    signal,
-    undefined,
-    reporting ? cap.bandwidth_probe_url : undefined,
-  );
-  if (!result || signal.aborted) return undefined;
-  writeStored(result.kbps, Date.now());
-  if (reporting) {
-    const type = networkInformation()?.type;
-    const transport =
-      type === "wifi" || type === "ethernet" || type === "cellular" ? type : "other";
-    await v2("POST /api/v2/playback/bandwidth-probe/results", { body: { ...result, transport } });
+  if (!reporting) {
+    return {
+      url: DEFAULT_PROBE_URL,
+      automatic: true,
+      maxAgeMs: DEFAULT_READING_MAX_AGE_MS,
+      reporting,
+    };
   }
-  return result.kbps;
+  return {
+    url: cap.bandwidth_probe_url!,
+    targetKbps: cap.bandwidth_probe_target_kbps,
+    automatic: cap.bandwidth_probe_automatic !== false,
+    maxAgeMs: (cap.bandwidth_probe_max_age_seconds ?? 0) * 1000 || DEFAULT_READING_MAX_AGE_MS,
+    reporting,
+  };
 }
+
+/** A probe or playback sample the server keeps; a sample is always a lower bound. */
+interface ServerReading {
+  kbps: number;
+  lowerBound: boolean;
+  measuredAt: number;
+}
+
+/**
+ * Reads what the server keeps for this connection, keeps the best reading
+ * within its lifetime for playback starts, and says whether one proves the
+ * link: a settled rate, or a lower bound at least the current target.
+ */
+async function readServerReading(schedule: ProbeSchedule): Promise<boolean> {
+  const connection = await v2("GET /api/v2/playback/connection");
+  const readings: ServerReading[] = [];
+  if (connection.probe)
+    readings.push({
+      kbps: connection.probe.kbps,
+      lowerBound: connection.probe.lower_bound,
+      measuredAt: Date.parse(connection.probe.measured_at),
+    });
+  if (connection.playback_sample)
+    readings.push({
+      kbps: connection.playback_sample.kbps,
+      lowerBound: true,
+      measuredAt: Date.parse(connection.playback_sample.measured_at),
+    });
+  const now = Date.now();
+  const current = readings.filter((reading) => now - reading.measuredAt <= schedule.maxAgeMs);
+  const best = current.reduce<ServerReading | undefined>(
+    (top, reading) => (!top || reading.kbps > top.kbps ? reading : top),
+    undefined,
+  );
+  if (best)
+    writeStored({ kbps: best.kbps, measuredAt: best.measuredAt, maxAgeMs: schedule.maxAgeMs });
+  else forgetBandwidthEstimate();
+  return current.some(
+    (reading) =>
+      !reading.lowerBound ||
+      (schedule.targetKbps !== undefined && reading.kbps >= schedule.targetKbps),
+  );
+}
+
+/** Runs one test and keeps what it measured: on the server, and here for starts. */
+async function collectProbe(
+  signal: AbortSignal,
+  mode: ProbeMode,
+  schedule: ProbeSchedule,
+): Promise<ProbeResult | undefined> {
+  const result = await measureBandwidth(signal, mode, schedule.targetKbps, schedule.url);
+  if (!result || signal.aborted) return undefined;
+  if (!schedule.reporting) {
+    writeStored({ kbps: result.kbps, measuredAt: Date.now(), maxAgeMs: schedule.maxAgeMs });
+    return result;
+  }
+  const type = networkInformation()?.type;
+  const transport = type === "wifi" || type === "ethernet" || type === "cellular" ? type : "other";
+  await v2("POST /api/v2/playback/bandwidth-probe/results", { body: { ...result, transport } });
+  await readServerReading(schedule);
+  return result;
+}
+
 /** Why Test speed did not run: media is playing or starting, or another probe is measuring. */
 export type SpeedTestSkipped = "playing" | "busy";
 
 /**
- * Settings → Test speed: probes now, under the same playback and cross-tab
- * guards as the schedule. Resolves to the measured kbps, or to why the probe
- * could not run. Rejects when it ran and measured nothing, with
+ * Settings → Test speed: runs the accurate test now, under the same playback
+ * and cross-tab guards as the automatic one. Resolves to what it measured, or
+ * to why it could not run. Rejects when it ran and measured nothing, with
  * ProbeRateLimited for a 429.
  */
-export async function testConnectionSpeed(): Promise<number | SpeedTestSkipped> {
+export async function testConnectionSpeed(): Promise<ProbeResult | SpeedTestSkipped> {
   if (!probeAllowed()) return "playing";
   if (activeProbe) return "busy";
   const controller = new AbortController();
   activeProbe = controller;
-  const run = async (): Promise<number | SpeedTestSkipped> => {
+  const run = async (): Promise<ProbeResult | SpeedTestSkipped> => {
     if (controller.signal.aborted || !probeAllowed()) return "playing";
     const locks = lockManager();
     if (locks && (await mediaActiveInAnyTab(locks))) return "playing";
-    const kbps = await collectProbe(controller.signal);
-    if (kbps !== undefined) return kbps;
-    // Playback that starts mid-probe aborts it; that is not a failed measurement.
+    const result = await collectProbe(controller.signal, "accurate", await probeSchedule());
+    if (result) return result;
+    // Playback that starts mid-test cancels it; that is not a failed measurement.
     if (controller.signal.aborted || !probeAllowed()) return "playing";
     throw new Error("The connection speed could not be measured");
   };
@@ -283,29 +315,28 @@ export async function testConnectionSpeed(): Promise<number | SpeedTestSkipped> 
   }
 }
 
-let scheduledTimer: ReturnType<typeof setTimeout> | undefined;
-/** Bumped by stopBandwidthProbes so a stopped schedule never re-arms. */
+let lookTimer: ReturnType<typeof setTimeout> | undefined;
+/** Bumped by stopBandwidthProbes so a stopped schedule never looks again. */
 let scheduleGeneration = 0;
 let scheduleCleanup: (() => void) | undefined;
 /**
- * Bumped by cancelBandwidthProbe, so a probe still waiting for the cross-tab
+ * Bumped by cancelBandwidthProbe, so a test still waiting for the cross-tab
  * lock when playback starts does not begin once the lock arrives.
  */
 let cancelEpoch = 0;
 /**
  * When playback last started. Media is still loading, and its element still
  * paused, for a while after a start, so the playing-media check alone would
- * let a timer that fires then probe during startup.
+ * let a look that comes then test during startup.
  */
 let lastPlaybackStartAt: number | undefined;
-/** How long after a playback start a probe holds off. */
+/** How long after a playback start a test holds off. */
 const PLAYBACK_START_QUIET_MS = 60_000;
-/** Web Lock that lets one tab at a time run a probe. */
+/** A 429's Retry-After: no automatic test before then. */
+let notBefore = 0;
+/** Web Lock that lets one tab at a time run a test. */
 const PROBE_LOCK_NAME = "silo-bandwidth-probe";
 let activeProbe: AbortController | undefined;
-
-/** How soon to look again when a probe could not run or did not finish. */
-const PROBE_RETRY_MS = 5 * 60 * 1000;
 
 function mediaPlaying(): boolean {
   if (typeof document === "undefined") return false;
@@ -314,10 +345,14 @@ function mediaPlaying(): boolean {
   );
 }
 
+function tabHidden(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
 /**
  * Whether the viewer pays for this link by the byte: Data Saver is on or the
- * browser reports cellular. Such a link is not probed, and a measurement
- * taken on another link does not describe it.
+ * browser reports cellular. Such a link is not tested, and a reading taken on
+ * another link does not describe it.
  */
 export function onMeteredConnection(): boolean {
   const connection = networkInformation();
@@ -326,7 +361,7 @@ export function onMeteredConnection(): boolean {
 
 /**
  * Shared Web Lock a tab holds while its media plays or playback is starting,
- * so a probe in another tab can tell the link is busy. Shared mode lets any
+ * so a test in another tab can tell the link is busy. Shared mode lets any
  * number of tabs hold it at once.
  */
 const MEDIA_LOCK_NAME = "silo-media-active";
@@ -361,7 +396,7 @@ function syncPlayingHold(): void {
   releasePlayingHold = undefined;
 }
 
-/** Tells other tabs that playback started here, so a running probe yields. */
+/** Tells other tabs that playback started here, so a running test yields. */
 const PLAYBACK_CHANNEL_NAME = "silo-playback-start";
 let playbackChannel: BroadcastChannel | undefined;
 
@@ -395,7 +430,7 @@ async function mediaActiveInAnyTab(locks: LockManager): Promise<boolean> {
 }
 
 function probeAllowed(): boolean {
-  // A probe beside a playing or starting stream would both slow it and
+  // A test beside a playing or starting stream would both slow it and
   // under-measure.
   const startingPlayback =
     lastPlaybackStartAt !== undefined && Date.now() - lastPlaybackStartAt < PLAYBACK_START_QUIET_MS;
@@ -403,12 +438,13 @@ function probeAllowed(): boolean {
 }
 
 /**
- * Keeps a measurement cached while the app is signed in. Starts once the first
- * screen has had time to settle, measures again when the cached one expires,
- * and while a probe is not allowed (metered link, media playing) looks again
- * every few minutes. Returns a function that stops the schedule.
+ * Looks for a current reading while the app is signed in: a few seconds
+ * after it starts, when a hidden tab is shown again, and after the browser
+ * reports a new connection type. Each look reads the server's reading first
+ * and runs the quick test only when none proves the link. A hidden tab
+ * neither looks nor tests. Returns a function that stops the schedule.
  */
-export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => void {
+export function scheduleBandwidthProbe(delayMs = LOOK_DELAY_MS): () => void {
   stopBandwidthProbes();
   try {
     installMediaTracking();
@@ -416,73 +452,58 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
     // Cross-tab coordination is optional.
   }
   const generation = scheduleGeneration;
-  const schedule = (ms: number) => {
+  const lookIn = (ms: number) => {
     if (generation !== scheduleGeneration) return;
-    clearTimeout(scheduledTimer);
-    scheduledTimer = setTimeout(run, Math.max(0, ms));
+    clearTimeout(lookTimer);
+    lookTimer = setTimeout(() => void look(), Math.max(0, ms));
   };
-  // Schedules the next look for when a fresh cached result expires.
-  const awaitExpiry = (): boolean => {
-    const now = Date.now();
-    const stored = readStored(now);
-    if (!stored) return false;
-    schedule(stored.measuredAt + BANDWIDTH_ESTIMATE_TTL_MS - now + 1000);
-    return true;
-  };
-  const probe = async () => {
-    const controller = new AbortController();
-    activeProbe = controller;
+  const look = async () => {
+    lookTimer = undefined;
+    // A test already running keeps what it measures when it settles.
+    if (activeProbe || tabHidden() || generation !== scheduleGeneration) return;
     try {
-      await collectProbe(controller.signal);
+      const schedule = await probeSchedule();
+      if (schedule.reporting) {
+        if (await readServerReading(schedule)) return;
+      } else if (readStored(Date.now())) {
+        return;
+      }
+      if (!schedule.automatic || !probeAllowed() || Date.now() < notBefore) return;
+      await testUnderLock(schedule);
     } catch {
-      // Best effort: without a measurement playback plans as it did before.
-    } finally {
-      if (activeProbe === controller) activeProbe = undefined;
-      // A stored result schedules its own expiry; a failed or aborted probe
-      // waits out the retry interval.
-      if (!awaitExpiry()) schedule(PROBE_RETRY_MS);
+      // Best effort: without a reading playback plans as it did before, and
+      // the next look tries again.
     }
   };
-  const run = () => {
-    scheduledTimer = undefined;
-    // A probe already running reschedules itself when it settles.
-    if (activeProbe) return;
-    if (awaitExpiry()) return;
-    if (!probeAllowed()) {
-      schedule(PROBE_RETRY_MS);
-      return;
-    }
-    // Tabs share the cached result, so only one of them measures at a time:
-    // two probes at once would split the link and both read low.
-    const locks = lockManager();
-    if (!locks) {
-      void probe();
-      return;
-    }
+  const testUnderLock = async (schedule: ProbeSchedule) => {
+    // Tabs share the reading, so only one of them tests at a time: two tests
+    // at once would split the link and both read low.
     const epoch = cancelEpoch;
-    locks
-      .request(PROBE_LOCK_NAME, { ifAvailable: true }, async (lock) => {
-        if (!lock || epoch !== cancelEpoch) {
-          // Another tab is measuring, or playback started while the lock
-          // was on its way; look again later.
-          schedule(PROBE_RETRY_MS);
-          return;
-        }
-        // The tab that held the lock may have just stored a result.
-        if (awaitExpiry() || generation !== scheduleGeneration) return;
-        // Another tab may be playing; this tab's own check cannot see it.
-        if (await mediaActiveInAnyTab(locks)) {
-          schedule(PROBE_RETRY_MS);
-          return;
-        }
-        await probe();
-      })
-      .catch(() => schedule(PROBE_RETRY_MS));
+    const test = async () => {
+      if (epoch !== cancelEpoch || generation !== scheduleGeneration || tabHidden()) return;
+      const locks = lockManager();
+      // Another tab may be playing; this tab's own check cannot see it.
+      if (locks && (await mediaActiveInAnyTab(locks))) return;
+      const controller = new AbortController();
+      activeProbe = controller;
+      try {
+        await collectProbe(controller.signal, "quick", schedule);
+      } catch (error) {
+        if (error instanceof ProbeRateLimited) notBefore = Date.now() + error.retryAfter * 1000;
+      } finally {
+        if (activeProbe === controller) activeProbe = undefined;
+      }
+    };
+    const locks = lockManager();
+    if (!locks) return test();
+    // Another tab holding the lock is testing and will share its reading.
+    await locks.request(PROBE_LOCK_NAME, { ifAvailable: true }, (lock) =>
+      lock ? test() : undefined,
+    );
   };
-  // A new network voids the measurement; a return to the foreground looks
-  // again, as a fresh sign-in does. The browser also fires `change` when only
-  // its own downlink or RTT estimate moves, which is not a new network and
-  // must not cost another probe.
+  // A new network means a different reading on the server; the browser also
+  // fires `change` when only its own downlink or RTT estimate moves, which is
+  // not a new network.
   const network = networkInformation() as (NetworkInformationLike & EventTarget) | undefined;
   let networkType = network?.type;
   const onNetworkChange = () => {
@@ -491,31 +512,39 @@ export function scheduleBandwidthProbe(delayMs = PROBE_START_DELAY_MS): () => vo
     cancelEpoch++;
     activeProbe?.abort();
     forgetBandwidthEstimate();
-    schedule(PROBE_START_DELAY_MS);
+    lookIn(LOOK_DELAY_MS);
   };
-  const onVisible = () => {
-    if (document.visibilityState === "visible") schedule(PROBE_START_DELAY_MS);
+  const onVisibility = () => {
+    if (!tabHidden()) {
+      lookIn(LOOK_DELAY_MS);
+      return;
+    }
+    // A hidden tab does not test; one that is running stops and measured nothing.
+    clearTimeout(lookTimer);
+    lookTimer = undefined;
+    cancelEpoch++;
+    activeProbe?.abort();
   };
   network?.addEventListener?.("change", onNetworkChange);
-  document.addEventListener("visibilitychange", onVisible);
+  document.addEventListener("visibilitychange", onVisibility);
   scheduleCleanup = () => {
     network?.removeEventListener?.("change", onNetworkChange);
-    document.removeEventListener("visibilitychange", onVisible);
+    document.removeEventListener("visibilitychange", onVisibility);
   };
-  schedule(delayMs);
+  if (!tabHidden()) lookIn(delayMs);
   return stopBandwidthProbes;
 }
 
 /**
- * Called when playback starts: stops a running probe so it does not compete
- * with playback, and holds off new ones while the media loads. The schedule
- * continues and tries again later.
+ * Called when playback starts: stops a running test so it does not compete
+ * with playback, and holds off new ones while the media loads. The next look
+ * tries again.
  */
 export function cancelBandwidthProbe(): void {
   cancelEpoch++;
   lastPlaybackStartAt = Date.now();
   activeProbe?.abort();
-  // Tell other tabs: a probe running there stops now, and the lock keeps new
+  // Tell other tabs: a test running there stops now, and the lock keeps new
   // ones off until the playing hold takes over or the start settles. This is
   // best effort: a browser that refuses cross-tab APIs (some privacy modes
   // throw SecurityError) must never keep playback from starting.
@@ -528,19 +557,22 @@ export function cancelBandwidthProbe(): void {
   }
 }
 
-/** Stops the schedule and any running probe, e.g. on sign-out. */
+/** Stops the schedule and any running test, e.g. on sign-out. */
 export function stopBandwidthProbes(): void {
   scheduleCleanup?.();
   scheduleCleanup = undefined;
   scheduleGeneration++;
   lastPlaybackStartAt = undefined;
+  notBefore = 0;
   playbackChannel?.close();
   playbackChannel = undefined;
-  if (scheduledTimer !== undefined) {
-    clearTimeout(scheduledTimer);
-    scheduledTimer = undefined;
+  if (lookTimer !== undefined) {
+    clearTimeout(lookTimer);
+    lookTimer = undefined;
   }
   const probe = activeProbe;
   activeProbe = undefined;
   probe?.abort();
 }
+
+export type { ProbeResult } from "./probe-meter";

@@ -237,11 +237,11 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     }
   });
 
-  it("prefers a fresh probe measurement over the downlink hint", () => {
+  it("prefers the kept speed reading over the downlink hint", () => {
     vi.stubGlobal("navigator", { connection: { downlink: 10 } });
     localStorage.setItem(
       "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
+      JSON.stringify({ kbps: 180_000, measuredAt: Date.now(), maxAgeMs: 7 * 24 * 60 * 60 * 1000 }),
     );
     try {
       expect(detectBandwidthEstimateKbpsV3()).toBe(180_000);
@@ -254,7 +254,7 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     vi.stubGlobal("navigator", { connection: { downlink: 10, saveData: true } });
     localStorage.setItem(
       "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
+      JSON.stringify({ kbps: 180_000, measuredAt: Date.now(), maxAgeMs: 7 * 24 * 60 * 60 * 1000 }),
     );
     try {
       expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
@@ -267,7 +267,7 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     vi.stubGlobal("navigator", { connection: { downlink: 4.5, type: "cellular" } });
     localStorage.setItem(
       "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 180_000, measuredAt: Date.now() }),
+      JSON.stringify({ kbps: 180_000, measuredAt: Date.now(), maxAgeMs: 7 * 24 * 60 * 60 * 1000 }),
     );
     try {
       expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();

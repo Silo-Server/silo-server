@@ -23,7 +23,7 @@ class FakeBroadcastChannel {
 const fetchWithSession = vi.fn();
 vi.mock("@/api/v2/request", () => ({
   V2_CLIENT_HEADERS: {},
-  v2: vi.fn(async () => ({ features: ["bandwidth_probe_v1"] })),
+  v2: vi.fn(async () => ({ features: [] })),
 }));
 vi.mock("@/api/client", () => ({
   fetchWithSession: (...args: unknown[]) => fetchWithSession(...args),
@@ -32,7 +32,6 @@ vi.mock("@/api/client", () => ({
 import {
   testConnectionSpeed,
   ProbeRateLimited,
-  BANDWIDTH_ESTIMATE_TTL_MS,
   cancelBandwidthProbe,
   forgetBandwidthEstimate,
   measureBandwidth,
@@ -43,8 +42,8 @@ import {
 import { v2 } from "@/api/v2/request";
 import { storage } from "@/utils/storage";
 
-const measureBandwidthKbps = async (...args: Parameters<typeof measureBandwidth>) =>
-  (await measureBandwidth(...args))?.kbps;
+const DAY = 24 * 60 * 60 * 1000;
+const PROBE_URL = "/api/v2/playback/bandwidth-probe?media_path=true";
 
 /** A body that yields `chunks` of `chunkBytes`, advancing a fake clock `stepMs` per chunk. */
 function timedBody(chunks: number, chunkBytes: number, stepMs: number) {
@@ -54,8 +53,8 @@ function timedBody(chunks: number, chunkBytes: number, stepMs: number) {
   const reader = {
     read: async () => {
       if (sent >= chunks) return { done: true, value: undefined };
+      if (sent > 0) time += stepMs;
       sent++;
-      time += stepMs;
       return { done: false, value: new Uint8Array(chunkBytes) };
     },
     cancel,
@@ -68,59 +67,186 @@ function timedBody(chunks: number, chunkBytes: number, stepMs: number) {
   };
 }
 
+/** A probe request that never answers until it is aborted. */
+function hangingProbe() {
+  fetchWithSession.mockImplementation(
+    (_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () =>
+          reject(new DOMException("aborted", "AbortError")),
+        );
+      }),
+  );
+}
+
+interface ServerReading {
+  probe?: { kbps: number; lower_bound: boolean; ageMs: number };
+  sample?: { kbps: number; ageMs: number };
+}
+
+/**
+ * Answers the capability and connection reads, with the speed test schedule;
+ * a reported result becomes the probe the next connection read returns.
+ */
+function server(options: {
+  target?: number;
+  automatic?: boolean;
+  maxAgeSeconds?: number;
+  reading?: ServerReading;
+}) {
+  let reading = options.reading ?? {};
+  const posted: Record<string, unknown>[] = [];
+  vi.mocked(v2).mockImplementation((async (operation: string, init?: { body?: unknown }) => {
+    if (operation === "GET /api/v2/playback/capabilities")
+      return {
+        features: ["buffering_quality_v1", "connection_speed_v1"],
+        bandwidth_probe_url: PROBE_URL,
+        bandwidth_probe_target_kbps: options.target,
+        bandwidth_probe_automatic: options.automatic ?? true,
+        bandwidth_probe_max_age_seconds: options.maxAgeSeconds ?? 604800,
+      };
+    if (operation === "GET /api/v2/playback/connection") {
+      const at = (ageMs: number) => new Date(Date.now() - ageMs).toISOString();
+      return {
+        connection: "remote",
+        learned_limit: null,
+        ...(reading.probe && {
+          probe: {
+            kbps: reading.probe.kbps,
+            lower_bound: reading.probe.lower_bound,
+            measured_at: at(reading.probe.ageMs),
+            transport: "wifi",
+          },
+        }),
+        ...(reading.sample && {
+          playback_sample: { kbps: reading.sample.kbps, measured_at: at(reading.sample.ageMs) },
+        }),
+      };
+    }
+    if (operation === "POST /api/v2/playback/bandwidth-probe/results") {
+      const body = init!.body as { kbps: number; lower_bound: boolean };
+      posted.push(body as Record<string, unknown>);
+      reading = { ...reading, probe: { kbps: body.kbps, lower_bound: body.lower_bound, ageMs: 0 } };
+      return undefined;
+    }
+    throw new Error(`unexpected ${operation}`);
+  }) as never);
+  return { posted };
+}
+
+function setVisibility(state: "visible" | "hidden") {
+  Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
 beforeEach(() => {
   // Re-stubbed per test because tests unstub all globals afterwards.
   vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
   forgetBandwidthEstimate();
   fetchWithSession.mockReset();
+  vi.mocked(v2).mockReset();
+  Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("measureBandwidthKbps", () => {
-  it("times the transfer after ramp-up and stops at the time budget", async () => {
-    // 1 MB every 80 ms = 100 Mbps.
+describe("measureBandwidth", () => {
+  it("stops a quick test once a window after ramp-up beats the target", async () => {
+    // 1 MB every 10 ms is 800 Mbps; the window from 500 ms beats 115 Mbps.
+    const body = timedBody(1000, 1_000_000, 10);
+    fetchWithSession.mockResolvedValue({ res: body.res });
+
+    const result = await measureBandwidth(
+      new AbortController().signal,
+      "quick",
+      115_000,
+      PROBE_URL,
+      body.clock,
+    );
+
+    expect(result).toEqual({
+      kbps: 115_000,
+      lower_bound: true,
+      bytes: 50_000_000,
+      duration_ms: 500,
+    });
+    expect(body.sent()).toBe(101);
+    expect(body.cancel).toHaveBeenCalled();
+    expect(fetchWithSession.mock.calls[0]![0]).toBe(`${PROBE_URL}&size=100000000`);
+  });
+
+  it("settles over the final second of a quick test without a target", async () => {
+    // 1 MB every 80 ms is 100 Mbps, for longer than the 3-second test.
     const body = timedBody(1000, 1_000_000, 80);
     fetchWithSession.mockResolvedValue({ res: body.res });
 
-    const kbps = await measureBandwidthKbps(new AbortController().signal, body.clock);
-
-    expect(kbps).toBe(100_000);
-    expect(body.sent()).toBeLessThan(1000);
-    expect(body.cancel).toHaveBeenCalled();
-    expect(fetchWithSession.mock.calls[0]![0]).toMatch(
-      /^\/api\/v2\/playback\/bandwidth-probe\?size=\d+$/,
+    const result = await measureBandwidth(
+      new AbortController().signal,
+      "quick",
+      undefined,
+      PROBE_URL,
+      body.clock,
     );
+
+    expect(result).toMatchObject({ lower_bound: false, duration_ms: 1000 });
+    expect(Math.abs(result!.kbps - 100_000)).toBeLessThanOrEqual(8_000);
   });
 
-  it("reads a fast link that finishes the whole payload", async () => {
-    // 40 MB in 160 ms is 2 Gbps; the contract bound caps it at 1 Gbps.
-    const body = timedBody(41, 1_000_000, 4);
+  it("asks for the accurate test's size and ignores the target", async () => {
+    const body = timedBody(1000, 1_000_000, 10);
     fetchWithSession.mockResolvedValue({ res: body.res });
 
-    expect(await measureBandwidthKbps(new AbortController().signal, body.clock)).toBe(1_000_000);
+    const result = await measureBandwidth(
+      new AbortController().signal,
+      "accurate",
+      115_000,
+      PROBE_URL,
+      body.clock,
+    );
+
+    expect(fetchWithSession.mock.calls[0]![0]).toBe(`${PROBE_URL}&size=1000000000`);
+    // 1000 MB in about 10 s is 800 Mbps over the final 3 seconds.
+    expect(result).toMatchObject({ kbps: 800_000, lower_bound: false, duration_ms: 3000 });
   });
 
   it("returns nothing for a failed or too-short probe", async () => {
     const cancel = vi.fn(async () => undefined);
     fetchWithSession.mockResolvedValue({ res: { ok: false, body: { cancel } } });
-    expect(await measureBandwidthKbps(new AbortController().signal)).toBeUndefined();
+    expect(await measureBandwidth(new AbortController().signal, "quick")).toBeUndefined();
     expect(cancel).toHaveBeenCalled();
 
     const tiny = timedBody(3, 1000, 10);
     fetchWithSession.mockResolvedValue({ res: tiny.res });
-    expect(await measureBandwidthKbps(new AbortController().signal, tiny.clock)).toBeUndefined();
+    expect(
+      await measureBandwidth(
+        new AbortController().signal,
+        "quick",
+        undefined,
+        PROBE_URL,
+        tiny.clock,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("preserves Retry-After from a 429", async () => {
+    fetchWithSession.mockResolvedValue({
+      res: { status: 429, headers: new Headers({ "Retry-After": "19" }) },
+    });
+    await expect(measureBandwidth(new AbortController().signal, "quick")).rejects.toMatchObject({
+      retryAfter: 19,
+    });
+    expect(new ProbeRateLimited(19).message).toBe("Try again in 19 seconds");
   });
 });
 
-describe("measureBandwidthKbps deadlines", () => {
+describe("measureBandwidth deadlines", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("cuts off a read that stops returning and counts the silence", async () => {
-    // 1 MB every 80 ms (100 Mbps) for 1.2 s, then the body goes silent.
+  it("ends a stalled transfer at the time limit and counts the silence", async () => {
+    // 1 MB every 80 ms (100 Mbps) for 2.6 s, then the body goes silent.
     const t0 = Date.now();
     const clock = () => Date.now() - t0;
     let sent = 0;
@@ -128,9 +254,11 @@ describe("measureBandwidthKbps deadlines", () => {
     const reader = {
       read: () =>
         new Promise<{ done: boolean; value?: Uint8Array }>((resolve) => {
-          if (sent < 16) {
-            sent++;
-            setTimeout(() => resolve({ done: false, value: new Uint8Array(1_000_000) }), 80);
+          if (sent < 33) {
+            setTimeout(
+              () => resolve({ done: false, value: new Uint8Array(1_000_000) }),
+              sent++ ? 80 : 0,
+            );
           } else {
             resolveStalled = resolve;
           }
@@ -139,59 +267,59 @@ describe("measureBandwidthKbps deadlines", () => {
     };
     fetchWithSession.mockResolvedValue({ res: { ok: true, body: { getReader: () => reader } } });
 
-    const result = measureBandwidthKbps(new AbortController().signal, clock);
+    const pending = measureBandwidth(
+      new AbortController().signal,
+      "quick",
+      undefined,
+      PROBE_URL,
+      clock,
+    );
     await vi.advanceTimersByTimeAsync(4_000);
-    const kbps = await result;
+    const result = await pending;
 
     expect(reader.cancel).toHaveBeenCalled();
-    // 11 MB after ramp-up over the 2.18 s from the warm mark to the cutoff,
-    // not the 100 Mbps of the burst alone.
-    expect(kbps).toBe(40_367);
+    // The final second, 2.0–3.0 s, holds chunks at 2.00–2.48 s and one at
+    // 2.56 s, then silence: 8 MB in 1 s, not the burst's 100 Mbps.
+    expect(result).toEqual({
+      kbps: 64_000,
+      lower_bound: false,
+      bytes: 8_000_000,
+      duration_ms: 1000,
+    });
   });
 
   it("abandons a probe whose first byte never arrives", async () => {
-    fetchWithSession.mockImplementation(
-      (_url: string, init: RequestInit) =>
-        new Promise((_resolve, reject) => {
-          init.signal?.addEventListener("abort", () =>
-            reject(new DOMException("aborted", "AbortError")),
-          );
-        }),
-    );
-
-    const result = measureBandwidthKbps(new AbortController().signal);
-    const settled = expect(result).rejects.toThrow();
+    hangingProbe();
+    const pending = measureBandwidth(new AbortController().signal, "quick");
+    const settled = expect(pending).rejects.toThrow();
     await vi.advanceTimersByTimeAsync(10_000);
     await settled;
   });
 });
 
-describe("measured bandwidth cache", () => {
-  it("expires after the TTL", () => {
+describe("kept reading", () => {
+  it("lasts its own lifetime", () => {
     const now = 1_000_000_000;
     storage.set(
       storage.KEYS.BANDWIDTH_ESTIMATE,
-      JSON.stringify({ kbps: 250_000, measuredAt: now }),
+      JSON.stringify({ kbps: 250_000, measuredAt: now, maxAgeMs: 7 * DAY }),
     );
-
-    expect(readMeasuredBandwidthKbps(now + 1000)).toBe(250_000);
-    expect(readMeasuredBandwidthKbps(now + BANDWIDTH_ESTIMATE_TTL_MS + 1)).toBeUndefined();
+    expect(readMeasuredBandwidthKbps(now + 6 * DAY)).toBe(250_000);
+    expect(readMeasuredBandwidthKbps(now + 7 * DAY + 1)).toBeUndefined();
   });
 
-  it("ignores malformed entries", () => {
+  it("ignores malformed entries and an older build's", () => {
     storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, "{not json");
     expect(readMeasuredBandwidthKbps()).toBeUndefined();
     storage.set(
       storage.KEYS.BANDWIDTH_ESTIMATE,
-      JSON.stringify({ kbps: "fast", measuredAt: Date.now() }),
+      JSON.stringify({ kbps: "fast", measuredAt: Date.now(), maxAgeMs: DAY }),
     );
     expect(readMeasuredBandwidthKbps()).toBeUndefined();
-  });
-
-  it("discards browser-local limits saved before server learning", () => {
+    // A 30-minute probe result from before the redesign has no lifetime.
     storage.set(
       storage.KEYS.BANDWIDTH_ESTIMATE,
-      JSON.stringify({ kbps: 4200, measuredAt: Date.now(), observed: true }),
+      JSON.stringify({ kbps: 4200, measuredAt: Date.now() }),
     );
     expect(readMeasuredBandwidthKbps()).toBeUndefined();
   });
@@ -207,50 +335,173 @@ describe("scheduleBandwidthProbe", () => {
     vi.useRealTimers();
   });
 
-  it("waits for a fresh measurement to expire, then measures again", async () => {
-    storage.set(
-      storage.KEYS.BANDWIDTH_ESTIMATE,
-      JSON.stringify({ kbps: 250_000, measuredAt: Date.now() }),
-    );
-    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+  it("keeps the server's settled reading and does not test", async () => {
+    server({
+      target: 115_000,
+      reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 2 * DAY } },
+    });
     scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
 
-    await vi.advanceTimersByTimeAsync(BANDWIDTH_ESTIMATE_TTL_MS - 1000);
     expect(fetchWithSession).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+    expect(readMeasuredBandwidthKbps()).toBe(48_000);
   });
 
-  it("keeps trying after a probe is cancelled for playback", async () => {
-    let release: (value: unknown) => void = () => undefined;
-    fetchWithSession.mockImplementationOnce(
-      (_url: string, init: RequestInit) =>
-        new Promise((resolve, reject) => {
-          release = resolve;
-          init.signal?.addEventListener("abort", () =>
-            reject(new DOMException("aborted", "AbortError")),
-          );
-        }),
-    );
+  it("does not test while a lower bound reaches the target, and sends the best reading", async () => {
+    server({
+      target: 115_000,
+      reading: {
+        probe: { kbps: 115_000, lower_bound: true, ageMs: DAY },
+        sample: { kbps: 140_000, ageMs: DAY },
+      },
+    });
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchWithSession).not.toHaveBeenCalled();
+    expect(readMeasuredBandwidthKbps()).toBe(140_000);
+  });
+
+  it("runs the quick test when a lower bound is below the current target", async () => {
+    const { posted } = server({
+      target: 200_000,
+      reading: { sample: { kbps: 60_000, ageMs: DAY } },
+    });
+    hangingProbe();
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+    expect(fetchWithSession.mock.calls[0]![0]).toBe(`${PROBE_URL}&size=100000000`);
+    expect(posted).toEqual([]);
+    // Until a test finishes, starts send the sample.
+    expect(readMeasuredBandwidthKbps()).toBe(60_000);
+  });
+
+  it("tests when the reading has outlived its lifetime", async () => {
+    server({
+      maxAgeSeconds: 86400,
+      reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 2 * DAY } },
+    });
+    hangingProbe();
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+    expect(readMeasuredBandwidthKbps()).toBeUndefined();
+  });
+
+  it("reports a test and keeps the reading the server returns", async () => {
+    const { posted } = server({ target: 115_000 });
+    const body = timedBody(1000, 1_000_000, 10);
+    fetchWithSession.mockResolvedValue({ res: body.res });
+    const clock = vi.spyOn(performance, "now").mockImplementation(body.clock);
+    try {
+      scheduleBandwidthProbe(0);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() => expect(posted).toHaveLength(1));
+    } finally {
+      clock.mockRestore();
+    }
+    expect(posted[0]).toEqual({
+      kbps: 115_000,
+      lower_bound: true,
+      bytes: 50_000_000,
+      duration_ms: 500,
+      transport: "other",
+    });
+    await vi.waitFor(() => expect(readMeasuredBandwidthKbps()).toBe(115_000));
+  });
+
+  it("runs no automatic test when the administrator turned them off", async () => {
+    server({ automatic: false });
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchWithSession).not.toHaveBeenCalled();
+  });
+
+  it("looks again only when the tab is shown, never on a timer", async () => {
+    server({});
     fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
     scheduleBandwidthProbe(0);
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
 
-    cancelBandwidthProbe();
-    release(undefined);
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    await vi.advanceTimersByTimeAsync(30 * DAY);
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+
+    setVisibility("hidden");
+    setVisibility("visible");
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(fetchWithSession).toHaveBeenCalledTimes(2);
   });
 
-  it("leaves the probe to the tab that holds the lock", async () => {
+  it("neither looks nor tests in a hidden tab, and hiding stops a running test", async () => {
+    server({});
+    hangingProbe();
+    setVisibility("hidden");
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(v2).not.toHaveBeenCalled();
+
+    setVisibility("visible");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+    const signal = (fetchWithSession.mock.calls[0]![1] as RequestInit).signal!;
+    setVisibility("hidden");
+    await vi.waitFor(() => expect(signal.aborted).toBe(true));
+  });
+
+  it("waits out a 429's Retry-After before testing again", async () => {
+    server({});
+    fetchWithSession.mockResolvedValue({
+      res: { status: 429, headers: new Headers({ "Retry-After": "600" }) },
+    });
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+
+    setVisibility("hidden");
+    setVisibility("visible");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(600_000);
+    setVisibility("hidden");
+    setVisibility("visible");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fetchWithSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("looks again on a new network, not on a new estimate", async () => {
+    const connection = Object.assign(new EventTarget(), { type: "wifi", downlink: 10 });
+    vi.stubGlobal("navigator", { ...navigator, connection });
+    server({ reading: { probe: { kbps: 250_000, lower_bound: false, ageMs: DAY } } });
+    scheduleBandwidthProbe(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readMeasuredBandwidthKbps()).toBe(250_000);
+    const reads = vi.mocked(v2).mock.calls.length;
+
+    connection.downlink = 1.5;
+    connection.dispatchEvent(new Event("change"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.mocked(v2).mock.calls.length).toBe(reads);
+
+    connection.type = "ethernet";
+    connection.dispatchEvent(new Event("change"));
+    expect(readMeasuredBandwidthKbps()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(vi.mocked(v2).mock.calls.length).toBeGreaterThan(reads);
+    expect(readMeasuredBandwidthKbps()).toBe(250_000);
+  });
+
+  it("leaves the test to the tab that holds the lock", async () => {
+    server({});
     const request = vi.fn(
       async (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
         callback(null),
     );
     vi.stubGlobal("navigator", { ...navigator, locks: { request } });
-    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
     scheduleBandwidthProbe(0);
     await vi.advanceTimersByTimeAsync(0);
 
@@ -260,24 +511,10 @@ describe("scheduleBandwidthProbe", () => {
       expect.any(Function),
     );
     expect(fetchWithSession).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
   });
 
-  it("probes while holding the lock", async () => {
-    const request = vi.fn(
-      async (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
-        callback({ name: "silo-bandwidth-probe" }),
-    );
-    vi.stubGlobal("navigator", { ...navigator, locks: { request } });
-    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(fetchWithSession).toHaveBeenCalledTimes(1);
-    vi.unstubAllGlobals();
-  });
-
-  it("does not probe while another tab holds the media lock", async () => {
+  it("does not test while another tab holds the media lock", async () => {
+    server({});
     const request = vi.fn(
       async (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
         callback({ name: "silo-bandwidth-probe" }),
@@ -287,16 +524,15 @@ describe("scheduleBandwidthProbe", () => {
       pending: [],
     }));
     vi.stubGlobal("navigator", { ...navigator, locks: { request, query } });
-    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
     scheduleBandwidthProbe(0);
     await vi.advanceTimersByTimeAsync(0);
 
     expect(query).toHaveBeenCalled();
     expect(fetchWithSession).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
   });
 
-  it("does not start a probe whose lock arrives after playback started", async () => {
+  it("does not start a test whose lock arrives after playback started", async () => {
+    server({});
     let grant: (() => Promise<void>) | undefined;
     const request = vi.fn(
       (name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
@@ -307,7 +543,6 @@ describe("scheduleBandwidthProbe", () => {
           : Promise.resolve(),
     );
     vi.stubGlobal("navigator", { ...navigator, locks: { request } });
-    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
     scheduleBandwidthProbe(0);
     await vi.advanceTimersByTimeAsync(0);
     expect(request).toHaveBeenCalledTimes(1);
@@ -320,29 +555,19 @@ describe("scheduleBandwidthProbe", () => {
       { mode: "shared" },
       expect.any(Function),
     );
-    vi.unstubAllGlobals();
   });
 
-  it("holds off a scheduled probe while playback is starting", async () => {
-    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+  it("holds off while playback is starting", async () => {
+    server({});
     scheduleBandwidthProbe(5_000);
     cancelBandwidthProbe();
     await vi.advanceTimersByTimeAsync(5_000);
     expect(fetchWithSession).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
-    expect(fetchWithSession).toHaveBeenCalledTimes(1);
   });
 
-  it("abandons a running probe when another tab starts playback", async () => {
-    fetchWithSession.mockImplementation(
-      (_url: string, init: RequestInit) =>
-        new Promise((_resolve, reject) => {
-          init.signal?.addEventListener("abort", () =>
-            reject(new DOMException("aborted", "AbortError")),
-          );
-        }),
-    );
+  it("abandons a running test when another tab starts playback", async () => {
+    server({});
+    hangingProbe();
     scheduleBandwidthProbe(0);
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
@@ -374,36 +599,9 @@ describe("scheduleBandwidthProbe", () => {
     }
   });
 
-  it("forgets the measurement on a new network, not on a new estimate", async () => {
-    const connection = Object.assign(new EventTarget(), { type: "wifi", downlink: 10 });
-    vi.stubGlobal("navigator", { ...navigator, connection });
-    storage.set(
-      storage.KEYS.BANDWIDTH_ESTIMATE,
-      JSON.stringify({ kbps: 250_000, measuredAt: Date.now() }),
-    );
-    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
-    scheduleBandwidthProbe(0);
-
-    connection.downlink = 1.5;
-    connection.dispatchEvent(new Event("change"));
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(readMeasuredBandwidthKbps()).toBe(250_000);
-    expect(fetchWithSession).not.toHaveBeenCalled();
-
-    connection.type = "cellular";
-    connection.dispatchEvent(new Event("change"));
-    expect(readMeasuredBandwidthKbps()).toBeUndefined();
-  });
-
-  it("answers Test speed with busy while a scheduled probe measures", async () => {
-    fetchWithSession.mockImplementation(
-      (_url: string, init: RequestInit) =>
-        new Promise((_resolve, reject) => {
-          init.signal?.addEventListener("abort", () =>
-            reject(new DOMException("aborted", "AbortError")),
-          );
-        }),
-    );
+  it("answers Test speed with busy while an automatic test measures", async () => {
+    server({});
+    hangingProbe();
     scheduleBandwidthProbe(0);
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
@@ -411,79 +609,57 @@ describe("scheduleBandwidthProbe", () => {
   });
 
   it("does nothing after it is stopped", async () => {
-    fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
+    server({});
     const stop = scheduleBandwidthProbe(1000);
     stop();
-    await vi.advanceTimersByTimeAsync(BANDWIDTH_ESTIMATE_TTL_MS * 2);
-    expect(fetchWithSession).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30 * DAY);
+    expect(v2).not.toHaveBeenCalled();
   });
 });
 
-describe("reported connection speed", () => {
-  it("uses the advertised media path and reports the timed sample", async () => {
+describe("Test speed", () => {
+  it("runs the accurate test, even with a current reading, and reports it", async () => {
     stopBandwidthProbes();
-    const body = timedBody(1000, 1_000_000, 80);
-    fetchWithSession.mockResolvedValue({ res: body.res });
-    const clock = vi.spyOn(performance, "now").mockImplementation(body.clock);
-    vi.mocked(v2)
-      .mockResolvedValueOnce({
-        features: ["connection_speed_v1"],
-        bandwidth_probe_url: "/api/v2/playback/bandwidth-probe?media_path=true",
-      } as never)
-      .mockResolvedValueOnce(undefined as never);
-    expect(await testConnectionSpeed()).toBe(100000);
-    expect(fetchWithSession.mock.calls[0]?.[0]).toContain("media_path=true&size=40000000");
-    expect(v2).toHaveBeenCalledWith("POST /api/v2/playback/bandwidth-probe/results", {
-      body: expect.objectContaining({
-        kbps: 100000,
-        transport: "other",
-        bytes: expect.any(Number),
-        duration_ms: expect.any(Number),
-      }),
+    const { posted } = server({
+      target: 115_000,
+      reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 0 } },
     });
-    clock.mockRestore();
-  });
-  async function measureNow() {
-    const body = timedBody(1000, 1_000_000, 80);
+    const body = timedBody(1000, 1_000_000, 10);
     fetchWithSession.mockResolvedValue({ res: body.res });
     const clock = vi.spyOn(performance, "now").mockImplementation(body.clock);
-    vi.mocked(v2).mockResolvedValueOnce({ features: [] } as never);
     try {
-      return await testConnectionSpeed();
+      expect(await testConnectionSpeed()).toMatchObject({ kbps: 800_000, lower_bound: false });
     } finally {
       clock.mockRestore();
     }
-  }
-  it("keeps a measurement for this page when localStorage refuses the write", async () => {
+    expect(fetchWithSession.mock.calls[0]?.[0]).toBe(`${PROBE_URL}&size=1000000000`);
+    expect(posted[0]).toMatchObject({
+      kbps: 800_000,
+      lower_bound: false,
+      transport: "other",
+      duration_ms: 3000,
+    });
+    expect(readMeasuredBandwidthKbps()).toBe(800_000);
+  });
+
+  it("keeps the reading for this page when localStorage refuses the write", async () => {
+    server({});
+    const body = timedBody(1000, 1_000_000, 10);
+    fetchWithSession.mockResolvedValue({ res: body.res });
+    const clock = vi.spyOn(performance, "now").mockImplementation(body.clock);
     const set = vi.spyOn(storage, "set").mockImplementation(() => undefined);
     try {
-      expect(await measureNow()).toBe(100000);
-      expect(readMeasuredBandwidthKbps()).toBe(100000);
+      await testConnectionSpeed();
+      expect(readMeasuredBandwidthKbps()).toBe(800_000);
     } finally {
       set.mockRestore();
+      clock.mockRestore();
     }
   });
-  it("prefers a newer result another tab stored over this page's own", async () => {
-    expect(await measureNow()).toBe(100000);
-    const now = Date.now();
-    storage.set(
-      storage.KEYS.BANDWIDTH_ESTIMATE,
-      JSON.stringify({ kbps: 90_000, measuredAt: now + 500 }),
-    );
-    expect(readMeasuredBandwidthKbps(now + 1_000)).toBe(90_000);
-  });
+
   it("rejects a test that ran and measured nothing", async () => {
+    server({});
     fetchWithSession.mockResolvedValue({ res: { ok: false, status: 503, body: null } });
-    vi.mocked(v2).mockResolvedValueOnce({ features: [] } as never);
     await expect(testConnectionSpeed()).rejects.toThrow("could not be measured");
-  });
-  it("preserves Retry-After for a foreground rate-limit message", async () => {
-    fetchWithSession.mockResolvedValue({
-      res: { status: 429, headers: new Headers({ "Retry-After": "19" }) },
-    });
-    await expect(measureBandwidthKbps(new AbortController().signal)).rejects.toMatchObject({
-      retryAfter: 19,
-    });
-    expect(new ProbeRateLimited(19).message).toBe("Try again in 19 seconds");
   });
 });
