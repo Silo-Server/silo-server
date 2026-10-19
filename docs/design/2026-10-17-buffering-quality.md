@@ -485,13 +485,19 @@ limit, the probe answers `429` with `Retry-After`.
 ### Playback samples
 
 A plan's `plan_summary` may carry `throughput_kbps`. It is the rate at which the
-plan's media requests received data, counted only while a request was receiving,
-from its first byte to its last.
+plan's long media requests received data, counted only while a request was
+receiving, from its first byte to its last.
 
-- Time in which several requests were receiving at once counts once.
-- A client sends it only after at least 1,000 ms of receiving, capped at
-  1,000,000. The server keeps the highest sample, and a short transfer that
-  arrives in one burst from a buffer can report a rate the link never held.
+- Only a request that spent at least 1,000 ms receiving counts, in bytes and in
+  time. A short request on a warm connection, such as one HLS segment, arrives
+  at the connection's burst rate, which can be twice what the link sustains;
+  Android measured 2–17 MB segments at a median 262 Mbps on a path that tested
+  at 98–141 Mbps.
+- Time in which several counted requests were receiving at once counts once.
+- A client sends it only when its counted requests add up to at least 1,000 ms
+  of receiving, capped at 1,000,000. The server keeps the highest sample, and
+  a sample at least the target proves the link, so an overstated one would
+  stand in for a test the link would not pass.
 - A client that cannot measure this omits it.
 - Apple measures it on Aether's upstream reader. AVPlayer reads from Aether on
   127.0.0.1, so its access log only sees that local hop.
