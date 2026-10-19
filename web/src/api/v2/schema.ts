@@ -217,7 +217,10 @@ export interface paths {
     /** Manage access groups. */
     put: operations["updateAdminAccessGroup"];
     post?: never;
-    /** Manage access groups. */
+    /**
+     * Manage access groups.
+     * @description Moves members to the default access group atomically. Deleting the default group, or a populated group without a default destination, returns 409 conflict.
+     */
     delete: operations["deleteAdminAccessGroup"];
     options?: never;
     head?: never;
@@ -34846,6 +34849,15 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

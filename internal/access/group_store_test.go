@@ -68,13 +68,13 @@ func TestGroupStoreCRUDAndMemberCountsDB(t *testing.T) {
 	if err := pool.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM users
-		WHERE username LIKE $1 AND access_group_id IS NOT NULL`,
-		"access-group-test-"+suffix+"%",
+		WHERE username LIKE $1 AND access_group_id = $2`,
+		"access-group-test-"+suffix+"%", defaultAccessGroupSeedID(t, ctx, pool),
 	).Scan(&assigned); err != nil {
 		t.Fatalf("count assigned users after delete: %v", err)
 	}
-	if assigned != 0 {
-		t.Fatalf("assigned users after delete = %d, want 0", assigned)
+	if assigned != 2 {
+		t.Fatalf("users assigned to default after delete = %d, want 2", assigned)
 	}
 }
 
@@ -234,20 +234,20 @@ func TestGroupStoreDeleteDefaultRejectedDB(t *testing.T) {
 	}
 	assertSingleDefaultGroup(t, ctx, pool, group.ID)
 
-	// Deleting a non-default group still clears memberships through the FK.
+	// Deleting a non-default group moves its members to the default group.
 	other := createTestGroup(t, ctx, store, suffix, "delete-non-default")
 	otherUserID := insertAccessGroupTestUser(t, ctx, pool, suffix, &other.ID, 2)
 	if err := store.Delete(ctx, other.ID); err != nil {
 		t.Fatalf("Delete(non-default) error: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `
-		SELECT access_group_id IS NOT NULL
+		SELECT access_group_id = $2
 		FROM users
-		WHERE id = $1`, otherUserID).Scan(&hasGroup); err != nil {
+		WHERE id = $1`, otherUserID, group.ID).Scan(&hasGroup); err != nil {
 		t.Fatalf("load deleted group member: %v", err)
 	}
-	if hasGroup {
-		t.Fatalf("user access_group_id remained set after deleting non-default group")
+	if !hasGroup {
+		t.Fatalf("user was not moved to the default after deleting non-default group")
 	}
 }
 

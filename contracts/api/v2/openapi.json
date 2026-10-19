@@ -54345,6 +54345,7 @@
     },
     "/api/v2/admin/access-groups/{id}": {
       "delete": {
+        "description": "Moves members to the default access group atomically. Deleting the default group, or a populated group without a default destination, returns 409 conflict.",
         "operationId": "deleteAdminAccessGroup",
         "parameters": [
           {
@@ -54455,6 +54456,16 @@
               }
             },
             "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "412": {
             "content": {

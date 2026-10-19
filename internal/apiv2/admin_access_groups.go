@@ -117,6 +117,8 @@ func groupProblem(ctx context.Context, err error) *Problem {
 		return NewProblem(TypeNotFound, "Access group not found.")
 	case errors.Is(err, access.ErrGroupDuplicate):
 		return NewProblem(TypeConflict, "An access group already uses this name.")
+	case errors.Is(err, access.ErrGroupDestinationRequired):
+		return NewProblem(TypeConflict, "Set a default access group before deleting a group with members.")
 	case errors.Is(err, access.ErrDefaultGroupRequired):
 		return NewProblem(TypeConflict, "Make another group the default before removing this default.")
 	case errors.Is(err, handlers.ErrInvalidAccessGroup):
@@ -271,7 +273,10 @@ func registerAdminAccessGroups(reg *Registry) {
 		}
 		return &AdminAccessGroupOutput{ETag: groupTag(ctx, g).String(), Body: adminAccessGroupOf(g)}, nil
 	})
-	Register(reg, op(http.MethodDelete, "/admin/access-groups/{id}", "deleteAdminAccessGroup", true), func(ctx context.Context, in *AdminAccessGroupIDInput) (*struct{}, error) {
+	del := op(http.MethodDelete, "/admin/access-groups/{id}", "deleteAdminAccessGroup", true)
+	del.Description = "Moves members to the default access group atomically. Deleting the default group, or a populated group without a default destination, returns 409 conflict."
+	del.Errors = append(del.Errors, http.StatusConflict)
+	Register(reg, del, func(ctx context.Context, in *AdminAccessGroupIDInput) (*struct{}, error) {
 		svc, p := reg.accessGroups()
 		if p != nil {
 			return nil, p

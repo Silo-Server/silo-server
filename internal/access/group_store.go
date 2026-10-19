@@ -108,6 +108,9 @@ var (
 	// default group at creation, so losing it would create them ungrouped and
 	// uncapped (the legacy per-user column defaults were retired).
 	ErrDefaultGroupRequired = errors.New("a default access group is required")
+	// ErrGroupDestinationRequired reports a populated group with no default
+	// destination to receive its members.
+	ErrGroupDestinationRequired = fmt.Errorf("%w: no destination for access group members", ErrDefaultGroupRequired)
 )
 
 // GroupStore persists access groups in Postgres.
@@ -470,52 +473,22 @@ func (s *GroupStore) UpdateConditional(ctx context.Context, id int64, input Upda
 	return updated, nil
 }
 
-// Delete removes an access group. User memberships are cleared by the FK.
+// Delete removes an access group after moving its members to the default group.
 // The default group cannot be deleted — promote another group to default
 // first — so new-user creation always finds a governing group.
 func (s *GroupStore) Delete(ctx context.Context, id int64) error {
 	return s.DeleteConditional(ctx, id, GroupPrecondition{Any: true})
 }
 func (s *GroupStore) DeleteConditional(ctx context.Context, id int64, guard GroupPrecondition) error {
-	if !guard.valid() {
-		return ErrGroupInvalidPrecondition
-	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if err = lockGroupWriters(ctx, tx); err != nil {
-		return err
-	}
-	row, err := lockGroup(ctx, tx, id, guard)
-	if err != nil {
-		return err
-	}
-	if row.IsDefault {
-		return ErrDefaultGroupRequired
-	}
-	if _, err = tx.Exec(ctx, `DELETE FROM access_groups WHERE id=$1`, id); err != nil {
-		return err
-	}
-	audit, err := recordGroupMutation(ctx, tx, row, nil)
-	if err != nil {
-		return err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return err
-	}
-	auditmutation.CommitMutation(ctx, audit)
-	return nil
+	return s.DeleteMovingMembers(ctx, id, guard)
 }
 
-// DeleteMovingMembers deletes a group as DeleteConditional does, but first
-// moves its members into the default group in the same transaction, so a
+// DeleteMovingMembers moves members into the default group and deletes the
+// source group in the same transaction, so a
 // regular account never falls back to having no group. Each moved account's
 // access_policy_revision is bumped, as for other group changes; members stay
-// signed in and pick up the default group's policy on their next request. If
-// no default group exists the members are left to the foreign key, as
-// DeleteConditional does.
+// signed in and pick up the default group's policy on their next request.
+// Without a default destination, a populated group's deletion fails unchanged.
 func (s *GroupStore) DeleteMovingMembers(ctx context.Context, id int64, guard GroupPrecondition) error {
 	if !guard.valid() {
 		return ErrGroupInvalidPrecondition
@@ -557,11 +530,18 @@ func (s *GroupStore) DeleteMovingMembers(ctx context.Context, id int64, guard Gr
 }
 
 // moveGroupMembersToDefault reassigns every member of group id to the default
-// group. It moves none when there is no default group other than id.
+// group. Without a destination, only an empty group can be deleted.
 func moveGroupMembersToDefault(ctx context.Context, tx pgx.Tx, id int64) ([]*auditmutation.Entry, error) {
 	var defaultID int64
 	err := tx.QueryRow(ctx, `SELECT id FROM access_groups WHERE is_default AND id <> $1`, id).Scan(&defaultID)
 	if errors.Is(err, pgx.ErrNoRows) {
+		var hasMembers bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE access_group_id=$1)`, id).Scan(&hasMembers); err != nil {
+			return nil, err
+		}
+		if hasMembers {
+			return nil, ErrGroupDestinationRequired
+		}
 		return nil, nil
 	}
 	if err != nil {

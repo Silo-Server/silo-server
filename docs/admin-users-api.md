@@ -262,10 +262,14 @@ administrator.
 returns 201 and Location. Update returns the new canonical representation and
 ETag; delete returns 204. Missing/stale guards return 428/412.
 
-`DELETE /api/v2/admin/access-groups/{id}` moves the group's members into the
-default group in the same transaction and advances their
+`DELETE /api/v2/admin/access-groups/{id}` and the bridge
+`DELETE /api/v1/admin/access-groups/{id}` move the group's members into the
+default group in the same transaction and advance their
 `access_policy_revision`. Members stay signed in and get the default group's
 access on their next request, as for a single account moved between groups.
+Deleting the default group returns 409. If no default destination exists,
+deleting a populated group also returns 409 without changing the group,
+memberships, or policy revisions. Empty non-default groups can still be deleted.
 
 Group configuration changes advance a monotonic revision, including default-group
 changes. Canonical editor responses exclude changing membership counts; list

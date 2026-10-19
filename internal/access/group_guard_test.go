@@ -104,12 +104,16 @@ func TestGroupGuardAtomicLegacyAndGeneration(t *testing.T) {
 	if err != nil || usage.MemberCount != 1 || usage.Revision != legacy.Revision {
 		t.Fatal("membership changed editor revision", err)
 	}
+	destination, err := s.Create(ctx, CreateGroupInput{Name: "Default", IsDefault: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err = s.DeleteConditional(ctx, g.ID, GroupPrecondition{Any: true}); err != nil {
 		t.Fatal(err)
 	}
 	var linked *int64
-	if err = s.pool.QueryRow(ctx, `SELECT access_group_id FROM users WHERE id=1`).Scan(&linked); err != nil || linked != nil {
-		t.Fatal("membership FK not cleared", err)
+	if err = s.pool.QueryRow(ctx, `SELECT access_group_id FROM users WHERE id=1`).Scan(&linked); err != nil || linked == nil || *linked != destination.ID {
+		t.Fatal("membership not moved to default", err)
 	}
 	var revision int64
 	if err = s.pool.QueryRow(ctx, `INSERT INTO access_groups(id,name) OVERRIDING SYSTEM VALUE VALUES($1,'Recreated') RETURNING configuration_revision`, g.ID).Scan(&revision); err != nil {
