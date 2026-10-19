@@ -753,7 +753,7 @@ func (r *CatalogResolver) resolveLibraryCollectionItems(
 	collectionRepo *LibraryCollectionRepository,
 ) (*CatalogResult, error) {
 	if IsLiveQueryType(collection.CollectionType) {
-		if err := validateCollectionQueryComposition(string(collection.QueryDefinition), "", req.Query); err != nil {
+		if err := ValidateLibraryCollectionQueryBudget(collection.LibraryID, collection.LibraryIDs, collection.QueryDefinition, req.Query); err != nil {
 			return nil, err
 		}
 	}
@@ -2189,8 +2189,8 @@ func parseCatalogCollectionQueryDefinition(config json.RawMessage) (QueryDefinit
 
 	legacy := false
 	if err := walkQueryJSONObject(bytes.TrimSpace(config), func(key string, _ []byte) error {
-		switch strings.ToLower(key) {
-		case "filter_type", "filter_library_id", queryLegacyLibraryIDsKey:
+		switch {
+		case strings.EqualFold(key, "filter_type"), strings.EqualFold(key, "filter_library_id"), strings.EqualFold(key, queryLegacyLibraryIDsKey):
 			legacy = true
 		}
 		return nil
@@ -2376,7 +2376,7 @@ func (r *CatalogResolver) loadCollectionSource(ctx context.Context, req CatalogR
 			return "", nil, ErrCatalogSourceNotFound
 		}
 		if IsLiveQueryType(collection.CollectionType) {
-			if err := validateCollectionQueryComposition(string(collection.QueryDefinition), "", req.Query); err != nil {
+			if err := ValidateLibraryCollectionQueryBudget(collection.LibraryID, collection.LibraryIDs, collection.QueryDefinition, req.Query); err != nil {
 				return "", nil, err
 			}
 		}

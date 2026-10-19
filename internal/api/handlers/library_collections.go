@@ -2599,7 +2599,7 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(ctx context.Context, 
 		return nil, false, fmt.Errorf("query executor is not configured")
 	}
 
-	if err := catalog.ValidatePersonalCollectionQueryBudget(string(collection.QueryDefinition), ""); err != nil {
+	if err := catalog.ValidateLibraryCollectionQueryBudget(collection.LibraryID, collection.LibraryIDs, collection.QueryDefinition); err != nil {
 		return nil, false, smartCollectionQueryError{err}
 	}
 	var def catalog.QueryDefinition
@@ -2607,9 +2607,6 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(ctx context.Context, 
 		if err := json.Unmarshal(collection.QueryDefinition, &def); err != nil {
 			return nil, false, smartCollectionQueryError{fmt.Errorf("parsing smart collection query definition: %w", err)}
 		}
-	}
-	if err := catalog.ValidateQueryStructure(def, catalog.QueryDefinition{LibraryIDs: collection.LibraryIDs}); err != nil {
-		return nil, false, smartCollectionQueryError{err}
 	}
 	def = def.Normalize()
 	if err := def.ValidateWithOptions(false, false); err != nil {

@@ -124,6 +124,36 @@ func ValidatePersonalCollectionQueryBudget(source, display string) error {
 	return err
 }
 
+// ValidateLibraryCollectionQueryBudget admits bindings and the raw definition
+// together, including browse overlays, before normalization or intersection can
+// discard IDs. The legacy binding is used only when the binding list is empty.
+func ValidateLibraryCollectionQueryBudget(libraryID int, libraryIDs []int, source []byte, overlays ...QueryDefinition) error {
+	libraries := len(libraryIDs)
+	if libraries == 0 && libraryID > 0 {
+		libraries = 1
+	}
+	if err := (queryStructureBudget{libraries: libraries}).validate(); err != nil {
+		return err
+	}
+	if err := ValidateQueryStructure(overlays...); err != nil {
+		return err
+	}
+	definitions := [][]byte{source}
+	for _, overlay := range overlays {
+		raw, err := json.Marshal(overlay)
+		if err != nil {
+			return err
+		}
+		definitions = append(definitions, raw)
+	}
+	budget, err := validateQueryJSONStructure(definitions...)
+	if err != nil {
+		return err
+	}
+	budget.libraries += libraries
+	return budget.validate()
+}
+
 func validateCollectionQueryComposition(source, display string, overlay QueryDefinition) error {
 	if err := ValidateQueryStructure(overlay); err != nil {
 		return err
@@ -151,17 +181,17 @@ func validateQueryJSONStructure(definitions ...[]byte) (queryStructureBudget, er
 			return budget, errors.New("invalid query definition JSON")
 		}
 		err := walkQueryJSONObject(raw, func(key string, value []byte) error {
-			switch strings.ToLower(key) {
-			case queryLibraryIDsKey, queryLegacyLibraryIDsKey:
+			switch {
+			case strings.EqualFold(key, queryLibraryIDsKey), strings.EqualFold(key, queryLegacyLibraryIDsKey):
 				return walkQueryJSONArray(value, func([]byte) error {
 					budget.libraries++
 					return budget.validate()
 				})
-			case "filter_library_id":
+			case strings.EqualFold(key, "filter_library_id"):
 				if !bytes.Equal(value, []byte("null")) {
 					budget.libraries++
 				}
-			case queryGroupsKey:
+			case strings.EqualFold(key, queryGroupsKey):
 				return walkQueryJSONArray(value, func(group []byte) error {
 					budget.groups++
 					if err := budget.validate(); err != nil {

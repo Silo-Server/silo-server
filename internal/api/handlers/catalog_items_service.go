@@ -139,7 +139,7 @@ func catalogResolveError(ctx context.Context, err error, groupedByWork bool) err
 	if errors.Is(err, catalog.ErrCatalogCursorChanged) {
 		return apiError(http.StatusBadRequest, "catalog_cursor_changed", err.Error())
 	}
-	if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
+	if errors.Is(err, catalog.ErrInvalidCatalogRequest) || errors.Is(err, catalog.ErrQueryComplexity) {
 		return apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 	if errors.Is(err, catalog.ErrCatalogSourceNotFound) {

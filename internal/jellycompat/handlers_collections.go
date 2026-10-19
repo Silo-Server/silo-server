@@ -770,7 +770,7 @@ func smartCollectionLeafType(c *models.LibraryCollection) (string, bool) {
 	if !catalog.IsLiveQueryType(c.CollectionType) || len(c.QueryDefinition) == 0 {
 		return "", false
 	}
-	if err := catalog.ValidatePersonalCollectionQueryBudget(string(c.QueryDefinition), ""); err != nil {
+	if err := catalog.ValidateLibraryCollectionQueryBudget(c.LibraryID, c.LibraryIDs, c.QueryDefinition); err != nil {
 		return "", false
 	}
 	var def catalog.QueryDefinition
@@ -1096,7 +1096,7 @@ func (h *ItemsHandler) prepareSmartCollectionQuery(ctx context.Context, session 
 	if h.queryExecutor == nil {
 		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 	}
-	if err := catalog.ValidatePersonalCollectionQueryBudget(string(c.QueryDefinition), ""); err != nil {
+	if err := catalog.ValidateLibraryCollectionQueryBudget(c.LibraryID, c.LibraryIDs, c.QueryDefinition); err != nil {
 		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 	}
 
@@ -1107,13 +1107,6 @@ func (h *ItemsHandler) prepareSmartCollectionQuery(ctx context.Context, session 
 				"collection_id", c.ID, "error", err)
 			return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 		}
-	}
-	boundLibraries := c.LibraryIDs
-	if len(boundLibraries) == 0 && c.LibraryID > 0 {
-		boundLibraries = []int{c.LibraryID}
-	}
-	if err := catalog.ValidateQueryStructure(def, catalog.QueryDefinition{LibraryIDs: boundLibraries}); err != nil {
-		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 	}
 	def = def.Normalize()
 	if err := def.ValidateWithOptions(false, false); err != nil {

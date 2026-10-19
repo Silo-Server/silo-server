@@ -118,18 +118,19 @@ func effectiveCollectionCountKey(accountID int, c PersonalCollectionDefinition, 
 	if IsLiveQueryType(c.CollectionType) {
 		source = c.QueryDefinition
 	}
-	if err := ValidatePersonalCollectionQueryBudget(source, c.DisplayQueryDefinition); err != nil {
-		return [32]byte{}, 0, err
+	structure, err := validateQueryJSONStructure([]byte(source), []byte(c.DisplayQueryDefinition))
+	if err != nil {
+		return [32]byte{}, structure.rules, err
 	}
 	display, err := NormalizeDisplayQueryFragment([]byte(c.DisplayQueryDefinition))
 	if err != nil {
-		return [32]byte{}, 0, err
+		return [32]byte{}, structure.rules, err
 	}
 	var definition QueryDefinition
 	if source != "" || IsLiveQueryType(c.CollectionType) {
 		definition, err = parseCatalogCollectionQueryDefinition([]byte(source))
 		if err != nil {
-			return [32]byte{}, 0, err
+			return [32]byte{}, structure.rules, err
 		}
 		definition = ApplySmartCollectionItemLimit(definition)
 		c.ID = ""
@@ -146,21 +147,9 @@ func effectiveCollectionCountKey(accountID int, c PersonalCollectionDefinition, 
 		Access     AccessFilter
 	}{accountID, c, definition, access})
 	if err != nil {
-		return [32]byte{}, 0, err
+		return [32]byte{}, structure.rules, err
 	}
-	var fragment QueryDefinition
-	if display != "" {
-		if err := json.Unmarshal([]byte(display), &fragment); err != nil {
-			return [32]byte{}, 0, err
-		}
-	}
-	rules := 0
-	for _, def := range []QueryDefinition{definition, fragment} {
-		for _, group := range def.Groups {
-			rules += len(group.Rules)
-		}
-	}
-	return sha256.Sum256(raw), rules, nil
+	return sha256.Sum256(raw), structure.rules, nil
 }
 
 type collectionCountStatement struct {
@@ -202,13 +191,26 @@ func CountPersonalCollections(ctx context.Context, pool *pgxpool.Pool, userID in
 		}
 		key, rules, err := effectiveCollectionCountKey(userID, c, access)
 		if err != nil {
-			failure = joinCollectionCountError(failure, err)
+			// Invalid persisted definitions have no effective canonical key. Charge
+			// their owner/collection identity, retaining the failure in the same
+			// bounded ledger rather than normalizing every later owner's records.
+			key = sha256.Sum256(fmt.Appendf(nil, "rejected:%d:%s", userID, c.ID))
+			result, fresh, reserveErr := budget.reserve(key, rules)
+			if reserveErr != nil {
+				failure = joinCollectionCountError(failure, reserveErr)
+				break
+			}
+			if fresh {
+				result.err = err
+				close(result.done)
+			}
+			references = append(references, collectionCountReference{c.ID, result})
 			continue
 		}
 		result, fresh, err := budget.reserve(key, rules)
 		if err != nil {
 			failure = joinCollectionCountError(failure, err)
-			continue
+			break
 		}
 		references = append(references, collectionCountReference{c.ID, result})
 		if !fresh {

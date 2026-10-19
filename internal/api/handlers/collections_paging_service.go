@@ -160,7 +160,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		if opts.Revision != 0 && opts.Revision != witness {
 			return out, collectionPageError(userstore.ErrCollectionChanged)
 		}
-		if err := catalog.ValidatePersonalCollectionQueryBudget(string(c.QueryDefinition), ""); err != nil {
+		if err := catalog.ValidateLibraryCollectionQueryBudget(c.LibraryID, c.LibraryIDs, c.QueryDefinition); err != nil {
 			return out, apiError(400, "bad_request", err.Error())
 		}
 		var def catalog.QueryDefinition
@@ -177,9 +177,6 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		libs := c.LibraryIDs
 		if len(libs) == 0 && c.LibraryID > 0 {
 			libs = []int{c.LibraryID}
-		}
-		if err := catalog.ValidateQueryStructure(def, catalog.QueryDefinition{LibraryIDs: libs}); err != nil {
-			return out, apiError(400, "bad_request", err.Error())
 		}
 		if len(libs) > 0 {
 			def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, libs)

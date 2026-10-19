@@ -106,6 +106,16 @@ func (h *LibraryCollectionHandler) ListAdminCollections(ctx context.Context, lib
 	return resp, nil
 }
 
+func validateAdminCollectionQueryBudget(libraryID int, libraryIDs []int, definition json.RawMessage) error {
+	if err := catalog.ValidateQueryStructure(catalog.QueryDefinition{LibraryIDs: libraryIDs}); err != nil {
+		return fieldError("library_ids", err.Error())
+	}
+	if err := catalog.ValidateLibraryCollectionQueryBudget(libraryID, libraryIDs, definition); err != nil {
+		return fieldError("query_definition", err.Error())
+	}
+	return nil
+}
+
 func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, req AdminCollectionCreate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
 	if err := validateCollectionVisibility(req.Visibility); err != nil {
@@ -113,6 +123,9 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	}
 	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
 		return none, apiError(http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
+	}
+	if err := validateAdminCollectionQueryBudget(req.LibraryID, req.LibraryIDs, req.QueryDefinition); err != nil {
+		return none, err
 	}
 	if err := validateTMDBListSourceConfig(req.SourceConfig, req.SourceURL); err != nil {
 		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
@@ -180,6 +193,9 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 		SyncSchedule:     syncSchedule,
 	})
 	if err != nil {
+		if errors.Is(err, catalog.ErrQueryComplexity) {
+			return none, fieldError("query_definition", err.Error())
+		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
@@ -211,12 +227,31 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		return none, err
 	}
 	req.Visibility = visibility
+	var proposedLibraryIDs []int
+	if req.LibraryIDs != nil {
+		proposedLibraryIDs = *req.LibraryIDs
+	}
+	if err := validateAdminCollectionQueryBudget(0, proposedLibraryIDs, req.QueryDefinition); err != nil {
+		return none, err
+	}
 	existing, err := h.repo.GetByID(ctx, collectionID)
 	if err != nil {
 		return none, adminCollectionLookupAPIError(err)
 	}
 	if err := validateAdminCollectionSourceUpdate(existing, req); err != nil {
 		return none, err
+	}
+	if req.LibraryIDs != nil || len(req.QueryDefinition) > 0 || req.CollectionType != nil {
+		libraryID, libraryIDs, definition := existing.LibraryID, existing.LibraryIDs, existing.QueryDefinition
+		if req.LibraryIDs != nil {
+			libraryID, libraryIDs = 0, *req.LibraryIDs
+		}
+		if len(req.QueryDefinition) > 0 {
+			definition = req.QueryDefinition
+		}
+		if err := catalog.ValidateLibraryCollectionQueryBudget(libraryID, libraryIDs, definition); err != nil {
+			return none, fieldError("query_definition", err.Error())
+		}
 	}
 	queryDefinition := req.QueryDefinition
 	if len(req.QueryDefinition) > 0 {
@@ -286,6 +321,9 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		ManagementKey:    req.ManagementKey,
 		SyncSchedule:     req.SyncSchedule,
 	}); err != nil {
+		if errors.Is(err, catalog.ErrQueryComplexity) {
+			return none, fieldError("query_definition", err.Error())
+		}
 		if errors.Is(err, catalog.ErrLibraryCollectionRevisionMismatch) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return none, err
 		}

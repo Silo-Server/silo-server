@@ -92,7 +92,7 @@ func (r *CatalogResolver) resolveLibraryCollectionCursor(ctx context.Context, re
 	}
 	result, err := r.resolveCollectionWithEffectiveSort(ctx, req, access, userstore.CollectionKindLibrary, collection.ID, collection.SortConfig, func(effective CatalogRequest) (*CatalogResult, error) {
 		if IsLiveQueryType(collection.CollectionType) {
-			if err := validateCollectionQueryComposition(string(collection.QueryDefinition), "", effective.Query); err != nil {
+			if err := ValidateLibraryCollectionQueryBudget(collection.LibraryID, collection.LibraryIDs, collection.QueryDefinition, effective.Query); err != nil {
 				return nil, err
 			}
 		}

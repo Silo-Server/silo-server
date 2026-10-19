@@ -73,11 +73,15 @@ viewer-filtered catalog count. Reload the collection to evaluate its count.
 Structural admission runs before normalization and SQL construction. A source definition
 and its display filter or browse overlay share one effective-definition budget: 16 groups,
 128 rules, 256 library IDs before deduplication, and 65,536 aggregate encoded value bytes.
+Library bindings share that raw budget with a library collection's query and overlay.
 Discarded display rules and empty groups still count. Oversized new or changed definitions
 fail validation; metadata-only edits of legacy definitions remain usable in v2.
 
 One list request shares a ledger across all owners: at most 128 distinct effective count
-definitions, 16,384 rules and four seconds, including construction and execution. Batches
+definitions, 16,384 rules and four seconds, including construction and execution. Rejected
+legacy definitions also consume construction entries, keyed by owner and collection, so
+invalid rows cannot skip admission. Results for an admitted effective definition remain
+reusable after capacity is reached. Batches
 contain at most 32 definitions, 262,144 SQL bytes and 8,192 arguments. Two fixed workers
 execute the request; shared admission allows at most two active count statements per
 account and four per server process, lowered for smaller connection pools. These limits
