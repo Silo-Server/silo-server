@@ -27337,7 +27337,10 @@ export interface components {
       bytes: number;
       /** Format: int64 */
       duration_ms: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description The bounds of bandwidth_estimate_kbps, so a kept reading is one a start can send.
+       */
       kbps: number;
       /** @description The test proved only that the link carries at least kbps: a quick test that reached its target, or a rate above the bound. */
       lower_bound?: boolean;

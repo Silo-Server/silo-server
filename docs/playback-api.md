@@ -491,8 +491,9 @@ limit and returns 204.
 
 `POST /api/v2/playback/bandwidth-probe/results` (`connection_speed_v1`)
 accepts `{kbps, bytes, duration_ms, transport, lower_bound}` and returns 204.
-Bounds are 1–1,000,000 kbps, 1–1,000,000,000 bytes and 1–60,000 milliseconds;
-`transport` is `wifi`, `ethernet`, `cellular` or `other`; the optional
+Bounds are 100–1,000,000 kbps (those of `bandwidth_estimate_kbps`),
+1–1,000,000,000 bytes and 1–60,000 milliseconds; `transport` is `wifi`,
+`ethernet`, `cellular` or `other`; the optional
 `lower_bound` (default `false`) marks a result that proves only "at least
 `kbps`". The server keeps the latest result per device and connection.
 

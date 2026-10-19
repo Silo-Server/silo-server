@@ -75,6 +75,11 @@ func TestProbeResultsContract(t *testing.T) {
 	if res.Code != 422 {
 		t.Fatalf("invalid transport %d", res.Code)
 	}
+	// Under 100 kbps no start could send it as bandwidth_estimate_kbps.
+	res = do(t, h, http.MethodPost, path, strings.Replace(body, `48000`, `99`, 1), headers)
+	if res.Code != 422 {
+		t.Fatalf("99 kbps result %d", res.Code)
+	}
 	res = do(t, h, http.MethodPost, path, body, nil)
 	if res.Code != 401 {
 		t.Fatalf("anonymous report %d", res.Code)

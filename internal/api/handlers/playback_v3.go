@@ -7254,10 +7254,11 @@ const throughputLogKeyV3 = "throughput_kbps"
 
 // playbackThroughputKbpsV3 reads a plan summary's throughput_kbps: the rate
 // its media arrived at, kept as a lower bound on the connection's speed. A
-// value outside the probe's own bounds is not a measurement.
+// value outside the probe's own bounds, which are bandwidth_estimate_kbps's,
+// is not a measurement, and a kept one could not be sent as an estimate.
 func playbackThroughputKbpsV3(diagnostics map[string]string) (int, bool) {
 	kbps, err := strconv.Atoi(diagnostics[throughputLogKeyV3])
-	if err != nil || kbps < 1 || kbps > 1_000_000 {
+	if err != nil || kbps < 100 || kbps > 1_000_000 {
 		return 0, false
 	}
 	return kbps, true

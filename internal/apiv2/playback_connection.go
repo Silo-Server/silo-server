@@ -75,7 +75,7 @@ type playbackProbeResultService interface {
 type PlaybackProbeResultsInput struct {
 	DeviceID string `header:"X-Silo-Device-Id" maxLength:"128"`
 	Body     struct {
-		Kbps       int    `json:"kbps" minimum:"1" maximum:"1000000"`
+		Kbps       int    `json:"kbps" minimum:"100" maximum:"1000000" doc:"The bounds of bandwidth_estimate_kbps, so a kept reading is one a start can send."`
 		Bytes      int64  `json:"bytes" minimum:"1" maximum:"1000000000"`
 		DurationMS int    `json:"duration_ms" minimum:"1" maximum:"60000"`
 		Transport  string `json:"transport" enum:"wifi,ethernet,cellular,other"`

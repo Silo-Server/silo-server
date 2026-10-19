@@ -435,7 +435,7 @@ func TestConnectionReadingsDB(t *testing.T) {
 			EventID: fmt.Sprintf("summary-%s-%d", throughput, time.Now().UnixNano()), UserID: user, ConnectionDeviceID: "tv-1", ConnectionKey: key, ReceivedAt: time.Now(), SampleLifetime: 7 * 24 * time.Hour}
 		recordRouteEventV3(playback.NewMemoryPlanStoreV3(), event, connections)
 	}
-	for _, nonsense := range []string{"fast", "0", "2000000"} {
+	for _, nonsense := range []string{"fast", "0", "99", "2000000"} {
 		summary(nonsense)
 	}
 	state, err := h.PlaybackConnection(remote, "tv-1", false)

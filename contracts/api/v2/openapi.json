@@ -38902,9 +38902,10 @@
             "type": "integer"
           },
           "kbps": {
+            "description": "The bounds of bandwidth_estimate_kbps, so a kept reading is one a start can send.",
             "format": "int64",
             "maximum": 1000000,
-            "minimum": 1,
+            "minimum": 100,
             "type": "integer"
           },
           "lower_bound": {
