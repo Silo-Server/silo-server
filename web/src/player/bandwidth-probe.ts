@@ -132,6 +132,7 @@ export async function measureBandwidth(
   );
   let ticker: ReturnType<typeof setInterval> | undefined;
   let start: number | undefined;
+  let lastByte = 0;
   try {
     const { res } = await fetchWithSession(
       `${url}${url.includes("?") ? "&" : "?"}size=${meter.limits.bytes}`,
@@ -172,7 +173,8 @@ export async function measureBandwidth(
             if (meter.tick(clock() - begun)) void reader.cancel().catch(() => undefined);
           }, 100);
         }
-        if (meter.add(now - start, value.byteLength)) break;
+        lastByte = now - start;
+        if (meter.add(lastByte, value.byteLength)) break;
       }
     } finally {
       // Closing the body ends the transfer; the server stops at its next write.
@@ -184,7 +186,9 @@ export async function measureBandwidth(
     signal.removeEventListener("abort", forwardAbort);
   }
   if (start === undefined || signal.aborted) return undefined;
-  return (meter.outcome ?? meter.finish(clock() - start)).result ?? undefined;
+  // Without an outcome, neither the time limit nor an early stop ended the
+  // read: the server finished sending, at the last byte.
+  return (meter.outcome ?? meter.finish(lastByte, true)).result ?? undefined;
 }
 
 /** The capability fields the test reads. */

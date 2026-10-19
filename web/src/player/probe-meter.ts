@@ -46,6 +46,8 @@ export interface ProbeOutcome {
 
 export class ProbeMeter {
   private readonly windows: number[] = [];
+  /** Every byte received, for a transfer that ends before a window completes. */
+  private total = 0;
   /** The last window already compared with the target. */
   private checked = 0;
   private done?: ProbeOutcome;
@@ -72,6 +74,7 @@ export class ProbeMeter {
     if (this.tick(t)) return true;
     const window = Math.floor(t / PROBE_WINDOW_MS);
     this.windows[window] = (this.windows[window] ?? 0) + bytes;
+    this.total += bytes;
     return false;
   }
 
@@ -90,16 +93,24 @@ export class ProbeMeter {
   }
 
   /**
-   * Ends the test at `t`, when the transfer ended or the time limit passed,
-   * and returns what it measured.
+   * Ends the test at `t` and returns what it measured. `transferEnded` says the
+   * server finished sending at `t`, its last byte, rather than the time limit
+   * cutting the test off.
    */
-  finish(t: number): ProbeOutcome {
+  finish(t: number, transferEnded = false): ProbeOutcome {
     if (this.done) return this.done;
     const stop = Math.min(t, this.limits.maxMs);
     if (this.earlyStop(stop)) return this.done!;
     const complete = Math.floor(stop / PROBE_WINDOW_MS);
     const first = Math.max(1, complete - this.limits.settleWindows);
-    if (first >= complete) return (this.done = { stop, result: null });
+    if (first >= complete) {
+      // A link fast enough to deliver the whole probe before a window after
+      // the ramp completes is measured over the whole transfer. The ramp is
+      // inside that average, so it can only read low.
+      if (transferEnded && t <= this.limits.maxMs && this.total >= this.limits.bytes)
+        return (this.done = { stop, result: this.wholeTransfer(stop) });
+      return (this.done = { stop, result: null });
+    }
     let bytes = 0;
     for (let window = first; window < complete; window++) bytes += this.windows[window] ?? 0;
     const duration_ms = (complete - first) * PROBE_WINDOW_MS;
@@ -110,6 +121,18 @@ export class ProbeMeter {
         ? { kbps: MAX_PROBE_KBPS, lower_bound: true, bytes, duration_ms }
         : { kbps, lower_bound: false, bytes, duration_ms };
     return (this.done = { stop, result });
+  }
+
+  private wholeTransfer(stop: number): ProbeResult {
+    const duration_ms = Math.max(stop, 1);
+    const kbps = Math.floor((this.total * 8) / duration_ms);
+    const target = this.mode === "quick" ? this.targetKbps : undefined;
+    return {
+      kbps: Math.min(target && kbps >= target ? target : kbps, MAX_PROBE_KBPS),
+      lower_bound: true,
+      bytes: this.total,
+      duration_ms,
+    };
   }
 
   /** A quick test stops at the end of the first window after window 0 that reaches the target. */
@@ -144,8 +167,8 @@ export function measureProbe(
 ): ProbeOutcome {
   const meter = new ProbeMeter(mode, targetKbps);
   for (const [t, bytes] of chunks) {
-    if (end !== undefined && t >= end) break;
+    if (end !== undefined && t > end) break;
     if (meter.add(t, bytes)) return meter.outcome!;
   }
-  return meter.finish(end ?? meter.limits.maxMs);
+  return end === undefined ? meter.finish(meter.limits.maxMs) : meter.finish(end, true);
 }

@@ -177,6 +177,38 @@ describe("measureBandwidth", () => {
     expect(fetchWithSession.mock.calls[0]![0]).toBe(`${PROBE_URL}&size=100000000`);
   });
 
+  it("measures a link that delivers the whole quick probe before window 1 ends", async () => {
+    // 100 MB in 594 ms, about 1.35 Gbps: no window after the ramp completes.
+    const body = timedBody(100, 1_000_000, 6);
+    fetchWithSession.mockResolvedValue({ res: body.res });
+
+    const withTarget = await measureBandwidth(
+      new AbortController().signal,
+      "quick",
+      115_000,
+      PROBE_URL,
+      body.clock,
+    );
+    expect(withTarget).toEqual({
+      kbps: 115_000,
+      lower_bound: true,
+      bytes: 100_000_000,
+      duration_ms: 594,
+    });
+
+    const again = timedBody(100, 1_000_000, 6);
+    fetchWithSession.mockResolvedValue({ res: again.res });
+    expect(
+      await measureBandwidth(
+        new AbortController().signal,
+        "quick",
+        undefined,
+        PROBE_URL,
+        again.clock,
+      ),
+    ).toEqual({ kbps: 1_000_000, lower_bound: true, bytes: 100_000_000, duration_ms: 594 });
+  });
+
   it("settles over the final second of a quick test without a target", async () => {
     // 1 MB every 80 ms is 100 Mbps, for longer than the 3-second test.
     const body = timedBody(1000, 1_000_000, 80);
