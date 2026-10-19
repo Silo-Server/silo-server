@@ -44,6 +44,7 @@ import {
 } from "@/components/realtimeCatalogInvalidation";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { createRealtimeQueryRefreshScheduler } from "@/components/realtimeQueryRefresh";
+import { createEventSocketRecovery, eventSocketRetryAfterMs } from "@/lib/eventSocketRecovery";
 import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
 import {
   adminDownloadPreparationsKey,
@@ -957,6 +958,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     };
     let closedByEffect = false;
     let activeSocket: WebSocket | null = null;
+    const recovery = createEventSocketRecovery();
 
     const clearReconnect = () => {
       if (reconnectTimerRef.current !== undefined) {
@@ -965,13 +967,13 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const scheduleReconnect = () => {
-      if (closedByEffect || reconnectTimerRef.current !== undefined) {
+    const scheduleReconnect = (retryAfterMs = 0) => {
+      if (closedByEffect || !authorityActive() || reconnectTimerRef.current !== undefined) {
         return;
       }
       // The profile-rebind path stretches the delay so a persistently failing
       // ticket mint cannot turn into a tight reconnect loop.
-      const delay = nextReconnectDelayRef.current ?? 1_000;
+      const delay = nextReconnectDelayRef.current ?? recovery.reconnect(retryAfterMs);
       nextReconnectDelayRef.current = null;
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = undefined;
@@ -983,21 +985,22 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     };
 
     const connect = () => {
-      if (closedByEffect) {
+      if (closedByEffect || !authorityActive()) {
         return;
       }
       setConnectionState("connecting");
       helloReceivedRef.current = false;
+      recovery.attempt();
 
       void mintEventsSocketTicket(authority)
         .then((ticket) => {
           if (closedByEffect || !authorityActive()) return;
           openSocket(ticket.ticket);
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (closedByEffect || !authorityActive()) return;
           setConnectionState("disconnected");
-          scheduleReconnect();
+          scheduleReconnect(eventSocketRetryAfterMs(error));
         });
     };
 
@@ -1075,6 +1078,9 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
               socket.close();
             } else {
               profileRebindAttemptsRef.current = 0;
+              // Opening the socket (or receiving hello) does not mean the
+              // server accepted a subscription. Later ACKs keep this clock.
+              if (message.channels?.length) recovery.accepted();
             }
             return;
           }
@@ -1113,7 +1119,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       };
 
       socket.onclose = (event: CloseEvent) => {
-        if (socketRef.current !== socket) {
+        if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
           return;
         }
         if (
@@ -1153,6 +1159,8 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       closedByEffect = true;
       adminRefresh.cancel();
       clearReconnect();
+      nextReconnectDelayRef.current = null;
+      profileRebindAttemptsRef.current = 0;
       for (const [jobId, waiter] of waitersRef.current) {
         window.clearTimeout(waiter.timeoutId);
         waiter.reject(new Error(`Realtime events provider closed before job ${jobId} finished`));
