@@ -3867,7 +3867,7 @@
       "expected_kbps": 35280
     }
   ],
-  "probe_about": "probe_cases replay the speed test arithmetic in Connection speed test > Measuring. chunks are [t, bytes] arrivals in ms after the first byte; a chunk counts in window floor(t / PROBE_WINDOW_MS) and only before the test stops. end is when the transfer ended; absent, it ran past the test's limit. expect is null when the test measured nothing, else {kbps, lower_bound, bytes, duration_ms, stop}, stop being when the client stops reading. connection_budget_cases take current readings only; the reading is the higher of probe_kbps and playback_sample_kbps.",
+  "probe_about": "probe_cases replay the speed test arithmetic in Connection speed test > Measuring. chunks are [t, bytes] arrivals in ms after the first byte; a chunk counts in window floor(t / PROBE_WINDOW_MS) and only before the test stops. end is when the transfer ended; absent, it ran past the test's limit. expect is null when the test measured nothing, else {kbps, lower_bound, bytes, duration_ms, stop}, stop being when the client stops reading. connection_budget_cases take current readings only; the reading is the higher of probe_kbps and playback_sample_kbps. When the transfer ends having delivered every byte the mode requests (QUICK_PROBE_BYTES or ACCURATE_PROBE_BYTES) before the first complete window after window 0, the test reports the average over the whole transfer, bytes x 8 / end, with lower_bound true, or the target when a quick test's average reaches it.",
   "probe_constants": {
     "PROBE_WINDOW_MS": 500,
     "QUICK_PROBE_BYTES": 100000000,
@@ -4285,6 +4285,205 @@
         "bytes": 750000000,
         "duration_ms": 3000,
         "stop": 4300
+      }
+    },
+    {
+      "name": "quick_whole_transfer_before_window_1_reaches_the_target",
+      "mode": "quick",
+      "target_kbps": 115000,
+      "chunks": [
+        [
+          0,
+          10000000
+        ],
+        [
+          50,
+          7500000
+        ],
+        [
+          100,
+          7500000
+        ],
+        [
+          150,
+          7500000
+        ],
+        [
+          200,
+          7500000
+        ],
+        [
+          250,
+          7500000
+        ],
+        [
+          300,
+          7500000
+        ],
+        [
+          350,
+          7500000
+        ],
+        [
+          400,
+          7500000
+        ],
+        [
+          450,
+          7500000
+        ],
+        [
+          500,
+          7500000
+        ],
+        [
+          550,
+          7500000
+        ],
+        [
+          600,
+          7500000
+        ]
+      ],
+      "end": 600,
+      "expect": {
+        "kbps": 115000,
+        "lower_bound": true,
+        "bytes": 100000000,
+        "duration_ms": 600,
+        "stop": 600
+      }
+    },
+    {
+      "name": "quick_whole_transfer_without_a_target_is_a_lower_bound",
+      "mode": "quick",
+      "chunks": [
+        [
+          0,
+          10000000
+        ],
+        [
+          100,
+          10000000
+        ],
+        [
+          200,
+          10000000
+        ],
+        [
+          300,
+          10000000
+        ],
+        [
+          400,
+          10000000
+        ],
+        [
+          500,
+          10000000
+        ],
+        [
+          600,
+          10000000
+        ],
+        [
+          700,
+          10000000
+        ],
+        [
+          800,
+          10000000
+        ],
+        [
+          900,
+          10000000
+        ]
+      ],
+      "end": 900,
+      "expect": {
+        "kbps": 888888,
+        "lower_bound": true,
+        "bytes": 100000000,
+        "duration_ms": 900,
+        "stop": 900
+      }
+    },
+    {
+      "name": "accurate_whole_transfer_on_a_ten_gigabit_link",
+      "mode": "accurate",
+      "chunks": [
+        [
+          0,
+          62500000
+        ],
+        [
+          50,
+          62500000
+        ],
+        [
+          100,
+          62500000
+        ],
+        [
+          150,
+          62500000
+        ],
+        [
+          200,
+          62500000
+        ],
+        [
+          250,
+          62500000
+        ],
+        [
+          300,
+          62500000
+        ],
+        [
+          350,
+          62500000
+        ],
+        [
+          400,
+          62500000
+        ],
+        [
+          450,
+          62500000
+        ],
+        [
+          500,
+          62500000
+        ],
+        [
+          550,
+          62500000
+        ],
+        [
+          600,
+          62500000
+        ],
+        [
+          650,
+          62500000
+        ],
+        [
+          700,
+          62500000
+        ],
+        [
+          750,
+          62500000
+        ]
+      ],
+      "end": 800,
+      "expect": {
+        "kbps": 1000000,
+        "lower_bound": true,
+        "bytes": 1000000000,
+        "duration_ms": 800,
+        "stop": 800
       }
     }
   ]

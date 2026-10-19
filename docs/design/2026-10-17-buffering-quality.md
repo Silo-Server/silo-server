@@ -402,8 +402,15 @@ span: 2 for the quick test, 6 for the accurate one, or every complete window
 after window 0 when there are fewer. Its rate is `floor(bytes × 8 / (windows ×
 500))`. A window cut short by the end of the transfer does not count.
 
-- A test with no complete window after window 0, or with a result under 100
-  kbps, measured nothing.
+- A link fast enough to deliver the whole probe before the first complete
+  window after window 0 (100 MB in under a second, above about 800 Mbps) is
+  measured over the whole transfer instead: `floor(bytes × 8 / ms)` from the
+  first byte to the last. The ramp is inside that average, so it can only read
+  low, and it is reported with `lower_bound: true`, or as the target when a
+  quick test's average reaches it.
+- Otherwise a test with no complete window after window 0, or with a result
+  under 100 kbps, measured nothing. So does a transfer that ends short of the
+  bytes it asked for before a complete window after window 0.
 - A result above 1,000,000 kbps is reported as 1,000,000 with `lower_bound: true`.
 - Without a target, the quick test runs its full 3 seconds.
 - A test whose first byte has not arrived within 10 seconds is abandoned.
@@ -693,6 +700,9 @@ stops reading.
 | `too_short_to_measure` | No complete window after window 0 measures nothing. |
 | `accurate_reports_the_final_three_seconds` | The accurate test ignores the target and reports the final 3 seconds. |
 | `accurate_fast_link_is_a_lower_bound` | A 2 Gbps link ends the 1 GB transfer early and reports 1000000 with `lower_bound: true`. |
+| `quick_whole_transfer_before_window_1_reaches_the_target` | 100 MB in 600 ms leaves no complete window after window 0; the whole-transfer average reaches the target, so it reports 115000 as a lower bound. |
+| `quick_whole_transfer_without_a_target_is_a_lower_bound` | 100 MB in 900 ms with no target reports the average, 888888, as a lower bound. |
+| `accurate_whole_transfer_on_a_ten_gigabit_link` | 1 GB in 800 ms reports 1000000 with `lower_bound: true`. |
 
 Each client vendors the file unchanged and replays it in unit tests against a
 fake clock, in the same way that `IntroAutoSkipControllerTest` and
