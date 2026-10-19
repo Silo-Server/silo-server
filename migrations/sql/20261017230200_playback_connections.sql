@@ -24,8 +24,11 @@ $$;
 CREATE TRIGGER delete_playback_device_connections AFTER DELETE ON user_devices
 FOR EACH ROW EXECUTE FUNCTION delete_playback_device_connections();
 
+-- NOT VALID keeps the ACCESS EXCLUSIVE lock to the catalog change: checking
+-- the retained route events here would block playback reads and writes for
+-- the whole scan. A later migration validates it under a lighter lock.
 ALTER TABLE playback_route_events DROP CONSTRAINT playback_route_events_event_check;
-ALTER TABLE playback_route_events ADD CONSTRAINT playback_route_events_event_check CHECK (event IN ('plan_selected', 'plan_invalidated', 'plan_failed', 'first_frame', 'terminal', 'stopped', 'runtime_correction_applied', 'runtime_correction_succeeded', 'runtime_correction_failed', 'seek_reanchor_requested', 'seek_reanchored', 'plan_summary'));
+ALTER TABLE playback_route_events ADD CONSTRAINT playback_route_events_event_check CHECK (event IN ('plan_selected', 'plan_invalidated', 'plan_failed', 'first_frame', 'terminal', 'stopped', 'runtime_correction_applied', 'runtime_correction_succeeded', 'runtime_correction_failed', 'seek_reanchor_requested', 'seek_reanchored', 'plan_summary')) NOT VALID;
 
 -- +goose Down
 DELETE FROM playback_route_events WHERE event='plan_summary';
