@@ -113,7 +113,13 @@ describe("ticket mint retry floor", () => {
     try {
       const error = new V2ProblemError(
         "mintEventsSocketTicket",
-        { type: "about:blank", title: "Unavailable", status: 503 },
+        {
+          type: "about:blank",
+          title: "Unavailable",
+          status: 503,
+          detail: "Fixture unavailable",
+          instance: "/api/v2/events/ws-ticket",
+        },
         seconds,
       );
       const callback = vi.fn();
