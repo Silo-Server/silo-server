@@ -146,6 +146,9 @@ func (p *PersonalCollectionCollages) Posters(ctx context.Context, userID int, co
 	var members, smart []PersonalCollectionDefinition
 	for _, c := range collections {
 		if IsLiveQueryType(c.CollectionType) {
+			if err := ValidatePersonalCollectionQueryBudget(c.QueryDefinition, ""); err != nil {
+				continue
+			}
 			smart = append(smart, c)
 		} else {
 			members = append(members, c)
@@ -214,6 +217,9 @@ func (p *PersonalCollectionCollages) serveSmart(ctx context.Context, userID int,
 // refreshSmartLater runs refreshSmart off the request. Refreshes of one
 // collection for one viewer and definition share a run.
 func (p *PersonalCollectionCollages) refreshSmartLater(userID int, c PersonalCollectionDefinition, access AccessFilter) {
+	if err := ValidatePersonalCollectionQueryBudget(c.QueryDefinition, ""); err != nil {
+		return
+	}
 	ref := CollectionCollageRef{CollectionID: c.ID, Key: "smart:" + collageAccessKey(access) + ":" + smartDefinitionKey(c.QueryDefinition)}
 	p.buildQueue().runLater(ref, func(ctx context.Context) error { return p.refreshSmart(ctx, userID, c, access) })
 }
@@ -248,6 +254,11 @@ func (p *PersonalCollectionCollages) refreshSmart(ctx context.Context, userID in
 func (p *PersonalCollectionCollages) Refresh(userID int, c PersonalCollectionDefinition, access AccessFilter) {
 	if !p.enabled() {
 		return
+	}
+	if IsLiveQueryType(c.CollectionType) {
+		if err := ValidatePersonalCollectionQueryBudget(c.QueryDefinition, ""); err != nil {
+			return
+		}
 	}
 	p.refreshMu.Lock()
 	defer p.refreshMu.Unlock()
@@ -376,6 +387,9 @@ func buildPersonalCollectionCollageSourcesSQL(userID int, collectionIDs []string
 // smartSources reads a smart collection's first matches as its catalog view
 // lists them and keeps the posters of the first ones that have one.
 func (p *PersonalCollectionCollages) smartSources(ctx context.Context, queryDefinition string, access AccessFilter) ([]string, error) {
+	if err := ValidatePersonalCollectionQueryBudget(queryDefinition, ""); err != nil {
+		return nil, err
+	}
 	var def QueryDefinition
 	if err := json.Unmarshal([]byte(queryDefinition), &def); err != nil {
 		return nil, fmt.Errorf("parsing smart collection query: %w", err)

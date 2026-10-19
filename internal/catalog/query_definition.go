@@ -233,12 +233,13 @@ var querySortDefs = map[string]querySortDef{
 }
 
 type QueryDefinition struct {
-	LibraryIDs []int        `json:"library_ids,omitempty"`
-	MediaScope string       `json:"media_scope,omitempty"`
-	Match      string       `json:"match"`
-	Groups     []QueryGroup `json:"groups"`
-	Sort       QuerySort    `json:"sort"`
-	Limit      *int         `json:"limit,omitempty"`
+	structureErr error
+	LibraryIDs   []int        `json:"library_ids,omitempty"`
+	MediaScope   string       `json:"media_scope,omitempty"`
+	Match        string       `json:"match"`
+	Groups       []QueryGroup `json:"groups"`
+	Sort         QuerySort    `json:"sort"`
+	Limit        *int         `json:"limit,omitempty"`
 }
 
 // MediaScopeVideo is the group scope covering all video-side item types. It
@@ -441,6 +442,10 @@ func EncodeCollectionDefaultSort(qs QuerySort, ok bool) (string, error) {
 
 func (q QueryDefinition) Normalize() QueryDefinition {
 	normalized := q
+	if err := ValidateQueryStructure(q); err != nil {
+		normalized.structureErr = err
+		return normalized
+	}
 	normalized.MediaScope = strings.ToLower(strings.TrimSpace(normalized.MediaScope))
 	normalized.Match = normalizeMatch(normalized.Match)
 	normalized.LibraryIDs = normalizeLibraryIDs(normalized.LibraryIDs)
@@ -476,6 +481,9 @@ func (q QueryDefinition) ValidateWithSortScope(allowPersonalizedSorts bool) erro
 }
 
 func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPersonalizedFields bool) error {
+	if err := ValidateQueryStructure(q); err != nil {
+		return err
+	}
 	normalized := q.Normalize()
 
 	for _, id := range normalized.LibraryIDs {
@@ -600,6 +608,9 @@ func (q QueryDefinition) IsPersonalized() bool {
 }
 
 func NormalizeLegacySectionFilter(config json.RawMessage) (QueryDefinition, error) {
+	if _, err := validateQueryJSONStructure(config); err != nil {
+		return QueryDefinition{}, err
+	}
 	var legacy struct {
 		FilterType       string       `json:"filter_type"`
 		FilterLibraryID  *int         `json:"filter_library_id"`

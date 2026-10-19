@@ -37,6 +37,9 @@ var displayFilterFields = map[string]bool{
 // collection's match set (the exact-collection reader relies on retrieving the
 // full match set in source order before paginating).
 func NormalizeDisplayQueryFragment(raw []byte) (string, error) {
+	if _, err := validateQueryJSONStructure(raw); err != nil {
+		return "", err
+	}
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
 		return "", nil
@@ -144,6 +147,9 @@ func FilterCollectionItemsByDisplayQuery(
 		return items, nil
 	}
 
+	if _, err := validateQueryJSONStructure([]byte(trimmed)); err != nil {
+		return nil, err
+	}
 	var def QueryDefinition
 	if err := json.Unmarshal([]byte(trimmed), &def); err != nil {
 		return nil, fmt.Errorf("parsing collection display_query_definition: %w", err)

@@ -91,6 +91,11 @@ func (r *CatalogResolver) resolveLibraryCollectionCursor(ctx context.Context, re
 		return nil, ErrCatalogSourceNotFound
 	}
 	result, err := r.resolveCollectionWithEffectiveSort(ctx, req, access, userstore.CollectionKindLibrary, collection.ID, collection.SortConfig, func(effective CatalogRequest) (*CatalogResult, error) {
+		if IsLiveQueryType(collection.CollectionType) {
+			if err := validateCollectionQueryComposition(string(collection.QueryDefinition), "", effective.Query); err != nil {
+				return nil, err
+			}
+		}
 		membership, err := catalogLibraryCollectionMembership(collection, access)
 		if err != nil {
 			return nil, err
@@ -128,6 +133,13 @@ func (r *CatalogResolver) resolveUserCollectionCursor(ctx context.Context, req C
 		return nil, err
 	}
 	result, err := r.resolveCollectionWithEffectiveSort(ctx, req, access, userstore.CollectionKindUser, collection.ID, []byte(collection.SortConfig), func(effective CatalogRequest) (*CatalogResult, error) {
+		source := ""
+		if IsLiveQueryType(collection.CollectionType) {
+			source = collection.QueryDefinition
+		}
+		if err := validateCollectionQueryComposition(source, collection.DisplayQueryDefinition, effective.Query); err != nil {
+			return nil, err
+		}
 		sqlState := userstore.HasCatalogSQLState(store)
 		if !sqlState {
 			if effective.GroupByWork {
@@ -165,6 +177,16 @@ func (r *CatalogResolver) resolveSmartCollectionCursor(ctx context.Context, req 
 	return r.resolveSmartCollectionCursorWithDisplay(ctx, req, access, def, "")
 }
 func (r *CatalogResolver) resolveSmartCollectionCursorWithDisplay(ctx context.Context, req CatalogRequest, access AccessFilter, def QueryDefinition, display string) (*CatalogResult, error) {
+	if err := ValidateQueryStructure(def, req.Query); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(def)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateCollectionQueryComposition(string(raw), display, req.Query); err != nil {
+		return nil, err
+	}
 	baseAccess := access
 	if req.Source == CatalogSourceLibraryCollection {
 		baseAccess = stripCatalogUserScope(access)

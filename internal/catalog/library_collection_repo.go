@@ -191,6 +191,12 @@ func scanLibraryCollections(rows pgx.Rows) ([]*models.LibraryCollection, error) 
 }
 
 func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLibraryCollectionInput) (*models.LibraryCollection, error) {
+	if err := ValidateQueryStructure(QueryDefinition{LibraryIDs: input.LibraryIDs}); err != nil {
+		return nil, err
+	}
+	if _, err := validateQueryJSONStructure(input.QueryDefinition); err != nil {
+		return nil, err
+	}
 	input.LibraryIDs = normalizeCollectionLibraryIDs(input.LibraryID, input.LibraryIDs)
 	if len(input.SourceConfig) == 0 {
 		input.SourceConfig = json.RawMessage(`{}`)
@@ -476,6 +482,14 @@ func (r *LibraryCollectionRepository) AnyVisibleInLibraries(ctx context.Context,
 }
 
 func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLibraryCollectionInput) error {
+	if input.LibraryIDs != nil {
+		if err := ValidateQueryStructure(QueryDefinition{LibraryIDs: *input.LibraryIDs}); err != nil {
+			return err
+		}
+	}
+	if _, err := validateQueryJSONStructure(input.QueryDefinition); err != nil {
+		return err
+	}
 	var (
 		sets []string
 		args []any
