@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/gorilla/websocket"
 )
 
 func TestPersonalEventRecipients(t *testing.T) {
@@ -78,64 +79,7 @@ func TestEventsSocketV2PersonalChannelIsolation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _ := socketTestHandler()
 			hub := h.Events.hub
-			server := httptest.NewServer(h)
-			t.Cleanup(server.Close)
-			ticket, err := h.Tickets.Mint(t.Context(), evt.SocketIdentity{
-				UserID: 7, Role: tc.role, SessionID: "synthetic-session", ProfileID: tc.profile,
-				AccessExpiresAt: time.Now().Add(time.Minute), AccessFingerprint: "synthetic-scope",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			dialer := websocket.Dialer{Subprotocols: []string{EventsSocketProtocol, eventsTicketProtocolPrefix + ticket}}
-			conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+
-				"?channels=user_state,user_settings,notifications,catalog", nil)
-			if resp != nil {
-				t.Cleanup(func() { _ = resp.Body.Close() })
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = conn.Close() })
-			read := func() []byte {
-				t.Helper()
-				if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-					t.Fatal(err)
-				}
-				_, data, err := conn.ReadMessage()
-				if err != nil {
-					t.Fatal(err)
-				}
-				return data
-			}
-			var hello evt.EventsHelloMessage
-			if err := json.Unmarshal(read(), &hello); err != nil || hello.Type != "hello" {
-				t.Fatalf("hello: %+v, %v", hello, err)
-			}
-			var subscribed evt.EventsSubscribedMessage
-			if err := json.Unmarshal(read(), &subscribed); err != nil || subscribed.Type != "subscribed" {
-				t.Fatalf("subscription: %+v, %v", subscribed, err)
-			}
-			wantChannels := []evt.EventChannel{evt.ChannelUserState, evt.ChannelUserSettings, evt.ChannelCatalog}
-			if tc.profile != "" {
-				wantChannels = append(wantChannels, evt.ChannelNotifications)
-				if len(subscribed.Rejected) != 0 {
-					t.Fatalf("unexpected rejections: %+v", subscribed.Rejected)
-				}
-			} else if len(subscribed.Rejected) != 1 || subscribed.Rejected[0].Channel != evt.ChannelNotifications || subscribed.Rejected[0].Code != "profile_required" {
-				t.Fatalf("unbound notification subscription: %+v", subscribed.Rejected)
-			}
-			for _, channel := range wantChannels {
-				if !slices.Contains(subscribed.Channels, channel) {
-					t.Fatalf("channel %s was not accepted: %+v", channel, subscribed)
-				}
-			}
-			for range len(wantChannels) {
-				var snapshot evt.EventsSnapshotMessage
-				if err := json.Unmarshal(read(), &snapshot); err != nil || snapshot.Type != "snapshot" {
-					t.Fatalf("snapshot: %+v, %v", snapshot, err)
-				}
-			}
+			read := openPersonalEventSocket(t, h, tc.role, tc.profile)
 
 			publishUserStateEvent(t.Context(), hub, 7, "b", "sibling-state", "", "watched", userStateEventState{Played: new(true)})
 			publishUserSettingsEvent(t.Context(), hub, 7, "b", "sibling-setting", "profile")
@@ -196,4 +140,67 @@ func TestEventsSocketV2PersonalChannelIsolation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func openPersonalEventSocket(t *testing.T, h *EventsSocketV2, role, profile string) func() []byte {
+	t.Helper()
+	server := httptest.NewServer(h)
+	t.Cleanup(server.Close)
+	ticket, err := h.Tickets.Mint(t.Context(), evt.SocketIdentity{
+		UserID: 7, Role: role, SessionID: "synthetic-session", ProfileID: profile,
+		AccessExpiresAt: time.Now().Add(time.Minute), AccessFingerprint: "synthetic-scope",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := websocket.Dialer{Subprotocols: []string{EventsSocketProtocol, eventsTicketProtocolPrefix + ticket}}
+	conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+
+		"?channels=user_state,user_settings,notifications,catalog", nil)
+	if resp != nil {
+		t.Cleanup(func() { _ = resp.Body.Close() })
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	read := func() []byte {
+		t.Helper()
+		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	var hello evt.EventsHelloMessage
+	if err := json.Unmarshal(read(), &hello); err != nil || hello.Type != "hello" {
+		t.Fatalf("hello: %+v, %v", hello, err)
+	}
+	var subscribed evt.EventsSubscribedMessage
+	if err := json.Unmarshal(read(), &subscribed); err != nil || subscribed.Type != "subscribed" {
+		t.Fatalf("subscription: %+v, %v", subscribed, err)
+	}
+	wantChannels := []evt.EventChannel{evt.ChannelUserState, evt.ChannelUserSettings, evt.ChannelCatalog}
+	if profile != "" {
+		wantChannels = append(wantChannels, evt.ChannelNotifications)
+		if len(subscribed.Rejected) != 0 {
+			t.Fatalf("unexpected rejections: %+v", subscribed.Rejected)
+		}
+	} else if len(subscribed.Rejected) != 1 || subscribed.Rejected[0].Channel != evt.ChannelNotifications || subscribed.Rejected[0].Code != "profile_required" {
+		t.Fatalf("unbound notification subscription: %+v", subscribed.Rejected)
+	}
+	for _, channel := range wantChannels {
+		if !slices.Contains(subscribed.Channels, channel) {
+			t.Fatalf("channel %s was not accepted: %+v", channel, subscribed)
+		}
+	}
+	for range len(wantChannels) {
+		var snapshot evt.EventsSnapshotMessage
+		if err := json.Unmarshal(read(), &snapshot); err != nil || snapshot.Type != "snapshot" {
+			t.Fatalf("snapshot: %+v, %v", snapshot, err)
+		}
+	}
+	return read
 }
