@@ -39,7 +39,7 @@ type compatSocket interface {
 // compatibility socket, including KeepAlive-only connections, spends capacity.
 type SocketLifecycle struct {
 	Admission    *evt.ClientSocketAdmission
-	AppContext   context.Context
+	AppContext   context.Context //nolint:containedctx // Process lifecycle dependency, not an individual request context.
 	ShuttingDown func() bool
 	upgrade      func(http.ResponseWriter, *http.Request) (compatSocket, error)
 }
@@ -126,6 +126,7 @@ func NewSocketHandlerWithUserData(sessions *SessionStore, keys *AdminAPIKeyAuthe
 			defer stop()
 		}
 		if ctx.Err() != nil || lifecycle.draining() {
+			lifecycle.Admission.RecordDrainingRefusal()
 			refuseCompatSocket(w, evt.ClientSocketDraining)
 			return
 		}

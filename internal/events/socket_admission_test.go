@@ -88,7 +88,8 @@ func TestNewClientSocketAdmission(t *testing.T) {
 	for _, mode := range []ClientSocketMode{ClientSocketObserve, ClientSocketEnforce} {
 		t.Run(string(mode), func(t *testing.T) {
 			a := newTestClientSocketAdmission(t, 2, 1, mode)
-			if a.Done() == nil || a.Done() != a.Done() || a.Occupancy() != 0 {
+			done := a.Done()
+			if done == nil || done != a.Done() || a.Occupancy() != 0 {
 				t.Fatal("new admission must be empty with a stable drain channel")
 			}
 			assertClientSocketDone(t, a, false)
