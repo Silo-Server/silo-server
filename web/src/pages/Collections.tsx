@@ -64,6 +64,7 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useDialogSearchParam } from "@/hooks/useDialogSearchParam";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useLoadMoreFocus } from "@/hooks/useLoadMoreFocus";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { personalDeleteDescription, unshareConsequence } from "@/lib/collections/copy";
 import { NEW_COLLECTION_DIALOG } from "@/lib/collections/dialogs";
@@ -726,26 +727,12 @@ function ServerCollectionsGrid({
     onIntersect: loadNext,
     enabled: loadOnScroll && !loading && next !== undefined,
   });
-  const gridRef = useRef<HTMLUListElement>(null);
-  const loadMoreRef = useRef<HTMLButtonElement>(null);
-  // A Load more press: the library it asked for and where its cards start.
-  const pressed = useRef<{ libraryId: number; from: number }>(undefined);
+  const { listRef, buttonRef, press } = useLoadMoreFocus<HTMLUListElement>(loading, cards.length);
   const pressLoadMore = () => {
     if (loading || !next) return;
-    pressed.current = { libraryId: next.library_id, from: cards.length };
+    press();
     loadNext();
   };
-  // Once that library's rest is in, focus its first card, unless the viewer
-  // moved on while it loaded. The button may be gone by then (nothing left
-  // to load), which leaves focus on the body.
-  useEffect(() => {
-    const press = pressed.current;
-    if (!press || loading || next?.library_id === press.libraryId) return;
-    pressed.current = undefined;
-    const focused = document.activeElement;
-    if (focused !== loadMoreRef.current && focused !== document.body) return;
-    gridRef.current?.children[press.from]?.querySelector<HTMLElement>("a[href]")?.focus();
-  });
   return (
     <>
       {refreshFailed.map(({ library, error, retry, retrying }) => (
@@ -757,7 +744,7 @@ function ServerCollectionsGrid({
           retrying={retrying}
         />
       ))}
-      <ul ref={gridRef} className={POSTER_GRID}>
+      <ul ref={listRef} className={POSTER_GRID}>
         {cards.map(({ collection, libraryId }) => (
           <li key={collection.id}>
             <CollectionPosterCard
@@ -777,7 +764,7 @@ function ServerCollectionsGrid({
         // and is aria-disabled rather than disabled, which would drop focus.
         <div ref={sentinelRef} className="flex justify-center">
           <Button
-            ref={loadMoreRef}
+            ref={buttonRef}
             variant="outline"
             size="sm"
             className="aria-disabled:opacity-50"
