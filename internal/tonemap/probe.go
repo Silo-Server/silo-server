@@ -429,7 +429,7 @@ func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath
 	for _, device := range devices {
 		if backend == BackendVAAPI {
 			if narrowed := vaapiCandidateSourceKinds(validated, device); len(narrowed) < len(validated) {
-				slog.Info("VAAPI tone mapping is offered for SDR sources only on Intel GPUs; HDR sources use software tone mapping, or set hardware acceleration to QSV",
+				slog.InfoContext(ctx, "VAAPI tone mapping is offered for SDR sources only on Intel GPUs; HDR sources need software tone mapping, or set hardware acceleration to QSV",
 					"component", "tonemap", "device", device)
 				validated = narrowed
 			}

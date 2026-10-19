@@ -51,7 +51,7 @@ func vaapiProbeRunner(hdrHardwareSmoke *bool) CommandRunner {
 }
 
 // TestProbeOffersIntelVAAPISDRSourcesOnly covers #2414: Intel's VAAPI tone
-// mapper gives wrong colours for HLG and PQ, so VAAPI on an Intel GPU must not
+// mapper gives wrong colors for HLG and PQ, so VAAPI on an Intel GPU must not
 // advertise HDR sources, and other vendors keep them.
 func TestProbeOffersIntelVAAPISDRSourcesOnly(t *testing.T) {
 	hdr := []SourceKind{SourcePQ, SourceHLG, SourceHLGBT709}
@@ -88,6 +88,27 @@ func TestProbeOffersIntelVAAPISDRSourcesOnly(t *testing.T) {
 				t.Fatalf("probe result counted as incomplete: %#v", got)
 			}
 		})
+	}
+}
+
+// TestDRMNodeNameFollowsByPathLinks lets a /dev/dri/by-path device find its
+// node's vendor.
+func TestDRMNodeNameFollowsByPathLinks(t *testing.T) {
+	byPath := filepath.Join(t.TempDir(), "by-path")
+	if err := os.MkdirAll(byPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(byPath, "pci-0000:03:00.0-render")
+	if err := os.Symlink("../renderD129", link); err != nil {
+		t.Fatal(err)
+	}
+	for device, want := range map[string]string{
+		link:                  "renderD129",
+		"/dev/dri/renderD128": "renderD128",
+	} {
+		if got := drmNodeName(device); got != want {
+			t.Fatalf("drmNodeName(%q) = %q, want %q", device, got, want)
+		}
 	}
 }
 
