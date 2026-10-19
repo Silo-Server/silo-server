@@ -34,13 +34,13 @@ type DiscordNotificationsHandler struct {
 
 // MayManageDiscordNotifications applies the existing household-manager rule
 // to the account-wide destination and delivery mode, before any mutation.
-func (h *DiscordNotificationsHandler) MayManageDiscordNotifications(ctx context.Context, userID int, profileID string, verify func(string) error) (bool, error) {
+func (h *DiscordNotificationsHandler) MayManageDiscordNotifications(ctx context.Context, userID int, profileID string, verify func(*userstore.Profile) error) (bool, error) {
 	return mayManageHouseholdOf(ctx, h.Stores, userID, profileID, verify)
 }
 
 func (h *DiscordNotificationsHandler) requireManagement(r *http.Request) error {
-	allowed, err := h.MayManageDiscordNotifications(r.Context(), apimw.GetUserID(r.Context()), activeProfileIDOf(r), func(profileID string) error {
-		return verifyProfileToken(r, h.Stores, h.ProfileTokens, profileID)
+	allowed, err := h.MayManageDiscordNotifications(r.Context(), apimw.GetUserID(r.Context()), activeProfileIDOf(r), func(profile *userstore.Profile) error {
+		return verifyProfileTokenFor(r, h.ProfileTokens, profile)
 	})
 	if errors.Is(err, access.ErrProfileUnverified) {
 		return apiError(http.StatusForbidden, "forbidden", "Discord notification changes require verifying the primary profile PIN")
