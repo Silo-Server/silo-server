@@ -134,6 +134,15 @@ function server(options: {
   return { posted };
 }
 
+/** How long the schedule lets the first screen settle before it tests. */
+const TEST_DELAY_MS = 5_000;
+
+/** Lets the schedule read the server's reading, then waits out the test delay. */
+async function readThenTest() {
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(TEST_DELAY_MS);
+}
+
 function setVisibility(state: "visible" | "hidden") {
   Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
   document.dispatchEvent(new Event("visibilitychange"));
@@ -372,8 +381,8 @@ describe("scheduleBandwidthProbe", () => {
       target: 115_000,
       reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 2 * DAY } },
     });
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
 
     expect(fetchWithSession).not.toHaveBeenCalled();
     expect(readMeasuredBandwidthKbps()).toBe(48_000);
@@ -387,27 +396,40 @@ describe("scheduleBandwidthProbe", () => {
         sample: { kbps: 140_000, ageMs: DAY },
       },
     });
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
 
     expect(fetchWithSession).not.toHaveBeenCalled();
     expect(readMeasuredBandwidthKbps()).toBe(140_000);
   });
 
-  it("runs the quick test when a lower bound is below the current target", async () => {
+  it("reads the server's reading at once and runs the quick test later when a lower bound is below the target", async () => {
     const { posted } = server({
       target: 200_000,
       reading: { sample: { kbps: 60_000, ageMs: DAY } },
     });
     hangingProbe();
-    scheduleBandwidthProbe(0);
+    scheduleBandwidthProbe();
     await vi.advanceTimersByTimeAsync(0);
+    // A playback start in the first seconds already sends the reading.
+    expect(readMeasuredBandwidthKbps()).toBe(60_000);
+    expect(fetchWithSession).not.toHaveBeenCalled();
 
+    await vi.advanceTimersByTimeAsync(TEST_DELAY_MS);
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
     expect(fetchWithSession.mock.calls[0]![0]).toBe(`${PROBE_URL}&size=100000000`);
     expect(posted).toEqual([]);
     // Until a test finishes, starts send the sample.
     expect(readMeasuredBandwidthKbps()).toBe(60_000);
+  });
+
+  it("treats any current reading as proof when the server has no target", async () => {
+    server({ reading: { probe: { kbps: 48_000, lower_bound: true, ageMs: DAY } } });
+    scheduleBandwidthProbe();
+    await readThenTest();
+
+    expect(fetchWithSession).not.toHaveBeenCalled();
+    expect(readMeasuredBandwidthKbps()).toBe(48_000);
   });
 
   it("tests when the reading has outlived its lifetime", async () => {
@@ -416,8 +438,8 @@ describe("scheduleBandwidthProbe", () => {
       reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 2 * DAY } },
     });
     hangingProbe();
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
 
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
     expect(readMeasuredBandwidthKbps()).toBeUndefined();
@@ -429,8 +451,8 @@ describe("scheduleBandwidthProbe", () => {
     fetchWithSession.mockResolvedValue({ res: body.res });
     const clock = vi.spyOn(performance, "now").mockImplementation(body.clock);
     try {
-      scheduleBandwidthProbe(0);
-      await vi.advanceTimersByTimeAsync(0);
+      scheduleBandwidthProbe();
+      await readThenTest();
       await vi.waitFor(() => expect(posted).toHaveLength(1));
     } finally {
       clock.mockRestore();
@@ -447,16 +469,16 @@ describe("scheduleBandwidthProbe", () => {
 
   it("runs no automatic test when the administrator turned them off", async () => {
     server({ automatic: false });
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
     expect(fetchWithSession).not.toHaveBeenCalled();
   });
 
   it("looks again only when the tab is shown, never on a timer", async () => {
     server({});
     fetchWithSession.mockResolvedValue({ res: { ok: false, body: null } });
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(30 * DAY);
@@ -464,7 +486,7 @@ describe("scheduleBandwidthProbe", () => {
 
     setVisibility("hidden");
     setVisibility("visible");
-    await vi.advanceTimersByTimeAsync(5_000);
+    await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(2);
   });
 
@@ -472,12 +494,12 @@ describe("scheduleBandwidthProbe", () => {
     server({});
     hangingProbe();
     setVisibility("hidden");
-    scheduleBandwidthProbe(0);
+    scheduleBandwidthProbe();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(v2).not.toHaveBeenCalled();
 
     setVisibility("visible");
-    await vi.advanceTimersByTimeAsync(5_000);
+    await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
     const signal = (fetchWithSession.mock.calls[0]![1] as RequestInit).signal!;
     setVisibility("hidden");
@@ -489,19 +511,19 @@ describe("scheduleBandwidthProbe", () => {
     fetchWithSession.mockResolvedValue({
       res: { status: 429, headers: new Headers({ "Retry-After": "600" }) },
     });
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
 
     setVisibility("hidden");
     setVisibility("visible");
-    await vi.advanceTimersByTimeAsync(5_000);
+    await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(600_000);
     setVisibility("hidden");
     setVisibility("visible");
-    await vi.advanceTimersByTimeAsync(5_000);
+    await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(2);
   });
 
@@ -509,7 +531,7 @@ describe("scheduleBandwidthProbe", () => {
     const connection = Object.assign(new EventTarget(), { type: "wifi", downlink: 10 });
     vi.stubGlobal("navigator", { ...navigator, connection });
     server({ reading: { probe: { kbps: 250_000, lower_bound: false, ageMs: DAY } } });
-    scheduleBandwidthProbe(0);
+    scheduleBandwidthProbe();
     await vi.advanceTimersByTimeAsync(0);
     expect(readMeasuredBandwidthKbps()).toBe(250_000);
     const reads = vi.mocked(v2).mock.calls.length;
@@ -522,7 +544,7 @@ describe("scheduleBandwidthProbe", () => {
     connection.type = "ethernet";
     connection.dispatchEvent(new Event("change"));
     expect(readMeasuredBandwidthKbps()).toBeUndefined();
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(0);
     expect(vi.mocked(v2).mock.calls.length).toBeGreaterThan(reads);
     expect(readMeasuredBandwidthKbps()).toBe(250_000);
   });
@@ -534,14 +556,27 @@ describe("scheduleBandwidthProbe", () => {
         callback(null),
     );
     vi.stubGlobal("navigator", { ...navigator, locks: { request } });
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
 
     expect(request).toHaveBeenCalledWith(
       "silo-bandwidth-probe",
       { ifAvailable: true },
       expect.any(Function),
     );
+    expect(fetchWithSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps a refused lock request from escaping the delayed test", async () => {
+    server({});
+    const request = vi.fn(async () => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    vi.stubGlobal("navigator", { ...navigator, locks: { request } });
+    scheduleBandwidthProbe();
+    await readThenTest();
+
+    expect(request).toHaveBeenCalled();
     expect(fetchWithSession).not.toHaveBeenCalled();
   });
 
@@ -556,8 +591,8 @@ describe("scheduleBandwidthProbe", () => {
       pending: [],
     }));
     vi.stubGlobal("navigator", { ...navigator, locks: { request, query } });
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
 
     expect(query).toHaveBeenCalled();
     expect(fetchWithSession).not.toHaveBeenCalled();
@@ -575,8 +610,8 @@ describe("scheduleBandwidthProbe", () => {
           : Promise.resolve(),
     );
     vi.stubGlobal("navigator", { ...navigator, locks: { request } });
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
     expect(request).toHaveBeenCalledTimes(1);
 
     cancelBandwidthProbe();
@@ -591,17 +626,18 @@ describe("scheduleBandwidthProbe", () => {
 
   it("holds off while playback is starting", async () => {
     server({});
-    scheduleBandwidthProbe(5_000);
+    scheduleBandwidthProbe();
+    await vi.advanceTimersByTimeAsync(0);
     cancelBandwidthProbe();
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(TEST_DELAY_MS);
     expect(fetchWithSession).not.toHaveBeenCalled();
   });
 
   it("abandons a running test when another tab starts playback", async () => {
     server({});
     hangingProbe();
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
     const signal = (fetchWithSession.mock.calls[0]![1] as RequestInit).signal!;
 
@@ -634,8 +670,8 @@ describe("scheduleBandwidthProbe", () => {
   it("answers Test speed with busy while an automatic test measures", async () => {
     server({});
     hangingProbe();
-    scheduleBandwidthProbe(0);
-    await vi.advanceTimersByTimeAsync(0);
+    scheduleBandwidthProbe();
+    await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
     expect(await testConnectionSpeed()).toBe("busy");
   });

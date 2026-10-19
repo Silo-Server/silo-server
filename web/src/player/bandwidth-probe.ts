@@ -18,14 +18,15 @@ import {
  * times random bytes from the server, on one connection as playback uses.
  *
  * The server keeps the reading for this device on the connection it is using
- * now. The app looks for it a few seconds after sign-in, when a hidden tab is
- * shown again and after a new connection type, and runs the quick test only
- * when no reading proves the link. There is no timer. The best reading is
- * kept here so playback starts can read it at once.
+ * now. The app reads it at once on sign-in, when a hidden tab is shown again
+ * and after a new connection type, so an early playback start already sends
+ * it, and runs the quick test a few seconds later only when no reading proves
+ * the link. There is no timer. The best reading is kept here so playback
+ * starts can read it at once.
  */
 
-/** Let the first screen settle before reading or spending bandwidth. */
-const LOOK_DELAY_MS = 5_000;
+/** Let the first screen settle before spending bandwidth on a test. */
+const TEST_DELAY_MS = 5_000;
 /** How long a reading lasts when the server does not say. */
 const DEFAULT_READING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** The probe without connection_speed_v1, which keeps nothing for us. */
@@ -257,10 +258,13 @@ async function readServerReading(schedule: ProbeSchedule): Promise<boolean> {
   if (best)
     writeStored({ kbps: best.kbps, measuredAt: best.measuredAt, maxAgeMs: schedule.maxAgeMs });
   else forgetBandwidthEstimate();
+  // Without a target the server has nothing to measure against, and a failed
+  // target lookup must not send every client into a test.
   return current.some(
     (reading) =>
       !reading.lowerBound ||
-      (schedule.targetKbps !== undefined && reading.kbps >= schedule.targetKbps),
+      schedule.targetKbps === undefined ||
+      reading.kbps >= schedule.targetKbps,
   );
 }
 
@@ -442,13 +446,13 @@ function probeAllowed(): boolean {
 }
 
 /**
- * Looks for a current reading while the app is signed in: a few seconds
- * after it starts, when a hidden tab is shown again, and after the browser
- * reports a new connection type. Each look reads the server's reading first
- * and runs the quick test only when none proves the link. A hidden tab
- * neither looks nor tests. Returns a function that stops the schedule.
+ * Keeps a current reading while the app is signed in: reads the server's at
+ * once on sign-in, when a hidden tab is shown again and after the browser
+ * reports a new connection type, and runs the quick test `testDelayMs` later
+ * only when none proves the link. A hidden tab neither reads nor tests.
+ * Returns a function that stops the schedule.
  */
-export function scheduleBandwidthProbe(delayMs = LOOK_DELAY_MS): () => void {
+export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void {
   stopBandwidthProbes();
   try {
     installMediaTracking();
@@ -456,41 +460,55 @@ export function scheduleBandwidthProbe(delayMs = LOOK_DELAY_MS): () => void {
     // Cross-tab coordination is optional.
   }
   const generation = scheduleGeneration;
-  const lookIn = (ms: number) => {
+  const later = (ms: number, step: () => Promise<void>) => {
     if (generation !== scheduleGeneration) return;
     clearTimeout(lookTimer);
-    lookTimer = setTimeout(() => void look(), Math.max(0, ms));
+    lookTimer = setTimeout(
+      () => {
+        lookTimer = undefined;
+        void step();
+      },
+      Math.max(0, ms),
+    );
   };
+  /** Whether nothing stops an automatic test from running now. */
+  const testMayRun = () =>
+    !activeProbe &&
+    !tabHidden() &&
+    generation === scheduleGeneration &&
+    probeAllowed() &&
+    Date.now() >= notBefore;
+  const readingProvesLink = (schedule: ProbeSchedule) =>
+    schedule.reporting ? readServerReading(schedule) : Promise.resolve(!!readStored(Date.now()));
   const look = async () => {
-    lookTimer = undefined;
     // A test already running keeps what it measures when it settles.
     if (activeProbe || tabHidden() || generation !== scheduleGeneration) return;
     try {
       const schedule = await probeSchedule();
-      if (schedule.reporting) {
-        if (await readServerReading(schedule)) return;
-      } else if (readStored(Date.now())) {
-        return;
-      }
-      if (!schedule.automatic || !probeAllowed() || Date.now() < notBefore) return;
-      await testUnderLock(schedule);
+      if (await readingProvesLink(schedule)) return;
+      if (!schedule.automatic || !testMayRun()) return;
+      // The test is best effort too: one that fails waits for the next look.
+      later(testDelayMs, () => testUnderLock(schedule).catch(() => undefined));
     } catch {
       // Best effort: without a reading playback plans as it did before, and
       // the next look tries again.
     }
   };
   const testUnderLock = async (schedule: ProbeSchedule) => {
+    if (!testMayRun()) return;
     // Tabs share the reading, so only one of them tests at a time: two tests
     // at once would split the link and both read low.
     const epoch = cancelEpoch;
     const test = async () => {
-      if (epoch !== cancelEpoch || generation !== scheduleGeneration || tabHidden()) return;
+      if (epoch !== cancelEpoch || !testMayRun()) return;
       const locks = lockManager();
       // Another tab may be playing; this tab's own check cannot see it.
       if (locks && (await mediaActiveInAnyTab(locks))) return;
       const controller = new AbortController();
       activeProbe = controller;
       try {
+        // Another tab, or another device, may have tested meanwhile.
+        if ((await readingProvesLink(schedule)) || controller.signal.aborted) return;
         await collectProbe(controller.signal, "quick", schedule);
       } catch (error) {
         if (error instanceof ProbeRateLimited) notBefore = Date.now() + error.retryAfter * 1000;
@@ -516,11 +534,11 @@ export function scheduleBandwidthProbe(delayMs = LOOK_DELAY_MS): () => void {
     cancelEpoch++;
     activeProbe?.abort();
     forgetBandwidthEstimate();
-    lookIn(LOOK_DELAY_MS);
+    later(0, look);
   };
   const onVisibility = () => {
     if (!tabHidden()) {
-      lookIn(LOOK_DELAY_MS);
+      later(0, look);
       return;
     }
     // A hidden tab does not test; one that is running stops and measured nothing.
@@ -535,7 +553,7 @@ export function scheduleBandwidthProbe(delayMs = LOOK_DELAY_MS): () => void {
     network?.removeEventListener?.("change", onNetworkChange);
     document.removeEventListener("visibilitychange", onVisibility);
   };
-  if (!tabHidden()) lookIn(delayMs);
+  if (!tabHidden()) later(0, look);
   return stopBandwidthProbes;
 }
 
