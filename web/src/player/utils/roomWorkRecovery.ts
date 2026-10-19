@@ -96,10 +96,23 @@ export function createRoomWorkRecovery(options: {
     entry.timer = null;
     pending.delete(entry.id);
   };
+  const discard = (entry: Pending) => {
+    drop(entry);
+    options.notice({
+      id: ++nextNotice,
+      uncertain: false,
+      discarded: true,
+      message: "The room action was refused and was not applied. Try again when the room is ready.",
+    });
+  };
   const uncertain = (
     entry: Pending,
     message = "The room action was not confirmed. Check the room before trying again.",
   ) => {
+    if (entry.refused) {
+      discard(entry);
+      return;
+    }
     drop(entry);
     options.notice({ id: ++nextNotice, message, uncertain: true });
     options.reconcile();
@@ -220,7 +233,13 @@ export function createRoomWorkRecovery(options: {
         timer: null,
       };
       if (isDesired && echoed(context, entry)) return { ok: true };
-      if (kind === "transport_request") latestTransportId = id;
+      if (kind === "transport_request") {
+        latestTransportId = id;
+        // A newer action cancels known-refused intent, even when the floor blocks it.
+        // Unconfirmed sends retain their correlation until receipt or uncertainty.
+        for (const previous of pending.values())
+          if (previous.kind === kind && previous.refused) discard(previous);
+      }
       if (!valid(entry)) return { ok: false };
       const delay = floor[workClass(kind)] - performance.now();
       if (kind === "state_report") {
@@ -264,15 +283,7 @@ export function createRoomWorkRecovery(options: {
             entry.kind === "transport_request" &&
             (entry.retried || performance.now() + delay >= entry.deadline || !valid(entry))
           ) {
-            drop(entry);
-            options.notice({
-              id: ++nextNotice,
-              uncertain: false,
-              discarded: true,
-              message:
-                "The room action was refused and was not applied. Try again when the room is ready.",
-            });
-            options.reconcile();
+            discard(entry);
           } else schedule(entry, delay);
         }
         return;
@@ -289,6 +300,7 @@ export function createRoomWorkRecovery(options: {
       }
       if (message.type === "error") {
         // Missing/true work_started and unknown errors are never replay permission.
+        entry.refused = false;
         if (entry.kind === "transport_request") uncertain(entry);
         else {
           drop(entry);
@@ -314,7 +326,11 @@ export function createRoomWorkRecovery(options: {
     },
     dispose() {
       disposed = true;
+      const unconfirmed = [...pending.values()].some(
+        (entry) => entry.kind === "transport_request" && !entry.refused,
+      );
       for (const entry of pending.values()) drop(entry);
+      return unconfirmed;
     },
   };
 }

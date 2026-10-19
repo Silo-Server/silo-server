@@ -989,7 +989,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       }
       // The profile-rebind path stretches the delay so a persistently failing
       // ticket mint cannot turn into a tight reconnect loop.
-      const delay = nextReconnectDelayRef.current ?? delayMs ?? backoff.reconnect();
+      // A fresh socket must be able to select before its missing-subscribe grace expires.
+      const delay = Math.max(
+        nextReconnectDelayRef.current ?? delayMs ?? backoff.reconnect(),
+        selection.retryDelay(),
+      );
       nextReconnectDelayRef.current = null;
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = undefined;

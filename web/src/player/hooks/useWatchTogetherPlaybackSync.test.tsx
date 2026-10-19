@@ -72,6 +72,7 @@ function fixture(waiting = false, attached = true) {
   const videoRef = { current: video };
   const streamOriginRef = { current: 0 };
   const appliedCommandIdRef = { current: "command" };
+  const onSustainedStall = vi.fn();
   const sendRoomMessage = (message: Record<string, unknown>, retry?: RoomSendOptions) =>
     recovery.send(message, retry);
   const view = renderHook(() =>
@@ -80,6 +81,7 @@ function fixture(waiting = false, attached = true) {
       videoRef,
       streamOriginRef,
       appliedCommandIdRef,
+      onSustainedStall,
       roomConnection: {
         connectionState: "connected",
         room,
@@ -119,6 +121,7 @@ function fixture(waiting = false, attached = true) {
     messages,
     refuse,
     update,
+    onSustainedStall,
     close: () => {
       view.unmount();
       recovery.dispose();
@@ -210,6 +213,48 @@ it("keeps a refused buffering desire when a readiness check still fails", async 
   });
   await act(() => vi.advanceTimersByTimeAsync(500));
   expect(f.messages("buffering")).toHaveLength(2);
+  f.close();
+});
+it("counts a continuous refused stall once while preserving its buffering retry", async () => {
+  const f = fixture();
+  Object.defineProperty(f.video, "readyState", { value: 1, writable: true });
+  act(() => f.view.result.current.reportBuffering());
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  const requestId = f.messages("buffering")[0]!.request_id;
+  act(() => f.refuse("buffering", 10_000));
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  act(() => f.view.result.current.reportBuffering());
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  expect(f.onSustainedStall).toHaveBeenCalledTimes(1);
+  expect(f.messages("buffering")).toHaveLength(1);
+  // A changed room command still describes this same unhealed media stall.
+  act(() => f.update({ generation: 2 }, { command_id: "command-2" }));
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  expect(f.onSustainedStall).toHaveBeenCalledTimes(1);
+  await act(() => vi.advanceTimersByTimeAsync(5_999));
+  expect(f.onSustainedStall).toHaveBeenCalledTimes(1);
+  // The command change canceled the old desire; the current one respects the same class floor.
+  expect(f.messages("buffering")).toHaveLength(2);
+  expect(f.messages("buffering")[1]!.request_id).not.toBe(requestId);
+  f.close();
+});
+it.each(["recovery", "selection"])("counts another stall only after %s", async (change) => {
+  const f = fixture();
+  Object.defineProperty(f.video, "readyState", { value: 1, writable: true });
+  act(() => f.view.result.current.reportBuffering());
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  act(() => f.refuse("buffering", 10_000));
+  if (change === "recovery") {
+    act(() => {
+      Object.defineProperty(f.video, "readyState", { value: 4, writable: true });
+      f.video.dispatchEvent(new Event("canplay"));
+    });
+  } else act(() => f.update({ selection_revision: 2 }));
+  Object.defineProperty(f.video, "readyState", { value: 1, writable: true });
+  act(() => f.view.result.current.reportBuffering());
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  expect(f.onSustainedStall).toHaveBeenCalledTimes(2);
+  expect(f.messages("buffering")).toHaveLength(1);
   f.close();
 });
 it("sends only the latest absolute seek in the 250ms window and preserves distinct pause/play order", async () => {

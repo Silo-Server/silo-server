@@ -159,6 +159,10 @@ export function useWatchTogetherRoomConnection({
   const commandRef = useRef(transportCommand);
   const [workAdmission, setWorkAdmission] = useState<WorkAdmission | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<RoomRecoveryNotice | null>(null);
+  const recoveryNoticeIdRef = useRef(0);
+  const publishRecoveryNotice = useCallback((notice: Omit<RoomRecoveryNotice, "id">) => {
+    setRecoveryNotice({ ...notice, id: ++recoveryNoticeIdRef.current });
+  }, []);
   const connectionEpochRef = useRef(0);
   useLayoutEffect(() => {
     roomRef.current = room;
@@ -246,26 +250,6 @@ export function useWatchTogetherRoomConnection({
         setClosedReason(null);
       }
     }, 0);
-    const readAuthority = captureProfileRequestContext();
-    const socketVersionAtRequest = socketSnapshotVersion.current;
-    void getWatchTogetherRoom(roomId, roomToken, readAuthority)
-      .then((response) => {
-        if (cancelled || !readAuthority || !isCapturedProfileAuthorityActive(readAuthority)) {
-          return;
-        }
-        applyHTTPRoomSnapshot(response.room, socketVersionAtRequest);
-      })
-      .catch((error: unknown) => {
-        if (cancelled || !readAuthority || !isCapturedProfileAuthorityActive(readAuthority)) {
-          return;
-        }
-        const reason = closedReasonFromRoomFetchError(error);
-        if (reason) {
-          window.clearTimeout(resetClosedReasonTimer);
-          markClosed(reason);
-        }
-      });
-
     void listWatchTogetherSuggestions(roomId, roomToken)
       .then((response) => {
         if (cancelled) {
@@ -280,8 +264,6 @@ export function useWatchTogetherRoomConnection({
       window.clearTimeout(resetClosedReasonTimer);
     };
   }, [
-    applyHTTPRoomSnapshot,
-    markClosed,
     roomId,
     roomToken,
     rejoinAttempt,
@@ -310,6 +292,25 @@ export function useWatchTogetherRoomConnection({
       !disposed &&
       replacementScopeRef.current !== replacementScope &&
       isCapturedProfileAuthorityActive(authority);
+    // Initial load and uncertainty share one read for this authority engagement.
+    // A later engagement owns a new closure; old results cannot publish into it.
+    let roomRead: Promise<void> | null = null;
+    const reconcile = () => {
+      if (!active() || closedReasonRef.current || roomRead) return;
+      const version = socketSnapshotVersion.current;
+      roomRead = getWatchTogetherRoom(roomId, roomToken, authority)
+        .then((response) => {
+          if (active()) applyHTTPRoomSnapshot(response.room, version);
+        })
+        .catch((error: unknown) => {
+          if (!active()) return;
+          const reason = closedReasonFromRoomFetchError(error);
+          if (reason) markClosed(reason);
+        })
+        .finally(() => {
+          roomRead = null;
+        });
+    };
     const backoff = createRealtimeBackoff();
     let admissionSupported = false;
     const recovery = createRoomWorkRecovery({
@@ -333,17 +334,9 @@ export function useWatchTogetherRoomConnection({
       },
       backoff,
       notice: (notice) => {
-        if (active()) setRecoveryNotice(notice);
+        if (active()) publishRecoveryNotice(notice);
       },
-      reconcile: () => {
-        if (!active() || closedReasonRef.current) return;
-        const version = socketSnapshotVersion.current;
-        void getWatchTogetherRoom(roomId, roomToken, authority)
-          .then((response) => {
-            if (active()) applyHTTPRoomSnapshot(response.room, version);
-          })
-          .catch(() => {});
-      },
+      reconcile,
     });
     recoveryRef.current = recovery;
     let reconnectTimer: number | null = null;
@@ -582,11 +575,18 @@ export function useWatchTogetherRoomConnection({
       });
     };
 
+    reconcile();
     void connect();
 
     return () => {
       disposed = true;
-      recovery.dispose();
+      if (recovery.dispose()) {
+        // Teardown settles delivery locally. Never read using the retired authority.
+        publishRecoveryNotice({
+          uncertain: true,
+          message: "A room action was not confirmed. Check the room before trying again.",
+        });
+      }
       if (recoveryRef.current === recovery) recoveryRef.current = null;
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
@@ -607,6 +607,7 @@ export function useWatchTogetherRoomConnection({
   }, [
     applyHTTPRoomSnapshot,
     markClosed,
+    publishRecoveryNotice,
     roomId,
     roomToken,
     rejoinAttempt,

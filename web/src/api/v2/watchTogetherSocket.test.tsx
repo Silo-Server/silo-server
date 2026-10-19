@@ -896,6 +896,138 @@ it("uses ticket metadata for correlated refusal and never replays transport afte
   view.unmount();
   expect(next.readyState).toBe(RoomSocket.CLOSED);
 });
+it("shows generic uncertainty on authority teardown without reading or replaying under the old PIN", async () => {
+  vi.useFakeTimers();
+  const reads = vi.mocked(getWatchTogetherRoom);
+  reads.mockClear();
+  let resolveOldRead!: (value: Awaited<ReturnType<typeof getWatchTogetherRoom>>) => void;
+  reads.mockImplementationOnce(() => new Promise((resolve) => (resolveOldRead = resolve)));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ticket("a", true)),
+  );
+  const view = renderHook(() =>
+    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  const old = RoomSocket.all[0]!;
+  act(() => {
+    old.open();
+    old.message({
+      type: "snapshot",
+      room: {
+        room_id: "room",
+        generation: 1,
+        selection_revision: 1,
+        phase: "playing",
+        attached_session_id: "session",
+        self_can_control_transport: true,
+      },
+    });
+    expect(
+      view.result.current.sendRoomMessage({
+        type: "transport_request",
+        session_id: "session",
+        action: "pause",
+      }).ok,
+    ).toBe(true);
+  });
+  expect(reads).toHaveBeenCalledTimes(1);
+  const oldReadCount = () =>
+    reads.mock.calls.filter(([, , authority]) => authority?.profileToken === "pin-A").length;
+  expect(oldReadCount()).toBe(1);
+  act(() => {
+    setProfileToken("pin-B");
+    view.rerender();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(view.result.current.recoveryNotice).toMatchObject({ uncertain: true });
+  expect(view.result.current.recoveryNotice?.message).not.toMatch(/pin-A|session|room-proof/);
+  expect(old.readyState).toBe(RoomSocket.CLOSED);
+  expect(reads).toHaveBeenCalledTimes(2);
+  expect(oldReadCount()).toBe(1);
+  expect(reads.mock.calls[1]![2]?.profileToken).toBe("pin-B");
+  const next = RoomSocket.all[1]!;
+  act(() => {
+    old.close();
+    old.message({ type: "error", request_id: "old", work_started: true });
+    next.open();
+    next.message({ type: "snapshot", room: { room_id: "room", generation: 2 } });
+  });
+  await act(async () =>
+    resolveOldRead({
+      room: { room_id: "room", generation: 99 } as WatchTogetherRoomSnapshot,
+      room_access_token: "proof",
+    }),
+  );
+  expect(view.result.current.room?.generation).toBe(2);
+  await act(() => vi.advanceTimersByTimeAsync(5_000));
+  expect(oldReadCount()).toBe(1);
+  expect(
+    next.send.mock.calls
+      .map(([data]) => JSON.parse(String(data)))
+      .filter((m) => m.type === "transport_request"),
+  ).toHaveLength(0);
+  view.unmount();
+});
+it("coalesces disconnect reconciliation with an in-flight room read per engagement", async () => {
+  vi.useFakeTimers();
+  const reads = vi.mocked(getWatchTogetherRoom);
+  reads.mockClear();
+  let resolveRead!: (value: Awaited<ReturnType<typeof getWatchTogetherRoom>>) => void;
+  reads.mockImplementationOnce(() => new Promise((resolve) => (resolveRead = resolve)));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ticket("a", true)),
+  );
+  const view = renderHook(() =>
+    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  const snapshot = {
+    room_id: "room",
+    generation: 1,
+    selection_revision: 1,
+    phase: "playing",
+    attached_session_id: "session",
+    self_can_control_transport: true,
+    self_can_manage_room: true,
+  } as WatchTogetherRoomSnapshot;
+  const sendAndClose = (socket: RoomSocket) => {
+    socket.open();
+    socket.message({ type: "snapshot", room: snapshot });
+    for (const action of ["pause", "play", "seek"])
+      expect(
+        view.result.current.sendRoomMessage({
+          type: "transport_request",
+          session_id: "session",
+          action,
+        }).ok,
+      ).toBe(true);
+    socket.close();
+  };
+  act(() => sendAndClose(RoomSocket.all[0]!));
+  expect(view.result.current.recoveryNotice?.uncertain).toBe(true);
+  expect(reads).toHaveBeenCalledTimes(1);
+  await act(async () =>
+    resolveRead({
+      room: { ...snapshot, attached_session_id: undefined },
+      room_access_token: "proof",
+    }),
+  );
+  // The coalesced HTTP read began before the equal-generation socket snapshot.
+  expect(view.result.current.room?.attached_session_id).toBe("session");
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  reads.mockImplementationOnce(() => new Promise((resolve) => (resolveRead = resolve)));
+  act(() => sendAndClose(RoomSocket.all[1]!));
+  expect(reads).toHaveBeenCalledTimes(2);
+  expect(reads.mock.calls[1]![2]?.profileToken).toBe("pin-A");
+  view.unmount();
+  await act(async () =>
+    resolveRead({ room: { ...snapshot, generation: 99 }, room_access_token: "proof" }),
+  );
+  expect(reads).toHaveBeenCalledTimes(2);
+});
 it("keeps shield backoff across opens and treats other 1008 closes as opaque", async () => {
   vi.useFakeTimers();
   vi.stubGlobal(

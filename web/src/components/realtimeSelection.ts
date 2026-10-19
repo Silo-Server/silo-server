@@ -69,6 +69,7 @@ export function createRealtimeSelection(options: {
       return false;
     },
     accepted: () => [...accepted],
+    retryDelay: () => Math.max(0, notBefore - performance.now()),
     disconnected() {
       current = null;
       accepted = [];

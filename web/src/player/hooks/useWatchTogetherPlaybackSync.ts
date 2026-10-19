@@ -180,6 +180,7 @@ export function useWatchTogetherPlaybackSync({
   const sendRoomMessage = roomConnection.sendRoomMessage;
   const cancelRoomMessage = roomConnection.cancelRoomMessage;
   const waitingStateRef = useRef<"idle" | "buffering" | "ready">("idle");
+  const stallNotifiedRef = useRef(false);
   const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelBuffering = useCallback(() => {
     if (bufferingTimerRef.current !== null) {
@@ -191,6 +192,7 @@ export function useWatchTogetherPlaybackSync({
     const video = videoRef.current;
     const recovered = () => {
       if (video && !video.seeking && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+        stallNotifiedRef.current = false;
         cancelBuffering();
         cancelRoomMessage?.("buffering");
         if (roomPlaybackState !== "waiting" && waitingStateRef.current === "buffering") {
@@ -389,7 +391,12 @@ export function useWatchTogetherPlaybackSync({
     return true;
   }, []);
 
-  // A new stream, room, selection, phase, or connection starts over.
+  // Notification counts media stalls, independently of desired-state acknowledgement.
+  useEffect(() => {
+    stallNotifiedRef.current = false;
+  }, [attachedSessionId, room?.room_id, room?.selection_revision, sessionId]);
+
+  // A new stream, room, selection, phase, or connection starts acknowledgement over.
   useEffect(() => {
     waitingStateRef.current = "idle";
     cancelRoomMessage?.("ready");
@@ -705,7 +712,10 @@ export function useWatchTogetherPlaybackSync({
           : sendRoomMessage(desired);
         if (result.ok) {
           if (!admissionSupported) waitingStateRef.current = "buffering";
-          onSustainedStall?.();
+          if (!stallNotifiedRef.current) {
+            stallNotifiedRef.current = true;
+            onSustainedStall?.();
+          }
         }
       }, bufferingGraceMs);
       return { ok: true };

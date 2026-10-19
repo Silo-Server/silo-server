@@ -128,7 +128,9 @@ it.each(["room", "selection", "generation", "epoch", "session", "authority", "co
     if (change === "command") f.context.commandId = "other";
     vi.advanceTimersByTime(1_000);
     expect(f.send).toHaveBeenCalledTimes(1);
-    expect(f.notice).toHaveBeenCalled();
+    expect(f.notice).toHaveBeenCalledWith(expect.objectContaining({ discarded: true }));
+    expect(f.notice).not.toHaveBeenCalledWith(expect.objectContaining({ uncertain: true }));
+    expect(f.reconcile).not.toHaveBeenCalled();
     f.recovery.dispose();
   },
 );
@@ -161,9 +163,57 @@ it("cancels an older refused transport retry when the newest intent is held by t
   f.recovery.send(transport);
   f.refuse();
   expect(f.recovery.send({ ...transport, action: "play" }).ok).toBe(false);
+  const notices = f.notice.mock.calls.length;
   vi.advanceTimersByTime(5_000);
   expect(f.send).toHaveBeenCalledTimes(1);
   expect(f.notice).toHaveBeenCalledWith(expect.objectContaining({ discarded: true }));
+  expect(f.notice).toHaveBeenCalledTimes(notices);
+  expect(f.notice).not.toHaveBeenCalledWith(expect.objectContaining({ uncertain: true }));
+  expect(f.reconcile).not.toHaveBeenCalled();
+  f.recovery.dispose();
+});
+it("discards a known refusal on disconnect without uncertainty or a reconciliation read", () => {
+  const f = fixture();
+  f.recovery.send(transport);
+  f.refuse();
+  f.recovery.disconnect();
+  vi.advanceTimersByTime(5_000);
+  expect(f.send).toHaveBeenCalledTimes(1);
+  expect(f.notice).toHaveBeenCalledWith(expect.objectContaining({ discarded: true }));
+  expect(f.notice).not.toHaveBeenCalledWith(expect.objectContaining({ uncertain: true }));
+  expect(f.reconcile).not.toHaveBeenCalled();
+  f.recovery.dispose();
+});
+it.each(["unconfirmed", "refused", "applied", "retried"])(
+  "reports unresolved delivery to teardown only for an unconfirmed send (%s)",
+  (state) => {
+    const f = fixture();
+    f.recovery.send(transport);
+    if (state === "refused" || state === "retried") f.refuse();
+    if (state === "retried") vi.advanceTimersByTime(500);
+    if (state === "applied")
+      f.recovery.receive({
+        type: "action_result",
+        action: "transport_request",
+        status: "applied",
+        request_id: f.last().request_id,
+      });
+    expect(f.recovery.dispose()).toBe(state === "unconfirmed" || state === "retried");
+    vi.advanceTimersByTime(10_000);
+    expect(f.send).toHaveBeenCalledTimes(state === "retried" ? 2 : 1);
+    expect(f.notice).not.toHaveBeenCalled();
+    expect(f.reconcile).not.toHaveBeenCalled();
+  },
+);
+it("treats a downstream error after refusal as uncertain without retrying", () => {
+  const f = fixture();
+  f.recovery.send(transport);
+  f.refuse();
+  f.refuse({ work_started: true });
+  vi.advanceTimersByTime(5_000);
+  expect(f.send).toHaveBeenCalledTimes(1);
+  expect(f.notice).toHaveBeenCalledWith(expect.objectContaining({ uncertain: true }));
+  expect(f.reconcile).toHaveBeenCalledTimes(1);
   f.recovery.dispose();
 });
 it.each(["phase", "session", "permission"])("rejects initial transport with stale %s", (change) => {

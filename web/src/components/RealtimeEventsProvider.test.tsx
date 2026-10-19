@@ -300,6 +300,72 @@ describe("RealtimeEventsProvider", () => {
     view.unmount();
   });
 
+  it("waits for the retained selection floor before reconnecting and subscribes inside the fresh grace", async () => {
+    const queryClient = new QueryClient();
+    const view = renderHook(() => useRealtimeEvents(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>
+          <RealtimeEventsProvider>{children}</RealtimeEventsProvider>
+        </QueryClientProvider>
+      ),
+    });
+    await act(async () => {});
+    const first = FakeWebSocket.instances[0]!;
+    const send = vi.spyOn(first, "send");
+    const admission = { version: 1, backend: "memory", scope: "node", epoch: "test" };
+    await act(async () => {
+      first.readyState = FakeWebSocket.OPEN;
+      view.result.current.subscribeChannel("catalog");
+      first.emitMessage({ type: "hello", work_admission: admission });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const refuse = () => {
+      const message = JSON.parse(String(send.mock.calls.at(-1)![0]));
+      first.emitMessage({
+        type: "error",
+        code: "realtime_unavailable",
+        request_id: message.request_id,
+        work_started: false,
+        retry_after_ms: 2_000,
+      });
+    };
+    for (const delay of [2_000, 4_000]) {
+      act(refuse);
+      await act(() => vi.advanceTimersByTimeAsync(delay));
+    }
+    act(() => {
+      refuse(); // The third outage refusal retains an eight-second floor.
+      first.emitClose();
+    });
+    await act(() => vi.advanceTimersByTimeAsync(7_999));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url).endsWith("/api/v2/events/ws-ticket")),
+    ).toHaveLength(1);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    const next = FakeWebSocket.instances[1]!;
+    const nextSend = vi.spyOn(next, "send");
+    const missingSubscribe = vi.fn(() => next.emitClose(1008));
+    const grace = setTimeout(() => {
+      if (!nextSend.mock.calls.length) missingSubscribe();
+    }, 5_000);
+    await act(async () => {
+      next.readyState = FakeWebSocket.OPEN;
+      next.emitMessage({ type: "hello", work_admission: admission });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(nextSend).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(nextSend.mock.calls[0]![0])).channels).toContain("catalog");
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    expect(missingSubscribe).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    clearTimeout(grace);
+    view.unmount();
+  });
+
   it("skips paginated job query state when looking for a cached terminal event", async () => {
     const client = new QueryClient();
     client.setQueryData([...adminKeys.jobs("__all"), "pages", 20], {
