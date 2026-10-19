@@ -2511,7 +2511,16 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 		}
 		lastErr = combineTransportErrorsV3(lastErr, transportErr)
 	}
-	return preparedTransportV3{}, &transportErrorV3{reason: "route_preparation_failed", message: "Playback route preparation exhausted every candidate.", retryable: true, cause: lastErr}
+	return preparedTransportV3{}, exhaustedRoutesErrorV3(lastErr)
+}
+
+// exhaustedRoutesErrorV3 ends a route loop that ran out of attempts. A final
+// preflight rejection stays final; anything else may clear on a retry.
+func exhaustedRoutesErrorV3(lastErr *transportErrorV3) *transportErrorV3 {
+	if lastErr != nil && !lastErr.retryable && errors.Is(lastErr.cause, tonemap.ErrSourcePreflightRejected) {
+		return lastErr
+	}
+	return &transportErrorV3{reason: "route_preparation_failed", message: "Playback route preparation exhausted every candidate.", retryable: true, cause: lastErr}
 }
 
 func (h *PlaybackHandler) checkReplacementAdmissionV3(

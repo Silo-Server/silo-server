@@ -75,6 +75,23 @@ func TestCombineTransportErrorsV3IneligibleExecutorKeepsSourceVerdict(t *testing
 	}
 }
 
+// TestExhaustedRoutesErrorV3KeepsFinalPreflightRejection keeps a rejection
+// final when the route loop runs out of attempts, and leaves every other
+// exhausted loop retryable.
+func TestExhaustedRoutesErrorV3KeepsFinalPreflightRejection(t *testing.T) {
+	rejected := preflightRejectedTransportErrorV3()
+	if got := exhaustedRoutesErrorV3(rejected); got != rejected {
+		t.Fatalf("exhausted after a rejection = %#v, want the rejection", got)
+	}
+	transient := toneMapExecutionTransportErrorV3(playback.ErrToneMapSourceValidationUnavailable, "Failed to start the playback transport.")
+	stale := toneMapExecutionTransportErrorV3(tonemap.ErrSourceRevisionChanged, "Failed to start the playback transport.")
+	for name, lastErr := range map[string]*transportErrorV3{"none": nil, "transient": transient, "stale source": stale} {
+		if got := exhaustedRoutesErrorV3(lastErr); got.reason != "route_preparation_failed" || !got.retryable {
+			t.Fatalf("exhausted after %s = %#v, want a retryable route_preparation_failed", name, got)
+		}
+	}
+}
+
 // TestValidateLocalTransportCapabilitiesV3MarksOnlyDefiniteMismatchIneligible
 // keeps a failed or slow capability read retryable in its own right.
 func TestValidateLocalTransportCapabilitiesV3MarksOnlyDefiniteMismatchIneligible(t *testing.T) {
