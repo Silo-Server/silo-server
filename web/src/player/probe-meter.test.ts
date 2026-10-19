@@ -41,3 +41,23 @@ describe("speed test probe vectors", () => {
       expect(outcome).toEqual({ stop, result });
     });
 });
+
+describe("measureProbe", () => {
+  it("reports a whole transfer that ends between milliseconds in whole milliseconds", () => {
+    const outcome = measureProbe(
+      "quick",
+      undefined,
+      [
+        [0, 60_000_000],
+        [450.25, 40_000_000],
+      ],
+      900.4,
+    );
+    expect(outcome.result).toEqual({
+      kbps: 888_888,
+      lower_bound: true,
+      bytes: 100_000_000,
+      duration_ms: 900,
+    });
+  });
+});

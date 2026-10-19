@@ -124,7 +124,9 @@ export class ProbeMeter {
   }
 
   private wholeTransfer(stop: number): ProbeResult {
-    const duration_ms = Math.max(stop, 1);
+    // The transfer ends at its last byte, read from a sub-millisecond clock;
+    // the results endpoint takes whole milliseconds.
+    const duration_ms = Math.max(Math.round(stop), 1);
     const kbps = Math.floor((this.total * 8) / duration_ms);
     const target = this.mode === "quick" ? this.targetKbps : undefined;
     return {
