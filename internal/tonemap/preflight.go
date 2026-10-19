@@ -528,18 +528,11 @@ func sourceConversionPreflightFilter(request SourcePreflightRequest) string {
 		return SourceParameters(request.Kind) + "," + CUDAFilter(request.Kind) + "," + HDRMetadataRemovalFilter()
 	}
 	filter := VAAPIFilter(request.Kind)
-	if request.SoftwareVideoDecode && (request.Backend == BackendQSV || request.Backend == BackendVAAPI) {
-		filter = "format=nv12,hwupload," + filter
-	}
 	if request.Backend == BackendQSV {
 		filter = QSVFilter(request.Kind, 0) + "," + QSVInteropFilter()
-		if request.SoftwareVideoDecode {
-			format := "nv12"
-			if !IsSDRSource(request.Kind) {
-				format = "p010le"
-			}
-			filter = "format=" + format + ",hwupload," + filter
-		}
+	}
+	if request.SoftwareVideoDecode && (request.Backend == BackendQSV || request.Backend == BackendVAAPI) {
+		filter = SoftwareUploadFilter(request.Kind) + filter
 	}
 	return filter + "," + HDRMetadataRemovalFilter()
 }

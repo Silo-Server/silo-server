@@ -1594,11 +1594,7 @@ func qsvOpenCLBitmapSubtitleGraph(opts TranscodeOpts, subInput string) string {
 // Intel or VAAPI device before invoking the selected hardware tone-map graph.
 func softwareToneMapUploadFilter(opts TranscodeOpts) string {
 	if opts.SoftwareVideoDecode && (opts.HWAccel == transcodeHWQSV || opts.HWAccel == transcodeHWVAAPI) {
-		format := "nv12"
-		if !tonemap.IsSDRSource(opts.ToneMapSourceKind) {
-			format = "p010le"
-		}
-		return "format=" + format + ",hwupload,"
+		return tonemap.SoftwareUploadFilter(opts.ToneMapSourceKind)
 	}
 	return ""
 }
