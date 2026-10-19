@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
-	"github.com/Silo-Server/silo-server/internal/catalog"
+	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -46,11 +46,11 @@ func TestCollectionCountUnavailableRecoveryDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	definition := func(n int) json.RawMessage {
-		rules := make([]catalog.QueryRule, n)
+		rules := make([]catalogsvc.QueryRule, n)
 		for i := range rules {
-			rules[i] = catalog.QueryRule{Field: "year", Op: "gte", Value: 2000 + i}
+			rules[i] = catalogsvc.QueryRule{Field: "year", Op: "gte", Value: 2000 + i}
 		}
-		raw, err := json.Marshal(catalog.QueryDefinition{MediaScope: "movie", Groups: []catalog.QueryGroup{{Rules: rules}}})
+		raw, err := json.Marshal(catalogsvc.QueryDefinition{MediaScope: "movie", Groups: []catalogsvc.QueryGroup{{Rules: rules}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +62,7 @@ func TestCollectionCountUnavailableRecoveryDB(t *testing.T) {
 	}
 	provider := collectionGuardHTTPProvider{stores: map[int]userstore.UserStore{1: store}}
 	svc := handlers.NewCollectionHandler(provider)
-	svc.Executor = &catalog.QueryExecutor{Pool: pool}
+	svc.Executor = &catalogsvc.QueryExecutor{Pool: pool}
 	deps := pilotDeps(nil, nil)
 	deps.PersonalCollections = svc
 	h := newTestHandler(t, deps)
