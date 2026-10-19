@@ -195,6 +195,9 @@ func (s *PostgresUserStore) updateCollectionAttempt(ctx context.Context, input u
 	if creatorProfileID != input.RequestProfileID {
 		return fmt.Errorf("only the creator can update this collection")
 	}
+	if err := s.validateCollectionQueryUpdate(ctx, tx, input); err != nil {
+		return err
+	}
 
 	now := nowUTC()
 	sets := []string{}
@@ -285,6 +288,26 @@ func (s *PostgresUserStore) updateCollectionAttempt(ctx context.Context, input u
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func (s *PostgresUserStore) validateCollectionQueryUpdate(ctx context.Context, tx pgx.Tx, input userstore.UpdateCollectionInput) error {
+	if input.ValidateQueryComposition == nil {
+		return nil
+	}
+	// Independent v1 patches have no revision fence. Read the companion while
+	// owning the same row lock as every collection writer, and keep it to commit.
+	var source, display string
+	if err := tx.QueryRow(ctx, `SELECT query_definition, COALESCE(display_query_definition::text, '')
+		FROM user_personal_collections WHERE user_id=$1 AND id=$2 AND native FOR UPDATE`, s.userID, input.ID).Scan(&source, &display); err != nil {
+		return fmt.Errorf("loading collection query composition: %w", err)
+	}
+	if input.QueryDefinition != nil {
+		source = *input.QueryDefinition
+	}
+	if input.DisplayQueryDefinition != nil {
+		display = *input.DisplayQueryDefinition
+	}
+	return input.ValidateQueryComposition(source, display)
 }
 
 func (s *PostgresUserStore) DeleteCollection(ctx context.Context, id string) error {

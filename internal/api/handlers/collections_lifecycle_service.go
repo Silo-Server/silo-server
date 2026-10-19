@@ -180,11 +180,30 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 	if input.DisplayQueryDefinition != nil {
 		proposed.DisplayQueryDefinition = *input.DisplayQueryDefinition
 	}
+	if input.QueryDefinition != nil || input.DisplayQueryDefinition != nil {
+		input.ValidateQueryComposition = func(source, display string) error {
+			// The store supplies the locked merged state. Keep requested sides raw:
+			// normalization can discard groups, rules and duplicate library IDs.
+			if len(req.QueryDefinition) > 0 {
+				source = string(req.QueryDefinition)
+			}
+			if req.DisplayQueryDefinition != nil {
+				display = string(req.DisplayQueryDefinition)
+			}
+			if err := catalog.ValidatePersonalCollectionQueryBudget(source, display); err != nil {
+				return fieldError("query_definition", err.Error()).WithCause(err)
+			}
+			return nil
+		}
+	}
 	ctx, err = h.preflightV1CollectionCount(ctx, store, userID, profileID, proposed)
 	if err != nil {
 		return none, err
 	}
 	if err := store.UpdateCollection(ctx, input); err != nil {
+		if apiErr, ok := errors.AsType[*APIError](err); ok {
+			return none, apiErr
+		}
 		if errors.Is(err, userstore.ErrCollectionRevisionMismatch) {
 			return none, err
 		}
