@@ -5629,19 +5629,20 @@ describe("VideoPlayer playback throughput", () => {
     return onBufferingSummary.mock.calls.at(-1)![1] as Record<string, unknown>;
   }
 
-  it("reports the rate hls.js fragments arrived at with the plan summary", async () => {
-    // 4 MB received over 1.2 s of transfer; the gap between requests and the
-    // wait for each first byte do not count.
-    const summary = await summaryAfterFragments([
-      { loaded: 1_000_000, loading: { start: 0, first: 50, end: 450 } },
-      { loaded: 3_000_000, loading: { start: 900, first: 1000, end: 1800 } },
-    ]);
-    expect(summary.throughput_kbps).toBe(26_666);
-  });
-
-  it("reports no throughput from under a second of receiving", async () => {
+  it("reports the rate long hls.js fragments arrived at with the plan summary", async () => {
+    // A 4 MB burst in 300 ms is left out; 3 MB over 1.2 s of transfer counts,
+    // without the wait for its first byte.
     const summary = await summaryAfterFragments([
       { loaded: 4_000_000, loading: { start: 0, first: 50, end: 350 } },
+      { loaded: 3_000_000, loading: { start: 900, first: 1000, end: 2200 } },
+    ]);
+    expect(summary.throughput_kbps).toBe(20_000);
+  });
+
+  it("reports no throughput when every fragment arrived in under a second", async () => {
+    const summary = await summaryAfterFragments([
+      { loaded: 4_000_000, loading: { start: 0, first: 50, end: 850 } },
+      { loaded: 4_000_000, loading: { start: 1000, first: 1050, end: 1850 } },
     ]);
     expect(summary).not.toHaveProperty("throughput_kbps");
   });

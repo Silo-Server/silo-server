@@ -415,7 +415,10 @@ function readStringPayload(
   return null;
 }
 
-/** The least receiving time a plan summary's throughput_kbps is taken from. */
+/**
+ * The least receiving time a fragment needs to count toward a plan summary's
+ * throughput_kbps, and so the least the summary is taken from.
+ */
 const MIN_THROUGHPUT_SAMPLE_MS = 1_000;
 
 export function VideoPlayer({
@@ -2536,7 +2539,10 @@ export function VideoPlayer({
             hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
               const { loaded, loading } = data.frag.stats;
               const ms = loading.end - loading.first;
-              if (destroyed || loaded <= 0 || ms <= 0) return;
+              // A short fragment on a warm connection arrives at the burst
+              // rate, which can be twice what the link sustains; only long
+              // ones count.
+              if (destroyed || loaded <= 0 || ms < MIN_THROUGHPUT_SAMPLE_MS) return;
               const revision = planRevisionForThroughputRef.current;
               const current = fragmentThroughputRef.current;
               fragmentThroughputRef.current =
