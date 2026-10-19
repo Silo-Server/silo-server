@@ -112,6 +112,11 @@ export interface BufferingSummary {
   delivered_kbps: number;
   buffering_mode: BufferingMode;
   buffering_action: BufferingAction;
+  /**
+   * The rate the plan's media arrived at while a request was receiving. The
+   * player adds it when it can measure it; the controller never does.
+   */
+  throughput_kbps?: number;
 }
 
 /** Stall time this early in a plan is startup, not a slow link. */

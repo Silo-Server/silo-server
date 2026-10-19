@@ -511,6 +511,16 @@ export function VideoPlayer({
   const fullscreenRootRef = usePlayerFullscreenRoot();
   const isMountedRef = useRef(true);
   const hlsRef = useRef<HlsType | null>(null);
+  // The fragments the current plan received, for plan_summary's
+  // throughput_kbps: bytes, and the time spent receiving them from each
+  // response's first byte to its last.
+  const fragmentThroughputRef = useRef<
+    { planRevision: number; bytes: number; ms: number } | undefined
+  >(undefined);
+  const planRevisionForThroughputRef = useRef(planRevision);
+  useEffect(() => {
+    planRevisionForThroughputRef.current = planRevision;
+  }, [planRevision]);
   const hlsStartupGuardRef = useRef<HlsStartupGuard | null>(null);
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
@@ -2520,6 +2530,18 @@ export function VideoPlayer({
               attemptAutoplayWhenReady();
             });
 
+            hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
+              const { loaded, loading } = data.frag.stats;
+              const ms = loading.end - loading.first;
+              if (destroyed || loaded <= 0 || ms <= 0) return;
+              const revision = planRevisionForThroughputRef.current;
+              const current = fragmentThroughputRef.current;
+              fragmentThroughputRef.current =
+                current?.planRevision === revision
+                  ? { planRevision: revision, bytes: current.bytes + loaded, ms: current.ms + ms }
+                  : { planRevision: revision, bytes: loaded, ms };
+            });
+
             hls.on(Hls.Events.BUFFER_APPENDED, () => {
               if (destroyed) return;
               attemptAutoplayWhenReady();
@@ -4191,7 +4213,17 @@ export function VideoPlayer({
             : "Can't lower quality for this video",
         tone: "info",
       }),
-    onSummary: onBufferingSummary,
+    onSummary: (summaryPlan, summary) => {
+      const fragments = fragmentThroughputRef.current;
+      const kbps =
+        fragments && String(fragments.planRevision) === summaryPlan.adoption_id
+          ? Math.min(Math.floor((fragments.bytes * 8) / fragments.ms), 1_000_000)
+          : 0;
+      onBufferingSummary?.(
+        summaryPlan,
+        kbps >= 1 ? { ...summary, throughput_kbps: kbps } : summary,
+      );
+    },
     onKeptEstimate,
   });
   const bufferingPill = isDetached ? null : bufferingQuality.pill;

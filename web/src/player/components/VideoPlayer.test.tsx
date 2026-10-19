@@ -143,6 +143,7 @@ vi.mock("hls.js", () => ({
       ERROR: "error",
       MANIFEST_PARSED: "manifestParsed",
       BUFFER_APPENDED: "bufferAppended",
+      FRAG_LOADED: "fragLoaded",
     };
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
     static isSupported = () => hlsJS.supported;
@@ -5595,5 +5596,44 @@ describe("VideoPlayer buffering pill", () => {
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(15_000));
     expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+  });
+});
+
+describe("VideoPlayer playback throughput", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    hlsJS.supported = false;
+    hlsJS.latest = null;
+  });
+
+  it("reports the rate hls.js fragments arrived at with the plan summary", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onBufferingSummary = vi.fn();
+    const plan = fixturePlanV3({
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    const { unmount } = renderPlayer({ plan, onBufferingSummary });
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+
+    // 4 MB received over 300 ms of transfer; the gap between requests and the
+    // wait for each first byte do not count.
+    for (const stats of [
+      { loaded: 1_000_000, loading: { start: 0, first: 50, end: 150 } },
+      { loaded: 3_000_000, loading: { start: 900, first: 1000, end: 1200 } },
+    ])
+      act(() => hlsJS.latest?.emit("fragLoaded", { frag: { stats } }));
+    unmount();
+
+    expect(onBufferingSummary).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ throughput_kbps: 106_666 }),
+    );
   });
 });
