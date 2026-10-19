@@ -2,6 +2,7 @@ import { fetchWithSession } from "@/api/client";
 import { v2, V2_CLIENT_HEADERS } from "@/api/v2/request";
 import { storage } from "@/utils/storage";
 import {
+  MIN_PROBE_KBPS,
   PROBE_FIRST_BYTE_DEADLINE_MS,
   ProbeMeter,
   type ProbeMode,
@@ -75,7 +76,8 @@ function parseStored(raw: string | null | undefined, now: number): StoredReading
     // An entry an older build wrote has no lifetime; the next look replaces it.
     if (typeof kbps !== "number" || typeof measuredAt !== "number" || typeof maxAgeMs !== "number")
       return undefined;
-    if (measuredAt > now || now - measuredAt > maxAgeMs || kbps < 1) return undefined;
+    // Under the probe's floor no start could send it as an estimate.
+    if (measuredAt > now || now - measuredAt > maxAgeMs || kbps < MIN_PROBE_KBPS) return undefined;
     return { kbps, measuredAt, maxAgeMs };
   } catch {
     return undefined;
@@ -256,13 +258,21 @@ async function readServerReading(schedule: ProbeSchedule): Promise<boolean> {
       measuredAt: Date.parse(connection.playback_sample.measured_at),
     });
   const now = Date.now();
-  const current = readings.filter((reading) => now - reading.measuredAt <= schedule.maxAgeMs);
+  const current = readings.filter(
+    (reading) => reading.kbps >= MIN_PROBE_KBPS && now - reading.measuredAt <= schedule.maxAgeMs,
+  );
   const best = current.reduce<ServerReading | undefined>(
     (top, reading) => (!top || reading.kbps > top.kbps ? reading : top),
     undefined,
   );
+  // The server's clock dates the reading; one behind this device's must not
+  // read as from the future and be dropped.
   if (best)
-    writeStored({ kbps: best.kbps, measuredAt: best.measuredAt, maxAgeMs: schedule.maxAgeMs });
+    writeStored({
+      kbps: best.kbps,
+      measuredAt: Math.min(best.measuredAt, now),
+      maxAgeMs: schedule.maxAgeMs,
+    });
   else forgetBandwidthEstimate();
   // Without a target the server has nothing to measure against, and a failed
   // target lookup must not send every client into a test.
@@ -311,9 +321,15 @@ export async function testConnectionSpeed(): Promise<ProbeResult | SpeedTestSkip
     if (controller.signal.aborted || !probeAllowed()) return "playing";
     const locks = lockManager();
     if (locks && (await mediaActiveInAnyTab(locks))) return "playing";
-    const result = await collectProbe(controller.signal, "accurate", await probeSchedule());
-    if (result) return result;
     // Playback that starts mid-test cancels it; that is not a failed measurement.
+    let result: ProbeResult | undefined;
+    try {
+      result = await collectProbe(controller.signal, "accurate", await probeSchedule());
+    } catch (error) {
+      if (controller.signal.aborted) return "playing";
+      throw error;
+    }
+    if (result) return result;
     if (controller.signal.aborted || !probeAllowed()) return "playing";
     throw new Error("The connection speed could not be measured");
   };
@@ -522,6 +538,7 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
       const locks = lockManager();
       // Another tab may be playing; this tab's own check cannot see it.
       if (locks && (await mediaActiveInAnyTab(locks))) return;
+      if (epoch !== cancelEpoch || !testMayRun()) return;
       const controller = new AbortController();
       activeProbe = controller;
       try {

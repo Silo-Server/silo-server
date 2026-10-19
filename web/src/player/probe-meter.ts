@@ -12,7 +12,7 @@ export type ProbeMode = "quick" | "accurate";
 export const PROBE_WINDOW_MS = 500;
 /** A probe whose first byte has not arrived by then is abandoned. */
 export const PROBE_FIRST_BYTE_DEADLINE_MS = 10_000;
-const MIN_PROBE_KBPS = 100;
+export const MIN_PROBE_KBPS = 100;
 /** The contract's ceiling for an estimate; a faster link is reported as a lower bound. */
 const MAX_PROBE_KBPS = 1_000_000;
 

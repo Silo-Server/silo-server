@@ -622,6 +622,42 @@ describe("scheduleBandwidthProbe", () => {
     expect(fetchWithSession).not.toHaveBeenCalled();
   });
 
+  it("does not start a test when playback starts during the media-lock check", async () => {
+    server({});
+    const request = vi.fn(
+      async (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
+        callback({ name: "silo-bandwidth-probe" }),
+    );
+    const query = vi.fn(async () => {
+      cancelBandwidthProbe();
+      return { held: [], pending: [] };
+    });
+    vi.stubGlobal("navigator", { ...navigator, locks: { request, query } });
+    scheduleBandwidthProbe();
+    await readThenTest();
+
+    expect(query).toHaveBeenCalled();
+    expect(fetchWithSession).not.toHaveBeenCalled();
+  });
+
+  it("ignores a reading under 100 kbps, which no start could send", async () => {
+    server({ reading: { sample: { kbps: 99, ageMs: DAY } } });
+    hangingProbe();
+    scheduleBandwidthProbe();
+    await readThenTest();
+
+    expect(readMeasuredBandwidthKbps()).toBeUndefined();
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a reading the server dated ahead of this device's clock", async () => {
+    server({ reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: -60_000 } } });
+    scheduleBandwidthProbe();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readMeasuredBandwidthKbps()).toBe(48_000);
+  });
+
   it("does not test while another tab holds the media lock", async () => {
     server({});
     const request = vi.fn(
@@ -728,6 +764,18 @@ describe("scheduleBandwidthProbe", () => {
 });
 
 describe("Test speed", () => {
+  it("answers playing when playback stops it mid-test", async () => {
+    stopBandwidthProbes();
+    server({ target: 115_000 });
+    hangingProbe();
+    const result = testConnectionSpeed();
+    await vi.waitFor(() => expect(fetchWithSession).toHaveBeenCalledTimes(1));
+
+    cancelBandwidthProbe();
+    await expect(result).resolves.toBe("playing");
+    stopBandwidthProbes();
+  });
+
   it("runs the accurate test, even with a current reading, and reports it", async () => {
     stopBandwidthProbes();
     const { posted } = server({

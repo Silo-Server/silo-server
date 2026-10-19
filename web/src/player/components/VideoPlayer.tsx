@@ -139,6 +139,7 @@ import {
   setWatchTogetherGuestControl,
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
+import { MIN_PROBE_KBPS } from "../probe-meter";
 
 let hlsJSModule: Promise<typeof HlsType> | null = null;
 
@@ -4234,7 +4235,7 @@ export function VideoPlayer({
           : 0;
       onBufferingSummary?.(
         summaryPlan,
-        kbps >= 1 ? { ...summary, throughput_kbps: kbps } : summary,
+        kbps >= MIN_PROBE_KBPS ? { ...summary, throughput_kbps: kbps } : summary,
       );
     },
     onKeptEstimate,
