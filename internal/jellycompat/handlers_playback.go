@@ -2155,6 +2155,10 @@ func (h *PlaybackHandler) HandleCapabilitiesFull(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// bitrateTestMaxSize is Jellyfin's own BitrateTest limit. It stays put when
+// Silo's native speed test asks for more (bandwidthprobe.MaxSize).
+const bitrateTestMaxSize = 100_000_000
+
 // HandleBitrateTest serves Size random bytes (default 102400) for clients that probe bandwidth.
 func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Request) {
 	// Jellyfin's authenticated bandwidth probe: transfer-observed, cap-exempt
@@ -2166,7 +2170,7 @@ func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Reque
 	size := 102400
 	if raw := firstQueryValue(r.URL.Query(), "Size"); raw != "" {
 		value, err := strconv.Atoi(raw)
-		if err != nil || value < 1 || value > bandwidthprobe.MaxSize {
+		if err != nil || value < 1 || value > bitrateTestMaxSize {
 			writeError(w, http.StatusBadRequest, "BadRequest", "Size must be between 1 and 100000000")
 			return
 		}
