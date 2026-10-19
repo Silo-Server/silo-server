@@ -40,6 +40,11 @@
 # Scan membership reconciliation retries a transaction Postgres aborts as a deadlock victim.
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
 
+# Group deletion preserves governed membership and rolls back failed moves.
+./internal/access TestGroupDeletionPreservesMembershipDB
+./internal/access TestGroupDeletionWithoutDefaultDB
+./internal/access TestGroupDeletionMoveRollsBackDB
+
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestClearResumePositionTargetsDB
 ./internal/api/handlers TestEbookProgressEventsPostgres
