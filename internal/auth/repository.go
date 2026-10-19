@@ -770,7 +770,8 @@ func (r *UserRepository) CreateInvited(ctx context.Context, input models.CreateU
 	if err != nil {
 		return nil, err
 	}
-	if enabled != "true" {
+	const signupEnabledValue = "true"
+	if enabled != signupEnabledValue {
 		return nil, ErrSignupDisabled
 	}
 	if err := redeemCode(ctx, tx, code); err != nil {

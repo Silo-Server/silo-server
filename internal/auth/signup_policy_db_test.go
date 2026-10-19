@@ -79,41 +79,6 @@ func TestSignupPolicySerializationDB(t *testing.T) {
 		_, _, err := svc.Signup(ctx, name, name+"@example.test", "correct horse battery", code, true, "Home", "test", "")
 		return err
 	}
-	wait := func(t *testing.T, signal <-chan struct{}) {
-		t.Helper()
-		select {
-		case <-signal:
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-	}
-	result := func(t *testing.T, done <-chan error) error {
-		t.Helper()
-		select {
-		case err := <-done:
-			return err
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-			return ctx.Err()
-		}
-	}
-	check := func(t *testing.T, name, code string, want int) {
-		t.Helper()
-		var accounts, profiles, uses int
-		if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username=$1`, name).Scan(&accounts); err != nil {
-			t.Fatal(err)
-		}
-		if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM user_profiles p JOIN users u ON u.id=p.user_id WHERE u.username=$1`, name).Scan(&profiles); err != nil {
-			t.Fatal(err)
-		}
-		if err := env.pool.QueryRow(ctx, `SELECT use_count FROM invite_codes WHERE code=$1`, code).Scan(&uses); err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("accounts=%d profiles=%d invite uses=%d, want each %d", accounts, profiles, uses, want)
-		if accounts != want || profiles != want || uses != want {
-			t.Fatalf("accounts=%d profiles=%d invite uses=%d, want each %d", accounts, profiles, uses, want)
-		}
-	}
 
 	t.Run("disable commits before signup transaction", func(t *testing.T) {
 		setEnabled(t, "true")
@@ -122,17 +87,17 @@ func TestSignupPolicySerializationDB(t *testing.T) {
 		a.accounts = NewAccountProvisioner(paused, pgstore.NewPostgresProvider(env.pool))
 		done := make(chan error, 1)
 		go func() { done <- signup(a, name, code) }()
-		wait(t, paused.checked)
+		waitForSignupPolicySignal(t, ctx, paused.checked)
 		setEnabled(t, "false")
 		close(paused.resume)
-		if err := result(t, done); !errors.Is(err, ErrSignupDisabled) {
+		if err := signupPolicyResult(t, ctx, done); !errors.Is(err, ErrSignupDisabled) {
 			t.Errorf("in-flight signup = %v, want ErrSignupDisabled", err)
 		}
-		check(t, name, code, 0)
+		checkSignupPolicyCounts(t, ctx, env.pool, name, code, 0)
 		if err := signup(b, name, code); !errors.Is(err, ErrSignupDisabled) {
 			t.Fatalf("peer signup = %v, want ErrSignupDisabled", err)
 		}
-		check(t, name, code, 0)
+		checkSignupPolicyCounts(t, ctx, env.pool, name, code, 0)
 	})
 
 	t.Run("signup commits before disable", func(t *testing.T) {
@@ -142,36 +107,19 @@ func TestSignupPolicySerializationDB(t *testing.T) {
 		a.accounts = NewAccountProvisioner(paused, pgstore.NewPostgresProvider(env.pool))
 		done := make(chan error, 1)
 		go func() { done <- signup(a, name, code) }()
-		wait(t, paused.written)
+		waitForSignupPolicySignal(t, ctx, paused.written)
 		disabled := make(chan error, 1)
 		go func() { disabled <- settings.Set(ctx, "signup.enabled", "false") }()
-		// Observe the other replica waiting on the advisory lock. Merely
-		// starting its goroutine does not establish the transaction order.
-		for {
-			var waiting bool
-			if err := env.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-				WHERE datname=current_database() AND application_name=$1
-				AND wait_event_type='Lock' AND wait_event='advisory')`, peerConfig.ConnConfig.RuntimeParams["application_name"]).Scan(&waiting); err != nil {
-				t.Fatal(err)
-			}
-			if waiting {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			case <-time.After(5 * time.Millisecond):
-			}
-		}
-		check(t, name, code, 0)
+		waitForSignupPolicyLock(t, ctx, env.pool, peerConfig.ConnConfig.RuntimeParams["application_name"])
+		checkSignupPolicyCounts(t, ctx, env.pool, name, code, 0)
 		close(paused.resume)
-		if err := result(t, done); err != nil {
+		if err := signupPolicyResult(t, ctx, done); err != nil {
 			t.Fatalf("signup whose commit wins = %v", err)
 		}
-		if err := result(t, disabled); err != nil {
+		if err := signupPolicyResult(t, ctx, disabled); err != nil {
 			t.Fatal(err)
 		}
-		check(t, name, code, 1)
+		checkSignupPolicyCounts(t, ctx, env.pool, name, code, 1)
 		if err := signup(b, name, code); !errors.Is(err, ErrSignupDisabled) {
 			t.Fatalf("retry after disable = %v, want ErrSignupDisabled", err)
 		}
@@ -179,9 +127,69 @@ func TestSignupPolicySerializationDB(t *testing.T) {
 		if err := signup(b, env.name("second-signup"), code); !errors.Is(err, ErrInviteCodeExhausted) {
 			t.Fatalf("spent invite on peer = %v, want ErrInviteCodeExhausted", err)
 		}
-		check(t, name, code, 1)
+		checkSignupPolicyCounts(t, ctx, env.pool, name, code, 1)
 		if _, err := b.users.GetByUsername(ctx, env.name("second-signup")); !IsNotFound(err) {
 			t.Fatalf("exhausted invite created a second account: %v", err)
 		}
 	})
+}
+
+func waitForSignupPolicySignal(t *testing.T, ctx context.Context, signal <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+func signupPolicyResult(t *testing.T, ctx context.Context, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+		return ctx.Err()
+	}
+}
+
+func checkSignupPolicyCounts(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name, code string, want int) {
+	t.Helper()
+	var accounts, profiles, uses int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username=$1`, name).Scan(&accounts); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_profiles p JOIN users u ON u.id=p.user_id WHERE u.username=$1`, name).Scan(&profiles); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT use_count FROM invite_codes WHERE code=$1`, code).Scan(&uses); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("accounts=%d profiles=%d invite uses=%d, want each %d", accounts, profiles, uses, want)
+	if accounts != want || profiles != want || uses != want {
+		t.Fatalf("accounts=%d profiles=%d invite uses=%d, want each %d", accounts, profiles, uses, want)
+	}
+}
+
+// Observe the other replica waiting on the advisory lock. Merely starting its
+// goroutine does not establish the transaction order.
+func waitForSignupPolicyLock(t *testing.T, ctx context.Context, pool *pgxpool.Pool, applicationName string) {
+	t.Helper()
+	for {
+		var waiting bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE datname=current_database() AND application_name=$1
+			AND wait_event_type='Lock' AND wait_event='advisory')`, applicationName).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 }
