@@ -390,6 +390,21 @@ describe("scheduleBandwidthProbe", () => {
     expect(fetchWithSession).toHaveBeenCalledTimes(2);
   });
 
+  it("stops a running test when Data Saver turns on without a new network", async () => {
+    const connection = Object.assign(new EventTarget(), { type: "wifi", saveData: false });
+    vi.stubGlobal("navigator", { ...navigator, connection });
+    server({});
+    hangingProbe();
+    scheduleBandwidthProbe();
+    await readThenTest();
+    expect(fetchWithSession).toHaveBeenCalledTimes(1);
+    const signal = (fetchWithSession.mock.calls[0]![1] as RequestInit).signal!;
+
+    connection.saveData = true;
+    connection.dispatchEvent(new Event("change"));
+    expect(signal.aborted).toBe(true);
+  });
+
   it("looks again on a new network, not on a new estimate", async () => {
     const connection = Object.assign(new EventTarget(), { type: "wifi", downlink: 10 });
     vi.stubGlobal("navigator", { ...navigator, connection });

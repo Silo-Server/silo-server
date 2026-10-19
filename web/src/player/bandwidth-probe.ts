@@ -565,6 +565,8 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
   const network = networkInformation() as (NetworkInformationLike & EventTarget) | undefined;
   let networkType = network?.type;
   const onNetworkChange = () => {
+    // Data Saver can turn on without a new network; a test then stops.
+    if (onMeteredConnection()) activeProbe?.abort();
     if (network?.type === networkType) return;
     networkType = network?.type;
     cancelEpoch++;
