@@ -295,8 +295,9 @@ export function useWatchTogetherRoomConnection({
     // Initial load and uncertainty share one read for this authority engagement.
     // A later engagement owns a new closure; old results cannot publish into it.
     let roomRead: Promise<void> | null = null;
-    const reconcile = () => {
-      if (!active() || closedReasonRef.current || roomRead) return;
+    let refreshNeeded = false;
+    const startRoomRead = () => {
+      if (!active() || closedReasonRef.current) return;
       const version = socketSnapshotVersion.current;
       roomRead = getWatchTogetherRoom(roomId, roomToken, authority)
         .then((response) => {
@@ -309,7 +310,18 @@ export function useWatchTogetherRoomConnection({
         })
         .finally(() => {
           roomRead = null;
+          if (refreshNeeded) {
+            refreshNeeded = false;
+            startRoomRead();
+          }
         });
+    };
+    const reconcile = () => {
+      if (!active() || closedReasonRef.current) return;
+      // Later uncertainty needs an observation started after the older read.
+      // Coalesce callers into one trailing read; completion alone adds no work.
+      if (roomRead) refreshNeeded = true;
+      else startRoomRead();
     };
     const backoff = createRealtimeBackoff();
     let admissionSupported = false;
@@ -580,11 +592,17 @@ export function useWatchTogetherRoomConnection({
 
     return () => {
       disposed = true;
-      if (recovery.dispose()) {
+      const settlement = recovery.dispose();
+      if (settlement.unknownDelivery || settlement.knownRefused) {
         // Teardown settles delivery locally. Never read using the retired authority.
         publishRecoveryNotice({
-          uncertain: true,
-          message: "A room action was not confirmed. Check the room before trying again.",
+          uncertain: settlement.unknownDelivery,
+          discarded: settlement.knownRefused,
+          message: settlement.unknownDelivery
+            ? settlement.knownRefused
+              ? "Some room actions were discarded. Another action was not confirmed. Check the room before trying again."
+              : "A room action was not confirmed. Check the room before trying again."
+            : "A room action was discarded before it started. Try again if needed.",
         });
       }
       if (recoveryRef.current === recovery) recoveryRef.current = null;

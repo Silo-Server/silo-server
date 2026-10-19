@@ -185,7 +185,7 @@ it("discards a known refusal on disconnect without uncertainty or a reconciliati
   f.recovery.dispose();
 });
 it.each(["unconfirmed", "refused", "applied", "retried"])(
-  "reports unresolved delivery to teardown only for an unconfirmed send (%s)",
+  "distinguishes unknown delivery from known refusal at teardown (%s)",
   (state) => {
     const f = fixture();
     f.recovery.send(transport);
@@ -198,13 +198,27 @@ it.each(["unconfirmed", "refused", "applied", "retried"])(
         status: "applied",
         request_id: f.last().request_id,
       });
-    expect(f.recovery.dispose()).toBe(state === "unconfirmed" || state === "retried");
+    expect(f.recovery.dispose()).toEqual({
+      unknownDelivery: state === "unconfirmed" || state === "retried",
+      knownRefused: state === "refused",
+    });
     vi.advanceTimersByTime(10_000);
     expect(f.send).toHaveBeenCalledTimes(state === "retried" ? 2 : 1);
     expect(f.notice).not.toHaveBeenCalled();
     expect(f.reconcile).not.toHaveBeenCalled();
   },
 );
+it("retains both teardown settlements for mixed unknown and known-refused transports", () => {
+  const f = fixture();
+  f.recovery.send(transport);
+  f.recovery.send({ ...transport, action: "play" });
+  f.refuse();
+  expect(f.recovery.dispose()).toEqual({ unknownDelivery: true, knownRefused: true });
+  vi.advanceTimersByTime(10_000);
+  expect(f.send).toHaveBeenCalledTimes(2);
+  expect(f.notice).not.toHaveBeenCalled();
+  expect(f.reconcile).not.toHaveBeenCalled();
+});
 it("treats a downstream error after refusal as uncertain without retrying", () => {
   const f = fixture();
   f.recovery.send(transport);

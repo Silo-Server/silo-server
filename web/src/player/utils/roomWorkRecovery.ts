@@ -326,11 +326,15 @@ export function createRoomWorkRecovery(options: {
     },
     dispose() {
       disposed = true;
-      const unconfirmed = [...pending.values()].some(
-        (entry) => entry.kind === "transport_request" && !entry.refused,
-      );
-      for (const entry of pending.values()) drop(entry);
-      return unconfirmed;
+      const settlement = { unknownDelivery: false, knownRefused: false };
+      for (const entry of pending.values()) {
+        if (entry.kind === "transport_request") {
+          if (entry.refused) settlement.knownRefused = true;
+          else settlement.unknownDelivery = true;
+        }
+        drop(entry);
+      }
+      return settlement;
     },
   };
 }

@@ -896,86 +896,215 @@ it("uses ticket metadata for correlated refusal and never replays transport afte
   view.unmount();
   expect(next.readyState).toBe(RoomSocket.CLOSED);
 });
-it("shows generic uncertainty on authority teardown without reading or replaying under the old PIN", async () => {
-  vi.useFakeTimers();
-  const reads = vi.mocked(getWatchTogetherRoom);
-  reads.mockClear();
-  let resolveOldRead!: (value: Awaited<ReturnType<typeof getWatchTogetherRoom>>) => void;
-  reads.mockImplementationOnce(() => new Promise((resolve) => (resolveOldRead = resolve)));
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => ticket("a", true)),
-  );
-  const view = renderHook(() =>
-    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
-  );
-  await act(() => vi.advanceTimersByTimeAsync(0));
-  const old = RoomSocket.all[0]!;
-  act(() => {
-    old.open();
-    old.message({
-      type: "snapshot",
-      room: {
-        room_id: "room",
-        generation: 1,
-        selection_revision: 1,
-        phase: "playing",
-        attached_session_id: "session",
-        self_can_control_transport: true,
-      },
+it.each(["unconfirmed", "refused", "retried", "applied", "mixed"])(
+  "settles %s transport locally on authority teardown without retired-authority reads or replay",
+  async (state) => {
+    vi.useFakeTimers();
+    const reads = vi.mocked(getWatchTogetherRoom);
+    reads.mockClear();
+    let resolveOldRead!: (value: Awaited<ReturnType<typeof getWatchTogetherRoom>>) => void;
+    reads.mockImplementationOnce(() => new Promise((resolve) => (resolveOldRead = resolve)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ticket("a", true)),
+    );
+    const view = renderHook(() =>
+      useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const old = RoomSocket.all[0]!;
+    act(() => {
+      old.open();
+      old.message({
+        type: "snapshot",
+        room: {
+          room_id: "room",
+          generation: 1,
+          selection_revision: 1,
+          phase: "playing",
+          attached_session_id: "session",
+          self_can_control_transport: true,
+        },
+      });
+      expect(
+        view.result.current.sendRoomMessage({
+          type: "transport_request",
+          session_id: "session",
+          action: "pause",
+        }).ok,
+      ).toBe(true);
     });
+    const actions = () =>
+      old.send.mock.calls
+        .map(([data]) => JSON.parse(String(data)))
+        .filter((m) => m.type === "transport_request");
+    act(() => {
+      if (state === "mixed")
+        view.result.current.sendRoomMessage({
+          type: "transport_request",
+          session_id: "session",
+          action: "play",
+        });
+      const request_id = actions().at(-1)!.request_id;
+      if (["refused", "retried", "mixed"].includes(state))
+        old.message({
+          type: "error",
+          code: "realtime_rate_limited",
+          work_started: false,
+          request_id,
+          retry_after_ms: 500,
+        });
+      if (state === "applied")
+        old.message({
+          type: "action_result",
+          action: "transport_request",
+          status: "applied",
+          request_id,
+        });
+    });
+    if (state === "retried") await act(() => vi.advanceTimersByTimeAsync(500));
+    const sent = actions().length;
+    expect(reads).toHaveBeenCalledTimes(1);
+    const oldReadCount = () =>
+      reads.mock.calls.filter(([, , authority]) => authority?.profileToken === "pin-A").length;
+    expect(oldReadCount()).toBe(1);
+    act(() => {
+      setProfileToken("pin-B");
+      view.rerender();
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    if (state === "applied") expect(view.result.current.recoveryNotice).toBeNull();
+    else {
+      expect(view.result.current.recoveryNotice?.uncertain).toBe(state !== "refused");
+      expect(Boolean(view.result.current.recoveryNotice?.discarded)).toBe(
+        state === "refused" || state === "mixed",
+      );
+    }
+    expect(view.result.current.recoveryNotice?.message ?? "").not.toMatch(
+      /pin-A|session|room-proof/,
+    );
+    expect(old.readyState).toBe(RoomSocket.CLOSED);
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(oldReadCount()).toBe(1);
+    expect(reads.mock.calls[1]![2]?.profileToken).toBe("pin-B");
+    const next = RoomSocket.all[1]!;
+    act(() => {
+      old.close();
+      old.message({ type: "error", request_id: "old", work_started: true });
+      next.open();
+      next.message({ type: "snapshot", room: { room_id: "room", generation: 2 } });
+    });
+    await act(async () =>
+      resolveOldRead({
+        room: { room_id: "room", generation: 99 } as WatchTogetherRoomSnapshot,
+        room_access_token: "proof",
+      }),
+    );
+    expect(view.result.current.room?.generation).toBe(2);
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    expect(oldReadCount()).toBe(1);
+    expect(actions()).toHaveLength(sent);
     expect(
-      view.result.current.sendRoomMessage({
-        type: "transport_request",
-        session_id: "session",
-        action: "pause",
-      }).ok,
-    ).toBe(true);
-  });
-  expect(reads).toHaveBeenCalledTimes(1);
-  const oldReadCount = () =>
-    reads.mock.calls.filter(([, , authority]) => authority?.profileToken === "pin-A").length;
-  expect(oldReadCount()).toBe(1);
-  act(() => {
-    setProfileToken("pin-B");
-    view.rerender();
-  });
-  await act(() => vi.advanceTimersByTimeAsync(0));
-  expect(view.result.current.recoveryNotice).toMatchObject({ uncertain: true });
-  expect(view.result.current.recoveryNotice?.message).not.toMatch(/pin-A|session|room-proof/);
-  expect(old.readyState).toBe(RoomSocket.CLOSED);
-  expect(reads).toHaveBeenCalledTimes(2);
-  expect(oldReadCount()).toBe(1);
-  expect(reads.mock.calls[1]![2]?.profileToken).toBe("pin-B");
-  const next = RoomSocket.all[1]!;
-  act(() => {
-    old.close();
-    old.message({ type: "error", request_id: "old", work_started: true });
-    next.open();
-    next.message({ type: "snapshot", room: { room_id: "room", generation: 2 } });
-  });
-  await act(async () =>
-    resolveOldRead({
-      room: { room_id: "room", generation: 99 } as WatchTogetherRoomSnapshot,
-      room_access_token: "proof",
-    }),
-  );
-  expect(view.result.current.room?.generation).toBe(2);
-  await act(() => vi.advanceTimersByTimeAsync(5_000));
-  expect(oldReadCount()).toBe(1);
-  expect(
-    next.send.mock.calls
-      .map(([data]) => JSON.parse(String(data)))
-      .filter((m) => m.type === "transport_request"),
-  ).toHaveLength(0);
-  view.unmount();
-});
-it("coalesces disconnect reconciliation with an in-flight room read per engagement", async () => {
+      next.send.mock.calls
+        .map(([data]) => JSON.parse(String(data)))
+        .filter((m) => m.type === "transport_request"),
+    ).toHaveLength(0);
+    view.unmount();
+  },
+);
+it.each([9, 11])(
+  "coalesces a fresh post-uncertainty read behind an older observation (generation %s)",
+  async (generation) => {
+    vi.useFakeTimers();
+    const reads = vi.mocked(getWatchTogetherRoom);
+    reads.mockClear();
+    const pending: Array<(value: Awaited<ReturnType<typeof getWatchTogetherRoom>>) => void> = [];
+    reads.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(ticket("a", true))
+      .mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({ status: 503, title: "Unavailable", retry_after_ms: 2_000 }),
+            { status: 503, headers: { "Content-Type": "application/problem+json" } },
+          ),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const view = renderHook(() =>
+      useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const snapshot = {
+      room_id: "room",
+      generation: 10,
+      selection_revision: 1,
+      phase: "playing",
+      attached_session_id: "session",
+      self_can_control_transport: true,
+      self_can_manage_room: true,
+      is_paused: false,
+    } as WatchTogetherRoomSnapshot;
+    const socket = RoomSocket.all[0]!;
+    act(() => {
+      socket.open();
+      socket.message({ type: "snapshot", room: snapshot });
+      for (const action of ["pause", "play", "seek"])
+        expect(
+          view.result.current.sendRoomMessage({
+            type: "transport_request",
+            session_id: "session",
+            action,
+          }).ok,
+        ).toBe(true);
+      socket.close();
+    });
+    expect(view.result.current.recoveryNotice?.uncertain).toBe(true);
+    expect(reads).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      pending[0]!({
+        room: { ...snapshot, attached_session_id: undefined },
+        room_access_token: "proof",
+      }),
+    );
+    expect(view.result.current.room?.attached_session_id).toBe("session");
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(reads.mock.calls[1]![2]?.profileToken).toBe("pin-A");
+    // Replacement ticket refusals cannot supply a fresh socket observation.
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(RoomSocket.all).toHaveLength(1);
+    expect(reads).toHaveBeenCalledTimes(2);
+    await act(async () =>
+      pending[1]!({
+        room: { ...snapshot, generation, is_paused: true } as WatchTogetherRoomSnapshot,
+        room_access_token: "proof",
+      }),
+    );
+    expect(view.result.current.room?.generation).toBe(generation === 11 ? 11 : 10);
+    expect(view.result.current.room?.is_paused).toBe(generation === 11);
+    act(() => socket.message({ type: "snapshot", room: { ...snapshot, generation: 99 } }));
+    expect(view.result.current.room?.generation).not.toBe(99);
+    expect(
+      socket.send.mock.calls
+        .map(([data]) => JSON.parse(String(data)))
+        .filter((m) => m.type === "transport_request"),
+    ).toHaveLength(3);
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(reads).toHaveBeenCalledTimes(2);
+    view.unmount();
+    reads.mockImplementation(async (roomId) => ({
+      room: { room_id: roomId, generation: 1 } as WatchTogetherRoomSnapshot,
+      room_access_token: "room-proof",
+    }));
+  },
+);
+it("coalesces each later uncertainty burst without building a self-replenishing read queue", async () => {
   vi.useFakeTimers();
   const reads = vi.mocked(getWatchTogetherRoom);
   reads.mockClear();
-  let resolveRead!: (value: Awaited<ReturnType<typeof getWatchTogetherRoom>>) => void;
-  reads.mockImplementationOnce(() => new Promise((resolve) => (resolveRead = resolve)));
+  const pending: Array<(value: Awaited<ReturnType<typeof getWatchTogetherRoom>>) => void> = [];
+  reads.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => ticket("a", true)),
@@ -986,17 +1115,21 @@ it("coalesces disconnect reconciliation with an in-flight room read per engageme
   await act(() => vi.advanceTimersByTimeAsync(0));
   const snapshot = {
     room_id: "room",
-    generation: 1,
+    generation: 10,
     selection_revision: 1,
     phase: "playing",
     attached_session_id: "session",
     self_can_control_transport: true,
-    self_can_manage_room: true,
   } as WatchTogetherRoomSnapshot;
-  const sendAndClose = (socket: RoomSocket) => {
+  // An initial read that completed before uncertainty permits an immediate fresh read.
+  await act(async () => pending[0]!({ room: snapshot, room_access_token: "proof" }));
+  const socket = RoomSocket.all[0]!;
+  act(() => {
     socket.open();
     socket.message({ type: "snapshot", room: snapshot });
-    for (const action of ["pause", "play", "seek"])
+  });
+  const burst = () => {
+    for (const action of ["pause", "play", "pause"]) {
       expect(
         view.result.current.sendRoomMessage({
           type: "transport_request",
@@ -1004,30 +1137,104 @@ it("coalesces disconnect reconciliation with an in-flight room read per engageme
           action,
         }).ok,
       ).toBe(true);
-    socket.close();
+      const sent = socket.send.mock.calls.map(([data]) => JSON.parse(String(data))).at(-1)!;
+      socket.message({ type: "error", request_id: sent.request_id, work_started: true });
+    }
   };
-  act(() => sendAndClose(RoomSocket.all[0]!));
-  expect(view.result.current.recoveryNotice?.uncertain).toBe(true);
-  expect(reads).toHaveBeenCalledTimes(1);
-  await act(async () =>
-    resolveRead({
-      room: { ...snapshot, attached_session_id: undefined },
-      room_access_token: "proof",
-    }),
-  );
-  // The coalesced HTTP read began before the equal-generation socket snapshot.
-  expect(view.result.current.room?.attached_session_id).toBe("session");
-  await act(() => vi.advanceTimersByTimeAsync(1_000));
-  reads.mockImplementationOnce(() => new Promise((resolve) => (resolveRead = resolve)));
-  act(() => sendAndClose(RoomSocket.all[1]!));
+  act(burst);
   expect(reads).toHaveBeenCalledTimes(2);
-  expect(reads.mock.calls[1]![2]?.profileToken).toBe("pin-A");
+  await act(async () => pending[1]!({ room: snapshot, room_access_token: "proof" }));
+  expect(reads).toHaveBeenCalledTimes(3);
+  // New uncertainty during the trailing read earns one further observation, not three.
+  act(burst);
+  expect(reads).toHaveBeenCalledTimes(3);
+  await act(async () => pending[2]!({ room: snapshot, room_access_token: "proof" }));
+  expect(reads).toHaveBeenCalledTimes(4);
+  // Equal-generation HTTP must still preserve a socket snapshot received after dispatch.
+  act(() =>
+    socket.message({ type: "snapshot", room: { ...snapshot, attached_session_id: "new-session" } }),
+  );
+  await act(async () => pending[3]!({ room: snapshot, room_access_token: "proof" }));
+  expect(view.result.current.room?.attached_session_id).toBe("new-session");
+  await act(() => vi.advanceTimersByTimeAsync(6_000));
+  expect(reads).toHaveBeenCalledTimes(4);
+  expect(
+    socket.send.mock.calls
+      .map(([data]) => JSON.parse(String(data)))
+      .filter((m) => m.type === "transport_request"),
+  ).toHaveLength(6);
   view.unmount();
-  await act(async () =>
-    resolveRead({ room: { ...snapshot, generation: 99 }, room_access_token: "proof" }),
-  );
-  expect(reads).toHaveBeenCalledTimes(2);
+  reads.mockImplementation(async (roomId) => ({
+    room: { room_id: roomId, generation: 1 } as WatchTogetherRoomSnapshot,
+    room_access_token: "room-proof",
+  }));
 });
+it.each(["authority", "closed", "replaced", "unmount"])(
+  "drops a queued refresh when the engagement is retired (%s)",
+  async (retire) => {
+    vi.useFakeTimers();
+    const reads = vi.mocked(getWatchTogetherRoom);
+    reads.mockClear();
+    let resolveRead!: (value: Awaited<ReturnType<typeof getWatchTogetherRoom>>) => void;
+    reads.mockImplementationOnce(() => new Promise((resolve) => (resolveRead = resolve)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ticket("a", true)),
+    );
+    const view = renderHook(() =>
+      useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const socket = RoomSocket.all[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: "snapshot",
+        room: {
+          room_id: "room",
+          generation: 10,
+          selection_revision: 1,
+          phase: "playing",
+          attached_session_id: "session",
+          self_can_control_transport: true,
+        },
+      });
+      view.result.current.sendRoomMessage({
+        type: "transport_request",
+        session_id: "session",
+        action: "pause",
+      });
+      // A downstream error requests reconciliation while the socket is still active.
+      const action = socket.send.mock.calls
+        .map(([data]) => JSON.parse(String(data)))
+        .find((m) => m.type === "transport_request")!;
+      socket.message({ type: "error", request_id: action.request_id, work_started: true });
+      if (retire === "authority") {
+        setProfileToken("pin-B");
+        view.rerender();
+      }
+      if (retire === "closed") socket.message({ type: "room_closed", reason: "ended" });
+      if (retire === "replaced")
+        socket.message({ type: "connection_replaced", reason: "replaced" });
+      if (retire === "unmount") view.unmount();
+    });
+    await act(async () =>
+      resolveRead({
+        room: { room_id: "room", generation: 99 } as WatchTogetherRoomSnapshot,
+        room_access_token: "proof",
+      }),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(6_000));
+    expect(
+      reads.mock.calls.filter(([, , authority]) => authority?.profileToken === "pin-A"),
+    ).toHaveLength(1);
+    expect(reads).toHaveBeenCalledTimes(retire === "authority" ? 2 : 1);
+    if (retire !== "unmount") {
+      expect(view.result.current.room?.generation).not.toBe(99);
+      view.unmount();
+    }
+  },
+);
 it("keeps shield backoff across opens and treats other 1008 closes as opaque", async () => {
   vi.useFakeTimers();
   vi.stubGlobal(
