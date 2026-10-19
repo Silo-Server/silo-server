@@ -141,10 +141,10 @@ func TestEventsSocketV2PersonalChannelIsolation(t *testing.T) {
 			publishUserSettingsEvent(t.Context(), hub, 7, "b", "sibling-setting", "profile")
 			publishUserStateEvent(t.Context(), hub, 8, "a", "foreign-state", "", "watched", userStateEventState{})
 			publishUserSettingsEvent(t.Context(), hub, 8, "a", "foreign-setting", "profile")
-			publishUserSettingsEvent(t.Context(), hub, 8, "", "foreign-account-setting", "user")
+			publishUserSettingsEvent(t.Context(), hub, 8, "", "foreign-account-setting", "account")
 			publishUserStateEvent(t.Context(), hub, 7, "a", "own-state", "", "watched", userStateEventState{Played: new(true)})
 			publishUserSettingsEvent(t.Context(), hub, 7, "a", "own-setting", "profile")
-			publishUserSettingsEvent(t.Context(), hub, 7, "", "account-setting", "user")
+			publishUserSettingsEvent(t.Context(), hub, 7, "", "account-setting", "account")
 			for _, env := range []evt.Envelope{
 				{Channel: evt.ChannelUserState, Event: "missing-profile", UserID: 7},
 				{Channel: evt.ChannelUserState, Event: "missing-account", ProfileID: "a"},

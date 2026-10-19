@@ -691,9 +691,9 @@ interface UserSettingsChangedPayload {
  * Keeps this client's resolved settings honest while another device edits them.
  *
  * The server publishes user_settings.changed on every canonical write and
- * delete, carrying only what changed and never the value — admins receive
- * other accounts' events, so a value in the payload would leak private
- * settings. The event is therefore a pure invalidation signal: mark the value
+ * delete, carrying only what changed and never the value. Recipients read
+ * values over HTTP under their current authority. The event is a pure
+ * invalidation signal: mark the value
  * queries stale and let react-query refetch the ones a mounted screen is
  * actually reading. Nothing is written into the cache from the socket.
  *
@@ -710,11 +710,8 @@ export function useSettingValuesRealtime() {
         const event = message as { event?: string; data?: UserSettingsChangedPayload };
         if (event?.event !== "user_settings.changed") return;
 
-        // One account can have several profiles, and admins additionally
-        // receive other accounts' user-scoped events (the frame carries no
-        // user id to filter on, so that case falls through to a harmless
-        // refetch). A profile-addressed change to a profile that is not the
-        // signed-in one cannot alter what we resolve, so it is dropped. An
+        // Keep a profile-addressed change from refreshing another profile's
+        // values, including when connected to an older server. An
         // account-scoped change carries no profile and does affect us.
         const changedProfile = event.data?.profile_id;
         const activeProfile = activeProfileId();

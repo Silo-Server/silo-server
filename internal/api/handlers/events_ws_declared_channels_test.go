@@ -124,8 +124,8 @@ func TestEventsWebSocketDeclaredChannelsSkipHandshake(t *testing.T) {
 		t.Fatalf("snapshot channel = %s, want user_settings", snapshot["channel"])
 	}
 
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Errorf("event channel = %s, want user_settings", event["channel"])
@@ -205,8 +205,8 @@ func TestEventsWebSocketPartialDeclarationSurvives(t *testing.T) {
 
 	time.Sleep(subscribeGracePeriod + time.Second)
 
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatalf("setting read deadline: %v", err)
@@ -299,8 +299,8 @@ func TestEventsWebSocketDeclaredChannelsCannotEscalate(t *testing.T) {
 		evt.PublishOptions{AdminOnly: true}); err != nil {
 		t.Fatalf("publishing admin-only event: %v", err)
 	}
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	event := readFrame("event")
 	if string(event["channel"]) != `"user_settings"` {
@@ -329,10 +329,10 @@ func TestEventsWebSocketAdminAccountChildProfileIsNotAdmin(t *testing.T) {
 
 	// Another account's event first, then this account's: receiving the
 	// second without the first proves the first was filtered.
-	publishUserSettingsEvent(context.Background(), hub, 2, "profile-2", "playback.subtitle_language", "profile")
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1", "playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 2, "", "foreign-setting", "account")
+	publishUserSettingsEvent(context.Background(), hub, 1, "", "own-setting", "account")
 	event := readFrame("event")
-	if !strings.Contains(string(event["data"]), `"profile-1"`) {
+	if !strings.Contains(string(event["data"]), `"own-setting"`) {
 		t.Fatalf("child profile received another account's event: %s", event["data"])
 	}
 }
@@ -390,8 +390,8 @@ func TestEventsWebSocketUnknownChannelDoesNotCloseConnection(t *testing.T) {
 
 	// The connection is still usable.
 	readFrame("snapshot")
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Errorf("event channel = %s, want user_settings", event["channel"])
 	}

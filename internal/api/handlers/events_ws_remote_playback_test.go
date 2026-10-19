@@ -28,16 +28,22 @@ func TestEventsForRemotePlaybackStayOnTheBoundProfile(t *testing.T) {
 		handoff, others bool
 	}{
 		{"bound profile's watch state", evt.Envelope{Channel: evt.ChannelUserState, UserID: 7, ProfileID: "kid"}, true, true},
-		{"another profile's watch state", evt.Envelope{Channel: evt.ChannelUserState, UserID: 7, ProfileID: "parent"}, false, true},
-		{"another profile's settings", evt.Envelope{Channel: evt.ChannelUserSettings, UserID: 7, ProfileID: "parent"}, false, true},
+		{"another profile's watch state", evt.Envelope{Channel: evt.ChannelUserState, UserID: 7, ProfileID: "parent"}, false, false},
+		{"another profile's settings", evt.Envelope{Channel: evt.ChannelUserSettings, UserID: 7, ProfileID: "parent"}, false, false},
 		{"account-wide settings", evt.Envelope{Channel: evt.ChannelUserSettings, UserID: 7}, true, true},
 		{"catalog", evt.Envelope{Channel: evt.ChannelCatalog}, true, true},
 	} {
 		if got := allowsEventForClaims(handoff, "kid", tc.env); got != tc.handoff {
 			t.Errorf("%s: handoff receives = %v, want %v", tc.name, got, tc.handoff)
 		}
-		if got := allowsEventForClaims(account, "", tc.env); got != tc.others {
+		if got := allowsEventForClaims(account, "kid", tc.env); got != tc.others {
 			t.Errorf("%s: ordinary sign-in receives = %v, want %v", tc.name, got, tc.others)
+		}
+	}
+	for _, channel := range []evt.EventChannel{evt.ChannelUserState, evt.ChannelUserSettings} {
+		env := evt.Envelope{Channel: channel, UserID: 7, ProfileID: "parent"}
+		if allowsEventForClaims(handoff, "parent", env) {
+			t.Errorf("%s bypassed the handoff's claim profile with a different socket binding", channel)
 		}
 	}
 }

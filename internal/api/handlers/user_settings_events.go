@@ -7,10 +7,9 @@ import (
 )
 
 // userSettingsEventPayload deliberately carries the identity of what changed
-// and never the value. Admins receive every user's user-scoped events (see
-// allowsEventForClaims in events_ws.go), so a value here would leak private
-// settings to admins. Clients that care about the new value re-fetch it over
-// the REST API, where access is scoped to the caller's own session.
+// and never the value. Recipients re-fetch values over the REST API under
+// their current session and profile authority; the socket only invalidates
+// their settings cache.
 type userSettingsEventPayload struct {
 	Key       string `json:"key"`
 	Scope     string `json:"scope"`

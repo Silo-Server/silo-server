@@ -93,8 +93,8 @@ func TestEventsWebSocketDeliversUserSettingsToNonAdmins(t *testing.T) {
 	}
 
 	// A change event addressed to this user must reach the connection.
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	event := readFrame("event")
 	if string(event["channel"]) != `"user_settings"` {
