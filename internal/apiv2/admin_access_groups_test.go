@@ -34,7 +34,7 @@ func TestAdminAccessGroupLibraryPolicyStates(t *testing.T) {
 		{"omitted", `{}`, nil},
 		{"null", `{"library_ids":null}`, new([]int(nil))},
 		{"empty", `{"library_ids":[]}`, new([]int{})},
-		{"populated", `{"library_ids":["22"]}`, new([]int{22})},
+		{"populated", `{"library_ids":["2"]}`, new([]int{2})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := fixtureAdminAccessGroups()
