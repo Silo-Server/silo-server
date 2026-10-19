@@ -13688,6 +13688,8 @@ export interface components {
        */
       import_sources: ("mdblist" | "tmdb" | "tmdb_list")[];
       imports: boolean;
+      /** @description addAdminCollectionItem accepts append=true to allocate the stored tail position atomically without counting or listing members */
+      item_append: boolean;
       item_reorder: boolean;
       /**
        * @description searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key
@@ -21657,6 +21659,8 @@ export interface components {
       import_sources: ("mdblist" | "tmdb" | "tmdb_list")[];
       /** @description The acting account supports imported collections */
       imports: boolean;
+      /** @description addCollectionItem accepts append=true to allocate the stored tail position atomically without counting or listing members */
+      item_append: boolean;
       /** @description The acting account supports reordering collection items */
       item_reorder: boolean;
       /** @description is_shared shows a collection to every profile on the login, listCollections includes other profiles' shared collections, and only a collection's creator changes or orders it */
@@ -42074,7 +42078,10 @@ export interface operations {
   };
   addAdminCollectionItem: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged. */
+        append?: boolean;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;
@@ -42194,6 +42201,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -93382,7 +93398,10 @@ export interface operations {
   };
   addCollectionItem: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged. */
+        append?: boolean;
+      };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
         "X-Profile-Id": string;
@@ -93502,6 +93521,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };

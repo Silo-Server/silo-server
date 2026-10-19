@@ -1,5 +1,5 @@
 {
-  "revision": "a1ee36903f401bd893ac35adce1d2ef6cebfbb6f5e6820b261894daa451f9a66",
+  "revision": "c2bcd2dc3f9d26d6fb98518bb947f01cd077bb7888ce83e755f6579499b0d520",
   "state": "available",
   "allowed": true,
   "groups": false,
@@ -8,6 +8,7 @@
   "import_sources": [],
   "artwork": false,
   "item_reorder": false,
+  "item_append": false,
   "display_filter_fields": [
     "type",
     "watched"

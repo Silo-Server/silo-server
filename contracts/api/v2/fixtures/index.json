@@ -6386,7 +6386,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"f9bfba671c81dbcc510b4d4cc41d4c6feb58ad9165a71786799d47524f7d7217\""
+        "ETag": "\"9b91c5a51105576763b03e8fa4f07e065e1bcb4c21f10125d6c563c400eaf855\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminCollectionCapabilityOutputBody",
@@ -6773,7 +6773,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"a91ed0179d17fbc83f4313795a5d923862df95a44c18758450a36dcbfb4d055c\""
+        "ETag": "\"85b5c2411ca78ca39acf268eca7437ead1575bfda93d09d8b9c0c19a5716c594\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/CollectionCapabilities",

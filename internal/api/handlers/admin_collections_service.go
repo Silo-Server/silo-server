@@ -707,6 +707,10 @@ func (h *LibraryCollectionHandler) adminManualCollection(ctx context.Context, id
 	return c, nil
 }
 func (h *LibraryCollectionHandler) AddAdminCollectionItem(ctx context.Context, id, itemID string, position int) error {
+	return h.addAdminCollectionItem(ctx, id, itemID, position, false)
+}
+
+func (h *LibraryCollectionHandler) addAdminCollectionItem(ctx context.Context, id, itemID string, position int, appendItem bool) error {
 	c, err := h.adminManualCollection(ctx, id)
 	if err != nil {
 		return err
@@ -721,6 +725,9 @@ func (h *LibraryCollectionHandler) AddAdminCollectionItem(ctx context.Context, i
 	}
 	if len(items) == 0 {
 		return apiError(404, "not_found", "Item not found in collection libraries")
+	}
+	if appendItem {
+		return h.repo.AppendItemIfAbsent(ctx, id, itemID)
 	}
 	return h.repo.AddItemIfAbsent(ctx, id, itemID, position)
 }

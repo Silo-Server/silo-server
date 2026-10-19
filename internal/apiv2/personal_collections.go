@@ -135,6 +135,7 @@ type CollectionCapabilities struct {
 	ImportSources             []string                       `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources the acting account can create a collection from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
 	Artwork                   bool                           `json:"artwork" doc:"The acting account supports collection artwork"`
 	ItemReorder               bool                           `json:"item_reorder" doc:"The acting account supports reordering collection items"`
+	ItemAppend                bool                           `json:"item_append" doc:"addCollectionItem accepts append=true to allocate the stored tail position atomically without counting or listing members"`
 	DisplayFilterFields       []string                       `json:"display_filter_fields" doc:"Catalog query fields a display filter may use" example:"[\"type\",\"watched\"]"`
 	DisplayFilterPresets      CollectionDisplayFilterPresets `json:"display_filter_presets"`
 	CollectionDefaultSort     bool                           `json:"collection_default_sort" example:"true"`
@@ -622,6 +623,7 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 	}
 	return &CollectionCapabilitiesOutput{Body: CollectionCapabilities{
 		Groups: features.Groups, LoginSharing: true, Imports: features.Imports, Artwork: features.Artwork, ItemReorder: features.ItemReorder,
+		ItemAppend:          features.ItemAppend && supportsPersonalCollectionAppend(svc),
 		ImportSources:       collectionImportSources(features.Imports),
 		DisplayFilterFields: NonNil(v.DisplayFilterFields),
 		DisplayFilterPresets: CollectionDisplayFilterPresets{

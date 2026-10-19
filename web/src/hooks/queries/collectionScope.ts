@@ -253,13 +253,17 @@ export function putCollectionItem<Raw extends WireCollection>(
   scope: CollectionScope<Raw>,
   id: string,
   itemId: string,
-  position: number,
+  position: number | "append",
 ) {
   return v2(
     scope.itemSource === "user"
       ? "PUT /api/v2/collections/{id}/items/{item_id}"
       : "PUT /api/v2/admin/collections/{id}/items/{item_id}",
-    { path: { id, item_id: itemId }, body: { position } },
+    {
+      path: { id, item_id: itemId },
+      ...(position === "append" ? { query: { append: true } } : {}),
+      body: { position: position === "append" ? 0 : position },
+    },
   );
 }
 
@@ -461,11 +465,16 @@ export function useCollectionDraft<Raw extends WireCollection>(
   );
 
   const addStaged = useCallback(
-    async (id: string, itemIds: readonly string[], firstPosition: number) => {
+    async (id: string, itemIds: readonly string[], firstPosition: number | "append") => {
       const failed: string[] = [];
       for (const [index, itemId] of itemIds.entries()) {
         try {
-          await putCollectionItem(scope, id, itemId, firstPosition + index);
+          await putCollectionItem(
+            scope,
+            id,
+            itemId,
+            firstPosition === "append" ? "append" : firstPosition + index,
+          );
         } catch {
           failed.push(itemId);
         }
@@ -513,7 +522,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
 
   /** Tries the titles that failed after create again, at the end of the collection. */
   const retryStagedItems = useCallback(
-    async (firstPosition: number) => {
+    async (firstPosition: number | "append") => {
       const { id, draft } = current.current;
       if (!id || !draft.stagedItems?.length) return;
       const failed = await addStaged(id, draft.stagedItems, firstPosition);

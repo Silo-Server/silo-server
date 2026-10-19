@@ -41,8 +41,9 @@ type AdminCollectionMembersOutput struct {
 	Body Collection[AdminCollectionMember]
 }
 type AdminCollectionMemberInput struct {
-	ID     ID `path:"id"`
-	ItemID ID `path:"item_id"`
+	ID     ID   `path:"id"`
+	ItemID ID   `path:"item_id"`
+	Append bool `query:"append" doc:"When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged."`
 	Body   struct {
 		Position int `json:"position"`
 	}
@@ -144,6 +145,7 @@ func (reg *Registry) adminCollectionExtras() (AdminCollectionExtrasService, *Pro
 func registerAdminCollectionExtras(reg *Registry) {
 	Register(reg, adminCollectionOperation(http.MethodGet, "/admin/collections/{id}/items", "getAdminCollectionItems", "Page manual membership with durable signed continuation.", false), reg.getAdminCollectionItems)
 	add := adminCollectionOperation(http.MethodPut, "/admin/collections/{id}/items/{item_id}", "addAdminCollectionItem", "Add a catalog item if absent; existing positions are preserved.", false)
+	add.Errors = append(add.Errors, http.StatusNotImplemented)
 	add.DefaultStatus = http.StatusNoContent
 	Register(reg, add, reg.addAdminCollectionItem)
 	Register(reg, adminCollectionOperation(http.MethodDelete, "/admin/collections/{id}/items/{item_id}", "removeAdminCollectionItem", "Remove a manual membership.", false), reg.removeAdminCollectionItem)
@@ -226,6 +228,9 @@ func (reg *Registry) getAdminCollectionItems(ctx context.Context, in *PersonalCo
 	return &AdminCollectionMembersOutput{Body: Paginated(items, next)}, nil
 }
 func (reg *Registry) addAdminCollectionItem(ctx context.Context, in *AdminCollectionMemberInput) (*struct{}, error) {
+	if in.Append {
+		return reg.appendAdminCollectionItem(ctx, in)
+	}
 	if reg.deps.AdminCollections == nil {
 		return nil, unavailable("admin collections")
 	}

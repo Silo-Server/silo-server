@@ -410,3 +410,9 @@
 # Composed raw budgets return validation errors and keep legacy recovery usable.
 ./internal/api/handlers TestLibraryCollectionComposedUpdateRecoveryDB
 ./internal/apiv2 TestCatalogComposedBudgetValidationDB
+
+# Atomic v2 collection append uses stored tails and preserves access boundaries.
+./internal/userstore/pgstore TestPostgresCollectionAtomicAppendDB
+./internal/catalog TestLibraryCollectionAtomicAppendDB
+./internal/catalog TestLibraryCollectionNativeMembershipDefinitionRaceDB
+./internal/api/handlers TestPersonalCollectionAppendBoundariesDB

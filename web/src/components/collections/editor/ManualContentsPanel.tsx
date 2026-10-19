@@ -454,7 +454,7 @@ export interface ManualContentsPanelProps {
   staged: readonly string[];
   onStagedChange: (itemIds: string[]) => void;
   /** After create: try the titles that failed again, at this position onwards. */
-  onRetryStaged?: (firstPosition: number) => void;
+  onRetryStaged?: (firstPosition: number | "append") => void;
   /** The collection's title count, for appending when the list isn't all loaded. */
   itemCount?: number | null;
   /** After every title write, so the editor refreshes its save token. */
@@ -581,7 +581,12 @@ export function ManualContentsPanel({
     const position = Math.max(nextPosition, claimed.current);
     claimed.current = position + 1;
     try {
-      await putCollectionItem(scope, collectionId, item.content_id, position);
+      await putCollectionItem(
+        scope,
+        collectionId,
+        item.content_id,
+        capabilities?.item_append === true ? "append" : position,
+      );
       await afterWrite();
     } catch (error) {
       setSaved("idle");
@@ -754,7 +759,9 @@ export function ManualContentsPanel({
               size="sm"
               variant="outline"
               className="h-8"
-              onClick={() => onRetryStaged(nextPosition)}
+              onClick={() =>
+                onRetryStaged(capabilities?.item_append === true ? "append" : nextPosition)
+              }
             >
               Try again
             </Button>

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PERSONAL_SCOPE } from "@/lib/collections/scope";
+import { PERSONAL_SCOPE, SERVER_SCOPE, type CollectionScope } from "@/lib/collections/scope";
 import { ManualContentsPanel } from "./ManualContentsPanel";
 
 const mocks = vi.hoisted(() => ({
@@ -29,18 +29,25 @@ vi.mock("@/hooks/queries/collections", () => ({
   }),
   useReorderCollectionItems: () => ({ mutate: mocks.mutate }),
 }));
+vi.mock("@/hooks/queries/admin/collections", () => ({
+  useAdminCollectionCapabilities: mocks.capabilities,
+}));
 const item = (id: string, position = 0) => ({
   collection_id: "c",
   media_item_id: id,
   position,
   added_at: "2026-09-05T00:00:00Z",
 });
-function show(staged: string[] = [], itemCount?: number | null) {
+function show(
+  staged: string[] = [],
+  itemCount?: number | null,
+  scope: CollectionScope = PERSONAL_SCOPE,
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <ManualContentsPanel
-        scope={PERSONAL_SCOPE}
+        scope={scope}
         collectionId="c"
         searchLibraries={[]}
         staged={staged}
@@ -52,14 +59,14 @@ function show(staged: string[] = [], itemCount?: number | null) {
   );
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.orderedIds = ["first"];
+  mocks.capabilities.mockReturnValue({ data: { item_reorder: true } });
+  mocks.search.mockResolvedValue({ items: [] });
+  mocks.v2.mockResolvedValue(undefined);
+});
 describe("manual collection paging", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.orderedIds = ["first"];
-    mocks.capabilities.mockReturnValue({ data: { item_reorder: true } });
-    mocks.search.mockResolvedValue({ items: [] });
-    mocks.v2.mockResolvedValue(undefined);
-  });
   it("replaces the visible page and disables full-order dragging for partial membership", () => {
     mocks.page.mockImplementation((_id: string, cursor: string) => ({
       data: cursor
@@ -96,6 +103,36 @@ describe("manual collection paging", () => {
     expect(screen.getByLabelText("Move first")).toBeTruthy();
   });
 });
+
+it.each([PERSONAL_SCOPE, SERVER_SCOPE])(
+  "appends from a partial page with an unavailable count in $kind scope",
+  async (scope) => {
+    mocks.capabilities.mockReturnValue({ data: { item_reorder: true, item_append: true } });
+    mocks.page.mockReturnValue({
+      data: {
+        items: Array.from({ length: 200 }, (_, i) => item(`member-${i}`, i)),
+        page: { has_more: true, next_cursor: "later-members" },
+      },
+      isLoading: false,
+    });
+    mocks.search.mockResolvedValue({
+      items: [{ content_id: "new", title: "New title", type: "movie" }],
+    });
+    show([], null, scope);
+    fireEvent.change(screen.getByRole("combobox", { name: "Add a title" }), {
+      target: { value: "new" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: /^New title/ }));
+    await vi.waitFor(() =>
+      expect(mocks.v2).toHaveBeenCalledWith(
+        scope.kind === "personal"
+          ? "PUT /api/v2/collections/{id}/items/{item_id}"
+          : "PUT /api/v2/admin/collections/{id}/items/{item_id}",
+        { path: { id: "c", item_id: "new" }, query: { append: true }, body: { position: 0 } },
+      ),
+    );
+  },
+);
 
 it("shows the catalog title while keeping mutation identifiers stable", async () => {
   mocks.search.mockResolvedValue({ items: [] });
@@ -195,6 +232,26 @@ it("loads and removes real members independently of an unavailable summary count
   await vi.waitFor(() =>
     expect(mocks.v2).toHaveBeenCalledWith("DELETE /api/v2/collections/{id}/items/{item_id}", {
       path: { id: "c", item_id: "first" },
+    }),
+  );
+});
+
+it("restores the removed position when atomic append is supported", async () => {
+  mocks.capabilities.mockReturnValue({ data: { item_reorder: true, item_append: true } });
+  mocks.page.mockReturnValue({
+    data: {
+      items: [{ ...item("first", 31), title: "Synthetic member" }],
+      page: { has_more: false },
+    },
+    isLoading: false,
+  });
+  show([], null);
+  fireEvent.click(screen.getByRole("button", { name: "Remove Synthetic member" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+  await vi.waitFor(() =>
+    expect(mocks.v2).toHaveBeenCalledWith("PUT /api/v2/collections/{id}/items/{item_id}", {
+      path: { id: "c", item_id: "first" },
+      body: { position: 31 },
     }),
   );
 });

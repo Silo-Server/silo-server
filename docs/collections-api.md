@@ -154,6 +154,26 @@ returns it with a strong ETag, and `reorderCollections` replaces it under `If-Ma
 including another profile's shared collection, is a `422 validation_failed` at
 `body.ordered_ids`. The server stores no per-viewer order of shared collections.
 
+## Appending manual members
+
+Check `item_append` in `getCollectionCapabilities` (personal collections) or
+`getAdminCollectionCapabilities` (server collections). When true, the corresponding
+`PUT /collections/{id}/items/{item_id}` or
+`PUT /admin/collections/{id}/items/{item_id}` accepts the query flag `append=true`.
+Send the existing body, for example `{"position":0}`; append mode ignores that position.
+The server allocates the position after the stored tail in the same transaction as the
+insert. Concurrent appends receive distinct positions, including when existing positions
+have gaps. An existing member keeps its position and timestamp.
+
+Append does not depend on `item_count`, count availability or the loaded membership page.
+The personal operation keeps creator and viewer-access checks; the admin operation keeps
+acting-administrator, manual-type and collection-library checks. A store without append
+support answers `501 capability_unsupported`. PostgreSQL supports it; SQLite does not.
+With the flag absent or false, `position` retains its existing meaning, including for undo.
+Reorder operations, frozen v1 requests and legacy admin upserts keep their behavior.
+Apple and Android can continue using positional adds; adoption of append is optional.
+Jellyfin-protocol operations are unchanged.
+
 ## Capabilities
 
 `getCollectionCapabilities` reports:
@@ -163,6 +183,8 @@ including another profile's shared collection, is a `422 validation_failed` at
 - `poster_collages`: collections without an uploaded or imported poster show a collage (see
   [Posters](#posters)).
 - `groups: false`: personal collection groups are no longer supported.
+- `item_append`: atomic server allocation of manual members' tail positions (see
+  [Appending manual members](#appending-manual-members)).
 
 ## Groups (being removed)
 

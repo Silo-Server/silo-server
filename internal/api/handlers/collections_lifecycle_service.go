@@ -365,6 +365,10 @@ func (h *CollectionHandler) accessibleCollectionItems(ctx context.Context, userI
 }
 
 func (h *CollectionHandler) AddPersonalCollectionItem(ctx context.Context, userID int, profileID, collectionID, itemID string, position int) error {
+	return h.addPersonalCollectionItem(ctx, userID, profileID, collectionID, itemID, position, false)
+}
+
+func (h *CollectionHandler) addPersonalCollectionItem(ctx context.Context, userID int, profileID, collectionID, itemID string, position int, appendItem bool) error {
 
 	if collectionID == "" || itemID == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "Collection ID and item ID are required")
@@ -382,7 +386,22 @@ func (h *CollectionHandler) AddPersonalCollectionItem(ctx context.Context, userI
 		return err
 	}
 
-	if err := store.AddCollectionItem(ctx, collectionID, itemID, position); err != nil {
+	if appendItem {
+		appender, ok := store.(collectionItemAppender)
+		if !ok {
+			return apiError(http.StatusNotImplemented, "unsupported", "This store cannot append collection items")
+		}
+		err = appender.AppendCollectionItem(ctx, collectionID, itemID)
+	} else {
+		err = store.AddCollectionItem(ctx, collectionID, itemID, position)
+	}
+	if errors.Is(err, userstore.ErrCollectionNotManual) {
+		return apiError(http.StatusConflict, "collection_not_manual", "Only manual collection membership can be edited")
+	}
+	if errors.Is(err, userstore.ErrCollectionNotFound) {
+		return apiError(http.StatusNotFound, "not_found", "Collection not found")
+	}
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add item to collection")
 	}
 	h.refreshCollage(ctx, store, userID, collection)

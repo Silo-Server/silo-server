@@ -194,6 +194,10 @@ func (r *LibraryCollectionRepository) deleteCollection(ctx context.Context, id s
 // AddItemIfAbsent is the native add operation. Existing membership retains its
 // position and timestamp; the legacy AddItem method keeps its upsert behavior.
 func (r *LibraryCollectionRepository) AddItemIfAbsent(ctx context.Context, collectionID, mediaItemID string, position int) error {
+	return r.addItemIfAbsent(ctx, collectionID, mediaItemID, position, false)
+}
+
+func (r *LibraryCollectionRepository) addItemIfAbsent(ctx context.Context, collectionID, mediaItemID string, position int, appendItem bool) error {
 	return (libraryCollectionMutation{pool: r.pool, collectionID: collectionID}).run(ctx, nil, func(tx pgx.Tx) error {
 		legacyLibraryID, err := lockManualLibraryCollection(ctx, tx, collectionID)
 		if err != nil {
@@ -214,10 +218,14 @@ func (r *LibraryCollectionRepository) AddItemIfAbsent(ctx context.Context, colle
    )
   ), inserted AS (
    INSERT INTO library_collection_items(collection_id,media_item_id,position,source_rank)
-   SELECT $1,media_item_id,$3,0 FROM eligible
+   SELECT $1,media_item_id,CASE WHEN $5 THEN COALESCE((
+    SELECT COALESCE(position,0) FROM library_collection_items WHERE collection_id=$1
+    ORDER BY COALESCE(position,0) DESC,media_item_id DESC LIMIT 1
+   ),-1)+1 ELSE $3 END,0 FROM eligible
+   WHERE NOT EXISTS(SELECT 1 FROM library_collection_items WHERE collection_id=$1 AND media_item_id=$2)
    ON CONFLICT(collection_id,media_item_id) DO NOTHING
    RETURNING 1
-  ) SELECT EXISTS(SELECT 1 FROM eligible)`, collectionID, mediaItemID, position, legacyLibraryID).Scan(&eligible)
+  ) SELECT EXISTS(SELECT 1 FROM eligible)`, collectionID, mediaItemID, position, legacyLibraryID, appendItem).Scan(&eligible)
 		if err != nil {
 			return err
 		}

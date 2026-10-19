@@ -3711,6 +3711,10 @@
           "imports": {
             "type": "boolean"
           },
+          "item_append": {
+            "description": "addAdminCollectionItem accepts append=true to allocate the stored tail position atomically without counting or listing members",
+            "type": "boolean"
+          },
           "item_reorder": {
             "type": "boolean"
           },
@@ -3759,6 +3763,7 @@
           "import_sources",
           "artwork",
           "item_reorder",
+          "item_append",
           "template_summaries",
           "mdblist_search",
           "schedule_time_zone",
@@ -24946,6 +24951,10 @@
             "description": "The acting account supports imported collections",
             "type": "boolean"
           },
+          "item_append": {
+            "description": "addCollectionItem accepts append=true to allocate the stored tail position atomically without counting or listing members",
+            "type": "boolean"
+          },
           "item_reorder": {
             "description": "The acting account supports reordering collection items",
             "type": "boolean"
@@ -25022,6 +25031,7 @@
           "import_sources",
           "artwork",
           "item_reorder",
+          "item_append",
           "display_filter_fields",
           "display_filter_presets",
           "collection_default_sort",
@@ -68183,6 +68193,16 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "description": "When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged.",
+            "explode": false,
+            "in": "query",
+            "name": "append",
+            "schema": {
+              "description": "When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged.",
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -68308,6 +68328,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
           },
           "503": {
             "content": {
@@ -146445,6 +146475,16 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "description": "When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged.",
+            "explode": false,
+            "in": "query",
+            "name": "append",
+            "schema": {
+              "description": "When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged.",
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -146570,6 +146610,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
           },
           "503": {
             "content": {
