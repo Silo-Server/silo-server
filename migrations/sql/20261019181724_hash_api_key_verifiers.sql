@@ -3,10 +3,14 @@
 -- api_key column. This transaction retains credentials and configuration tags.
 ALTER TABLE api_keys ADD COLUMN key_prefix text NOT NULL DEFAULT '';
 ALTER TABLE api_keys DISABLE TRIGGER api_key_configuration_revision;
+-- A legacy value can equal another row's final digest. Restore uniqueness
+-- after every row is converted, under this transaction's exclusive table lock.
+ALTER TABLE api_keys DROP CONSTRAINT api_keys_api_key_key;
 UPDATE api_keys SET
     key_prefix = CASE WHEN api_key ~ '^sa_[0-9a-f]{64}$' THEN left(api_key,11) ELSE '' END,
     api_key = encode(sha256(convert_to(api_key,'UTF8')),'hex');
 ALTER TABLE api_keys RENAME COLUMN api_key TO key_hash;
+ALTER TABLE api_keys ADD CONSTRAINT api_keys_api_key_key UNIQUE (key_hash);
 ALTER TABLE api_keys ADD CONSTRAINT api_keys_key_hash_format CHECK (key_hash ~ '^[0-9a-f]{64}$');
 ALTER TABLE api_keys ADD CONSTRAINT api_keys_key_prefix_format CHECK (key_prefix ~ '^(sa_[0-9a-f]{8})?$');
 

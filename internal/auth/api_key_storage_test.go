@@ -166,6 +166,35 @@ func TestAPIKeyVerifierEmptyMigrationRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAPIKeyVerifierLegacyDigestCollision(t *testing.T) {
+	repo := apiKeyLegacyRepository(t)
+	ctx := t.Context()
+	key, err := generateAPIKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both values fit the old schema. Conversion must not collide with a
+	// legacy row that happens to equal another row's final digest.
+	keys := []string{key, HashLinkToken(key)}
+	for _, value := range keys {
+		if _, err := repo.pool.Exec(ctx, `INSERT INTO api_keys(user_id,label,api_key) VALUES(2,'Legacy collision',$1)`, value); err != nil {
+			t.Fatal("legacy collision fixture failed")
+		}
+	}
+	up, _ := apiKeyVerifierMigration(t)
+	if _, err := repo.pool.Exec(ctx, up); err != nil {
+		t.Fatal("conversion failed for distinct legacy credentials")
+	}
+	var previousID int64
+	for _, value := range keys {
+		found, err := repo.GetByKey(ctx, value)
+		if err != nil || found.ID == previousID || found.Key != "" {
+			t.Fatal("conversion did not preserve distinct legacy credential identities")
+		}
+		previousID = found.ID
+	}
+}
+
 func TestAPIKeyVerifierMigrationRollback(t *testing.T) {
 	repo := apiKeyLegacyRepository(t)
 	ctx := t.Context()

@@ -67,7 +67,10 @@
 ./internal/auth TestAPIKeyStorageDoesNotRetainBearer
 ./internal/auth TestAPIKeyVerifierUpgrade
 ./internal/auth TestAPIKeyVerifierEmptyMigrationRoundTrip
+./internal/auth TestAPIKeyVerifierLegacyDigestCollision
 ./internal/auth TestAPIKeyVerifierMigrationRollback
+./internal/api/handlers TestAPIKeyLegacyListsAndEditorNeverReturnStoredSecret
+./internal/api/handlers TestAPIKeyCreationStillReturnsTheOnlyFullSecretResponse
 
 # Recovery identity changes retire links and prevent delivery to a stale address.
 ./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB

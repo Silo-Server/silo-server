@@ -165,8 +165,8 @@ model's `Key` empty. Scope and current-owner checks remain at their existing
 authorization boundaries, including Jellyfin-compatible API-key access.
 
 Migration `20261019181724_hash_api_key_verifiers` hashes historical credentials
-without rotating them or changing their configuration revisions. It keeps the
-unique index, replaces the credential-identity trigger in the same transaction,
+without rotating them or changing their configuration revisions. It rebuilds the
+unique index after conversion, replaces the credential-identity trigger in the same transaction,
 and constrains the stored digest and prefix. Its Down migration refuses a
 nonempty key table because the original bearers cannot be recovered.
 
