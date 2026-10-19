@@ -117,10 +117,11 @@ it("says when a speed test fails rather than blaming playback", async () => {
   ).toBeInTheDocument();
 });
 
-it("words a lower bound and a playback sample as faster than, and shows the higher", async () => {
+it("words a lower bound and a playback sample as faster than, and shows a sample only without a probe", async () => {
+  // The sample is higher, but a probe is the reading whenever there is one.
   let reading: Record<string, unknown> = {
     probe: {
-      kbps: 115000,
+      kbps: 48000,
       lower_bound: true,
       measured_at: new Date().toISOString(),
       transport: "ethernet",
@@ -139,7 +140,7 @@ it("words a lower bound and a playback sample as faster than, and shows the high
   speedTest.mockReturnValue(new Promise((resolve) => (finish = resolve)));
   mount();
   expect(
-    await screen.findByText("Faster than 115 Mbps · measured just now on Ethernet"),
+    await screen.findByText("Faster than 48 Mbps · measured just now on Ethernet"),
   ).toBeInTheDocument();
   fireEvent.click(screen.getByText("Test speed"));
   expect(await screen.findByText("Testing for up to 10 seconds.")).toBeInTheDocument();

@@ -112,7 +112,9 @@ function speedDescription(
 ): string | undefined {
   const probe = connection?.probe;
   const sample = connection?.playback_sample;
-  if (probe && (!sample || probe.kbps >= sample.kbps)) {
+  // A playback sample stands in only without a probe: a fresh test result
+  // must not hide behind an older, higher sample.
+  if (probe) {
     const rate = probe.lower_bound
       ? `Faster than ${formatBitrateKbps(probe.kbps)}`
       : formatBitrateKbps(probe.kbps);
