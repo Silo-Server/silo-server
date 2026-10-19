@@ -443,7 +443,9 @@ client is signed in and online, so a playback start in the first seconds already
 sends the reading. Only a test waits: a few seconds, so the first screen can
 settle, and it runs only if automatic tests are on and no current reading proves
 the link. A reinstalled app, or a phone back on its usual Wi-Fi, finds the
-reading it left there.
+reading it left there. On the web, a tab shown again less than a minute after
+it was hidden has not returned to the foreground: it is still on the network
+it left, so it reads nothing and only resumes a test the hide stopped.
 
 - There is no periodic test. A test that fails or is refused waits for the next
   check. A `429` holds automatic tests against the server that sent it until
