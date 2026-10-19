@@ -289,3 +289,6 @@
 # the only person field search documents carry.
 ./internal/catalog TestPersonWriteReindexesTitlesOnlyOnRenamePostgres
 ./internal/catalog TestPersonWriteWaitingOnARenameReindexesTitlesPostgres
+
+# Count construction shares one request ledger across collection owners.
+./internal/api/handlers TestCollectionCountLedgerAcrossOwnersDB
