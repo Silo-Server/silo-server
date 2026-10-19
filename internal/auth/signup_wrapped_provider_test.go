@@ -33,7 +33,7 @@ func TestInvitedAccountWrappedPostgresDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = admin.Exec(context.WithoutCancel(ctx), "DROP SCHEMA "+q+" CASCADE") }()
-	for _, table := range []string{"users", "invite_codes", "user_profiles", "user_profile_allowed_libraries"} {
+	for _, table := range []string{"users", "invite_codes", "user_profiles", "user_profile_allowed_libraries", "server_settings"} {
 		if _, err = admin.Exec(ctx, "CREATE TABLE "+q+"."+table+" (LIKE public."+table+" INCLUDING ALL EXCLUDING IDENTITY)"); err != nil {
 			t.Fatal(err)
 		}
@@ -60,6 +60,9 @@ func TestInvitedAccountWrappedPostgresDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
+	if _, err := pool.Exec(ctx, `INSERT INTO server_settings (key,value) VALUES ('signup.enabled','true')`); err != nil {
+		t.Fatal(err)
+	}
 	var creator int
 	if err = pool.QueryRow(ctx, `INSERT INTO users(username,email,password_hash,role,enabled) VALUES('creator','creator@example.invalid','x','admin',true) RETURNING id`).Scan(&creator); err != nil {
 		t.Fatal(err)

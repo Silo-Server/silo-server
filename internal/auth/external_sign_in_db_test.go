@@ -894,6 +894,8 @@ func TestSignupRefusedWhileLocalLoginIsOffDB(t *testing.T) {
 func TestExternalSignInEmailAutoMatchRevokesCredentialsDB(t *testing.T) {
 	env := newExternalSignInEnv(t)
 	ctx := t.Context()
+	t.Cleanup(saveSettings(t, env.pool, "signup.enabled"))
+	env.setSetting(t, "signup.enabled", "true")
 	env.setSetting(t, config.AuthEmailAutoMatchSettingKey, "true")
 
 	creator := env.localAccount(t, "match-inviter", models.RoleAdmin)
