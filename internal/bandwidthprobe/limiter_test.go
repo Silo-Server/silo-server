@@ -119,3 +119,26 @@ func TestBandwidthProbeLimiterForgetsIdleAccounts(t *testing.T) {
 		t.Fatal("the admitted account is not tracked")
 	}
 }
+
+// An accurate test asks for MaxSize. After the quick tests that came before
+// it, it is still admitted; a run of accurate tests is not.
+func TestBandwidthProbeLimiterAdmitsAnAccurateTestAfterQuickOnes(t *testing.T) {
+	limiter := &Limiter{accounts: map[int]*bandwidthProbeAccount{}}
+	now := time.Unix(1_000_000, 0)
+	for range 3 {
+		ok, window, _ := limiter.Acquire(1, MaxSize/10, now)
+		if !ok {
+			t.Fatal("refused a quick test")
+		}
+		limiter.Release(1, 0, window, now)
+	}
+	for i := range 2 {
+		ok, window, _ := limiter.Acquire(1, MaxSize, now)
+		if (i == 0) != ok {
+			t.Fatalf("accurate test %d admitted=%v", i, ok)
+		}
+		if ok {
+			limiter.Release(1, 0, window, now)
+		}
+	}
+}

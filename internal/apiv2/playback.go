@@ -40,7 +40,10 @@ type PlaybackService interface {
 }
 
 type PlaybackCapabilities struct {
-	BandwidthProbeURL string `json:"bandwidth_probe_url,omitempty"`
+	BandwidthProbeURL           string `json:"bandwidth_probe_url,omitempty"`
+	BandwidthProbeTargetKbps    *int   `json:"bandwidth_probe_target_kbps,omitempty" nullable:"false" doc:"With connection_speed_v1: the rate a quick speed test has to prove, the highest bitrate the server would plan for this viewer plus 25%. Absent when the server has no bitrates to set it from."`
+	BandwidthProbeAutomatic     *bool  `json:"bandwidth_probe_automatic,omitempty" nullable:"false" doc:"With connection_speed_v1: false when the administrator turned automatic speed tests off. Test speed still works."`
+	BandwidthProbeMaxAgeSeconds *int   `json:"bandwidth_probe_max_age_seconds,omitempty" nullable:"false" doc:"With connection_speed_v1: how long a speed reading stays current."`
 	Capability
 	InstallationID   ID                    `json:"installation_id,omitempty"`
 	ProtocolVersions []int                 `json:"protocol_versions"`
@@ -345,15 +348,20 @@ func registerPlayback(reg *Registry) {
 		if err != nil {
 			return nil, playbackProblem(err)
 		}
-		probeURL := ""
+		body := PlaybackCapabilities{InstallationID: ID(view.InstallationID), Capability: Capability{State: view.State, Allowed: new(view.Allowed)}, ProtocolVersions: append([]int{}, view.ProtocolVersions...), Features: append([]string{}, view.Features...), Deliveries: append([]playback.DeliveryV3{}, view.Deliveries...)}
 		if playback.HasFeatureV3(view.Features, playback.FeatureConnectionSpeedV1) {
 			// The origin the client reached, as a reverse proxy forwards it: r.Host
 			// behind a TLS-terminating proxy is the internal host the proxy dialed.
 			if r := requestFrom(ctx); r != nil {
-				probeURL = handlers.RequestBaseURL(r) + Prefix + "/playback/bandwidth-probe?media_path=true"
+				body.BandwidthProbeURL = handlers.RequestBaseURL(r) + Prefix + "/playback/bandwidth-probe?media_path=true"
+			}
+			body.BandwidthProbeAutomatic = new(view.BandwidthProbeAutomatic)
+			body.BandwidthProbeMaxAgeSeconds = new(view.BandwidthProbeMaxAgeSeconds)
+			if view.BandwidthProbeTargetKbps > 0 {
+				body.BandwidthProbeTargetKbps = new(view.BandwidthProbeTargetKbps)
 			}
 		}
-		return &PlaybackCapabilitiesOutput{CacheControl: playbackCacheControl, Body: PlaybackCapabilities{BandwidthProbeURL: probeURL, InstallationID: ID(view.InstallationID), Capability: Capability{State: view.State, Allowed: new(view.Allowed)}, ProtocolVersions: append([]int{}, view.ProtocolVersions...), Features: append([]string{}, view.Features...), Deliveries: append([]playback.DeliveryV3{}, view.Deliveries...)}}, nil
+		return &PlaybackCapabilitiesOutput{CacheControl: playbackCacheControl, Body: body}, nil
 	})
 	Register(reg, op(http.MethodPost, "/start", opStartPlayback), func(ctx context.Context, in *PlaybackStartInput) (*PlaybackStartOutput, error) {
 		if in.Body.BandwidthEstimateSource != "" && in.Body.BandwidthEstimateKbps == nil {

@@ -205,6 +205,21 @@ type PlaybackConfig struct {
 	// KeyframePlaylist is playback.copy_keyframe_playlist: copy-remux HLS
 	// from one complete keyframe-planned playlist (#1466).
 	KeyframePlaylist bool `yaml:"-"`
+	// AutomaticBandwidthProbeOff is playback.bandwidth_probe_automatic turned
+	// off, so a zero config keeps automatic speed tests on.
+	AutomaticBandwidthProbeOff bool `yaml:"-"`
+	// BandwidthProbeMaxAgeDays is playback.bandwidth_probe_max_age_days; 0
+	// means DefaultBandwidthProbeMaxAgeDays.
+	BandwidthProbeMaxAgeDays int `yaml:"-"`
+}
+
+// BandwidthProbeMaxAge is how long a connection speed reading lasts.
+func (c PlaybackConfig) BandwidthProbeMaxAge() time.Duration {
+	days := c.BandwidthProbeMaxAgeDays
+	if days <= 0 {
+		days = DefaultBandwidthProbeMaxAgeDays
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 // RedisConfig holds Redis connection settings.

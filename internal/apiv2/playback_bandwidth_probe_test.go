@@ -2,7 +2,10 @@ package apiv2
 
 import (
 	"net/http"
+	"strconv"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 )
 
 func TestPlaybackBandwidthProbe(t *testing.T) {
@@ -39,7 +42,7 @@ func TestPlaybackBandwidthProbe(t *testing.T) {
 		}
 	})
 
-	for _, size := range []string{"0", "-1", "abc", "100000001"} {
+	for _, size := range []string{"0", "-1", "abc", strconv.Itoa(bandwidthprobe.MaxSize + 1)} {
 		t.Run("rejects size "+size, func(t *testing.T) {
 			requireProblem(t, do(t, handler, http.MethodGet, path+"?size="+size, "", bearer(memberToken)), TypeValidationFailed)
 		})

@@ -50,7 +50,7 @@ func registerPlaybackBandwidthProbe(reg *Registry) {
 		"422": {Description: http.StatusText(http.StatusUnprocessableEntity), Content: map[string]*huma.MediaType{problemContentType: {Schema: reg.api.OpenAPI().Components.Schemas.Schema(reflect.TypeFor[Problem](), true, "")}}},
 	}
 	op := humaOp(http.MethodGet, Prefix+"/playback/bandwidth-probe", opGetPlaybackBandwidthProbe, playbackTag,
-		"Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 32 probes at once; an account may run two of them and draw up to 400 MB per 10 minutes. Beyond any limit the request gets 429 with Retry-After.")
+		"Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 4 probes at once; an account may run two of them and draw up to 2,000,000,000 bytes per 10 minutes. Beyond any limit the request gets 429 with Retry-After.")
 	op.Parameters = append(params, &huma.Param{Name: "media_path", In: playbackParamQuery, Description: "Use the client media egress route.", Schema: &huma.Schema{Type: huma.TypeBoolean}})
 	op.Responses = responses
 	raw := RawOperation{Operation: Operation{Operation: op, Class: ClassAuthenticated}, Protocol: "bandwidth-probe",

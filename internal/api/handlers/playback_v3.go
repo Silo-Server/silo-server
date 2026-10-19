@@ -6588,6 +6588,11 @@ func recordRouteEventV3(store playback.PlanStoreV3, event playback.RouteEventRec
 			if err := connections.ReportSummary(ctx, event.UserID, event.ConnectionDeviceID, event.ConnectionKey, summary); err != nil {
 				slog.Warn("playback connection summary write failed", "error", err)
 			}
+			if kbps, ok := playbackThroughputKbpsV3(event.Diagnostics); ok {
+				if err := connections.ReportSample(ctx, event.UserID, event.ConnectionDeviceID, event.ConnectionKey, kbps, event.SampleLifetime); err != nil {
+					slog.Warn("playback connection sample write failed", "error", err)
+				}
+			}
 		}
 	}
 }
@@ -7245,8 +7250,21 @@ func configureHLSTimelineV3(plan *playback.PlanV3, videoCodec string, segmentDur
 	return seek, startSegment
 }
 
+const throughputLogKeyV3 = "throughput_kbps"
+
+// playbackThroughputKbpsV3 reads a plan summary's throughput_kbps: the rate
+// its media arrived at, kept as a lower bound on the connection's speed. A
+// value outside the probe's own bounds is not a measurement.
+func playbackThroughputKbpsV3(diagnostics map[string]string) (int, bool) {
+	kbps, err := strconv.Atoi(diagnostics[throughputLogKeyV3])
+	if err != nil || kbps < 1 || kbps > 1_000_000 {
+		return 0, false
+	}
+	return kbps, true
+}
+
 var diagnosticKeysV3 = map[string]struct{}{
-	"played_ms": {}, "stall_count": {}, "stall_total_ms": {}, "stall_longest_ms": {}, "delivered_kbps": {}, "buffering_mode": {}, "buffering_action": {},
+	"played_ms": {}, "stall_count": {}, "stall_total_ms": {}, "stall_longest_ms": {}, "delivered_kbps": {}, "buffering_mode": {}, "buffering_action": {}, throughputLogKeyV3: {},
 	"decoder_name": {}, "decoder_init_ms": {}, "first_frame_ms": {},
 	"device_model": {}, "requested_quality": {}, "effective_quality": {},
 	"pcm_recovery": {}, "retry_outcome": {}, "replan_request_id": {},

@@ -5022,6 +5022,9 @@
           "plan_summary": {
             "$ref": "#/components/schemas/PlaybackPlanSummary"
           },
+          "playback_sample": {
+            "$ref": "#/components/schemas/PlaybackSample"
+          },
           "probe": {
             "$ref": "#/components/schemas/PlaybackProbe"
           }
@@ -5030,6 +5033,7 @@
           "id",
           "connection",
           "probe",
+          "playback_sample",
           "learned_limit",
           "plan_summary"
         ],
@@ -38440,6 +38444,20 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "bandwidth_probe_automatic": {
+            "description": "With connection_speed_v1: false when the administrator turned automatic speed tests off. Test speed still works.",
+            "type": "boolean"
+          },
+          "bandwidth_probe_max_age_seconds": {
+            "description": "With connection_speed_v1: how long a speed reading stays current.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "bandwidth_probe_target_kbps": {
+            "description": "With connection_speed_v1: the rate a quick speed test has to prove, the highest bitrate the server would plan for this viewer plus 25%. Absent when the server has no bitrates to set it from.",
+            "format": "int64",
+            "type": "integer"
+          },
           "bandwidth_probe_url": {
             "type": "string"
           },
@@ -38507,6 +38525,10 @@
           },
           "learned_limit": {
             "$ref": "#/components/schemas/PlaybackLearnedLimit"
+          },
+          "playback_sample": {
+            "$ref": "#/components/schemas/PlaybackSample",
+            "description": "The best recent playback throughput on this connection, a lower bound on its speed."
           },
           "probe": {
             "$ref": "#/components/schemas/PlaybackProbe"
@@ -38844,6 +38866,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "lower_bound": {
+            "description": "The test proved only that the link carries at least kbps.",
+            "type": "boolean"
+          },
           "measured_at": {
             "format": "date-time",
             "type": "string"
@@ -38854,6 +38880,7 @@
         },
         "required": [
           "kbps",
+          "lower_bound",
           "measured_at",
           "transport"
         ],
@@ -38864,7 +38891,7 @@
         "properties": {
           "bytes": {
             "format": "int64",
-            "maximum": 100000000,
+            "maximum": 1000000000,
             "minimum": 1,
             "type": "integer"
           },
@@ -38879,6 +38906,10 @@
             "maximum": 1000000,
             "minimum": 1,
             "type": "integer"
+          },
+          "lower_bound": {
+            "description": "The test proved only that the link carries at least kbps: a quick test that reached its target, or a rate above the bound.",
+            "type": "boolean"
           },
           "transport": {
             "enum": [
@@ -39200,6 +39231,24 @@
         "required": [
           "event_id",
           "outcome"
+        ],
+        "type": "object"
+      },
+      "PlaybackSample": {
+        "additionalProperties": false,
+        "properties": {
+          "kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "measured_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kbps",
+          "measured_at"
         ],
         "type": "object"
       },
@@ -180959,7 +181008,7 @@
             "schema": {
               "default": 1000000,
               "format": "int64",
-              "maximum": 100000000,
+              "maximum": 1000000000,
               "minimum": 1,
               "type": "integer"
             }
@@ -181075,7 +181124,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 32 probes at once; an account may run two of them and draw up to 400 MB per 10 minutes. Beyond any limit the request gets 429 with Retry-After.",
+        "summary": "Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 4 probes at once; an account may run two of them and draw up to 2,000,000,000 bytes per 10 minutes. Beyond any limit the request gets 429 with Retry-After.",
         "tags": [
           "playback"
         ],
@@ -222541,7 +222590,7 @@
             "name": "size",
             "required": true,
             "schema": {
-              "maximum": 100000000,
+              "maximum": 1000000000,
               "minimum": 1,
               "type": "integer"
             }

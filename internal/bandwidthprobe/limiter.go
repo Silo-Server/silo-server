@@ -11,15 +11,15 @@ const (
 	// counts requests, not the bytes each one streams.
 	bandwidthProbeMaxInFlight = 2
 	// bandwidthProbeWindowBytes bounds the probe bytes one account may draw
-	// from this server per bandwidthProbeWindow. The web client sends at most
-	// 40 MB about every 30 minutes, so the budget only stops an account that
-	// probes back to back.
-	bandwidthProbeWindowBytes = 400_000_000
+	// from this server per bandwidthProbeWindow. It admits one accurate test
+	// (MaxSize) beside the quick tests that preceded it, and refuses a run of
+	// accurate tests back to back.
+	bandwidthProbeWindowBytes = 2_000_000_000
 	bandwidthProbeWindow      = 10 * time.Minute
 	// bandwidthProbeNodeMaxInFlight bounds probes on this server across all
-	// accounts, so many viewers signing in together cannot tie up its CPU and
-	// egress with probes. A refused client tries again a few minutes later.
-	bandwidthProbeNodeMaxInFlight = 32
+	// accounts. Each probe saturates the server's upload while it runs, so a
+	// few at once is enough; a refused client tries again at its next check.
+	bandwidthProbeNodeMaxInFlight = 4
 	bandwidthProbeNodeRetryAfter  = 30 * time.Second
 )
 

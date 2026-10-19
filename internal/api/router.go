@@ -1343,6 +1343,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
 			playbackHandler.Connections = &connectionstore.Store{Pool: deps.DB}
+			playbackHandler.SourceBitrates = &catalog.SourceBitrates{Pool: deps.DB}
 			// The v2 playback contract binds every mutation to this server's
 			// installation identity; a client that read capabilities from a
 			// different installation is refused. Nothing else depends on it, so a

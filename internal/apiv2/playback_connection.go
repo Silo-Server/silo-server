@@ -21,6 +21,7 @@ type PlaybackLearnedLimit struct {
 }
 type PlaybackConnection struct {
 	Probe          *PlaybackProbe        `json:"probe,omitempty"`
+	PlaybackSample *PlaybackSample       `json:"playback_sample,omitempty" doc:"The best recent playback throughput on this connection, a lower bound on its speed."`
 	AutoBudgetKbps *int                  `json:"auto_budget_kbps,omitempty"`
 	Connection     string                `json:"connection"`
 	LearnedLimit   *PlaybackLearnedLimit `json:"learned_limit"`
@@ -49,7 +50,7 @@ func registerPlaybackConnection(reg *Registry) {
 		if err != nil {
 			return nil, playbackProblem(err)
 		}
-		body := PlaybackConnection{Connection: state.Connection, Probe: playbackProbeOf(state.Probe), AutoBudgetKbps: state.AutoBudgetKbps}
+		body := PlaybackConnection{Connection: state.Connection, Probe: playbackProbeOf(state.Probe), PlaybackSample: playbackSampleOf(state.PlaybackSample), AutoBudgetKbps: state.AutoBudgetKbps}
 		if limit := state.LearnedLimit; limit != nil {
 			body.LearnedLimit = &PlaybackLearnedLimit{Kbps: limit.Kbps, ObservedAt: limit.ObservedAt, ExpiresAt: limit.ExpiresAt}
 		}
@@ -75,9 +76,10 @@ type PlaybackProbeResultsInput struct {
 	DeviceID string `header:"X-Silo-Device-Id" maxLength:"128"`
 	Body     struct {
 		Kbps       int    `json:"kbps" minimum:"1" maximum:"1000000"`
-		Bytes      int64  `json:"bytes" minimum:"1" maximum:"100000000"`
+		Bytes      int64  `json:"bytes" minimum:"1" maximum:"1000000000"`
 		DurationMS int    `json:"duration_ms" minimum:"1" maximum:"60000"`
 		Transport  string `json:"transport" enum:"wifi,ethernet,cellular,other"`
+		LowerBound bool   `json:"lower_bound,omitempty" doc:"The test proved only that the link carries at least kbps: a quick test that reached its target, or a rate above the bound."`
 	}
 }
 
@@ -87,7 +89,7 @@ func registerPlaybackProbeResults(reg *Registry) {
 		if !ok {
 			return nil, unavailable("connection observations")
 		}
-		err := service.ReportPlaybackProbe(ctx, in.DeviceID, connectionstore.ProbeResult{Kbps: in.Body.Kbps, Bytes: in.Body.Bytes, DurationMS: in.Body.DurationMS, Transport: in.Body.Transport})
+		err := service.ReportPlaybackProbe(ctx, in.DeviceID, connectionstore.ProbeResult{Kbps: in.Body.Kbps, Bytes: in.Body.Bytes, DurationMS: in.Body.DurationMS, Transport: in.Body.Transport, LowerBound: in.Body.LowerBound})
 		if err != nil {
 			return nil, playbackProblem(err)
 		}
@@ -97,6 +99,7 @@ func registerPlaybackProbeResults(reg *Registry) {
 
 type PlaybackProbe struct {
 	Kbps       int       `json:"kbps"`
+	LowerBound bool      `json:"lower_bound" doc:"The test proved only that the link carries at least kbps."`
 	MeasuredAt time.Time `json:"measured_at"`
 	Transport  string    `json:"transport"`
 }
@@ -105,7 +108,19 @@ func playbackProbeOf(p *connectionstore.Probe) *PlaybackProbe {
 	if p == nil {
 		return nil
 	}
-	return &PlaybackProbe{Kbps: p.Kbps, MeasuredAt: p.MeasuredAt, Transport: p.Transport}
+	return &PlaybackProbe{Kbps: p.Kbps, LowerBound: p.LowerBound, MeasuredAt: p.MeasuredAt, Transport: p.Transport}
+}
+
+type PlaybackSample struct {
+	Kbps       int       `json:"kbps"`
+	MeasuredAt time.Time `json:"measured_at"`
+}
+
+func playbackSampleOf(s *connectionstore.Sample) *PlaybackSample {
+	if s == nil {
+		return nil
+	}
+	return &PlaybackSample{Kbps: s.Kbps, MeasuredAt: s.MeasuredAt}
 }
 func playbackLimitOf(p *connectionstore.Limit) *PlaybackLearnedLimit {
 	if p == nil {

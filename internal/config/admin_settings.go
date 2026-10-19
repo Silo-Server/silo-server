@@ -72,6 +72,17 @@ const (
 // the beginning.
 const PlaybackKeyframePlaylistSettingKey = "playback.copy_keyframe_playlist"
 
+// The connection speed test's schedule, delivered to clients with the probe
+// URL. Automatic tests run only when this is true; Test speed always works.
+// A reading lasts the max age, in days, before an automatic test is due again.
+const (
+	PlaybackBandwidthProbeAutomaticSettingKey  = "playback.bandwidth_probe_automatic"
+	PlaybackBandwidthProbeMaxAgeDaysSettingKey = "playback.bandwidth_probe_max_age_days"
+	// DefaultBandwidthProbeMaxAgeDays matches the lifetime of a learned limit.
+	DefaultBandwidthProbeMaxAgeDays = 7
+	maxBandwidthProbeMaxAgeDays     = 30
+)
+
 // CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
 // sources clients show in addition to IMDb and TMDB, which are always shown:
 // sources metadata plugins declare, such as rt_critic. Empty, the
@@ -488,6 +499,9 @@ var adminSettingDefaults = map[string]string{
 	"catalog.search.meilisearch.binary_quantized":         "false",
 
 	PlaybackKeyframePlaylistSettingKey: "false",
+
+	PlaybackBandwidthProbeAutomaticSettingKey:  "true",
+	PlaybackBandwidthProbeMaxAgeDaysSettingKey: strconv.Itoa(DefaultBandwidthProbeMaxAgeDays),
 }
 
 var legacyAdminSettingFallbacks = []struct {
@@ -604,7 +618,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	switch key {
 	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey,
-		PlaybackKeyframePlaylistSettingKey,
+		PlaybackKeyframePlaylistSettingKey, PlaybackBandwidthProbeAutomaticSettingKey,
 		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
 		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
@@ -678,6 +692,10 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalized, nil
 	case "playback.trickplay_interval_seconds":
 		return normalizeAdminInt(key, value, 5, 60)
+	case PlaybackBandwidthProbeMaxAgeDaysSettingKey:
+		// Rows are retained 30 days after their last update, so a longer
+		// lifetime would outlive the reading it describes.
+		return normalizeAdminInt(key, value, 1, maxBandwidthProbeMaxAgeDays)
 	case "playback.trickplay_workers":
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.watched_threshold":

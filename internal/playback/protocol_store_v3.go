@@ -167,6 +167,9 @@ type RouteEventRecordV3 struct {
 	ConnectionKey      string
 	Delivery           string
 	ReceivedAt         time.Time
+	// SampleLifetime is the speed reading lifetime when the event was
+	// received; a plan summary's throughput replaces an older sample.
+	SampleLifetime time.Duration
 	RouteEventV3
 	// EventID is the client-minted identity of one report. Empty for legacy
 	// v1 reports; a v2 report always carries one so a retry after a lost 202

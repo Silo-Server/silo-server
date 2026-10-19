@@ -55,6 +55,11 @@ type PlaybackCapabilitiesView struct {
 	ProtocolVersions                []int
 	Features                        []string
 	Deliveries                      []playback.DeliveryV3
+	// The connection speed test's schedule, with connection_speed_v1. A zero
+	// target means the server has no bitrates to set one from.
+	BandwidthProbeTargetKbps    int
+	BandwidthProbeAutomatic     bool
+	BandwidthProbeMaxAgeSeconds int
 }
 
 const playbackCapabilityStateAvailable = "available"
@@ -192,9 +197,13 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 		view.Features = append(view.Features, "watch_party_source_fallback_v1", "watch_party_coordinator_v1")
 	}
 	view.Deliveries = []playback.DeliveryV3{playback.DeliveryOriginalHTTPV3, playback.DeliveryRemuxProgressiveV3, playback.DeliveryRemuxHLSV3}
-	if h.playbackConfig().TranscodeEnabled {
+	settings := h.playbackConfig()
+	if settings.TranscodeEnabled {
 		view.Deliveries = append(view.Deliveries, playback.DeliveryTranscodeHLSV3)
 	}
+	view.BandwidthProbeAutomatic = !settings.AutomaticBandwidthProbeOff
+	view.BandwidthProbeMaxAgeSeconds = int(settings.BandwidthProbeMaxAge() / time.Second)
+	view.BandwidthProbeTargetKbps = h.bandwidthProbeTargetKbps(ctx)
 	capability, _ := json.Marshal(view) // This view contains only JSON-safe scalar values.
 	digest := sha256.Sum256(capability)
 	view.Revision = hex.EncodeToString(digest[:])
@@ -772,6 +781,7 @@ func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller Playbac
 		record.ConnectionDeviceID = connectionDeviceV3(caller.ConnectionDeviceID)
 		record.ConnectionKey, _ = connectionstore.Key(ctx, h.JWTSecret)
 		record.ReceivedAt = time.Now().UTC()
+		record.SampleLifetime = h.playbackConfig().BandwidthProbeMaxAge()
 		if lookup, ok := h.PlanStoreV3.(interface {
 			PlanDelivery(context.Context, string, string) (string, error)
 		}); ok {

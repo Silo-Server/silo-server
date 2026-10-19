@@ -36,9 +36,24 @@ func (h *PlaybackHandler) PlaybackConnection(ctx context.Context, device string,
 	if err != nil {
 		return state, err
 	}
-	state.Probe, err = h.Connections.Probe(ctx, apimw.GetUserID(ctx), device, key)
-	state.AutoBudgetKbps = connectionstore.Budget(state.Probe, nil, limit, requestBitrateCapV3(ctx))
-	return state, err
+	if state.Probe, err = h.Connections.Probe(ctx, apimw.GetUserID(ctx), device, key); err != nil {
+		return state, err
+	}
+	if state.PlaybackSample, err = h.Connections.Sample(ctx, apimw.GetUserID(ctx), device, key); err != nil {
+		return state, err
+	}
+	// Both readings are returned for display whatever their age; only those
+	// within the reading lifetime count toward the budget.
+	maxAge := h.playbackConfig().BandwidthProbeMaxAge()
+	probe, sample := state.Probe, state.PlaybackSample
+	if probe != nil && time.Since(probe.MeasuredAt) > maxAge {
+		probe = nil
+	}
+	if sample != nil && time.Since(sample.MeasuredAt) > maxAge {
+		sample = nil
+	}
+	state.AutoBudgetKbps = connectionstore.Budget(probe, sample, limit, requestBitrateCapV3(ctx))
+	return state, nil
 }
 
 // applyLearnedLimit plans Auto under the device's learned limit and returns the

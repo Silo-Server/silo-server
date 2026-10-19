@@ -18,6 +18,9 @@ func (f *fixturePlaybackService) PlaybackCapabilities(ctx context.Context, userI
 	}
 	view, err := f.fakePlaybackService.PlaybackCapabilities(ctx, userID, profileID)
 	view.Features = append(fixtureInitialPlaybackFeatures(), playback.FeatureBufferingQualityV1, playback.FeaturePlaybackPlanSummaryV1, playback.FeatureConnectionSpeedV1)
+	// The defaults, with a target from a library whose 99.9th percentile is
+	// 91 Mbps.
+	view.BandwidthProbeAutomatic, view.BandwidthProbeMaxAgeSeconds, view.BandwidthProbeTargetKbps = true, 7*24*60*60, 113750
 	return view, err
 }
 func (f *fixturePlaybackService) StartPlaybackV2(ctx context.Context, caller handlers.PlaybackCaller, request playback.StartRequestV3) (playback.DecisionResponseV3, error) {

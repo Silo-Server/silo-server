@@ -9708,7 +9708,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 32 probes at once; an account may run two of them and draw up to 400 MB per 10 minutes. Beyond any limit the request gets 429 with Retry-After. */
+    /** Download random bytes to measure throughput to this server. Clients time the transfer and send the result as bandwidth_estimate_kbps; the bytes count as transfer egress, not playback. A server runs at most 4 probes at once; an account may run two of them and draw up to 2,000,000,000 bytes per 10 minutes. Beyond any limit the request gets 429 with Retry-After. */
     get: operations["getPlaybackBandwidthProbe"];
     put?: never;
     post?: never;
@@ -14227,6 +14227,7 @@ export interface components {
       id: string;
       learned_limit: components["schemas"]["PlaybackLearnedLimit"];
       plan_summary: components["schemas"]["PlaybackPlanSummary"];
+      playback_sample: components["schemas"]["PlaybackSample"];
       probe: components["schemas"]["PlaybackProbe"];
     };
     AdminDeviceDetail: {
@@ -27154,6 +27155,18 @@ export interface components {
     PlaybackCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description With connection_speed_v1: false when the administrator turned automatic speed tests off. Test speed still works. */
+      bandwidth_probe_automatic?: boolean;
+      /**
+       * Format: int64
+       * @description With connection_speed_v1: how long a speed reading stays current.
+       */
+      bandwidth_probe_max_age_seconds?: number;
+      /**
+       * Format: int64
+       * @description With connection_speed_v1: the rate a quick speed test has to prove, the highest bitrate the server would plan for this viewer plus 25%. Absent when the server has no bitrates to set it from.
+       */
+      bandwidth_probe_target_kbps?: number;
       bandwidth_probe_url?: string;
       deliveries: string[];
       features: string[];
@@ -27176,6 +27189,8 @@ export interface components {
       auto_budget_kbps?: number;
       connection: string;
       learned_limit: components["schemas"]["PlaybackLearnedLimit"];
+      /** @description The best recent playback throughput on this connection, a lower bound on its speed. */
+      playback_sample?: components["schemas"]["PlaybackSample"];
       probe?: components["schemas"]["PlaybackProbe"];
     };
     PlaybackControlSocketCapabilitiesOutputBody: {
@@ -27294,6 +27309,8 @@ export interface components {
     PlaybackProbe: {
       /** Format: int64 */
       kbps: number;
+      /** @description The test proved only that the link carries at least kbps. */
+      lower_bound: boolean;
       /** Format: date-time */
       measured_at: string;
       transport: string;
@@ -27305,6 +27322,8 @@ export interface components {
       duration_ms: number;
       /** Format: int64 */
       kbps: number;
+      /** @description The test proved only that the link carries at least kbps: a quick test that reached its target, or a rate above the bound. */
+      lower_bound?: boolean;
       /** @enum {string} */
       transport: "wifi" | "ethernet" | "cellular" | "other";
     };
@@ -27421,6 +27440,12 @@ export interface components {
       event_id: string;
       /** @enum {string} */
       outcome: "accepted";
+    };
+    PlaybackSample: {
+      /** Format: int64 */
+      kbps: number;
+      /** Format: date-time */
+      measured_at: string;
     };
     PlaybackSession: {
       /**

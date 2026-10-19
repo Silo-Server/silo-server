@@ -172,3 +172,58 @@ func checkResetPreservesObservations(t *testing.T, s *Store, user int) {
 		t.Fatalf("reset lost observations: %+v %v", rows, err)
 	}
 }
+
+// TestReadingsDB: a probe keeps whether it was a lower bound, and a playback
+// sample is replaced only by a higher one, or by any once the kept sample is
+// older than the reading lifetime.
+func TestReadingsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var user int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, fmt.Sprintf("connection-readings-%d", time.Now().UnixNano())).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, user) }()
+	s := &Store{Pool: pool}
+	const lifetime = 7 * 24 * time.Hour
+
+	if err := s.ReportProbe(ctx, user, "device", "local", ProbeResult{Kbps: 115000, Bytes: 7187500, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {
+		t.Fatal(err)
+	}
+	if probe, err := s.Probe(ctx, user, "device", "local"); err != nil || probe == nil || probe.Kbps != 115000 || !probe.LowerBound {
+		t.Fatalf("lower-bound probe read back as %+v (%v)", probe, err)
+	}
+	for _, step := range []struct {
+		report, want int
+		age          string
+	}{
+		{report: 30000, want: 30000},
+		{report: 20000, want: 30000},
+		{report: 40000, want: 40000},
+		{age: "8 days", report: 10000, want: 10000},
+	} {
+		if step.age != "" {
+			if _, err := pool.Exec(ctx, `UPDATE playback_connections SET sample_at = now() - $2::interval WHERE user_id = $1`, user, step.age); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.ReportSample(ctx, user, "device", "local", step.report, lifetime); err != nil {
+			t.Fatal(err)
+		}
+		if sample, err := s.Sample(ctx, user, "device", "local"); err != nil || sample == nil || sample.Kbps != step.want {
+			t.Fatalf("after a %d sample (kept one aged %q): %+v (%v), want %d", step.report, step.age, sample, err, step.want)
+		}
+	}
+	rows, err := s.List(ctx, user, "device")
+	if err != nil || len(rows) != 1 || rows[0].Probe == nil || !rows[0].Probe.LowerBound || rows[0].PlaybackSample == nil || rows[0].PlaybackSample.Kbps != 10000 {
+		t.Fatalf("admin view: %+v (%v)", rows, err)
+	}
+}

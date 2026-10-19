@@ -401,3 +401,58 @@ func TestLearnedLimitCarriesThroughReplansDB(t *testing.T) {
 		}
 	}
 }
+
+// TestConnectionReadingsDB: a plan summary's throughput becomes the
+// connection's playback sample, a nonsense figure does not, a probe keeps its
+// lower bound, and only readings within their lifetime count toward the
+// budget, though both are still returned.
+func TestConnectionReadingsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	var user int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("connection-readings-%d", time.Now().UnixNano())).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM users WHERE id = $1`, user) })
+
+	connections := &connectionstore.Store{Pool: pool}
+	h := &PlaybackHandler{Connections: connections, JWTSecret: "connection-readings-secret"}
+	remote := clientip.SetContext(apimw.SetClaims(ctx, &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "203.0.113.7")
+	key, _ := connectionstore.Key(remote, h.JWTSecret)
+	if err := h.ReportPlaybackProbe(remote, "tv-1", connectionstore.ProbeResult{Kbps: 48000, Bytes: 3000000, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {
+		t.Fatal(err)
+	}
+	summary := func(throughput string) {
+		event := playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{Event: playback.RouteEventPlanSummaryV3, PlanID: "plan-1", Diagnostics: map[string]string{"throughput_kbps": throughput}},
+			EventID: fmt.Sprintf("summary-%s-%d", throughput, time.Now().UnixNano()), UserID: user, ConnectionDeviceID: "tv-1", ConnectionKey: key, ReceivedAt: time.Now(), SampleLifetime: 7 * 24 * time.Hour}
+		recordRouteEventV3(playback.NewMemoryPlanStoreV3(), event, connections)
+	}
+	for _, nonsense := range []string{"fast", "0", "2000000"} {
+		summary(nonsense)
+	}
+	state, err := h.PlaybackConnection(remote, "tv-1", false)
+	if err != nil || state.PlaybackSample != nil || state.Probe == nil || !state.Probe.LowerBound || state.AutoBudgetKbps == nil || *state.AutoBudgetKbps != 38400 {
+		t.Fatalf("before a sample: %+v (%v)", state, err)
+	}
+	summary("60000")
+	state, err = h.PlaybackConnection(remote, "tv-1", false)
+	if err != nil || state.PlaybackSample == nil || state.PlaybackSample.Kbps != 60000 || state.AutoBudgetKbps == nil || *state.AutoBudgetKbps != 48000 {
+		t.Fatalf("with a 60000 sample: %+v (%v)", state, err)
+	}
+	// Past the 7-day lifetime the probe is still shown but no longer counts.
+	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET measured_at = now() - interval '8 days', sample_at = now() - interval '8 days' WHERE user_id = $1`, user); err != nil {
+		t.Fatal(err)
+	}
+	state, err = h.PlaybackConnection(remote, "tv-1", false)
+	if err != nil || state.Probe == nil || state.PlaybackSample == nil || state.AutoBudgetKbps != nil {
+		t.Fatalf("expired readings: %+v (%v)", state, err)
+	}
+}

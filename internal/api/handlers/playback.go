@@ -186,7 +186,10 @@ type copySeekAnchorResolver func(
 
 // PlaybackHandler handles playback session HTTP endpoints.
 type PlaybackHandler struct {
-	Connections            *connectionstore.Store
+	Connections *connectionstore.Store
+	// SourceBitrates sets the connection speed test's target; nil sends none.
+	SourceBitrates         SourceBitratePercentiler
+	probeTargets           probeTargetCache
 	sessionMgr             SessionManagerInterface
 	fileResolver           FilePathResolver            // optional; enables stream_url in responses
 	StoreProvider          userstore.UserStoreProvider // optional; enables progress/history persistence
