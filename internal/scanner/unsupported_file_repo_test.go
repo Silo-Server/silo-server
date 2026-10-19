@@ -566,6 +566,51 @@ func TestUnsupportedFileRepositoryAddNew(t *testing.T) {
 	}
 }
 
+func TestUnsupportedFileRepositoryRecordsAcrossBatches(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Unsupported Batches Test")
+	repo := NewUnsupportedFileRepository(pool)
+	base := fmt.Sprintf("/unsupported-batches-%d", time.Now().UnixNano())
+	previous := unsupportedFileBatchSize
+	unsupportedFileBatchSize = 2
+	t.Cleanup(func() { unsupportedFileBatchSize = previous })
+
+	groups := func(names ...string) []models.UnsupportedMediaFileGroup {
+		out := make([]models.UnsupportedMediaFileGroup, 0, len(names))
+		for _, name := range names {
+			out = append(out, models.UnsupportedMediaFileGroup{MediaFolderID: folderID, DirectoryPath: base + "/" + name, Reason: UnsupportedReasonDVDVOB, FileCount: 1, FileNames: []string{"VTS_01_1.VOB"}})
+		}
+		return out
+	}
+	expect := func(step string, names ...string) {
+		t.Helper()
+		want := make([]string, 0, len(names))
+		for _, name := range names {
+			want = append(want, "/"+name+" dvd_vob 1")
+		}
+		if got := unsupportedRowsUnder(t, pool, folderID, base); strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Fatalf("%s: rows = %v, want %v", step, got, want)
+		}
+	}
+
+	// Five groups go out as batches of two, two and one.
+	if err := repo.Replace(ctx, folderID, nil, nil, nil, time.Now(), groups("A", "B", "C", "D", "E")); err != nil {
+		t.Fatalf("first replace: %v", err)
+	}
+	expect("first scan", "A", "B", "C", "D", "E")
+
+	if err := repo.Replace(ctx, folderID, nil, nil, nil, time.Now().Add(time.Minute), groups("A", "C", "E")); err != nil {
+		t.Fatalf("second replace: %v", err)
+	}
+	expect("second scan", "A", "C", "E")
+
+	if err := repo.AddNew(ctx, folderID, time.Now().Add(2*time.Minute), groups("A", "B", "D", "F", "G")); err != nil {
+		t.Fatalf("add new: %v", err)
+	}
+	expect("guarded scan", "A", "B", "C", "D", "E", "F", "G")
+}
+
 // unsupportedRowsUnder lists a library's stored groups as "dir reason count",
 // with base trimmed from each directory, in order.
 func unsupportedRowsUnder(t *testing.T, pool *pgxpool.Pool, folderID int, base string) []string {
