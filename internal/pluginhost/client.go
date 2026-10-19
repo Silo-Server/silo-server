@@ -151,6 +151,12 @@ func (c *Client) ImageResolver(capabilityID string) (*ImageResolverClient, error
 	}, nil
 }
 
+// NewMarkerProviderClient wraps a marker provider connection with the default
+// call timeout, for callers that hold the gRPC client directly.
+func NewMarkerProviderClient(client pluginv1.MarkerProviderClient) *MarkerProviderClient {
+	return &MarkerProviderClient{client: client, timeout: DefaultMarkerProviderTimeout}
+}
+
 func (c *Client) MarkerProvider(capabilityID string) (*MarkerProviderClient, error) {
 	if err := c.requireCapability("marker_provider.v1", capabilityID); err != nil {
 		return nil, err

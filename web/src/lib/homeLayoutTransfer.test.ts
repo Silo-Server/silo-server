@@ -476,6 +476,26 @@ describe("planHomeLayoutImport on the same server", () => {
     ]);
   });
 
+  it("skips a Next up row, which the server adds only itself", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [{ user_section_type: "next_up", user_title: "On deck" }],
+          },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.skippedSections).toEqual([
+      { page: "Home", title: "On deck", reason: "unknown_recipe" },
+    ]);
+    expect(plan.pages).toEqual([]);
+  });
+
   it("skips sections limited to libraries this profile can't open", () => {
     const plan = planHomeLayoutImport(
       layoutFile({

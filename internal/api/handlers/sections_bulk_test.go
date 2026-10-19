@@ -116,3 +116,24 @@ func TestBulkCreateRejectsLibraryScopeWithEmptyIDs(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 }
+
+func TestBulkCreateRefusesNextUp(t *testing.T) {
+	repo := &stubBulkRepo{}
+	h := &SectionBulkHandler{Repo: repo}
+	body, _ := json.Marshal(map[string]any{
+		"scope":        "library",
+		"library_ids":  []int{1},
+		"section_type": "next_up",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/sections/bulk-create", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.HandleBulkCreate(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if len(repo.created) != 0 {
+		t.Fatalf("expected zero created; got %d", len(repo.created))
+	}
+}

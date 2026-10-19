@@ -279,6 +279,9 @@ type TranscodeSession struct {
 	// subtitleSpans lists each generation's subtitle rendition cue file,
 	// oldest first. Guarded by mu.
 	subtitleSpans []subtitleCueSpan
+	// subtitleOriginMu serializes observations of a span's origin, so
+	// concurrent subtitle requests share one ffprobe run.
+	subtitleOriginMu sync.Mutex
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -3126,7 +3129,7 @@ func (s *TranscodeSession) cleanStaleSegments(startSegment int) {
 			os.Remove(filepath.Join(s.outputDir, name))
 			continue
 		}
-		if name == "init.mp4" {
+		if name == hlsInitSegmentName {
 			continue
 		}
 		segNum, parseErr := ParseSegmentNumber(name)

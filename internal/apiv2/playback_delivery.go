@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -234,3 +235,6 @@ func (w *playbackDeliveryWriter) Unwrap() http.ResponseWriter    { return w.Resp
 func (w *playbackDeliveryWriter) WriteHeader(status int)         { w.transport().WriteHeader(status) }
 func (w *playbackDeliveryWriter) Write(data []byte) (int, error) { return w.transport().Write(data) }
 func (w *playbackDeliveryWriter) FlushError() error              { return w.transport().FlushError() }
+func (w *playbackDeliveryWriter) ReadFrom(src io.Reader) (int64, error) {
+	return w.transport().ReadFrom(src)
+}

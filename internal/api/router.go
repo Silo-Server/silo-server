@@ -296,6 +296,10 @@ type Dependencies struct {
 	// Built in main.go with TMDB wired.
 	TrendingRefresher *sections.TrendingRefresher
 
+	// SeasonalListRefresher downloads the MDBList lists seasonal rows show.
+	// Built in main.go alongside the trending refresher.
+	SeasonalListRefresher *sections.SeasonalListRefresher
+
 	// MDBListClient is used by user-facing list discovery endpoints
 	// (search/top). May be nil; the handlers report "not configured" in
 	// that case rather than failing.
@@ -2023,6 +2027,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.TrendingRefresher != nil {
 			sectionHandler.TrendingRefresher = deps.TrendingRefresher
 		}
+		if deps.SeasonalListRefresher != nil {
+			sectionHandler.SeasonalLists = deps.SeasonalListRefresher
+		}
 		sectionHandler.CollectionRepo = sectionFetcher.CollectionRepo
 		sectionHandler.FolderRepo = deps.FolderRepo
 		if deps.UserStoreProvider != nil {
@@ -2113,6 +2120,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// snapshot table; the upstream fetch happens out-of-band in the refresh
 		// task, so the read path never calls the provider.
 		sectionFetcher.TrendingSnapshots = sections.NewTrendingSnapshotRepository(deps.DB)
+		sectionFetcher.SeasonalLists = sections.NewSeasonalListRepository(deps.DB)
+		if sectionFetcher.RecommendationRepo != nil {
+			sectionFetcher.SeasonalNeighbors = sectionFetcher.RecommendationRepo
+		}
 
 		libraryCollectionHandler = handlers.NewLibraryCollectionHandler(
 			libraryCollectionRepo,
@@ -5007,29 +5018,19 @@ func (a *tmdbCollectionAdapter) GetCollectionPreset(ctx context.Context, preset,
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]catalog.TMDBCollectionEntry, len(results))
-	for i, r := range results {
-		entry := catalog.TMDBCollectionEntry{
-			ID:        r.ID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-		}
+	return tmdbCollectionEntries(results), nil
+}
 
-		// Fetch external IDs (IMDb, TVDB) for better matching against local library.
-		if externalIDs, err := a.client.GetExternalIDs(ctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
-			entry.IMDbID = externalIDs.IMDbID
-			entry.TVDBID = externalIDs.TVDBID
-		}
+func (a *tmdbCollectionAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
 
-		entries[i] = entry
-	}
-	return entries, nil
+func (a *tmdbCollectionAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
 }
 
 // tmdbFranchiseAdapter adapts tmdb.Client to catalog.TMDBCollectionByIDFetcher
-// for the `tmdb_collection` sync mode. Like the preset adapter, it enriches
-// each TMDB collection part with external IDs so the catalog matcher can fall
-// back to IMDb/TVDB when a local item lacks a TMDB ID.
+// for the `tmdb_collection` sync mode.
 type tmdbFranchiseAdapter struct {
 	client *tmdb.Client
 }
@@ -5048,24 +5049,25 @@ func (a *tmdbFranchiseAdapter) GetCollection(ctx context.Context, id int) ([]cat
 		if mediaType == "" {
 			mediaType = "movie"
 		}
-		entry := catalog.TMDBCollectionEntry{
+		entries[i] = catalog.TMDBCollectionEntry{
 			ID:        p.ID,
 			MediaType: mediaType,
 			Title:     p.Title,
 		}
-		if externalIDs, err := a.client.GetExternalIDs(ctx, mediaType, p.ID); err == nil && externalIDs != nil {
-			entry.IMDbID = externalIDs.IMDbID
-			entry.TVDBID = externalIDs.TVDBID
-		}
-		entries[i] = entry
 	}
 	return entries, nil
 }
 
+func (a *tmdbFranchiseAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
+
+func (a *tmdbFranchiseAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
+}
+
 // tmdbDiscoverAdapter adapts tmdb.Client to catalog.TMDBDiscoverFetcher for
-// the `tmdb_discover` sync mode. Like the preset adapter, it enriches each
-// result with external IDs so the catalog matcher can fall back to IMDb/TVDB
-// when a local item lacks a TMDB ID.
+// the `tmdb_discover` sync mode.
 type tmdbDiscoverAdapter struct {
 	client *tmdb.Client
 }
@@ -5089,56 +5091,101 @@ func (a *tmdbDiscoverAdapter) Discover(ctx context.Context, mediaType string, pa
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]catalog.TMDBCollectionEntry, len(results))
-	for i, r := range results {
-		entry := catalog.TMDBCollectionEntry{
-			ID:        r.ID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-		}
-		if externalIDs, err := a.client.GetExternalIDs(ctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
-			entry.IMDbID = externalIDs.IMDbID
-			entry.TVDBID = externalIDs.TVDBID
-		}
-		entries[i] = entry
-	}
-	return entries, nil
+	return tmdbCollectionEntries(results), nil
+}
+
+func (a *tmdbDiscoverAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
+
+func (a *tmdbDiscoverAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
 }
 
 // tmdbListAdapter adapts tmdb.Client to catalog.TMDBListFetcher for the
-// `tmdb_list` sync mode. Like the other TMDB adapters, it enriches each entry
-// with external IDs so the matcher can fall back to IMDb/TVDB when a local
-// item lacks a TMDB ID.
+// `tmdb_list` sync mode.
 type tmdbListAdapter struct {
 	client *tmdb.Client
 }
-
-// tmdbListExternalIDLookups bounds the concurrent external-ID lookups for one
-// list. A list can hold up to 500 entries and the import runs its first sync
-// inside the request, so sequential lookups (one round trip each) would take
-// far longer than the client's shared rate limit requires.
-const tmdbListExternalIDLookups = 8
 
 func (a *tmdbListAdapter) GetList(ctx context.Context, id, limit int) ([]catalog.TMDBCollectionEntry, error) {
 	results, err := a.client.GetList(ctx, id, limit)
 	if err != nil {
 		return nil, err
 	}
+	return tmdbCollectionEntries(results), nil
+}
+
+func (a *tmdbListAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
+
+func (a *tmdbListAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
+}
+
+func tmdbCollectionEntries(results []tmdb.CollectionResult) []catalog.TMDBCollectionEntry {
 	entries := make([]catalog.TMDBCollectionEntry, len(results))
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(tmdbListExternalIDLookups)
 	for i, r := range results {
-		entries[i] = catalog.TMDBCollectionEntry{
-			ID:        r.ID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-		}
+		entries[i] = catalog.TMDBCollectionEntry{ID: r.ID, MediaType: r.MediaType, Title: r.Title}
+	}
+	return entries
+}
+
+// tmdbExternalIDLookups bounds the concurrent external-ID lookups of one sync.
+// The client's shared rate limit sets the pace; concurrency only keeps the
+// round trips from adding up, since an import runs its first sync inside the
+// request.
+const tmdbExternalIDLookups = 8
+
+// enrichTMDBExternalIDs fills in the IMDb and TVDB IDs of entries, which lets
+// the matcher find a local title that lacks a TMDB ID. The matcher asks only
+// for the entries their TMDB ID left unmatched.
+func enrichTMDBExternalIDs(ctx context.Context, client *tmdb.Client, entries []catalog.TMDBCollectionEntry) error {
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(tmdbExternalIDLookups)
+	for i := range entries {
 		g.Go(func() error {
 			// A failed lookup leaves the entry matchable by TMDB ID alone; only
 			// cancellation ends the sync.
-			if externalIDs, err := a.client.GetExternalIDs(gctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
+			if externalIDs, err := client.GetExternalIDs(gctx, entries[i].MediaType, entries[i].ID); err == nil && externalIDs != nil {
 				entries[i].IMDbID = externalIDs.IMDbID
 				entries[i].TVDBID = externalIDs.TVDBID
+			}
+			return gctx.Err()
+		})
+	}
+	return g.Wait()
+}
+
+// findTMDBIDs looks up the TMDB ID of each catalog title known only by IMDb or
+// TVDB ID, trying the provider that identifies itemType best first. A title
+// TMDB does not know, or whose lookup fails, gets 0; only cancellation ends
+// the sync.
+func findTMDBIDs(ctx context.Context, client *tmdb.Client, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	ids := make([]int, len(titles))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(tmdbExternalIDLookups)
+	for i, title := range titles {
+		g.Go(func() error {
+			lookups := [][2]string{{tmdb.ExternalSourceIMDb, title.IMDbID}, {tmdb.ExternalSourceTVDB, title.TVDBID}}
+			if itemType == "series" {
+				lookups[0], lookups[1] = lookups[1], lookups[0]
+			}
+			for _, lookup := range lookups {
+				if lookup[1] == "" {
+					continue
+				}
+				results, err := client.FindByExternalIDCached(gctx, lookup[0], lookup[1])
+				if err != nil {
+					continue
+				}
+				for _, result := range results {
+					if result.MediaType == itemType {
+						ids[i] = result.ID
+						return nil
+					}
+				}
 			}
 			return gctx.Err()
 		})
@@ -5146,7 +5193,7 @@ func (a *tmdbListAdapter) GetList(ctx context.Context, id, limit int) ([]catalog
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	return entries, nil
+	return ids, nil
 }
 
 // adminJobArtifactURLTTL matches the presigned lifetime an S3 deployment hands

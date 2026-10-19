@@ -221,9 +221,9 @@ func (s *ContributionService) contributeSegment(
 			Reason:   strings.Join(missing, ",") + " id required",
 		}, true
 	}
-	// Providers key episodes by show plus season and episode number; specials
-	// numbered season 0 and unnumbered episodes have no submittable target.
-	if ids.Kind == ItemKindEpisode && (ids.SeasonNumber <= 0 || ids.EpisodeNumber <= 0) {
+	// Providers key episodes by show plus season and episode number, so an
+	// unnumbered episode has no submittable target. Season 0 holds specials.
+	if ids.Kind == ItemKindEpisode && (ids.SeasonNumber < 0 || ids.EpisodeNumber <= 0) {
 		return ContributionOutcome{
 			Provider: providerID,
 			Segment:  seg.kind,
@@ -262,14 +262,17 @@ func (s *ContributionService) contributeSegment(
 	startDur := time.Duration(*seg.start * float64(time.Second))
 	endDur := time.Duration(*seg.end * float64(time.Second))
 	req := SubmissionRequest{
-		Kind:          ids.Kind,
-		ExternalIDs:   ids.AsRequestMap(),
-		SeasonNumber:  ids.SeasonNumber,
-		EpisodeNumber: ids.EpisodeNumber,
-		Segment:       seg.kind,
-		Start:         &startDur,
-		End:           &endDur,
-		Duration:      time.Duration(file.Duration) * time.Second,
+		Kind:               ids.Kind,
+		ExternalIDs:        ids.AsRequestMap(),
+		SeasonNumber:       ids.SeasonNumber,
+		EpisodeNumber:      ids.EpisodeNumber,
+		EpisodeExternalIDs: ids.Episode.AsRequestMap(),
+		EpisodeNumbering:   ids.EpisodeNumbering,
+		EpisodeTitle:       ids.EpisodeTitle,
+		Segment:            seg.kind,
+		Start:              &startDur,
+		End:                &endDur,
+		Duration:           time.Duration(file.Duration) * time.Second,
 	}
 
 	submitCtx, cancel := context.WithTimeout(ctx, contributionSubmitLimit)
@@ -344,8 +347,9 @@ func contributionTargetParts(ids ExternalIDs) []string {
 //
 // The item is identified by the first external ID the provider keys
 // submissions by, or else by TMDB, TVDB, then IMDb. The migration that
-// introduced the column, and the candidate query, derive the preference form
-// in SQL; the providers in use key by TMDB, where the two agree.
+// introduced the column, and the candidate query, derive the second form in
+// SQL, so the two agree for providers that declare no keyed IDs or key by
+// TMDB.
 func contributionTargetKey(ids ExternalIDs, keyedBy []string) string {
 	id := ""
 	values := ids.AsRequestMap()

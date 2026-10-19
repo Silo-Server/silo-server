@@ -840,8 +840,9 @@ func (r *PersonRepository) update(ctx context.Context, p models.Person, guard *P
 // missedPersonUpdate explains a person write that matched no row: the person
 // is gone (pgx.ErrNoRows), or, under a guard, their provider ids changed.
 // The guard itself is in the write's WHERE clause, so it is checked
-// atomically with the write and takes no lock ahead of the conflict
-// resolver's ordered ones.
+// atomically with the write. The write locks the person's row even when the
+// guard misses, but a miss only ends the transaction and nothing locks after
+// it, so that lock never sits ahead of the conflict resolver's ordered ones.
 func missedPersonUpdate(ctx context.Context, tx pgx.Tx, id int64, guard *PersonIdentity) error {
 	if guard == nil {
 		return pgx.ErrNoRows
@@ -856,8 +857,10 @@ func missedPersonUpdate(ctx context.Context, tx pgx.Tx, id int64, guard *PersonI
 	return pgx.ErrNoRows
 }
 
-// applyUpdate writes all non-key fields on a person and enqueues a search
-// reindex for the items they appear in, all in one transaction.
+// applyUpdate writes all non-key fields on a person and, when their name
+// changed, enqueues a search reindex for the items they appear in, all in one
+// transaction. Search documents carry only people's names, so a write that
+// keeps the name, such as a lookup filling in a bio or photo, leaves them be.
 func (r *PersonRepository) applyUpdate(ctx context.Context, p models.Person, guard *PersonIdentity) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -865,7 +868,7 @@ func (r *PersonRepository) applyUpdate(ctx context.Context, p models.Person, gua
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	affected, err := execPersonUpdate(ctx, tx, p, guard)
+	affected, renamed, err := execPersonUpdate(ctx, tx, p, guard)
 	if err != nil {
 		return err
 	}
@@ -874,8 +877,10 @@ func (r *PersonRepository) applyUpdate(ctx context.Context, p models.Person, gua
 		// concurrently), or its ids no longer match the guard.
 		return missedPersonUpdate(ctx, tx, p.ID, guard)
 	}
-	if err := reindexPersonItems(ctx, tx, p.ID); err != nil {
-		return err
+	if renamed {
+		if err := reindexPersonItems(ctx, tx, p.ID); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit person update tx: %w", err)
@@ -899,7 +904,7 @@ func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p model
 
 	var affected int64
 	for attempt := 0; ; attempt++ {
-		affected, err = tryPersonUpdate(ctx, tx, p, guard)
+		affected, _, err = tryPersonUpdate(ctx, tx, p, guard)
 		if err == nil {
 			break
 		}
@@ -927,6 +932,9 @@ func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p model
 		// never the survivor's stored ids, so the guard holds across retries.
 		return PersonIdentity{}, missedPersonUpdate(ctx, tx, p.ID, guard)
 	}
+	// Always reindex here: a merge moves the other person's credits onto
+	// this one, which changes the names on those items whatever this
+	// person's own name did.
 	if err := reindexPersonItems(ctx, tx, p.ID); err != nil {
 		return PersonIdentity{}, err
 	}
@@ -936,19 +944,25 @@ func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p model
 	return PersonIdentityOf(p), nil
 }
 
-// execPersonUpdate writes all non-key person fields and returns the rows affected.
-// execPersonUpdate writes a person's fields. When their provider ids change,
-// the last lookup's outcome was about another identity: it is cleared and the
+// execPersonUpdate writes a person's fields and reports the rows affected and
+// whether the write changed their name. When their provider ids change, the
+// last lookup's outcome was about another identity: it is cleared and the
 // person is due now, so one the providers didn't know under the old id isn't
 // left out of the sweep for good. The attempt time stays, so the person isn't
 // taken for one never looked up. The SET list reads the row's old ids. With a
-// guard the write matches only while the row still has the guarded ids.
-func execPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person, guard *PersonIdentity) (int64, error) {
+// guard the write matches only while the row still has the guarded ids. The
+// prior row is read under FOR NO KEY UPDATE, the lock the UPDATE takes anyway,
+// so after waiting on a concurrent writer it holds the name this write
+// replaces, not the statement snapshot's.
+func execPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person, guard *PersonIdentity) (int64, bool, error) {
 	var g PersonIdentity
 	if guard != nil {
 		g = *guard
 	}
-	tag, err := tx.Exec(ctx, `
+	rows, err := tx.Query(ctx, `
+		WITH prior AS (
+			SELECT id AS prior_id, name AS prior_name FROM people WHERE id = $1 FOR NO KEY UPDATE
+		)
 		UPDATE people SET name=$2, sort_name=$3, bio=$4, birth_date=$5, death_date=$6,
 			birthplace=$7, homepage=$8, photo_path=$9, photo_source_path=$10, photo_thumbhash=$11,
 			tmdb_id=$12, imdb_id=$13, tvdb_id=$14, plex_guid=$15, updated_at=now(),
@@ -958,37 +972,43 @@ func execPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person, guard *Pe
 				THEN 0 ELSE metadata_refresh_failures END,
 			metadata_refresh_due_at = CASE WHEN (tmdb_id, imdb_id, tvdb_id) IS DISTINCT FROM ($12, $13, $14)
 				THEN NOW() ELSE metadata_refresh_due_at END
-		WHERE id = $1
+		FROM prior
+		WHERE id = prior_id
 			AND (NOT $16::boolean OR (tmdb_id IS NOT DISTINCT FROM $17
 				AND imdb_id IS NOT DISTINCT FROM $18
-				AND tvdb_id IS NOT DISTINCT FROM $19))`,
+				AND tvdb_id IS NOT DISTINCT FROM $19))
+		RETURNING prior_name IS DISTINCT FROM name`,
 		p.ID, p.Name, p.SortName, p.Bio, p.BirthDate, p.DeathDate,
 		p.Birthplace, p.Homepage, p.PhotoPath, p.PhotoSourcePath, p.PhotoThumbhash,
 		p.TmdbID, p.ImdbID, p.TvdbID, p.PlexGUID,
 		guard != nil, g.TmdbID, g.ImdbID, g.TvdbID,
 	)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return tag.RowsAffected(), nil
+	renamed, err := pgx.CollectRows(rows, pgx.RowTo[bool])
+	if err != nil {
+		return 0, false, err
+	}
+	return int64(len(renamed)), len(renamed) > 0 && renamed[0], nil
 }
 
 // tryPersonUpdate runs execPersonUpdate inside a savepoint so a unique violation
 // rolls back only the attempt, leaving the surrounding transaction usable.
-func tryPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person, guard *PersonIdentity) (int64, error) {
+func tryPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person, guard *PersonIdentity) (int64, bool, error) {
 	sp, err := tx.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("begin person update savepoint: %w", err)
+		return 0, false, fmt.Errorf("begin person update savepoint: %w", err)
 	}
-	affected, err := execPersonUpdate(ctx, sp, p, guard)
+	affected, renamed, err := execPersonUpdate(ctx, sp, p, guard)
 	if err != nil {
 		_ = sp.Rollback(ctx)
-		return 0, err
+		return 0, false, err
 	}
 	if err := sp.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("release person update savepoint: %w", err)
+		return 0, false, fmt.Errorf("release person update savepoint: %w", err)
 	}
-	return affected, nil
+	return affected, renamed, nil
 }
 
 // reindexPersonItems enqueues a catalog-search reindex for every item the person

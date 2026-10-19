@@ -379,6 +379,8 @@ function sectionSkipReason(
   const recipeType = override.user_section_type || override.section_type || "";
   const isFilterType = FILTER_SECTION_TYPES.has(recipeType);
   const recipe = target.recipes.get(recipeType);
+  // The server refuses a new next_up row: it adds the only one itself.
+  if (recipeType === "next_up") return "unknown_recipe";
   // The gallery omits hidden recipes the server still resolves (award_winners),
   // so on the same server a saved row's type is trusted.
   if (!recipe && !isFilterType && !sameServer) return "unknown_recipe";

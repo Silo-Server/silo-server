@@ -966,15 +966,15 @@ export function VideoPlayer({
   // Read by timers that must use the newest clock estimate without restarting.
   const serverTimeOffsetRef = useRef(watchTogether.serverTimeOffsetMs);
   serverTimeOffsetRef.current = watchTogether.serverTimeOffsetMs;
-  // The browser decode engine's audio follows playbackRate without keeping
-  // pitch, so room sync corrects it by seeking instead of nudging.
+  // Room sync corrects the browser decode engine by seeking. Its audio keeps
+  // pitch at other rates too, but rate nudges have not been checked against
+  // room drift on it, so it keeps the seek path it had when they could not.
   const roomRateCapableRef = useRef(!browserEngineActive);
   roomRateCapableRef.current = !browserEngineActive;
   // The viewer's speed for this player session. A room plays everyone at 1x
-  // and nudges the rate itself to keep viewers together. The browser engine
-  // also plays at 1x: its audio follows the rate without keeping pitch.
+  // and nudges the rate itself to keep viewers together.
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const baseRate = roomPlaybackActive || browserEngineActive ? 1 : playbackSpeed;
+  const baseRate = roomPlaybackActive ? 1 : playbackSpeed;
   const roomSyncWaiting = watchTogether.room?.playback_state === "waiting";
   // Media events acknowledge readiness while the room waits and while this
   // viewer recovers from a stall the room did not wait for.
@@ -4010,8 +4010,8 @@ export function VideoPlayer({
   // Continuous drift loop: while the room and this viewer both play, absorb
   // drift from the room reference with a rate nudge. It never seeks a player
   // that can nudge; drift too large for a nudge is the server's to correct,
-  // and that correction arrives as a command. A player without pitch-kept
-  // rate changes seeks within reach instead. Around a command (scheduled,
+  // and that correction arrives as a command. A player room sync does not
+  // nudge seeks within reach instead. Around a command (scheduled,
   // just executed, or loading media) the loop only waits, before looking at
   // the room state: the snapshot that announces a command can arrive before
   // it executes, and a received command must not change the rate. Otherwise,
@@ -5106,9 +5106,7 @@ export function VideoPlayer({
               : undefined
           }
           playbackSpeed={playbackSpeed}
-          onPlaybackSpeedChange={
-            roomPlaybackActive || browserEngineActive ? undefined : setPlaybackSpeed
-          }
+          onPlaybackSpeedChange={roomPlaybackActive ? undefined : setPlaybackSpeed}
           onTogglePiP={browserEngineActive ? undefined : handleTogglePiP}
           onPlayPause={handlePlayPause}
           onSeek={handlePlayerSeek}

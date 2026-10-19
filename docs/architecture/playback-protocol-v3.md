@@ -1498,9 +1498,19 @@ admit `master.m3u8` with exactly one `silo_rendition=video` or
 
 The transcode's own FFmpeg process writes the track as WebVTT beside the HLS
 output, on the same `-copyts` source clock, so a cue is on disk once the video
-around it is. Subtitle segment N carries every cue overlapping
-`[N·d, (N+1)·d)` with its absolute source time and settings; a cue spanning
-segments repeats in each. Every segment starts with
+around it is. Subtitle segment N carries every cue overlapping the source
+time video segment N covers, `[O + (N−K)·d, O + (N−K+1)·d)`, with its absolute
+source time and settings; a cue spanning segments repeats in each. K is the
+segment the generation started at and O the source time of its first video
+frame, read once per generation from that segment's first video PTS less the
+timestamp-map shift below. O is not `K·d` when the source clock does not start
+at zero: the first generation's grid starts at the first video frame, while an
+input seek counts from the container's start time. On MPEG-TS, whose
+timestamps wrap at 2^33 ticks, O takes the cue clock's epoch, and every window
+of the generation keeps it. A
+generation's output is read only while no restart is under way and no later
+generation has rewritten it; a generation whose origin cannot be read uses
+`[N·d, (N+1)·d)`. Every segment starts with
 `X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:<offset>`, where `<offset>` is the
 video segments' shift from the source clock: 900000 (10 s) for MPEG-TS and 0
 for fMP4. A segment whose cues are not produced yet is waited for while

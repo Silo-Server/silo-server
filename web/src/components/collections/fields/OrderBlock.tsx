@@ -12,7 +12,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
-import { COLLECTION_MAX_ITEMS } from "@/lib/collectionTemplates";
 import {
   COLLECTION_SOURCE_ORDER,
   collectionDefaultSortOptions,
@@ -219,12 +218,10 @@ function SmartOrder({
 function MaxTitlesInput({
   limit,
   placeholder,
-  max,
   onCommit,
 }: {
   limit: number | undefined;
   placeholder: string;
-  max?: number;
   onCommit: (input: HTMLInputElement) => void;
 }) {
   return (
@@ -233,7 +230,6 @@ function MaxTitlesInput({
         key={limit ?? ""}
         type="number"
         min={1}
-        max={max}
         step={1}
         aria-label="Max titles"
         placeholder={placeholder}
@@ -271,8 +267,7 @@ function SyncedOrder({
   );
 
   function commitLimit(input: HTMLInputElement) {
-    const typed = parsedLimit(input.value, limit);
-    const next = typed === undefined ? undefined : Math.min(typed, COLLECTION_MAX_ITEMS);
+    const next = parsedLimit(input.value, limit);
     input.value = next === undefined ? "" : String(next);
     if (next !== limit) onLimitChange(next);
   }
@@ -298,12 +293,7 @@ function SyncedOrder({
             ))}
           </SelectContent>
         </Select>
-        <MaxTitlesInput
-          limit={limit}
-          placeholder="Whole list"
-          max={COLLECTION_MAX_ITEMS}
-          onCommit={commitLimit}
-        />
+        <MaxTitlesInput limit={limit} placeholder="Whole list" onCommit={commitLimit} />
       </div>
       <p className="text-muted-foreground text-[13px]">
         {SYNCED_ORDER_HELP} {ORDER_HELP}

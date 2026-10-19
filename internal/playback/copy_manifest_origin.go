@@ -2,12 +2,13 @@ package playback
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -89,26 +90,58 @@ func (s *TranscodeSession) copyManifestOrigin(opts TranscodeOpts, generation uin
 	return origin, nil
 }
 
+// hlsInitSegmentName is the fMP4 initialization segment FFmpeg's HLS muxer
+// writes beside the media segments.
+const hlsInitSegmentName = "init.mp4"
+
 // fMP4 retains packet timestamps without MPEG-TS wraparound. Callers calibrate
 // the mux offset against the first fragment before mapping onto source time.
-// Feed only the generated init and requested fragment, so a live playlist cannot
-// advance between observation and probing. No source file or remote URI opens.
 func probeCopyFragmentOrigin(ctx context.Context, opts TranscodeOpts, outputDir string, number int) (float64, error) {
-	init, err := os.Open(filepath.Join(outputDir, "init.mp4"))
+	origin, err := probeSegmentVideoPTS(ctx, opts, outputDir, number)
 	if err != nil {
-		return 0, fmt.Errorf("open copy init: %w", err)
+		return 0, err
 	}
-	defer func() { _ = init.Close() }()
-	fragment, err := os.Open(filepath.Join(outputDir, fmt.Sprintf("seg_%05d.m4s", number)))
+	if origin < 0 {
+		return 0, errors.New("copy fragment has no valid source timestamp")
+	}
+	return origin, nil
+}
+
+// probeSegmentVideoPTS reads the presentation time of the first video packet
+// in one produced HLS segment. Feed only the generated init and the requested
+// segment, so a live playlist cannot advance between observation and probing.
+// No source file or remote URI opens. MPEG-TS times are 33-bit and ffprobe may
+// report them signed; callers that compare them must allow for wraparound.
+func probeSegmentVideoPTS(ctx context.Context, opts TranscodeOpts, outputDir string, number int) (float64, error) {
+	root, err := os.OpenRoot(outputDir)
 	if err != nil {
-		return 0, fmt.Errorf("open copy fragment: %w", err)
+		return 0, fmt.Errorf("open segment directory: %w", err)
 	}
-	defer func() { _ = fragment.Close() }()
+	defer func() { _ = root.Close() }()
+	names := []string{segmentFilename(number, opts)}
+	if videoUsesFMP4(opts) {
+		names = []string{hlsInitSegmentName, names[0]}
+	}
+	inputs := make([]io.Reader, 0, len(names))
+	files := make([]*os.File, 0, len(names))
+	defer func() {
+		for _, file := range files {
+			_ = file.Close()
+		}
+	}()
+	for _, name := range names {
+		file, err := root.Open(name)
+		if err != nil {
+			return 0, fmt.Errorf("open segment: %w", err)
+		}
+		files = append(files, file)
+		inputs = append(inputs, file)
+	}
 	cmd := exec.CommandContext(ctx, ffprobePathFromFFmpeg(ResolveFFmpegPath(opts.FFmpegPath)),
 		"-v", "error", "-probesize", "5000000", "-analyzeduration", "3000000",
 		"-select_streams", "v:0", "-read_intervals", "%+#1", "-show_entries", "packet=pts_time",
-		"-of", "csv=p=0", "-i", "pipe:0")
-	cmd.Stdin = io.MultiReader(init, fragment)
+		"-of", "json", "-i", "pipe:0")
+	cmd.Stdin = io.MultiReader(inputs...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return 0, err
@@ -125,15 +158,25 @@ func probeCopyFragmentOrigin(ctx context.Context, opts TranscodeOpts, outputDir 
 		return 0, readErr
 	}
 	if len(data) > 4096 {
-		return 0, fmt.Errorf("copy fragment timestamp output exceeds limit")
+		return 0, errors.New("segment timestamp output exceeds limit")
 	}
 	if waitErr != nil {
-		return 0, fmt.Errorf("probe copy fragment timestamp: %w", waitErr)
+		return 0, fmt.Errorf("probe segment timestamp: %w", waitErr)
 	}
-	value := strings.TrimSpace(string(data))
-	origin, err := strconv.ParseFloat(value, 64)
-	if err != nil || math.IsNaN(origin) || math.IsInf(origin, 0) || origin < 0 {
-		return 0, fmt.Errorf("copy fragment has no valid source timestamp")
+	var report struct {
+		Packets []struct {
+			PTS string `json:"pts_time"`
+		} `json:"packets"`
 	}
-	return origin, nil
+	if err := json.Unmarshal(data, &report); err != nil {
+		return 0, fmt.Errorf("parse segment timestamp: %w", err)
+	}
+	if len(report.Packets) == 0 {
+		return 0, errors.New("segment has no video timestamp")
+	}
+	pts, err := strconv.ParseFloat(strings.TrimSpace(report.Packets[0].PTS), 64)
+	if err != nil || math.IsNaN(pts) || math.IsInf(pts, 0) {
+		return 0, errors.New("segment has no valid video timestamp")
+	}
+	return pts, nil
 }

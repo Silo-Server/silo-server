@@ -7,6 +7,7 @@ import golden from "@/lib/homeRows/payloads.golden.json";
 import { expectPhoneLayout, stubPhone } from "@/components/homeRows/phoneLayout.test-support";
 import { recipeCatalogFixture } from "@/lib/homeRows/recipeCatalogFixture.test-support";
 import { V2ProblemError } from "@/api/v2/request";
+import seasonalThemes from "../../../contracts/api/v2/fixtures/list_seasonal_themes_ok.json";
 import AdminHomeRows from "./AdminHomeRows";
 
 const mocks = vi.hoisted(() => ({
@@ -140,6 +141,7 @@ beforeEach(() => {
     args.onResponse?.(new Response(null, { headers: { ETag: '"rev-1"' } }));
     const scope = args.query?.scope ?? "home";
     const here = rows.filter((row) => row.scope === scope);
+    if (operation === "GET /api/v2/sections/seasonal-themes") return seasonalThemes;
     if (operation === "GET /api/v2/admin/sections/capabilities")
       return { available: true, reset_profiles: false, preview };
     if (operation === "GET /api/v2/admin/sections/order")

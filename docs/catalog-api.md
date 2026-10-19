@@ -256,8 +256,10 @@ whether it runs on import, through `syncCollection`, or on the collection's sche
 - The item limit fills with titles the owner can access. The sync checks every source entry
   it reads before it applies the limit, so titles outside the owner's access never take a
   slot. With an item limit set, the sync reads at most four times the limit from the source
-  (100 to 500 entries), so an owner with tight limits can get fewer titles than the limit
-  even when the full source list holds enough the owner can access.
+  (at least 100 entries), so an owner with tight limits can get fewer titles than the limit
+  even when the full source list holds enough the owner can access. The limit can be any
+  positive number. Without one, an MDBList sync reads up to 10,000 entries, a TMDB list sync
+  the whole list, and a TMDB preset its first 20.
 - `library_ids` keeps only titles in one of the listed libraries, and each title must still
   be one the owner can access. Omit it to match against everything the owner can access.
 - The sync summary counts only titles the owner can access. `items_matched` counts the
@@ -415,6 +417,12 @@ series, orders the cards by most recent activity, and returns at most the row's
 previous episode; with `ui.next_up_new_releases_first` on, it is when the next
 episode was released to the server if that came later. With `separate`, the row holds only in-progress cards and
 Next Up is its own row.
+
+The server inserts that Next Up row (`system-next-up`, type `next_up`) after
+Continue Watching; it is the only one. The recipe gallery does not list
+`next_up`, and creating an admin row of that type, changing a row to it, or
+adding it to a profile's page fails validation. A profile can still save a
+`next_up` row it already has, such as one brought in by a bridge import.
 
 ## Bridge note
 
@@ -621,7 +629,8 @@ PostgreSQL search retains the complete relevance tuple or requested SQL sort
 rather than a numeric page. It selects the FTS or bounded fuzzy retrieval family
 on the first page and retains that choice. The existing fuzzy candidate cap and
 reranking remain in force. A fuzzy-family query that becomes a richer FTS query
-returns `invalid_cursor` so the client can restart. PostgreSQL search retains its
+returns `invalid_cursor` so the client can restart, as does a cursor issued by a
+server whose PostgreSQL ranking differed. PostgreSQL search retains its
 three-second deadline inside the overall browse deadline.
 
 Meilisearch captures the configured ranked result window in one provider response,

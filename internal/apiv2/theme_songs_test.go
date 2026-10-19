@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -123,6 +125,40 @@ func TestThemeSongsContractAndAuthorization(t *testing.T) {
 	rec = do(t, newTestHandler(t, deps), "GET", capability, "", themeSongHeaders())
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"state":"not_configured"`) {
 		t.Fatal(rec.Code, rec.Body.String())
+	}
+}
+
+// originalThemeSongs grants every audio request the original file at path.
+type originalThemeSongs struct {
+	fakeThemeSongs
+	path string
+}
+
+func (s *originalThemeSongs) OpenGrant(context.Context, string, string, string) (themesongs.File, themesongs.Delivery, *os.File, error) {
+	f, err := os.Open(s.path)
+	if err != nil {
+		return themesongs.File{}, "", nil, err
+	}
+	file := themesongs.File{Song: themesongs.Song{ID: "7", Title: "Opening", Container: "mp3"}, Size: 64 << 10, Modified: time.Unix(1700000000, 0)}
+	return file, themesongs.DeliveryOriginal, f, nil
+}
+
+// Original theme audio must reach the connection's ReadFrom with the file
+// still visible to sendfile, as TestPlaybackDeliveryKeepsZeroCopy checks for
+// the stream route.
+func TestThemeSongAudioKeepsZeroCopy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "theme.mp3")
+	body := strings.Repeat("x", 64<<10)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps, _ := catalogDeps(t)
+	deps.ThemeSongs = &originalThemeSongs{path: path}
+	h := newTestHandler(t, deps)
+	inner := &zeroCopyWriter{ResponseRecorder: httptest.NewRecorder()}
+	h.ServeHTTP(inner, httptest.NewRequest(http.MethodGet, Prefix+"/catalog/items/movie:heat-1995/themes/7/audio?token=grant", nil))
+	if inner.Code != http.StatusOK || inner.Body.String() != body || inner.fromFile != int64(len(body)) {
+		t.Fatalf("status %d, body %d bytes, %d of them read from the file by ReadFrom", inner.Code, inner.Body.Len(), inner.fromFile)
 	}
 }
 

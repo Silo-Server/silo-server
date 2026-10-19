@@ -229,8 +229,8 @@ export interface RoomCommandInput {
   /** Whether the element was playing when the command executed. */
   localPlaying: boolean;
   /**
-   * Whether this player can nudge its playback rate without audible pitch
-   * change. The browser decode engine cannot; it corrects drift by seeking.
+   * Whether room sync may nudge this player's playback rate. The browser
+   * decode engine corrects drift by seeking instead.
    */
   rateCapable: boolean;
   /**

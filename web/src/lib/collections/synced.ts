@@ -59,7 +59,7 @@ export interface SyncedDraft {
   /** The MDBList and TMDB list links, as typed. */
   mdblistLink: string;
   tmdbListLink: string;
-  /** Blank takes the whole list (up to 500). */
+  /** Blank takes the whole list. */
   limit?: number;
   /** Server: a cron expression. Personal: a schedule name. "" = no scheduled sync. */
   schedule: string;
