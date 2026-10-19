@@ -54,8 +54,8 @@ Settled on 2026-10-18, for the connection speed test:
 
 ## Motivation
 
-On 2026-10-17 an onn 4K Pro (Android TV) buffered all the way through
-*A Minecraft Movie* on Auto. The file was a 63 Mbps (average) 4K Dolby Vision
+On 2026-10-17 an onn 4K Pro (Android TV) buffered all the way through a
+feature film on Auto. The file was a 63 Mbps (average) 4K Dolby Vision
 remux. The link delivered 40–80 Mbps with 50 ms of round-trip time, and the
 player's 128 MiB buffer held only about 17 seconds at that bitrate. What happened:
 
