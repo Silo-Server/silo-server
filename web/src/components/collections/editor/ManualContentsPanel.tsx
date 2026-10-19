@@ -770,19 +770,21 @@ export function ManualContentsPanel({
 
       {addProblem ? (
         <div
-          role={capabilityQuery.isPending ? "status" : "alert"}
+          role={capabilityQuery.isPending || items.isLoading ? "status" : "alert"}
           className="text-muted-foreground grid justify-items-start gap-2 text-[13px]"
         >
           <p>{addProblem}</p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={capabilityQuery.isFetching}
-            onClick={() => void capabilityQuery.refetch()}
-          >
-            Try loading again
-          </Button>
+          {!capabilityQuery.isSuccess && !capabilityQuery.isPending ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={capabilityQuery.isFetching}
+              onClick={() => void capabilityQuery.refetch()}
+            >
+              Try loading again
+            </Button>
+          ) : null}
         </div>
       ) : null}
 

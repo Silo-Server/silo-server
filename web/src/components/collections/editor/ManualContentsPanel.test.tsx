@@ -327,6 +327,16 @@ describe.each([PERSONAL_SCOPE, SERVER_SCOPE])("append readiness in $kind scope",
             : "Couldn't check whether titles can be added. Try loading again.",
         ),
       ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Try loading again" }) !== null).toBe(
+        phase === "failed",
+      );
+      expect(
+        screen.getByText(
+          phase === "pending"
+            ? "Checking whether titles can be added…"
+            : "Couldn't check whether titles can be added. Try loading again.",
+        ).parentElement,
+      ).toHaveAttribute("role", phase === "pending" ? "status" : "alert");
       fireEvent.keyDown(input, { key: "Enter" });
       fireEvent.click(screen.getByRole("button", { name: "Try again" }));
       expect(retry).not.toHaveBeenCalled();
@@ -469,6 +479,11 @@ describe.each([PERSONAL_SCOPE, SERVER_SCOPE])("append readiness in $kind scope",
     mocks.page.mockReturnValue({ isLoading: true });
     const view = show([], 999, scope);
     expect(screen.getByRole("combobox", { name: "Add a title" })).toBeDisabled();
+    expect(screen.getByText("Loading titles before adding more…").parentElement).toHaveAttribute(
+      "role",
+      "status",
+    );
+    expect(screen.queryByRole("button", { name: "Try loading again" })).not.toBeInTheDocument();
     mocks.page.mockReturnValue({
       data: { items: [item("first", 31)], page: { has_more: false } },
       isLoading: false,
