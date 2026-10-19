@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
@@ -23,8 +25,9 @@ const (
 	probeTargetPercentile = 0.999
 	probeTargetCacheTTL   = time.Hour
 	// A failed read is retried soon, without a query on every capability read.
-	probeTargetErrorTTL = time.Minute
-	maxProbeTargetKbps  = 1_000_000
+	probeTargetErrorTTL     = time.Minute
+	probeTargetQueryTimeout = 10 * time.Second
+	maxProbeTargetKbps      = 1_000_000
 )
 
 // probeTargetCache keeps the percentile for each library scope, which changes
@@ -32,6 +35,7 @@ const (
 type probeTargetCache struct {
 	mu      sync.Mutex
 	entries map[string]probeTargetEntry
+	reads   singleflight.Group
 }
 
 type probeTargetEntry struct {
@@ -59,28 +63,38 @@ func (h *PlaybackHandler) sourceBitratePercentile(ctx context.Context, filter ca
 	if h.SourceBitrates == nil {
 		return 0
 	}
-	var key strings.Builder
-	filter.WriteAccessScopeCacheKey(&key)
-	key.WriteString("|quality=")
-	key.WriteString(filter.MaxPlaybackQuality)
-	now := time.Now()
+	var builder strings.Builder
+	filter.WriteAccessScopeCacheKey(&builder)
+	builder.WriteString("|quality=")
+	builder.WriteString(filter.MaxPlaybackQuality)
+	key := builder.String()
 	h.probeTargets.mu.Lock()
-	entry, ok := h.probeTargets.entries[key.String()]
+	cached, ok := h.probeTargets.entries[key]
 	h.probeTargets.mu.Unlock()
-	if ok && now.Before(entry.expires) {
-		return entry.kbps
+	if ok && time.Now().Before(cached.expires) {
+		return cached.kbps
 	}
-	kbps, err := h.SourceBitrates.Percentile(ctx, filter, probeTargetPercentile)
-	entry = probeTargetEntry{kbps: kbps, expires: now.Add(probeTargetCacheTTL)}
-	if err != nil {
-		slog.WarnContext(ctx, "speed test target unavailable", "component", "playback", "error", err)
-		entry = probeTargetEntry{expires: now.Add(probeTargetErrorTTL)}
-	}
-	h.probeTargets.mu.Lock()
-	if h.probeTargets.entries == nil {
-		h.probeTargets.entries = map[string]probeTargetEntry{}
-	}
-	h.probeTargets.entries[key.String()] = entry
-	h.probeTargets.mu.Unlock()
-	return entry.kbps
+	// Capability reads for one scope share a query, and it outlives the
+	// request that started it, so a client that disconnects mid-read does
+	// not leave a failure cached for everyone.
+	target, _, _ := h.probeTargets.reads.Do(key, func() (any, error) {
+		queryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTargetQueryTimeout)
+		defer cancel()
+		kbps, err := h.SourceBitrates.Percentile(queryCtx, filter, probeTargetPercentile)
+		entry := probeTargetEntry{kbps: kbps, expires: time.Now().Add(probeTargetCacheTTL)}
+		if err != nil {
+			slog.WarnContext(ctx, "speed test target unavailable", "component", "playback", "error", err)
+			// Keep the last good target while the read is retried soon.
+			entry = probeTargetEntry{kbps: cached.kbps, expires: time.Now().Add(probeTargetErrorTTL)}
+		}
+		h.probeTargets.mu.Lock()
+		if h.probeTargets.entries == nil {
+			h.probeTargets.entries = map[string]probeTargetEntry{}
+		}
+		h.probeTargets.entries[key] = entry
+		h.probeTargets.mu.Unlock()
+		return entry.kbps, nil
+	})
+	kbps, _ := target.(int)
+	return kbps
 }

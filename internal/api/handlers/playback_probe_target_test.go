@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -17,11 +18,14 @@ type countingPercentiles struct {
 	last  catalog.AccessFilter
 }
 
-func (c *countingPercentiles) Percentile(_ context.Context, filter catalog.AccessFilter, fraction float64) (int, error) {
+func (c *countingPercentiles) Percentile(ctx context.Context, filter catalog.AccessFilter, fraction float64) (int, error) {
 	c.calls++
 	c.last = filter
 	if fraction != probeTargetPercentile {
 		return 0, errors.New("unexpected percentile")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 	return c.kbps, c.err
 }
@@ -77,5 +81,32 @@ func TestBandwidthProbeTargetCachesPerLibraryScope(t *testing.T) {
 	failing := &PlaybackHandler{SourceBitrates: &countingPercentiles{err: errors.New("down")}}
 	if got := failing.bandwidthProbeTargetKbps(all); got != 0 {
 		t.Fatalf("failed read sent target %d", got)
+	}
+}
+
+// A capability read whose client went away still caches the target it read,
+// and a read that fails after a good one keeps that target until the retry.
+func TestBandwidthProbeTargetSurvivesCanceledAndFailedReads(t *testing.T) {
+	source := &countingPercentiles{kbps: 40000}
+	h := &PlaybackHandler{SourceBitrates: source}
+	canceled, cancel := context.WithCancel(newAuthorizedPlaybackContext())
+	cancel()
+	if got := h.bandwidthProbeTargetKbps(canceled); got != 50000 {
+		t.Fatalf("canceled request: target = %d, want 50000", got)
+	}
+
+	all := newAuthorizedPlaybackContext()
+	h.probeTargets.mu.Lock()
+	for key, entry := range h.probeTargets.entries {
+		entry.expires = time.Now().Add(-time.Second)
+		h.probeTargets.entries[key] = entry
+	}
+	h.probeTargets.mu.Unlock()
+	source.err = errors.New("down")
+	if got := h.bandwidthProbeTargetKbps(all); got != 50000 {
+		t.Fatalf("failed refresh: target = %d, want the last good 50000", got)
+	}
+	if source.calls != 2 {
+		t.Fatalf("read the percentile %d times, want 2", source.calls)
 	}
 }
