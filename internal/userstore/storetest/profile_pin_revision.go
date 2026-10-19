@@ -1,10 +1,82 @@
 package storetest
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
+
+// RunProfilePINRevisionTransactions checks revision-zero proof, missing rows,
+// and a PIN change serialized ahead of a protected profile creation.
+func RunProfilePINRevisionTransactions(t *testing.T, newStore func(*testing.T) userstore.UserStore) {
+	ctx := t.Context()
+	store := newStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "parent", Name: "Parent"}); err != nil {
+		t.Fatal(err)
+	}
+	tx := store.(userstore.PreferenceSettingsTransactioner)
+	if err := tx.WithPreferenceSettingsTransaction(ctx, func(w userstore.PreferenceSettingsWriter) error {
+		for _, tc := range []struct {
+			id       string
+			revision int64
+			matches  bool
+		}{{"parent", 0, true}, {"parent", 1, false}, {"missing", 0, false}} {
+			got, err := w.CheckProfilePINRevision(ctx, tc.id, tc.revision)
+			if err != nil || got != tc.matches {
+				t.Errorf("revision check %s/%d = %v, %v", tc.id, tc.revision, got, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, release := make(chan struct{}), make(chan struct{})
+	writer := make(chan error, 1)
+	go func() {
+		writer <- tx.WithPreferenceSettingsTransaction(ctx, func(w userstore.PreferenceSettingsWriter) error {
+			if err := w.UpdateProfile(ctx, "parent", userstore.UpdateProfileInput{PIN: new("4321")}); err != nil {
+				return err
+			}
+			close(updated)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-updated:
+	case err := <-writer:
+		t.Fatalf("PIN writer failed before mutation: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	protected := make(chan error, 1)
+	revoked := errors.New("PIN proof revoked")
+	go func() {
+		protected <- tx.WithPreferenceSettingsTransaction(ctx, func(w userstore.PreferenceSettingsWriter) error {
+			matches, err := w.CheckProfilePINRevision(ctx, "parent", 0)
+			if err != nil {
+				return err
+			}
+			if !matches {
+				return revoked
+			}
+			return w.CreateProfile(ctx, userstore.Profile{ID: "extra", Name: "Extra"})
+		})
+	}()
+	close(release)
+	if err := <-writer; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-protected; !errors.Is(err, revoked) {
+		t.Fatalf("protected creation = %v, want revocation", err)
+	}
+	profiles, err := store.ListProfiles(ctx)
+	if err != nil || len(profiles) != 1 {
+		t.Fatalf("revoked transaction persisted: profiles=%d, err=%v", len(profiles), err)
+	}
+}
 
 // RunProfilePINRevision pins the profile PIN revision that profile tokens are
 // bound to: setting, changing or clearing a profile's PIN advances that

@@ -100,6 +100,10 @@ func TestSQLiteProfilePINRevision(t *testing.T) {
 	storetest.RunProfilePINRevision(t, newConformanceStore)
 }
 
+func TestSQLiteProfilePINRevisionTransactions(t *testing.T) {
+	storetest.RunProfilePINRevisionTransactions(t, newConformanceStore)
+}
+
 func TestSQLiteDeleteProfileRemovesProfileState(t *testing.T) {
 	storetest.RunDeleteProfileRemovesProfileState(t, newConformanceStore, false)
 }

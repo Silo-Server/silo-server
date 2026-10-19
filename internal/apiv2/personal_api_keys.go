@@ -10,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // PersonalAPIKeyService keeps credentials scoped to the login account, independently of profiles.
@@ -19,7 +20,7 @@ type PersonalAPIKeyService interface {
 	RevokePersonalAPIKey(context.Context, int, int64) error
 	// MayCreatePersonalAPIKey applies the household-manager rule to key
 	// creation: (account, acting profile, PIN verifier).
-	MayCreatePersonalAPIKey(context.Context, int, string, func(string) error) (bool, error)
+	MayCreatePersonalAPIKey(context.Context, int, string, func(*userstore.Profile) error) (bool, error)
 }
 
 type PersonalAPIKeyListItem struct {

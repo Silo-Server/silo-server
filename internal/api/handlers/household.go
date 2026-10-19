@@ -44,8 +44,8 @@ func canManageHousehold(
 	store userstore.UserStore,
 	tokens *access.ProfileTokenService,
 ) (bool, error) {
-	return canManageHouseholdAs(r.Context(), store, activeProfileIDOf(r), func(profileID string) error {
-		return verifyProfileTokenIn(r, store, tokens, profileID)
+	return canManageHouseholdAs(r.Context(), store, activeProfileIDOf(r), func(profile *userstore.Profile) error {
+		return verifyProfileTokenFor(r, tokens, profile)
 	})
 }
 
@@ -66,33 +66,50 @@ func canManageHouseholdAs(
 	ctx context.Context,
 	store userstore.UserStore,
 	activeProfileID string,
-	verify func(profileID string) error,
+	verify func(profile *userstore.Profile) error,
 ) (bool, error) {
+	allowed, _, err := householdManagerAs(ctx, store, activeProfileID, verify)
+	return allowed, err
+}
+
+// householdManagerAs also returns the authorized acting row, so profile writes
+// can check its revision under the transaction lock without repeating policy.
+// A profile-less admin has no PIN proof to bind and returns a nil row.
+func householdManagerAs(
+	ctx context.Context,
+	store userstore.UserStore,
+	activeProfileID string,
+	verify func(*userstore.Profile) error,
+) (bool, *userstore.Profile, error) {
 	// A remote-playback handoff never manages the household, even when it is
 	// bound to the primary profile.
 	if apimw.GetClaims(ctx).IsRemotePlayback() {
-		return false, nil
+		return false, nil, nil
 	}
 	if activeProfileID == "" {
-		return profileLessAdminMayManage(ctx, store)
+		allowed, err := profileLessAdminMayManage(ctx, store)
+		return allowed, nil, err
 	}
 	active, err := store.GetProfile(ctx, activeProfileID)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if active == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	if !active.IsPrimary {
-		return false, nil
+		return false, nil, nil
 	}
 	if active.PINHash == "" {
-		return true, nil
+		return true, active, nil
 	}
-	if err := verify(active.ID); err != nil {
-		return false, err
+	if verify == nil {
+		return false, nil, access.ErrProfileUnverified
 	}
-	return true, nil
+	if err := verify(active); err != nil {
+		return false, nil, err
+	}
+	return true, active, nil
 }
 
 // profileLessAdminMayManage is the household rule for a request that names no
@@ -154,16 +171,6 @@ func verifyProfileTokenIn(
 		return access.ErrProfileUnverified
 	}
 
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil || claims.SessionID == "" {
-		return access.ErrProfileUnverified
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		return access.ErrProfileUnverified
-	}
-
 	profile, err := store.GetProfile(r.Context(), profileID)
 	if err != nil {
 		return fmt.Errorf("loading profile: %w", err)
@@ -172,5 +179,29 @@ func verifyProfileTokenIn(
 		return access.ErrProfileUnverified
 	}
 
-	return access.CheckProfileToken(tokens, r.Header.Get("X-Profile-Token"), userID, claims.SessionID, profile)
+	return verifyProfileTokenFor(r, tokens, profile)
+}
+
+func verifyProfileTokenFor(r *http.Request, tokens *access.ProfileTokenService, profile *userstore.Profile) error {
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil || claims.SessionID == "" || claims.UserID == 0 {
+		return access.ErrProfileUnverified
+	}
+	return access.CheckProfileToken(tokens, r.Header.Get("X-Profile-Token"), claims.UserID, claims.SessionID, profile)
+}
+
+// checkHouseholdPINRevision runs after the existing account transaction lock.
+// The row lock also serializes PIN writers that do not take the account lock.
+func checkHouseholdPINRevision(ctx context.Context, tx userstore.PreferenceSettingsWriter, active *userstore.Profile) error {
+	if active == nil {
+		return nil
+	}
+	matches, err := tx.CheckProfilePINRevision(ctx, active.ID, active.PINRevision)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return access.ErrProfileUnverified
+	}
+	return nil
 }

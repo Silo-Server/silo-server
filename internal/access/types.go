@@ -31,6 +31,10 @@ type Scope struct {
 	MetadataLanguageOverrides map[string]string
 	PolicyRevision            int64
 	ProfileVerified           bool
+	// ProfilePINRevision binds request verification to the resolved PIN state.
+	// Revision zero is valid; ProfileVerified records whether proof was accepted.
+	// Keep it out of scope fingerprints used by sockets and progress snapshots.
+	ProfilePINRevision int64 `json:"-"`
 	// PINVerificationSkipped is set when ProfileVerified holds only because
 	// the request was exempt from PIN verification (an API-key credential,
 	// ResolveInput.SkipPINVerification), not because a profile token proved

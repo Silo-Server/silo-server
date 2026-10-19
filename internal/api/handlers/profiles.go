@@ -318,8 +318,8 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		UserID:          userID,
 		ActiveProfileID: activeProfileIDOf(r),
 		Request:         req,
-		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
+		VerifyProfile: func(profile *userstore.Profile) error {
+			return verifyProfileTokenFor(r, h.ProfileTokens, profile)
 		},
 	})
 	if err != nil {
@@ -343,7 +343,7 @@ type ProfileCreateCommand struct {
 	Request         ProfileCreateRequest
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
-	VerifyProfile func(profileID string) error
+	VerifyProfile func(profile *userstore.Profile) error
 }
 
 // CreateProfile creates a household profile: validation, the bootstrap or
@@ -390,12 +390,14 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	// primary/admin privileges (it becomes the primary); everything after
 	// requires the household manager (canManageHouseholdAs): the caller's
 	// active profile being the verified primary, whatever the account role.
+	var acting *userstore.Profile
 	isBootstrap := len(existingProfiles) == 0
 	if !isBootstrap {
-		allowed, err := canManageHouseholdAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
+		allowed, active, err := householdManagerAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
 		if err != nil {
 			return none, profileManagementError(err)
 		}
+		acting = active
 		if !allowed {
 			return none, apiError(http.StatusForbidden, "forbidden", "Profile management requires the primary profile or admin access")
 		}
@@ -461,7 +463,10 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		MaxPlaybackQuality:         maxPlaybackQuality,
 	}
 
-	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, settingsSync); err != nil {
+	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, settingsSync, acting); err != nil {
+		if errors.Is(err, access.ErrProfileUnverified) {
+			return none, profileManagementError(err)
+		}
 		slog.ErrorContext(ctx, "profile create failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
@@ -528,8 +533,8 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		ProfileID:       profileID,
 		ActiveProfileID: activeProfileIDOf(r),
 		Request:         req,
-		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
+		VerifyProfile: func(profile *userstore.Profile) error {
+			return verifyProfileTokenFor(r, h.ProfileTokens, profile)
 		},
 	})
 	if err != nil {
@@ -555,7 +560,7 @@ type ProfileUpdateCommand struct {
 	Request         ProfileUpdateRequest
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
-	VerifyProfile func(profileID string) error
+	VerifyProfile func(profile *userstore.Profile) error
 }
 
 // UpdateProfile applies a profile update: authorization (household manager
@@ -597,7 +602,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
 
-	canManage, err := canManageHouseholdAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
+	canManage, acting, err := householdManagerAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
 	if err != nil {
 		return none, profileManagementError(err)
 	}
@@ -663,8 +668,11 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 	// failure cannot leave a 500 response whose legacy values look saved while
 	// canonical readers continue serving the previous preference.
 	if err := h.applyProfileUpdateSettingsSync(
-		ctx, store, userID, profileID, input, settingsSync,
+		ctx, store, userID, profileID, input, settingsSync, acting,
 	); err != nil {
+		if errors.Is(err, access.ErrProfileUnverified) {
+			return none, profileManagementError(err)
+		}
 		slog.ErrorContext(ctx, "profile update failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
@@ -731,8 +739,8 @@ func (h *ProfileHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Requ
 		UserID:          userID,
 		ProfileID:       profileID,
 		ActiveProfileID: activeProfileIDOf(r),
-		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
+		VerifyProfile: func(profile *userstore.Profile) error {
+			return verifyProfileTokenFor(r, h.ProfileTokens, profile)
 		},
 	})
 	if err != nil {
@@ -757,7 +765,7 @@ type ProfileDeleteCommand struct {
 	ActiveProfileID string
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
-	VerifyProfile func(profileID string) error
+	VerifyProfile func(profile *userstore.Profile) error
 }
 
 // DeleteProfile deletes a household profile: the household-manager
@@ -1063,8 +1071,8 @@ func (h *ProfileHandler) HandleListHouseholdSessions(w http.ResponseWriter, r *h
 	sessions, err := h.ListHouseholdSessions(r.Context(), HouseholdSessionsQuery{
 		UserID:          userID,
 		ActiveProfileID: activeProfileIDOf(r),
-		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
+		VerifyProfile: func(profile *userstore.Profile) error {
+			return verifyProfileTokenFor(r, h.ProfileTokens, profile)
 		},
 	})
 	if err != nil {
@@ -1091,7 +1099,7 @@ type HouseholdSessionsQuery struct {
 	ActiveProfileID string
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
-	VerifyProfile func(profileID string) error
+	VerifyProfile func(profile *userstore.Profile) error
 }
 
 // ListHouseholdSessions lists the account's live playback sessions for a

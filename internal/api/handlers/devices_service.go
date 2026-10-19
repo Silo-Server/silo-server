@@ -16,7 +16,7 @@ import (
 type DeviceSettingsActor struct {
 	UserID        int
 	ProfileID     string
-	VerifyProfile func(string) error
+	VerifyProfile func(*userstore.Profile) error
 }
 
 func (h *DeviceHandler) deviceSettingsStore(ctx context.Context, actor DeviceSettingsActor, target string, household bool) (userstore.DeviceSettingsStore, error) {
@@ -33,7 +33,7 @@ func (h *DeviceHandler) deviceSettingsStore(ctx context.Context, actor DeviceSet
 	if household || (target != "" && target != actor.ProfileID) {
 		verify := actor.VerifyProfile
 		if verify == nil {
-			verify = func(string) error { return access.ErrProfileUnverified }
+			verify = func(*userstore.Profile) error { return access.ErrProfileUnverified }
 		}
 		allowed, err := canManageHouseholdAs(ctx, store, actor.ProfileID, verify)
 		if errors.Is(err, access.ErrProfileUnverified) {

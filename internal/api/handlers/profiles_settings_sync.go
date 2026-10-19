@@ -198,6 +198,7 @@ func (h *ProfileHandler) createProfileWithSettingsSync(
 	userID int,
 	profile userstore.Profile,
 	writes []profileSettingSync,
+	acting *userstore.Profile,
 ) error {
 	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
 	if !ok {
@@ -205,6 +206,9 @@ func (h *ProfileHandler) createProfileWithSettingsSync(
 	}
 	var changedKeys []string
 	err := transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		if err := checkHouseholdPINRevision(ctx, tx, acting); err != nil {
+			return err
+		}
 		if err := tx.CreateProfile(ctx, profile); err != nil {
 			return err
 		}
@@ -233,10 +237,14 @@ func (h *ProfileHandler) applyProfileUpdateSettingsSync(
 	profileID string,
 	input userstore.UpdateProfileInput,
 	writes []profileSettingSync,
+	acting *userstore.Profile,
 ) error {
 	return applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, userstore.SettingIdentity{
 		Scope: settingscontract.ScopeProfile, ProfileID: profileID,
 	}, writes, func(tx userstore.PreferenceSettingsWriter) error {
+		if err := checkHouseholdPINRevision(ctx, tx, acting); err != nil {
+			return err
+		}
 		return tx.UpdateProfile(ctx, profileID, input)
 	})
 }

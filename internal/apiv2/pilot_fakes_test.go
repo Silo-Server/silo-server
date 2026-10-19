@@ -237,7 +237,7 @@ func (f *fakeProfiles) CreateProfile(_ context.Context, cmd handlers.ProfileCrea
 		return handlers.ProfileView{}, f.err
 	}
 	if f.lockedPrimary != "" && cmd.ActiveProfileID == f.lockedPrimary {
-		if err := cmd.VerifyProfile(f.lockedPrimary); err != nil {
+		if err := cmd.VerifyProfile(&userstore.Profile{ID: f.lockedPrimary}); err != nil {
 			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
 		}
 	}
@@ -252,7 +252,7 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpda
 		return handlers.ProfileView{}, f.err
 	}
 	if f.lockedPrimary != "" && cmd.ActiveProfileID == f.lockedPrimary {
-		if err := cmd.VerifyProfile(f.lockedPrimary); err != nil {
+		if err := cmd.VerifyProfile(&userstore.Profile{ID: f.lockedPrimary}); err != nil {
 			return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
 		}
 	}
@@ -263,12 +263,12 @@ func (f *fakeProfiles) UpdateProfile(_ context.Context, cmd handlers.ProfileUpda
 // canManageHouseholdAs it runs the command's verifier for a PIN-locked
 // primary profile and answers an unverified one with the 403
 // profile_management the real service returns.
-func (f *fakeProfiles) manage(activeProfileID string, verify func(string) error) error {
+func (f *fakeProfiles) manage(activeProfileID string, verify func(*userstore.Profile) error) error {
 	if f.err != nil {
 		return f.err
 	}
 	if f.lockedPrimary != "" && activeProfileID == f.lockedPrimary {
-		if err := verify(f.lockedPrimary); err != nil {
+		if err := verify(&userstore.Profile{ID: f.lockedPrimary}); err != nil {
 			return &handlers.APIError{Status: http.StatusForbidden, Code: codeProfileManagement, Message: "Profile management requires verifying the primary profile PIN"}
 		}
 	}
@@ -688,7 +688,7 @@ func (f *fakeSettingValuesSeam) identity(req handlers.SettingIdentityRequest) (h
 			if req.ProfileID != "p-other" {
 				return handlers.SettingValueView{}, settingAPIError(404, "not_found", "profile_id", "Profile not found")
 			}
-			if err := req.VerifyProfile(v.ProfileID); err != nil {
+			if err := req.VerifyProfile(&userstore.Profile{ID: v.ProfileID}); err != nil {
 				return handlers.SettingValueView{}, settingAPIError(403, "forbidden", "", "Profile verification required")
 			}
 			v.ProfileID = req.ProfileID
@@ -848,7 +848,7 @@ func (f *fakeSettingValuesSeam) effective(q handlers.EffectiveSettingsQuery, key
 		if q.ProfileID != "p-other" {
 			return nil, settingAPIError(404, "not_found", "profile_id", "Profile not found")
 		}
-		if err := q.VerifyProfile(profileID); err != nil {
+		if err := q.VerifyProfile(&userstore.Profile{ID: profileID}); err != nil {
 			return nil, settingAPIError(403, "forbidden", "", "Profile verification required")
 		}
 		profileID = q.ProfileID
