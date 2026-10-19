@@ -50,21 +50,24 @@ class RoomSocket extends EventTarget {
     this.readyState = 1;
     this.dispatchEvent(new Event("open"));
   }
-  close() {
+  close(code = 1006, reason = "") {
     this.readyState = 3;
-    this.dispatchEvent(new Event("close"));
+    this.dispatchEvent(new CloseEvent("close", { code, reason }));
   }
   message(data: unknown) {
     this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(data) }));
   }
 }
-const ticket = (letter = "a") =>
+const ticket = (letter = "a", admission = false) =>
   new Response(
     JSON.stringify({
       ticket: letter.repeat(43),
       protocol: "silo.room.v2",
       expires_in: 29,
       max_connection_seconds: 300,
+      ...(admission
+        ? { work_admission: { version: 1, backend: "memory", scope: "node", epoch: "test" } }
+        : {}),
     }),
     { headers: { "Content-Type": "application/json" } },
   );
@@ -74,6 +77,7 @@ beforeEach(() => {
   setAccessToken("login");
   setProfileId("profile");
   setProfileToken("pin-A");
+  vi.spyOn(Math, "random").mockReturnValue(0);
   RoomSocket.all = [];
   vi.stubGlobal("WebSocket", RoomSocket);
 });
@@ -81,6 +85,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 it.each([401, 500])("single sends ticket refusal %s", async (status) => {
@@ -123,7 +128,7 @@ it("mounted socket uses no URL credentials and rebinds replaced same-profile PIN
   expect(view.result.current.room?.generation).toBe(20);
   setProfileToken("pin-B");
   view.rerender();
-  await waitFor(() => expect(RoomSocket.all.length).toBe(2));
+  await waitFor(() => expect(RoomSocket.all.length).toBe(2), { timeout: 2_000 });
   expect(old.readyState).toBe(RoomSocket.CLOSED);
   act(() => old.message({ type: "snapshot", room: { room_id: "room", generation: 99 } }));
   expect(view.result.current.room?.generation).not.toBe(99);
@@ -180,7 +185,7 @@ it("gets a fresh ticket after socket close and preserves ping/message callbacks"
   act(() => old.message({ type: "transport_command", command: { action: "play" } }));
   expect(view.result.current.transportCommand?.action).toBe("play");
   act(() => old.close());
-  await waitFor(() => expect(RoomSocket.all.length).toBe(2));
+  await waitFor(() => expect(RoomSocket.all.length).toBe(2), { timeout: 2_000 });
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(RoomSocket.all[1]!.protocols[1]).toBe(`silo.ticket.${"b".repeat(43)}`);
 });
@@ -243,7 +248,7 @@ it("estimates the clock from the fastest pong, keeps it across a reconnect, and 
 
   // A reconnect to the same room keeps the samples it has.
   act(() => first.close());
-  await act(() => vi.advanceTimersByTimeAsync(500));
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
   const second = RoomSocket.all[1]!;
   act(() => second.open());
   expect(pings(second)).toHaveLength(1);
@@ -327,7 +332,7 @@ it("drops a transport command with the socket that delivered it", async () => {
   expect(view.result.current.transportCommand).toBeNull();
 
   // The reconnected socket carries only what the server sends on it.
-  await waitFor(() => expect(RoomSocket.all.length).toBe(2));
+  await waitFor(() => expect(RoomSocket.all.length).toBe(2), { timeout: 2_000 });
   const current = RoomSocket.all[1]!;
   act(() => current.open());
   expect(view.result.current.connectionState).toBe("connected");
@@ -351,7 +356,7 @@ it("drops a transport command when a new authority replaces the socket", async (
 
   setProfileToken("pin-B");
   view.rerender();
-  await waitFor(() => expect(RoomSocket.all.length).toBe(2));
+  await waitFor(() => expect(RoomSocket.all.length).toBe(2), { timeout: 2_000 });
   act(() => RoomSocket.all[1]!.open());
   expect(view.result.current.connectionState).toBe("connected");
   expect(view.result.current.transportCommand).toBeNull();
@@ -430,7 +435,7 @@ it("renews a healthy five-minute connection and recovers from a transient networ
   expect(RoomSocket.all[0]!.send.mock.calls.length).toBeGreaterThan(1);
   // The server's ordinary credential lifetime closes the healthy socket.
   act(() => RoomSocket.all[0]!.close());
-  await act(() => vi.advanceTimersByTimeAsync(500));
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
   expect(RoomSocket.all).toHaveLength(2);
   act(() => RoomSocket.all[1]!.open());
   act(() => {
@@ -443,9 +448,11 @@ it("renews a healthy five-minute connection and recovers from a transient networ
   expect(view.result.current.closedReason).toBeNull();
   fetch.mockRejectedValueOnce(new TypeError("Network unavailable"));
   act(() => RoomSocket.all[1]!.dispatchEvent(new Event("error")));
-  await act(() => vi.advanceTimersByTimeAsync(500));
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
   expect(RoomSocket.all).toHaveLength(2);
-  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  await act(() => vi.advanceTimersByTimeAsync(3_999));
+  expect(RoomSocket.all).toHaveLength(2);
+  await act(() => vi.advanceTimersByTimeAsync(1));
   expect(RoomSocket.all).toHaveLength(3);
   act(() => RoomSocket.all[2]!.open());
   expect(view.result.current.connectionState).toBe("connected");
@@ -499,7 +506,7 @@ it("auth provider update reconnects without changing room props or rerendering t
   const old = RoomSocket.all[0]!;
   act(() => old.open());
   fireEvent.click(screen.getByRole("button", { name: "Replace authority" }));
-  await waitFor(() => expect(RoomSocket.all.length).toBe(2));
+  await waitFor(() => expect(RoomSocket.all.length).toBe(2), { timeout: 2_000 });
   expect(old.readyState).toBe(RoomSocket.CLOSED);
   expect(new Headers(fetch.mock.calls[1]![1].headers).get("X-Profile-Token")).toBe(
     "provider-pin-B",
@@ -820,4 +827,145 @@ it("keeps personalized HTTP votes when common socket rows change tallies or sugg
   expect(view.result.current.suggestions[0]).toMatchObject({ vote_count: 3, voted_by_me: true });
   act(() => socket.message({ type: "suggestions_update", suggestions: [] }));
   expect(view.result.current.suggestions).toEqual([]);
+});
+
+it("uses ticket metadata for correlated refusal and never replays transport after reconnect", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ticket("a", true)),
+  );
+  const view = renderHook(() =>
+    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  const socket = RoomSocket.all[0]!;
+  act(() => {
+    socket.open();
+    socket.message({
+      type: "snapshot",
+      room: {
+        room_id: "room",
+        generation: 1,
+        selection_revision: 1,
+        phase: "playing",
+        attached_session_id: "session",
+        self_can_control_transport: true,
+        self_can_manage_room: true,
+      },
+    });
+  });
+  expect(view.result.current.workAdmission?.version).toBe(1);
+  act(() => {
+    view.result.current.sendRoomMessage({
+      type: "transport_request",
+      session_id: "session",
+      action: "pause",
+    });
+  });
+  const actions = () =>
+    socket.send.mock.calls
+      .map(([data]) => JSON.parse(String(data)))
+      .filter((m) => m.type === "transport_request");
+  const id = actions()[0]!.request_id;
+  act(() =>
+    socket.message({
+      type: "error",
+      code: "realtime_rate_limited",
+      work_started: false,
+      request_id: id,
+      retry_after_ms: 500,
+    }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(499));
+  expect(actions()).toHaveLength(1);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(actions()).toHaveLength(2);
+  expect(actions()[1]!.request_id).toBe(id);
+  act(() => socket.close());
+  expect(view.result.current.recoveryNotice?.uncertain).toBe(true);
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  const next = RoomSocket.all[1]!;
+  act(() => next.open());
+  await act(() => vi.advanceTimersByTimeAsync(5_000));
+  expect(
+    next.send.mock.calls
+      .map(([data]) => JSON.parse(String(data)))
+      .filter((m) => m.type === "transport_request"),
+  ).toHaveLength(0);
+  view.unmount();
+  expect(next.readyState).toBe(RoomSocket.CLOSED);
+});
+it("keeps shield backoff across opens and treats other 1008 closes as opaque", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ticket("a", true)),
+  );
+  const view = renderHook(() =>
+    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  act(() => {
+    RoomSocket.all[0]!.open();
+    RoomSocket.all[0]!.close(1008, "realtime input shield");
+  });
+  await act(() => vi.advanceTimersByTimeAsync(4_999));
+  expect(RoomSocket.all).toHaveLength(1);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  act(() => {
+    RoomSocket.all[1]!.open();
+    RoomSocket.all[1]!.close(1008, "realtime input shield");
+  });
+  await act(() => vi.advanceTimersByTimeAsync(9_999));
+  expect(RoomSocket.all).toHaveLength(2);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  act(() => {
+    RoomSocket.all[2]!.open();
+    RoomSocket.all[2]!.close(1008, "missing subscribe");
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  expect(RoomSocket.all).toHaveLength(4);
+  view.unmount();
+});
+it("honors ticket metadata and Retry-After and retains outage steps through an open", async () => {
+  vi.useFakeTimers();
+  const refusal = () =>
+    new Response(
+      JSON.stringify({
+        type: "urn:silo:problem:rate_limited",
+        status: 503,
+        title: "Unavailable",
+        detail: "Unavailable",
+        instance: "test",
+        retry_after_ms: 2_500,
+      }),
+      { status: 503, headers: { "Content-Type": "application/problem+json", "Retry-After": "3" } },
+    );
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(refusal())
+    .mockImplementation(async () => ticket("a", true));
+  vi.stubGlobal("fetch", fetch);
+  const view = renderHook(() =>
+    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(RoomSocket.all).toHaveLength(0);
+  await act(() => vi.advanceTimersByTimeAsync(2_999));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(RoomSocket.all).toHaveLength(1);
+  act(() => {
+    RoomSocket.all[0]!.open();
+    RoomSocket.all[0]!.close();
+  });
+  fetch.mockResolvedValueOnce(refusal());
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  expect(fetch).toHaveBeenCalledTimes(3);
+  await act(() => vi.advanceTimersByTimeAsync(3_999));
+  expect(fetch).toHaveBeenCalledTimes(3);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(fetch).toHaveBeenCalledTimes(4);
+  view.unmount();
 });

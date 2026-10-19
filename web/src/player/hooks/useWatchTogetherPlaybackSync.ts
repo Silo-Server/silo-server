@@ -1,3 +1,4 @@
+import { useWatchTogetherTransportRequests } from "./useWatchTogetherTransportRequests";
 import {
   useCallback,
   useEffect,
@@ -33,6 +34,7 @@ interface TransportRequestResult {
 
 interface UseWatchTogetherPlaybackSyncResult {
   attachedSessionId: string | null;
+  transportDiscarded: number;
   /**
    * The room kept going without this viewer, who catches up on its own and
    * must acknowledge recovery before the room counts it as ready again.
@@ -174,7 +176,9 @@ export function useWatchTogetherPlaybackSync({
       ? transportCommand.command_id
       : null;
   const lastReadyRejectReasonRef = useRef<string | null>(null);
+  const admissionSupported = roomConnection.workAdmission?.version === 1;
   const sendRoomMessage = roomConnection.sendRoomMessage;
+  const cancelRoomMessage = roomConnection.cancelRoomMessage;
   const waitingStateRef = useRef<"idle" | "buffering" | "ready">("idle");
   const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelBuffering = useCallback(() => {
@@ -188,6 +192,7 @@ export function useWatchTogetherPlaybackSync({
     const recovered = () => {
       if (video && !video.seeking && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
         cancelBuffering();
+        cancelRoomMessage?.("buffering");
         if (roomPlaybackState !== "waiting" && waitingStateRef.current === "buffering") {
           waitingStateRef.current = "idle";
         }
@@ -210,6 +215,7 @@ export function useWatchTogetherPlaybackSync({
     };
   }, [
     cancelBuffering,
+    cancelRoomMessage,
     connectionState,
     attachedSessionId,
     roomPhase,
@@ -386,7 +392,10 @@ export function useWatchTogetherPlaybackSync({
   // A new stream, room, selection, phase, or connection starts over.
   useEffect(() => {
     waitingStateRef.current = "idle";
+    cancelRoomMessage?.("ready");
+    cancelRoomMessage?.("buffering");
   }, [
+    cancelRoomMessage,
     attachedSessionId,
     connectionState,
     roomPhase,
@@ -408,8 +417,23 @@ export function useWatchTogetherPlaybackSync({
       return;
     }
 
-    sendRoomMessage({ type: "attach_session", session_id: sessionId });
-  }, [connectionState, sendRoomMessage, sessionId]);
+    if (attachedSessionId === sessionId) return;
+    const message = { type: "attach_session", session_id: sessionId };
+    if (admissionSupported) sendRoomMessage(message, { current: () => message });
+    else sendRoomMessage(message);
+    return () => cancelRoomMessage?.("attach_session");
+  }, [
+    admissionSupported,
+    attachedSessionId,
+    cancelRoomMessage,
+    connectionState,
+    sendRoomMessage,
+    sessionId,
+    room?.room_id,
+    room?.generation,
+    room?.selection_revision,
+    transportCommand?.command_id,
+  ]);
 
   // Level-triggered readiness: anything that can acknowledge the waiting
   // command evaluates the same guards, so no single media event is the one
@@ -525,14 +549,21 @@ export function useWatchTogetherPlaybackSync({
           if (check.ok) {
             // A waiting room also accepts readiness on the state tick; a room
             // that resumed without this viewer needs an explicit ready.
-            sendRoomMessage({
-              type: catchingUp ? "ready" : "state_report",
-              session_id: sessionId,
-              command_id: check.commandId,
-              position_seconds: check.positionSeconds,
-              is_paused: check.isPaused,
-              is_ready: true,
-            });
+            const current = () => {
+              const latest = checkReady();
+              return latest.ok
+                ? {
+                    type: catchingUp ? "ready" : "state_report",
+                    session_id: sessionId,
+                    command_id: latest.commandId,
+                    position_seconds: latest.positionSeconds,
+                    is_paused: latest.isPaused,
+                    is_ready: true,
+                  }
+                : null;
+            };
+            if (admissionSupported && catchingUp) sendRoomMessage(current()!, { current });
+            else sendRoomMessage(current()!);
             return;
           }
           noteReadyReject(check.reason);
@@ -569,6 +600,7 @@ export function useWatchTogetherPlaybackSync({
       window.clearInterval(intervalId);
     };
   }, [
+    admissionSupported,
     advanceThroughPreroll,
     appliedCommandIdRef,
     attachedSessionId,
@@ -586,29 +618,14 @@ export function useWatchTogetherPlaybackSync({
     videoRef,
   ]);
 
-  const requestTransport = useCallback(
-    (action: "play" | "pause" | "seek", positionSeconds: number, isPaused: boolean) => {
-      if (
-        connectionState !== "connected" ||
-        !roomConnected ||
-        !sessionId ||
-        attachedSessionId !== sessionId
-      ) {
-        return { ok: false };
-      }
-      return sendRoomMessage({
-        type: "transport_request",
-        action,
-        position_seconds: positionSeconds,
-        is_paused: isPaused,
-      });
-    },
-    [attachedSessionId, connectionState, roomConnected, sendRoomMessage, sessionId],
+  const { requestTransport, transportDiscarded } = useWatchTogetherTransportRequests(
+    roomConnection,
+    sessionId ?? null,
   );
 
   const reportReady = useCallback(() => {
     cancelBuffering();
-    if (readinessAcknowledged || waitingStateRef.current === "ready") {
+    if (readinessAcknowledged || (!admissionSupported && waitingStateRef.current === "ready")) {
       return { ok: false };
     }
     const check = checkReady();
@@ -616,19 +633,28 @@ export function useWatchTogetherPlaybackSync({
       noteReadyReject(check.reason);
       return { ok: false };
     }
-    const result = sendRoomMessage({
-      type: "ready",
-      command_id: check.commandId,
-      session_id: sessionId,
-      position_seconds: check.positionSeconds,
-      is_paused: check.isPaused,
-    });
-    if (result.ok) {
-      waitingStateRef.current = "ready";
-    }
+    cancelRoomMessage?.("buffering");
+    const current = () => {
+      const latest = checkReady();
+      return latest.ok
+        ? {
+            type: "ready",
+            command_id: latest.commandId,
+            session_id: sessionId,
+            position_seconds: latest.positionSeconds,
+            is_paused: latest.isPaused,
+          }
+        : null;
+    };
+    const result = admissionSupported
+      ? sendRoomMessage(current()!, { current })
+      : sendRoomMessage(current()!);
+    if (result.ok && !admissionSupported) waitingStateRef.current = "ready";
     return result;
   }, [
+    admissionSupported,
     cancelBuffering,
+    cancelRoomMessage,
     checkReady,
     noteReadyReject,
     readinessAcknowledged,
@@ -646,7 +672,8 @@ export function useWatchTogetherPlaybackSync({
         attachedSessionId !== sessionId ||
         roomPhase !== "playing" ||
         roomPlaybackState !== "playing" ||
-        waitingStateRef.current === "buffering" ||
+        selfMember?.is_buffering === true ||
+        (!admissionSupported && waitingStateRef.current === "buffering") ||
         !video
       ) {
         return { ok: false };
@@ -657,26 +684,38 @@ export function useWatchTogetherPlaybackSync({
         bufferingTimerRef.current = null;
         // A stalled download can leave plenty of playable media buffered.
         if (!video.seeking && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
-        const result = sendRoomMessage({
-          type: "buffering",
-          session_id: sessionId,
-          position_seconds: Math.max(
-            0,
-            positionSeconds ?? toMediaTime(video.currentTime, streamOriginRef.current),
-          ),
-          is_paused: isPaused ?? video.paused,
-        });
+        const current = () => {
+          if (!video.seeking && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return null;
+          return {
+            type: "buffering",
+            session_id: sessionId,
+            position_seconds: Math.max(0, toMediaTime(video.currentTime, streamOriginRef.current)),
+            is_paused: video.paused,
+          };
+        };
+        const message = current();
+        if (!message) return;
+        const desired = {
+          ...message,
+          position_seconds: positionSeconds ?? message.position_seconds,
+          is_paused: isPaused ?? message.is_paused,
+        };
+        const result = admissionSupported
+          ? sendRoomMessage(desired, { current })
+          : sendRoomMessage(desired);
         if (result.ok) {
-          waitingStateRef.current = "buffering";
+          if (!admissionSupported) waitingStateRef.current = "buffering";
           onSustainedStall?.();
         }
       }, bufferingGraceMs);
       return { ok: true };
     },
     [
+      admissionSupported,
       attachedSessionId,
       connectionState,
       onSustainedStall,
+      selfMember?.is_buffering,
       roomConnected,
       roomPhase,
       roomPlaybackState,
@@ -687,11 +726,19 @@ export function useWatchTogetherPlaybackSync({
     ],
   );
 
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video && (video.seeking || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA)) {
+      reportBuffering();
+    }
+  }, [reportBuffering, room?.generation, transportCommand?.command_id, videoRef]);
+
   // Stable identity so consumers (e.g. VideoPlayer's video-event-listener
   // effect) don't re-run on every room snapshot.
   return useMemo(
     () => ({
       attachedSessionId,
+      transportDiscarded,
       catchingUp,
       readinessPending,
       requestTransport,
@@ -704,6 +751,7 @@ export function useWatchTogetherPlaybackSync({
     [
       carryStreamRebuild,
       attachedSessionId,
+      transportDiscarded,
       catchingUp,
       readinessPending,
       requestTransport,

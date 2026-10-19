@@ -1,4 +1,16 @@
 import {
+  createRealtimeBackoff,
+  isInputShieldClose,
+  readWorkAdmission,
+  ticketWorkRefusal,
+  type WorkAdmission,
+} from "@/lib/realtimeRecovery";
+import {
+  createRoomWorkRecovery,
+  type RoomSendOptions,
+  type RoomRecoveryNotice,
+} from "../utils/roomWorkRecovery";
+import {
   fallbackRoomSource,
   type SourceFallbackRequest,
 } from "@/api/v2/watchTogetherSourceFallback";
@@ -64,7 +76,13 @@ export interface WatchTogetherRoomConnectionResult {
   rejoinRoom: () => void;
   transportCommand: WatchTogetherTransportCommand | null;
   serverTimeOffsetMs: number;
-  sendRoomMessage: (message: Record<string, unknown>) => SendRoomMessageResult;
+  sendRoomMessage: (
+    message: Record<string, unknown>,
+    retry?: RoomSendOptions,
+  ) => SendRoomMessageResult;
+  cancelRoomMessage?: (kind: string) => void;
+  recoveryNotice?: RoomRecoveryNotice | null;
+  workAdmission?: WorkAdmission | null;
   updatePolicy: (policy: GuestControlPolicy) => Promise<WatchTogetherRoomSnapshot | null>;
   selectItem: (
     input: SelectWatchTogetherRoomItemInput,
@@ -89,8 +107,6 @@ export interface WatchTogetherRoomConnectionResult {
   unvote: (suggestionId: string) => Promise<void>;
   promoteSuggestion: (suggestionId: string) => Promise<WatchTogetherRoomSnapshot | null>;
 }
-
-const reconnectDelays = [500, 1_000, 2_000, 5_000];
 
 /**
  * Maps a room-fetch failure to a terminal closed reason. Returns null for
@@ -138,6 +154,17 @@ export function useWatchTogetherRoomConnection({
     samples: [],
   });
   const socketRef = useRef<WebSocket | null>(null);
+  const recoveryRef = useRef<ReturnType<typeof createRoomWorkRecovery> | null>(null);
+  const roomRef = useRef(room);
+  const commandRef = useRef(transportCommand);
+  const [workAdmission, setWorkAdmission] = useState<WorkAdmission | null>(null);
+  const [recoveryNotice, setRecoveryNotice] = useState<RoomRecoveryNotice | null>(null);
+  const connectionEpochRef = useRef(0);
+  useLayoutEffect(() => {
+    roomRef.current = room;
+    commandRef.current = transportCommand;
+    recoveryRef.current?.sync();
+  }, [room, transportCommand]);
   // Subscribe to the production AuthProvider so PIN/profile replacement can
   // rebind the socket even when room props remain unchanged.
   useOptionalAuth();
@@ -160,7 +187,6 @@ export function useWatchTogetherRoomConnection({
     setRoom(null);
     setRejoinAttempt((attempt) => attempt + 1);
   }, [replacementScope]);
-  const socketAuthorityRef = useRef<ReturnType<typeof captureProfileRequestContext>>(null);
   const closedReasonRef = useRef<string | null>(null);
   const socketSnapshotVersion = useRef(0);
   const applyHTTPRoomSnapshot = useCallback(
@@ -191,19 +217,13 @@ export function useWatchTogetherRoomConnection({
     setClosedReason(reason);
   }, []);
 
-  const sendRoomMessage = useCallback((message: Record<string, unknown>) => {
-    const socket = socketRef.current;
-    if (
-      !socket ||
-      socket.readyState !== WebSocket.OPEN ||
-      !socketAuthorityRef.current ||
-      !isCapturedProfileAuthorityActive(socketAuthorityRef.current)
-    ) {
-      return { ok: false };
-    }
-    socket.send(JSON.stringify(message));
-    return { ok: true };
-  }, []);
+  const sendRoomMessage = useCallback(
+    (message: Record<string, unknown>, retry?: RoomSendOptions) => {
+      return recoveryRef.current?.send(message, retry) ?? { ok: false };
+    },
+    [],
+  );
+  const cancelRoomMessage = useCallback((kind: string) => recoveryRef.current?.cancel(kind), []);
 
   useEffect(() => {
     if (!roomId || !roomToken) {
@@ -290,7 +310,42 @@ export function useWatchTogetherRoomConnection({
       !disposed &&
       replacementScopeRef.current !== replacementScope &&
       isCapturedProfileAuthorityActive(authority);
-    let attempt = 0;
+    const backoff = createRealtimeBackoff();
+    let admissionSupported = false;
+    const recovery = createRoomWorkRecovery({
+      context: () => ({
+        room: roomRef.current?.room_id === roomId ? roomRef.current : null,
+        commandId: commandRef.current?.command_id ?? null,
+        epoch: connectionEpochRef.current,
+        supported: admissionSupported,
+        active:
+          active() && socketRef.current?.readyState === WebSocket.OPEN && !closedReasonRef.current,
+      }),
+      send: (message) => {
+        const socket = socketRef.current;
+        if (!active() || !socket || socket.readyState !== WebSocket.OPEN) return false;
+        try {
+          socket.send(JSON.stringify(message));
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      backoff,
+      notice: (notice) => {
+        if (active()) setRecoveryNotice(notice);
+      },
+      reconcile: () => {
+        if (!active() || closedReasonRef.current) return;
+        const version = socketSnapshotVersion.current;
+        void getWatchTogetherRoom(roomId, roomToken, authority)
+          .then((response) => {
+            if (active()) applyHTTPRoomSnapshot(response.room, version);
+          })
+          .catch(() => {});
+      },
+    });
+    recoveryRef.current = recovery;
     let reconnectTimer: number | null = null;
     let pingTimer: number | null = null;
     // Samples taken on the current socket; pings come fast until it has enough.
@@ -338,13 +393,15 @@ export function useWatchTogetherRoomConnection({
       if (roomClockPingDelayMs(connectionSamples) !== delayBefore) schedulePing();
     };
 
-    const scheduleReconnect = () => {
+    const scheduleReconnect = (delayMs = backoff.reconnect()) => {
       if (!active() || closedReasonRef.current) {
         return;
       }
-      const delay = reconnectDelays[Math.min(attempt, reconnectDelays.length - 1)];
-      attempt += 1;
-      reconnectTimer = window.setTimeout(() => void connect(), delay);
+      if (reconnectTimer !== null) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        void connect();
+      }, delayMs);
     };
 
     const connect = async () => {
@@ -358,6 +415,10 @@ export function useWatchTogetherRoomConnection({
       try {
         const ticket = await mintRoomSocketTicket(roomId, roomToken, authority);
         if (!active() || closedReasonRef.current) return;
+        const admission = readWorkAdmission(ticket);
+        admissionSupported = admission !== null;
+        setWorkAdmission(admission);
+        connectionEpochRef.current++;
         socket = new WebSocket(roomSocketURL(roomId), [
           ticket.protocol,
           `silo.ticket.${ticket.ticket}`,
@@ -370,10 +431,10 @@ export function useWatchTogetherRoomConnection({
           );
           return;
         }
-        scheduleReconnect();
+        const refusal = ticketWorkRefusal(error);
+        scheduleReconnect(refusal ? backoff.refusal(refusal) : undefined);
         return;
       }
-      socketAuthorityRef.current = authority;
 
       socketRef.current = socket;
 
@@ -382,7 +443,6 @@ export function useWatchTogetherRoomConnection({
           socket.close();
           return;
         }
-        attempt = 0;
         connectionSamples = 0;
         setConnectionState("connected");
         sendPing();
@@ -401,6 +461,14 @@ export function useWatchTogetherRoomConnection({
           case "snapshot": {
             const payload = message.room as WatchTogetherRoomSnapshot | undefined;
             if (payload) {
+              backoff.useful();
+              if (
+                !roomRef.current ||
+                roomRef.current.room_id !== payload.room_id ||
+                roomRef.current.generation <= payload.generation
+              )
+                roomRef.current = payload;
+              recovery.sync();
               socketSnapshotVersion.current++;
               setRoom((current) =>
                 current?.room_id === payload.room_id && current.generation > payload.generation
@@ -426,11 +494,13 @@ export function useWatchTogetherRoomConnection({
             return;
           }
           case "room_closed":
+            recovery.disconnect();
             setRoom(null);
             markClosed(typeof message.reason === "string" ? message.reason : "room_closed");
             socket.close();
             return;
           case "connection_replaced":
+            recovery.disconnect();
             replacementScopeRef.current = replacementScope;
             setReplacement({
               scope: replacementScope,
@@ -450,6 +520,8 @@ export function useWatchTogetherRoomConnection({
           case "transport_command": {
             const payload = message.command as WatchTogetherTransportCommand | undefined;
             if (payload) {
+              commandRef.current = payload;
+              recovery.sync();
               setTransportCommand(payload);
             }
             return;
@@ -469,7 +541,11 @@ export function useWatchTogetherRoomConnection({
               if (sample) recordClockSample(sample);
             }
             return;
+          case "action_result":
+            recovery.receive(message);
+            return;
           case "error": {
+            recovery.receive(message);
             // Defense in depth: some server paths report terminal conditions
             // as an error message instead of (or before) room_closed.
             if (message.code === "not_found" || message.code === "gone") {
@@ -485,18 +561,19 @@ export function useWatchTogetherRoomConnection({
         }
       });
 
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         if (!active() || socketRef.current !== socket) return;
         if (socketRef.current === socket) {
           socketRef.current = null;
         }
+        recovery.disconnect();
         stopPings();
         // A command belongs to the connection that delivered it. Kept, the
         // player would apply it again on reconnect, from a position the room
         // may have left; the server sends a fresh one once the member attaches.
         setTransportCommand(null);
         setConnectionState("disconnected");
-        scheduleReconnect();
+        scheduleReconnect(backoff.reconnect(isInputShieldClose(event as CloseEvent)));
       });
 
       socket.addEventListener("error", () => {
@@ -509,6 +586,8 @@ export function useWatchTogetherRoomConnection({
 
     return () => {
       disposed = true;
+      recovery.dispose();
+      if (recoveryRef.current === recovery) recoveryRef.current = null;
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
       }
@@ -526,6 +605,7 @@ export function useWatchTogetherRoomConnection({
       setTransportCommand(null);
     };
   }, [
+    applyHTTPRoomSnapshot,
     markClosed,
     roomId,
     roomToken,
@@ -684,7 +764,16 @@ export function useWatchTogetherRoomConnection({
     [roomId, lobbyAuthority, publishLobbyReceipt],
   );
   const setLobbyReady = useCallback(
-    (ready: boolean) => sendRoomMessage({ type: "lobby_ready", ready }),
+    (ready: boolean) => {
+      if (roomRef.current?.phase !== "lobby") return { ok: false };
+      return sendRoomMessage(
+        { type: "lobby_ready", ready },
+        {
+          current: () =>
+            roomRef.current?.phase === "lobby" ? { type: "lobby_ready", ready } : null,
+        },
+      );
+    },
     [sendRoomMessage],
   );
 
@@ -825,6 +914,9 @@ export function useWatchTogetherRoomConnection({
     transportCommand,
     serverTimeOffsetMs,
     sendRoomMessage,
+    cancelRoomMessage,
+    recoveryNotice,
+    workAdmission,
     updatePolicy,
     selectItem,
     fallbackSource,

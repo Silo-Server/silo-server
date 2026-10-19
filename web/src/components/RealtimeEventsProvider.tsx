@@ -1,3 +1,10 @@
+import { createRealtimeSelection } from "./realtimeSelection";
+import {
+  createRealtimeBackoff,
+  isInputShieldClose,
+  readWorkAdmission,
+  ticketWorkRefusal,
+} from "@/lib/realtimeRecovery";
 import { jellyfinCompatStatusKey } from "@/api/v2/jellyfinStatusCache";
 import { fetchAdminTaskJob } from "@/api/v2/adminTasks";
 import type { QueryClient, QueryFilters } from "@tanstack/react-query";
@@ -499,6 +506,8 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const socketRef = useRef<WebSocket | null>(null);
   const helloReceivedRef = useRef(false);
   const requestCounterRef = useRef(0);
+  const recoveryBackoffRef = useRef(createRealtimeBackoff());
+  const selectionRef = useRef<ReturnType<typeof createRealtimeSelection> | null>(null);
   const channelRefsRef = useRef(new Map<EventChannel, number>());
   const channelHandlersRef = useRef(new Map<EventChannel, Map<number, EventChannelHandlers>>());
   const nextHandlerIDRef = useRef(1);
@@ -550,19 +559,8 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sendSubscribe = useCallback(() => {
-    const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN || !helloReceivedRef.current) {
-      return;
-    }
-    requestCounterRef.current += 1;
-    socket.send(
-      JSON.stringify({
-        type: "subscribe",
-        request_id: `req-${requestCounterRef.current}`,
-        channels: currentChannels(),
-      }),
-    );
-  }, [currentChannels]);
+    selectionRef.current?.changed();
+  }, []);
 
   const subscribeChannel = useCallback(
     (channel: EventChannel, handlers?: EventChannelHandlers) => {
@@ -957,6 +955,26 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     };
     let closedByEffect = false;
     let activeSocket: WebSocket | null = null;
+    let admissionSupported = false;
+    const backoff = recoveryBackoffRef.current;
+    const selection = createRealtimeSelection({
+      channels: currentChannels,
+      requestId: () => `req-${++requestCounterRef.current}`,
+      active: () => !closedByEffect && authorityActive() && helloReceivedRef.current,
+      send: (message) => {
+        const socket = socketRef.current;
+        if (!socket || socket !== activeSocket || socket.readyState !== WebSocket.OPEN)
+          return false;
+        try {
+          socket.send(JSON.stringify(message));
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      backoff,
+    });
+    selectionRef.current = selection;
 
     const clearReconnect = () => {
       if (reconnectTimerRef.current !== undefined) {
@@ -965,13 +983,13 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const scheduleReconnect = () => {
+    const scheduleReconnect = (delayMs?: number) => {
       if (closedByEffect || reconnectTimerRef.current !== undefined) {
         return;
       }
       // The profile-rebind path stretches the delay so a persistently failing
       // ticket mint cannot turn into a tight reconnect loop.
-      const delay = nextReconnectDelayRef.current ?? 1_000;
+      const delay = nextReconnectDelayRef.current ?? delayMs ?? backoff.reconnect();
       nextReconnectDelayRef.current = null;
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = undefined;
@@ -992,12 +1010,14 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       void mintEventsSocketTicket(authority)
         .then((ticket) => {
           if (closedByEffect || !authorityActive()) return;
+          admissionSupported = readWorkAdmission(ticket) !== null;
           openSocket(ticket.ticket);
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (closedByEffect || !authorityActive()) return;
           setConnectionState("disconnected");
-          scheduleReconnect();
+          const refusal = ticketWorkRefusal(error);
+          scheduleReconnect(refusal ? backoff.refusal(refusal) : undefined);
         });
     };
 
@@ -1050,10 +1070,15 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
         switch (message.type) {
           case "hello":
+            admissionSupported = readWorkAdmission(message) !== null || admissionSupported;
             helloReceivedRef.current = true;
             sendSubscribe();
             return;
           case "subscribed": {
+            if (
+              !selection.receive(message as unknown as Record<string, unknown>, admissionSupported)
+            )
+              return;
             // A profile_required rejection means the profile binding was lost
             // (the ticket mint failed or the ticket was not honored). Left
             // alone, this socket would stay healthy for hours while silently
@@ -1079,6 +1104,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             return;
           }
           case "snapshot":
+            backoff.useful();
             handleSnapshot(
               message,
               refreshSessions,
@@ -1088,6 +1114,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             );
             return;
           case "event":
+            backoff.useful();
             handleEvent(
               message,
               authority,
@@ -1101,6 +1128,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             handleAccessChanged();
             return;
           case "error":
+            selection.receive(message as unknown as Record<string, unknown>, admissionSupported);
             return;
         }
       };
@@ -1140,9 +1168,15 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         socketRef.current = null;
         activeSocket = null;
         helloReceivedRef.current = false;
+        selection.disconnected();
+        backoff.interrupted();
         setConnectionState("disconnected");
         if (!closedByEffect) {
-          scheduleReconnect();
+          scheduleReconnect(
+            event.code === EVENTS_ACCESS_CHANGED_CLOSE_CODE
+              ? 0
+              : backoff.reconnect(isInputShieldClose(event)),
+          );
         }
       };
     };
@@ -1151,6 +1185,8 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
     return () => {
       closedByEffect = true;
+      selection.dispose();
+      if (selectionRef.current === selection) selectionRef.current = null;
       adminRefresh.cancel();
       clearReconnect();
       for (const [jobId, waiter] of waitersRef.current) {
@@ -1184,6 +1220,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     queryClient,
     refreshAccount,
     sendSubscribe,
+    currentChannels,
   ]);
 
   const awaitAdminJob = useCallback(

@@ -625,6 +625,55 @@ describe("VideoPlayer room catch-up", () => {
     },
   );
 
+  it("shows the latest seek immediately while admission-aware input batches for 250ms", async () => {
+    const { connection, rerenderPlayer } = setup(100);
+    const supported = {
+      ...connection,
+      workAdmission: {
+        version: 1 as const,
+        backend: "memory" as const,
+        scope: "node",
+        epoch: "test",
+      },
+      room: { ...connection.room!, self_can_manage_room: true, self_can_control_transport: true },
+    };
+    rerenderPlayer({ watchTogetherConnection: supported });
+    act(() => controls.current!.onSeek(200));
+    expect(controls.current!.currentTime).toBe(200);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    act(() => controls.current!.onSeek(250));
+    expect(controls.current!.currentTime).toBe(250);
+    expect(connection.sendRoomMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "transport_request" }),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(150));
+    expect(connection.sendRoomMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "transport_request",
+        action: "seek",
+        position_seconds: 250,
+        session_id: "session-1",
+      }),
+    );
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...supported,
+        recoveryNotice: {
+          id: 1,
+          uncertain: true,
+          message: "The room action was not confirmed. Check the room before trying again.",
+        },
+      },
+    });
+    expect(controls.current!.currentTime).not.toBe(250);
+    expect(
+      screen.getByText("The room action was not confirmed. Check the room before trying again."),
+    ).toBeInTheDocument();
+    // A new intent is immediately available after uncertainty is shown.
+    act(() => controls.current!.onSeek(300));
+    expect(controls.current!.currentTime).toBe(300);
+  });
+
   it.each([1500, 30])("shows a requested room seek to %ss before the command arrives", (target) => {
     const { connection, video, rerenderPlayer, onReanchorSeek } = setup(100);
     connection.room = { ...connection.room!, self_can_manage_room: true };

@@ -87,7 +87,7 @@ class FakeWebSocket {
     FakeWebSocket.instances.push(this);
   }
 
-  send() {}
+  send(_data?: string) {}
 
   close() {
     this.readyState = FakeWebSocket.CLOSED;
@@ -225,6 +225,7 @@ describe("RealtimeEventsProvider", () => {
     FakeWebSocket.instances = [];
     mockState.refreshAccount.mockClear();
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
     vi.stubGlobal("WebSocket", FakeWebSocket);
     mockState.pageActivity = {
       isVisible: true,
@@ -240,6 +241,63 @@ describe("RealtimeEventsProvider", () => {
     cleanup();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("batches startup selection once and recovers only the latest correlated selection after refusal", async () => {
+    const queryClient = new QueryClient();
+    const view = renderHook(() => useRealtimeEvents(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>
+          <RealtimeEventsProvider>{children}</RealtimeEventsProvider>
+        </QueryClientProvider>
+      ),
+    });
+    await act(async () => {});
+    const socket = FakeWebSocket.instances[0]!;
+    const send = vi.spyOn(socket, "send");
+    const admission = { version: 1, backend: "memory", scope: "node", epoch: "test" };
+    let removeCatalog: () => void;
+    await act(async () => {
+      socket.readyState = FakeWebSocket.OPEN;
+      removeCatalog = view.result.current.subscribeChannel("catalog");
+      view.result.current.subscribeChannel("user_state");
+      socket.emitMessage({ type: "hello", work_admission: admission });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    const initial = JSON.parse(String(send.mock.calls[0]![0]));
+    expect(initial.channels).toEqual(expect.arrayContaining(["catalog", "user_state"]));
+    await act(async () => {
+      socket.emitMessage({
+        type: "subscribed",
+        request_id: initial.request_id,
+        channels: initial.channels,
+      });
+      removeCatalog!();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const refused = JSON.parse(String(send.mock.calls[1]![0]));
+    await act(async () => {
+      socket.emitMessage({
+        type: "error",
+        code: "realtime_unavailable",
+        request_id: refused.request_id,
+        work_started: false,
+        retry_after_ms: 2_000,
+      });
+      view.result.current.subscribeChannel("notifications");
+      await vi.advanceTimersByTimeAsync(1_999);
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(send).toHaveBeenCalledTimes(3);
+    const retry = JSON.parse(String(send.mock.calls[2]![0]));
+    expect(retry.channels).toContain("notifications");
+    expect(retry.channels).not.toContain("catalog");
+    expect(retry.request_id).not.toBe(refused.request_id);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    view.unmount();
   });
 
   it("skips paginated job query state when looking for a cached terminal event", async () => {

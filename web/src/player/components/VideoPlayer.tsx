@@ -1273,6 +1273,22 @@ export function VideoPlayer({
     [],
   );
 
+  useEffect(() => {
+    const notice = watchTogether.recoveryNotice;
+    if (!notice) return;
+    if (notice.uncertain || notice.discarded) abandonRoomHeldSeek();
+    showWatchTogetherNotice(notice.message, "warning");
+  }, [abandonRoomHeldSeek, showWatchTogetherNotice, watchTogether.recoveryNotice]);
+
+  useEffect(() => {
+    if (!watchTogetherSync.transportDiscarded) return;
+    abandonRoomHeldSeek();
+    showWatchTogetherNotice(
+      "The room changed before the seek was sent. Try again if needed.",
+      "warning",
+    );
+  }, [abandonRoomHeldSeek, showWatchTogetherNotice, watchTogetherSync.transportDiscarded]);
+
   // Ends an active room catch-up nudge; any seek or local stop returns the
   // element to the base rate so a stale rate never survives a context change.
   const resetRoomCatchupRate = useCallback(() => {

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   captureProfileRequestContext,
@@ -18,6 +18,9 @@ import type {
  * silent; everything else is a toast.
  */
 export function useRoomActions(connection: WatchTogetherRoomConnectionResult) {
+  useEffect(() => {
+    if (connection.recoveryNotice) toast.error(connection.recoveryNotice.message);
+  }, [connection.recoveryNotice]);
   const [busy, setBusy] = useState<null | "stage" | "start" | "stop" | "mode" | "promote">(null);
 
   const run = useCallback(
