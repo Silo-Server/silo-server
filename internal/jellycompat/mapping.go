@@ -400,6 +400,11 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		// itemFromList with Jellyfin's Virtual contract.
 		applyPlayableLocation(&dto, false)
 	}
+	// A requested MediaSources on a playable item without a present version
+	// is [], as in Jellyfin; series and seasons have no media sources.
+	if wantField("mediasources") && isPlayableItemType(item.Type) && dto.MediaSources == nil {
+		dto.MediaSources = []mediaSourceDTO{}
+	}
 	if !allFields {
 		dropUnrequestedEmptyLists(&dto, wantField)
 	}

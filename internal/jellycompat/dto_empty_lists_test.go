@@ -39,6 +39,13 @@ func TestItemListFieldsSendEmptyArraysWhenFilled(t *testing.T) {
 	// List endpoints that need detail data map every field, then keep only
 	// the empty lists the request asked for.
 	sourcesOnly := marshalItemJSON(t, m.itemFromDetailWithFields(detail, false, nil, map[string]bool{"mediasources": true}))
+	if !strings.Contains(sourcesOnly, `"MediaSources":[]`) {
+		t.Errorf("requested MediaSources on a movie without versions missing or not []: %s", sourcesOnly)
+	}
+	series := upstreamItemDetail{ContentID: "series-1", Type: "series", Title: "No Lists"}
+	if got := marshalItemJSON(t, m.itemFromDetailWithFields(series, false, nil, map[string]bool{"mediasources": true})); strings.Contains(got, `"MediaSources"`) {
+		t.Errorf("series has MediaSources: %s", got)
+	}
 	for _, key := range []string{`"MediaStreams"`, `"Chapters"`, `"Genres"`, `"GenreItems"`, `"Studios"`, `"Tags"`, `"Taglines"`,
 		`"ProductionLocations"`, `"ExternalUrls"`, `"RemoteTrailers"`, `"LockedFields"`, `"People"`} {
 		if strings.Contains(sourcesOnly, key) {
@@ -48,7 +55,7 @@ func TestItemListFieldsSendEmptyArraysWhenFilled(t *testing.T) {
 
 	// A full detail response still carries every list field.
 	full := marshalItemJSON(t, m.itemFromDetail(detail, false, nil))
-	for _, want := range []string{`"MediaStreams":[]`, `"Chapters":[]`, `"Tags":[]`, `"LockedFields":[]`, `"People":[]`} {
+	for _, want := range []string{`"MediaSources":[]`, `"MediaStreams":[]`, `"Chapters":[]`, `"Tags":[]`, `"LockedFields":[]`, `"People":[]`} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full detail missing %s: %s", want, full)
 		}
