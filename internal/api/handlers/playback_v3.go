@@ -4107,7 +4107,9 @@ func combineTransportErrorsV3(first, second *transportErrorV3) *transportErrorV3
 	}
 	// A route skipped because its executor can't run the recipe says nothing
 	// about the file, so a route that ran keeps its reason, message and
-	// retryability. Otherwise any retryable failure makes the result retryable.
+	// retryability. Otherwise any retryable failure makes the result retryable,
+	// and the reason and message come from a retryable side, so a final
+	// verdict's "won't help" message never rides on a retryable result.
 	if first.executorIneligible != second.executorIneligible {
 		attempted := first
 		if first.executorIneligible {
@@ -4118,6 +4120,9 @@ func combineTransportErrorsV3(first, second *transportErrorV3) *transportErrorV3
 		return &combined
 	}
 	combined := *second
+	if first.retryable && !second.retryable {
+		combined = *first
+	}
 	combined.retryable = first.retryable || second.retryable
 	combined.cause = errors.Join(first.cause, second.cause)
 	return &combined
@@ -4141,7 +4146,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	if result.ToneMapMode != "" {
 		capabilities, err := h.remoteToneMapCapabilitiesV3(r.Context(), node.URL, false)
 		if err != nil || !capabilities.Supports(result.ToneMapMode, result.ToneMapSourceKind) {
-			return preparedTransportV3{}, &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "The selected node cannot run the tone-map recipe.", retryable: true, cause: err}
+			return preparedTransportV3{}, &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "The selected node cannot run the tone-map recipe.", retryable: true, cause: err, executorIneligible: err == nil}
 		}
 		toneMapFilter = capabilities.FilterFor(result.ToneMapMode, result.ToneMapSourceKind)
 		if result.ToneMapMode == tonemap.ModeHardware {

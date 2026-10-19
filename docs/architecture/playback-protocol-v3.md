@@ -1348,10 +1348,12 @@ The last two come from the node-routing resolver:
 `routing_policy_unsatisfied` means no route shape is legal under the configured
 execution and egress policy and is never retryable, while
 `route_capacity_unavailable` means a legal shape exists but no node could serve
-it right now and is always retryable. When the tone-map source preflight
-rejects the file, the start ends in a non-retryable `transcode_start_failed`
-whose message says the file failed the conversion check. A route skipped only
-because its executor cannot run the recipe does not change that answer.
+it right now and is always retryable. When every route that ran rejected the
+file in the tone-map source preflight, the start ends in a non-retryable
+`transcode_start_failed` whose message says the file failed the conversion
+check. A route skipped only because its executor cannot run the recipe does
+not change that answer; a route that failed in a way a retry could clear keeps
+the start retryable, with that route's message.
 
 ### 7.4 Route event names
 

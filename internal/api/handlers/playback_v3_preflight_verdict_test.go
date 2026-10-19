@@ -73,6 +73,18 @@ func TestCombineTransportErrorsV3IneligibleExecutorKeepsSourceVerdict(t *testing
 	if got := combineTransportErrorsV3(ineligibleExecutorTransportErrorV3(), transient); !got.retryable || got.reason != transcodeStartFailedReasonV3 {
 		t.Fatalf("skip and transient failure = %#v, want the retryable transient failure", got)
 	}
+
+	// Two routes that both ran, one transient and one rejecting the file: a
+	// retry may still work, so the result stays retryable and doesn't say it
+	// won't, whichever ran last.
+	for name, got := range map[string]*transportErrorV3{
+		"transient then rejection": combineTransportErrorsV3(transient, preflightRejectedTransportErrorV3()),
+		"rejection then transient": combineTransportErrorsV3(preflightRejectedTransportErrorV3(), transient),
+	} {
+		if !got.retryable || got.message == sourcePreflightRejectedMessageV3 || !errors.Is(got.cause, tonemap.ErrSourcePreflightRejected) {
+			t.Fatalf("%s = %#v, want a retryable result without the final-verdict message", name, got)
+		}
+	}
 }
 
 // TestExhaustedRoutesErrorV3KeepsFinalPreflightRejection keeps a rejection
