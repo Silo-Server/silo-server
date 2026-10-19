@@ -48,54 +48,10 @@ func TestHouseholdMutationRechecksPINAfterSlowBody(t *testing.T) {
 				t.Run(setup+"/"+mutation.name+"/"+concurrent.name, func(t *testing.T) {
 					ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 					defer cancel()
-					db, err := userdb.NewUserDB(filepath.Join(t.TempDir(), "user.db"), 1)
-					if err != nil {
-						t.Fatal(err)
-					}
-					t.Cleanup(func() { _ = db.Close() })
-					db.DB.SetMaxOpenConns(1)
-					store := userdb.NewSQLiteUserStore(db.DB)
-					for _, p := range []userstore.Profile{{ID: "parent", Name: "Parent"}, {ID: "child", Name: "Child", MaxContentRating: "PG"}} {
-						if err := store.CreateProfile(ctx, p); err != nil {
-							t.Fatal(err)
-						}
-					}
-					if setup != "policy initially unlocked" {
-						if err := store.UpdateProfile(ctx, "parent", userstore.UpdateProfileInput{PIN: new("1234")}); err != nil {
-							t.Fatal(err)
-						}
-					}
-					if setup == "policy legacy revision zero" {
-						if _, err := db.DB.ExecContext(ctx, "UPDATE profiles SET pin_revision = 0 WHERE id = 'parent'"); err != nil {
-							t.Fatal(err)
-						}
-					}
-					users := &revisionUsers{user: &models.User{ID: 1, Role: "user", Enabled: true, MaxProfiles: new(5)}}
-					stores := singleStoreProvider{store: store}
-					tokens := access.NewProfileTokenService("slow-body-profile-test-secret", 0)
-					profiles := handlers.NewProfileHandler(stores)
-					profiles.UserRepo, profiles.ProfileTokens = users, tokens
-					deps := pilotDeps(nil, nil)
-					deps.Profiles = profiles
-					deps.ViewerAccess = apimw.NewViewerAccessMiddleware(policy.NewViewerResolver(users, stores, tokens, policy.NewPDP(engine)))
-					if setup == "access" {
-						deps.ViewerAccess = apimw.NewViewerAccessMiddleware(access.NewResolver(users, stores, tokens))
-					}
-					h := newTestHandler(t, deps)
-					var proof ProfileVerification
-					if setup != "policy initially unlocked" {
-						verified := do(t, h, http.MethodPost, "/api/v2/profiles/parent/verify-pin", `{"pin":"1234"}`, bearer(memberToken))
-						if verified.Code != http.StatusOK {
-							t.Fatalf("verify PIN: %d %s", verified.Code, verified.Body.String())
-						}
-						if err := json.Unmarshal(verified.Body.Bytes(), &proof); err != nil {
-							t.Fatal(err)
-						}
-					}
-					headers := with(with(bearer(memberToken), "X-Profile-Id", "parent"), "X-Profile-Token", proof.ProfileToken)
+					h, store, users, headers := slowBodyHousehold(t, ctx, engine, setup)
 					reader, writer := io.Pipe()
-					defer reader.Close()
-					defer writer.Close()
+					defer func() { _ = reader.Close() }()
+					defer func() { _ = writer.Close() }()
 					reading := make(chan struct{})
 					body := &bodyReadSignal{Reader: reader, started: reading}
 					req := httptest.NewRequest(mutation.method, mutation.path, body).WithContext(ctx)
@@ -154,6 +110,56 @@ func TestHouseholdMutationRechecksPINAfterSlowBody(t *testing.T) {
 			}
 		}
 	}
+}
+
+func slowBodyHousehold(t *testing.T, ctx context.Context, engine *policy.Engine, setup string) (http.Handler, userstore.UserStore, *revisionUsers, map[string]string) {
+	t.Helper()
+	db, err := userdb.NewUserDB(filepath.Join(t.TempDir(), "user.db"), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	db.DB.SetMaxOpenConns(1)
+	store := userdb.NewSQLiteUserStore(db.DB)
+	for _, p := range []userstore.Profile{{ID: "parent", Name: "Parent"}, {ID: "child", Name: "Child", MaxContentRating: "PG"}} {
+		if err := store.CreateProfile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if setup != "policy initially unlocked" {
+		if err := store.UpdateProfile(ctx, "parent", userstore.UpdateProfileInput{PIN: new("1234")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if setup == "policy legacy revision zero" {
+		if _, err := db.DB.ExecContext(ctx, "UPDATE profiles SET pin_revision = 0 WHERE id = 'parent'"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	users := &revisionUsers{user: &models.User{ID: 1, Role: "user", Enabled: true, MaxProfiles: new(5)}}
+	stores := singleStoreProvider{store: store}
+	tokens := access.NewProfileTokenService("slow-body-profile-test-secret", 0)
+	profiles := handlers.NewProfileHandler(stores)
+	profiles.UserRepo, profiles.ProfileTokens = users, tokens
+	deps := pilotDeps(nil, nil)
+	deps.Profiles = profiles
+	deps.ViewerAccess = apimw.NewViewerAccessMiddleware(policy.NewViewerResolver(users, stores, tokens, policy.NewPDP(engine)))
+	if setup == "access" {
+		deps.ViewerAccess = apimw.NewViewerAccessMiddleware(access.NewResolver(users, stores, tokens))
+	}
+	h := newTestHandler(t, deps)
+	var proof ProfileVerification
+	if setup != "policy initially unlocked" {
+		verified := do(t, h, http.MethodPost, "/api/v2/profiles/parent/verify-pin", `{"pin":"1234"}`, bearer(memberToken))
+		if verified.Code != http.StatusOK {
+			t.Fatalf("verify PIN: %d %s", verified.Code, verified.Body.String())
+		}
+		if err := json.Unmarshal(verified.Body.Bytes(), &proof); err != nil {
+			t.Fatal(err)
+		}
+	}
+	headers := with(with(bearer(memberToken), "X-Profile-Id", "parent"), "X-Profile-Token", proof.ProfileToken)
+	return h, store, users, headers
 }
 
 type bodyReadSignal struct {

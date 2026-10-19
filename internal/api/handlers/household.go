@@ -183,6 +183,9 @@ func verifyProfileTokenIn(
 }
 
 func verifyProfileTokenFor(r *http.Request, tokens *access.ProfileTokenService, profile *userstore.Profile) error {
+	if tokens == nil {
+		return access.ErrProfileUnverified
+	}
 	claims := apimw.GetClaims(r.Context())
 	if claims == nil || claims.SessionID == "" || claims.UserID == 0 {
 		return access.ErrProfileUnverified
