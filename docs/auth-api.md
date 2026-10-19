@@ -360,6 +360,12 @@ header itself, spend only the per-client budget. An exhausted budget answers 429
 
 ## Profile PINs
 
+Profile creation through v1 and v2 stores a requested PIN hash in the same
+transaction as the profile and its preferences. The first committed profile
+state already requires PIN proof. Creation rejects PINs longer than 72 bytes
+before writing anything (v1: 400 `bad_request`; v2: 422 `validation_failed`).
+Omitting the PIN still creates an unlocked profile.
+
 `POST /api/v2/profiles/{id}/verify-pin` (`verifyProfilePIN`) and v1
 `POST /api/v1/profiles/{id}/verify-pin` check a household profile's PIN. A match
 issues the `X-Profile-Token` that unlocks the profile for the caller's login session; a

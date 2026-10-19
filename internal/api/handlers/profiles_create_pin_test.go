@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -41,12 +42,14 @@ func (s profileCommitObserver) WithPreferenceSettingsTransaction(ctx context.Con
 func TestCreateProfilePINProtectedAtFirstCommit(t *testing.T) {
 	for _, pin := range []string{"1234", ""} {
 		t.Run("pin="+pin, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
 			base := newProfileTestStore(t)
 			store := profileCommitObserver{UserStore: base, committed: make(chan struct{}), resume: make(chan struct{})}
 			handler := NewProfileHandler(testUserStoreProvider{store: store})
 			done := make(chan error, 1)
 			go func() {
-				_, err := handler.CreateProfile(t.Context(), ProfileCreateCommand{
+				_, err := handler.CreateProfile(ctx, ProfileCreateCommand{
 					UserID: 1, ActiveProfileID: "profile-1",
 					Request: ProfileCreateRequest{Name: "New profile", PIN: pin, Language: "de"},
 				})
@@ -60,7 +63,7 @@ func TestCreateProfilePINProtectedAtFirstCommit(t *testing.T) {
 			}()
 			select {
 			case <-store.committed:
-			case <-t.Context().Done():
+			case <-ctx.Done():
 				t.Fatal("create did not commit")
 			}
 			profiles, err := base.ListProfiles(t.Context())
