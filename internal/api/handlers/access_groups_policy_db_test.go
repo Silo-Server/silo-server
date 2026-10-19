@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -47,7 +48,7 @@ func TestAccessGroupUpdateLibraryPolicyDB(t *testing.T) {
 			if _, err := store.Update(t.Context(), group.ID, access.UpdateGroupInput{LibraryIDs: new([]int{f.library})}); err != nil {
 				t.Fatal(err)
 			}
-			id := fmt.Sprint(group.ID)
+			id := strconv.FormatInt(group.ID, 10)
 			rec := httptest.NewRecorder()
 			h.HandleUpdate(rec, accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/"+id, strings.NewReader(tc.body), id))
 			if rec.Code != http.StatusOK {
