@@ -159,6 +159,11 @@ func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.Sta
 		if err != nil || dropped {
 			continue
 		}
+		// The returned request is the one later replans resolve against, so
+		// its audio selection moves to the candidate with the file.
+		if err := remapAudioSelectionV3(base, candidate, &next); err != nil {
+			continue
+		}
 		nextAudio := remapAudioIndexV3(base, candidate, audio)
 		if err := preflightPlaybackFile(r.Context(), candidate, h.MissingMarker, h.EventsHub); err != nil {
 			continue

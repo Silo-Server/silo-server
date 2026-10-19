@@ -183,11 +183,17 @@ func TestBufferedAutoPrefersCopyVersion(t *testing.T) {
 	req.BandwidthEstimateKbps = new(44100)
 	req.BandwidthEstimateSource = "observed_rebuffer"
 	req.ClientFeatures = append(req.ClientFeatures, playback.FeatureBufferingQualityV1)
+	req.AudioTrackID = playback.TrackIDV3(source.ID, "audio", 0)
 	r := httptest.NewRequest("POST", "/", nil).WithContext(newAuthorizedPlaybackContext())
-	chosen, _, _ := h.lowerBufferedVersion(r, req, source, 0, h.plannerSettingsV3(r.Context()))
+	chosen, next, _ := h.lowerBufferedVersion(r, req, source, 0, h.plannerSettingsV3(r.Context()))
 	if chosen.ID != alternate.ID {
 		t.Fatalf("selected %d, want lower original %d", chosen.ID, alternate.ID)
 	}
+	// A later replan resolves the selection against the file that plays.
+	if want := playback.TrackIDV3(alternate.ID, "audio", 0); next.AudioTrackID != want {
+		t.Fatalf("audio identity %q, want %q on the lower version", next.AudioTrackID, want)
+	}
+	req.AudioTrackID = ""
 	req.AllowAlternateVersions = new(false)
 	chosen, _, _ = h.lowerBufferedVersion(r, req, source, 0, h.plannerSettingsV3(r.Context()))
 	if chosen.ID != source.ID {
