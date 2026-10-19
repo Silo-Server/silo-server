@@ -78,23 +78,23 @@ func TestCreateProfilePINProtectedAtFirstCommit(t *testing.T) {
 					continue
 				}
 				verified, err := access.VerifyProfileForRequest(&profile, access.ResolveInput{ProfileID: profile.ID}, 1, nil)
+				if value := storedProfileSetting(t, base, settingskeys.PlaybackAudioLanguage, profile.ID); value == nil {
+					t.Error("profile preferences missing at first commit")
+				}
 				if pin == "" {
 					if !verified || err != nil || profile.PINHash != "" {
 						t.Errorf("PIN-less profile: verified=%v err=%v", verified, err)
 					}
-				} else {
-					if verified || !errors.Is(err, access.ErrProfileUnverified) {
-						t.Errorf("first committed row allows selection without PIN: verified=%v err=%v", verified, err)
-					}
-					if err := bcrypt.CompareHashAndPassword([]byte(profile.PINHash), []byte(pin)); err != nil {
-						t.Errorf("first committed row does not contain requested PIN: %v", err)
-					}
-					if err := bcrypt.CompareHashAndPassword([]byte(profile.PINHash), []byte("wrong")); err == nil {
-						t.Error("wrong PIN accepted")
-					}
+					continue
 				}
-				if value := storedProfileSetting(t, base, settingskeys.PlaybackAudioLanguage, profile.ID); value == nil {
-					t.Error("profile preferences missing at first commit")
+				if verified || !errors.Is(err, access.ErrProfileUnverified) {
+					t.Errorf("first committed row allows selection without PIN: verified=%v err=%v", verified, err)
+				}
+				if err := bcrypt.CompareHashAndPassword([]byte(profile.PINHash), []byte(pin)); err != nil {
+					t.Errorf("first committed row does not contain requested PIN: %v", err)
+				}
+				if err := bcrypt.CompareHashAndPassword([]byte(profile.PINHash), []byte("wrong")); err == nil {
+					t.Error("wrong PIN accepted")
 				}
 			}
 		})
