@@ -18,6 +18,15 @@ the route answers `413` without processing the request: `too_large` in the v1 er
 or plain text on `/api/v1/auth/oauth/complete`. Only the first JSON value is decoded; data
 after it is ignored, not rejected.
 
+`POST /api/v1/auth/setup` also requires `Content-Type: application/json` before
+reading the body. MIME parameters are accepted; missing, malformed, or other media
+types return `415` with the v1 `unsupported_media_type` error. This critical bridge
+fix prevents a cross-site browser form or `no-cors` fetch from claiming the first
+administrator. A cross-origin JSON fetch requires a preflight, which the main API
+does not grant. Same-origin browser and native JSON setup keep the existing
+database-wide one-winner transaction. This does not add a setup secret or limit
+which networks may complete setup.
+
 ## Login sessions
 
 Login sessions belong to accounts and are separate from household profiles, registered
