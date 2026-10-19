@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -105,8 +106,7 @@ func (f accessGroupIntSliceField) Ptr() *[]int {
 	if !f.Set {
 		return nil
 	}
-	value := append([]int(nil), f.Value...)
-	return &value
+	return new(slices.Clone(f.Value))
 }
 
 type accessGroupStringSliceField struct {
@@ -412,7 +412,7 @@ func toAccessGroupResponse(group access.Group) accessGroupResponse {
 		ID:                       group.ID,
 		Name:                     group.Name,
 		Description:              group.Description,
-		LibraryIDs:               append([]int(nil), group.LibraryIDs...),
+		LibraryIDs:               slices.Clone(group.LibraryIDs),
 		MaxPlaybackQuality:       access.NormalizePlaybackQuality(group.MaxPlaybackQuality),
 		DownloadAllowed:          group.DownloadAllowed,
 		DownloadTranscodeAllowed: group.DownloadTranscodeAllowed,

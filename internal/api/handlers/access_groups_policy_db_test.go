@@ -53,6 +53,9 @@ func TestAccessGroupUpdateLibraryPolicyDB(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("update status = %d, body %s", rec.Code, rec.Body.String())
 			}
+			if got := decodeAccessGroupResponse(t, rec).LibraryIDs; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("response library_ids = %#v, want %#v", got, tc.want)
+			}
 			var ids []int
 			if err := f.pool.QueryRow(t.Context(), `SELECT library_ids FROM access_groups WHERE id=$1`, group.ID).Scan(&ids); err != nil {
 				t.Fatal(err)

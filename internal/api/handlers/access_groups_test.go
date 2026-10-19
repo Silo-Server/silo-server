@@ -245,6 +245,18 @@ func TestAccessGroupUpdateLibraryPolicy(t *testing.T) {
 			if got := decodeAccessGroupResponse(t, rec).LibraryIDs; !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("library_ids = %#v, want %#v", got, tc.want)
 			}
+			read := httptest.NewRecorder()
+			h.HandleGet(read, accessGroupRequestWithID(http.MethodGet, "/api/v1/admin/access-groups/1", nil, "1"))
+			policy := decodeAccessGroupResponse(t, read)
+			body, err := json.Marshal(map[string][]int{"library_ids": policy.LibraryIDs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayed := httptest.NewRecorder()
+			h.HandleUpdate(replayed, accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/1", strings.NewReader(string(body)), "1"))
+			if replayed.Code != http.StatusOK || !reflect.DeepEqual(store.groups[1].LibraryIDs, tc.want) {
+				t.Fatalf("read/save round trip: status = %d, library_ids = %#v, want %#v", replayed.Code, store.groups[1].LibraryIDs, tc.want)
+			}
 		})
 	}
 }
