@@ -24,9 +24,11 @@ import {
   Plus,
   RotateCcw,
   TimerReset,
+  ThumbsDown,
   X,
 } from "lucide-react";
 import { useLocation } from "react-router";
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useFinePointer } from "@/hooks/useFinePointer";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
@@ -38,6 +40,7 @@ import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queri
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { useClearResumePosition } from "@/hooks/queries/progress";
+import { canMarkNotInterested, useToggleNotInterested } from "@/hooks/queries/notInterested";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
@@ -124,6 +127,7 @@ type MediaItemMenuEntry =
         | "resetProgress"
         | "toggleFavorite"
         | "toggleWatchlist"
+        | "toggleNotInterested"
         | "dismissFromHome"
         | "viewDetails"
         | "viewPlayHistory"
@@ -237,6 +241,13 @@ export function buildMediaItemMenuModel({
         label: userState.in_watchlist ? "Remove from Watchlist" : "Add to Watchlist",
       });
     }
+    if (canMarkNotInterested(mediaType)) {
+      entries.push({
+        kind: "action",
+        key: "toggleNotInterested",
+        label: userState.not_interested ? "Show in Recommendations" : "Not Interested",
+      });
+    }
   }
 
   // Manga series get a local file inspector (folder path, per-volume files).
@@ -332,6 +343,13 @@ function MediaItemMenuActionIcon({
         <Check aria-hidden="true" className="size-4" />
       ) : (
         <Plus aria-hidden="true" className="size-4" />
+      );
+    case "toggleNotInterested":
+      return (
+        <ThumbsDown
+          aria-hidden="true"
+          className={cn("size-4", userState?.not_interested && "fill-current")}
+        />
       );
     case "dismissFromHome":
       return <X aria-hidden="true" className="size-4" />;
@@ -979,6 +997,7 @@ function MediaItemMenuEngine({
   });
   const favoriteMutation = useToggleFavorite(contentId);
   const watchlistMutation = useToggleWatchlist(contentId);
+  const notInterestedMutation = useToggleNotInterested(contentId);
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
   const clearResumePositionMutation = useClearResumePosition();
@@ -988,6 +1007,7 @@ function MediaItemMenuEngine({
     watchedMutation.isPending ||
     favoriteMutation.isPending ||
     watchlistMutation.isPending ||
+    notInterestedMutation.isPending ||
     refreshMetadataMutation.isPending ||
     dismissHomeItemMutation.isPending ||
     clearResumePositionMutation.isPending;
@@ -1076,6 +1096,21 @@ function MediaItemMenuEngine({
         setCurrentUserState((prev) =>
           prev ? { ...prev, in_watchlist: !prev.in_watchlist } : prev,
         );
+        return;
+      }
+      case "toggleNotInterested": {
+        if (!currentUserState) return;
+        const marked = currentUserState.not_interested ?? false;
+        const authority = captureProfileRequestContext();
+        setCurrentUserState((prev) => (prev ? { ...prev, not_interested: !marked } : prev));
+        try {
+          await notInterestedMutation.mutateAsync(marked);
+        } catch {
+          // After a profile switch the card shows the new profile's state.
+          if (!authority || isCapturedProfileAuthorityActive(authority)) {
+            setCurrentUserState((prev) => (prev ? { ...prev, not_interested: marked } : prev));
+          }
+        }
         return;
       }
       case "viewDetails": {
@@ -1207,6 +1242,8 @@ export default function MediaItemMenu({
   const hasFinePointer = useHasFinePointer();
   const [currentUserState, setCurrentUserState] = useState(userState);
   const lastSyncedUserStateRef = useRef(userState);
+  const activeProfileId = currentProfile?.id;
+  const lastSyncedProfileRef = useRef(activeProfileId);
   // A card that has never been hovered, focused, or used mounts none of the
   // action machinery — a home page holds hundreds of cards.
   const [engineMounted, setEngineMounted] = useState(false);
@@ -1228,16 +1265,22 @@ export default function MediaItemMenu({
 
   useEffect(() => {
     const lastSynced = lastSyncedUserStateRef.current;
+    // A profile switch always resyncs: the local state may still hold the
+    // earlier profile's optimistic change while the props look unchanged.
+    const sameProfile = lastSyncedProfileRef.current === activeProfileId;
     if (
+      sameProfile &&
       lastSynced?.played === userState?.played &&
       lastSynced?.is_favorite === userState?.is_favorite &&
-      lastSynced?.in_watchlist === userState?.in_watchlist
+      lastSynced?.in_watchlist === userState?.in_watchlist &&
+      lastSynced?.not_interested === userState?.not_interested
     ) {
       return;
     }
     lastSyncedUserStateRef.current = userState;
+    lastSyncedProfileRef.current = activeProfileId;
     setCurrentUserState(userState);
-  }, [userState]);
+  }, [userState, activeProfileId]);
 
   const dismissLabel =
     dismissAction?.surface === "continue_watching"

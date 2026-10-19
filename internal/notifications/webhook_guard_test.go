@@ -40,7 +40,7 @@ func TestWebhookGuardedDeletePG(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer scoped.Close()
-	if _, err = scoped.Exec(ctx, `CREATE TABLE notification_webhooks (id text PRIMARY KEY, profile_id text NOT NULL, name text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now()); CREATE TABLE attempts(id text PRIMARY KEY, webhook_id text REFERENCES notification_webhooks(id) ON DELETE CASCADE)`); err != nil {
+	if _, err = scoped.Exec(ctx, `CREATE TABLE notification_webhooks (id text PRIMARY KEY, user_id integer NOT NULL DEFAULT 1, profile_id text NOT NULL, name text NOT NULL, updated_at timestamptz NOT NULL DEFAULT now()); CREATE TABLE attempts(id text PRIMARY KEY, webhook_id text REFERENCES notification_webhooks(id) ON DELETE CASCADE)`); err != nil {
 		t.Fatal(err)
 	}
 	migration, err := os.ReadFile("../../migrations/sql/20260906145619_webhook_conditional_revision.sql")
@@ -78,7 +78,7 @@ func TestWebhookGuardedDeletePG(t *testing.T) {
 	repo := NewWebhookRepository(scoped)
 	result := make(chan error, 1)
 	go func() {
-		result <- repo.DeleteGuarded(ctx, "owner", "row", func(current int64) error {
+		result <- repo.DeleteGuarded(ctx, 1, "owner", "row", func(current int64) error {
 			if current != original {
 				return stale
 			}
@@ -110,10 +110,13 @@ func TestWebhookGuardedDeletePG(t *testing.T) {
 	if err = scoped.QueryRow(ctx, `SELECT count(*) FROM attempts`).Scan(&attempts); err != nil || attempts != 1 {
 		t.Fatal("stale delete changed attempts")
 	}
-	if err = repo.DeleteGuarded(ctx, "other", "row", func(int64) error { t.Error("foreign precondition evaluated"); return nil }); !errors.Is(err, ErrWebhookNotFound) {
+	if err = repo.DeleteGuarded(ctx, 2, "owner", "row", func(int64) error { t.Error("other account's precondition evaluated"); return nil }); !errors.Is(err, ErrWebhookNotFound) {
+		t.Fatalf("other account: %v", err)
+	}
+	if err = repo.DeleteGuarded(ctx, 1, "other", "row", func(int64) error { t.Error("foreign precondition evaluated"); return nil }); !errors.Is(err, ErrWebhookNotFound) {
 		t.Fatalf("foreign: %v", err)
 	}
-	if err = repo.DeleteGuarded(ctx, "owner", "row", func(current int64) error {
+	if err = repo.DeleteGuarded(ctx, 1, "owner", "row", func(current int64) error {
 		if current != second {
 			return stale
 		}
@@ -124,7 +127,7 @@ func TestWebhookGuardedDeletePG(t *testing.T) {
 	if err = scoped.QueryRow(ctx, `SELECT count(*) FROM attempts`).Scan(&attempts); err != nil || attempts != 0 {
 		t.Fatal("attempts did not cascade")
 	}
-	if err = repo.DeleteGuarded(ctx, "owner", "row", func(int64) error { return nil }); !errors.Is(err, ErrWebhookNotFound) {
+	if err = repo.DeleteGuarded(ctx, 1, "owner", "row", func(int64) error { return nil }); !errors.Is(err, ErrWebhookNotFound) {
 		t.Fatalf("missing: %v", err)
 	}
 	if _, err = scoped.Exec(ctx, `INSERT INTO notification_webhooks(id,profile_id,name,revision) VALUES ('row','owner','recreated',1)`); err != nil {

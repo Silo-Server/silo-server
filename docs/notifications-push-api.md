@@ -105,8 +105,8 @@ Authorization: Bearer <display token or access token>
 ```json
 {
   "delivery_id": "01M...",
-  "title": "The latest episode of Severance S02E01 just dropped!",
-  "body": "Hello, Ms. Cobel",
+  "title": "Severance",
+  "body": "New episode · S02E01 · Hello, Ms. Cobel",
   "thread_id": "series:series-1",
   "category": "episode_available",
   "url": "/item/episode-1"

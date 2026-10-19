@@ -831,7 +831,7 @@ func (h *ItemsHandler) writeCatalogBrowseResponse(w http.ResponseWriter, r *http
 	episodeMetadata := h.listEpisodeBrowseMetadata(r.Context(), result.Items)
 	items := make([]itemListResponse, 0, len(result.Items))
 	for _, item := range result.Items {
-		resp := h.toItemListResponseWithOverlay(r.Context(), viewer, item, overlaySummaries[item.ContentID], userStates[item.ContentID], filter.ImageSize)
+		resp := h.toItemListResponseWithOverlay(r.Context(), viewer, item, overlaySummaries[item.ContentID], userStates[item.ContentID], filter.Artwork())
 		// The resolver validated the item's own hint against this profile, so
 		// its answer replaces the unvalidated one carried by the item.
 		resp.PlayContentID = playTargets[playableTargetKeyForItem(item)]
@@ -978,20 +978,20 @@ func (h *ItemsHandler) writeCatalogFiltersResponse(w http.ResponseWriter, r *htt
 
 // toItemListResponse converts a MediaItem to an itemListResponse with presigned
 // URLs at the size the caller's request asked for.
-func (h *ItemsHandler) toItemListResponse(ctx context.Context, v ItemViewer, item *models.MediaItem, size imagesize.Size) itemListResponse {
-	return h.toItemListResponseWithOverlay(ctx, v, item, nil, nil, size)
+func (h *ItemsHandler) toItemListResponse(ctx context.Context, v ItemViewer, item *models.MediaItem, art imagesize.Request) itemListResponse {
+	return h.toItemListResponseWithOverlay(ctx, v, item, nil, nil, art)
 }
 
-func (h *ItemsHandler) toItemListResponseWithOverlay(ctx context.Context, v ItemViewer, item *models.MediaItem, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse, size imagesize.Size) itemListResponse {
+func (h *ItemsHandler) toItemListResponseWithOverlay(ctx context.Context, v ItemViewer, item *models.MediaItem, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse, art imagesize.Request) itemListResponse {
 	if h.detailSvc != nil {
 		if localized, err := h.detailSvc.LocalizeItemModel(ctx, item, v.Access); err == nil && localized != nil {
 			item = localized
 		}
 	}
 	resp := itemListResponseShell(item, overlaySummary, userState)
-	hint := requestVariantHint("card", size)
-	resp.PosterURL = h.presignURLCtx(ctx, sizedCardPath(item.PosterPath, artworkkey.ImagePoster, size), hint)
-	resp.BackdropURL = h.presignURLCtx(ctx, sizedCardBackdropPath(item.BackdropPath, size), hint)
+	poster, backdrop := art.For(imagesize.SlotPoster), art.For(imagesize.SlotBackdrop)
+	resp.PosterURL = h.presignURLCtx(ctx, sizedCardPath(item.PosterPath, artworkkey.ImagePoster, poster), requestVariantHint("card", poster))
+	resp.BackdropURL = h.presignURLCtx(ctx, sizedCardBackdropPath(item.BackdropPath, backdrop), requestVariantHint("card", backdrop))
 	return resp
 }
 
@@ -1052,7 +1052,7 @@ func (h *ItemsHandler) localizeItemListModels(ctx context.Context, items []*mode
 	return localized
 }
 
-func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*models.MediaItem, size imagesize.Size) map[string]itemListImageURLs {
+func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*models.MediaItem, art imagesize.Request) map[string]itemListImageURLs {
 	urls := make(map[string]itemListImageURLs, len(items))
 	if h == nil || h.detailSvc == nil || len(items) == 0 {
 		return urls
@@ -1065,19 +1065,10 @@ func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*model
 	}
 
 	pending := make([]pendingImages, 0, len(items))
-	paths := make([]string, 0, len(items)*2)
-	seenPaths := make(map[string]struct{}, len(items)*2)
 	logoPaths := make(map[string]string, len(items))
-	addPath := func(path string) {
-		if path == "" || path == "-" {
-			return
-		}
-		if _, ok := seenPaths[path]; ok {
-			return
-		}
-		seenPaths[path] = struct{}{}
-		paths = append(paths, path)
-	}
+	posterSize, backdropSize := art.For(imagesize.SlotPoster), art.For(imagesize.SlotBackdrop)
+	posterHint, backdropHint := requestVariantHint("card", posterSize), requestVariantHint("card", backdropSize)
+	var batch catalog.ArtworkBatch
 
 	for _, item := range items {
 		if item == nil || item.ContentID == "" {
@@ -1085,21 +1076,21 @@ func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*model
 		}
 		images := pendingImages{
 			contentID:    item.ContentID,
-			posterPath:   sizedCardPath(item.PosterPath, artworkkey.ImagePoster, size),
-			backdropPath: sizedCardBackdropPath(item.BackdropPath, size),
+			posterPath:   sizedCardPath(item.PosterPath, artworkkey.ImagePoster, posterSize),
+			backdropPath: sizedCardBackdropPath(item.BackdropPath, backdropSize),
 		}
 		pending = append(pending, images)
-		addPath(images.posterPath)
-		addPath(images.backdropPath)
+		batch.Add(images.posterPath, posterHint)
+		batch.Add(images.backdropPath, backdropHint)
 		logoPaths[item.ContentID] = item.LogoPath
 	}
 
-	resolved := h.detailSvc.PresignURLsWithExpiry(ctx, paths, requestVariantHint("card", size))
-	logoURLs := signListingLogos(ctx, h.detailSvc, logoPaths, size)
+	resolved := batch.Resolve(ctx, h.detailSvc, requestVariantHint("card", art.Size))
+	logoURLs := signListingLogos(ctx, h.detailSvc, logoPaths, art.For(imagesize.SlotLogo))
 	for _, images := range pending {
 		urls[images.contentID] = itemListImageURLs{
-			posterURL:   resolved[images.posterPath].URL,
-			backdropURL: resolved[images.backdropPath].URL,
+			posterURL:   resolved.Get(images.posterPath, posterHint).URL,
+			backdropURL: resolved.Get(images.backdropPath, backdropHint).URL,
 			logoURL:     logoURLs[images.contentID],
 		}
 	}
@@ -1286,7 +1277,7 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 // each resolve in one round-trip for the whole list instead of per episode.
 func (h *ItemsHandler) buildEpisodeResponses(ctx context.Context, v ItemViewer, episodes []*models.Episode) []episodeResponse {
 	filter := v.Access
-	size := filter.ImageSize
+	size := filter.ImageSizeFor(imagesize.SlotStill)
 
 	if h.detailSvc != nil {
 		if localized, err := h.detailSvc.LocalizeEpisodeModels(ctx, episodes, filter); err == nil && len(localized) == len(episodes) {
@@ -1556,6 +1547,9 @@ func (h *ItemsHandler) listAudiobookSortMetrics(
 		case "series":
 			resp.SeriesName = value
 		}
+	}
+	if err := rows.Err(); err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing audiobook sort metrics", "component", "api", "sort", sortField, "error", err)
 	}
 }
 
@@ -2316,6 +2310,8 @@ type AccessFilterOptions struct {
 	ScopeFilesToLibrary bool
 	// ImageSize is the artwork variant to presign; Unset picks defaults.
 	ImageSize imagesize.Size
+	// ImageWidths are per-slot target widths overriding ImageSize.
+	ImageWidths imagesize.Widths
 }
 
 // ContextAccessFilter is the viewer's access filter from the identity on the
@@ -2337,6 +2333,7 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 			MetadataLanguageOverrides: scope.MetadataLanguageOverrides,
 			SelectedFileID:            opts.SelectedFileID,
 			ImageSize:                 opts.ImageSize,
+			ImageWidths:               opts.ImageWidths,
 			UserID:                    apimw.GetUserID(ctx),
 			ProfileID:                 apimw.GetProfileID(ctx),
 			DeviceID:                  opts.DeviceID,
@@ -2372,6 +2369,7 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 		ScopeFilesToLibrary:   opts.ScopeFilesToLibrary,
 		SelectedFileID:        opts.SelectedFileID,
 		ImageSize:             opts.ImageSize,
+		ImageWidths:           opts.ImageWidths,
 		UserID:                apimw.GetUserID(ctx),
 		ProfileID:             apimw.GetProfileID(ctx),
 		DeviceID:              opts.DeviceID,

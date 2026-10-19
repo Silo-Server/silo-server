@@ -20,7 +20,7 @@ const OPTIONS = [
   option("best", "Best Picture Winners", "mdblist"),
   option("xmas", "Christmas Classics", "smart"),
   option("tmdb", "TMDB Top", "tmdb", "user"),
-  option("trakt", "Trakt Watchlist", "trakt", "user"),
+  option("watchlist", "IMDb Watchlist", "mdblist", "user"),
   option("mine", "My Picks", "manual", "user"),
 ];
 
@@ -38,12 +38,10 @@ function Harness({
   initial = "",
   source = collections(),
   onPick = vi.fn(),
-  locked,
 }: {
   initial?: string;
   source?: RowCollections;
   onPick?: (option: CollectionOption) => void;
-  locked?: boolean;
 }) {
   const [value, setValue] = useState(initial);
   return (
@@ -52,7 +50,6 @@ function Harness({
       value={value}
       onPageIds={new Set(["ghibli"])}
       pageLabel="Home"
-      locked={locked}
       onPick={(picked) => {
         setValue(picked.id);
         onPick(picked);
@@ -74,7 +71,7 @@ describe("CollectionPicker", () => {
       "Best Picture Winners",
       "Christmas Classics",
       "TMDB Top",
-      "Trakt Watchlist",
+      "IMDb Watchlist",
       "My Picks",
     ]);
     const ghibli = screen.getByRole("radio", { name: "Studio Ghibli" });
@@ -100,7 +97,7 @@ describe("CollectionPicker", () => {
     await userEvent.click(within(filters).getByRole("button", { name: "Smart" }));
     expect(names()).toEqual(["Christmas Classics"]);
     await userEvent.click(within(filters).getByRole("button", { name: "Synced list" }));
-    expect(names()).toEqual(["Best Picture Winners", "TMDB Top", "Trakt Watchlist"]);
+    expect(names()).toEqual(["Best Picture Winners", "TMDB Top", "IMDb Watchlist"]);
     await userEvent.click(within(filters).getByRole("button", { name: "All" }));
     expect(names()).toHaveLength(6);
   });
@@ -157,14 +154,6 @@ describe("CollectionPicker", () => {
     rerender(<Harness source={collections({ options: [] })} />);
     expect(
       screen.getByText("No collections yet. Make one in Collections first."),
-    ).toBeInTheDocument();
-  });
-
-  it("can't change a legacy Trakt row's collection", () => {
-    render(<Harness initial="ghibli" locked />);
-    for (const radio of screen.getAllByRole("radio")) expect(radio).toBeDisabled();
-    expect(
-      screen.getByText("This row follows a Trakt list, so its collection can't change."),
     ).toBeInTheDocument();
   });
 });

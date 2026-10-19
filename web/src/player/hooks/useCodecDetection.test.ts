@@ -1,10 +1,10 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   detectHDRFromMatchMedia,
-  detectMaxResolutionFromScreen,
   prewarmCodecDetection,
   probeHDR10PlaybackSupport,
+  probeMaxDecodeResolution,
   probeWebCapabilities,
   resetCodecDetectionForTests,
   useCodecDetection,
@@ -12,13 +12,150 @@ import {
 
 afterEach(() => {
   resetCodecDetectionForTests();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
-describe("detectMaxResolutionFromScreen", () => {
-  it("keeps a 1280x720 display in the 720p bucket", () => {
-    expect(detectMaxResolutionFromScreen(1280, 720)).toBe("720p");
+type DecodeAnswer = Pick<MediaCapabilitiesDecodingInfo, "supported" | "smooth" | "powerEfficient">;
+
+const DECODED: DecodeAnswer = { supported: true, smooth: true, powerEfficient: true };
+const NOT_DECODED: DecodeAnswer = { supported: false, smooth: false, powerEfficient: false };
+const SOFTWARE_STUTTER: DecodeAnswer = { supported: true, smooth: false, powerEfficient: false };
+const HARDWARE_NOT_SMOOTH: DecodeAnswer = { supported: true, smooth: false, powerEfficient: true };
+
+/**
+ * Answers decoder queries keyed by codec family and picture height, such as
+ * "vp09@2160"; anything not listed is not decoded.
+ */
+function stubDecoder(answers: Record<string, DecodeAnswer>) {
+  const decodingInfo = vi.fn((configuration: MediaDecodingConfiguration) => {
+    const video = configuration.video;
+    const codec = /codecs="(\w{4})/.exec(video?.contentType ?? "")?.[1];
+    return Promise.resolve(answers[`${codec}@${video?.height}`] ?? NOT_DECODED);
+  });
+  vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+  return decodingInfo;
+}
+
+/** The queries a decoder stub received, as "codec WIDTHxHEIGHT". */
+function queried(decodingInfo: { mock: { calls: MediaDecodingConfiguration[][] } }): string[] {
+  return decodingInfo.mock.calls.map(([configuration]) => {
+    const video = configuration?.video;
+    const codec = /codecs="([^"]+)"/.exec(video?.contentType ?? "")?.[1];
+    return `${codec} ${video?.width}x${video?.height}`;
+  });
+}
+
+const UHD_QUERIES = [
+  "avc1.640033 3840x2160",
+  "hvc1.1.6.L150.B0 3840x2160",
+  "vp09.00.51.08 3840x2160",
+  "av01.0.12M.08 3840x2160",
+];
+
+describe("probeMaxDecodeResolution", () => {
+  it("queries every codec at 4K at once, as a file", () => {
+    const decodingInfo = vi.fn<
+      (configuration: MediaDecodingConfiguration) => Promise<DecodeAnswer>
+    >(() => new Promise(() => {}));
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    void probeMaxDecodeResolution();
+
+    expect(queried(decodingInfo)).toEqual(UHD_QUERIES);
+    expect(decodingInfo.mock.calls.every(([configuration]) => configuration.type === "file")).toBe(
+      true,
+    );
+  });
+
+  it("reports 2160p when the browser decodes 4K H.264 smoothly", async () => {
+    const decodingInfo = stubDecoder({ "avc1@2160": DECODED });
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("2160p");
+    expect(queried(decodingInfo)).toEqual(UHD_QUERIES);
+  });
+
+  // The server downscales anything above the reported limit, whatever its
+  // codec, so a 4K VP9 decoder must not be capped by H.264.
+  it("reports 2160p for a browser that decodes only VP9 at 4K", async () => {
+    stubDecoder({ "vp09@2160": DECODED, "avc1@1080": DECODED });
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("2160p");
+  });
+
+  // iOS Safari reports even small HEVC streams as not smooth while its
+  // hardware decoder plays them in real time.
+  it("trusts a hardware decoder whose small reference stream is also not smooth", async () => {
+    const decodingInfo = stubDecoder({
+      "hvc1@2160": HARDWARE_NOT_SMOOTH,
+      "hvc1@720": HARDWARE_NOT_SMOOTH,
+      "avc1@1080": DECODED,
+    });
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("2160p");
+    expect(queried(decodingInfo)).toContain("hvc1.1.6.L93.B0 1280x720");
+  });
+
+  // Chromium derives smooth from frames dropped in earlier playback, so a
+  // hardware decoder that struggled at 4K is reported as not smooth there.
+  it("keeps a not-smooth 4K answer when the reference stream plays smoothly", async () => {
+    const decodingInfo = stubDecoder({
+      "avc1@2160": HARDWARE_NOT_SMOOTH,
+      "avc1@720": DECODED,
+      "avc1@1080": DECODED,
+    });
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("1080p");
+    expect(queried(decodingInfo)).toContain("avc1.64001F 1280x720");
+  });
+
+  it("caps at 1080p when 4K would stutter in software", async () => {
+    stubDecoder({ "avc1@2160": SOFTWARE_STUTTER, "avc1@1080": DECODED });
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("1080p");
+  });
+
+  it("counts a 4K query the browser throws on as no, keeping the other answers", async () => {
+    const decodingInfo = vi.fn((configuration: MediaDecodingConfiguration) => {
+      const contentType = configuration.video?.contentType ?? "";
+      if (contentType.includes("av01")) return Promise.reject(new TypeError("unparsable codec"));
+      const height = configuration.video?.height;
+      if (contentType.includes("avc1") && height === 2160) return Promise.resolve(SOFTWARE_STUTTER);
+      if (contentType.includes("avc1") && height === 1080) return Promise.resolve(DECODED);
+      return Promise.resolve(NOT_DECODED);
+    });
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("1080p");
+  });
+
+  it("caps at 1080p when every codec rejects 4K", async () => {
+    stubDecoder({ "avc1@1080": DECODED });
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("1080p");
+  });
+
+  // A browser without H.264 rejects 1080p too; that is about the codec, not
+  // the size, and the flat codec lists already carry it.
+  it("reports 2160p when H.264 is rejected at every size", async () => {
+    stubDecoder({});
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("2160p");
+  });
+
+  it("reports 2160p without the Media Capabilities API", async () => {
+    vi.stubGlobal("navigator", {});
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("2160p");
+  });
+
+  it("reports 2160p when the query fails", async () => {
+    vi.stubGlobal("navigator", {
+      mediaCapabilities: { decodingInfo: vi.fn().mockRejectedValue(new TypeError("bad config")) },
+    });
+
+    await expect(probeMaxDecodeResolution()).resolves.toBe("2160p");
   });
 });
 
@@ -66,6 +203,45 @@ describe("probeWebCapabilities", () => {
         }),
       }),
     );
+  });
+
+  // iOS Safari reports every HEVC configuration as not smooth, even a small
+  // SDR stream, while its hardware decoder (power efficient) plays them in real time.
+  it("accepts a hardware decoder where the browser reports no HEVC stream as smooth", async () => {
+    const decodingInfo = vi
+      .fn()
+      .mockResolvedValue({ supported: true, smooth: false, powerEfficient: true });
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(true);
+    expect(decodingInfo).toHaveBeenLastCalledWith(
+      expect.objectContaining({ video: expect.objectContaining({ width: 640, height: 360 }) }),
+    );
+  });
+
+  // Chromium derives smooth from frames dropped in earlier playback, so a
+  // hardware decoder that struggled at 4K is reported as not smooth there.
+  it("keeps a not-smooth answer from a browser that plays the small stream smoothly", async () => {
+    const decodingInfo = vi.fn().mockImplementation((configuration: MediaDecodingConfiguration) =>
+      Promise.resolve({
+        supported: true,
+        smooth: configuration.video?.width === 640,
+        powerEfficient: true,
+      }),
+    );
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(false);
+  });
+
+  it("does not claim HDR10 for a decoder that is neither smooth nor power efficient", async () => {
+    const decodingInfo = vi
+      .fn()
+      .mockResolvedValue({ supported: true, smooth: false, powerEfficient: false });
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(false);
+    expect(decodingInfo).toHaveBeenCalledTimes(1);
   });
 
   // The strip remux delivers an hvc1-labeled file; support reported only for
@@ -140,20 +316,61 @@ describe("probeWebCapabilities", () => {
     expect(probeWebCapabilities().hdrDetails.dolby_vision_profiles).toEqual([]);
   });
 
-  // `screen` is measured in logical CSS pixels, so a 2x MacBook Pro XDR panel
-  // advertises 1080p unless the device pixel ratio is applied.
-  it("scales the screen-derived resolution by the device pixel ratio", () => {
-    vi.stubGlobal("screen", { width: 1728, height: 1117 });
-    vi.stubGlobal("devicePixelRatio", 2);
+  // The browser scales a 1080p picture into a 720p window itself, so a small
+  // screen must not make Auto transcode a file the decoder plays.
+  it("does not derive the resolution limit from the screen", () => {
+    vi.stubGlobal("screen", { width: 1280, height: 720 });
+    vi.stubGlobal("devicePixelRatio", 1);
 
     expect(probeWebCapabilities().maxResolution).toBe("2160p");
   });
 
-  it("treats a missing device pixel ratio as 1", () => {
-    vi.stubGlobal("screen", { width: 1728, height: 1117 });
-    vi.stubGlobal("devicePixelRatio", undefined);
+  it("adopts the decoder's resolution limit once the async probes settle", async () => {
+    vi.stubGlobal("screen", { width: 3840, height: 2160 });
+    stubDecoder({ "avc1@2160": SOFTWARE_STUTTER, "avc1@1080": DECODED });
 
-    expect(probeWebCapabilities().maxResolution).toBe("1080p");
+    const { result, unmount } = renderHook(() => useCodecDetection());
+    expect(result.current.settled).toBe(false);
+    expect(result.current.maxResolution).toBe("2160p");
+
+    await waitFor(() => expect(result.current.settled).toBe(true));
+    expect(result.current.maxResolution).toBe("1080p");
+    unmount();
+  });
+
+  // A size query that never answers must not hold playback start past the
+  // HDR10 probe by more than the deadline; its late answer serves later starts.
+  it("assumes 2160p when the size probe misses its deadline", async () => {
+    vi.useFakeTimers();
+    const pending: Array<(answer: DecodeAnswer) => void> = [];
+    vi.stubGlobal("navigator", {
+      mediaCapabilities: {
+        decodingInfo: vi.fn((configuration: MediaDecodingConfiguration) =>
+          configuration.video?.transferFunction === "pq"
+            ? Promise.resolve(NOT_DECODED)
+            : new Promise<DecodeAnswer>((resolve) => pending.push(resolve)),
+        ),
+      },
+    });
+
+    const first = renderHook(() => useCodecDetection());
+    await act(() => vi.advanceTimersByTimeAsync(1_999));
+    expect(first.result.current.settled).toBe(false);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(first.result.current.settled).toBe(true);
+    expect(first.result.current.maxResolution).toBe("2160p");
+    first.unmount();
+
+    vi.useRealTimers();
+    for (const resolve of pending.splice(0)) resolve(SOFTWARE_STUTTER);
+    // Every 4K answer failed, so the 1080p H.264 query follows.
+    await waitFor(() => expect(pending).toHaveLength(1));
+    pending[0]!(DECODED);
+
+    const second = renderHook(() => useCodecDetection());
+    await waitFor(() => expect(second.result.current.settled).toBe(true));
+    expect(second.result.current.maxResolution).toBe("1080p");
+    second.unmount();
   });
 
   // Moving a window between displays can change what the decoder will admit to,
@@ -234,9 +451,11 @@ describe("probeWebCapabilities", () => {
     const { result, unmount } = renderHook(() => useCodecDetection());
     await act(async () => Promise.resolve());
 
-    expect(decodingInfo).toHaveBeenCalledTimes(1);
+    // One HDR10 query and one 4K query per codec, all issued by the warm-up.
+    expect(decodingInfo).toHaveBeenCalledTimes(5);
     expect(result.current.settled).toBe(true);
     expect(result.current.hdrDetails.hdr10).toBe(true);
+    expect(result.current.maxResolution).toBe("2160p");
     unmount();
   });
 

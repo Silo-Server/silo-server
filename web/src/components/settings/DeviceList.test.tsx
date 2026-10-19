@@ -137,6 +137,42 @@ describe("DeviceList", () => {
     const [onlyItem] = items;
     expect(within(onlyItem!).getByText("Living Room")).toBeInTheDocument();
   });
+
+  it("lists a renamed device by its chosen name and finds it by either name", () => {
+    const tvs = [
+      device({ device_id: "den", device_name: "Apple TV", custom_name: "Den" }),
+      device({ device_id: "bedroom", device_name: "Apple TV" }),
+    ];
+    const { rerender } = render(
+      <DeviceList
+        devices={tvs}
+        selectedKey={null}
+        onSelect={vi.fn()}
+        search="den"
+        onSearchChange={vi.fn()}
+        now={NOW}
+      />,
+    );
+    let items = screen.getAllByRole("listitem");
+    expect(items).toHaveLength(1);
+    expect(within(items[0]!).getByText("Den")).toBeInTheDocument();
+
+    rerender(
+      <DeviceList
+        devices={tvs}
+        selectedKey={null}
+        onSelect={vi.fn()}
+        search="apple tv"
+        onSearchChange={vi.fn()}
+        now={NOW}
+      />,
+    );
+    items = screen.getAllByRole("listitem");
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringContaining("Den"),
+      expect.stringContaining("Apple TV"),
+    ]);
+  });
 });
 
 describe("DeviceList at scale", () => {

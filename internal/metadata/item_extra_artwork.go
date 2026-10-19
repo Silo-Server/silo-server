@@ -211,7 +211,13 @@ func (s *MetadataService) syncItemExtraBackdrops(ctx context.Context, retention 
 		return err
 	}
 	rows := stored[item.ContentID]
-	if planned := planExtraBackdrops(retention, item, rows, images); !sameItemBackdrops(rows, planned) {
+	// Extra backdrops are local art only. With caching off the item keeps
+	// none, unless its artwork is locked.
+	var planned []models.ItemBackdrop
+	if s.autoCacheImages.Load() || artworkLocked(item) {
+		planned = planExtraBackdrops(retention, item, rows, images)
+	}
+	if !sameItemBackdrops(rows, planned) {
 		rows, err = s.itemBackdropRepo.Replace(ctx, item.ContentID, planned)
 		if err != nil {
 			slog.WarnContext(ctx, "metadata: storing item backdrops failed", "component", "metadata",

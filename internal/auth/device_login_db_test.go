@@ -383,6 +383,9 @@ func TestDeviceLoginRetentionDeletesOldRequestsDB(t *testing.T) {
 		}
 		left = append(left, n)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if len(left) != 1 || left[0] != name("recent") {
 		t.Fatalf("remaining = %v, want only the recent request", left)
 	}

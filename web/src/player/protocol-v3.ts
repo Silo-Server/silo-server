@@ -149,8 +149,32 @@ export const CLAIM_CLIENT_SELECTED_AUDIO_TRACK_V3 = "client_selected_audio_track
  */
 export const CLAIM_CLIENT_MANAGED_DYNAMIC_RANGE_V3 = "client_managed_dynamic_range_v1";
 
-/** The `original` rung label, which always preserves the source. */
+/**
+ * The legacy source-preserving quality label. Servers before the v2 menu
+ * change still publish it as an `available_qualities` entry; as a preference
+ * it is an alias of `auto`, which already plays the source whenever the
+ * device and connection can carry it.
+ */
 export const QUALITY_ORIGINAL_V3 = "original";
+
+/**
+ * A stored or chosen quality preference in the form the client works with.
+ * Empty and the legacy source labels ("original", "source", "max") read as
+ * `auto`, as the server reads them; anything else passes through trimmed.
+ */
+export function normalizeQualityPreferenceV3(value: string | null | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  switch (trimmed.toLowerCase()) {
+    case "":
+    case "auto":
+    case QUALITY_ORIGINAL_V3:
+    case "source":
+    case "max":
+      return "auto";
+    default:
+      return trimmed;
+  }
+}
 
 /** Server-executed transformation names a plan can list. */
 export const TRANSFORMATION_AUDIO_TO_AAC_V3 = "audio_to_aac";
@@ -318,7 +342,6 @@ export interface StartRequestV3 {
   audio_track_index?: number;
   subtitle_track_id?: string;
   subtitle_track_index?: number;
-  metered: boolean;
   bandwidth_estimate_kbps?: number;
   bandwidth_cap_kbps?: number;
   client_capabilities: ClientCodecCapabilitiesV3;
@@ -355,7 +378,6 @@ export interface ReplanRequestV3 {
   attempt_count: number;
   quality_preference: string;
   position_seconds: number;
-  metered: boolean;
   bandwidth_estimate_kbps?: number;
   bandwidth_cap_kbps?: number;
   selected_tracks: SelectedTracksV3;

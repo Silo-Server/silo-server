@@ -53,7 +53,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
-	metatrakt "github.com/Silo-Server/silo-server/internal/metadata/trakt"
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
@@ -282,7 +281,7 @@ type Dependencies struct {
 	ServerRestartStatus    *handlers.ServerRestartStatusTracker
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
-	// Trakt / MDBList) — the user-facing analogue of CollectionService.
+	// MDBList) — the user-facing counterpart of CollectionService.
 	UserCollectionSync      *usercollections.Service
 	UserCollectionScheduler *usercollections.Scheduler
 	// PersonalCollectionCollages serves and builds personal collection
@@ -293,9 +292,12 @@ type Dependencies struct {
 	PersonalCollectionCollages *catalog.PersonalCollectionCollages
 
 	// TrendingRefresher refreshes the persisted trending_discover snapshots.
-	// Built in main.go with TMDB wired; its Trakt fetcher is propagated here in
-	// router.go once the Trakt adapter exists (mirrors UserCollectionSync).
+	// Built in main.go with TMDB wired.
 	TrendingRefresher *sections.TrendingRefresher
+
+	// SeasonalListRefresher downloads the MDBList lists seasonal rows show.
+	// Built in main.go alongside the trending refresher.
+	SeasonalListRefresher *sections.SeasonalListRefresher
 
 	// MDBListClient is used by user-facing list discovery endpoints
 	// (search/top). May be nil; the handlers report "not configured" in
@@ -314,6 +316,11 @@ type Dependencies struct {
 	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
 	// resolve correctly. May be nil; no ABS routes are registered in that case.
 	ABSHandler absHandler
+
+	// LocalTLSPin is the pin of the key the API listener presents over TLS on
+	// its own port (internal/lantls), published in the connections document.
+	// Empty when the listener does not answer TLS (tests).
+	LocalTLSPin string
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -1154,6 +1161,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 			// So do ratings and recommendation state; the Postgres store
 			// already deleted them with the profile.
 			profileHandler.RecommendationsPurger = recommendations.NewRepo(deps.DB)
+			// Ebook reading data lives there too.
+			profileHandler.EbookReaderPurger = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		}
 		if watchlistRequestWithdrawer != nil {
 			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
@@ -1410,6 +1419,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// transcodes from after a restart. Same nil-safety: without Redis such a
 		// session replans instead of recovering, as it did before.
 		playbackHandler.NodeRecipeStore = noderecipe.NewStore(deps.RedisClient, 0)
+		// Keep the recipe of a header-authenticated session server-side, the only
+		// place it exists, so a restarted or different API process can rebuild the
+		// playback session. Same nil-safety: without Redis such a session answers
+		// 404 after a restart and the client starts a new attempt.
+		playbackHandler.SessionRecipeStore = noderecipe.NewSessionRecipeStore(deps.RedisClient, 0)
+		if streamHandler != nil {
+			streamHandler.SessionRecipeStore = playbackHandler.SessionRecipeStore
+		}
 		if deps.Config != nil {
 			playbackHandler.PlaybackConfig = func() config.PlaybackConfig {
 				return deps.CurrentConfig().Playback
@@ -1768,7 +1785,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		markersHandler = handlers.NewMarkersHandler(
 			deps.FileRepo, deps.FileRepo, contributor, contributions, notifier, slog.Default(),
 		)
-		markersHandler.BaseContext = deps.AppContext
+		markersHandler.BaseContext = deps.AppContext //nolint:fatcontext // set once on a new handler to the app context
 		if deps.DB != nil {
 			markersHandler.Libraries = catalog.NewFolderRepository(deps.DB)
 		}
@@ -2007,6 +2024,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.TrendingRefresher != nil {
 			sectionHandler.TrendingRefresher = deps.TrendingRefresher
 		}
+		if deps.SeasonalListRefresher != nil {
+			sectionHandler.SeasonalLists = deps.SeasonalListRefresher
+		}
 		sectionHandler.CollectionRepo = sectionFetcher.CollectionRepo
 		sectionHandler.FolderRepo = deps.FolderRepo
 		if deps.UserStoreProvider != nil {
@@ -2080,35 +2100,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 				client: tmdb.NewClient(apiKey, 40),
 			}
 		}
-		if libraryCollectionService.TraktCollections == nil {
-			// The client ID is resolved per call rather than captured here, so
-			// saving new Trakt credentials applies without a server restart.
-			adapter := &traktCollectionAdapter{
-				client:   metatrakt.NewClient("", 5),
-				settings: settingsRepo,
-			}
-			if clientIDs, ok := deps.WatchProviderService.(watchProviderAppClientIDs); ok {
-				adapter.watchProviders = clientIDs
-			}
-			libraryCollectionService.TraktCollections = adapter
-		}
-		if tokens, ok := deps.WatchProviderService.(watchProviderAccessTokens); ok && libraryCollectionService.TraktTokenResolver == nil && deps.DB != nil {
-			libraryCollectionService.TraktTokenResolver = &traktCollectionTokenResolver{
-				pool:   deps.DB,
-				tokens: tokens,
-			}
-		}
-
-		// Propagate the now-wired Trakt + TMDB fetchers to the user-side sync
-		// service (constructed earlier in main.go before settingsRepo and the
-		// Trakt adapters existed, so its fetcher fields started nil).
+		// Propagate the now-wired TMDB fetchers to the user-side sync service
+		// (constructed earlier in main.go before settingsRepo existed, so its
+		// fetcher fields started nil).
 		if deps.UserCollectionSync != nil {
-			if deps.UserCollectionSync.TraktCollections == nil {
-				deps.UserCollectionSync.TraktCollections = libraryCollectionService.TraktCollections
-			}
-			if deps.UserCollectionSync.TraktTokenResolver == nil {
-				deps.UserCollectionSync.TraktTokenResolver = libraryCollectionService.TraktTokenResolver
-			}
 			if deps.UserCollectionSync.TMDBCollections == nil {
 				deps.UserCollectionSync.TMDBCollections = libraryCollectionService.TMDBCollections
 			}
@@ -2117,17 +2112,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 
-		// Propagate the now-wired Trakt fetcher to the trending refresher (built
-		// in main.go with TMDB only, before the Trakt adapter existed).
-		if deps.TrendingRefresher != nil && deps.TrendingRefresher.TraktTrending == nil {
-			deps.TrendingRefresher.TraktTrending = libraryCollectionService.TraktCollections
-		}
-
 		// Wire the trending snapshot reader into the section fetcher. The
 		// trending_discover home section reads its list from the persisted
 		// snapshot table; the upstream fetch happens out-of-band in the refresh
 		// task, so the read path never calls the provider.
 		sectionFetcher.TrendingSnapshots = sections.NewTrendingSnapshotRepository(deps.DB)
+		sectionFetcher.SeasonalLists = sections.NewSeasonalListRepository(deps.DB)
+		if sectionFetcher.RecommendationRepo != nil {
+			sectionFetcher.SeasonalNeighbors = sectionFetcher.RecommendationRepo
+		}
 
 		libraryCollectionHandler = handlers.NewLibraryCollectionHandler(
 			libraryCollectionRepo,
@@ -2467,12 +2460,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		v2deps.ServerIdentity = serveridentity.New(catalog.NewServerSettingsRepo(deps.DB))
 	}
-	v2deps.ServerConnections = apiv2.ServerConnections{PublicURL: func() string {
-		if cfg := deps.CurrentConfig(); cfg != nil {
-			return cfg.Server.PublicURL
-		}
-		return ""
-	}}
+	v2deps.ServerConnections = apiv2.ServerConnections{
+		PublicURL: func() string {
+			if cfg := deps.CurrentConfig(); cfg != nil {
+				return cfg.Server.PublicURL
+			}
+			return ""
+		},
+		LocalURL: func() string {
+			if cfg := deps.CurrentConfig(); cfg != nil {
+				return cfg.Server.LocalURL
+			}
+			return ""
+		},
+		LocalTLSPin: deps.LocalTLSPin,
+	}
 	if deps.NetworkAccess != nil {
 		v2deps.ServerConnections.Providers = deps.NetworkAccess.Status
 	}
@@ -2486,7 +2488,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.ScanControls = libraryHandler
 	}
 	if deps.OpsLogRepo != nil && deps.ActivityLogRepo != nil && deps.LogStreamHub != nil && sessionRepo != nil && userRepo != nil {
-		socket := handlers.NewAdminLogsSocketV2(handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub), evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+		socket := handlers.NewAdminLogsSocketV2(handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub), evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 		v2deps.AdminLogsSocket = socket
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2564,6 +2566,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.ObserveDownloadDelivery = func(method, pattern string, handler http.Handler) http.Handler {
 		return observeNative(deps.StreamTelemetry, method, pattern, handler.ServeHTTP)
 	}
+	v2deps.ObserveBandwidthProbe = func(handler http.Handler) http.Handler {
+		return observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v2/playback/bandwidth-probe", handler.ServeHTTP)
+	}
 
 	var themeHandler *handlers.ThemeHandler
 	if settingsRepo != nil {
@@ -2617,7 +2622,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if playbackHandler != nil {
 		v2deps.Playback = playbackHandler
 		if sessionRepo != nil && userRepo != nil {
-			socket := handlers.NewPlaybackControlSocketV2(playbackHandler, deps.RedisClient, sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+			socket := handlers.NewPlaybackControlSocketV2(playbackHandler, deps.RedisClient, sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 			v2deps.PlaybackControlSocket = socket
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2736,7 +2741,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.WatchTogetherCapability = watchTogetherHandler
 		v2deps.WatchTogetherCreate = watchTogetherHandler
 		if deps.RedisClient != nil && sessionRepo != nil && userRepo != nil {
-			socket := handlers.NewWatchTogetherSocketV2(watchTogetherHandler, watchtogether.NewRoomSocketCredentialStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+			socket := handlers.NewWatchTogetherSocketV2(watchTogetherHandler, watchtogether.NewRoomSocketCredentialStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 			v2deps.WatchTogetherSocket = socket
 			playbackHandler.WatchTogetherAvailable = true
 			if deps.OnConfigChange != nil {
@@ -2752,7 +2757,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		events.SetNotificationsSystem(deps.Notifications)
 		v2deps.EventsCapability = events
 		if sessionRepo != nil && userRepo != nil {
-			socket := handlers.NewEventsSocketV2(events, evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, checkPrimaryProfile, deps.PublicURL)
+			socket := handlers.NewEventsSocketV2(events, evt.NewSocketTicketStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 			v2deps.EventsSocket = socket
 			if deps.OnConfigChange != nil {
 				deps.OnConfigChange(func(_, updated *config.Config) { socket.SetPublicOrigin(updated.Server.PublicURL) })
@@ -2770,7 +2775,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.NotificationDestinationTests = inbox
 		v2deps.NotificationDestinationCreate = inbox
 		v2deps.OrderedAndroidPush = inbox
-		v2deps.OrderedApplePush = handlers.NewOrderedApplePushV2(deps.Notifications.PushDevices, jwtService, sessionRepo, userRepo, viewerResolver, checkPrimaryProfile)
+		v2deps.OrderedApplePush = handlers.NewOrderedApplePushV2(deps.Notifications.PushDevices, jwtService, sessionRepo, userRepo, viewerResolver, actingAdmin)
 		v2deps.AdminNotificationPush = deps.Notifications
 		v2deps.AdminNotificationDiscord = deps.Notifications
 		v2deps.NotificationChannels = deps.Notifications
@@ -3007,6 +3012,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.Recipes = &handlers.RecipeHandler{}
 	if personalDataHandler != nil && itemsHandler != nil {
 		v2deps.PersonalLists = personalDataHandler
+		v2deps.NotInterested = personalDataHandler
 	}
 	if ratingsHandler != nil {
 		v2deps.Ratings = ratingsHandler
@@ -3446,6 +3452,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					if sessionRepo != nil {
 						eventsHandler.SetSessionRoles(sessionRepo)
 					}
+					eventsHandler.SetProfileVerifier(viewerResolver)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 					r.Get("/events/capability", eventsHandler.HandleCapability)
 				}
@@ -5008,29 +5015,19 @@ func (a *tmdbCollectionAdapter) GetCollectionPreset(ctx context.Context, preset,
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]catalog.TMDBCollectionEntry, len(results))
-	for i, r := range results {
-		entry := catalog.TMDBCollectionEntry{
-			ID:        r.ID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-		}
+	return tmdbCollectionEntries(results), nil
+}
 
-		// Fetch external IDs (IMDb, TVDB) for better matching against local library.
-		if externalIDs, err := a.client.GetExternalIDs(ctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
-			entry.IMDbID = externalIDs.IMDbID
-			entry.TVDBID = externalIDs.TVDBID
-		}
+func (a *tmdbCollectionAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
 
-		entries[i] = entry
-	}
-	return entries, nil
+func (a *tmdbCollectionAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
 }
 
 // tmdbFranchiseAdapter adapts tmdb.Client to catalog.TMDBCollectionByIDFetcher
-// for the `tmdb_collection` sync mode. Like the preset adapter, it enriches
-// each TMDB collection part with external IDs so the catalog matcher can fall
-// back to IMDb/TVDB when a local item lacks a TMDB ID.
+// for the `tmdb_collection` sync mode.
 type tmdbFranchiseAdapter struct {
 	client *tmdb.Client
 }
@@ -5049,24 +5046,25 @@ func (a *tmdbFranchiseAdapter) GetCollection(ctx context.Context, id int) ([]cat
 		if mediaType == "" {
 			mediaType = "movie"
 		}
-		entry := catalog.TMDBCollectionEntry{
+		entries[i] = catalog.TMDBCollectionEntry{
 			ID:        p.ID,
 			MediaType: mediaType,
 			Title:     p.Title,
 		}
-		if externalIDs, err := a.client.GetExternalIDs(ctx, mediaType, p.ID); err == nil && externalIDs != nil {
-			entry.IMDbID = externalIDs.IMDbID
-			entry.TVDBID = externalIDs.TVDBID
-		}
-		entries[i] = entry
 	}
 	return entries, nil
 }
 
+func (a *tmdbFranchiseAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
+
+func (a *tmdbFranchiseAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
+}
+
 // tmdbDiscoverAdapter adapts tmdb.Client to catalog.TMDBDiscoverFetcher for
-// the `tmdb_discover` sync mode. Like the preset adapter, it enriches each
-// result with external IDs so the catalog matcher can fall back to IMDb/TVDB
-// when a local item lacks a TMDB ID.
+// the `tmdb_discover` sync mode.
 type tmdbDiscoverAdapter struct {
 	client *tmdb.Client
 }
@@ -5090,56 +5088,101 @@ func (a *tmdbDiscoverAdapter) Discover(ctx context.Context, mediaType string, pa
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]catalog.TMDBCollectionEntry, len(results))
-	for i, r := range results {
-		entry := catalog.TMDBCollectionEntry{
-			ID:        r.ID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-		}
-		if externalIDs, err := a.client.GetExternalIDs(ctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
-			entry.IMDbID = externalIDs.IMDbID
-			entry.TVDBID = externalIDs.TVDBID
-		}
-		entries[i] = entry
-	}
-	return entries, nil
+	return tmdbCollectionEntries(results), nil
+}
+
+func (a *tmdbDiscoverAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
+
+func (a *tmdbDiscoverAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
 }
 
 // tmdbListAdapter adapts tmdb.Client to catalog.TMDBListFetcher for the
-// `tmdb_list` sync mode. Like the other TMDB adapters, it enriches each entry
-// with external IDs so the matcher can fall back to IMDb/TVDB when a local
-// item lacks a TMDB ID.
+// `tmdb_list` sync mode.
 type tmdbListAdapter struct {
 	client *tmdb.Client
 }
-
-// tmdbListExternalIDLookups bounds the concurrent external-ID lookups for one
-// list. A list can hold up to 500 entries and the import runs its first sync
-// inside the request, so sequential lookups (one round trip each) would take
-// far longer than the client's shared rate limit requires.
-const tmdbListExternalIDLookups = 8
 
 func (a *tmdbListAdapter) GetList(ctx context.Context, id, limit int) ([]catalog.TMDBCollectionEntry, error) {
 	results, err := a.client.GetList(ctx, id, limit)
 	if err != nil {
 		return nil, err
 	}
+	return tmdbCollectionEntries(results), nil
+}
+
+func (a *tmdbListAdapter) EnrichExternalIDs(ctx context.Context, entries []catalog.TMDBCollectionEntry) error {
+	return enrichTMDBExternalIDs(ctx, a.client, entries)
+}
+
+func (a *tmdbListAdapter) FindTMDBIDs(ctx context.Context, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	return findTMDBIDs(ctx, a.client, itemType, titles)
+}
+
+func tmdbCollectionEntries(results []tmdb.CollectionResult) []catalog.TMDBCollectionEntry {
 	entries := make([]catalog.TMDBCollectionEntry, len(results))
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(tmdbListExternalIDLookups)
 	for i, r := range results {
-		entries[i] = catalog.TMDBCollectionEntry{
-			ID:        r.ID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-		}
+		entries[i] = catalog.TMDBCollectionEntry{ID: r.ID, MediaType: r.MediaType, Title: r.Title}
+	}
+	return entries
+}
+
+// tmdbExternalIDLookups bounds the concurrent external-ID lookups of one sync.
+// The client's shared rate limit sets the pace; concurrency only keeps the
+// round trips from adding up, since an import runs its first sync inside the
+// request.
+const tmdbExternalIDLookups = 8
+
+// enrichTMDBExternalIDs fills in the IMDb and TVDB IDs of entries, which lets
+// the matcher find a local title that lacks a TMDB ID. The matcher asks only
+// for the entries their TMDB ID left unmatched.
+func enrichTMDBExternalIDs(ctx context.Context, client *tmdb.Client, entries []catalog.TMDBCollectionEntry) error {
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(tmdbExternalIDLookups)
+	for i := range entries {
 		g.Go(func() error {
 			// A failed lookup leaves the entry matchable by TMDB ID alone; only
 			// cancellation ends the sync.
-			if externalIDs, err := a.client.GetExternalIDs(gctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
+			if externalIDs, err := client.GetExternalIDs(gctx, entries[i].MediaType, entries[i].ID); err == nil && externalIDs != nil {
 				entries[i].IMDbID = externalIDs.IMDbID
 				entries[i].TVDBID = externalIDs.TVDBID
+			}
+			return gctx.Err()
+		})
+	}
+	return g.Wait()
+}
+
+// findTMDBIDs looks up the TMDB ID of each catalog title known only by IMDb or
+// TVDB ID, trying the provider that identifies itemType best first. A title
+// TMDB does not know, or whose lookup fails, gets 0; only cancellation ends
+// the sync.
+func findTMDBIDs(ctx context.Context, client *tmdb.Client, itemType string, titles []catalog.TitleWithoutTMDBID) ([]int, error) {
+	ids := make([]int, len(titles))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(tmdbExternalIDLookups)
+	for i, title := range titles {
+		g.Go(func() error {
+			lookups := [][2]string{{tmdb.ExternalSourceIMDb, title.IMDbID}, {tmdb.ExternalSourceTVDB, title.TVDBID}}
+			if itemType == "series" {
+				lookups[0], lookups[1] = lookups[1], lookups[0]
+			}
+			for _, lookup := range lookups {
+				if lookup[1] == "" {
+					continue
+				}
+				results, err := client.FindByExternalIDCached(gctx, lookup[0], lookup[1])
+				if err != nil {
+					continue
+				}
+				for _, result := range results {
+					if result.MediaType == itemType {
+						ids[i] = result.ID
+						return nil
+					}
+				}
 			}
 			return gctx.Err()
 		})
@@ -5147,20 +5190,7 @@ func (a *tmdbListAdapter) GetList(ctx context.Context, id, limit int) ([]catalog
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	return entries, nil
-}
-
-// traktClientIDSettingKey holds the Trakt app client ID that the built-in Trakt
-// watch provider used. The adapter falls back to it when no Trakt watch-sync
-// plugin is configured, so a server that uses Trakt only for collections keeps
-// working. It is deliberately not in config.restartRequiredKeys: the adapter
-// re-reads it before every upstream call.
-const traktClientIDSettingKey = "watchsync.trakt.client_id"
-
-// watchProviderAppClientIDs reads the app client ID a watch-sync plugin is
-// configured with.
-type watchProviderAppClientIDs interface {
-	AppClientID(ctx context.Context, providerKey string) (string, error)
+	return ids, nil
 }
 
 // adminJobArtifactURLTTL matches the presigned lifetime an S3 deployment hands
@@ -5178,85 +5208,6 @@ func newAdminJobArtifactSigner(deps *Dependencies) *artworkurl.Signer {
 		return nil
 	}
 	return artworkurl.NewJobArtifactSigner(deps.CurrentConfig().Auth.JWTSecret, adminJobArtifactURLTTL)
-}
-
-type traktCollectionAdapter struct {
-	client *metatrakt.Client
-	// watchProviders supplies the Trakt watch-sync plugin's app client ID,
-	// the app that issued the profile tokens these calls send. Nil when watch
-	// sync is unavailable.
-	watchProviders watchProviderAppClientIDs
-	// settings is the fallback source of the app client ID. Nil only where no
-	// settings store exists (tests), where the client ID stays empty and the
-	// upstream call fails the same way it always did.
-	settings catalog.SettingsStore
-}
-
-// refreshClientID pushes the current app client ID onto the shared client:
-// the Trakt watch-sync plugin's, else the legacy setting. A read failure
-// leaves the last known value in place: failing the request at Trakt is more
-// useful than failing it here on a transient DB blip.
-func (a *traktCollectionAdapter) refreshClientID(ctx context.Context) {
-	if a.watchProviders != nil {
-		clientID, err := a.watchProviders.AppClientID(ctx, "trakt")
-		if err != nil {
-			return
-		}
-		if clientID != "" {
-			a.client.SetClientID(clientID)
-			return
-		}
-	}
-	if a.settings == nil {
-		return
-	}
-	if clientID, err := a.settings.Get(ctx, traktClientIDSettingKey); err == nil {
-		a.client.SetClientID(clientID)
-	}
-}
-
-func (a *traktCollectionAdapter) GetCollectionPreset(ctx context.Context, preset, mediaType string, limit int, accessToken string) ([]catalog.TraktCollectionEntry, error) {
-	a.refreshClientID(ctx)
-	results, err := a.client.GetCollectionPreset(ctx, preset, mediaType, limit, accessToken)
-	if err != nil {
-		return nil, err
-	}
-	entries := make([]catalog.TraktCollectionEntry, len(results))
-	for i, r := range results {
-		entries[i] = catalog.TraktCollectionEntry{
-			TraktID:   r.TraktID,
-			TMDBID:    r.TMDBID,
-			TVDBID:    r.TVDBID,
-			IMDbID:    r.IMDbID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-			Year:      r.Year,
-			Rank:      r.Rank,
-		}
-	}
-	return entries, nil
-}
-
-func (a *traktCollectionAdapter) GetUserList(ctx context.Context, user, list string, limit int, accessToken string) ([]catalog.TraktCollectionEntry, error) {
-	a.refreshClientID(ctx)
-	results, err := a.client.GetUserList(ctx, user, list, limit, accessToken)
-	if err != nil {
-		return nil, err
-	}
-	entries := make([]catalog.TraktCollectionEntry, len(results))
-	for i, r := range results {
-		entries[i] = catalog.TraktCollectionEntry{
-			TraktID:   r.TraktID,
-			TMDBID:    r.TMDBID,
-			TVDBID:    r.TVDBID,
-			IMDbID:    r.IMDbID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
-			Year:      r.Year,
-			Rank:      r.Rank,
-		}
-	}
-	return entries, nil
 }
 
 // llmConfigFromServer derives the shared AI client config from the server

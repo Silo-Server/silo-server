@@ -38,7 +38,7 @@ func TestApplePushFinalizationRollbackAndReplay(t *testing.T) {
 	if err != nil || observed != replay || observed.Enabled {
 		t.Fatal("finalizer lost disabled outcome", err)
 	}
-	if err = repo.DeleteAllForProfile(ctx, cmd.ProfileID); err != nil {
+	if err = repo.DeleteAllForProfile(ctx, cmd.UserID, cmd.ProfileID); err != nil {
 		t.Fatal(err)
 	}
 	_, err = repo.ApplyApplePushAndFinalize(ctx, cmd, cipher, func(r ApplePushReceipt) error { observed = r; return nil })

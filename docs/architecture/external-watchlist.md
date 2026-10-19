@@ -341,7 +341,7 @@ least 15.
 
 ## Not built
 
-Watch-provider (Trakt, Simkl, MDBList) and Plex imports still drop rows the
+Watch-provider (Simkl, MDBList) and Plex imports still drop rows the
 library doesn't have, and export only library items. Carrying unowned titles
 through them needs its own design; imports would never auto-request. A profile
 that cannot request, or has opted out, gets no arrival notification: only the

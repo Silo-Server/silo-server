@@ -146,15 +146,7 @@
     "transformations": [],
     "applied_quirks": [],
     "runtime_corrections": [],
-    "available_qualities": [
-      {
-        "label": "original",
-        "display_name": "Original",
-        "height": 1080,
-        "bitrate_kbps": 8000,
-        "preserves_source": true
-      }
-    ],
+    "available_qualities": [],
     "degradation_warnings": [],
     "decision_reason": "validated_original_playback",
     "requested_media_file_id": "42",

@@ -121,7 +121,7 @@ export function resolveOriginalPlaybackRoute(input: {
     return unsupported("The browser engine cannot present this dynamic range.");
   }
   if (transfer !== "sdr" && !engine.hdr) {
-    return unsupported("HDR needs WebGPU, which this browser does not offer.");
+    return unsupported("HDR needs a working WebGPU presenter, which this browser does not have.");
   }
 
   return {

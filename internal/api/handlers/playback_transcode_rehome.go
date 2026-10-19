@@ -294,11 +294,11 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 
 // rehomePlanV3 is the planner result whose capability requirements the moved
 // transport must keep meeting: the session's current v3 plan, with the
-// tone-map identity the recipe froze. A session with no recorded plan (the
-// protocol store is absent or lost it) has no plan, which applies no capability
-// filter, as at that session's own start.
+// tone-map identity and subtitle rendition the recipe froze. A session with no
+// recorded plan (the protocol store is absent or lost it) has no plan, which
+// applies no other capability filter, as at that session's own start.
 func (h *PlaybackHandler) rehomePlanV3(ctx context.Context, session *playback.Session, card *playback.RecipeCard) playback.PlannerResultV3 {
-	result := playback.PlannerResultV3{ToneMapMode: card.ToneMapMode, ToneMapSourceKind: card.ToneMapSourceKind}
+	result := playback.PlannerResultV3{ToneMapMode: card.ToneMapMode, ToneMapSourceKind: card.ToneMapSourceKind, SubtitleRendition: card.SubtitleRendition}
 	if h.PlanStoreV3 == nil {
 		return result
 	}
@@ -394,6 +394,7 @@ func (h *PlaybackHandler) moveTranscodeToLocalV3(
 	if fromStore {
 		// The stored card rebuilt a node transport; a local one never reads it.
 		h.deleteNodeRecipeV3(ctx, remoteTransportID(session))
+		h.followSessionRecipeMoveV3(ctx, session.ID, local)
 	}
 	h.retireUnreachableTransportV3(ctx, dead.NodeURL, remoteTransportID(session), nil)
 	slog.WarnContext(ctx, "moved a transcode off an unreachable node", "component", "api",
@@ -461,6 +462,7 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 			transcodenode.ValidateAudioRecipeAttestation(req, response),
 			transcodenode.ValidateCopyFMP4RecipeAttestation(req, response),
 			transcodenode.ValidateThrottleAttestation(req, response),
+			transcodenode.ValidateSubtitleRenditionAttestation(req, response),
 		)
 	}
 	if err == nil && req.ToneMapMode != "" && response.ToneMapMode != req.ToneMapMode {
@@ -509,6 +511,7 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 		h.retireUnreachableTransportV3(ctx, dead.NodeURL, transportID, func(ctx context.Context) {
 			h.putNodeRecipeIfRouteV3(ctx, session.ID, playback.TranscodeRoute{NodeURL: node.URL, TransportID: transportID}, next)
 		})
+		h.followSessionRecipeMoveV3(ctx, session.ID, next)
 	} else {
 		h.retireUnreachableTransportV3(ctx, dead.NodeURL, transportID, nil)
 	}
@@ -560,6 +563,7 @@ func rehomeStartRequestV3(card playback.RecipeCard, transportID, hwAccel string,
 		SubtitleTrackIndex:         card.SubtitleTrackIndex,
 		SubtitleBurnIn:             card.SubtitleBurnIn,
 		SubtitleCodec:              card.SubtitleCodec,
+		SubtitleRendition:          card.SubtitleRendition,
 		TotalDuration:              card.TotalDuration,
 		ThrottleSeconds:            card.ThrottleSeconds,
 		RequireReady:               true,

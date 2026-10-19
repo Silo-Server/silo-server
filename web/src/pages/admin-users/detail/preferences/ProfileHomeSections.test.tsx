@@ -194,7 +194,7 @@ describe("ProfileHomeSections", () => {
             {
               location: "body.overrides",
               code: "invalid",
-              detail: "legacy Trakt section sources cannot be changed or reactivated",
+              detail: "unknown section type retired_row",
             },
           ],
         }),
@@ -205,7 +205,7 @@ describe("ProfileHomeSections", () => {
     await u.click(within(card).getByRole("button", { name: "Hide Continue Watching" }));
 
     expect(toastError).toHaveBeenCalledWith(
-      "Couldn't save Home sections: legacy Trakt section sources cannot be changed or reactivated",
+      "Couldn't save Home sections: unknown section type retired_row",
     );
   });
 });

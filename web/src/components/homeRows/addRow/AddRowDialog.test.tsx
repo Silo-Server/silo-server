@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
 import { recipeCatalogFixture } from "@/lib/homeRows/recipeCatalogFixture.test-support";
 import type { RowDraft } from "@/lib/homeRows/rowDraft";
@@ -11,14 +11,29 @@ import type { EditSession, HomeRow, HomeRowsAdapter } from "@/lib/homeRows/types
 import { VARIANT_FAMILIES } from "@/lib/homeRows/variants";
 import { AddRowDialog } from "./AddRowDialog";
 import { paramFieldKeys } from "@/lib/homeRows/paramFields";
+import seasonalThemes from "../../../../../contracts/api/v2/fixtures/list_seasonal_themes_ok.json";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+// The real catalog body the server's contract fixture pins.
+vi.mock("@/hooks/queries/seasonalThemes", () => ({
+  useSeasonalThemes: () => ({ data: seasonalThemes, isError: false }),
+}));
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));
 vi.mock("@/hooks/queries/items", () => ({
   fetchWatchDetail: async (id: string) => ({ title: `Title ${id}` }),
 }));
+
+// Radix Select drives pointer capture and scrolling that jsdom lacks.
+beforeAll(() => {
+  Object.defineProperties(Element.prototype, {
+    hasPointerCapture: { configurable: true, value: () => false },
+    setPointerCapture: { configurable: true, value: () => {} },
+    releasePointerCapture: { configurable: true, value: () => {} },
+    scrollIntoView: { configurable: true, value: () => {} },
+  });
+});
 
 const COLLECTIONS: CollectionOption[] = [
   {
@@ -49,7 +64,6 @@ function row(overrides: Partial<HomeRow> = {}): HomeRow {
     hero: false,
     shown: true,
     own: false,
-    legacyTrakt: false,
     ...overrides,
   };
 }
@@ -155,7 +169,7 @@ describe("Add row picker", () => {
     expect(tablist).toHaveAttribute("aria-orientation", "vertical");
     const tabs = within(tablist).getAllByRole("tab");
     expect(tabs.map((tab) => tab.textContent)).toEqual([
-      "Keep watching5 kinds",
+      "Keep watching4 kinds",
       "What's new4 kinds",
       "Popular4 kinds",
       "Picked for you4 kinds",
@@ -320,7 +334,9 @@ describe("Add row form", () => {
       if (box.getAttribute("aria-checked") === "true") await userEvent.click(box);
     }
     expect(within(form).getByRole("radio", { name: /Holidays/ })).toBeChecked();
-    expect(within(form).getByText("Pick at least one holiday.")).toBeInTheDocument();
+    expect(
+      within(form).getByText("Pick at least one holiday or add your own."),
+    ).toBeInTheDocument();
     expect(within(form).getByRole("button", { name: "Add row" })).toBeDisabled();
   });
 

@@ -885,7 +885,7 @@ export default function StorageSettings() {
           <SettingField
             label="Save provider artwork to storage"
             type="toggle"
-            description="When off, clients load provider artwork straight from the providers. Artwork stored next to your media is copied either way."
+            description="When off, clients load artwork straight from the providers, and artwork stored next to your media is not used. Artwork saved earlier switches back to provider images, except on titles whose artwork you chose in Edit Metadata."
             value={form.getValue(CACHE_IMAGES_KEY)}
             onChange={(value) => form.setValue(CACHE_IMAGES_KEY, value)}
             restartRequired={restartKeys.has(CACHE_IMAGES_KEY)}

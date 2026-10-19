@@ -245,6 +245,22 @@ describe("DeviceSettingGroups", () => {
     expect(screen.queryByText("App default")).not.toBeInTheDocument();
   });
 
+  it("shows a stored original quality as Auto and no longer offers Original", async () => {
+    renderGroups({
+      "playback.preferred_quality": effective({
+        key: "playback.preferred_quality",
+        value: "original",
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    const select = screen.getByRole("combobox", { name: "Preferred quality" });
+    expect(select).toHaveTextContent("Auto");
+    await userEvent.click(select);
+    expect(screen.queryByRole("option", { name: /Original/ })).not.toBeInTheDocument();
+  });
+
   it("offers the three intro modes and writes the selected device override", async () => {
     const { onChange } = renderGroups({
       "playback.intro_skip_mode": effective({
@@ -335,9 +351,11 @@ describe("DeviceSettingGroups", () => {
       }),
     });
 
-    expect(screen.getByText("2 Mbps")).toBeInTheDocument();
+    // Anchored: the cellular maximum bitrate row has its own 2 Mbps default.
+    const select = screen.getByRole("combobox", { name: /^Maximum bitrate/i });
+    expect(select).toHaveTextContent("2 Mbps");
 
-    await userEvent.click(screen.getByRole("combobox", { name: /Maximum bitrate/i }));
+    await userEvent.click(select);
     const option = await screen.findByRole("option", { name: "10 Mbps" });
     for (const name of ["200 Mbps", "100 Mbps", "1.5 Mbps", "No limit"]) {
       expect(screen.getByRole("option", { name })).toBeInTheDocument();
@@ -362,6 +380,23 @@ describe("DeviceSettingGroups", () => {
     });
 
     expect(screen.getByText("3.5 Mbps")).toBeInTheDocument();
+  });
+
+  // The cellular cap defaults to 2 Mbps, so a stored null is a choice of its
+  // own and must not fall back to the default.
+  it("shows a stored no-limit cellular bitrate as No limit", () => {
+    renderGroups({
+      "playback.cellular_max_bitrate_kbps": effective({
+        key: "playback.cellular_max_bitrate_kbps",
+        value: null,
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    expect(screen.getByRole("combobox", { name: /^Cellular maximum bitrate/i })).toHaveTextContent(
+      "No limit",
+    );
   });
 
   // The sliders shipped controlled with only onValueCommit, so the thumb

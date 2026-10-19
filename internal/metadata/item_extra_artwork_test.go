@@ -143,7 +143,7 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 		item := &models.MediaItem{}
 		carryItemOnlyArtwork(item, existing)
 		applyBestImages(item, nil, MergeFillEmpty, "en")
-		prepareItemImagesForQueue(item, existing)
+		prepareItemImagesForQueue(item, existing, true)
 		if item.BannerSourcePath != pending || item.BannerPath != "" {
 			t.Fatalf("banner = %q from %q, want the pending source kept", item.BannerPath, item.BannerSourcePath)
 		}
@@ -155,7 +155,7 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 		const remote = "https://img.example/de-poster.jpg"
 		existing := &models.MediaItem{PosterSourcePath: remote}
 		item := &models.MediaItem{PosterSourcePath: remote}
-		prepareItemImagesForQueue(item, existing)
+		prepareItemImagesForQueue(item, existing, true)
 		if item.PosterSourcePath != "" {
 			t.Fatalf("poster source = %q, want it cleared", item.PosterSourcePath)
 		}
@@ -531,6 +531,20 @@ func TestSyncItemExtraBackdropsStoresRowsAndQueuesJobs(t *testing.T) {
 		if in.RequeueSucceeded {
 			t.Fatalf("cached row requeued: %+v", in)
 		}
+	}
+
+	// Extra backdrops are local art only: with caching off the item keeps
+	// none, unless its artwork is locked.
+	service.SetAutoCacheImages(false)
+	locked := *item
+	locked.LockedFields = []int{int(FieldImages)}
+	_ = service.syncItemExtraBackdrops(ctx, itemRetention(ctx), &locked, nil, nil)
+	if len(repo.rows["movie-1"]) != 2 {
+		t.Fatalf("locked item rows with caching off = %+v, want both kept", repo.rows["movie-1"])
+	}
+	_ = service.syncItemExtraBackdrops(ctx, itemRetention(ctx), item, nil, images)
+	if len(repo.rows["movie-1"]) != 0 {
+		t.Fatalf("rows with caching off = %+v, want none", repo.rows["movie-1"])
 	}
 }
 

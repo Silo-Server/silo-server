@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 )
@@ -25,7 +27,7 @@ const (
 	projectAPIKey              = "4ef0d7355d9ffb5151e987764708ce96"
 	maxRetries                 = 3
 	maxResponseBody            = 1 << 20 // 1 MB
-	maxCollectionPresetResults = 500
+	maxCollectionPresetResults = maxPages * 20
 	defaultResponseCacheTTL    = 2 * time.Hour
 	// certificationCacheTTL is deliberately much longer than the shared
 	// response TTL: a certification is assigned at release and effectively
@@ -42,6 +44,10 @@ const (
 	mediaDetailCacheTTL = 2 * time.Minute
 )
 
+// maxPages is TMDB's own ceiling on its paged feeds (trending, popular,
+// discover): it answers no page past 500, at 20 results a page.
+const maxPages = 500
+
 // Client is an HTTP client for the TMDB collection preset API surface.
 type Client struct {
 	httpClient           *http.Client
@@ -51,6 +57,7 @@ type Client struct {
 	discoverSectionCache *cache.TTLCache[*MediaPage]
 	discoverPageCache    *cache.TTLCache[*MediaPage]
 	externalIDCache      *cache.TTLCache[*ExternalIDs]
+	findCache            *cache.TTLCache[*[]MediaResult]
 	certificationCache   *cache.TTLCache[string]
 	mediaDetailCache     *cache.TTLCache[*MediaDetail]
 	cacheGroup           singleflight.Group
@@ -77,6 +84,7 @@ func NewClient(apiKey string, rateLimit int) *Client {
 		discoverSectionCache: cache.NewTTLCache[*MediaPage](),
 		discoverPageCache:    cache.NewTTLCache[*MediaPage](),
 		externalIDCache:      cache.NewTTLCache[*ExternalIDs](),
+		findCache:            cache.NewTTLCache[*[]MediaResult](),
 		certificationCache:   cache.NewTTLCache[string](),
 		mediaDetailCache:     cache.NewTTLCache[*MediaDetail](),
 		responseCacheTTL:     defaultResponseCacheTTL,
@@ -101,6 +109,9 @@ func (c *Client) Close() {
 	}
 	if c.externalIDCache != nil {
 		c.externalIDCache.Close()
+	}
+	if c.findCache != nil {
+		c.findCache.Close()
 	}
 	if c.certificationCache != nil {
 		c.certificationCache.Close()
@@ -499,7 +510,7 @@ func (c *Client) GetCollectionPreset(ctx context.Context, preset, mediaType, tim
 	}
 
 	results := make([]CollectionResult, 0, limit)
-	for page := 1; len(results) < limit; page++ {
+	for page := 1; len(results) < limit && page <= maxPages; page++ {
 		path := fmt.Sprintf("%s?page=%d", basePath, page)
 		done := false
 
@@ -627,7 +638,7 @@ func (c *Client) Discover(ctx context.Context, mediaType string, params Discover
 	}
 
 	results := make([]CollectionResult, 0, limit)
-	for page := 1; len(results) < limit; page++ {
+	for page := 1; len(results) < limit && page <= maxPages; page++ {
 		query := baseQuery + "&page=" + strconv.Itoa(page)
 		path := basePath + "?" + query
 
@@ -856,44 +867,83 @@ func (c *Client) GetCollection(ctx context.Context, id int) (*Collection, error)
 // order. Lists mix movies and TV shows; entries of any other media type are
 // skipped. The endpoint pages 20 entries at a time, so reading stops at the
 // list's last page or once limit entries are collected. A limit <= 0 reads
-// the whole list, capped like the presets at maxCollectionPresetResults.
+// the whole list.
 func (c *Client) GetList(ctx context.Context, id, limit int) ([]CollectionResult, error) {
 	if id <= 0 {
 		return nil, fmt.Errorf("tmdb: list id must be > 0 (got %d)", id)
 	}
-	if limit <= 0 || limit > maxCollectionPresetResults {
-		limit = maxCollectionPresetResults
+	if limit <= 0 {
+		limit = math.MaxInt
 	}
 
-	results := make([]CollectionResult, 0, min(limit, 100))
-	for page := 1; len(results) < limit; page++ {
-		var resp listResponse
-		if err := c.doGet(ctx, fmt.Sprintf("/list/%d?page=%d", id, page), &resp); err != nil {
-			return nil, err
-		}
-		for _, item := range resp.Items {
-			if item.MediaType != "movie" && item.MediaType != "tv" {
-				continue
-			}
-			title := item.Title
-			if title == "" {
-				title = item.Name
-			}
-			results = append(results, CollectionResult{
-				ID:        item.ID,
-				MediaType: item.MediaType,
-				Title:     title,
+	first, err := c.getListPage(ctx, id, 1)
+	if err != nil {
+		return nil, err
+	}
+	results := appendListItems(make([]CollectionResult, 0, min(limit, 100)), first.Items)
+	// Later pages load a few at a time; the client's rate limit sets the
+	// pace, and results keep list order.
+	for next := 2; next <= first.TotalPages && len(results) < limit; {
+		// A page holds at most listPageSize entries; ask for no more pages
+		// than the remaining limit can use.
+		needed := (limit-len(results)-1)/listPageSize + 1
+		pages := make([]listResponse, min(listPageFetches, first.TotalPages-next+1, needed))
+		g, gctx := errgroup.WithContext(ctx)
+		for i := range pages {
+			g.Go(func() error {
+				page, err := c.getListPage(gctx, id, next+i)
+				pages[i] = page
+				return err
 			})
 		}
-		if page >= resp.TotalPages || len(resp.Items) == 0 {
-			break
+		if err := g.Wait(); err != nil {
+			return nil, err
+		}
+		next += len(pages)
+		for _, page := range pages {
+			if len(page.Items) == 0 {
+				return truncateResults(results, limit), nil
+			}
+			results = appendListItems(results, page.Items)
 		}
 	}
+	return truncateResults(results, limit), nil
+}
 
-	if len(results) > limit {
-		results = results[:limit]
+// listPageFetches bounds the list pages GetList requests at once;
+// listPageSize is the most entries TMDB puts on one list page.
+const (
+	listPageFetches = 8
+	listPageSize    = 20
+)
+
+func (c *Client) getListPage(ctx context.Context, id, page int) (listResponse, error) {
+	var resp listResponse
+	err := c.doGet(ctx, fmt.Sprintf("/list/%d?page=%d", id, page), &resp)
+	return resp, err
+}
+
+// appendListItems appends a list page's movies and TV shows; lists can also
+// hold people, which are skipped.
+func appendListItems(results []CollectionResult, items []TrendingResult) []CollectionResult {
+	for _, item := range items {
+		if item.MediaType != "movie" && item.MediaType != "tv" {
+			continue
+		}
+		title := item.Title
+		if title == "" {
+			title = item.Name
+		}
+		results = append(results, CollectionResult{ID: item.ID, MediaType: item.MediaType, Title: title})
 	}
-	return results, nil
+	return results
+}
+
+func truncateResults(results []CollectionResult, limit int) []CollectionResult {
+	if len(results) > limit {
+		return results[:limit]
+	}
+	return results
 }
 
 // GetMediaDetail fetches a single TMDB movie or series with credits, external
@@ -1622,18 +1672,87 @@ const (
 // ID, with Silo-facing media types ("movie", "series"); no result is an empty
 // slice, not an error. Results are not cached: callers use it to recover a
 // title whose TMDB ID stopped resolving, which is rare and wants a fresh
-// answer.
+// answer. Repeated matching uses FindByExternalIDCached.
 func (c *Client) FindByExternalID(ctx context.Context, source, externalID string) ([]MediaResult, error) {
+	path, err := findPath(source, externalID)
+	if err != nil {
+		return nil, err
+	}
+	return c.fetchFind(ctx, path)
+}
+
+// FindByExternalIDCached is FindByExternalID for lookups that recur, such as
+// matching every sync's list entries against the same catalog titles. It
+// serves a cached answer for the response cache TTL, and concurrent lookups of
+// one ID share a single request.
+func (c *Client) FindByExternalIDCached(ctx context.Context, source, externalID string) ([]MediaResult, error) {
+	path, err := findPath(source, externalID)
+	if err != nil {
+		return nil, err
+	}
+	cacheKey := "find:" + path
+	if c.findCache != nil {
+		if cached, ok := c.findCache.Get(cacheKey); ok {
+			return slices.Clone(*cached), nil
+		}
+	}
+	// The fetch below outlives its caller, so a caller that has already
+	// stopped must not start one; a canceled sync would otherwise leave a
+	// detached request behind for every title it had left.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// DoChan + select, as in cachedCertification: the shared fetch runs
+	// detached with its own bound, so one caller's cancellation cannot fail
+	// another sync's lookup, and each caller still stops waiting on its own
+	// cancellation.
+	resultCh := c.cacheGroup.DoChan(cacheKey, func() (any, error) {
+		if c.findCache != nil {
+			if cached, ok := c.findCache.Get(cacheKey); ok {
+				return *cached, nil
+			}
+		}
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedFetchTimeout)
+		defer cancel()
+		results, err := c.fetchFind(fetchCtx, path)
+		if err != nil {
+			return nil, err
+		}
+		if c.findCache != nil && c.responseCacheTTL > 0 {
+			cached := slices.Clone(results)
+			c.findCache.Set(cacheKey, &cached, c.responseCacheTTL)
+		}
+		return results, nil
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return nil, result.Err
+		}
+		results, ok := result.Val.([]MediaResult)
+		if !ok {
+			return nil, errors.New("tmdb: invalid cached find response")
+		}
+		return slices.Clone(results), nil
+	}
+}
+
+func findPath(source, externalID string) (string, error) {
 	externalID = strings.TrimSpace(externalID)
 	if externalID == "" {
-		return nil, fmt.Errorf("tmdb: external id must not be empty")
+		return "", errors.New("tmdb: external id must not be empty")
 	}
 	switch source {
 	case ExternalSourceIMDb, ExternalSourceTVDB:
 	default:
-		return nil, fmt.Errorf("tmdb: invalid external source %q", source)
+		return "", fmt.Errorf("tmdb: invalid external source %q", source)
 	}
-	path := "/find/" + url.PathEscape(externalID) + "?external_source=" + url.QueryEscape(source)
+	return "/find/" + url.PathEscape(externalID) + "?external_source=" + url.QueryEscape(source), nil
+}
+
+func (c *Client) fetchFind(ctx context.Context, path string) ([]MediaResult, error) {
 	var resp findResponse
 	if err := c.doGet(ctx, path, &resp); err != nil {
 		return nil, err

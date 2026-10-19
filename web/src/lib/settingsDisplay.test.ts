@@ -101,6 +101,13 @@ describe("settingsDisplay", () => {
 
   it("renders booleans and enum members with their contract labels", () => {
     expect(formatSettingValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO, "true")).toBe("Enabled");
+    // A stored null bandwidth cap is "No limit" even where the default is a cap.
+    expect(formatSettingValue(SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS, null)).toBe(
+      "No limit",
+    );
+    expect(formatSettingValue(SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS, "2000")).toBe(
+      "2 Mbps",
+    );
     expect(formatSettingValue(SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, "always")).toBe("Always on");
   });
 

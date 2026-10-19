@@ -1059,7 +1059,24 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 	}
 	excludeIDs := scoredItemIDsFromSet(excluded)
 
+	// The rows rank against the titles the profile turned away. Rows built
+	// without them would bring those titles' neighbors back, so a profile
+	// whose turned-away titles cannot be read keeps its cached rows.
 	builder := w.engine.rowBuilder()
+	av, err := w.engine.loadAversion(ctx, userID, profileID, builder.now)
+	if err != nil {
+		fail("aversion", err)
+		return res
+	}
+	builder.aversion = av
+	var penalized int
+	builder.penalized = &penalized
+	if !av.empty() {
+		defer func() {
+			slog.DebugContext(ctx, "recommendation rows ranked against turned-away titles", "component", "recommendations",
+				"user_id", userID, "profile_id", profileID, "turned_away_titles", av.size(), "candidates_pushed_down", penalized)
+		}()
+	}
 	aggregatedRow, err := builder.mainRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	if err != nil {
 		// The cluster rows leave out the main row's titles, so they keep
@@ -1071,7 +1088,13 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		if aggregatedRow != nil {
 			mainItems = aggregatedRow.Items
 		}
-		putOrDrop(RecTypeForYouMain, "", mainItems)
+		if aggregatedRow != nil && len(mainItems) == 0 {
+			// Every interest was turned away: cache the row empty, so
+			// reads know it was built rather than ask for it again.
+			put(RecTypeForYouMain, "", []ScoredItem{})
+		} else {
+			putOrDrop(RecTypeForYouMain, "", mainItems)
+		}
 
 		// Cache per-cluster ForYou rows. clusterRows logs each cluster whose
 		// candidates failed and returns no row for it, so its cached row
@@ -1095,7 +1118,7 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 	// An empty Similar Users row is cached too: it records that the row was
 	// built and came out empty (below the account floors), so reads do not
 	// keep asking for a rebuild that cannot fill it.
-	items, err := w.engine.similarUsersLiked(ctx, userID, profileID, CacheCandidateLimit, excluded, accessFilter)
+	items, err := w.engine.similarUsersLiked(ctx, builder, userID, profileID, CacheCandidateLimit, excluded, accessFilter)
 	if err != nil {
 		fail("similar_users", err)
 	} else {
@@ -1111,7 +1134,7 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		return res
 	}
 	for _, sourceItemID := range anchors {
-		items, err := w.engine.becauseYouWatched(ctx, sourceItemID, CacheCandidateLimit, excluded, accessFilter)
+		items, err := w.engine.becauseYouWatched(ctx, builder, sourceItemID, CacheCandidateLimit, excluded, accessFilter)
 		if err != nil {
 			fail("because_you_watched", err, "source_item_id", sourceItemID)
 			continue

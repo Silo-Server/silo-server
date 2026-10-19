@@ -792,7 +792,7 @@ func (s *Service) syncConnectionWithRun(ctx context.Context, conn Connection, ru
 
 func (s *Service) tryLock(connectionID string) (func(), bool) {
 	value, _ := s.locks.LoadOrStore(connectionID, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
+	mu := value.(*sync.Mutex) //nolint:errcheck,forcetypeassert // locks stores only *sync.Mutex
 	if !mu.TryLock() {
 		return nil, false
 	}
@@ -1446,6 +1446,43 @@ func listAllCompletedHistory(ctx context.Context, store completedHistoryLister, 
 	}
 }
 
+// nearRunDeadline reports whether ctx's deadline is within exportDrainReserve.
+func (s *Service) nearRunDeadline(ctx context.Context) bool {
+	deadline, ok := ctx.Deadline()
+	return ok && deadline.Sub(s.now()) < exportDrainReserve
+}
+
+// visiblePlays keeps the plays whose history entries are still visible.
+func visiblePlays(ctx context.Context, store completedHistoryLister, query userstore.CompletedHistoryQuery, plays []LocalPlay) ([]LocalPlay, error) {
+	if len(plays) == 0 {
+		// An empty media filter would read the whole history.
+		return plays, nil
+	}
+	query.MediaItemIDs = make([]string, 0, len(plays))
+	seen := make(map[string]bool, len(plays))
+	for _, play := range plays {
+		if !seen[play.MediaItemID] {
+			seen[play.MediaItemID] = true
+			query.MediaItemIDs = append(query.MediaItemIDs, play.MediaItemID)
+		}
+	}
+	rows, err := listAllCompletedHistory(ctx, store, query)
+	if err != nil {
+		return nil, err
+	}
+	visible := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		visible[row.ID] = true
+	}
+	kept := make([]LocalPlay, 0, len(plays))
+	for _, play := range plays {
+		if visible[play.HistoryID] {
+			kept = append(kept, play)
+		}
+	}
+	return kept, nil
+}
+
 func hasVisibleCompletedHistoryAtOrAfter(ctx context.Context, store completedHistoryLister, profileID, mediaItemID string, at time.Time) (bool, error) {
 	for offset := 0; ; offset += completedHistoryPageSize {
 		rows, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
@@ -1474,46 +1511,16 @@ func hasVisibleCompletedHistoryAtOrAfter(ctx context.Context, store completedHis
 
 const tokenRefreshSkew = 5 * time.Minute
 
-// AccessToken returns a usable access token for a saved connection, refreshing
-// it first when it is about to expire. Callers outside watch sync, such as
-// Trakt recommendation collections, use it so their refreshes share the
-// serialized path in refreshConnectionIfNeeded.
-func (s *Service) AccessToken(ctx context.Context, connectionID string) (string, error) {
-	conn, ok, err := s.repo.GetConnectionByID(ctx, connectionID)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", ErrConnectionNotFound
-	}
-	provider, ok := s.registry.Get(conn.Provider)
-	if !ok {
-		return "", UnknownProviderError{Key: conn.Provider}
-	}
-	cfg, err := s.serverConfig(ctx, conn.Provider)
-	if err != nil {
-		return "", err
-	}
-	conn, err = s.refreshConnectionIfNeeded(ctx, provider, cfg, conn)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(conn.AccessToken) == "" {
-		return "", fmt.Errorf("%s connection is missing an access token; reconnect the provider", conn.Provider)
-	}
-	return conn.AccessToken, nil
-}
-
 func (s *Service) tokenNeedsRefresh(conn Connection) bool {
 	return conn.TokenExpiresAt != nil && !conn.TokenExpiresAt.After(s.now().Add(tokenRefreshSkew))
 }
 
 // refreshConnectionIfNeeded refreshes conn's tokens when they are about to
 // expire. Refreshes of one saved connection are serialized across the cluster
-// because refresh tokens can be single-use: Trakt spends one on each refresh,
-// so a second caller holding the same token would be refused. A caller that
-// waited on the lock continues from the stored tokens, which the previous
-// holder has usually just refreshed.
+// because refresh tokens can be single-use: a provider that spends one on each
+// refresh refuses a second caller holding the same token. A caller that waited
+// on the lock continues from the stored tokens, which the previous holder has
+// usually just refreshed.
 func (s *Service) refreshConnectionIfNeeded(ctx context.Context, provider Provider, cfg ServerConfig, conn Connection) (Connection, error) {
 	if !s.tokenNeedsRefresh(conn) {
 		return conn, nil
@@ -1637,10 +1644,12 @@ func (s *Service) ExportWatched(
 	}
 	result := ExportWatchedResult{RemoteFound: len(remote)}
 
-	historyRows, err := listAllCompletedHistory(ctx, store, userstore.CompletedHistoryQuery{
+	historyQuery := userstore.CompletedHistoryQuery{
 		ProfileID:      conn.ProfileID,
 		ExcludeSources: []userstore.WatchHistorySource{historySourceForProvider(exporter)},
-	})
+	}
+	historyReadAt := s.now()
+	historyRows, err := listAllCompletedHistory(ctx, store, historyQuery)
 	if err != nil {
 		return result, err
 	}
@@ -1671,19 +1680,43 @@ func (s *Service) ExportWatched(
 	for _, play := range local {
 		localByHistoryID[play.HistoryID] = play
 	}
+	// Drain the whole backlog in one run, one provider batch per call. The
+	// cursor moves past every export a call tried, so a failed export waits
+	// for the next sync instead of being retried in this one. A rate limit
+	// ends the run and defers the connection until the provider's window
+	// resets. A run with a deadline stops starting calls near it and leaves
+	// the rest for the next sync.
+	pageSize := min(watchedExportBatchSize(exporter, 100), maxHistoryExportPage)
+	var cursor HistoryExportCursor
+	calledProvider := false
 	for {
-		pending, err := s.repo.ListPendingHistoryExports(ctx, conn.ID, 100)
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		// Checked on every page, including pages that end up with nothing to
+		// send, once at least one batch has gone out.
+		if calledProvider && s.nearRunDeadline(ctx) {
+			break
+		}
+		pending, err := s.repo.ListPendingHistoryExports(ctx, conn.ID, cursor, pageSize)
 		if err != nil {
 			return result, err
 		}
 		if len(pending) == 0 {
 			break
 		}
+		last := pending[len(pending)-1]
+		cursor = HistoryExportCursor{WatchedAt: last.WatchedAt, ID: last.ID}
 		pendingPlays := make([]LocalPlay, 0, len(pending))
 		exportByHistoryID := make(map[string]HistoryExport, len(pending))
 		progressed := false
 		for _, export := range pending {
 			play, ok := localByHistoryID[export.HistoryID]
+			if !ok && export.CreatedAt.After(historyReadAt.Add(-exportSnapshotSkew)) {
+				// A play watched after this run read local history: its
+				// export is not in the snapshot, so leave it for the next run.
+				continue
+			}
 			if !ok {
 				if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusNotFound, "local history entry not found"); err != nil {
 					return result, err
@@ -1694,12 +1727,19 @@ func (s *Service) ExportWatched(
 			pendingPlays = append(pendingPlays, play)
 			exportByHistoryID[export.HistoryID] = export
 		}
+		// Local history can change while the backlog drains. A play the user
+		// marked unwatched after the run read history must not go out as
+		// watched; its export waits for the next run, whose read retires it.
+		pendingPlays, err = visiblePlays(ctx, store, historyQuery, pendingPlays)
+		if err != nil {
+			return result, err
+		}
 		if len(pendingPlays) == 0 {
 			continue
 		}
-		pendingPlays, singleBatch := limitWatchedExportBatch(exporter, pendingPlays)
 		pendingPlays = s.withPlayTitles(ctx, pendingPlays)
 		exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
+		calledProvider = true
 		_, limited := AsRateLimited(err)
 		retryable := isRetryableProviderError(err)
 		if err != nil && isWatchSyncInvalidCredentialError(err) {
@@ -1757,7 +1797,12 @@ func (s *Service) ExportWatched(
 			// Leave unmentioned events pending for a later retry.
 			return result, err
 		}
-		if !progressed || singleBatch {
+		// A plugin call can rotate the connection's credentials. Read them
+		// back so later calls and the final save use the current ones.
+		if conn, err = s.reloadConnection(ctx, conn); err != nil {
+			return result, err
+		}
+		if !progressed {
 			break
 		}
 	}
@@ -1831,7 +1876,6 @@ func (s *Service) exportLocalPlays(
 	if len(pendingPlays) == 0 {
 		return nil
 	}
-	pendingPlays, _ = limitWatchedExportBatch(exporter, pendingPlays)
 	exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
 	_, limited := AsRateLimited(err)
 	retryable := isRetryableProviderError(err)
@@ -1902,20 +1946,8 @@ func (s *Service) persistConnectionError(ctx context.Context, conn Connection, m
 	return err
 }
 
-func limitWatchedExportBatch(exporter WatchedExporter, plays []LocalPlay) ([]LocalPlay, bool) {
-	_, ok := exporter.(singleBatchWatchedExporter)
-	if !ok {
-		return plays, false
-	}
-	limit := watchedExportBatchSize(exporter, len(plays))
-	if len(plays) > limit {
-		plays = plays[:limit]
-	}
-	return plays, true
-}
-
 func watchedExportBatchSize(exporter WatchedExporter, fallback int) int {
-	bounded, ok := exporter.(singleBatchWatchedExporter)
+	bounded, ok := exporter.(batchedWatchedExporter)
 	if !ok {
 		return max(1, fallback)
 	}
@@ -2350,7 +2382,7 @@ func scrobbleDispatchKey(scrobbler Scrobbler, conn Connection, event ScrobbleEve
 
 func (s *Service) enqueueOrderedScrobble(key string, dispatch func()) {
 	value, _ := s.scrobbleQueues.LoadOrStore(key, &scrobbleQueue{})
-	queue := value.(*scrobbleQueue)
+	queue := value.(*scrobbleQueue) //nolint:errcheck,forcetypeassert // scrobbleQueues stores only *scrobbleQueue
 
 	queue.mu.Lock()
 	previous := queue.tail

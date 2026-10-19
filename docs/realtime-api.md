@@ -50,7 +50,11 @@ node; restarting that node invalidates them. This store is distinct from the
 bridge's user/profile-only ticket, which cannot authenticate a v2 connection.
 
 Admission rechecks the current session, enabled account, account role and viewer
-policy/PIN proof. Secondary profiles do not receive administrator channels.
+policy/PIN proof. An admin account receives the administrator channels only while
+it is the acting admin (see [api-contract.md](architecture/api-contract.md)): as
+its primary profile, or with no profile while no profile on the account has a PIN
+or an access limit. Any other profile, and a profile-less session on a household
+that requires a profile, gets the user channels.
 Connections end at access-token expiry or after five minutes, whichever comes
 first. Current session/account/profile policy is rechecked every 15 seconds;
 a failed check closes the connection, with a two-second bound on authority
@@ -80,8 +84,9 @@ close frame:
 ```
 
 The close code is `4001` with reason `access_changed`. Access has changed when
-the account role, the effective role (an admin account's profile stopped or
-started being the primary profile), or the fingerprint of the resolved viewer
+the account role, the effective role (an admin account's connection stopped or
+started being the acting admin, for example its profile stopped being the
+primary profile or the household gained a PIN), or the fingerprint of the resolved viewer
 scope differs from the ticket's, or the profile is no longer verified. The
 scope covers the visible libraries, content-rating limits, playback-quality and
 bitrate limits, and `access_policy_revision`, which a group move, a permission,
@@ -114,7 +119,9 @@ The bridge events socket never sends this frame. It picks its channels once, at
 the handshake: an admin account gets the administrator channels and other
 accounts' events only while it is the acting admin (see
 [api-contract.md](architecture/api-contract.md)), judged on the handshake's
-`X-Profile-Id` or, without one, on the profile its ticket was minted for. Any
+`X-Profile-Id` or, without one, on the profile its ticket was minted for. That
+profile's PIN proof must still verify: the ticket keeps the `X-Profile-Token`
+sent when it was minted, server-side, and the socket re-verifies it. Any
 other profile on the account, such as a child profile, connects with the user
 channels. A rejected ticket (expired, reused, or for another account) leaves the
 connection unbound and judged as acting with no profile, so on a household with
@@ -122,7 +129,8 @@ a PIN-protected or limited profile it also gets the user channels until the
 client reconnects with a fresh ticket. The socket rechecks the login session on the same interval and closes
 without a frame once the session ends, the account's role differs from the
 token's, or a connection holding the administrator channels is no longer the
-acting admin or that check fails.
+acting admin (including when its profile's PIN proof stops verifying after a PIN
+change) or that check fails.
 The playback-control and Watch Together sockets share the recheck but still
 close without a frame or dedicated code when it fails.
 
@@ -437,10 +445,14 @@ host's reported position becomes the room anchor before the room resumes. A
 rebuilt stream that lands on a keyframe or segment boundary short of the
 target therefore resumes from where the host really is instead of holding the
 room until the waiting deadline. Position validation uses the same finite,
-nonnegative range as other playback reports. Buffering pause commands can be
-acknowledged at the member's actual position: they do not require rebuilding an
-otherwise usable stream to reach an unbuffered anchor. Playback correction
-still runs when the room resumes.
+nonnegative range as other playback reports. When a guest stalls, the room
+pauses where it is and that guest alone is sent a seek to the room's position.
+An acknowledgement that names that seek's `command_id` is accepted within five
+seconds of the destination either way, because a rebuilt stream often lands
+short and the client closes the rest by rate once the room plays. When the host
+stalls, or nobody else is watching, the room pauses at the stalled member's
+position, and that pause can be acknowledged where the member is. Playback
+correction still runs when the room resumes.
 
 Readiness is level-triggered on the web player. It evaluates the same guards on
 every media event that can indicate playable media (`canplay`,
@@ -460,6 +472,22 @@ the room snapshot marks its own member `is_ready`. It then stops readiness
 acknowledgements and returns to ordinary state reports every 1.5 s, even while
 other members are still waiting. A readiness reset for a new command enables
 retries again. Reports without `is_ready` are still ignored while waiting.
+
+Every `transport_command` carries the room's position at its `execute_at`, and
+the room anchors there too, so a client that runs the command at `execute_at`
+and projects from it at 1x is where the room says it is. A command that arrives
+late is projected forward from `execute_at`.
+
+Outside `waiting`, a `state_report` may carry the `command_id` of the last
+transport command the client applied. The server uses it to tell which reports
+predate a member's latest command: until that command's `execute_at` plus 1.5
+seconds, or for up to 10 seconds while a report names an older command, a report
+is neither corrected nor taken as the host's decision. A report that names the
+latest command ends that window early. Clients that omit the field get the time
+window alone. Reports from a host that has just re-attached are corrected like a
+guest's until one plays as its sync said, within the host band; only then is its
+pause or position a decision for the room. The host band is 10 seconds on the
+v2 socket and 2 seconds on the v1 socket.
 
 A viewer the room stopped waiting for sends `ready` while the room is `playing`
 or `paused`. The v2 snapshot shows this state as `self_ignore_wait: true`, or as

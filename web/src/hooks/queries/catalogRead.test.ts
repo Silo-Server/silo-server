@@ -65,7 +65,12 @@ describe("catalog item reads on the v2 contract", () => {
     expect(detail.rating_imdb).toBeNull();
     expect(detail.release_date).toBeNull();
     expect(detail.intro).toBeNull();
-    expect(detail.user_state).toEqual({ played: true, is_favorite: true, in_watchlist: false });
+    expect(detail.user_state).toEqual({
+      played: true,
+      is_favorite: true,
+      in_watchlist: false,
+      not_interested: false,
+    });
     expect(detail.status).toBeUndefined();
   });
 

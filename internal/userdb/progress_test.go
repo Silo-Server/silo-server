@@ -116,6 +116,51 @@ func TestAddHistoryIfMissingKeepsExistingSemantics(t *testing.T) {
 	}
 }
 
+// Imported history arrives with sub-second times. The SQLite store compares
+// its timestamps as text, so it keeps them in whole seconds: one stored that
+// way before still dedupes the replay, and a removal still hides it.
+func TestAddHistoryIfMissingStoresWholeSeconds(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	entry := userstore.WatchHistoryEntry{ProfileID: "profile-1", MediaItemID: "movie-1", WatchedAt: "2026-04-25T12:00:00Z", Completed: true, Source: userstore.WatchHistorySourceImport}
+	if created, err := AddHistoryIfMissing(db, entry); err != nil || !created {
+		t.Fatalf("whole-second import: created %v, err %v", created, err)
+	}
+	entry.WatchedAt = "2026-04-25T12:00:00.25Z"
+	if created, err := AddHistoryIfMissing(db, entry); err != nil || created {
+		t.Fatalf("sub-second replay: created %v, err %v; want a duplicate", created, err)
+	}
+	entry.MediaItemID = "movie-2"
+	entry.WatchedAt = "2026-04-25T12:00:01.75+00:00"
+	if created, err := AddHistoryIfMissing(db, entry); err != nil || !created {
+		t.Fatalf("sub-second import: created %v, err %v", created, err)
+	}
+	history, err := ListHistory(db, "profile-1", 10, 0)
+	if err != nil || len(history) != 2 {
+		t.Fatalf("ListHistory: %+v, err %v; want two rows", history, err)
+	}
+	if history[0].WatchedAt != "2026-04-25T12:00:01Z" {
+		t.Fatalf("stored watched_at = %q, want 2026-04-25T12:00:01Z", history[0].WatchedAt)
+	}
+	if err := RemoveHistoryItems(db, "profile-1", []string{"movie-2"}, time.Date(2026, 4, 25, 12, 0, 1, 900_000_000, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if created, err := AddHistoryIfMissing(db, entry); err != nil || created {
+		t.Fatalf("import before the removal: created %v, err %v; want hidden", created, err)
+	}
+}
+
 func TestListCompletedHistoryAppliesScopedFilters(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {

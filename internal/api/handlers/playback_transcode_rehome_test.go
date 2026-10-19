@@ -664,3 +664,53 @@ func TestMovedRecipeWriteRequiresTheLiveRoute(t *testing.T) {
 		t.Fatal("wrote the recipe back after the session stopped")
 	}
 }
+
+// A moved transport keeps its subtitle rendition: node selection must admit
+// only nodes that emit one, and the start request asks the new node for it.
+func TestRelayMoveKeepsTheSubtitleRendition(t *testing.T) {
+	card := &playback.RecipeCard{SubtitleRendition: true, SubtitleTrackIndex: 2, SubtitleCodec: "subrip"}
+	if plan := (&PlaybackHandler{}).rehomePlanV3(t.Context(), &playback.Session{ID: "session"}, card); !plan.SubtitleRendition {
+		t.Fatal("rehome plan dropped the subtitle rendition, so node selection would admit nodes without it")
+	}
+	if req := rehomeStartRequestV3(*card, "transport", "", -1); !req.SubtitleRendition {
+		t.Fatal("rehome start request dropped the subtitle rendition")
+	}
+}
+
+// predicateEnumeratingNodePlannerV3 lists its nodes and accepts an eligibility
+// predicate, the seam transcodeEligibilityV3 builds its filter for.
+type predicateEnumeratingNodePlannerV3 struct{ enumeratingNodePlannerV3 }
+
+func (predicateEnumeratingNodePlannerV3) PlanSessionWith(string, string, bool, int, func(*nodepool.Node) bool) nodepool.Plan {
+	return nodepool.Plan{}
+}
+
+// A moved rendition whose attempt plan is no longer recorded still finds a
+// node that emits renditions: with no plan there are no transformations to
+// require, as at that session's own start.
+func TestRelayMoveWithoutARecordedPlanAdmitsRenditionNodes(t *testing.T) {
+	node := func(features ...string) *httptest.Server {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{TransportFeatures: features})
+		}))
+		t.Cleanup(server.Close)
+		return server
+	}
+	capable := node(playback.TransportFeatureHLSSubtitleRenditionV1)
+	older := node()
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodePlanner = predicateEnumeratingNodePlannerV3{enumeratingNodePlannerV3{urls: []string{capable.URL, older.URL}}}
+
+	card := &playback.RecipeCard{SubtitleRendition: true, SubtitleTrackIndex: 2, SubtitleCodec: "subrip"}
+	plan := handler.rehomePlanV3(t.Context(), &playback.Session{ID: "session"}, card)
+	if plan.Plan != nil || !plan.SubtitleRendition {
+		t.Fatalf("rehome plan = %+v, want no recorded plan with the rendition kept", plan)
+	}
+	eligible := handler.transcodeEligibilityV3(t.Context(), plan, nil)
+	if eligible == nil || !eligible(&nodepool.Node{URL: capable.URL}) {
+		t.Fatal("the rendition-capable node was rejected")
+	}
+	if eligible(&nodepool.Node{URL: older.URL}) {
+		t.Fatal("a node without the rendition feature was admitted")
+	}
+}

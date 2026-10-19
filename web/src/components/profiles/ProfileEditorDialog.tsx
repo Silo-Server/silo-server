@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import { RefreshCw } from "lucide-react";
 
+import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { Profile, UserLibrary } from "@/api/types";
 import { ImageUploadField } from "@/components/ImageUploadField";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -58,6 +59,11 @@ interface ProfileEditorDialogProps {
   advisoryAgeSupported?: boolean;
   /** The server accepts `require_advisory_age`; hides the switch when false. */
   requireAdvisoryAgeSupported?: boolean;
+  /**
+   * Creates the profile and uploads its avatar as this profile instead of the
+   * active one, as Who's watching does for the verified primary profile.
+   */
+  profileContext?: ProfileRequestContextSnapshot;
   onOpenChange: (open: boolean) => void;
   onSaveSuccess?: (
     profile: Profile,
@@ -88,6 +94,7 @@ export function ProfileEditorDialog({
   avatarUploadEnabled = false,
   advisoryAgeSupported = false,
   requireAdvisoryAgeSupported = false,
+  profileContext,
   onOpenChange,
   onSaveSuccess,
 }: ProfileEditorDialogProps) {
@@ -115,6 +122,7 @@ export function ProfileEditorDialog({
             avatarUploadEnabled={avatarUploadEnabled}
             advisoryAgeSupported={advisoryAgeSupported}
             requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
+            profileContext={profileContext}
             onOpenChange={onOpenChange}
             onSaveSuccess={onSaveSuccess}
           />
@@ -131,6 +139,7 @@ function ProfileEditorForm({
   avatarUploadEnabled,
   advisoryAgeSupported,
   requireAdvisoryAgeSupported,
+  profileContext,
   onOpenChange,
   onSaveSuccess,
 }: {
@@ -140,6 +149,7 @@ function ProfileEditorForm({
   avatarUploadEnabled: boolean;
   advisoryAgeSupported: boolean;
   requireAdvisoryAgeSupported: boolean;
+  profileContext?: ProfileRequestContextSnapshot;
   onOpenChange: (open: boolean) => void;
   onSaveSuccess?: (
     profile: Profile,
@@ -149,9 +159,9 @@ function ProfileEditorForm({
     },
   ) => void;
 }) {
-  const createMutation = useCreateProfile();
+  const createMutation = useCreateProfile(profileContext);
   const updateMutation = useUpdateProfile();
-  const uploadAvatarMutation = useUploadProfileAvatar();
+  const uploadAvatarMutation = useUploadProfileAvatar(profileContext);
   const deleteAvatarMutation = useDeleteProfileAvatar();
   const isPending =
     createMutation.isPending ||

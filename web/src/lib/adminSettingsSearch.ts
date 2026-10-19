@@ -65,6 +65,8 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "public url",
       "lan discovery",
       "local network",
+      "local address",
+      "lan address",
       "multicast",
       "reverse proxy",
       "trusted proxies",
@@ -82,6 +84,7 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "Network",
       "Silo public URL",
       "Show on the local network",
+      "Local network address",
       "Trusted proxies",
       "Database",
       "Maximum Postgres connections",
@@ -559,9 +562,8 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
     id: "providers",
     label: "Providers",
     description:
-      "Watch-provider plugins such as Trakt and Simkl, subtitle provider accounts, the MDBList lists key, and skip-marker providers.",
+      "Watch-provider plugins such as Simkl, subtitle provider accounts, the MDBList lists key, and skip-marker providers.",
     keywords: [
-      "trakt",
       "simkl",
       "scrobble",
       "watch providers",

@@ -268,7 +268,7 @@ func TestResolveEmptySectionIDPrefersExplicitUserFields(t *testing.T) {
 	overrides := []ProfileSectionOverride{{
 		ID:              "conflicting",
 		SectionType:     SectionTrendingDiscover,
-		Config:          json.RawMessage(`{"source":"trakt","window":"week"}`),
+		Config:          json.RawMessage(`{"source":"tmdb","window":"week"}`),
 		IsUserAdded:     false,
 		UserSectionType: SectionTrendingDiscover,
 		UserConfig:      json.RawMessage(`{"source":"tmdb","window":"day"}`),

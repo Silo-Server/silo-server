@@ -51,7 +51,11 @@ same providers, for a phone handing a TV an address it can reach:
     { "kind": "public", "url": "https://silo.example.test" },
     { "kind": "provider", "provider": "tailscale", "display_name": "Tailscale",
       "state": "connected", "url": "https://silo.overlay.example.test" }
-  ]
+  ],
+  "local_route": {
+    "spki_sha256": "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=",
+    "url": "http://192.168.1.20:8080"
+  }
 }
 ```
 
@@ -60,10 +64,14 @@ same providers, for a phone handing a TV an address it can reach:
 request arrived on (`provider` with the slug when it came through an overlay
 listener). `endpoints` lists `server.public_url` as `kind: public` when it is
 configured, then every installed provider in slug order with its state on the
-API host; `url` is present only while that provider is connected there. Node
+API host; `url` is present only while that provider is connected there.
+`local_route` carries `spki_sha256`, the pin of the key the API listener
+presents over TLS on its own port, and `url`, `server.local_url` when an admin
+set it. Node
 addresses, `auth_url` and error text stay on the admin status below. The
 identity is self-asserted: clients pair through device login before trusting
-an address. Design and client flow:
+an address, and use a local-network address only over TLS that presents the
+pinned key. Design and client flow:
 [docs/architecture/server-identity.md](architecture/server-identity.md).
 
 ## `GET /api/v2/admin/network-access/{provider}/status`

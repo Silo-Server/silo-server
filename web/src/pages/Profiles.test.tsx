@@ -13,8 +13,24 @@ const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
   navigate: vi.fn(),
   editorPin: "",
+  editorProps: null as null | { profileContext?: unknown; libraries: UserLibrary[] },
   searchParams: new URLSearchParams(),
+  listUserLibraries: vi.fn(),
+  toastError: vi.fn(),
 }));
+
+vi.mock("sonner", () => ({ toast: { error: mocks.toastError, success: vi.fn() } }));
+
+vi.mock("@/api/client", async () => {
+  const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
+  return {
+    ...actual,
+    captureProfileRequestContextAs: (profileId: string, profileToken: string | null) => ({
+      profileId,
+      profileToken,
+    }),
+  };
+});
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -31,6 +47,7 @@ vi.mock("@/hooks/queries/profiles", () => ({
 
 vi.mock("@/hooks/queries/libraries", () => ({
   useAvailableUserLibraries: (...args: unknown[]) => mocks.useAvailableUserLibraries(...args),
+  listUserLibraries: (...args: unknown[]) => mocks.listUserLibraries(...args),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -41,11 +58,15 @@ vi.mock("@/components/profiles/ProfileEditorDialog", () => ({
   ProfileEditorDialog: ({
     open,
     onSaveSuccess,
+    ...props
   }: {
     open: boolean;
+    profileContext?: unknown;
+    libraries: UserLibrary[];
     onSaveSuccess?: (profile: Profile, context: { mode: "create" | "edit"; pin: string }) => void;
-  }) =>
-    open ? (
+  }) => {
+    if (open) mocks.editorProps = props;
+    return open ? (
       <button
         type="button"
         onClick={() =>
@@ -64,7 +85,8 @@ vi.mock("@/components/profiles/ProfileEditorDialog", () => ({
       >
         save-editor
       </button>
-    ) : null,
+    ) : null;
+  },
 }));
 
 vi.mock("@/components/profiles/ProfilePinDialog", () => ({
@@ -85,6 +107,10 @@ vi.mock("@/components/profiles/ProfilePinDialog", () => ({
 import Profiles from "./Profiles";
 
 const libraries: UserLibrary[] = [{ id: 1, name: "Movies", type: "movies", sort_order: 0 }];
+const primaryLibraries: UserLibrary[] = [
+  ...libraries,
+  { id: 2, name: "Shows", type: "tvshows", sort_order: 1 },
+];
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {
   return {
@@ -154,7 +180,10 @@ describe("Profiles", () => {
     mocks.useAuth.mockReset();
     mocks.navigate.mockReset();
     mocks.editorPin = "";
+    mocks.editorProps = null;
     mocks.searchParams = new URLSearchParams();
+    mocks.listUserLibraries.mockReset().mockResolvedValue(primaryLibraries);
+    mocks.toastError.mockReset();
 
     mocks.useProfiles.mockReturnValue({
       data: [makeProfile(), makeProfile({ id: "profile-2", name: "Guest" })],
@@ -260,5 +289,61 @@ describe("Profiles", () => {
     await click(findButton(container, "Main"));
 
     expect(mocks.navigate).toHaveBeenCalledWith("/");
+  });
+  it.each([
+    { hasPin: false, token: null },
+    { hasPin: true, token: "verified-token" },
+  ])(
+    "adds a profile as the primary profile (PIN $hasPin) without selecting anyone",
+    async ({ hasPin, token }) => {
+      const primary = makeProfile({
+        id: "primary",
+        name: "Parent",
+        is_primary: true,
+        has_pin: hasPin,
+      });
+      mocks.useProfiles.mockReturnValue({ data: [primary, makeProfile()], isLoading: false });
+
+      await render(<Profiles />);
+      await click(findButton(container, "Add profile"));
+      if (hasPin) {
+        await click(findButton(container, "confirm-pin"));
+      }
+
+      const profileContext = { profileId: "primary", profileToken: token };
+      expect(mocks.listUserLibraries).toHaveBeenCalledWith({ profileContext });
+      expect(mocks.editorProps).toMatchObject({ profileContext, libraries: primaryLibraries });
+
+      await click(findButton(container, "save-editor"));
+      expect(selectProfile).not.toHaveBeenCalled();
+      expect(mocks.navigate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("manages profiles by selecting the verified primary profile", async () => {
+    const primary = makeProfile({ id: "primary", name: "Parent", is_primary: true, has_pin: true });
+    mocks.useProfiles.mockReturnValue({ data: [primary, makeProfile()], isLoading: false });
+    mocks.searchParams = new URLSearchParams("redirect=%2Fmovies");
+
+    await render(<Profiles />);
+    await click(findButton(container, "Manage profiles"));
+    await click(findButton(container, "confirm-pin"));
+
+    expect(selectProfile).toHaveBeenCalledWith(primary, "verified-token");
+    expect(mocks.navigate).toHaveBeenCalledWith("/settings/profiles");
+  });
+
+  it("reports a failure to open the new profile form on the picker", async () => {
+    mocks.useProfiles.mockReturnValue({
+      data: [makeProfile({ id: "primary", is_primary: true }), makeProfile({ id: "p2" })],
+      isLoading: false,
+    });
+    mocks.listUserLibraries.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await render(<Profiles />);
+    await click(findButton(container, "Add profile"));
+
+    expect(mocks.toastError).toHaveBeenCalledWith("Couldn't open the new profile form. Try again.");
+    expect(mocks.editorProps).toBeNull();
   });
 });

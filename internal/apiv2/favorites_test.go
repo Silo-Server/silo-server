@@ -77,6 +77,34 @@ func (f *fakePersonalLists) ListFavoritesPage(_ context.Context, viewer handlers
 	return page, cards, nil
 }
 
+// VisibleItemIDs reports every id the catalog "has" as visible.
+func (f *fakePersonalLists) VisibleItemIDs(_ context.Context, _ handlers.PersonalListViewer, ids []string) (map[string]bool, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	visible := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		visible[id] = !f.missing[id]
+	}
+	return visible, nil
+}
+
+// ResolveCards resolves a series card for every id the catalog "has".
+func (f *fakePersonalLists) ResolveCards(_ context.Context, viewer handlers.PersonalListViewer, ids []string) ([]handlers.CollectionItemView, error) {
+	f.viewers = append(f.viewers, viewer)
+	if f.err != nil {
+		return nil, f.err
+	}
+	cards := make([]handlers.CollectionItemView, 0, len(ids))
+	for _, id := range ids {
+		if f.missing[id] {
+			continue
+		}
+		cards = append(cards, handlers.CollectionItemView{ContentID: id, Type: "series", Title: "Title " + id, Status: "matched"})
+	}
+	return cards, nil
+}
+
 func (f *fakePersonalLists) GetFavorite(_ context.Context, viewer handlers.PersonalListViewer, itemID string) (userstore.Favorite, bool, error) {
 	if f.err != nil {
 		return userstore.Favorite{}, false, f.err

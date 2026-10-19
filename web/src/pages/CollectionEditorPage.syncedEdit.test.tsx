@@ -1,7 +1,7 @@
 /**
  * Editing a saved Synced list on the collection editor page, both scopes: the
  * list it follows (a link, a chart, a TMDB collection ID, or a locked summary
- * for Discover and legacy Trakt lists), its sync status and Sync now, and the
+ * for Discover lists), its sync status and Sync now, and the
  * schedule a profile picks by name.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -74,22 +74,14 @@ beforeEach(() => {
 type Source = { source_url: string; source_config: Record<string, unknown> };
 
 /** A saved server Synced list, as the editor reads it and as the list shows it. */
-function serverList(
-  type: "mdblist" | "tmdb" | "trakt",
-  source: Source,
-  extra: Record<string, unknown> = {},
-) {
+function serverList(type: "mdblist" | "tmdb", source: Source, extra: Record<string, unknown> = {}) {
   const collection = { ...adminSyncedCollection(type, source), ...extra };
   v2Recorder.answer("GET /api/v2/admin/collections/{id}", collection);
   v2Recorder.answer("GET /api/v2/admin/collections", adminCollectionList(collection));
   return collection;
 }
 
-function personalList(
-  type: "mdblist" | "tmdb" | "trakt",
-  source: Source,
-  extra: Record<string, unknown>,
-) {
+function personalList(type: "mdblist" | "tmdb", source: Source, extra: Record<string, unknown>) {
   v2Recorder.answer("GET /api/v2/collections/{id}", {
     ...personalSyncedCollection(type, source),
     ...extra,
@@ -532,13 +524,13 @@ describe("server Synced list editor", () => {
     expect(saveButton()).toBeDisabled();
   });
 
-  it("caps Max titles at 500, which sync can fill", async () => {
+  it("keeps Max titles above 500", async () => {
     serverList("mdblist", MDBLIST);
     showPage(SERVER_EDIT);
-    expect(await setMaxTitles("501")).toHaveValue(500);
+    expect(await setMaxTitles("10000")).toHaveValue(10000);
     await save(ADMIN_PATCH);
     expect(patches(ADMIN_PATCH)[0]).toMatchObject({
-      source_config: { mode: "mdblist_json", limit: 500 },
+      source_config: { mode: "mdblist_json", limit: 10000 },
     });
   });
 
@@ -765,64 +757,6 @@ describe("server Synced list editor", () => {
     expect(screen.queryByRole("list", { name: "You decide" })).toBeNull();
   });
 
-  describe("a legacy Trakt list", () => {
-    const TRAKT: Source = {
-      source_url: "trakt://recommended/movie/p-owner",
-      source_config: {
-        mode: "trakt_preset",
-        preset: "recommended",
-        media_type: "movie",
-        profile_id: "p-owner",
-        limit: 40,
-      },
-    };
-
-    it("shows its source read-only, locks libraries and max titles, and sends no source", async () => {
-      serverList("trakt", TRAKT);
-      showPage(SERVER_EDIT);
-      expect(
-        await screen.findByText(
-          "New Trakt lists aren't supported. This one keeps its source and libraries.",
-        ),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          "You can still change its name, artwork, order, schedule and where it shows.",
-        ),
-      ).toBeInTheDocument();
-      expect(screen.getByRole("spinbutton", { name: "Max titles" })).toBeDisabled();
-      expect(screen.getByRole("spinbutton", { name: "Max titles" })).toHaveValue(40);
-      expect(screen.getByRole("button", { name: /Match into/ })).toBeDisabled();
-      await rename("For you");
-      await save(ADMIN_PATCH);
-      const body = patches(ADMIN_PATCH)[0]!;
-      expect(body).toMatchObject({
-        title: "For you",
-        collection_type: "trakt",
-        library_ids: ["1"],
-      });
-      expect(body).not.toHaveProperty("source_url");
-      expect(body).not.toHaveProperty("source_config");
-    });
-
-    it("can't turn a schedule on, and says why", async () => {
-      serverList("trakt", TRAKT);
-      showPage(SERVER_EDIT);
-      expect(await screen.findByRole("combobox", { name: "Sync schedule" })).toBeDisabled();
-      expect(screen.getByText("A stopped Trakt list can't be scheduled again.")).toBeVisible();
-    });
-
-    it("can still change or stop a schedule it already has", async () => {
-      serverList("trakt", TRAKT, { sync_schedule: "0 3 * * *" });
-      showPage(SERVER_EDIT);
-      const schedule = await screen.findByRole("combobox", { name: "Sync schedule" });
-      expect(schedule).toBeEnabled();
-      choose(schedule, "No automatic sync");
-      await save(ADMIN_PATCH);
-      expect(patches(ADMIN_PATCH)[0]).toMatchObject({ sync_schedule: "" });
-    });
-  });
-
   describe("artwork", () => {
     beforeEach(() => {
       serverList("mdblist", MDBLIST, {
@@ -891,27 +825,6 @@ describe("personal Synced list editor", () => {
       include_in_server_collections: false,
       sync_schedule: "weekly",
     });
-  });
-
-  it("sends no libraries for a legacy Trakt list, which the server won't take", async () => {
-    personalList(
-      "trakt",
-      {
-        source_url: "trakt://recommended/movie/p-owner",
-        source_config: { limit: 40, library_ids: [1] },
-      },
-      { sync_schedule: "17 4 * * *", sync_cadence: "daily" },
-    );
-    showPage(PERSONAL_EDIT);
-    const schedule = await screen.findByRole("combobox", { name: "Sync schedule" });
-    await vi.waitFor(() => expect(schedule).toBeEnabled());
-    choose(schedule, "Weekly");
-    await save(PERSONAL_PATCH);
-    const body = patches(PERSONAL_PATCH)[0]!;
-    expect(body).toMatchObject({ sync_schedule: "weekly" });
-    expect(body).not.toHaveProperty("library_ids");
-    expect(body).not.toHaveProperty("source_url");
-    expect(body).not.toHaveProperty("max_items");
   });
 
   it("keeps a schedule it can't name until another is picked", async () => {

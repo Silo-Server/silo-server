@@ -257,23 +257,24 @@ func TestPlaybackV2StartForwardsDeclaredDevice(t *testing.T) {
 	}
 }
 
-// v2 names every source entry, video or audio-only, without touching other
+// v2 drops the source entry, video or audio-only, without touching other
 // entries or the shared plan that v1 serializes.
-func TestPlaybackQualitiesNamesTheSourceEntry(t *testing.T) {
+func TestPlaybackQualitiesDropsTheSourceEntry(t *testing.T) {
 	plan := []playback.AvailableQualityV3{
 		{Label: playback.QualityOriginalV3, Height: 2160, BitrateKbps: 40_000, PreservesSource: true},
+		{Label: "1080p", DisplayName: "1080p", Height: 1080, BitrateKbps: 8_000},
 		{Label: "1080p-medium", DisplayName: "1080p Medium", Height: 1080, BitrateKbps: 6_000},
 	}
 	got := playbackQualities(plan)
-	if got[0].DisplayName != sourceQualityDisplayName || got[1].DisplayName != "1080p Medium" {
+	if len(got) != 2 || got[0].Label != "1080p" || got[1].Label != "1080p-medium" {
 		t.Fatalf("v2 qualities = %#v", got)
 	}
-	if plan[0].DisplayName != "" {
-		t.Fatalf("shared plan changed: %#v", plan[0])
+	if len(plan) != 3 || plan[0].Label != playback.QualityOriginalV3 {
+		t.Fatalf("shared plan changed: %#v", plan)
 	}
 	audio := playbackQualities([]playback.AvailableQualityV3{{Label: playback.QualityOriginalV3, BitrateKbps: 128, PreservesSource: true}})
-	if audio[0].DisplayName != sourceQualityDisplayName {
-		t.Fatalf("audio-only source entry = %#v", audio[0])
+	if len(audio) != 0 {
+		t.Fatalf("audio-only menu = %#v, want empty", audio)
 	}
 	if playbackQualities(nil) != nil {
 		t.Fatal("an absent menu stays absent")

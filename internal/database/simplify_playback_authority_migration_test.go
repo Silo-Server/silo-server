@@ -25,6 +25,9 @@ func simplifyColumns(ctx context.Context, t *testing.T, pool *pgxpool.Pool, tabl
 		}
 		out[c] = true
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	return out
 }
 
@@ -42,6 +45,9 @@ func simplifyTables(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[s
 			t.Fatal(err)
 		}
 		out[c] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	return out
 }

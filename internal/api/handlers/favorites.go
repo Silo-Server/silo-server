@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +29,7 @@ type personalDataItemRepository interface {
 	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
 	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.MediaItem, error)
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+	EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]bool, error)
 }
 
 type LocalListEventDispatcher interface {
@@ -152,6 +155,14 @@ type PersonalListViewer struct {
 	ProfileID string
 	Access    catalog.AccessFilter
 	ImageSize imagesize.Size
+	// ImageWidths are per-slot target widths overriding ImageSize; only the
+	// native v2 API carries them.
+	ImageWidths imagesize.Widths
+}
+
+// Artwork is the viewer's artwork preference.
+func (v PersonalListViewer) Artwork() imagesize.Request {
+	return imagesize.Request{Size: v.ImageSize, Widths: v.ImageWidths}
 }
 
 func personalListViewerFromRequest(r *http.Request) PersonalListViewer {
@@ -447,6 +458,26 @@ func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer Pers
 	return entries, items, nil
 }
 
+// VisibleItemIDs reports which of the given catalog items the viewer may see.
+func (h *PersonalDataHandler) VisibleItemIDs(ctx context.Context, viewer PersonalListViewer, ids []string) (map[string]bool, error) {
+	visible, err := h.itemRepo.EnsureAccessibleIDs(ctx, ids, viewer.Access)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
+	}
+	return visible, nil
+}
+
+// ResolveCards answers the cards of the given catalog items the viewer may
+// see, in the order given. Items the catalog no longer has or the viewer may
+// not see have no card.
+func (h *PersonalDataHandler) ResolveCards(ctx context.Context, viewer PersonalListViewer, ids []string) ([]CollectionItemView, error) {
+	items, err := resolveItemsByIDs(h, ctx, viewer, ids)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve items")
+	}
+	return items, nil
+}
+
 // filterHiddenWatchlistSeries drops fully-watched series from a watchlist page.
 // The entries stay in the store (and on synced providers) so a newly added
 // episode makes the series reappear; only the display surface hides them.
@@ -715,7 +746,7 @@ func (h *PersonalDataHandler) historyDisplayCards(ctx context.Context, viewer Se
 	for _, d := range display {
 		ids = append(ids, d.DisplayID)
 	}
-	items, err := resolveItemsByIDs(h, ctx, PersonalListViewer{UserID: apimw.GetUserID(ctx), ProfileID: apimw.GetProfileID(ctx), Access: viewer.Access, ImageSize: viewer.ImageSize}, ids)
+	items, err := resolveItemsByIDs(h, ctx, PersonalListViewer{UserID: apimw.GetUserID(ctx), ProfileID: apimw.GetProfileID(ctx), Access: viewer.Access, ImageSize: viewer.ImageSize, ImageWidths: viewer.ImageWidths}, ids)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
 	}
@@ -855,18 +886,22 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 	// an unrecognized value. Unset keeps the per-slot defaults below, which are
 	// deliberately asymmetric (a featured poster beside a card backdrop); an
 	// explicit size applies to every image in the response instead.
-	size := viewer.ImageSize
-	posterHint := requestVariantHint("featured", size)
-	cardHint := requestVariantHint("card", size)
+	art := viewer.Artwork()
+	posterHint := requestVariantHint("featured", art.For(imagesize.SlotPoster))
+	cardHint := requestVariantHint("card", art.For(imagesize.SlotBackdrop))
+	itemIDs := make([]string, len(mediaItems))
+	for i, mi := range mediaItems {
+		itemIDs[i] = mi.ContentID
+	}
+	accessible, err := h.itemRepo.EnsureAccessibleIDs(ctx, itemIDs, filter)
+	if err != nil {
+		return nil, err
+	}
 	accessibleItems := make([]*models.MediaItem, 0, len(mediaItems))
 	for _, mi := range mediaItems {
-		if err := h.itemRepo.EnsureAccessible(ctx, mi.ContentID, filter); err != nil {
-			if errors.Is(err, catalog.ErrItemNotFound) {
-				continue
-			}
-			return nil, err
+		if accessible[mi.ContentID] {
+			accessibleItems = append(accessibleItems, mi)
 		}
-		accessibleItems = append(accessibleItems, mi)
 	}
 
 	userStates := map[string]*itemUserStateResponse{}
@@ -879,6 +914,9 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 		}
 	}
 
+	// Card images resolve together once every card is built, in one batch per
+	// hint, rather than one lookup each.
+	var images listCardImages
 	for _, mi := range accessibleItems {
 		resp := itemListResponse{
 			ContentID:         mi.ContentID,
@@ -895,8 +933,8 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 			BackdropThumbhash: mi.BackdropThumbhash,
 			UserState:         userStates[mi.ContentID],
 		}
-		resp.PosterURL = h.presignURL(ctx, sizedPosterPath(mi.PosterPath, size), posterHint)
-		resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
+		images.add(&resp.PosterURL, sizedPosterPath(mi.PosterPath, art.For(imagesize.SlotPoster)), posterHint)
+		images.add(&resp.BackdropURL, sizedCardBackdropPath(mi.BackdropPath, art.For(imagesize.SlotBackdrop)), cardHint)
 		byID[mi.ContentID] = &resp
 	}
 	logoPaths := localizedLogoPaths(ctx, h.detailSvc, accessibleItems, filter)
@@ -939,14 +977,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 					}
 					// Use episode still as backdrop, fall back to parent series images.
 					if ep.StillPath != "" {
-						resp.BackdropURL = h.presignURL(ctx, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
+						images.add(&resp.BackdropURL, sizedCardPath(ep.StillPath, artworkkey.ImageStill, art.For(imagesize.SlotBackdrop)), cardHint)
 						resp.BackdropThumbhash = ep.StillThumbhash
 					} else if parent != nil {
-						resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
+						images.add(&resp.BackdropURL, sizedCardBackdropPath(parent.BackdropPath, art.For(imagesize.SlotBackdrop)), cardHint)
 						resp.BackdropThumbhash = parent.BackdropThumbhash
 					}
 					if parent != nil {
-						resp.PosterURL = h.presignURL(ctx, sizedPosterPath(parent.PosterPath, size), posterHint)
+						images.add(&resp.PosterURL, sizedPosterPath(parent.PosterPath, art.For(imagesize.SlotPoster)), posterHint)
 						resp.PosterThumbhash = parent.PosterThumbhash
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
@@ -961,7 +999,8 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 		}
 	}
 
-	for contentID, url := range signListingLogos(ctx, h.detailSvc, logoPaths, size) {
+	images.resolve(ctx, h.detailSvc)
+	for contentID, url := range signListingLogos(ctx, h.detailSvc, logoPaths, art.For(imagesize.SlotLogo)) {
 		if item, ok := byID[contentID]; ok {
 			item.LogoURL = url
 		}
@@ -1103,14 +1142,48 @@ func (h *PersonalDataHandler) ensureAccessibleItem(ctx context.Context, itemID s
 	return err
 }
 
-// presignURL resolves an image path to a usable URL, delegating to the
-// DetailService which handles plugin-prefixed paths, HTTP pass-through,
-// and legacy S3 presigning.
-func (h *PersonalDataHandler) presignURL(ctx context.Context, path string, variant string) string {
-	if h.detailSvc != nil {
-		return h.detailSvc.PresignURL(ctx, path, variant)
+// listCardImages collects a listing's card image fields for batch resolution.
+type listCardImages struct {
+	pending []listCardImage
+}
+
+type listCardImage struct {
+	dst        *string
+	path, hint string
+}
+
+// add queues path to fill *dst, resolved at hint. Empty paths and the "-"
+// placeholder leave *dst empty.
+func (l *listCardImages) add(dst *string, path, hint string) {
+	if path == "" || path == "-" {
+		return
 	}
-	return ""
+	l.pending = append(l.pending, listCardImage{dst: dst, path: path, hint: hint})
+}
+
+// resolve fills every queued field, one batch per hint.
+func (l *listCardImages) resolve(ctx context.Context, svc *catalog.DetailService) {
+	if svc == nil || len(l.pending) == 0 {
+		return
+	}
+	byHint := make(map[string][]string)
+	type pathAtHint struct{ path, hint string }
+	seen := make(map[pathAtHint]struct{}, len(l.pending))
+	for _, image := range l.pending {
+		key := pathAtHint{path: image.path, hint: image.hint}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		byHint[image.hint] = append(byHint[image.hint], image.path)
+	}
+	resolved := make(map[string]map[string]catalog.ResolvedImageURL, len(byHint))
+	for _, hint := range slices.Sorted(maps.Keys(byHint)) {
+		resolved[hint] = svc.PresignURLsWithExpiry(ctx, byHint[hint], hint)
+	}
+	for _, image := range l.pending {
+		*image.dst = resolved[image.hint][image.path].URL
+	}
 }
 
 // parsePagination extracts limit and offset from query parameters with defaults.
