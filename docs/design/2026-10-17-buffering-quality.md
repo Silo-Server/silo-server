@@ -503,9 +503,12 @@ receiving, from its first byte to its last.
   at 98–141 Mbps.
 - Time in which several counted requests were receiving at once counts once.
 - A client sends it only when its counted requests add up to at least 1,000 ms
-  of receiving, capped at 1,000,000. The server keeps the highest sample, and
-  a sample at least the target proves the link, so an overstated one would
-  stand in for a test the link would not pass.
+  of receiving and it is at least 100, capped at 1,000,000. The server ignores
+  a sample under 100: like a probe under 100 kbps, it is not a measurement, and
+  no start could send it as `bandwidth_estimate_kbps`.
+- The server keeps the highest sample, and a sample at least the target proves
+  the link, so an overstated one would stand in for a test the link would not
+  pass.
 - A client that cannot measure this omits it.
 - Apple will measure it on Aether's upstream reader once AetherEngine reports
   it, and omits it until then. AVPlayer reads from Aether on 127.0.0.1, so its
@@ -522,9 +525,10 @@ bound.
 
 `POST /api/v2/playback/bandwidth-probe/results` takes
 `{kbps, bytes, duration_ms, transport, lower_bound}`, where `transport` is
-`wifi`, `ethernet`, `cellular` or `other`, and returns 204. `lower_bound` is
-optional and `false` by default. The server keeps the latest result per
-learned-limit key.
+`wifi`, `ethernet`, `cellular` or `other`, and returns 204. `kbps` is 100 to
+1,000,000, the bounds of `bandwidth_estimate_kbps`, so a kept reading is always
+one a client can send. `lower_bound` is optional and `false` by default. The
+server keeps the latest result per learned-limit key.
 
 ### `GET /api/v2/playback/connection`
 
