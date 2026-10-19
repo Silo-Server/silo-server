@@ -110,3 +110,24 @@ func TestBandwidthProbeTargetSurvivesCanceledAndFailedReads(t *testing.T) {
 		t.Fatalf("read the percentile %d times, want 2", source.calls)
 	}
 }
+
+// An expired scope is dropped when another scope is stored, so profiles that
+// come and go do not leave their targets behind.
+func TestBandwidthProbeTargetDropsExpiredScopes(t *testing.T) {
+	h := &PlaybackHandler{SourceBitrates: &countingPercentiles{kbps: 40000}}
+	all := newAuthorizedPlaybackContext()
+	kids := access.SetScope(all, access.Scope{AllowedLibraryIDs: []int{3}, LibrariesRestricted: true})
+	h.bandwidthProbeTargetKbps(all)
+	h.probeTargets.mu.Lock()
+	for key, entry := range h.probeTargets.entries {
+		entry.expires = time.Now().Add(-time.Second)
+		h.probeTargets.entries[key] = entry
+	}
+	h.probeTargets.mu.Unlock()
+	h.bandwidthProbeTargetKbps(kids)
+	h.probeTargets.mu.Lock()
+	defer h.probeTargets.mu.Unlock()
+	if len(h.probeTargets.entries) != 1 {
+		t.Fatalf("kept %d scopes, want only the one just read", len(h.probeTargets.entries))
+	}
+}

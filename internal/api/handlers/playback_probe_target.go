@@ -91,6 +91,14 @@ func (h *PlaybackHandler) sourceBitratePercentile(ctx context.Context, filter ca
 		if h.probeTargets.entries == nil {
 			h.probeTargets.entries = map[string]probeTargetEntry{}
 		}
+		// Scopes come and go with profiles and their restrictions; an expired
+		// one is read again on its next use, so it need not be kept.
+		now := time.Now()
+		for cachedKey, cachedEntry := range h.probeTargets.entries {
+			if !now.Before(cachedEntry.expires) {
+				delete(h.probeTargets.entries, cachedKey)
+			}
+		}
 		h.probeTargets.entries[key] = entry
 		h.probeTargets.mu.Unlock()
 		return entry.kbps, nil
