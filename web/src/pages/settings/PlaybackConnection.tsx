@@ -90,6 +90,40 @@ export function LearnedLimitRow() {
   );
 }
 
+interface SpeedProbe {
+  kbps: number;
+  lower_bound: boolean;
+  measured_at: string;
+  transport: string;
+}
+
+interface SpeedSample {
+  kbps: number;
+  measured_at: string;
+}
+
+/**
+ * The highest reading the server keeps for this connection: the latest test,
+ * or the best playback throughput, which is only a lower bound.
+ */
+function speedDescription(
+  connection: { probe?: SpeedProbe | null; playback_sample?: SpeedSample | null } | undefined,
+  now: number,
+): string | undefined {
+  const probe = connection?.probe;
+  const sample = connection?.playback_sample;
+  if (probe && (!sample || probe.kbps >= sample.kbps)) {
+    const rate = probe.lower_bound
+      ? `Faster than ${formatBitrateKbps(probe.kbps)}`
+      : formatBitrateKbps(probe.kbps);
+    return `${rate} · measured ${measuredAgo(probe.measured_at, now)} on ${TRANSPORT_LABELS[probe.transport] ?? "this connection"}`;
+  }
+  if (sample) {
+    return `Faster than ${formatBitrateKbps(sample.kbps)} · seen during playback ${measuredAgo(sample.measured_at, now)}`;
+  }
+  return undefined;
+}
+
 /** The Connection group: this connection's speed, a speed test and Auto's budget. */
 export function PlaybackConnection() {
   const { connection, speedAvailable } = usePlaybackConnection();
@@ -108,13 +142,10 @@ export function PlaybackConnection() {
     };
   }, []);
   if (!speedAvailable) return null;
-  const probe = connection.data?.probe;
   const budget = connection.data?.auto_budget_kbps;
   const description = metered
     ? "Speed tests are skipped on cellular or metered connections. Cellular quality settings apply."
-    : probe
-      ? `${formatBitrateKbps(probe.kbps)} · measured ${measuredAgo(probe.measured_at, now)} on ${TRANSPORT_LABELS[probe.transport] ?? "this connection"}`
-      : "Test the connection used to stream videos.";
+    : (speedDescription(connection.data, now) ?? "Test the connection used to stream videos.");
   return (
     <SettingsGroup title="Connection">
       <SettingRow
@@ -126,14 +157,17 @@ export function PlaybackConnection() {
             disabled={testing || metered}
             onClick={() => {
               setTesting(true);
-              setMessage(undefined);
+              setMessage("Testing for up to 10 seconds.");
               void testConnectionSpeed()
-                .then(async (kbps) => {
-                  if (kbps === "playing")
+                .then(async (result) => {
+                  if (result === "playing")
                     setMessage("Stop playback before testing, then try again.");
-                  else if (kbps === "busy")
+                  else if (result === "busy")
                     setMessage("A speed test is already running. Try again in a moment.");
-                  else await connection.refetch();
+                  else {
+                    setMessage(undefined);
+                    await connection.refetch();
+                  }
                 })
                 .catch((error: unknown) =>
                   setMessage(

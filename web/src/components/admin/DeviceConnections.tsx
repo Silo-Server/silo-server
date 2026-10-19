@@ -78,9 +78,16 @@ export function DeviceConnections({
           </div>
           {connection.probe && (
             <p className="text-muted-foreground">
+              {connection.probe.lower_bound && "Faster than "}
               {formatBitrateKbps(connection.probe.kbps)} on{" "}
               {TRANSPORT_LABELS[connection.probe.transport] ?? connection.probe.transport} ·
               measured {formatRelative(connection.probe.measured_at)}
+            </p>
+          )}
+          {connection.playback_sample && (
+            <p className="text-muted-foreground">
+              Faster than {formatBitrateKbps(connection.playback_sample.kbps)} · seen during
+              playback {formatRelative(connection.playback_sample.measured_at)}
             </p>
           )}
           {connection.learned_limit && (

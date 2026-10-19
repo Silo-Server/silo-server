@@ -116,3 +116,39 @@ it("says when a speed test fails rather than blaming playback", async () => {
     await screen.findByText("A speed test is already running. Try again in a moment."),
   ).toBeInTheDocument();
 });
+
+it("words a lower bound and a playback sample as faster than, and shows the higher", async () => {
+  let reading: Record<string, unknown> = {
+    probe: {
+      kbps: 115000,
+      lower_bound: true,
+      measured_at: new Date().toISOString(),
+      transport: "ethernet",
+    },
+    playback_sample: {
+      kbps: 51200,
+      measured_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+    },
+  };
+  request.mockImplementation(async (operation: string) =>
+    operation.endsWith("capabilities")
+      ? { features: ["buffering_quality_v1", "connection_speed_v1"] }
+      : { connection: "remote", learned_limit: null, ...reading },
+  );
+  let finish: (value: unknown) => void = () => undefined;
+  speedTest.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+  mount();
+  expect(
+    await screen.findByText("Faster than 115 Mbps · measured just now on Ethernet"),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Test speed"));
+  expect(await screen.findByText("Testing for up to 10 seconds.")).toBeInTheDocument();
+
+  // Without a probe, the sample is the reading.
+  reading = { playback_sample: reading.playback_sample };
+  finish({ kbps: 48000, lower_bound: false, bytes: 18_000_000, duration_ms: 3000 });
+  expect(
+    await screen.findByText("Faster than 51.2 Mbps · seen during playback 2 hours ago"),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("Testing for up to 10 seconds.")).not.toBeInTheDocument();
+});

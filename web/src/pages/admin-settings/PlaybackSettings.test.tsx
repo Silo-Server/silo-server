@@ -163,6 +163,12 @@ describe("PlaybackSettings layout", () => {
     expect(keys).toContain("playback.copy_keyframe_playlist");
     expect(keys).toEqual(
       expect.arrayContaining([
+        "playback.bandwidth_probe_automatic",
+        "playback.bandwidth_probe_max_age_days",
+      ]),
+    );
+    expect(keys).toEqual(
+      expect.arrayContaining([
         "markers.mode",
         "markers.detect_intros",
         "markers.detect_credits",
@@ -190,7 +196,13 @@ describe("PlaybackSettings layout", () => {
         container.querySelectorAll("section[role=group]"),
         (group) => group.querySelector("h3")?.textContent,
       ),
-    ).toEqual(["Watch behavior", "Transcoding", "Preview images", "Skip markers"]);
+    ).toEqual([
+      "Watch behavior",
+      "Transcoding",
+      "Connection speed tests",
+      "Preview images",
+      "Skip markers",
+    ]);
   });
 
   it("counts each group's advanced settings in its own disclosure", () => {
