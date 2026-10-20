@@ -4,66 +4,77 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// configurationTestPool returns a pool whose search_path puts a private copy
+// of the node tables in front of the migrated ones. The test pins the pool
+// generation and injects a failing constraint into it, which would break other
+// tests sharing the database, so it works on copies: LIKE ... INCLUDING ALL
+// takes every column, default, constraint and index from the migrated table,
+// and the migrated triggers are attached as they are. The copy cannot fall
+// behind a new column the repository reads.
 func configurationTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("SILO_NODE_CONFIGURATION_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_NODE_CONFIGURATION_TEST_DATABASE_URL is not set")
-	}
-	cfg, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.ConnConfig.Database != "silo_operations_node_configuration_test" {
-		t.Fatal("refusing non-owned node configuration database")
-	}
-	admin, err := pgxpool.NewWithConfig(t.Context(), cfg)
-	if err != nil {
+	shared := newNodeTestPool(t)
+	ctx := t.Context()
+	var source string
+	if err := shared.QueryRow(ctx, `SELECT current_schema()`).Scan(&source); err != nil {
 		t.Fatal(err)
 	}
 	schema := fmt.Sprintf("node_configuration_%d", time.Now().UnixNano())
-	if _, err = admin.Exec(t.Context(), "CREATE SCHEMA "+schema); err != nil {
-		admin.Close()
+	if _, err := shared.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = admin.Exec(cleanup, "DROP SCHEMA "+schema+" CASCADE")
-		admin.Close()
+		_, _ = shared.Exec(cleanup, "DROP SCHEMA "+schema+" CASCADE")
 	})
-	cfg.ConnConfig.RuntimeParams["search_path"] = schema
-	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	statements := []string{
+		"CREATE TABLE " + schema + ".stream_nodes (LIKE " + source + ".stream_nodes INCLUDING ALL)",
+		"CREATE TABLE " + schema + ".stream_node_pool_generation (LIKE " + source + ".stream_node_pool_generation INCLUDING ALL)",
+		"INSERT INTO " + schema + ".stream_node_pool_generation (generation) VALUES (1)",
+	}
+	rows, err := shared.Query(ctx, `SELECT pg_get_triggerdef(oid) FROM pg_trigger
+		WHERE tgrelid = $1::regclass AND NOT tgisinternal ORDER BY tgname`, source+".stream_nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	triggers, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(triggers) == 0 {
+		t.Fatal("migrated stream_nodes has no configuration trigger")
+	}
+	migrated := " ON " + source + ".stream_nodes "
+	for _, trigger := range triggers {
+		if !strings.Contains(trigger, migrated) {
+			t.Fatalf("unexpected trigger definition: %s", trigger)
+		}
+		statements = append(statements, strings.Replace(trigger, migrated, " ON "+schema+".stream_nodes ", 1))
+	}
+	for _, statement := range statements {
+		if _, err := shared.Exec(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	// The trigger functions and the revision sequence stay in the migrated
+	// schema; unqualified names in them resolve to the copies first.
+	cfg := shared.Config()
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema + ", " + source
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	_, err = pool.Exec(t.Context(), `CREATE TABLE stream_nodes (
- id serial PRIMARY KEY, name text NOT NULL, type text NOT NULL, url text NOT NULL CONSTRAINT stream_nodes_url_key UNIQUE,
- public_url text, enabled boolean NOT NULL DEFAULT true, healthy boolean NOT NULL DEFAULT false,
- active_jobs integer NOT NULL DEFAULT 0, node_group text, max_jobs integer, max_bandwidth_kbps integer,
- egress_kbps integer NOT NULL DEFAULT 0, last_health_check timestamptz, created_at timestamptz NOT NULL DEFAULT now(),
- capabilities jsonb, capabilities_hash text, capabilities_refreshed_at timestamptz, last_stats jsonb,
- hw_accel_override text, hw_device_override text, capability_drift text, capability_drift_baseline jsonb)`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	migration, err := os.ReadFile("../../migrations/sql/20260906205459_node_admin_configuration_revisions.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = pool.Exec(t.Context(), strings.Split(string(migration), "-- +goose Down")[0]); err != nil {
-		t.Fatal(err)
-	}
 	return pool
 }
 

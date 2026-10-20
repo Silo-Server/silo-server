@@ -414,3 +414,8 @@
 # Explore all on a row the catalog cannot express as a query pages the row's
 # own fetch past its item limit, on Home and on its library page.
 ./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
+
+# Admin node configuration writes against the migrated stream_nodes table:
+# create retries and conflicts, health samples that keep the revision, guarded
+# updates and deletes, and pool invalidation that rolls back with its write.
+./internal/nodepool TestAdminNodeConfigurationTransactions
