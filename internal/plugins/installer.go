@@ -239,8 +239,8 @@ func (i *Installer) replaceBinary(
 	if err := ValidateManifest(manifest); err != nil {
 		return nil, err
 	}
-	if manifest.GetPluginId() != existing.PluginID {
-		return nil, fmt.Errorf("replacement plugin id %q does not match installation %q", manifest.GetPluginId(), existing.PluginID)
+	if err := checkReplacementIdentity(manifest, existing); err != nil {
+		return nil, err
 	}
 
 	manifestBytes, err := protojson.Marshal(manifest)
@@ -306,8 +306,12 @@ func (i *Installer) replaceBinary(
 		return nil, fmt.Errorf("update replacement plugin installation: %w", err)
 	}
 
+	oldInstallDir := filepath.Dir(existing.InstallPath)
+	if oldInstallDir != "" && filepath.Clean(oldInstallDir) != filepath.Clean(installDir) {
+		_ = os.RemoveAll(oldInstallDir)
+	}
+
 	keepInstallDir = true
-	cleanupReplacedInstallation(ctx, existing, installDir, os.RemoveAll)
 
 	updated := *existing
 	updated.Version = version
@@ -338,8 +342,8 @@ func (i *Installer) replaceArchive(
 	if err != nil {
 		return nil, err
 	}
-	if manifest.GetPluginId() != existing.PluginID {
-		return nil, fmt.Errorf("replacement plugin id %q does not match installation %q", manifest.GetPluginId(), existing.PluginID)
+	if err := checkReplacementIdentity(manifest, existing); err != nil {
+		return nil, err
 	}
 
 	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
@@ -392,8 +396,12 @@ func (i *Installer) replaceArchive(
 		return nil, fmt.Errorf("update replacement plugin installation: %w", err)
 	}
 
+	oldInstallDir := filepath.Dir(existing.InstallPath)
+	if oldInstallDir != "" && filepath.Clean(oldInstallDir) != filepath.Clean(installDir) {
+		_ = os.RemoveAll(oldInstallDir)
+	}
+
 	keepInstallDir = true
-	cleanupReplacedInstallation(ctx, existing, installDir, os.RemoveAll)
 
 	updated := *existing
 	updated.Version = version
@@ -690,6 +698,19 @@ func readZipFile(file *zip.File) ([]byte, error) {
 func sanitizeFilesystemSegment(value string) string {
 	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "@", "_")
 	return replacer.Replace(value)
+}
+
+// checkReplacementIdentity refuses a package that names a different plugin
+// than the installation it would replace.
+func checkReplacementIdentity(manifest *pluginv1.PluginManifest, existing *Installation) error {
+	if manifest.GetPluginId() == existing.PluginID {
+		return nil
+	}
+	return packageError(
+		fmt.Errorf("replacement plugin id %q does not match installation %q", manifest.GetPluginId(), existing.PluginID),
+		"The package is %s, not the installed %s, so Silo didn't replace it.",
+		manifest.GetPluginId(), existing.PluginID,
+	)
 }
 
 // checkCatalogIdentity refuses a binary whose own manifest is not the plugin

@@ -1,9 +1,7 @@
 package plugins
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"strings"
 )
@@ -43,37 +41,9 @@ func pluginVersionRoot(root, pluginID, version string) (string, error) {
 // writers changing symlinks between a check and a filesystem operation.
 func pluginPathUnder(root string, parts ...string) (string, error) {
 	path := filepath.Join(append([]string{root}, parts...)...)
-	if _, err := pluginRelativeDescendant(root, path); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func pluginRelativeDescendant(root, path string) (string, error) {
 	rel, err := filepath.Rel(filepath.Clean(root), path)
 	if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("plugin path %q is not below root %q", path, root)
 	}
-	return rel, nil
-}
-
-// removeInstallationFiles accepts paths written by the host, including legacy
-// layouts and roots that differ from today's configuration. Invalid identities
-// may have produced an unsafe path before admission checks existed; leave those
-// files alone. The caller decides whether cleanup failure fails its operation.
-func removeInstallationFiles(installation *Installation, removeAll func(string) error) error {
-	if _, _, err := pluginIdentitySegments(installation.PluginID, installation.Version); err != nil {
-		return err
-	}
-	return removeAll(filepath.Dir(installation.InstallPath))
-}
-
-func cleanupReplacedInstallation(ctx context.Context, existing *Installation, installDir string, removeAll func(string) error) {
-	if filepath.Clean(filepath.Dir(existing.InstallPath)) == filepath.Clean(installDir) {
-		return
-	}
-	if err := removeInstallationFiles(existing, removeAll); err != nil {
-		slog.WarnContext(ctx, "remove replaced plugin installation files", "component", "plugins",
-			"installation_id", existing.ID, "error", err)
-	}
+	return path, nil
 }

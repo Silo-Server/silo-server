@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -140,7 +139,7 @@ func (c *ArchiveCache) ensure(
 	}
 	binaryPath, err := c.LocalInstallPath(installation)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
 	}
 
 	if manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath)); err == nil {
@@ -252,46 +251,19 @@ func (c *ArchiveCache) markVerified(installationID int, binaryPath string, manif
 // the directories belong to the installer. Best effort; a failure is logged
 // and costs disk, not correctness.
 func (c *ArchiveCache) pruneStaleReleases(ctx context.Context, installation *Installation, keepDir string) {
-	c.pruneStaleReleasesFrom(ctx, installation, keepDir, diskReleaseFiles{})
-}
-
-// releaseFiles keeps pruning's directory traversal and removal together. Tests
-// supply inert entries and removal spies, without touching a real cache.
-type releaseFiles interface {
-	ReadDir(string) ([]os.DirEntry, error)
-	RemoveAll(string) error
-	Remove(string) error
-}
-
-type diskReleaseFiles struct{}
-
-func (diskReleaseFiles) ReadDir(path string) ([]os.DirEntry, error) { return os.ReadDir(path) }
-func (diskReleaseFiles) RemoveAll(path string) error                { return os.RemoveAll(path) }
-func (diskReleaseFiles) Remove(path string) error                   { return os.Remove(path) }
-
-func (c *ArchiveCache) pruneStaleReleasesFrom(ctx context.Context, installation *Installation, keepDir string, files releaseFiles) {
 	if c == nil || c.root == "" {
 		return
 	}
+	// keepDir must be the release LocalInstallPath derived under the root:
+	// <root>/<id>/<version>/<release>. Its grandparent is then this plugin's
+	// directory under the root, and nothing outside it is listed or removed.
 	binaryPath, err := c.LocalInstallPath(installation)
-	if err != nil || filepath.Clean(keepDir) != filepath.Dir(binaryPath) {
+	keepDir = filepath.Clean(keepDir)
+	if err != nil || keepDir != filepath.Dir(binaryPath) {
 		return
 	}
-	id, _, err := pluginIdentitySegments(installation.PluginID, installation.Version)
-	if err != nil {
-		return
-	}
-	pluginRoot, err := pluginPathUnder(c.root, id)
-	if err != nil {
-		return
-	}
-	keepRelative, err := pluginRelativeDescendant(pluginRoot, keepDir)
-	// A release is exactly pluginRoot/version/release, never the plugin or
-	// version root itself. Do not list anything if the keep directory is wrong.
-	if err != nil || len(strings.Split(keepRelative, string(filepath.Separator))) != 2 {
-		return
-	}
-	versions, err := files.ReadDir(pluginRoot)
+	pluginRoot := filepath.Dir(filepath.Dir(keepDir))
+	versions, err := os.ReadDir(pluginRoot)
 	if err != nil {
 		return
 	}
@@ -299,26 +271,23 @@ func (c *ArchiveCache) pruneStaleReleasesFrom(ctx context.Context, installation 
 		if !version.IsDir() {
 			continue
 		}
-		versionDir, err := pluginPathUnder(pluginRoot, version.Name())
-		if err != nil {
-			continue
-		}
-		releases, err := files.ReadDir(versionDir)
+		versionDir := filepath.Join(pluginRoot, version.Name())
+		releases, err := os.ReadDir(versionDir)
 		if err != nil {
 			continue
 		}
 		for _, release := range releases {
-			releaseDir, err := pluginPathUnder(versionDir, release.Name())
-			if err != nil || !release.IsDir() || releaseDir == filepath.Clean(keepDir) {
+			releaseDir := filepath.Join(versionDir, release.Name())
+			if !release.IsDir() || releaseDir == keepDir {
 				continue
 			}
-			if err := files.RemoveAll(releaseDir); err != nil {
+			if err := os.RemoveAll(releaseDir); err != nil {
 				slog.WarnContext(ctx, "remove stale plugin release from cache", "component", "plugins",
 					"installation_id", installation.ID, "path", releaseDir, "error", err)
 			}
 		}
 		// Drop the version dir once it is empty; a non-empty one stays.
-		_ = files.Remove(versionDir)
+		_ = os.Remove(versionDir)
 	}
 }
 
