@@ -89,3 +89,25 @@ it("adds only nonnegative bounded jitter and distinguishes shield from other 100
   expect(isInputShieldClose({ code: 1008, reason: "realtime input shield" })).toBe(true);
   expect(isInputShieldClose({ code: 1008, reason: "missing subscribe" })).toBe(false);
 });
+it("resets quiet accepted connections at disconnect without a second activity frame", () => {
+  const backoff = createRealtimeBackoff(() => 0);
+  expect(backoff.reconnect()).toBe(1_000);
+  expect(backoff.reconnect()).toBe(2_000);
+  backoff.useful();
+  vi.advanceTimersByTime(30_000);
+  backoff.interrupted();
+  expect(backoff.reconnect()).toBe(1_000);
+});
+it("does not count open time or time following refusal as healthy accepted operation", () => {
+  const backoff = createRealtimeBackoff(() => 0);
+  expect(backoff.reconnect(true)).toBe(5_000);
+  vi.advanceTimersByTime(300_000);
+  backoff.interrupted();
+  expect(backoff.reconnect(true)).toBe(10_000);
+  backoff.useful();
+  vi.advanceTimersByTime(29_999);
+  backoff.refusal({ code: "realtime_unavailable", retryAfterMs: 2_000 });
+  vi.advanceTimersByTime(300_000);
+  backoff.interrupted();
+  expect(backoff.reconnect(true)).toBe(20_000);
+});

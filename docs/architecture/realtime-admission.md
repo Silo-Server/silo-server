@@ -57,8 +57,11 @@ clear or configure this store. Memory is the default and enforces per node:
 N nodes can grant N times the account allowance. Its aligned time is one startup
 wall-clock anchor plus monotonic elapsed time. Redis uses store `TIME` within an
 atomic script and a stable, version-neutral key namespace. The dedicated Redis
-client honors context deadlines. A missing configured Redis connection prevents
-startup; an unavailable Redis store refuses new work without local fallback.
+client honors context deadlines. If the work store cannot be configured, this
+dependency reports an `unavailable` scope and a startup warning instead of
+aborting startup; new realtime work is refused without local fallback. Other
+startup prerequisites still apply. An unavailable Redis store also refuses new
+work. Repairing startup configuration requires a restart.
 
 Second counters expire two seconds after their first increment; minute counters
 expire after 120 seconds. Denial does not extend retention. Redis retains live

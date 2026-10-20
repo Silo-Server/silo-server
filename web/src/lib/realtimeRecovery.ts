@@ -69,6 +69,10 @@ export function createRealtimeBackoff(random = Math.random, now = () => performa
   let opaque = 0;
   let shield = 0;
   let usefulSince: number | null = null;
+  // Quiet accepted sockets can renew without receiving a second useful frame.
+  const resetIfHealthy = () => {
+    if (usefulSince !== null && now() - usefulSince >= 30_000) unavailable = opaque = shield = 0;
+  };
   const jitter = () => Math.floor(Math.min(1, Math.max(0, random())) * 250);
   const stepped = (steps: number[], attempt: number) => steps[Math.min(attempt, steps.length - 1)]!;
   return {
@@ -81,6 +85,7 @@ export function createRealtimeBackoff(random = Math.random, now = () => performa
       return Math.max(refusal.retryAfterMs, outageMs) + jitter();
     },
     reconnect(inputShield = false) {
+      resetIfHealthy();
       usefulSince = null;
       return (
         (inputShield
@@ -90,9 +95,10 @@ export function createRealtimeBackoff(random = Math.random, now = () => performa
     },
     useful() {
       usefulSince ??= now();
-      if (now() - usefulSince >= 30_000) unavailable = opaque = shield = 0;
+      resetIfHealthy();
     },
     interrupted() {
+      resetIfHealthy();
       usefulSince = null;
     },
   };

@@ -460,6 +460,39 @@ it("renews a healthy five-minute connection and recovers from a transient networ
   expect(view.result.current.closedReason).toBeNull();
 });
 
+it("quiet accepted room renewals reset accumulated reconnect backoff", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ticket("a", true)),
+  );
+  const view = renderHook(() =>
+    useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  act(() => RoomSocket.all[0]!.close());
+  await act(() => vi.advanceTimersByTimeAsync(1_000));
+  act(() => RoomSocket.all[1]!.close());
+  await act(() => vi.advanceTimersByTimeAsync(2_000));
+  for (let index = 2; index < 4; index++) {
+    act(() => {
+      RoomSocket.all[index]!.open();
+      RoomSocket.all[index]!.message({
+        type: "snapshot",
+        room: { room_id: "room", generation: 1 },
+      });
+    });
+    // No more snapshots or accepted action results during this socket lifetime.
+    await act(() => vi.advanceTimersByTimeAsync(300_000));
+    act(() => RoomSocket.all[index]!.close());
+    await act(() => vi.advanceTimersByTimeAsync(999));
+    expect(RoomSocket.all).toHaveLength(index + 1);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(RoomSocket.all).toHaveLength(index + 2);
+  }
+  view.unmount();
+});
+
 it("terminal ticket refusal opens no socket and does not reconnect", async () => {
   const fetch = vi.fn().mockResolvedValue(
     new Response(

@@ -96,6 +96,9 @@ func New(store ratelimit.WorkStore, backend string) *Controller {
 func newController(store ratelimit.WorkStore, backend string, config configuration) *Controller {
 	c := &Controller{store: store, config: config, accounts: make(map[int]*inputAccount)}
 	c.status = newStatus(backend, uuid.NewString(), config)
+	if store == nil {
+		c.status.Scope = unavailableScope
+	}
 	return c
 }
 

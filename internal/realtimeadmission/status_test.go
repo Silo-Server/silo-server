@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
@@ -12,7 +13,9 @@ func TestAdmissionStatusDefaultsAndEpoch(t *testing.T) {
 	for _, tc := range []struct{ backend, scope string }{
 		{"memory", "per_node"}, {"redis", "shared"}, {"unknown", "unavailable"},
 	} {
-		c := New(nil, tc.backend)
+		c := New(storeFunc(func(context.Context, string, ratelimit.WorkLimit) ratelimit.WorkResult {
+			return ratelimit.WorkResult{Allowed: true}
+		}), tc.backend)
 		status := c.Status()
 		if status.Version != 1 || status.Backend != tc.backend || status.Scope != tc.scope || status.Epoch == "" || status.DeadlineMS != 250 {
 			t.Fatalf("status = %+v", status)
@@ -33,6 +36,14 @@ func TestAdmissionStatusDefaultsAndEpoch(t *testing.T) {
 			t.Fatal("status mutation changed enforcement")
 		}
 	}
+}
+
+func TestAdmissionMissingStoreReportsUnavailable(t *testing.T) {
+	c := New(nil, "redis")
+	if status := c.Status(); status.Backend != "redis" || status.Scope != unavailableScope {
+		t.Fatalf("missing store status=%+v", status)
+	}
+	requireRefusal(t, c.Admit(t.Context(), Events, Identity{UserID: 1}), UnavailableCode, 2*time.Second)
 }
 
 func TestAdmissionUsesApprovedLimits(t *testing.T) {

@@ -2802,7 +2802,7 @@ func main() {
 	// Realtime client work remains bounded when generic HTTP limiting is off.
 	realtimeWork, closeRealtimeWork, err := newRealtimeWorkAdmission(cfg.RateLimit, cfg.Redis)
 	if err != nil {
-		log.Fatalf("failed to initialize realtime work admission: %v", err)
+		slog.Warn("realtime work admission unavailable; new realtime work will be refused", "component", "app", "error", err)
 	}
 	defer closeRealtimeWork()
 	deps.RealtimeAdmission = realtimeWork
