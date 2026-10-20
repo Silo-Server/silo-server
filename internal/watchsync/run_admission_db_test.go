@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,15 +21,15 @@ import (
 // admissionLockTrace coordinates two repository calls at the row lock. These
 // fixtures never execute a service or provider, and use no timing-based waits.
 type admissionLockTrace struct {
-	started chan struct{}
+	started chan uint32
 	locked  chan struct{}
 	release chan struct{}
 }
 
-func (tr *admissionLockTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+func (tr *admissionLockTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	if strings.Contains(data.SQL, "FOR NO KEY UPDATE") {
 		if tr.started != nil {
-			tr.started <- struct{}{}
+			tr.started <- conn.PgConn().PID()
 		}
 		return context.WithValue(ctx, admissionTraceKey{}, true)
 	}
@@ -48,6 +51,26 @@ type admissionTraceKey struct{}
 type admissionReply struct {
 	admitted syncRunAdmission
 	err      error
+}
+
+// awaitAdmissionLock observes a real PostgreSQL wait, rather than a client
+// query-start callback. Its read-only snapshots are bounded; only the two fixed
+// admission operations above contend, and no provider work runs.
+func awaitAdmissionLock(t *testing.T, ctx context.Context, observer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, pid uint32) {
+	t.Helper()
+	for range 128 {
+		var blocked bool
+		if err := observer.QueryRow(ctx, "SELECT cardinality(pg_blocking_pids($1::integer)) > 0", pid).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		runtime.Gosched()
+	}
+	t.Fatal("repository operation did not enter the expected PostgreSQL lock wait")
 }
 
 //nolint:funlen,gocyclo // Transaction scenarios share one bounded synthetic account fixture.
@@ -98,7 +121,8 @@ func TestSyncRunAdmissionDB(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	admit := func(t *testing.T, conn Connection, trigger string, at time.Time) syncRunAdmission {
 		t.Helper()
-		got, err := repo.AdmitSyncRun(ctx, conn, SyncRun{Trigger: trigger, StartedAt: at})
+		repo.now = func() time.Time { return at }
+		got, err := repo.AdmitSyncRun(ctx, conn, SyncRun{Trigger: trigger})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -121,9 +145,12 @@ func TestSyncRunAdmissionDB(t *testing.T) {
 	t.Run("two independent repositories commit one manual reservation", func(t *testing.T) {
 		conn := connection(t)
 		firstTrace := &admissionLockTrace{locked: make(chan struct{}, 1), release: make(chan struct{})}
-		secondTrace := &admissionLockTrace{started: make(chan struct{}, 1)}
+		release := sync.OnceFunc(func() { close(firstTrace.release) })
+		defer release()
+		secondTrace := &admissionLockTrace{started: make(chan uint32, 1)}
 		first := NewPostgresRepository(newPool(t, firstTrace), cipher)
 		second := NewPostgresRepository(newPool(t, secondTrace), cipher)
+		first.now, second.now = func() time.Time { return now }, func() time.Time { return now }
 		// Buffered results and a bounded context also release the fixtures on failure.
 		results := make(chan admissionReply, 2)
 		go func() {
@@ -140,11 +167,12 @@ func TestSyncRunAdmissionDB(t *testing.T) {
 			results <- admissionReply{got, err}
 		}()
 		select {
-		case <-secondTrace.started:
+		case pid := <-secondTrace.started:
+			awaitAdmissionLock(t, ctx, pool, pid)
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		close(firstTrace.release)
+		release()
 		a, b := <-results, <-results
 		if a.err != nil || b.err != nil || a.admitted.Created == b.admitted.Created || a.admitted.Run.ID != b.admitted.Run.ID || a.admitted.Run.ID == "" {
 			t.Fatalf("reservation outcomes = %+v / %+v", a, b)
@@ -259,9 +287,10 @@ func TestSyncRunAdmissionDB(t *testing.T) {
 		if _, err := tx.Exec(ctx, "SELECT id FROM watch_provider_connections WHERE id=$1::uuid FOR NO KEY UPDATE", conn.ID); err != nil {
 			t.Fatal(err)
 		}
-		trace := &admissionLockTrace{started: make(chan struct{}, 1)}
+		trace := &admissionLockTrace{started: make(chan uint32, 1)}
 		otherPool := newPool(t, trace)
 		other := NewPostgresRepository(otherPool, cipher)
+		other.now = func() time.Time { return now }
 		blockedCtx, stop := context.WithCancel(ctx)
 		defer stop()
 		result := make(chan error, 1)
@@ -270,7 +299,8 @@ func TestSyncRunAdmissionDB(t *testing.T) {
 			result <- err
 		}()
 		select {
-		case <-trace.started:
+		case pid := <-trace.started:
+			awaitAdmissionLock(t, ctx, tx, pid)
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
@@ -285,6 +315,44 @@ func TestSyncRunAdmissionDB(t *testing.T) {
 		got, err := other.AdmitSyncRun(ctx, conn, SyncRun{Trigger: "manual", StartedAt: now})
 		if err != nil || !got.Created {
 			t.Fatalf("admission after rollback = %+v, %v", got, err)
+		}
+	})
+
+	t.Run("admission samples time after waiting for the connection lock", func(t *testing.T) {
+		conn := connection(t)
+		fixtureRun(t, conn, SyncRun{Trigger: "manual", StartedAt: now})
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		if _, err := tx.Exec(ctx, "SELECT id FROM watch_provider_connections WHERE id=$1::uuid FOR NO KEY UPDATE", conn.ID); err != nil {
+			t.Fatal(err)
+		}
+		trace := &admissionLockTrace{started: make(chan uint32, 1)}
+		other := NewPostgresRepository(newPool(t, trace), cipher)
+		var clock atomic.Pointer[time.Time]
+		clock.Store(new(now.Add(manualSyncTimeout)))
+		other.now = func() time.Time { return *clock.Load() }
+		result := make(chan admissionReply, 1)
+		go func() {
+			got, err := other.AdmitSyncRun(ctx, conn, SyncRun{Trigger: "scheduled", StartedAt: now.Add(manualSyncTimeout)})
+			result <- admissionReply{got, err}
+		}()
+		select {
+		case pid := <-trace.started:
+			awaitAdmissionLock(t, ctx, tx, pid)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		after := now.Add(manualSyncTimeout + time.Microsecond)
+		clock.Store(new(after))
+		if err := tx.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+		got := <-result
+		if got.err != nil || !got.admitted.Created || !got.admitted.Run.StartedAt.Equal(after) {
+			t.Fatalf("admission after boundary = %+v, %v", got.admitted, got.err)
 		}
 	})
 

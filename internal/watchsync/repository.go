@@ -140,6 +140,7 @@ const listItemStateColumns = `
 type PostgresRepository struct {
 	pool   *pgxpool.Pool
 	cipher *secret.Cipher
+	now    func() time.Time
 	// ratingLock serializes a connection's rating reconciliation; see
 	// WithRatingSyncLock.
 	ratingLock connectionLock
@@ -181,7 +182,7 @@ func (l *connectionLock) sessionLimit(pool *pgxpool.Pool) chan struct{} {
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *PostgresRepository {
-	r := &PostgresRepository{pool: pool, cipher: cipher}
+	r := &PostgresRepository{pool: pool, cipher: cipher, now: time.Now}
 	r.ratingLock.class, r.ratingLock.name = ratingSyncLockClass, "rating sync"
 	r.tokenRefreshLock.class, r.tokenRefreshLock.name = tokenRefreshLockClass, "token refresh"
 	return r
