@@ -21,8 +21,12 @@ import {
   parseOverlayPrefs,
   serializeOverlayPrefs,
   storedOverlayIds,
+  supportsOverlayStyles,
+  watchStatusOf,
+  withoutUnlistedImages,
   type CardOverlayPrefs,
   type OverlayId,
+  type OverlayImage,
   type OverlayServerSupport,
 } from "@/lib/overlays";
 import {
@@ -55,10 +59,12 @@ function inheritBoolean(userValue: unknown, serverDefault: boolean): boolean {
   return typeof userValue === "boolean" ? userValue : serverDefault;
 }
 
+const NO_IMAGES: readonly OverlayImage[] = [];
+
 // The server-wide overlay defaults live in server_settings, not the
 // user-settings contract, so this endpoint stays alongside the canonical
-// values API.
-function useOverlayConfig() {
+// values API. It also lists the images an administrator uploaded.
+export function useOverlayConfig() {
   return useQuery({
     queryKey: settingsKeys.overlayConfig(),
     queryFn: () => v2("GET /api/v2/settings/overlay-config"),
@@ -135,6 +141,11 @@ export function useOverlayPrefs() {
     const source = userValue ?? config?.defaults ?? null;
     return parseOverlayPrefs(source);
   }, [userValue, config?.defaults]);
+  const images = config?.images ?? NO_IMAGES;
+  const renderPrefs = useMemo(
+    () => withoutUnlistedImages(prefs, new Set(images.map((image) => image.ref))),
+    [prefs, images],
+  );
 
   // Absent server config (including while it loads), overlays are on — the
   // shipped default — and quick actions are off.
@@ -222,7 +233,15 @@ export function useOverlayPrefs() {
   const isLoading = (hasProfile && userLoading) || configLoading;
 
   return {
-    prefs: overlaysEnabled && !isLoading ? prefs : null,
+    prefs: overlaysEnabled && !isLoading ? renderPrefs : null,
+    // The status corner shows whether or not badges are on; while settings
+    // load it stays empty rather than flashing a mode that may change.
+    watchStatus: isLoading ? ("off" as const) : watchStatusOf(prefs),
+    // The full document, badges on or off, for settings screens.
+    editablePrefs: prefs,
+    images,
+    imageUploadsAvailable: config?.image_uploads_available === true,
+    supportsStyles: supportsOverlayStyles(serverSupport),
     setPrefs,
     isOverlaySupported,
     overlaysEnabled,

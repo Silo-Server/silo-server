@@ -76,7 +76,7 @@ export default function RecommendationsSection() {
 
   const { data, isLoading, isError, refetch } = useRecommendationSection(kind, key);
   const title = data?.label || fallbackTitle(kind, key);
-  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
+  const { prefs: overlayPrefs, watchStatus, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
 
   useDocumentTitle(title);
@@ -106,6 +106,7 @@ export default function RecommendationsSection() {
               key={item.content_id}
               item={item}
               overlayPrefs={overlayPrefs}
+              watchStatus={watchStatus}
               quickActionMode={quickActionMode}
             />
           ))}

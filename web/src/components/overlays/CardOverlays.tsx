@@ -1,31 +1,53 @@
-import { useLayoutEffect, useRef, type CSSProperties } from "react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { useLanguageNamesLoaded } from "@/lib/languageNamesLoader";
-import { OverlayIcon, WORDMARK_TEXT, getPreset, orderedOverlaysForPosition } from "@/lib/overlays";
+import {
+  OverlayIcon,
+  WORDMARK_TEXT,
+  applyOverlayStyle,
+  getPreset,
+  orderedOverlaysForPosition,
+  overlayImageUrl,
+  readableTextOn,
+  watchStatusOf,
+} from "@/lib/overlays";
 import { cn } from "@/lib/utils";
 import type {
   CardOverlayPrefs,
   OverlayData,
   OverlayDef,
   OverlayIconId,
+  OverlayItemConfig,
   OverlayPosition,
   OverlayPreset,
   OverlayShadow,
 } from "@/lib/overlays";
 
+import {
+  EDGE_GAP,
+  EDGE_INSET,
+  POSTER_REFERENCE_WIDTH,
+  WATCH_STATUS_SIZE,
+  overlayLength,
+  setLegacyLength,
+  supportsContainerQueryUnits,
+  type ScalingMode,
+} from "./overlayScale";
+
 // Corner stacks render at most this many badges; anything further down the
 // user's order is dropped rather than colliding with the opposite corner.
+// Edge rails run along the card's height and hold one more.
 const MAX_BADGES_PER_CORNER = 3;
+const MAX_BADGES_PER_RAIL = 4;
 
-// The desktop Home carousel's measured 185px overlay layer is the visual
-// reference, including when the host card has its standard 1px border.
-const POSTER_REFERENCE_WIDTH = 185;
-const EDGE_INSET = 8;
-const EDGE_GAP = 8;
+// An uploaded image that replaces a whole badge is this many times the
+// height of the text badge it stands in for, so a logo reads as a logo.
+const VALUE_IMAGE_SCALE = 1.6;
 
 const POSTER_VARS = {
   edgeInset: "--card-overlay-edge-inset",
   edgeGap: "--card-overlay-edge-gap",
+  statusReserve: "--card-overlay-status-reserve",
   stackGap: "--card-overlay-stack-gap",
   fontSize: "--card-overlay-font-size",
   paddingInline: "--card-overlay-padding-inline",
@@ -35,6 +57,7 @@ const POSTER_VARS = {
   borderLeftWidth: "--card-overlay-border-left-width",
   iconSize: "--card-overlay-icon-size",
   iconGap: "--card-overlay-icon-gap",
+  imageHeight: "--card-overlay-image-height",
   textShadowX: "--card-overlay-text-shadow-x",
   textShadowY: "--card-overlay-text-shadow-y",
   textShadowBlur: "--card-overlay-text-shadow-blur",
@@ -44,29 +67,13 @@ const POSTER_VARS = {
   boxShadowSpread: "--card-overlay-box-shadow-spread",
 } as const;
 
-type ScalingMode = "container" | "legacy" | "fixed";
-
-function overlayLength(pixels: number, mode: ScalingMode, legacyVariable: string): string {
-  if (mode === "fixed") return `${pixels}px`;
-  if (mode === "legacy") return `var(${legacyVariable}, ${pixels}px)`;
-  return `${Number(((pixels / POSTER_REFERENCE_WIDTH) * 100).toFixed(6))}cqi`;
+function valueImageHeight(preset: OverlayPreset): number {
+  return (preset.fontSize + preset.paddingBlock * 2) * VALUE_IMAGE_SCALE;
 }
 
-// Every poster card asks on every render, so the answer is cached. It is keyed
-// to the `CSS` object so a replaced global (as in tests) is asked again.
-let containerQueryUnitsSupport: { css: typeof CSS; supported: boolean } | null = null;
-
-function supportsContainerQueryUnits(): boolean {
-  if (typeof CSS === "undefined" || typeof CSS.supports !== "function") return false;
-  if (containerQueryUnitsSupport?.css !== CSS) {
-    containerQueryUnitsSupport = { css: CSS, supported: CSS.supports("width", "1cqi") };
-  }
-  return containerQueryUnitsSupport.supported;
-}
-
-function setLegacyLength(element: HTMLElement, variable: string, pixels: number, scale: number) {
-  element.style.setProperty(variable, `${Number((pixels * scale).toFixed(4))}px`);
-}
+// How far the top badge row stops short of the right edge: the watch-status
+// corner plus the usual gap.
+const STATUS_RESERVE = WATCH_STATUS_SIZE + EDGE_GAP;
 
 function shadowValue(
   shadow: OverlayShadow,
@@ -95,12 +102,14 @@ function applyLegacyPosterScale(
 
   setLegacyLength(element, POSTER_VARS.edgeInset, EDGE_INSET, scale);
   setLegacyLength(element, POSTER_VARS.edgeGap, EDGE_GAP, scale);
+  setLegacyLength(element, POSTER_VARS.statusReserve, STATUS_RESERVE, scale);
   setLegacyLength(element, POSTER_VARS.stackGap, preset.stackGap, scale);
   setLegacyLength(element, POSTER_VARS.fontSize, preset.fontSize, scale);
   setLegacyLength(element, POSTER_VARS.paddingInline, preset.paddingInline, scale);
   setLegacyLength(element, POSTER_VARS.paddingBlock, preset.paddingBlock, scale);
   setLegacyLength(element, POSTER_VARS.iconSize, preset.iconSize, scale);
   setLegacyLength(element, POSTER_VARS.iconGap, preset.iconGap, scale);
+  setLegacyLength(element, POSTER_VARS.imageHeight, valueImageHeight(preset), scale);
   if (preset.borderRadius !== "full") {
     setLegacyLength(element, POSTER_VARS.borderRadius, borderRadius, scale);
   }
@@ -141,27 +150,42 @@ interface ResolvedBadge {
   label: string;
   accentColor: string | undefined;
   iconId: OverlayIconId | null;
+  // Uploaded image refs: one in the icon's place, or one for the whole badge.
+  image: string | null;
+  valueImage: string | null;
+  valueKey: string | null;
+  // The rating's source mark and bare score, when the preset draws chips or
+  // an uploaded image already shows the source.
+  sourceMark: string | null;
+  score: string | null;
 }
 
 function resolveBadge(
   def: OverlayDef,
   data: OverlayData,
   preset: OverlayPreset,
-  itemAccent: string | undefined,
-  itemShowIcon: boolean | undefined,
+  config: OverlayItemConfig | undefined,
 ): ResolvedBadge | null {
   const label = def.getValue(data);
   if (!label) return null;
   const dynamicIcon = def.getIcon ? def.getIcon(data) : null;
   const candidateIcon = dynamicIcon ?? def.iconId ?? null;
-  const showIcon = def.iconCapable && candidateIcon !== null && (itemShowIcon ?? preset.preferIcon);
+  const showIcon =
+    def.iconCapable && candidateIcon !== null && (config?.showIcon ?? preset.preferIcon);
+  const valueKey = def.getValueKey?.(data) ?? null;
+  const score = def.getScore?.(data) ?? null;
   return {
     def,
     label,
     // The viewer's own accent wins; a data-driven accent (amber for a title
     // that needs attention) comes before the badge's default.
-    accentColor: itemAccent ?? def.getAccent?.(data) ?? def.defaultAccent,
+    accentColor: config?.accentColor ?? def.getAccent?.(data) ?? def.defaultAccent,
     iconId: showIcon ? candidateIcon : null,
+    image: config?.image ?? null,
+    valueImage: (valueKey !== null && config?.valueImages?.[valueKey]) || null,
+    valueKey,
+    sourceMark: def.sourceMark && score !== null ? def.sourceMark : null,
+    score,
   };
 }
 
@@ -173,99 +197,242 @@ function labelRedundantWithIcon(badge: ResolvedBadge): boolean {
   return mark !== undefined && mark.toLowerCase() === badge.label.trim().toLowerCase();
 }
 
+type Rail = "left" | "right";
+
+interface BadgeProps {
+  badge: ResolvedBadge;
+  preset: OverlayPreset;
+  scalingMode: ScalingMode;
+  rail?: Rail;
+}
+
+// An administrator's uploaded image. A deleted image (404) falls back to
+// whatever the badge draws without it.
+function UploadedImage({
+  imageRef,
+  alt,
+  height,
+  onError,
+}: {
+  imageRef: string;
+  alt: string;
+  height: string;
+  onError: () => void;
+}) {
+  return (
+    <img
+      src={overlayImageUrl(imageRef)}
+      alt={alt}
+      draggable={false}
+      decoding="async"
+      onError={onError}
+      className="block max-w-full shrink-0 object-contain"
+      style={{ height, width: "auto" }}
+    />
+  );
+}
+
+function Badge({ badge, preset, scalingMode, rail }: BadgeProps) {
+  const [failedImages, setFailedImages] = useState<ReadonlySet<string>>(() => new Set());
+  const failed = (ref: string) => setFailedImages((current) => new Set(current).add(ref));
+  const length = (pixels: number, legacyVariable: string) =>
+    overlayLength(pixels, scalingMode, legacyVariable);
+  const dataAttributes = {
+    "data-overlay-badge": "",
+    "data-overlay-id": badge.def.id,
+    "data-overlay-value": badge.valueKey ?? undefined,
+  };
+
+  if (badge.valueImage && !failedImages.has(badge.valueImage)) {
+    return (
+      <span {...dataAttributes} className="inline-flex max-w-full items-center">
+        <UploadedImage
+          imageRef={badge.valueImage}
+          alt={badge.label}
+          height={length(valueImageHeight(preset), POSTER_VARS.imageHeight)}
+          onError={() => failed(badge.valueImage as string)}
+        />
+      </span>
+    );
+  }
+
+  const borderRadiusVariable = preset.borderRadiusVariable ?? "--radius-sm";
+  const radius =
+    preset.borderRadius === "full"
+      ? "9999px"
+      : scalingMode === "fixed"
+        ? `var(${borderRadiusVariable}, ${preset.borderRadius}px)`
+        : `var(${POSTER_VARS.borderRadius}, var(${borderRadiusVariable}, ${preset.borderRadius}px))`;
+  const geometry: CSSProperties = {
+    columnGap: length(preset.iconGap, POSTER_VARS.iconGap),
+    paddingInline: length(preset.paddingInline, POSTER_VARS.paddingInline),
+    paddingBlock: length(preset.paddingBlock, POSTER_VARS.paddingBlock),
+    // The inline size beats the preset's rem class, so it carries the
+    // text size itself: browser default and in-app scale (#1796).
+    fontSize: `calc(${length(preset.fontSize, POSTER_VARS.fontSize)} * var(--ui-root-text-ratio, 1))`,
+    fontWeight: preset.fontWeight,
+    textTransform: preset.uppercase ? "uppercase" : "none",
+  };
+  if (rail) {
+    // A badge on an edge rail is a tab: flush against the card edge, square
+    // on that side, rounded on the side facing the artwork. Longhands only,
+    // so React never mixes them with the borderRadius shorthand.
+    const outer = rail === "left" ? "Left" : "Right";
+    const inner = rail === "left" ? "Right" : "Left";
+    geometry[`borderTop${inner}Radius`] = radius;
+    geometry[`borderBottom${inner}Radius`] = radius;
+    geometry[`borderTop${outer}Radius`] = 0;
+    geometry[`borderBottom${outer}Radius`] = 0;
+  } else {
+    geometry.borderRadius = radius;
+  }
+  if (preset.borderWidth !== undefined) {
+    geometry.borderWidth = length(preset.borderWidth, POSTER_VARS.borderWidth);
+    if (rail === "left") geometry.borderLeftWidth = 0;
+    if (rail === "right") geometry.borderRightWidth = 0;
+  }
+  if (preset.borderLeftWidth !== undefined && badge.accentColor !== undefined && rail !== "left") {
+    geometry.borderLeftWidth = length(preset.borderLeftWidth, POSTER_VARS.borderLeftWidth);
+  }
+  if (preset.textShadow) {
+    geometry.textShadow = shadowValue(preset.textShadow, scalingMode, {
+      x: POSTER_VARS.textShadowX,
+      y: POSTER_VARS.textShadowY,
+      blur: POSTER_VARS.textShadowBlur,
+    });
+  }
+  if (preset.boxShadow) {
+    geometry.boxShadow = shadowValue(preset.boxShadow, scalingMode, {
+      x: POSTER_VARS.boxShadowX,
+      y: POSTER_VARS.boxShadowY,
+      blur: POSTER_VARS.boxShadowBlur,
+      spread: POSTER_VARS.boxShadowSpread,
+    });
+  }
+
+  const iconImage = badge.image && !failedImages.has(badge.image) ? badge.image : null;
+  const iconSize = length(preset.iconSize, POSTER_VARS.iconSize);
+  // An uploaded image beside a rating stands for its source, so the label
+  // drops the mark; the plate preset draws the mark as a chip instead.
+  const sourceChip = !iconImage && preset.sourceChips && badge.sourceMark !== null;
+  const scoreOnly = (iconImage !== null || sourceChip) && badge.score !== null;
+  const text = scoreOnly ? badge.score : labelRedundantWithIcon(badge) ? null : badge.label;
+  const chipColor = badge.accentColor ?? "#ffffff";
+
+  return (
+    <span
+      {...dataAttributes}
+      className={`inline-flex max-w-full items-center gap-1 ${preset.badgeClass}`}
+      style={{ ...preset.badgeStyle(badge.accentColor), ...geometry }}
+    >
+      {iconImage ? (
+        <UploadedImage
+          imageRef={iconImage}
+          alt=""
+          height={iconSize}
+          onError={() => failed(iconImage)}
+        />
+      ) : sourceChip ? (
+        <span
+          className="shrink-0 rounded-[0.2em] px-[0.35em] py-[0.15em] leading-none"
+          style={{ background: chipColor, color: readableTextOn(chipColor) }}
+        >
+          {badge.sourceMark}
+        </span>
+      ) : (
+        badge.iconId && (
+          <OverlayIcon
+            iconId={badge.iconId}
+            size={preset.iconSize}
+            cssSize={iconSize}
+            className="shrink-0"
+          />
+        )
+      )}
+      {/* A cut score ("6.") misleads, so a bare score never truncates. */}
+      {text !== null && <span className={scoreOnly ? "shrink-0" : "truncate"}>{text}</span>}
+    </span>
+  );
+}
+
 function BadgeStack({
   badges,
   align,
   preset,
   scalingMode,
+  rail,
 }: {
   badges: ResolvedBadge[];
   align: "start" | "end";
   preset: OverlayPreset;
   scalingMode: ScalingMode;
+  rail?: Rail;
 }) {
-  const length = (pixels: number, legacyVariable: string) =>
-    overlayLength(pixels, scalingMode, legacyVariable);
-  const borderRadiusVariable = preset.borderRadiusVariable ?? "--radius-sm";
-
   return (
     <div
       className={`flex min-w-0 flex-col ${align === "start" ? "items-start" : "items-end"} ${preset.gapClass}`}
-      style={{ gap: length(preset.stackGap, POSTER_VARS.stackGap) }}
+      style={{ gap: overlayLength(preset.stackGap, scalingMode, POSTER_VARS.stackGap) }}
     >
-      {badges.map((badge) => {
-        const geometry: CSSProperties = {
-          columnGap: length(preset.iconGap, POSTER_VARS.iconGap),
-          paddingInline: length(preset.paddingInline, POSTER_VARS.paddingInline),
-          paddingBlock: length(preset.paddingBlock, POSTER_VARS.paddingBlock),
-          // The inline size beats the preset's rem class, so it carries the
-          // text size itself: browser default and in-app scale (#1796).
-          fontSize: `calc(${length(preset.fontSize, POSTER_VARS.fontSize)} * var(--ui-root-text-ratio, 1))`,
-          borderRadius:
-            preset.borderRadius === "full"
-              ? "9999px"
-              : scalingMode === "fixed"
-                ? `var(${borderRadiusVariable}, ${preset.borderRadius}px)`
-                : `var(${POSTER_VARS.borderRadius}, var(${borderRadiusVariable}, ${preset.borderRadius}px))`,
-        };
-        if (preset.borderWidth !== undefined) {
-          geometry.borderWidth = length(preset.borderWidth, POSTER_VARS.borderWidth);
-        }
-        if (preset.borderLeftWidth !== undefined && badge.accentColor !== undefined) {
-          geometry.borderLeftWidth = length(preset.borderLeftWidth, POSTER_VARS.borderLeftWidth);
-        }
-        if (preset.textShadow) {
-          geometry.textShadow = shadowValue(preset.textShadow, scalingMode, {
-            x: POSTER_VARS.textShadowX,
-            y: POSTER_VARS.textShadowY,
-            blur: POSTER_VARS.textShadowBlur,
-          });
-        }
-        if (preset.boxShadow) {
-          geometry.boxShadow = shadowValue(preset.boxShadow, scalingMode, {
-            x: POSTER_VARS.boxShadowX,
-            y: POSTER_VARS.boxShadowY,
-            blur: POSTER_VARS.boxShadowBlur,
-            spread: POSTER_VARS.boxShadowSpread,
-          });
-        }
-
-        return (
-          <span
-            key={badge.def.id}
-            data-overlay-badge
-            className={`inline-flex max-w-full items-center gap-1 ${preset.badgeClass}`}
-            style={{ ...preset.badgeStyle(badge.accentColor), ...geometry }}
-          >
-            {badge.iconId && (
-              <OverlayIcon
-                iconId={badge.iconId}
-                size={preset.iconSize}
-                cssSize={length(preset.iconSize, POSTER_VARS.iconSize)}
-                className="shrink-0"
-              />
-            )}
-            {!labelRedundantWithIcon(badge) && <span className="truncate">{badge.label}</span>}
-          </span>
-        );
-      })}
+      {badges.map((badge) => (
+        <Badge
+          key={badge.def.id}
+          badge={badge}
+          preset={preset}
+          scalingMode={scalingMode}
+          rail={rail}
+        />
+      ))}
     </div>
   );
 }
 
-// Each card edge renders as ONE flex row holding the left and right corner
-// stacks. Sharing a row lets flexbox divide the card width between opposing
+// The band layout draws an edge's badges as one row of marks with thin
+// dividers between them.
+function BandMarks({
+  badges,
+  preset,
+  scalingMode,
+}: {
+  badges: ResolvedBadge[];
+  preset: OverlayPreset;
+  scalingMode: ScalingMode;
+}) {
+  const gap = overlayLength(preset.stackGap, scalingMode, POSTER_VARS.stackGap);
+  return (
+    <div className="flex min-w-0 items-center" style={{ gap }}>
+      {badges.map((badge, index) => (
+        <Fragment key={badge.def.id}>
+          {index > 0 && (
+            <span
+              aria-hidden="true"
+              className="h-[0.9em] w-px shrink-0 bg-white/40"
+              style={{
+                fontSize: overlayLength(preset.fontSize, scalingMode, POSTER_VARS.fontSize),
+              }}
+            />
+          )}
+          <Badge badge={badge} preset={preset} scalingMode={scalingMode} />
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+// Each card edge renders as ONE flex row holding the corner stacks on that
+// edge. Sharing a row lets flexbox divide the card width between opposing
 // corners (min-w-0 + truncate), so wide badges shrink instead of overlapping.
+// The top row holds only the left corner and stops short of the top-right
+// corner, which belongs to the watch-status indicator (CardWatchStatus).
+// Badges placed on an edge rail stack vertically, centred on that side.
 //
 // Stacking contract with the card quick actions (watched/favorite bottom-left,
 // more-menu bottom-right; web/src/components/MediaItemMenu.tsx): this whole
 // layer paints at z-10 inside the artwork box, the action wrappers paint at
 // z-20 as siblings of the artwork link in the same stacking context, so the
 // actions always cover overlay badges. That is by design — badges sit flush in
-// all four corners and the actions (hover-revealed on fine pointers,
-// persistent on coarse ones) render on top of them. The layer is
-// pointer-events-none end to end, so a badge can never swallow a click aimed
-// at an action underneath it.
+// the corners and the actions (hover-revealed on fine pointers, persistent on
+// coarse ones) render on top of them. The layer is pointer-events-none end to
+// end, so a badge can never swallow a click aimed at an action underneath it.
 export default function CardOverlays({
   data,
   prefs,
@@ -276,21 +443,23 @@ export default function CardOverlays({
   // until it arrives; this re-renders the card when it does. Cards without the
   // badge skip the re-render.
   useLanguageNamesLoaded(prefs.items.original_language?.enabled === true);
-  const preset = getPreset(prefs.preset);
-  const resolve = (pos: OverlayPosition): ResolvedBadge[] =>
+  const preset = useMemo(
+    () => applyOverlayStyle(getPreset(prefs.preset), prefs.style),
+    [prefs.preset, prefs.style],
+  );
+  const resolve = (pos: OverlayPosition, limit: number): ResolvedBadge[] =>
     orderedOverlaysForPosition(prefs, pos)
-      .map((def) => {
-        const config = prefs.items[def.id];
-        return resolveBadge(def, data, preset, config?.accentColor, config?.showIcon);
-      })
+      .map((def) => resolveBadge(def, data, preset, prefs.items[def.id]))
       .filter((badge): badge is ResolvedBadge => badge !== null)
-      .slice(0, MAX_BADGES_PER_CORNER);
+      .slice(0, limit);
 
-  const topLeft = resolve("top-left");
-  const topRight = resolve("top-right");
-  const bottomLeft = resolve("bottom-left");
-  const bottomRight = resolve("bottom-right");
+  const topLeft = resolve("top-left", MAX_BADGES_PER_CORNER);
+  const bottomLeft = resolve("bottom-left", MAX_BADGES_PER_CORNER);
+  const bottomRight = resolve("bottom-right", MAX_BADGES_PER_CORNER);
+  const leftRail = resolve("left-edge", MAX_BADGES_PER_RAIL);
+  const rightRail = resolve("right-edge", MAX_BADGES_PER_RAIL);
   const wide = variant === "wide";
+  const band = preset.layout === "band";
   const scalingMode: ScalingMode = wide
     ? "fixed"
     : supportsContainerQueryUnits()
@@ -299,6 +468,16 @@ export default function CardOverlays({
   const layerRef = useRef<HTMLDivElement>(null);
   const edgeInset = overlayLength(EDGE_INSET, scalingMode, POSTER_VARS.edgeInset);
   const edgeGap = overlayLength(EDGE_GAP, scalingMode, POSTER_VARS.edgeGap);
+  // Poster cards keep the top-right corner clear for the watch-status
+  // indicator unless the viewer turned it off; wide cards never draw it.
+  const reserveStatus = !wide && watchStatusOf(prefs) !== "off";
+  const topRight = reserveStatus
+    ? `calc(${edgeInset} + ${overlayLength(STATUS_RESERVE, scalingMode, POSTER_VARS.statusReserve)})`
+    : edgeInset;
+  // A filled badge on a rail sits flush against the edge as a tab; a
+  // transparent one (minimal, band) keeps the corner inset.
+  const flushRails = !band && preset.id !== "minimal";
+  const railInset = flushRails ? 0 : edgeInset;
 
   useLayoutEffect(() => {
     const layer = layerRef.current;
@@ -310,10 +489,14 @@ export default function CardOverlays({
     let baseBorderRadius = preset.borderRadius === "full" ? 0 : preset.borderRadius;
     if (roundedPoster) {
       layer.style.removeProperty(POSTER_VARS.borderRadius);
-      const badge = layer.querySelector<HTMLElement>("[data-overlay-badge]");
+      const badge = layer.querySelector<HTMLElement>("span[data-overlay-badge][class*='rounded']");
       if (badge) {
-        const measured = Number.parseFloat(getComputedStyle(badge).borderTopLeftRadius);
-        if (Number.isFinite(measured)) baseBorderRadius = measured;
+        // A rail tab squares one side, so the larger top corner is the radius.
+        const computed = getComputedStyle(badge);
+        const measured = [computed.borderTopLeftRadius, computed.borderTopRightRadius]
+          .map((value) => Number.parseFloat(value ?? ""))
+          .filter(Number.isFinite);
+        if (measured.length > 0) baseBorderRadius = Math.max(...measured);
       }
     }
 
@@ -339,40 +522,117 @@ export default function CardOverlays({
     return () => observer.disconnect();
   }, [preset, scalingMode]);
 
+  const bandScrim = (edge: "top" | "bottom"): CSSProperties => ({
+    background: `linear-gradient(to ${edge === "top" ? "bottom" : "top"}, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0.6) 55%, transparent)`,
+  });
+
   return (
     <div
       ref={layerRef}
       data-card-overlays={variant}
       className="@container/card-overlays pointer-events-none absolute inset-0 z-10"
     >
-      {(topLeft.length > 0 || topRight.length > 0) && (
+      {topLeft.length > 0 &&
+        (band ? (
+          <div
+            data-overlay-edge="top"
+            className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start"
+            style={{
+              ...bandScrim("top"),
+              paddingTop: edgeInset,
+              paddingLeft: edgeInset,
+              paddingRight: topRight,
+              paddingBottom: `calc(${edgeInset} * 3)`,
+            }}
+          >
+            <BandMarks badges={topLeft} preset={preset} scalingMode={scalingMode} />
+          </div>
+        ) : (
+          <div
+            data-overlay-edge="top"
+            className="pointer-events-none absolute inset-x-2 top-2 z-10 flex items-start justify-start gap-2"
+            style={{ top: edgeInset, right: topRight, left: edgeInset, gap: edgeGap }}
+          >
+            <BadgeStack badges={topLeft} align="start" preset={preset} scalingMode={scalingMode} />
+          </div>
+        ))}
+      {leftRail.length > 0 && (
         <div
-          data-overlay-edge="top"
-          className="pointer-events-none absolute inset-x-2 top-2 z-10 flex items-start justify-between gap-2"
-          style={{ top: edgeInset, right: edgeInset, left: edgeInset, gap: edgeGap }}
+          data-overlay-edge="left"
+          className="pointer-events-none absolute top-1/2 z-10 flex max-w-[60%] -translate-y-1/2"
+          style={{ left: railInset }}
         >
-          <BadgeStack badges={topLeft} align="start" preset={preset} scalingMode={scalingMode} />
-          <BadgeStack badges={topRight} align="end" preset={preset} scalingMode={scalingMode} />
+          <BadgeStack
+            badges={leftRail}
+            align="start"
+            preset={preset}
+            scalingMode={scalingMode}
+            rail={flushRails ? "left" : undefined}
+          />
         </div>
       )}
-      {(bottomLeft.length > 0 || bottomRight.length > 0) && (
-        /* Bottom badges anchor flush in the corners with the same inset as the
-           top row; card actions cover them by design (see above). The single
-           exception is a watch-progress bar, which lives in this same edge
-           strip and would be cut in half by a flush badge, so hosts that draw
-           one lift the row by one edge step. */
+      {rightRail.length > 0 && (
         <div
-          data-overlay-edge="bottom"
-          className={cn(
-            "pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end justify-between gap-2",
-            hasProgressBar && "mb-2",
-          )}
-          style={{ right: edgeInset, bottom: edgeInset, left: edgeInset, gap: edgeGap }}
+          data-overlay-edge="right"
+          className="pointer-events-none absolute top-1/2 z-10 flex max-w-[60%] -translate-y-1/2 justify-end"
+          style={{ right: railInset }}
         >
-          <BadgeStack badges={bottomLeft} align="start" preset={preset} scalingMode={scalingMode} />
-          <BadgeStack badges={bottomRight} align="end" preset={preset} scalingMode={scalingMode} />
+          <BadgeStack
+            badges={rightRail}
+            align="end"
+            preset={preset}
+            scalingMode={scalingMode}
+            rail={flushRails ? "right" : undefined}
+          />
         </div>
       )}
+      {(bottomLeft.length > 0 || bottomRight.length > 0) &&
+        (band ? (
+          /* One centred strip for the whole bottom edge, left corner first. */
+          <div
+            data-overlay-edge="bottom"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center"
+            style={{
+              ...bandScrim("bottom"),
+              paddingTop: `calc(${edgeInset} * 3)`,
+              paddingInline: edgeInset,
+              paddingBottom: hasProgressBar ? `calc(${edgeInset} * 2)` : edgeInset,
+            }}
+          >
+            <BandMarks
+              badges={[...bottomLeft, ...bottomRight]}
+              preset={preset}
+              scalingMode={scalingMode}
+            />
+          </div>
+        ) : (
+          /* Bottom badges anchor flush in the corners with the same inset as
+             the top row; card actions cover them by design (see above). The
+             single exception is a watch-progress bar, which lives in this same
+             edge strip and would be cut in half by a flush badge, so hosts
+             that draw one lift the row by one edge step. */
+          <div
+            data-overlay-edge="bottom"
+            className={cn(
+              "pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end justify-between gap-2",
+              hasProgressBar && "mb-2",
+            )}
+            style={{ right: edgeInset, bottom: edgeInset, left: edgeInset, gap: edgeGap }}
+          >
+            <BadgeStack
+              badges={bottomLeft}
+              align="start"
+              preset={preset}
+              scalingMode={scalingMode}
+            />
+            <BadgeStack
+              badges={bottomRight}
+              align="end"
+              preset={preset}
+              scalingMode={scalingMode}
+            />
+          </div>
+        ))}
     </div>
   );
 }

@@ -27,7 +27,7 @@ import {
 } from "@/lib/uiCustomization";
 
 import { CardOverlaySettings } from "./CardOverlaySettings";
-import { ChoiceButtons } from "./ChoiceButtons";
+import { ChoiceButtons } from "@/components/settings/ChoiceButtons";
 import { PosterCardPreview } from "./PosterCardPreview";
 import { ResetButton } from "./ResetButton";
 

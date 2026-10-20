@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, Check, RotateCcw } from "lucide-react";
+import { AlertTriangle, Check, ImageIcon, RotateCcw } from "lucide-react";
 
 import { BrandingAssetField } from "@/components/admin/BrandingAssetField";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -8,6 +8,11 @@ import {
   type OverlayPreviewVariant,
 } from "@/components/overlays/OverlayPreviewCard";
 import { OverlayPreviewVariantToggle } from "@/components/overlays/OverlayPreviewVariantToggle";
+import { BadgeImagesControl } from "@/components/overlays/settings/BadgeImagesControl";
+import { OverlayImageLibrary } from "@/components/overlays/settings/OverlayImageLibrary";
+import { OverlayLookControls } from "@/components/overlays/settings/OverlayLookControls";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import {
@@ -22,21 +27,22 @@ import { useBranding } from "@/hooks/useBranding";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import {
   buildDefaultPrefs,
   CATEGORY_META,
   OVERLAY_CATEGORIES,
-  OVERLAY_PRESETS,
   OVERLAY_REGISTRY,
   isOverlayOffered,
   POSITION_OPTIONS,
-  PRESET_IDS,
+  WATCH_STATUS_OPTIONS,
   parseOverlayPrefs,
   serializeOverlayPrefs,
+  watchStatusOf,
   type CardOverlayPrefs,
   type OverlayId,
   type OverlayPosition,
-  type PresetId,
+  type WatchStatusMode,
 } from "@/lib/overlays";
 import { adminDefaultServerKey } from "@/lib/settingsAdminDefaults";
 import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
@@ -95,6 +101,7 @@ export default function AppearanceSettings() {
   const branding = useBranding();
   const restartKeys = useRestartKeys();
   const shownRatingSources = useShownRatingSources();
+  const { images, imageUploadsAvailable, supportsStyles } = useOverlayPrefs();
 
   const [confirmRestoreOverlaysOpen, setConfirmRestoreOverlaysOpen] = useState(false);
   // Which sample the badge preview stands in for. View state only — show-only
@@ -299,6 +306,31 @@ export default function AppearanceSettings() {
             restartRequired={restartKeys.has(OVERLAYS_ENABLED_KEY)}
           />
 
+          {supportsStyles ? (
+            <SettingFieldRow
+              label="Watch status"
+              description="What a poster's top-right corner shows, for people who have not chosen. It shows whether or not badges are on."
+            >
+              <Select
+                value={watchStatusOf(overlayPrefs)}
+                onValueChange={(v) =>
+                  setOverlayPrefs({ ...overlayPrefs, watchStatus: v as WatchStatusMode })
+                }
+              >
+                <SelectTrigger className={SETTINGS_CONTROL_WIDTH} aria-label="Watch status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WATCH_STATUS_OPTIONS.map((choice) => (
+                    <SelectItem key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingFieldRow>
+          ) : null}
+
           {/* Row and preview are one list child so the hairline falls after
               the pair, not between them. The preview gets a full-width framed
               strip instead of squatting in the row's control column. */}
@@ -306,26 +338,17 @@ export default function AppearanceSettings() {
             inert={!overlaysEnabled}
             className={overlaysEnabled ? undefined : "pointer-events-none opacity-50"}
           >
-            <SettingFieldRow
-              label="Badge style"
-              description="Default for people who have not chosen their own."
-            >
-              <Select
-                value={overlayPrefs.preset}
-                onValueChange={(v) => setOverlayPrefs({ ...overlayPrefs, preset: v as PresetId })}
-              >
-                <SelectTrigger className={SETTINGS_CONTROL_WIDTH} aria-label="Badge style">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRESET_IDS.map((id) => (
-                    <SelectItem key={id} value={id}>
-                      {OVERLAY_PRESETS[id].label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </SettingFieldRow>
+            <div className="space-y-2 py-4">
+              <p className="text-sm font-medium">Badge style</p>
+              <p className="text-muted-foreground text-[13px] leading-relaxed">
+                Default for people who have not chosen their own.
+              </p>
+              <OverlayLookControls
+                prefs={overlayPrefs}
+                onChange={setOverlayPrefs}
+                supportsStyles={supportsStyles}
+              />
+            </div>
             <div className="border-border/70 bg-foreground/[0.02] mb-4 rounded-xl border p-3">
               <div className="flex items-center justify-between gap-3 px-1">
                 <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
@@ -367,7 +390,10 @@ export default function AppearanceSettings() {
                               updateOverlayItem(def.id, { position: pos as OverlayPosition })
                             }
                           >
-                            <SelectTrigger className="w-[130px]" aria-label={`${def.label} corner`}>
+                            <SelectTrigger
+                              className="w-[140px]"
+                              aria-label={`${def.label} position`}
+                            >
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -378,6 +404,33 @@ export default function AppearanceSettings() {
                               ))}
                             </SelectContent>
                           </Select>
+                          {supportsStyles &&
+                          (images.length > 0 || config.image || config.valueImages) ? (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  disabled={!config.enabled}
+                                  aria-label={`${def.label} images`}
+                                  className={cn(
+                                    (config.image || config.valueImages) && "text-primary",
+                                  )}
+                                >
+                                  <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent align="end" className="w-80 p-4">
+                                <BadgeImagesControl
+                                  def={def}
+                                  config={config}
+                                  images={images}
+                                  onChange={(patch) => updateOverlayItem(def.id, patch)}
+                                />
+                              </PopoverContent>
+                            </Popover>
+                          ) : null}
                           <Switch
                             checked={config.enabled}
                             aria-label={`Show ${def.label}`}
@@ -394,6 +447,12 @@ export default function AppearanceSettings() {
             })}
           </div>
         </FieldGroup>
+
+        {supportsStyles ? (
+          <FieldGroup label="Badge images">
+            <OverlayImageLibrary images={images} uploadsAvailable={imageUploadsAvailable} />
+          </FieldGroup>
+        ) : null}
 
         <FieldGroup label="Title pages" restartAll={allRestart(TITLE_ART_KEYS)}>
           <SettingField
