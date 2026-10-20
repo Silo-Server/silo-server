@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -193,6 +194,41 @@ func TestCurationScopeRebindToleratesVanishedSourcePostgres(t *testing.T) {
 				t.Fatalf("rebinding a vanished source onto a vanished target = %v, want ErrItemNotFound", err)
 			}
 		})
+	}
+}
+
+// A target that another writer creates after the guard has read the items is
+// visible to the transaction's later statements. The rebind must authorize it
+// before moving anything onto it.
+func TestCurationScopeRebindAuthorizesLateTargetPostgres(t *testing.T) {
+	pool, source, target, allowed, denied := curationFixture(t)
+	if _, err := pool.Exec(t.Context(), `DELETE FROM media_items WHERE content_id=$1`, target); err != nil {
+		t.Fatal(err)
+	}
+	var created sync.Once
+	ctx := access.WithMetadataCurationAuthorizer(t.Context(), func(_ context.Context, libraries []int) error {
+		// The guard calls this after reading the rows it locks.
+		created.Do(func() {
+			if _, err := pool.Exec(context.Background(), `WITH item AS (INSERT INTO media_items(content_id,type,title,status) VALUES($1,'movie','Target','pending') RETURNING content_id)
+				INSERT INTO media_item_libraries(content_id,media_folder_id) SELECT content_id, $2 FROM item`, target, denied); err != nil {
+				t.Error(err)
+			}
+		})
+		if slices.ContainsFunc(libraries, func(id int) bool { return id != allowed }) {
+			return access.ErrMetadataCurationScope
+		}
+		return nil
+	})
+	svc := &MetadataService{dbPool: pool}
+	if err := svc.rebindItemOnto(ctx, source, target, true, true); !errors.Is(err, access.ErrMetadataCurationScope) {
+		t.Fatalf("rebinding onto a target created in a denied library = %v, want ErrMetadataCurationScope", err)
+	}
+	var sourceLibraries int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM media_item_libraries WHERE content_id=$1 AND media_folder_id=$2`, source, allowed).Scan(&sourceLibraries); err != nil {
+		t.Fatal(err)
+	}
+	if sourceLibraries != 1 {
+		t.Fatal("the refused rebind moved the source's library membership")
 	}
 }
 

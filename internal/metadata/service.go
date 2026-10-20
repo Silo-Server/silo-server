@@ -8289,21 +8289,12 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 	if err := catalog.LockMetadataCurationFiles(ctx, tx, fromContentID); err != nil {
 		return err
 	}
-	if err := catalog.GuardMetadataCurationItems(ctx, tx, fromContentID, toContentID); err != nil {
-		if !errors.Is(err, catalog.ErrItemNotFound) {
-			return err
-		}
-		// A source merged or deleted after the caller found it leaves nothing
-		// to move. Carry on as without curation authority, so an Identify
-		// still marks the target, which the guard has locked and authorized.
-		// A missing target still fails, including when the source is gone too.
-		var targetExists bool
-		if existsErr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_items WHERE content_id = $1)`, toContentID).Scan(&targetExists); existsErr != nil {
-			return existsErr
-		}
-		if !targetExists {
-			return err
-		}
+	err = catalog.GuardMetadataCurationItems(ctx, tx, fromContentID, toContentID)
+	if errors.Is(err, catalog.ErrItemNotFound) {
+		return rebindOntoAfterMissingItem(ctx, tx, fromContentID, toContentID, markIdentity, err)
+	}
+	if err != nil {
+		return err
 	}
 
 	steps := []struct {
@@ -8464,6 +8455,36 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 		return fmt.Errorf("commit skeleton rebind transaction: %w", err)
 	}
 	MarkRecommendationsStale(ctx, s.recsStaler, MovedStateTargets(report, toContentID, episodePairs)...)
+	return nil
+}
+
+// rebindOntoAfterMissingItem finishes a curated rebind whose guard found the
+// source or the target missing (notFound).
+func rebindOntoAfterMissingItem(ctx context.Context, tx pgx.Tx, fromContentID, toContentID string, markIdentity bool, notFound error) error {
+	// Lock and authorize the target again: one created since the guard's read
+	// is visible now. A missing target still fails.
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, toContentID); err != nil {
+		return err
+	}
+	var sourceExists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_items WHERE content_id = $1)`, fromContentID).Scan(&sourceExists); err != nil {
+		return err
+	}
+	if sourceExists {
+		return notFound
+	}
+	// A source merged or deleted after the caller found it leaves nothing to
+	// move. An Identify still marks the target, as without curation authority;
+	// no source rows are touched.
+	if !markIdentity {
+		return nil
+	}
+	if err := catalog.MarkIdentityChosenTx(ctx, tx, toContentID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit skeleton rebind transaction: %w", err)
+	}
 	return nil
 }
 
