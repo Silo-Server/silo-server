@@ -195,3 +195,58 @@ it("does not count a wait that begins with media buffered until the buffer runs 
   h.advance(200);
   expect(h.options.onReplan).toHaveBeenCalledTimes(1);
 });
+
+it("times a plan's slow start as a wait, from adoption", () => {
+  const video = document.createElement("video");
+  // A new plan's element starts paused and plays once enough data arrives.
+  Object.defineProperty(video, "paused", { value: true, configurable: true });
+  const onReplan = vi.fn();
+  renderHook((props) => useAutoQualityDownshift(props), {
+    initialProps: {
+      videoRef: { current: video },
+      enabled: true,
+      sessionId: "title",
+      plan,
+      planRevision: 1,
+      mode: "always" as const,
+      obscured: false,
+      playIntent: () => true,
+      onReplan,
+      onNotice: vi.fn(),
+    },
+  });
+  // The transport empties the element as it attaches; the start still counts.
+  act(() => {
+    video.dispatchEvent(new Event("emptied"));
+  });
+  act(() => vi.advanceTimersByTime(15_900));
+  expect(onReplan).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersByTime(200));
+  expect(onReplan).toHaveBeenCalledTimes(1);
+  expect(onReplan.mock.calls[0]![0]).toMatchObject({
+    bandwidth_estimate_kbps: 44100,
+    bandwidth_estimate_source: "observed_rebuffer",
+  });
+});
+
+it("does not time a start the player will not play", () => {
+  const video = document.createElement("video");
+  Object.defineProperty(video, "paused", { value: true, configurable: true });
+  const onReplan = vi.fn();
+  renderHook((props) => useAutoQualityDownshift(props), {
+    initialProps: {
+      videoRef: { current: video },
+      enabled: true,
+      sessionId: "title",
+      plan,
+      planRevision: 1,
+      mode: "always" as const,
+      obscured: false,
+      playIntent: () => false,
+      onReplan,
+      onNotice: vi.fn(),
+    },
+  });
+  act(() => vi.advanceTimersByTime(30_000));
+  expect(onReplan).not.toHaveBeenCalled();
+});

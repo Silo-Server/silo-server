@@ -54,6 +54,12 @@ interface Options {
    */
   transportTrouble?: () => boolean;
   /**
+   * Whether a newly adopted plan's transport will start playing on its own.
+   * Its element starts paused and plays once enough data has arrived, so until
+   * then the start is a wait the controller times, like a stall.
+   */
+  playIntent?: () => boolean;
+  /**
    * Sends the replan; `onAdopt` names the revision it adopted, if any, and
    * `sent` is false when the session refused it before sending it.
    */
@@ -96,6 +102,8 @@ export function useAutoQualityDownshift(options: Options) {
   const requestedPlan = useRef<number | undefined>(undefined);
   const adoptedPlan = useRef<number | undefined>(undefined);
   const attempt = useRef<string | null | undefined>(undefined);
+  // The adopted plan is starting with play intent and has not played yet.
+  const starting = useRef(false);
   const [pill, setPill] = useState<BufferingPillState | null>(null);
   // The pill state changes only when it shows, hides, freezes or resumes; the
   // pill counts down from its deadline itself.
@@ -165,15 +173,22 @@ export function useAutoQualityDownshift(options: Options) {
       Date.now(),
     );
     if (isNewPlan) requestedPlan.current = undefined;
-    // A plan adopted while the element is already playing fires no `playing`.
     const video = options.videoRef.current;
-    if (
-      isNewPlan &&
-      video &&
-      !video.paused &&
-      video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA
-    )
-      c.event({ type: "playing" }, Date.now());
+    if (isNewPlan) starting.current = false;
+    if (isNewPlan && video) {
+      // A plan adopted while the element is already playing fires no `playing`.
+      if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA)
+        c.event({ type: "playing" }, Date.now());
+      else if (
+        latest.current.playIntent?.() &&
+        video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
+      ) {
+        // The element waits for data before it plays, and fires no `waiting`.
+        starting.current = true;
+        c.event({ type: "play" }, Date.now());
+        c.event({ type: "waiting" }, Date.now());
+      }
+    }
   }, [
     options.plan,
     options.planRevision,
@@ -209,6 +224,7 @@ export function useAutoQualityDownshift(options: Options) {
     const playing = () => {
       stalledAt = undefined;
       rendererWait = false;
+      starting.current = false;
       send("playing");
     };
     const waiting = () => {
@@ -225,6 +241,7 @@ export function useAutoQualityDownshift(options: Options) {
     };
     const pause = () => {
       rendererWait = false;
+      starting.current = false;
       send("pause");
     };
     const play = () => send("play");
@@ -237,6 +254,9 @@ export function useAutoQualityDownshift(options: Options) {
       stalledAt = undefined;
       rendererWait = false;
       send("reload");
+      // The new transport empties the element as it attaches; its start is
+      // still the plan's wait.
+      if (starting.current) send("waiting");
     };
     const timeupdate = () => {
       if (stalledAt !== undefined && video.currentTime > stalledAt) playing();

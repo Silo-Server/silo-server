@@ -318,6 +318,22 @@ const EXIT_PROGRESS_FLUSH_TIMEOUT_MS = 1_000;
 // MediaError.MEDIA_ERR_NETWORK: the media was usable, then fetching it failed.
 const MEDIA_ERR_NETWORK = 2;
 const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
+/**
+ * Firefox's copy-remux stall is media that arrived and still made no frame.
+ * With less than this buffered past the playhead the link is slow, which the
+ * buffering controller handles, so the fallback waits.
+ */
+const FIREFOX_STALL_BUFFERED_SECONDS = 2;
+
+/** Media buffered past the playhead, in seconds; 0 when none is. */
+function bufferedAheadSeconds(video: HTMLVideoElement): number {
+  const position = video.currentTime;
+  for (let i = 0; i < video.buffered.length; i++) {
+    if (video.buffered.start(i) <= position && position < video.buffered.end(i))
+      return video.buffered.end(i) - position;
+  }
+  return 0;
+}
 // A progressive remux is one forward-only response. A paused browser stops
 // reading it, and the server closes it once it has made no progress for its
 // stall window (180s by default, see internal/httpstream). The browser cannot
@@ -1164,8 +1180,15 @@ export function VideoPlayer({
       return;
     }
 
-    const timer = setTimeout(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const check = () => {
       if (compatibilityFallbackKeyRef.current === fallbackKey) {
+        return;
+      }
+      // Still waiting for data: a slow start, not a Firefox stall.
+      const video = videoRef.current;
+      if (video && bufferedAheadSeconds(video) < FIREFOX_STALL_BUFFERED_SECONDS) {
+        timer = setTimeout(check, 1_000);
         return;
       }
       compatibilityFallbackKeyRef.current = fallbackKey;
@@ -1178,7 +1201,8 @@ export function VideoPlayer({
         classification: "startup_timeout",
         message: "Firefox produced no frames from the copy remux before the startup deadline.",
       });
-    }, FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS);
+    };
+    timer = setTimeout(check, FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS);
 
     return () => clearTimeout(timer);
   }, [
@@ -4269,6 +4293,8 @@ export function VideoPlayer({
     mode: bufferingMode ?? "never",
     plan: bufferingPlan,
     obscured: higherPriorityPillActive || isDetached,
+    playIntent: () =>
+      shouldAutoPlay && !connectionReplacedRef.current && !roomPlaybackActiveRef.current,
     transportTrouble: () =>
       connectionStatus !== "connected" ||
       (typeof navigator !== "undefined" && navigator.onLine === false) ||

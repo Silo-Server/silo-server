@@ -4360,6 +4360,47 @@ describe("VideoPlayer source timeline", () => {
   });
 });
 
+describe("VideoPlayer Firefox copy-remux fallback", () => {
+  const firefox =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0";
+  const remuxPlan = fixturePlanV3({
+    delivery: "server_remux_hls",
+    stream: {
+      url: "/playback/transcode/session-1/master.m3u8",
+      protocol: "hls",
+      headers: {},
+      header_refresh: "none",
+    },
+  });
+  const buffered = (end: number) => ({
+    length: end > 0 ? 1 : 0,
+    start: () => 0,
+    end: () => end,
+  });
+
+  it("leaves a start that is still waiting for data to the buffering controller", async () => {
+    vi.useFakeTimers();
+    try {
+      hlsJS.supported = true;
+      vi.stubGlobal("navigator", { ...navigator, userAgent: firefox });
+      const onPlanFailure = vi.fn((_failure: unknown, _position?: number) => true);
+      const { container } = renderPlayer({ plan: remuxPlan, onPlanFailure });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      Object.defineProperty(video, "buffered", { value: buffered(0), configurable: true });
+      await act(async () => vi.advanceTimersByTimeAsync(20_000));
+      expect(onPlanFailure).not.toHaveBeenCalled();
+
+      // Media arrived and still made no frame: that is Firefox's stall.
+      Object.defineProperty(video, "buffered", { value: buffered(6), configurable: true });
+      await act(async () => vi.advanceTimersByTimeAsync(1_500));
+      expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 // A server-invalidated plan swaps the transport without any user gesture, and
 // it is the one swap that can cross transport kinds — an optimistic progressive
 // remux replaced by a tone-mapping HLS transcode. The replacement has to resume
