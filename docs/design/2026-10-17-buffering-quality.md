@@ -340,9 +340,10 @@ Until the profile's mode loads, a client uses the last mode it saw for this
 profile on this device, and the default only when it has seen none. A start
 does not wait for the settings read. Against a server whose manifest lacks the
 setting, a client hides the row and runs `always`; nothing device-local stands
-in for the setting. Clients detect the setting by the key's presence in the
-server's settings manifest or resolved settings, not by comparing a revision
-number.
+in for the setting. Native clients, which talk to servers of any version,
+detect the setting by the key's presence in the server's settings manifest or
+resolved settings, not by comparing a revision number. The web app ships inside
+the server it talks to, so it keeps the revision check every web setting uses.
 
 The existing **Maximum bitrate** setting (`playback.max_bitrate_kbps`) remains
 the way to cap Auto by hand. It reaches the server as `bandwidth_cap_kbps`, and
@@ -787,7 +788,7 @@ in parallel:
 | `learned_limit` | Start and replan, optional: `ignore` or `clear`. |
 | `playback_plan.bandwidth_limit` | Optional object: `kbps` (integer), `source` (`"observed_rebuffer"`), `expires_at` (RFC 3339). Present only when the learned limit lowered the plan. |
 | Connection endpoints | `GET /api/v2/playback/connection`, and `DELETE /api/v2/playback/connection/learned-limit` returning 204. Both exist when the feature is advertised. They use normal authenticated profile-scoped headers and `X-Silo-Device-Id`; no installation ID or body is required. |
-| Setting | `playback.buffering_quality_mode`, introduced in manifest revision 23. The revision is informational: clients detect the setting by the key's presence in the server's settings manifest or resolved settings, not by comparing revision numbers. |
+| Setting | `playback.buffering_quality_mode`, introduced in manifest revision 23. The revision is informational: native clients detect the setting by the key's presence in the server's settings manifest or resolved settings, not by comparing revision numbers. |
 | Telemetry | Feature `playback_plan_summary_v1`, route event `plan_summary`, and the allowlist keys under *Telemetry*. |
 | Phase 2 | The server advertises `connection_speed_v1` and adds `bandwidth_probe_url` to the capability response: the probe on the path this client's media takes. With it, clients probe that URL, report to `POST /api/v2/playback/bandwidth-probe/results`, and read `probe` and `auto_budget_kbps` from the connection endpoint. |
 | Speed test | With `connection_speed_v1`, the capability response also carries `bandwidth_probe_target_kbps` (optional integer), `bandwidth_probe_automatic` (boolean) and `bandwidth_probe_max_age_seconds` (integer). Probe results accept optional `lower_bound` (boolean), and `bytes` up to 1,000,000,000. The connection endpoint's `probe` gains `lower_bound`, and the endpoint gains optional `playback_sample: {kbps, measured_at}`; the admin device `connections` gain the same. `plan_summary` may carry `throughput_kbps`. Tests run as *Connection speed test* says, and `probe_cases` pins the measurement. |
