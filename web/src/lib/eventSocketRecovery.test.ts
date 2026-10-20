@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { V2ProblemError } from "@/api/v2/request";
+import { decodeV2Response, V2ProblemError, V2TransportError } from "@/api/v2/request";
 import {
   createEventSocketRecovery,
   eventSocketRetryAfterMs,
@@ -86,6 +86,27 @@ describe("generic event socket recovery", () => {
 });
 
 describe("ticket mint retry floor", () => {
+  it.each([
+    [429, "text/plain", "capacity unavailable"],
+    [503, "text/html", "<h1>Unavailable</h1>"],
+    [503, "application/json", "{"],
+    [429, "application/json", '{"message":"capacity unavailable"}'],
+    [503, "application/json", ""],
+  ])("keeps readable floors on opaque HTTP %s responses (%s)", async (status, type, body) => {
+    const error = await decodeV2Response(
+      "POST /api/v2/events/ws-ticket",
+      new Response(body, {
+        status,
+        headers: { "Content-Type": type, "Retry-After": "40" },
+      }),
+    ).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(V2TransportError);
+    expect(eventSocketRetryAfterMs(error)).toBe(40_000);
+    expect(createEventSocketRecovery(() => 1).reconnect(eventSocketRetryAfterMs(error))).toBe(
+      60_000,
+    );
+  });
+
   it.each([null, -1, 0, Number.NaN, Number.POSITIVE_INFINITY, 8])(
     "reads valid Retry-After seconds: %s",
     (seconds) => {

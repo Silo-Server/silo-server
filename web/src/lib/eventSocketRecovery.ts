@@ -1,8 +1,11 @@
-import { V2ProblemError } from "@/api/v2/request";
+import { V2ProblemError, V2TransportError } from "@/api/v2/request";
 
 /** Browser upgrade failures hide headers; a failed ticket mint can expose this floor. */
 export function eventSocketRetryAfterMs(error: unknown): number {
-  const seconds = error instanceof V2ProblemError ? error.retryAfterSeconds : null;
+  const seconds =
+    error instanceof V2ProblemError || error instanceof V2TransportError
+      ? error.retryAfterSeconds
+      : null;
   return seconds !== null && Number.isFinite(seconds) && seconds > 0 ? seconds * 1_000 : 0;
 }
 
