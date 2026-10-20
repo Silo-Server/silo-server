@@ -822,9 +822,9 @@ box set with its movies in that library that the viewer can see, in collection
 (release) order; it is `404` when the library has box sets off or the viewer
 can see too few of its movies. `GET /api/v2/catalog/box-sets?q=`
 (`searchCatalogBoxSets`) answers the box sets of libraries with
-`box_sets_in_search` whose name contains every word of `q`, or with two or
-more movies whose titles do, best match first; `library_id` limits it to one
-library. Search results keep listing the
+`box_sets_in_search` whose name contains every word of `q`, or that have two
+or more movies in those libraries whose titles do, best match first.
+`library_id` limits the search to one library. Search results keep listing the
 movies themselves; clients show matching box sets ahead of them.
 
 ## History ordering

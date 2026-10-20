@@ -108,7 +108,7 @@ func (r *BoxSetRepository) Collections(ctx context.Context, ids []int64) (map[in
 // SearchCollectionIDs returns up to limit stored collections with a movie in
 // one of libraryIDs that match query, skipping the first offset: first those
 // whose name contains every word of it, then those with at least two movies
-// whose titles do, case-insensitively.
+// in those libraries whose titles do, case-insensitively.
 func (r *BoxSetRepository) SearchCollectionIDs(ctx context.Context, query string, libraryIDs []int, limit, offset int) ([]int64, error) {
 	words := strings.Fields(strings.ToLower(query))
 	if r == nil || r.pool == nil || len(words) == 0 || len(libraryIDs) == 0 {
@@ -128,6 +128,7 @@ func (r *BoxSetRepository) SearchCollectionIDs(ctx context.Context, query string
 			FROM media_item_tmdb_collections m
 			JOIN media_items mi ON mi.content_id = m.content_id AND mi.tmdb_id = m.checked_tmdb_id::text
 			WHERE m.tmdb_collection_id IS NOT NULL AND lower(mi.title) LIKE ALL($1::text[])
+			  AND EXISTS (SELECT 1 FROM media_item_libraries tl WHERE tl.content_id = m.content_id AND tl.media_folder_id = ANY($4))
 			GROUP BY m.tmdb_collection_id
 			HAVING count(*) >= 2
 		) matches

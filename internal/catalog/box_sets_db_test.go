@@ -226,6 +226,10 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	if !slices.Contains(byTitle, f.franchise) || slices.Contains(byTitle, f.single) {
 		t.Fatalf("title search = %v, want the franchise and not the single", byTitle)
 	}
+	// Titles in another library do not make a match.
+	if elsewhere, err := f.repo.SearchCollectionIDs(ctx, "kappa", []int{f.lib + 1_000_000}, 50, 0); err != nil || slices.Contains(elsewhere, f.franchise) {
+		t.Fatalf("title search in another library = %v, %v; want no franchise", elsewhere, err)
+	}
 
 	if _, err := f.pool.Exec(ctx, `DELETE FROM media_item_tmdb_collections WHERE content_id = $1`, f.id("solo")); err != nil {
 		t.Fatal(err)
