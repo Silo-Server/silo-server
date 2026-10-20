@@ -1778,6 +1778,19 @@ describe("VideoPlayer room catch-up", () => {
     expect(messages).toHaveBeenCalledWith(expect.objectContaining({ type: "state_report" }));
   });
 
+  it("sends no position reports while a room play waits for the member's media", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    const messages = vi.mocked(connection.sendRoomMessage);
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_NOTHING,
+    });
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    messages.mockClear();
+    await act(() => vi.advanceTimersByTimeAsync(4_000));
+    expect(messages).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state_report" }));
+  });
+
   it("runs one correction rebuild at a time and aims the next ahead by its startup", async () => {
     const { connection, video, command, rerenderPlayer, onReanchorSeek } = setup(90);
     const correct = async (commandId: string, position = 100) => {
