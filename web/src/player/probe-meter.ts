@@ -12,9 +12,10 @@ export type ProbeMode = "quick" | "accurate";
 export const PROBE_WINDOW_MS = 500;
 /** A probe whose first byte has not arrived by then is abandoned. */
 export const PROBE_FIRST_BYTE_DEADLINE_MS = 10_000;
+/** The contract's floor for an estimate; a result under it measured nothing. */
 export const MIN_PROBE_KBPS = 100;
 /** The contract's ceiling for an estimate; a faster link is reported as a lower bound. */
-const MAX_PROBE_KBPS = 1_000_000;
+export const MAX_PROBE_KBPS = 1_000_000;
 
 interface ModeLimits {
   /** The probe `size` requested. */
@@ -94,8 +95,7 @@ export class ProbeMeter {
 
   /**
    * Ends the test at `t` and returns what it measured. `transferEnded` says the
-   * server finished sending at `t`, its last byte, rather than the time limit
-   * cutting the test off.
+   * body ended cleanly at `t`, rather than the time limit cutting the test off.
    */
   finish(t: number, transferEnded = false): ProbeOutcome {
     if (this.done) return this.done;
@@ -107,8 +107,10 @@ export class ProbeMeter {
       // A link fast enough to deliver the whole probe before a window after
       // the ramp completes is measured over the whole transfer. The ramp is
       // inside that average, so it can only read low.
-      if (transferEnded && t <= this.limits.maxMs && this.total >= this.limits.bytes)
-        return (this.done = { stop, result: this.wholeTransfer(stop) });
+      if (transferEnded && t <= this.limits.maxMs && this.total >= this.limits.bytes) {
+        const result = this.wholeTransfer(stop);
+        return (this.done = { stop, result: result.kbps >= MIN_PROBE_KBPS ? result : null });
+      }
       return (this.done = { stop, result: null });
     }
     let bytes = 0;
@@ -124,7 +126,7 @@ export class ProbeMeter {
   }
 
   private wholeTransfer(stop: number): ProbeResult {
-    // The transfer ends at its last byte, read from a sub-millisecond clock;
+    // The transfer ends when the body ends, read from a sub-millisecond clock;
     // the results endpoint takes whole milliseconds.
     const duration_ms = Math.max(Math.round(stop), 1);
     const kbps = Math.floor((this.total * 8) / duration_ms);
@@ -146,9 +148,14 @@ export class ProbeMeter {
       this.checked = window;
       const bytes = this.windows[window] ?? 0;
       if (Math.floor((bytes * 8) / PROBE_WINDOW_MS) >= target) {
+        // No result may report a target under the floor, so reaching one
+        // measured nothing.
         this.done = {
           stop: (window + 1) * PROBE_WINDOW_MS,
-          result: { kbps: target, lower_bound: true, bytes, duration_ms: PROBE_WINDOW_MS },
+          result:
+            target >= MIN_PROBE_KBPS
+              ? { kbps: target, lower_bound: true, bytes, duration_ms: PROBE_WINDOW_MS }
+              : null,
         };
         return true;
       }
