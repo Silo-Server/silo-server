@@ -2,11 +2,27 @@ package watchsync
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+type missingAdmissionRepo struct{ Repository }
+
+func (r *missingAdmissionRepo) AdmitSyncRun(context.Context, Connection, SyncRun) (syncRunAdmission, error) {
+	return syncRunAdmission{}, fmt.Errorf("admit watch provider sync run: %w", ErrConnectionNotFound)
+}
+
+func TestServiceManualSyncPreservesMissingConnectionError(t *testing.T) {
+	service := NewService(&missingAdmissionRepo{}, NewRegistry())
+	_, err := service.RequestManualSync(t.Context(), 7, "synthetic-profile", "no-transport")
+	if !errors.Is(err, ErrConnectionNotFound) || err.Error() != ErrConnectionNotFound.Error() {
+		t.Fatalf("missing connection error = %v", err)
+	}
+}
 
 type admissionOrderRepo struct {
 	*serviceFakeRepo

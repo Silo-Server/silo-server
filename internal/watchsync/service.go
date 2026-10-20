@@ -299,6 +299,11 @@ func (s *Service) RequestManualSync(ctx context.Context, userID int, profileID s
 	admitted, err := s.repo.AdmitSyncRun(ctx, Connection{
 		Provider: providerKey, UserID: userID, ProfileID: profileID,
 	}, SyncRun{Trigger: manualSyncTrigger, StartedAt: s.now()})
+	if errors.Is(err, ErrConnectionNotFound) {
+		// Preserve the frozen v1 handler's existing error message as well as
+		// the sentinel used by v2's problem mapping.
+		return ManualSyncResult{}, ErrConnectionNotFound
+	}
 	if err != nil {
 		return ManualSyncResult{}, err
 	}
