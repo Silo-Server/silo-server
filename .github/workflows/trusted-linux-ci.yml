@@ -782,7 +782,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: web/pnpm-lock.yaml
@@ -913,7 +913,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: web/pnpm-lock.yaml

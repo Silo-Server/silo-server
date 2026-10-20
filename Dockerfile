@@ -5,7 +5,7 @@
 FROM node:24-slim AS jellyfin_web_node
 
 # Stage 1: Build frontend
-FROM node:22-slim AS frontend
+FROM node:24-slim AS frontend
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app/web
 COPY web/package.json web/pnpm-lock.yaml ./
