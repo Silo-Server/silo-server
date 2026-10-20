@@ -172,7 +172,18 @@ func scanLibraryCollection(row pgx.Row) (*models.LibraryCollection, error) {
 	if len(collection.LibraryIDs) == 0 && collection.LibraryID > 0 {
 		collection.LibraryIDs = []int{collection.LibraryID}
 	}
+	setLibraryCollectionCountAvailability(&collection)
 	return &collection, nil
+}
+
+// A cache that the refresher cannot evaluate must not appear current. Derive
+// availability from the same saved row on every read, including untouched
+// legacy rows, without changing their definitions or stored cache.
+func setLibraryCollectionCountAvailability(collection *models.LibraryCollection) {
+	collection.ItemCountStatus = models.CollectionCountAvailable
+	if collection.CollectionType == collectionCountSmartType && ValidateLibraryCollectionQueryBudget(collection.LibraryID, collection.LibraryIDs, collection.QueryDefinition) != nil {
+		collection.ItemCount, collection.ItemCountStatus = 0, models.CollectionCountUnavailable
+	}
 }
 
 func scanLibraryCollections(rows pgx.Rows) ([]*models.LibraryCollection, error) {
@@ -191,6 +202,9 @@ func scanLibraryCollections(rows pgx.Rows) ([]*models.LibraryCollection, error) 
 }
 
 func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLibraryCollectionInput) (*models.LibraryCollection, error) {
+	if err := ValidateLibraryCollectionQueryBudget(input.LibraryID, input.LibraryIDs, input.QueryDefinition); err != nil {
+		return nil, err
+	}
 	input.LibraryIDs = normalizeCollectionLibraryIDs(input.LibraryID, input.LibraryIDs)
 	if len(input.SourceConfig) == 0 {
 		input.SourceConfig = json.RawMessage(`{}`)
@@ -475,7 +489,38 @@ func (r *LibraryCollectionRepository) AnyVisibleInLibraries(ctx context.Context,
 	return exists, nil
 }
 
+// Called with the parent locked: concurrent binding and definition updates must
+// validate their proposed composition against the same committed state.
+func validateLibraryCollectionUpdateQueryBudget(ctx context.Context, tx pgx.Tx, input UpdateLibraryCollectionInput) error {
+	if input.LibraryIDs == nil && len(input.QueryDefinition) == 0 && input.CollectionType == nil {
+		return nil
+	}
+	var libraryID int
+	var libraryIDs []int
+	var definition json.RawMessage
+	if err := tx.QueryRow(ctx, `SELECT library_id, query_definition,
+		ARRAY(SELECT library_id FROM library_collection_libraries WHERE collection_id=$1)
+		FROM library_collections WHERE id=$1`, input.ID).Scan(&libraryID, &definition, &libraryIDs); err != nil {
+		return fmt.Errorf("loading collection query budget: %w", err)
+	}
+	if input.LibraryIDs != nil {
+		libraryID, libraryIDs = 0, *input.LibraryIDs
+	}
+	if len(input.QueryDefinition) > 0 {
+		definition = input.QueryDefinition
+	}
+	return ValidateLibraryCollectionQueryBudget(libraryID, libraryIDs, definition)
+}
+
 func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLibraryCollectionInput) error {
+	if input.LibraryIDs != nil {
+		if err := ValidateQueryStructure(QueryDefinition{LibraryIDs: *input.LibraryIDs}); err != nil {
+			return err
+		}
+	}
+	if _, err := validateQueryJSONStructure(input.QueryDefinition); err != nil {
+		return err
+	}
 	var (
 		sets []string
 		args []any
@@ -615,6 +660,9 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 
 	return (libraryCollectionMutation{pool: r.pool, collectionID: input.ID}).run(ctx, input.ExpectedRevision, func(tx pgx.Tx) error {
 		if err := lockLibraryCollectionParent(ctx, tx, input.ID); err != nil {
+			return err
+		}
+		if err := validateLibraryCollectionUpdateQueryBudget(ctx, tx, input); err != nil {
 			return err
 		}
 

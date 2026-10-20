@@ -1,3 +1,4 @@
+import { collectionCountLabel, collectionItemCount } from "@/lib/collections/count";
 import type { CSSProperties, ReactNode, Ref } from "react";
 import { Check, EyeOff, Layers, Loader2, Pin } from "lucide-react";
 
@@ -108,7 +109,7 @@ function ListItem({
   menu,
   selection,
 }: ListItemProps) {
-  const titles = collection.item_count;
+  const titles = collectionCountLabel(collectionItemCount(collection));
   return (
     <ListRow
       id={collection.id}
@@ -132,7 +133,7 @@ function ListItem({
             </>
           ) : null}
           <MetaDot />
-          {titles} title{titles === 1 ? "" : "s"}
+          {titles}
           <SyncStatus collection={collection} syncing={syncing} />
         </>
       }
@@ -189,7 +190,7 @@ function CompactItem({
   style,
   dragging,
 }: CompactItemProps) {
-  const titles = collection.item_count;
+  const titles = collectionCountLabel(collectionItemCount(collection));
   return (
     <li
       ref={ref}
@@ -219,7 +220,7 @@ function CompactItem({
         <p className="text-muted-foreground truncate text-[12.5px]">
           {COLLECTION_KIND_LABEL[collectionKindOf(collection.collection_type)]}
           <MetaDot />
-          {titles} title{titles === 1 ? "" : "s"}
+          {titles}
         </p>
       </div>
       <span className="inline-flex items-center gap-2">

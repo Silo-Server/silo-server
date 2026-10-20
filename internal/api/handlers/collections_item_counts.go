@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
-	"strings"
+	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // visiblePersonalCollectionCounts answers how many items each personal
@@ -14,45 +16,37 @@ import (
 // members, or its smart definition's matches, narrowed by its display filter.
 // The stored item_count column is written only by import syncs, so it cannot
 // answer this. A collection whose count cannot be read is absent from the
-// result and keeps its stored count.
+// result; callers must mark it unavailable rather than use a stored count.
 //
 // Membership is read from the Postgres user store; callers skip stores that
 // keep collections elsewhere.
-func visiblePersonalCollectionCounts(ctx context.Context, executor *catalog.QueryExecutor, userID int, collections []catalog.PersonalCollectionDefinition, filter catalog.AccessFilter) map[string]int {
-	counts := make(map[string]int, len(collections))
+func visiblePersonalCollectionCounts(ctx context.Context, executor *catalog.QueryExecutor, userID int, collections []catalog.PersonalCollectionDefinition, filter catalog.AccessFilter) (map[string]int, error) {
 	if executor == nil || executor.Pool == nil || len(collections) == 0 {
-		return counts
+		return nil, apiError(http.StatusServiceUnavailable, "collection_count_unavailable", "Collection counts are unavailable")
 	}
-	// Hand-picked and imported collections without a display filter share one
-	// grouped count; dynamic definitions are deduplicated and batched.
-	var memberIDs []string
-	var dynamic []catalog.PersonalCollectionDefinition
-	for _, c := range collections {
-		if !catalog.IsLiveQueryType(c.CollectionType) && strings.TrimSpace(c.DisplayQueryDefinition) == "" {
-			memberIDs = append(memberIDs, c.ID)
-			continue
-		}
-		dynamic = append(dynamic, c)
-	}
-	if len(dynamic) > 0 {
-		var err error
-		counts, err = catalog.CountPersonalCollections(ctx, executor.Pool, userID, dynamic, filter)
-		if err != nil {
-			slog.WarnContext(ctx, "counting personal collections failed", "component", "collections", "error", err)
-		}
-	}
-	if len(memberIDs) == 0 {
-		return counts
-	}
-	visible, err := catalog.NewItemRepository(executor.Pool).CountVisiblePersonalCollectionMembers(ctx, userID, memberIDs, filter)
+	counts, err := catalog.CountPersonalCollections(ctx, executor.Pool, userID, collections, filter)
 	if err != nil {
-		slog.WarnContext(ctx, "counting personal collection members failed", "component", "collections", "error", err)
-		return counts
+		slog.WarnContext(ctx, "counting personal collections failed", "component", "collections", "error", err)
 	}
-	for _, id := range memberIDs {
-		counts[id] = visible[id]
+	return counts, err
+}
+
+const (
+	// CollectionCountAvailable means ItemCount is a current evaluated count.
+	CollectionCountAvailable = models.CollectionCountAvailable
+	// CollectionCountUnavailable means clients must ignore ItemCount.
+	CollectionCountUnavailable = models.CollectionCountUnavailable
+)
+
+// Frozen v1 cannot represent an unavailable count in its response body.
+func collectionCountReadError(err error) error {
+	if errors.Is(err, catalog.ErrCollectionCountBudget) || errors.Is(err, catalog.ErrQueryComplexity) || errors.Is(err, context.DeadlineExceeded) {
+		return apiError(http.StatusServiceUnavailable, "collection_count_unavailable", "Collection count budget exhausted; retry or repair the collection definition")
 	}
-	return counts
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
+		return apiErr
+	}
+	return apiError(http.StatusInternalServerError, "internal_error", "Failed to count collection items")
 }
 
 // ownedCollectionDefinition is a personal collection's count definition and
@@ -73,6 +67,7 @@ type ownedCollectionReads struct {
 	posters map[string]catalog.CollectionPoster
 	// unavailable lists the collections whose owner could not be resolved.
 	unavailable map[string]bool
+	countError  error
 }
 
 // ownerScopedCollectionReads counts each collection as viewerProfileID sees
@@ -85,8 +80,11 @@ type ownedCollectionReads struct {
 func ownerScopedCollectionReads(ctx context.Context, executor *catalog.QueryExecutor, owners catalog.PersonalCollectionAccess, collages *catalog.PersonalCollectionCollages, userID int, viewerProfileID string, collections []ownedCollectionDefinition, viewer catalog.AccessFilter) ownedCollectionReads {
 	out := ownedCollectionReads{counts: make(map[string]int, len(collections)), posters: map[string]catalog.CollectionPoster{}, unavailable: make(map[string]bool)}
 	if executor == nil || executor.Pool == nil {
+		out.countError = apiError(http.StatusServiceUnavailable, "collection_count_unavailable", "Collection counts are unavailable")
 		return out
 	}
+	countCtx, cancel := catalog.WithCollectionCountBudget(ctx)
+	defer cancel()
 	byOwner := make(map[string][]ownedCollectionDefinition)
 	var order []string
 	for _, c := range collections {
@@ -113,7 +111,9 @@ func ownerScopedCollectionReads(ctx context.Context, executor *catalog.QueryExec
 				collaged = append(collaged, c.PersonalCollectionDefinition)
 			}
 		}
-		maps.Copy(out.counts, visiblePersonalCollectionCounts(ctx, executor, userID, definitions, filter))
+		counts, countErr := visiblePersonalCollectionCounts(countCtx, executor, userID, definitions, filter)
+		maps.Copy(out.counts, counts)
+		out.countError = errors.Join(out.countError, countErr)
 		maps.Copy(out.posters, collages.Posters(ctx, userID, collaged, filter))
 	}
 	return out

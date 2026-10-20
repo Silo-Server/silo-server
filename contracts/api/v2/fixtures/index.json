@@ -6386,7 +6386,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"f9bfba671c81dbcc510b4d4cc41d4c6feb58ad9165a71786799d47524f7d7217\""
+        "ETag": "\"9b91c5a51105576763b03e8fa4f07e065e1bcb4c21f10125d6c563c400eaf855\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminCollectionCapabilityOutputBody",
@@ -6773,7 +6773,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"d1ab2d090e59fc1b188200e07381aad6e929278904a8e25da475b7882cdf3815\""
+        "ETag": "\"85b5c2411ca78ca39acf268eca7437ead1575bfda93d09d8b9c0c19a5716c594\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/CollectionCapabilities",
@@ -6814,7 +6814,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"457e318bf2388a46420c6eb8.1njpabgklvmqp\""
+        "ETag": "\"cfa68c66d6775b1d5979600c.3c8f1d9zvklhz\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PersonalCollection",

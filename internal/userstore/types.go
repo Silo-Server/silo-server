@@ -342,6 +342,10 @@ type UpdateCollectionInput struct {
 	PosterURL                  *string
 	PosterThumbhash            *string
 	GroupID                    **string
+	// ValidateQueryComposition checks the merged source and display definitions
+	// under the store's write lock. The caller may retain raw request definitions
+	// here so normalization cannot erase their admission cost. Nil for metadata edits.
+	ValidateQueryComposition func(source, display string) error
 }
 
 type UpdateCollectionSyncStateInput struct {

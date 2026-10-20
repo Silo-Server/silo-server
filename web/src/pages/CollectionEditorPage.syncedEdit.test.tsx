@@ -546,7 +546,6 @@ describe("server Synced list editor", () => {
     fireEvent.change(link, { target: { value: "https://www.themoviedb.org/list/8649937-marvel" } });
     await save(ADMIN_PATCH);
     expect(patches(ADMIN_PATCH)[0]).toMatchObject({
-      collection_type: "tmdb",
       source_url: "https://www.themoviedb.org/list/8649937",
       source_config: {
         mode: "tmdb_list",
@@ -622,7 +621,6 @@ describe("server Synced list editor", () => {
     fireEvent.change(id, { target: { value: "119" } });
     await save(ADMIN_PATCH);
     expect(patches(ADMIN_PATCH)[0]).toMatchObject({
-      collection_type: "tmdb",
       source_url: "tmdb://collection/119",
       source_config: { mode: "tmdb_collection", collection_id: 119, limit: 20 },
     });
@@ -821,7 +819,6 @@ describe("personal Synced list editor", () => {
     expect(patches(PERSONAL_PATCH)[0]).toEqual({
       name: "Rainy days",
       is_shared: false,
-      library_ids: ["1"],
       include_in_server_collections: false,
       sync_schedule: "weekly",
     });
@@ -911,3 +908,26 @@ describe("personal Synced list editor", () => {
     expect(within(alert).queryByRole("button")).toBeNull();
   });
 });
+
+it.each(["unavailable", "future-status"])(
+  "does not present stale synced-list counts for %s status",
+  async (status) => {
+    serverList("mdblist", MDBLIST, {
+      last_sync_status: "failed",
+      last_sync_at: "2026-01-02T03:04:05Z",
+      item_count: 999,
+      item_count_status: status,
+    });
+    showPage(SERVER_EDIT);
+    await nameField();
+    expect(within(statusStrip()).getByText("Count unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Count unavailable.");
+    expect(screen.queryByText(/999 titles/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Keeps 0/)).not.toBeInTheDocument();
+    const menu = await openMoreActions();
+    expect(within(menu).getByRole("menuitem", { name: "Sync now" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  },
+);

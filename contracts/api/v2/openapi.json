@@ -3518,6 +3518,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "item_count_status": {
+            "description": "available when item_count is usable; unavailable when the saved definition cannot be evaluated within the count budget. Ignore item_count for any other status; the collection remains editable and deletable",
+            "examples": [
+              "available"
+            ],
+            "type": "string"
+          },
           "last_sync_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -3641,6 +3648,7 @@
           "last_sync_status",
           "last_sync_message",
           "item_count",
+          "item_count_status",
           "created_at",
           "updated_at"
         ],
@@ -3711,6 +3719,10 @@
           "imports": {
             "type": "boolean"
           },
+          "item_append": {
+            "description": "addAdminCollectionItem accepts append=true to allocate the stored tail position atomically without counting or listing members",
+            "type": "boolean"
+          },
           "item_reorder": {
             "type": "boolean"
           },
@@ -3759,6 +3771,7 @@
           "import_sources",
           "artwork",
           "item_reorder",
+          "item_append",
           "template_summaries",
           "mdblist_search",
           "schedule_time_zone",
@@ -24883,6 +24896,13 @@
             ],
             "type": "boolean"
           },
+          "count_availability": {
+            "description": "Collection responses include item_count_status. Ignore item_count when its status is not available; missing status on older servers means the count is usable",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "create_description": {
             "description": "createCollection stores a description for the acting account",
             "examples": [
@@ -24937,6 +24957,10 @@
           },
           "imports": {
             "description": "The acting account supports imported collections",
+            "type": "boolean"
+          },
+          "item_append": {
+            "description": "addCollectionItem accepts append=true to allocate the stored tail position atomically without counting or listing members",
             "type": "boolean"
           },
           "item_reorder": {
@@ -25015,6 +25039,7 @@
           "import_sources",
           "artwork",
           "item_reorder",
+          "item_append",
           "display_filter_fields",
           "display_filter_presets",
           "collection_default_sort",
@@ -25027,6 +25052,7 @@
           "sync_schedule_editable",
           "contains_item",
           "preview_posters",
+          "count_availability",
           "poster_collages",
           "revision",
           "state",
@@ -26131,6 +26157,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "item_count_status": {
+            "description": "available when item_count is usable; unavailable when the saved definition cannot be evaluated within the count budget. Ignore item_count for any other status; the collection remains accessible",
+            "examples": [
+              "available"
+            ],
+            "type": "string"
+          },
           "last_sync_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -26273,6 +26306,7 @@
           "last_sync_status",
           "last_sync_message",
           "item_count",
+          "item_count_status",
           "created_at",
           "updated_at",
           "poster_is_collage"
@@ -32195,6 +32229,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "item_count_status": {
+            "description": "available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible",
+            "examples": [
+              "available"
+            ],
+            "type": "string"
+          },
           "poster_is_collage": {
             "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages",
             "examples": [
@@ -32221,6 +32262,7 @@
           "title",
           "poster_url",
           "item_count",
+          "item_count_status",
           "poster_is_collage"
         ],
         "type": "object"
@@ -37869,6 +37911,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "item_count_status": {
+            "description": "available when item_count is current; unavailable when it could not be evaluated within the count budget or failed. Ignore item_count unless available. Collections remain accessible for editing and deletion",
+            "examples": [
+              "available"
+            ],
+            "type": "string"
+          },
           "last_sync_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "examples": [
@@ -38018,6 +38067,7 @@
           "last_sync_status",
           "last_sync_message",
           "item_count",
+          "item_count_status",
           "include_in_server_collections",
           "poster_url",
           "poster_thumbhash",
@@ -48166,6 +48216,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "item_count_status": {
+            "description": "available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible",
+            "examples": [
+              "available"
+            ],
+            "type": "string"
+          },
           "name": {
             "examples": [
               "Rainy days"
@@ -48203,6 +48260,7 @@
           "name",
           "collection_type",
           "item_count",
+          "item_count_status",
           "poster_is_collage",
           "created_at",
           "updated_at"
@@ -68151,6 +68209,16 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "description": "When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged.",
+            "explode": false,
+            "in": "query",
+            "name": "append",
+            "schema": {
+              "description": "When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged.",
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -68276,6 +68344,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
           },
           "503": {
             "content": {
@@ -146413,6 +146491,16 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "description": "When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged.",
+            "explode": false,
+            "in": "query",
+            "name": "append",
+            "schema": {
+              "description": "When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged.",
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -146538,6 +146626,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
           },
           "503": {
             "content": {

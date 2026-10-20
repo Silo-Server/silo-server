@@ -1,3 +1,4 @@
+import { collectionItemCount } from "@/lib/collections/count";
 import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Film, FolderPlus, ListPlus, Loader2, Plus, Search, Users } from "lucide-react";
@@ -379,7 +380,7 @@ function CollectionChoice({
         <span className="min-w-0">
           <span className="block truncate text-sm font-semibold">{collection.name}</span>
           <span id={metaId} className="text-muted-foreground flex items-center gap-2 text-[12.5px]">
-            <span className="truncate">{manualTitleCount(collection.item_count ?? 0)}</span>
+            <span className="truncate">{manualTitleCount(collectionItemCount(collection))}</span>
             {collection.is_shared ? (
               <span className="bg-info/10 text-info ring-info/30 inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-semibold ring-1 ring-inset">
                 <Users aria-hidden className="size-3" />

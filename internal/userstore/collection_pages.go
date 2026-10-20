@@ -55,6 +55,7 @@ type CollectionFeatures struct {
 	Imports     bool
 	Artwork     bool
 	ItemReorder bool
+	ItemAppend  bool
 	// Description reports that the store persists a collection description.
 	Description bool
 }

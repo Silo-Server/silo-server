@@ -44,6 +44,7 @@ type PersonalCollection struct {
 	LastSyncMessage            string          `json:"last_sync_message" example:""`
 	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition,omitempty" doc:"Display filter fragment; absent when none"`
 	ItemCount                  int             `json:"item_count" example:"4"`
+	ItemCountStatus            string          `json:"item_count_status" doc:"available when item_count is current; unavailable when it could not be evaluated within the count budget or failed. Ignore item_count unless available. Collections remain accessible for editing and deletion" example:"available"`
 	IncludeInServerCollections bool            `json:"include_in_server_collections" example:"false"`
 	PosterURL                  string          `json:"poster_url" doc:"Presigned, short-lived; empty when there is no poster" example:""`
 	PosterThumbhash            string          `json:"poster_thumbhash" example:""`
@@ -134,6 +135,7 @@ type CollectionCapabilities struct {
 	ImportSources             []string                       `json:"import_sources" enum:"mdblist,tmdb,tmdb_list" doc:"Import sources the acting account can create a collection from; empty when imports is false" example:"[\"mdblist\",\"tmdb\",\"tmdb_list\"]"`
 	Artwork                   bool                           `json:"artwork" doc:"The acting account supports collection artwork"`
 	ItemReorder               bool                           `json:"item_reorder" doc:"The acting account supports reordering collection items"`
+	ItemAppend                bool                           `json:"item_append" doc:"addCollectionItem accepts append=true to allocate the stored tail position atomically without counting or listing members"`
 	DisplayFilterFields       []string                       `json:"display_filter_fields" doc:"Catalog query fields a display filter may use" example:"[\"type\",\"watched\"]"`
 	DisplayFilterPresets      CollectionDisplayFilterPresets `json:"display_filter_presets"`
 	CollectionDefaultSort     bool                           `json:"collection_default_sort" example:"true"`
@@ -146,6 +148,7 @@ type CollectionCapabilities struct {
 	SyncScheduleEditable      bool                           `json:"sync_schedule_editable" doc:"updateCollection accepts sync_schedule on a synced list; false when imports is false" example:"true"`
 	ContainsItem              bool                           `json:"contains_item" doc:"listCollections accepts contains_item and marks the acting profile's own manual collections with contains" example:"true"`
 	PreviewPosters            bool                           `json:"preview_posters" doc:"previewCollection items carry poster_url when the title has a poster" example:"true"`
+	CountAvailability         bool                           `json:"count_availability" doc:"Collection responses include item_count_status. Ignore item_count when its status is not available; missing status on older servers means the count is usable" example:"true"`
 	PosterCollages            bool                           `json:"poster_collages" doc:"A collection with no uploaded or imported poster shows a collage of its first titles the acting profile can see in poster_url, marked by poster_is_collage, on listCollections, getLibraryCollections and listLibraryUserCollections, once the server has built it. False when the server has no artwork storage or the acting account's store keeps no artwork" example:"true"`
 }
 
@@ -511,7 +514,7 @@ func personalCollectionOf(v handlers.PersonalCollectionView) PersonalCollection 
 		SortOrder: v.SortOrder, SourceURL: v.SourceURL, SyncSchedule: v.SyncSchedule, SyncCadence: usercollections.CadenceOf(v.SyncSchedule),
 		NextSyncAt: instantOfStamp(v.NextSyncAt), LastSyncAt: instantOfStamp(v.LastSyncAt),
 		LastSyncStatus: v.LastSyncStatus, LastSyncMessage: v.LastSyncMessage,
-		ItemCount: v.ItemCount, IncludeInServerCollections: v.IncludeInServerCollections,
+		ItemCount: v.ItemCount, ItemCountStatus: countStatusOf(v.ItemCountStatus), IncludeInServerCollections: v.IncludeInServerCollections,
 		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, PosterIsCollage: v.PosterIsCollage && v.PosterURL != "",
 	}
 	if v.GroupID != nil {
@@ -620,6 +623,7 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 	}
 	return &CollectionCapabilitiesOutput{Body: CollectionCapabilities{
 		Groups: features.Groups, LoginSharing: true, Imports: features.Imports, Artwork: features.Artwork, ItemReorder: features.ItemReorder,
+		ItemAppend:          features.ItemAppend && supportsPersonalCollectionAppend(svc),
 		ImportSources:       collectionImportSources(features.Imports),
 		DisplayFilterFields: NonNil(v.DisplayFilterFields),
 		DisplayFilterPresets: CollectionDisplayFilterPresets{
@@ -636,6 +640,7 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 		ContainsItem:              true,
 		PreviewPosters:            true,
 		PosterCollages:            v.PosterCollages && features.Artwork,
+		CountAvailability:         v.CountAvailability,
 	}}, nil
 }
 
@@ -937,3 +942,12 @@ func (reg *Registry) reorderCollectionGroups(ctx context.Context, in *Collection
 }
 
 func (c CollectionCapabilities) capabilityState() string { return StateAvailable }
+
+// Services without live SQL counts already supply a usable count. Missing
+// internal status preserves that behavior; explicit unknown status stays unknown.
+func countStatusOf(status string) string {
+	if status == "" {
+		return handlers.CollectionCountAvailable
+	}
+	return status
+}

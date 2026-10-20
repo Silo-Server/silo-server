@@ -25,7 +25,7 @@ func seedNativeCollectionItem(t *testing.T, f libraryCASFixture, suffix string) 
 // starts behind it. Validation must observe the committed definition after
 // acquiring that lock, not the definition previously seen by an HTTP service.
 func TestLibraryCollectionNativeMembershipDefinitionRaceDB(t *testing.T) {
-	for _, operation := range []string{"add-type", "add-scope", "remove-type", "reorder-wildcard-type"} {
+	for _, operation := range []string{"add-type", "add-scope", "append-type", "append-scope", "remove-type", "reorder-wildcard-type"} {
 		t.Run(operation, func(t *testing.T) {
 			f := newLibraryCASFixture(t)
 			other := newLibraryCASFixture(t)
@@ -53,7 +53,7 @@ func TestLibraryCollectionNativeMembershipDefinitionRaceDB(t *testing.T) {
 			if err := lockLibraryCollectionParent(ctx, tx, f.collectionID); err != nil {
 				t.Fatal(err)
 			}
-			if operation == "add-scope" {
+			if operation == "add-scope" || operation == "append-scope" {
 				if _, err := tx.Exec(ctx, `UPDATE library_collection_libraries SET library_id=$2 WHERE collection_id=$1`, f.collectionID, other.libraryID); err != nil {
 					t.Fatal(err)
 				}
@@ -80,6 +80,8 @@ func TestLibraryCollectionNativeMembershipDefinitionRaceDB(t *testing.T) {
 				switch operation {
 				case "add-type", "add-scope":
 					done <- repo.AddItemIfAbsent(ctx, f.collectionID, first, 0)
+				case "append-type", "append-scope":
+					done <- repo.AppendItemIfAbsent(ctx, f.collectionID, first)
 				case "remove-type":
 					done <- repo.RemoveManualItem(ctx, f.collectionID, first)
 				case "reorder-wildcard-type":
@@ -91,7 +93,7 @@ func TestLibraryCollectionNativeMembershipDefinitionRaceDB(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := ErrLibraryCollectionNotManual
-			if operation == "add-scope" {
+			if operation == "add-scope" || operation == "append-scope" {
 				want = ErrLibraryCollectionItemNotFound
 			}
 			if err := <-done; !errors.Is(err, want) {

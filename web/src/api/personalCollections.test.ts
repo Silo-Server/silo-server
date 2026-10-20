@@ -32,6 +32,7 @@ const collection: components["schemas"]["PersonalCollection"] = {
   last_sync_status: "",
   last_sync_message: "",
   item_count: 0,
+  item_count_status: "available",
   include_in_server_collections: false,
   poster_url: "",
   poster_thumbhash: "",

@@ -64,9 +64,15 @@ func (h *CollectionHandler) PersonalCollectionItemsPage(ctx context.Context, use
 		if opts.Revision != 0 && opts.Revision != witness {
 			return out, collectionPageError(userstore.ErrCollectionChanged)
 		}
+		if err := catalog.ValidatePersonalCollectionQueryBudget(c.QueryDefinition, ""); err != nil {
+			return out, apiError(400, "bad_request", err.Error())
+		}
 		var def catalog.QueryDefinition
 		if err := json.Unmarshal([]byte(c.QueryDefinition), &def); err != nil {
 			return out, apiError(400, "bad_request", "Invalid smart collection query")
+		}
+		if err := catalog.ValidateQueryStructure(def); err != nil {
+			return out, apiError(400, "bad_request", err.Error())
 		}
 		def = catalog.ApplySmartCollectionItemLimit(def.Normalize())
 		if err := def.ValidateWithOptions(true, true); err != nil {
@@ -154,9 +160,15 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		if opts.Revision != 0 && opts.Revision != witness {
 			return out, collectionPageError(userstore.ErrCollectionChanged)
 		}
+		if err := catalog.ValidateLibraryCollectionQueryBudget(c.LibraryID, c.LibraryIDs, c.QueryDefinition); err != nil {
+			return out, apiError(400, "bad_request", err.Error())
+		}
 		var def catalog.QueryDefinition
 		if err := json.Unmarshal(c.QueryDefinition, &def); err != nil {
 			return out, apiError(400, "bad_request", "Invalid smart collection query")
+		}
+		if err := catalog.ValidateQueryStructure(def); err != nil {
+			return out, apiError(400, "bad_request", err.Error())
 		}
 		def = catalog.ApplySmartCollectionItemLimit(def.Normalize())
 		if err := def.ValidateWithOptions(false, false); err != nil {

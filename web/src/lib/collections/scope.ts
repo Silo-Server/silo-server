@@ -9,6 +9,7 @@
  * `hooks/queries/collectionScope.ts`, not on these objects.
  */
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import { collectionItemCount } from "@/lib/collections/count";
 
 import {
   adminCreateBody,
@@ -156,7 +157,7 @@ export interface CollectionView<Raw extends WireCollection = WireCollection> {
   /** `posterUrl` is the server's collage of its titles, not an image someone chose. */
   posterIsCollage: boolean;
   backdropUrl?: string;
-  itemCount: number;
+  itemCount: number | null;
   libraryIds: number[];
   /** Personal: the profile that created it, the only one that may change it. */
   ownerProfileId?: string;
@@ -585,9 +586,9 @@ function serverListRequest(
 }
 
 /**
- * A saved personal list's PATCH. Name, sharing, libraries, the Collections
- * tab switch and Show only always go; everything else only when it changed
- * from `base`. A "custom" schedule is never sent: it stays until another is picked.
+ * A saved personal list's PATCH. Name, sharing and the Collections tab switch always go;
+ * admission fields and other settings only go when changed from `base`. A
+ * "custom" schedule is never sent: it stays until another is picked.
  */
 function personalListRequest(draft: ListEditDraft, base: CollectionDraft): UpdateCollectionRequest {
   const changed = new Set(changedFields(base, draft));
@@ -719,7 +720,7 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
     posterThumbhash: raw.poster_thumbhash || undefined,
     posterIsCollage: Boolean(raw.poster_url && raw.poster_is_collage),
     backdropUrl: raw.backdrop_url || undefined,
-    itemCount: raw.item_count ?? 0,
+    itemCount: collectionItemCount(raw),
     libraryIds: serverLibraryIds(raw),
     sync: syncView(raw),
     server: {
@@ -773,8 +774,23 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
   },
 
   async update(ref, draft, base) {
-    const request =
+    const request: UpdateLibraryCollectionRequest =
       draft.kind === "synced" ? serverListRequest(draft, base ?? draft) : serverRequest(draft);
+    if (base) {
+      const changed = new Set(changedFields(base, draft));
+      if (!changed.has("libraryIds")) delete request.library_ids;
+      if (!changed.has("rules") && !changed.has("libraryIds")) delete request.query_definition;
+      // Kind is fixed for manual/smart collections. A synced source can
+      // switch between MDBList and TMDB, which changes its stored type.
+      if (
+        draft.kind !== "synced" ||
+        (base.kind === "synced" &&
+          base.list &&
+          COLLECTION_TYPE_OF[draft.list.source] === COLLECTION_TYPE_OF[base.list.source])
+      ) {
+        delete request.collection_type;
+      }
+    }
     const updated = await v2("PATCH /api/v2/admin/collections/{id}", {
       path: { id: ref.id },
       headers: { "If-Match": requiredETag(ref.etag) },
@@ -847,7 +863,7 @@ export const PERSONAL_SCOPE: CollectionScope<Collection> = {
     posterUrl: raw.poster_url || undefined,
     posterThumbhash: raw.poster_thumbhash || undefined,
     posterIsCollage: Boolean(raw.poster_url && raw.poster_is_collage),
-    itemCount: raw.item_count ?? 0,
+    itemCount: collectionItemCount(raw),
     libraryIds: personalCollectionLibraryIds(raw),
     ownerProfileId: raw.creator_profile_id,
     sync: syncView(raw),
@@ -905,6 +921,12 @@ export const PERSONAL_SCOPE: CollectionScope<Collection> = {
   async update(ref, draft, base) {
     const body: UpdateCollectionRequest =
       draft.kind === "synced" ? personalListRequest(draft, base ?? draft) : personalFields(draft);
+    if (base) {
+      const changed = new Set(changedFields(base, draft));
+      if (!changed.has("rules") && !changed.has("libraryIds")) delete body.query_definition;
+      if (!changed.has("libraryIds")) delete body.library_ids;
+      if (!changed.has("showOnly")) delete body.display_query_definition;
+    }
     // An absent display_query_definition keeps the saved one, so Show only set
     // back to All sends an empty filter, which the server stores as none.
     if (draft.kind !== "smart" && !draft.showOnly && base?.showOnly) {

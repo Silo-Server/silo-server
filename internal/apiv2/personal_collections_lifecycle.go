@@ -57,8 +57,9 @@ type PersonalCollectionItemInput struct {
 	ItemID ID `path:"item_id"`
 }
 type PersonalCollectionAddItemInput struct {
-	ID     ID `path:"id"`
-	ItemID ID `path:"item_id"`
+	ID     ID   `path:"id"`
+	ItemID ID   `path:"item_id"`
+	Append bool `query:"append" doc:"When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged."`
 	Body   struct {
 		Position int `json:"position" minimum:"0"`
 	}
@@ -166,7 +167,9 @@ func registerPersonalCollectionLifecycle(reg *Registry) {
 		return o
 	}
 	Register(reg, noContent(http.MethodDelete, "/collections/{id}", "deleteCollection", "Delete the creator's collection."), reg.deletePersonalCollection)
-	Register(reg, noContent(http.MethodPut, "/collections/{id}/items/{item_id}", "addCollectionItem", "Add an item to the creator's manual collection."), reg.addPersonalCollectionItem)
+	addItem := noContent(http.MethodPut, "/collections/{id}/items/{item_id}", "addCollectionItem", "Add an item to the creator's manual collection.")
+	addItem.Errors = append(addItem.Errors, http.StatusNotImplemented)
+	Register(reg, addItem, reg.addPersonalCollectionItem)
 	Register(reg, noContent(http.MethodDelete, "/collections/{id}/items/{item_id}", "removeCollectionItem", "Remove an item from the creator's manual collection."), reg.removePersonalCollectionItem)
 	Register(reg, op(http.MethodPut, "/collections/{id}/items/order", "reorderCollectionItems", "Replace the manual collection item order."), reg.reorderPersonalCollectionItems)
 	preview := op(http.MethodPost, "/collections/preview", "previewCollection", "Preview a smart query within the acting profile's access.")
@@ -248,6 +251,9 @@ func (reg *Registry) deletePersonalCollection(ctx context.Context, in *PersonalC
 	return nil, nil
 }
 func (reg *Registry) addPersonalCollectionItem(ctx context.Context, in *PersonalCollectionAddItemInput) (*struct{}, error) {
+	if in.Append {
+		return reg.appendPersonalCollectionItem(ctx, in)
+	}
 	s, p := reg.collectionLifecycle()
 	if p != nil {
 		return nil, p

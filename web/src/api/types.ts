@@ -1370,6 +1370,8 @@ export interface Collection {
   /** Filter-only QueryDefinition fragment for the profile-scoped display filters. */
   display_query_definition?: DisplayQueryDefinition;
   item_count?: number;
+  /** Absent on older servers; explicit unknown statuses mean the count is unavailable. */
+  item_count_status?: string;
   include_in_server_collections?: boolean;
   poster_url?: string;
   poster_thumbhash?: string;
@@ -1388,6 +1390,8 @@ export interface ServerVisibleUserCollection {
   description?: string;
   collection_type: UserCollectionType;
   item_count: number;
+  /** Absent on older servers; explicit unknown statuses mean the count is unavailable. */
+  item_count_status?: string;
   poster_url?: string;
   poster_thumbhash?: string;
   created_at: string;
@@ -1407,6 +1411,7 @@ export interface CollectionsListResponse {
 }
 
 export interface CollectionCapabilitiesResponse {
+  count_availability?: boolean;
   display_filter_fields: string[];
   display_filter_presets: {
     watched: UserCollectionWatchFilter[];
@@ -1578,6 +1583,8 @@ export interface LibraryCollection {
   sync_schedule?: string;
   next_sync_at?: string;
   item_count: number;
+  /** Absent on older servers; explicit unknown statuses mean the count is unavailable. */
+  item_count_status?: string;
   /** Admin list only: turned-on Home rows that show it. */
   home_row_count?: number;
   /** Admin list only: Home and library page rows that show it, turned-off ones included. */
@@ -1651,6 +1658,8 @@ export interface LibraryTabCollection {
   poster_url: string;
   poster_thumbhash?: string;
   item_count: number;
+  /** Absent on older servers; explicit unknown statuses mean the count is unavailable. */
+  item_count_status?: string;
   featured?: boolean;
   creator_profile_id?: string | null;
 }

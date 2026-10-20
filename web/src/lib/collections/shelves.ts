@@ -5,6 +5,7 @@
  */
 import type { GroupSortMode, LibraryCollection, LibraryCollectionGroup } from "@/api/types";
 
+import { compareCollectionCounts } from "./count";
 import { NO_HEADING } from "./copy";
 
 /** The id the order routes use for the collections on no shelf. */
@@ -119,7 +120,7 @@ export function shownCollections(shelf: Shelf): LibraryCollection[] {
     case "recent":
       return list.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
     case "most_items":
-      return list.sort((a, b) => (b.item_count ?? 0) - (a.item_count ?? 0));
+      return list.sort(compareCollectionCounts);
     default:
       return pinnedFirst(list);
   }

@@ -13615,6 +13615,11 @@ export interface components {
       /** Format: int64 */
       item_count: number;
       /**
+       * @description available when item_count is usable; unavailable when the saved definition cannot be evaluated within the count budget. Ignore item_count for any other status; the collection remains editable and deletable
+       * @example available
+       */
+      item_count_status: string;
+      /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        */
@@ -13688,6 +13693,8 @@ export interface components {
        */
       import_sources: ("mdblist" | "tmdb" | "tmdb_list")[];
       imports: boolean;
+      /** @description addAdminCollectionItem accepts append=true to allocate the stored tail position atomically without counting or listing members */
+      item_append: boolean;
       item_reorder: boolean;
       /**
        * @description searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key
@@ -21624,6 +21631,11 @@ export interface components {
        */
       contains_item: boolean;
       /**
+       * @description Collection responses include item_count_status. Ignore item_count when its status is not available; missing status on older servers means the count is usable
+       * @example true
+       */
+      count_availability: boolean;
+      /**
        * @description createCollection stores a description for the acting account
        * @example true
        */
@@ -21652,6 +21664,8 @@ export interface components {
       import_sources: ("mdblist" | "tmdb" | "tmdb_list")[];
       /** @description The acting account supports imported collections */
       imports: boolean;
+      /** @description addCollectionItem accepts append=true to allocate the stored tail position atomically without counting or listing members */
+      item_append: boolean;
       /** @description The acting account supports reordering collection items */
       item_reorder: boolean;
       /** @description is_shared shows a collection to every profile on the login, listCollections includes other profiles' shared collections, and only a collection's creator changes or orders it */
@@ -22086,6 +22100,11 @@ export interface components {
        * @example 12
        */
       item_count: number;
+      /**
+       * @description available when item_count is usable; unavailable when the saved definition cannot be evaluated within the count budget. Ignore item_count for any other status; the collection remains accessible
+       * @example available
+       */
+      item_count_status: string;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -24577,6 +24596,11 @@ export interface components {
        */
       item_count: number;
       /**
+       * @description available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible
+       * @example available
+       */
+      item_count_status: string;
+      /**
        * @description poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages
        * @example false
        */
@@ -26862,6 +26886,11 @@ export interface components {
        * @example 4
        */
       item_count: number;
+      /**
+       * @description available when item_count is current; unavailable when it could not be evaluated within the count budget or failed. Ignore item_count unless available. Collections remain accessible for editing and deletion
+       * @example available
+       */
+      item_count_status: string;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -31300,6 +31329,11 @@ export interface components {
        * @example 4
        */
       item_count: number;
+      /**
+       * @description available when item_count is usable; unavailable when evaluation failed or exceeded the count budget. Ignore item_count for any other status; the collection remains accessible
+       * @example available
+       */
+      item_count_status: string;
       /** @example Rainy days */
       name: string;
       /**
@@ -42054,7 +42088,10 @@ export interface operations {
   };
   addAdminCollectionItem: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged. */
+        append?: boolean;
+      };
       header?: {
         /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
         "X-Profile-Id"?: string;
@@ -42174,6 +42211,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -93362,7 +93408,10 @@ export interface operations {
   };
   addCollectionItem: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description When item_append is supported, allocate a position after the stored tail atomically; body.position is ignored. Existing membership is unchanged. */
+        append?: boolean;
+      };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
         "X-Profile-Id": string;
@@ -93482,6 +93531,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };

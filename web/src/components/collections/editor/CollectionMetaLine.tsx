@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { collectionCountLabel } from "@/lib/collections/count";
 
 import { MetaDot } from "@/components/calm/ListRow";
 import { cn } from "@/lib/utils";
@@ -27,18 +28,13 @@ export function CollectionMetaLine({
 }: {
   typeLabel?: string;
   libraryNames?: readonly string[];
-  itemCount?: number;
+  itemCount?: number | null;
   /** What follows the count: one part, or several. */
   extra?: string | readonly string[];
   attention?: SyncAttention;
   className?: string;
 }) {
-  const counted = [
-    typeLabel,
-    itemCount === undefined ? undefined : `${itemCount} title${itemCount === 1 ? "" : "s"}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const counted = [typeLabel, collectionCountLabel(itemCount)].filter(Boolean).join(" · ");
   const parts = [counted, ...(typeof extra === "string" ? [extra] : (extra ?? []))].filter(
     (part): part is string => Boolean(part),
   );

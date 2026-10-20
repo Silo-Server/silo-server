@@ -1,6 +1,7 @@
 package userdb
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -101,12 +102,12 @@ func ListCollections(db *sql.DB, profileID string) ([]Collection, error) {
 }
 
 // UpdateCollection renames a collection and updates its updated_at timestamp.
-func UpdateCollection(db *sql.DB, input userstore.UpdateCollectionInput) error {
+func UpdateCollection(ctx context.Context, db *sql.DB, input userstore.UpdateCollectionInput) error {
 	if input.SourceConfigPatch != nil {
 		return fmt.Errorf("user collection imports are not supported on the SQLite user store")
 	}
 
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -114,33 +115,53 @@ func UpdateCollection(db *sql.DB, input userstore.UpdateCollectionInput) error {
 	if err := checkSQLiteCollectionRevision(tx, input.ID, input.ExpectedRevision); err != nil {
 		return err
 	}
+	if input.ValidateQueryComposition != nil {
+		// Take SQLite's writer lock before reading the companion. A no-op on the
+		// revision table takes no collection triggers and consumes no revision.
+		if _, err := tx.ExecContext(ctx, `UPDATE personal_collection_revisions SET revision=revision WHERE collection_id=?`, input.ID); err != nil {
+			return err
+		}
+	}
 
 	var creatorProfileID string
-	if err := tx.QueryRow(`SELECT creator_profile_id FROM personal_collections WHERE id = ?`, input.ID).Scan(&creatorProfileID); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT creator_profile_id FROM personal_collections WHERE id = ?`, input.ID).Scan(&creatorProfileID); err != nil {
 		return err
 	}
 	if creatorProfileID != input.RequestProfileID {
 		return fmt.Errorf("only the creator can update this collection")
 	}
+	if input.ValidateQueryComposition != nil {
+		var source string
+		if err := tx.QueryRowContext(ctx, `SELECT query_definition FROM personal_collections WHERE id=?`, input.ID).Scan(&source); err != nil {
+			return err
+		}
+		if input.QueryDefinition != nil {
+			source = *input.QueryDefinition
+		}
+		// SQLite supports source definitions only; display filters are not stored.
+		if err := input.ValidateQueryComposition(source, ""); err != nil {
+			return err
+		}
+	}
 
 	now := nowUTC()
 	if input.Name != nil {
-		if _, err := tx.Exec(`UPDATE personal_collections SET name = ?, updated_at = ? WHERE id = ?`, *input.Name, now, input.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE personal_collections SET name = ?, updated_at = ? WHERE id = ?`, *input.Name, now, input.ID); err != nil {
 			return err
 		}
 	}
 	if input.IsShared != nil {
-		if _, err := tx.Exec(`UPDATE personal_collections SET is_shared = ?, updated_at = ? WHERE id = ?`, *input.IsShared, now, input.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE personal_collections SET is_shared = ?, updated_at = ? WHERE id = ?`, *input.IsShared, now, input.ID); err != nil {
 			return err
 		}
 	}
 	if input.QueryDefinition != nil {
-		if _, err := tx.Exec(`UPDATE personal_collections SET query_definition = ?, updated_at = ? WHERE id = ?`, *input.QueryDefinition, now, input.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE personal_collections SET query_definition = ?, updated_at = ? WHERE id = ?`, *input.QueryDefinition, now, input.ID); err != nil {
 			return err
 		}
 	}
 	if input.SortConfig != nil {
-		if _, err := tx.Exec(`UPDATE personal_collections SET sort_config = ?, updated_at = ? WHERE id = ?`, *input.SortConfig, now, input.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE personal_collections SET sort_config = ?, updated_at = ? WHERE id = ?`, *input.SortConfig, now, input.ID); err != nil {
 			return err
 		}
 	}

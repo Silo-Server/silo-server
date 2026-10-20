@@ -54,8 +54,16 @@ func (h *CollectionHandler) ListPersonalCollections(ctx context.Context, userID 
 	if err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collections")
 	}
+	views := h.collectionViews(ctx, store, userID, profileID, collections)
+	if !isNativeAPIV2(ctx) {
+		for _, view := range views {
+			if view.ItemCountStatus == CollectionCountUnavailable {
+				return none, collectionCountReadError(view.itemCountError)
+			}
+		}
+	}
 	return PersonalCollectionListView{
-		Collections: h.collectionViews(ctx, store, userID, profileID, collections),
+		Collections: views,
 		Groups:      []CollectionGroupView{},
 	}, nil
 }
@@ -106,6 +114,7 @@ func (h *CollectionHandler) Capabilities() CollectionCapabilitiesView {
 		EffectiveCollectionSort:   true,
 		SortPreferenceKinds:       sortPreferenceKinds,
 		PosterCollages:            h.Collages != nil,
+		CountAvailability:         true,
 	}
 }
 
@@ -133,6 +142,9 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 			return none, err
 		}
 	}
+	if err := catalog.ValidatePersonalCollectionQueryBudget(string(req.QueryDefinition), string(req.DisplayQueryDefinition)); err != nil {
+		return none, fieldError("query_definition", err.Error())
+	}
 	queryDefinitionJSON := defaultJSON(req.QueryDefinition)
 	collectionType := firstNonEmptyCollection(req.CollectionType, "manual")
 	if collectionType == collectionTypeSmart {
@@ -154,6 +166,10 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 	displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(req.DisplayQueryDefinition)
 	if err != nil {
 		return none, fieldError("display_query_definition", err.Error())
+	}
+	ctx, err = h.preflightV1CollectionCount(ctx, store, cmd.UserID, cmd.ProfileID, userstore.Collection{CreatorProfileID: cmd.ProfileID, CollectionType: collectionType, QueryDefinition: queryDefinition, DisplayQueryDefinition: displayQueryDefinition})
+	if err != nil {
+		return none, err
 	}
 	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID:           cmd.ProfileID,
@@ -317,7 +333,8 @@ func (h *CollectionHandler) ReorderCollectionGroups(ctx context.Context, userID 
 // once built. A collection whose owner cannot be resolved is left out.
 func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, profileID string, collections []userstore.Collection) []PersonalCollectionView {
 	var reads ownedCollectionReads
-	if userstore.HasCatalogSQLState(store) {
+	preflightCount, preflight := ctx.Value(collectionPreflightCountKey{}).(int)
+	if userstore.HasCatalogSQLState(store) && !preflight {
 		sources := make([]ownedCollectionDefinition, 0, len(collections))
 		for _, c := range collections {
 			sources = append(sources, ownedCollectionDefinition{
@@ -337,6 +354,14 @@ func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore
 			c.ItemCount = n
 		}
 		resp := toCollectionResponse(c)
+		if preflight {
+			resp.ItemCount = preflightCount
+		} else if userstore.HasCatalogSQLState(store) {
+			if _, ok := reads.counts[c.ID]; !ok {
+				resp.ItemCount, resp.ItemCountStatus = 0, CollectionCountUnavailable
+				resp.itemCountError = reads.countError
+			}
+		}
 		posterPath := c.PosterURL
 		if collage, ok := reads.posters[c.ID]; ok {
 			posterPath, resp.PosterThumbhash, resp.PosterIsCollage = collage.Path, collage.Thumbhash, true
@@ -363,6 +388,9 @@ func (h *CollectionHandler) collectionView(ctx context.Context, store userstore.
 	views := h.collectionViews(ctx, store, userID, profileID, []userstore.Collection{c})
 	if len(views) == 0 {
 		return PersonalCollectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection")
+	}
+	if !isNativeAPIV2(ctx) && views[0].ItemCountStatus == CollectionCountUnavailable {
+		return PersonalCollectionView{}, collectionCountReadError(views[0].itemCountError)
 	}
 	return views[0], nil
 }
@@ -425,4 +453,20 @@ func collectionFeatureError(store userstore.UserStore, feature string) error {
 		return apiError(http.StatusNotImplemented, "unsupported", "The acting account does not support collection "+feature)
 	}
 	return nil
+}
+
+// A v1 mutation reuses its proposed-state count after writing. Counting again
+// could fail after a committed mutation and make a successful edit look failed.
+type collectionPreflightCountKey struct{}
+
+func (h *CollectionHandler) preflightV1CollectionCount(ctx context.Context, store userstore.UserStore, userID int, profileID string, proposed userstore.Collection) (context.Context, error) {
+	if isNativeAPIV2(ctx) || !userstore.HasCatalogSQLState(store) {
+		return ctx, nil
+	}
+	reads := ownerScopedCollectionReads(ctx, h.Executor, h.CollectionOwners, nil, userID, profileID, []ownedCollectionDefinition{{PersonalCollectionDefinition: usercollections.CollectionDefinition(proposed), CreatorProfileID: proposed.CreatorProfileID}}, AccessFilterFromContext(ctx, ""))
+	count, ok := reads.counts[proposed.ID]
+	if !ok {
+		return ctx, collectionCountReadError(reads.countError)
+	}
+	return context.WithValue(ctx, collectionPreflightCountKey{}, count), nil
 }

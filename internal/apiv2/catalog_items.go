@@ -949,6 +949,9 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 		return nil, p
 	}
 	if in.Groups != "" {
+		if err := catalogpkg.ValidatePersonalCollectionQueryBudget(`{"groups":`+in.Groups+`}`, ""); err != nil {
+			return nil, NewProblem(TypeValidationFailed, "Invalid structured filters.").WithErrors(ProblemError{Location: locationQueryGroups, Code: codeInvalid, Detail: err.Error()})
+		}
 		var groups []CatalogQueryGroup
 		decoder := json.NewDecoder(strings.NewReader(in.Groups))
 		decoder.DisallowUnknownFields()

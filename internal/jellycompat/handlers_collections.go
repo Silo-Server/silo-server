@@ -264,6 +264,10 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 		)
 	}
 	posterAspect := 2.0 / 3.0 // portrait poster; without it clients square-crop the card
+	count := c.ItemCount
+	if c.ItemCountStatus != "" && c.ItemCountStatus != models.CollectionCountAvailable {
+		count = 0
+	}
 	dto := baseItemDTO{
 		ID:                      routeID,
 		Type:                    "BoxSet",
@@ -272,8 +276,8 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 		ServerID:                h.mapper.serverID,
 		Overview:                c.Description,
 		SortName:                strings.ToLower(c.Title),
-		ChildCount:              c.ItemCount,
-		RecursiveItemCount:      c.ItemCount,
+		ChildCount:              count,
+		RecursiveItemCount:      count,
 		ImageTags:               imgTags,
 		PrimaryImageAspectRatio: &posterAspect,
 		UserData: &itemUserDataDTO{
@@ -770,6 +774,9 @@ func smartCollectionLeafType(c *models.LibraryCollection) (string, bool) {
 	if !catalog.IsLiveQueryType(c.CollectionType) || len(c.QueryDefinition) == 0 {
 		return "", false
 	}
+	if err := catalog.ValidateLibraryCollectionQueryBudget(c.LibraryID, c.LibraryIDs, c.QueryDefinition); err != nil {
+		return "", false
+	}
 	var def catalog.QueryDefinition
 	if err := json.Unmarshal(c.QueryDefinition, &def); err != nil {
 		return "", false
@@ -1091,6 +1098,9 @@ func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.R
 // and a single bad collection never 500s a browse.
 func (h *ItemsHandler) prepareSmartCollectionQuery(ctx context.Context, session *Session, c *models.LibraryCollection) (catalog.QueryDefinition, catalog.AccessFilter, bool) {
 	if h.queryExecutor == nil {
+		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
+	}
+	if err := catalog.ValidateLibraryCollectionQueryBudget(c.LibraryID, c.LibraryIDs, c.QueryDefinition); err != nil {
 		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 	}
 

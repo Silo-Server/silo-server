@@ -67,6 +67,18 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		Description:                req.Description,
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	}
+	if len(req.QueryDefinition) > 0 || req.DisplayQueryDefinition != nil {
+		source, display := existing.QueryDefinition, existing.DisplayQueryDefinition
+		if len(req.QueryDefinition) > 0 {
+			source = string(req.QueryDefinition)
+		}
+		if req.DisplayQueryDefinition != nil {
+			display = string(req.DisplayQueryDefinition)
+		}
+		if err := catalog.ValidatePersonalCollectionQueryBudget(source, display); err != nil {
+			return none, fieldError("query_definition", err.Error())
+		}
+	}
 	if req.DisplayQueryDefinition != nil {
 		displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(req.DisplayQueryDefinition)
 		if err != nil {
@@ -161,7 +173,37 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		}
 	}
 
+	proposed := *existing
+	if input.QueryDefinition != nil {
+		proposed.QueryDefinition = *input.QueryDefinition
+	}
+	if input.DisplayQueryDefinition != nil {
+		proposed.DisplayQueryDefinition = *input.DisplayQueryDefinition
+	}
+	if input.QueryDefinition != nil || input.DisplayQueryDefinition != nil {
+		input.ValidateQueryComposition = func(source, display string) error {
+			// The store supplies the locked merged state. Keep requested sides raw:
+			// normalization can discard groups, rules and duplicate library IDs.
+			if len(req.QueryDefinition) > 0 {
+				source = string(req.QueryDefinition)
+			}
+			if req.DisplayQueryDefinition != nil {
+				display = string(req.DisplayQueryDefinition)
+			}
+			if err := catalog.ValidatePersonalCollectionQueryBudget(source, display); err != nil {
+				return fieldError("query_definition", err.Error()).WithCause(err)
+			}
+			return nil
+		}
+	}
+	ctx, err = h.preflightV1CollectionCount(ctx, store, userID, profileID, proposed)
+	if err != nil {
+		return none, err
+	}
 	if err := store.UpdateCollection(ctx, input); err != nil {
+		if apiErr, ok := errors.AsType[*APIError](err); ok {
+			return none, apiErr
+		}
 		if errors.Is(err, userstore.ErrCollectionRevisionMismatch) {
 			return none, err
 		}
@@ -342,6 +384,10 @@ func (h *CollectionHandler) accessibleCollectionItems(ctx context.Context, userI
 }
 
 func (h *CollectionHandler) AddPersonalCollectionItem(ctx context.Context, userID int, profileID, collectionID, itemID string, position int) error {
+	return h.addPersonalCollectionItem(ctx, userID, profileID, collectionID, itemID, position, false)
+}
+
+func (h *CollectionHandler) addPersonalCollectionItem(ctx context.Context, userID int, profileID, collectionID, itemID string, position int, appendItem bool) error {
 
 	if collectionID == "" || itemID == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "Collection ID and item ID are required")
@@ -359,7 +405,22 @@ func (h *CollectionHandler) AddPersonalCollectionItem(ctx context.Context, userI
 		return err
 	}
 
-	if err := store.AddCollectionItem(ctx, collectionID, itemID, position); err != nil {
+	if appendItem {
+		appender, ok := store.(collectionItemAppender)
+		if !ok {
+			return apiError(http.StatusNotImplemented, "unsupported", "This store cannot append collection items")
+		}
+		err = appender.AppendCollectionItem(ctx, collectionID, itemID)
+	} else {
+		err = store.AddCollectionItem(ctx, collectionID, itemID, position)
+	}
+	if errors.Is(err, userstore.ErrCollectionNotManual) {
+		return apiError(http.StatusConflict, "collection_not_manual", "Only manual collection membership can be edited")
+	}
+	if errors.Is(err, userstore.ErrCollectionNotFound) {
+		return apiError(http.StatusNotFound, "not_found", "Collection not found")
+	}
+	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add item to collection")
 	}
 	h.refreshCollage(ctx, store, userID, collection)

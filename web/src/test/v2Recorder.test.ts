@@ -105,7 +105,6 @@ describe("v2Recorder", () => {
       "DELETE /api/v2/collections/{id} (/api/v2/collections/c2) has no If-Match",
       "POST /api/v2/admin/collections (/api/v2/admin/collections) sends library_ids that are not strings",
       "POST /api/v2/admin/collections (/api/v2/admin/collections) sends query_definition or sort_config for a manual collection",
-      "PATCH /api/v2/admin/collections/{id} (/api/v2/admin/collections/c3) does not name collection_type",
       "PATCH /api/v2/collections/{id} (/api/v2/collections/c1) sends query_definition or sort_config for a manual collection",
     ]);
   });

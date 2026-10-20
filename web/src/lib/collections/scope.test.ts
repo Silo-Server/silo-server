@@ -5,7 +5,7 @@ import getAdminCollectionOk from "../../../../contracts/api/v2/fixtures/get_admi
 import getCollectionOk from "../../../../contracts/api/v2/fixtures/get_collection_ok.json";
 import { adminCollectionFromV2 } from "@/api/adminCollections";
 import { collectionFromV2 } from "@/api/personalCollections";
-import type { Collection, LibraryCollection } from "@/api/types";
+import type { Collection, LibraryCollection, QueryDefinition } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
 import { adminKeys, collectionKeys, libraryCollectionKeys } from "@/hooks/queries/keys";
 import {
@@ -34,7 +34,7 @@ installV2Recorder();
 const writes = () => v2Recorder.writes();
 const png = (name: string) => new File(["image"], name, { type: "image/png" });
 
-function storedQuery(limit: number | undefined) {
+function storedQuery(limit: number | undefined): QueryDefinition & Record<string, unknown> {
   return {
     library_ids: [1],
     match: "all",
@@ -305,7 +305,7 @@ describe("create and update send the editor's bodies", () => {
     v2Recorder.answer("GET /api/v2/admin/collections/{id}", adminCollection);
     const { draft, etag } = await loaded(SERVER_SCOPE);
     await expect(
-      SERVER_SCOPE.update({ id: "c1", etag }, { ...draft, name: "Renamed" }),
+      SERVER_SCOPE.update({ id: "c1", etag }, { ...draft, name: "Renamed" }, draft),
     ).resolves.toEqual({ warnings: [], failedArtwork: [] });
     expect(writes()).toEqual(goldens.adminManualUpdate);
   });
@@ -320,7 +320,7 @@ describe("create and update send the editor's bodies", () => {
       adminSmartCollection(storedQuery(limit)),
     );
     const { draft, etag } = await loaded(SERVER_SCOPE);
-    await SERVER_SCOPE.update({ id: "c1", etag }, draft);
+    await SERVER_SCOPE.update({ id: "c1", etag }, draft, draft);
     expect(writes()).toEqual(goldens.adminSmartUnchanged[label]);
   });
 
@@ -336,7 +336,7 @@ describe("create and update send the editor's bodies", () => {
         personalSmartCollection(storedQuery(limit)),
       );
       const { draft, etag } = await loaded(PERSONAL_SCOPE);
-      await PERSONAL_SCOPE.update({ id: "c1", etag }, draft);
+      await PERSONAL_SCOPE.update({ id: "c1", etag }, draft, draft);
       expect(writes()).toEqual(goldens.personalSmartUnchanged[label]);
     },
   );

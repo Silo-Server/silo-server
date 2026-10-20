@@ -106,9 +106,7 @@ export const goldens = {
       body: {
         title: "Renamed",
         description: "",
-        collection_type: "manual",
         visibility: "visible",
-        library_ids: ["1"],
       },
     },
   ] satisfies Writes,
@@ -123,9 +121,7 @@ export const goldens = {
       body: {
         title: "Original",
         description: "",
-        collection_type: "manual",
         visibility: "visible",
-        library_ids: ["1"],
       },
     },
     {
@@ -148,9 +144,7 @@ export const goldens = {
       body: {
         title: "Original",
         description: "",
-        collection_type: "manual",
         visibility: "visible",
-        library_ids: ["1"],
       },
     },
     {
@@ -164,7 +158,7 @@ export const goldens = {
       },
     },
   ] satisfies Writes,
-  /** A loaded admin smart collection saved unchanged from the editor page. The sentinel saves as no limit; the PATCH leaves out `featured`, so Pin set in Arrange stays. */
+  /** A loaded admin smart collection saved unchanged from the editor page. The PATCH omits unchanged admission fields and leaves out `featured`, so Pin set in Arrange stays. */
   adminSmartUnchanged: {
     "no limit": [
       {
@@ -176,30 +170,8 @@ export const goldens = {
         body: {
           title: "Original",
           description: "",
-          collection_type: "smart",
           visibility: "visible",
-          query_definition: {
-            library_ids: [1],
-            match: "all",
-            groups: [
-              {
-                match: "all",
-                rules: [
-                  {
-                    field: "genre",
-                    op: "is",
-                    value: "Comedy",
-                  },
-                ],
-              },
-            ],
-            sort: {
-              field: "added_at",
-              order: "desc",
-            },
-          },
           sort_config: {},
-          library_ids: ["1"],
         },
       },
     ],
@@ -213,30 +185,8 @@ export const goldens = {
         body: {
           title: "Original",
           description: "",
-          collection_type: "smart",
           visibility: "visible",
-          query_definition: {
-            library_ids: [1],
-            match: "all",
-            groups: [
-              {
-                match: "all",
-                rules: [
-                  {
-                    field: "genre",
-                    op: "is",
-                    value: "Comedy",
-                  },
-                ],
-              },
-            ],
-            sort: {
-              field: "added_at",
-              order: "desc",
-            },
-          },
           sort_config: {},
-          library_ids: ["1"],
         },
       },
     ],
@@ -250,31 +200,8 @@ export const goldens = {
         body: {
           title: "Original",
           description: "",
-          collection_type: "smart",
           visibility: "visible",
-          query_definition: {
-            library_ids: [1],
-            match: "all",
-            groups: [
-              {
-                match: "all",
-                rules: [
-                  {
-                    field: "genre",
-                    op: "is",
-                    value: "Comedy",
-                  },
-                ],
-              },
-            ],
-            sort: {
-              field: "added_at",
-              order: "desc",
-            },
-            limit: 250,
-          },
           sort_config: {},
-          library_ids: ["1"],
         },
       },
     ],
@@ -292,26 +219,6 @@ export const goldens = {
           name: "Rainy days",
           description: "",
           is_shared: false,
-          query_definition: {
-            library_ids: [1],
-            match: "all",
-            groups: [
-              {
-                match: "all",
-                rules: [
-                  {
-                    field: "genre",
-                    op: "is",
-                    value: "Comedy",
-                  },
-                ],
-              },
-            ],
-            sort: {
-              field: "added_at",
-              order: "desc",
-            },
-          },
           sort_config: {},
           include_in_server_collections: false,
         },
@@ -328,26 +235,6 @@ export const goldens = {
           name: "Rainy days",
           description: "",
           is_shared: false,
-          query_definition: {
-            library_ids: [1],
-            match: "all",
-            groups: [
-              {
-                match: "all",
-                rules: [
-                  {
-                    field: "genre",
-                    op: "is",
-                    value: "Comedy",
-                  },
-                ],
-              },
-            ],
-            sort: {
-              field: "added_at",
-              order: "desc",
-            },
-          },
           sort_config: {},
           include_in_server_collections: false,
         },
@@ -364,27 +251,6 @@ export const goldens = {
           name: "Rainy days",
           description: "",
           is_shared: false,
-          query_definition: {
-            library_ids: [1],
-            match: "all",
-            groups: [
-              {
-                match: "all",
-                rules: [
-                  {
-                    field: "genre",
-                    op: "is",
-                    value: "Comedy",
-                  },
-                ],
-              },
-            ],
-            sort: {
-              field: "added_at",
-              order: "desc",
-            },
-            limit: 250,
-          },
           sort_config: {},
           include_in_server_collections: false,
         },
@@ -513,26 +379,6 @@ export const goldens = {
         name: "Rainy days",
         description: "",
         is_shared: false,
-        query_definition: {
-          library_ids: [1],
-          match: "all",
-          groups: [
-            {
-              match: "all",
-              rules: [
-                {
-                  field: "genre",
-                  op: "is",
-                  value: "Comedy",
-                },
-              ],
-            },
-          ],
-          sort: {
-            field: "added_at",
-            order: "desc",
-          },
-        },
         sort_config: {},
         include_in_server_collections: false,
       },
@@ -682,7 +528,6 @@ export const goldens = {
         title: "Original",
         description: "",
         visibility: "visible",
-        collection_type: "mdblist",
         source_url: "https://mdblist.com/lists/user/top-watched/json",
         source_config: {
           mode: "mdblist_json",
@@ -691,7 +536,6 @@ export const goldens = {
         },
         sync_schedule: "",
         sort_config: {},
-        library_ids: ["1"],
       },
     },
   ] satisfies Writes,
@@ -707,7 +551,6 @@ export const goldens = {
         title: "Trending This Week",
         description: "",
         visibility: "visible",
-        collection_type: "tmdb",
         source_url: "tmdb://trending/movie/week",
         source_config: {
           mode: "tmdb_preset",
@@ -718,7 +561,6 @@ export const goldens = {
         },
         sync_schedule: "",
         sort_config: {},
-        library_ids: ["1"],
       },
     },
   ] satisfies Writes,
@@ -734,7 +576,6 @@ export const goldens = {
         title: "Festival Picks",
         description: "",
         visibility: "visible",
-        collection_type: "tmdb",
         source_url: "https://www.themoviedb.org/list/310",
         source_config: {
           mode: "tmdb_list",
@@ -742,11 +583,10 @@ export const goldens = {
         },
         sync_schedule: "",
         sort_config: {},
-        library_ids: ["1"],
       },
     },
   ] satisfies Writes,
-  /** Personal Synced list editor: optional fields go only when changed; name, sharing, libraries and the tab switch always go. */
+  /** Personal Synced list editor: optional fields go only when changed; name, sharing and the tab switch always go. */
   personalSyncedRename: [
     {
       operation: "PATCH /api/v2/collections/{id}",
@@ -757,7 +597,6 @@ export const goldens = {
       body: {
         name: "Top Watched",
         is_shared: false,
-        library_ids: ["1"],
         include_in_server_collections: false,
       },
     },
@@ -773,7 +612,6 @@ export const goldens = {
       body: {
         name: "Rainy days",
         is_shared: false,
-        library_ids: ["1"],
         include_in_server_collections: false,
       },
     },
@@ -790,7 +628,6 @@ export const goldens = {
       body: {
         name: "Rainy days",
         is_shared: false,
-        library_ids: ["1"],
         include_in_server_collections: false,
         max_items: 0,
       },

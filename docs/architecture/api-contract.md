@@ -2265,6 +2265,7 @@ Collection capabilities describe the acting account's selected user store:
 | --- | --- | --- |
 | Existing manual create/read/update/delete and membership | Supported | Supported |
 | Stable bounded manual continuation | Supported | Supported |
+| Atomic v2 tail append (`item_append`) | Supported | Unsupported |
 | Guarded definition update/delete | Supported | Supported |
 | Collection/item ordering | Supported | Pre-existing unsupported behavior |
 | Groups | Removed (#1615) | Removed |

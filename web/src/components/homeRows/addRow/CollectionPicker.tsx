@@ -1,10 +1,11 @@
 import { useId, useMemo, useState } from "react";
+import { collectionCountLabel, collectionItemCount } from "@/lib/collections/count";
 import { Check, Search } from "lucide-react";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 import { Input } from "@/components/ui/input";
 import { RadioDot, RadioGroup } from "@/components/ui/radio-group";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
-import { collectionKind, titleCount } from "@/lib/homeRows/describe";
+import { collectionKind } from "@/lib/homeRows/describe";
 import type { RowCollections } from "@/lib/homeRows/types";
 import { PosterArt } from "@/components/calm/PosterTile";
 
@@ -145,7 +146,7 @@ function CollectionRadio({
 }) {
   const metaId = useId();
   const kind = collectionKind(option.collection_type);
-  const meta = [kind, option.item_count === undefined ? undefined : titleCount(option.item_count)]
+  const meta = [kind, collectionCountLabel(collectionItemCount(option))]
     .filter(Boolean)
     .join(" · ");
   return (
