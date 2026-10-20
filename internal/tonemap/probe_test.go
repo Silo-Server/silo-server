@@ -185,7 +185,8 @@ func TestProbeTotalTimeoutCoversBoundedCommandMatrix(t *testing.T) {
 	}{
 		{name: "software", backend: BackendSoftware, expected: 41 * time.Second},
 		{name: "one QSV device", backend: BackendQSV, device: "/dev/dri/renderD128", expected: 71 * time.Second},
-		{name: "two VAAPI devices", backend: BackendVAAPI, device: "/dev/dri/renderD128,/dev/dri/renderD129", expected: 91 * time.Second},
+		// VAAPI counts the Dolby Vision smoke its OpenCL path on Intel runs.
+		{name: "two VAAPI devices", backend: BackendVAAPI, device: "/dev/dri/renderD128,/dev/dri/renderD129", expected: 101 * time.Second},
 		{name: "one NVENC device", backend: BackendNVENC, device: "0", expected: 221 * time.Second},
 		{name: "VideoToolbox", backend: BackendVideoToolbox, expected: 66 * time.Second},
 	}

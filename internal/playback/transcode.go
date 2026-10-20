@@ -1612,12 +1612,10 @@ func openCLBitmapSubtitleGraph(opts TranscodeOpts, subInput string) string {
 		tail + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
 }
 
-// vaapiOpenCLToneMap reports whether a VAAPI recipe tone maps an HDR source
-// on OpenCL, as the probe selects on Intel GPUs. SDR bases keep the VAAPI
-// color conversion.
+// vaapiOpenCLToneMap reports whether a VAAPI recipe tone maps on OpenCL, as
+// the probe selects on Intel GPUs.
 func vaapiOpenCLToneMap(opts TranscodeOpts) bool {
-	return opts.HWAccel == transcodeHWVAAPI && opts.ToneMapFilter == tonemap.HardwareFilterOpenCL &&
-		!tonemap.IsSDRSource(opts.ToneMapSourceKind)
+	return opts.HWAccel == transcodeHWVAAPI && tonemap.OpenCLToneMaps(opts.ToneMapFilter, opts.ToneMapSourceKind)
 }
 
 // softwareToneMapUploadFilter moves CPU-decoded frames onto the configured

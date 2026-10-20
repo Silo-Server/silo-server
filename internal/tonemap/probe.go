@@ -326,10 +326,21 @@ func ProbeTotalTimeout(hardwareBackend, hardwareDevice string) time.Duration {
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
 	switch backend {
 	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
-		hardwareCommandCount := len(smokeKindsForFilter(hardwareFilter(backend, hardwareDevice))) * len(probeDevices(hardwareDevice, backend))
+		hardwareCommandCount := len(smokeKindBudget(backend)) * len(probeDevices(hardwareDevice, backend))
 		total += time.Duration(hardwareCommandCount) * hardwareProbeCommandTimeout(backend)
 	}
 	return total + probeTimeoutSlack
+}
+
+// smokeKindBudget is the most source kinds a backend's smoke matrix can test on
+// one device. It doesn't read the host's devices, because a server also prices
+// a remote node's probe with it: VAAPI counts the Dolby Vision smoke its OpenCL
+// path on Intel runs.
+func smokeKindBudget(backend string) []SourceKind {
+	if backend == BackendVAAPI {
+		return AllSourceKinds()
+	}
+	return smokeKindsForFilter(hardwareFilter(backend, ""))
 }
 
 // ProbeEndpointTimeout includes auto-backend discovery and response overhead
@@ -428,7 +439,7 @@ func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath
 	devices := probeDevices(hardwareDevice, backend)
 	validated := smokeKindsForFilter(filter)
 	for _, device := range devices {
-		if filter == HardwareFilterVAAPI && strings.HasPrefix(device, "/dev/dri/") && drmVendor(device) == "" {
+		if filter == HardwareFilterVAAPI && drmVendorUnreadable(device) {
 			slog.WarnContext(ctx, "could not read the VAAPI device's GPU vendor, so HDR is tone mapped with tonemap_vaapi, which gives wrong colors on Intel GPUs",
 				"component", "tonemap", "device", device)
 		}
@@ -519,8 +530,10 @@ func hardwareFilter(backend, hardwareDevice string) string {
 		return HardwareFilterCUDA
 	case BackendVideoToolbox:
 		return HardwareFilterVideoToolbox
-	default:
+	case BackendVAAPI:
 		return vaapiFilter(hardwareDevice)
+	default:
+		return HardwareFilterVAAPI
 	}
 }
 

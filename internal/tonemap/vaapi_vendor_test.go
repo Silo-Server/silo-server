@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -158,6 +159,22 @@ func TestDRMNodeNameFollowsByPathLinks(t *testing.T) {
 	} {
 		if got := drmNodeName(device); got != want {
 			t.Fatalf("drmNodeName(%q) = %q, want %q", device, got, want)
+		}
+	}
+}
+
+// TestCharDeviceNumberReadsTheNode looks a node up by the device it is, not by
+// its name, which a container can give to another GPU.
+func TestCharDeviceNumberReadsTheNode(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("device numbers are read only on Linux")
+	}
+	if got, ok := charDeviceNumber("/dev/null"); !ok || got != "1:3" {
+		t.Fatalf("charDeviceNumber(/dev/null) = %q, %t; want 1:3", got, ok)
+	}
+	for _, path := range []string{"/dev/dri/silo-missing-node", t.TempDir()} {
+		if got, ok := charDeviceNumber(path); ok {
+			t.Fatalf("charDeviceNumber(%q) = %q, want none", path, got)
 		}
 	}
 }

@@ -371,7 +371,7 @@ func TestIntelVAAPIToneMapsHDROnOpenCL(t *testing.T) {
 				if strings.Contains(joined[toneMap:], "scale_vaapi=w=") {
 					t.Fatalf("a VAAPI scale reads the tone-mapped surface: %s", joined)
 				}
-				if subtitleCodec == "" && strings.Index(joined, "scale_vaapi=w=-2:h=1080:format=p010") > toneMap {
+				if resize := strings.Index(joined, "scale_vaapi=w=-2:h=1080:format=p010"); subtitleCodec == "" && (resize < 0 || resize > toneMap) {
 					t.Fatalf("graph does not resize before tone mapping: %s", joined)
 				}
 			})

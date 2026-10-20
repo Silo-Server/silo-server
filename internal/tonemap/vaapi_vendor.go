@@ -16,9 +16,9 @@ const intelPCIVendorID = "0x8086"
 // configured devices. Intel's VAAPI tone mapper turns HLG teal and inverted and
 // crushes PQ midtones (#2414), so when any device is an Intel GPU, VAAPI tone
 // maps HDR on OpenCL with the graph QSV uses (IntelFilter). Other vendors keep
-// tonemap_vaapi. One filter covers the whole device list, so a non-Intel
-// device listed beside an Intel one fails the OpenCL HDR smoke and the backend
-// offers HDR on neither.
+// tonemap_vaapi. One filter covers the whole device list, and FFmpeg maps VAAPI
+// frames to OpenCL only on Intel, so a non-Intel device listed beside an Intel
+// one fails the HDR smoke and HDR is offered on neither.
 func vaapiFilter(hardwareDevice string) string {
 	if slices.ContainsFunc(probeDevices(hardwareDevice, BackendVAAPI), isIntelDRMDevice) {
 		return HardwareFilterOpenCL
@@ -31,12 +31,32 @@ func isIntelDRMDevice(device string) bool {
 }
 
 // drmVendor returns the PCI vendor ID of a /dev/dri device, or "" when the
-// device isn't a DRM node or sysfs can't be read.
+// device isn't a DRM node or sysfs can't be read. sysfs is not namespaced, so
+// a node that exists is looked up by its device number: a container may name
+// another GPU's node renderD128, and a link may take several hops.
 func drmVendor(device string) string {
 	if !strings.HasPrefix(device, "/dev/dri/") {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(sysfsRoot, "class", "drm", drmNodeName(device), "device", "vendor"))
+	if number, ok := charDeviceNumber(device); ok {
+		if vendor := readSysfsVendor("dev", "char", number); vendor != "" {
+			return vendor
+		}
+	}
+	return readSysfsVendor("class", "drm", drmNodeName(device))
+}
+
+// drmVendorUnreadable reports whether device exists but sysfs doesn't give its
+// GPU vendor.
+func drmVendorUnreadable(device string) bool {
+	_, exists := charDeviceNumber(device)
+	return exists && drmVendor(device) == ""
+}
+
+// readSysfsVendor reads the PCI vendor of the sysfs device directory at dir
+// under sysfsRoot.
+func readSysfsVendor(dir ...string) string {
+	data, err := os.ReadFile(filepath.Join(sysfsRoot, filepath.Join(dir...), "device", "vendor"))
 	if err != nil {
 		return ""
 	}
@@ -53,15 +73,4 @@ func drmNodeName(device string) string {
 		device = target
 	}
 	return filepath.Base(device)
-}
-
-// VAAPIOpenCLInitArgs declares the OpenCL device a VAAPI graph derives from
-// the VAAPI device alias. Only an HDR source tone mapped on OpenCL needs it;
-// SDR bases convert on VAAPI alone, so they keep working on a host without an
-// OpenCL runtime.
-func VAAPIOpenCLInitArgs(alias, filter string, kind SourceKind) []string {
-	if filter != HardwareFilterOpenCL || IsSDRSource(kind) {
-		return nil
-	}
-	return []string{initHWDeviceFlag, "opencl=ocl@" + alias}
 }

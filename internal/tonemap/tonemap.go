@@ -797,7 +797,7 @@ func QSVInteropFilter() string {
 // qsvVAAPIInitDevice builds the Intel-specific VAAPI device declaration used
 // to derive a QSV encoding device.
 func qsvVAAPIInitDevice(device string) string {
-	return "vaapi=va:" + device + ",driver=iHD,kernel_driver=i915,vendor_id=0x8086"
+	return "vaapi=va:" + device + ",driver=iHD,kernel_driver=i915,vendor_id=" + intelPCIVendorID
 }
 
 // initHWDeviceFlag is FFmpeg's hardware-device declaration flag, shared by
@@ -817,6 +817,22 @@ func QSVInitDeviceArgs(device string) []string {
 // filter graph and encoder reference.
 func VAAPIInitDeviceArgs(alias, device string) []string {
 	return []string{initHWDeviceFlag, "vaapi=" + alias + ":" + device}
+}
+
+// VAAPIOpenCLInitArgs declares the OpenCL device a VAAPI graph derives from
+// the VAAPI device alias, when OpenCLToneMaps says the graph needs one.
+func VAAPIOpenCLInitArgs(alias, filter string, kind SourceKind) []string {
+	if !OpenCLToneMaps(filter, kind) {
+		return nil
+	}
+	return []string{initHWDeviceFlag, "opencl=ocl@" + alias}
+}
+
+// OpenCLToneMaps reports whether a recipe frozen with filter converts kind on
+// OpenCL. SDR bases convert on VAAPI alone, so they keep working on a host
+// without an OpenCL runtime.
+func OpenCLToneMaps(filter string, kind SourceKind) bool {
+	return filter == HardwareFilterOpenCL && !IsSDRSource(kind)
 }
 
 // HDRMetadataRemovalFilter removes side data that would otherwise incorrectly

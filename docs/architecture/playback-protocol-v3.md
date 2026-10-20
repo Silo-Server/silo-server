@@ -1826,11 +1826,13 @@ pooled executors. The generic tone-map transformation does not reveal hardware
 selection policy; the server freezes a validated executor into each accepted
 recipe. Heterogeneous pools are filtered again at transport startup, and a stale
 or older node advertisement is rejected instead of silently changing modes.
-On an Intel GPU (PCI vendor `0x8086` in sysfs), the VAAPI executor tone maps
-HDR with `tonemap_opencl`, the graph QSV uses, and encodes with `h264_vaapi`:
-Intel's `tonemap_vaapi` turns HLG teal and inverted and crushes PQ midtones.
-Other VAAPI devices keep `tonemap_vaapi`, as does a device whose vendor can't be
-read. The executor's advertised filter names the choice.
+When its device list includes an Intel GPU (PCI vendor `0x8086` in sysfs), the
+VAAPI executor tone maps HDR with `tonemap_opencl`, the graph QSV uses, and
+encodes with `h264_vaapi`: Intel's `tonemap_vaapi` turns HLG teal and inverted
+and crushes PQ midtones. FFmpeg maps VAAPI frames to OpenCL only on Intel, so a
+non-Intel device in the same list fails the HDR smoke. Lists without an Intel
+GPU keep `tonemap_vaapi`, as does a device whose vendor can't be read. The
+executor's advertised filter names the choice.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
 legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
@@ -1839,8 +1841,8 @@ when its primaries and matrix are both tagged BT.709.
 Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
 resolve to the `dolby_vision` source kind. Only executors that apply the RPU
 advertise it: software `tonemapx`, `tonemap_opencl` on QSV and Intel VAAPI, and
-NVENC `tonemap_cuda`. VAAPI `tonemap_vaapi` and VideoToolbox `scale_vt` cannot, so a
-pool of those executors still refuses these sources with
+NVENC `tonemap_cuda`. VAAPI `tonemap_vaapi` and VideoToolbox `scale_vt` cannot,
+so a pool of those executors still refuses these sources with
 `hdr_transcode_unsupported`. A source without an RPU, or with a declared absent
 base layer, remains unsupported. Profile 5 is accepted from its configuration
 record. ID `0` on any other profile says nothing about the base, so it is
