@@ -1828,8 +1828,8 @@ recipe. Heterogeneous pools are filtered again at transport startup, and a stale
 or older node advertisement is rejected instead of silently changing modes.
 When its device list includes an Intel GPU (PCI vendor `0x8086` in sysfs), the
 VAAPI executor tone maps HDR with `tonemap_opencl`, the graph QSV uses, and
-encodes with `h264_vaapi`: Intel's `tonemap_vaapi` turns HLG teal and inverted
-and crushes PQ midtones. FFmpeg maps VAAPI frames to OpenCL only on Intel, so a
+hands the frames straight to the VAAPI encoder: Intel's `tonemap_vaapi` turns
+HLG teal and inverted and crushes PQ midtones. FFmpeg maps VAAPI frames to OpenCL only on Intel, so a
 non-Intel device in the same list fails the HDR smoke. Lists without an Intel
 GPU keep `tonemap_vaapi`, as does a device whose vendor can't be read. The
 executor's advertised filter names the choice.

@@ -24,12 +24,18 @@ func fakeDRMVendors(t *testing.T, vendors map[string]string) {
 	t.Helper()
 	root := t.TempDir()
 	for node, vendor := range vendors {
-		dir := filepath.Join(root, "class", "drm", node, "device")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
+		dirs := []string{filepath.Join(root, "class", "drm", node, "device")}
+		// A host that has this node looks it up by device number.
+		if number, ok := charDeviceNumber("/dev/dri/" + node); ok {
+			dirs = append(dirs, filepath.Join(root, "dev", "char", number, "device"))
 		}
-		if err := os.WriteFile(filepath.Join(dir, "vendor"), []byte(vendor+"\n"), 0o644); err != nil {
-			t.Fatal(err)
+		for _, dir := range dirs {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "vendor"), []byte(vendor+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	previous := sysfsRoot
@@ -176,6 +182,23 @@ func TestCharDeviceNumberReadsTheNode(t *testing.T) {
 		if got, ok := charDeviceNumber(path); ok {
 			t.Fatalf("charDeviceNumber(%q) = %q, want none", path, got)
 		}
+	}
+
+	// An existing device reads its vendor by number and never by name.
+	root := t.TempDir()
+	for dir, vendor := range map[string]string{"dev/char/1:3": "0x8086", "class/drm/null": "0x1002"} {
+		if err := os.MkdirAll(filepath.Join(root, dir, "device"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, dir, "device", "vendor"), []byte(vendor+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	previous := sysfsRoot
+	sysfsRoot = root
+	t.Cleanup(func() { sysfsRoot = previous })
+	if got := drmVendor("/dev/null"); got != "0x8086" {
+		t.Fatalf("drmVendor(/dev/null) = %q, want the vendor under its device number", got)
 	}
 }
 

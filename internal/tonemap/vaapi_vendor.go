@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 )
 
 // sysfsRoot is where DRM device facts are read; tests point it at a fixture tree.
@@ -30,20 +31,19 @@ func isIntelDRMDevice(device string) bool {
 	return strings.EqualFold(drmVendor(device), intelPCIVendorID)
 }
 
-// drmVendor returns the PCI vendor ID of a /dev/dri device, or "" when the
-// device isn't a DRM node or sysfs can't be read. sysfs is not namespaced, so
-// a node that exists is looked up by its device number: a container may name
-// another GPU's node renderD128, and a link may take several hops.
+// drmVendor returns the PCI vendor ID of a render device, or "" when sysfs
+// doesn't give one. sysfs is not namespaced, so a device that exists is looked
+// up by its device number, never by name: a container may give another GPU's
+// node the name renderD128, and a link may take several hops. Only a
+// /dev/dri path that doesn't exist falls back to its node name.
 func drmVendor(device string) string {
-	if !strings.HasPrefix(device, "/dev/dri/") {
-		return ""
-	}
 	if number, ok := charDeviceNumber(device); ok {
-		if vendor := readSysfsVendor("dev", "char", number); vendor != "" {
-			return vendor
-		}
+		return readSysfsVendor("dev", "char", number)
 	}
-	return readSysfsVendor("class", "drm", drmNodeName(device))
+	if strings.HasPrefix(device, "/dev/dri/") {
+		return readSysfsVendor("class", "drm", drmNodeName(device))
+	}
+	return ""
 }
 
 // drmVendorUnreadable reports whether device exists but sysfs doesn't give its
@@ -52,6 +52,10 @@ func drmVendorUnreadable(device string) bool {
 	_, exists := charDeviceNumber(device)
 	return exists && drmVendor(device) == ""
 }
+
+// unreadableVendorWarned latches the unreadable-vendor warning to one line per
+// device: an incomplete probe reruns every negative-cache interval.
+var unreadableVendorWarned sync.Map
 
 // readSysfsVendor reads the PCI vendor of the sysfs device directory at dir
 // under sysfsRoot.

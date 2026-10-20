@@ -440,8 +440,10 @@ func hardwareSmokeSourceKinds(ctx context.Context, run CommandRunner, ffmpegPath
 	validated := smokeKindsForFilter(filter)
 	for _, device := range devices {
 		if filter == HardwareFilterVAAPI && drmVendorUnreadable(device) {
-			slog.WarnContext(ctx, "could not read the VAAPI device's GPU vendor, so HDR is tone mapped with tonemap_vaapi, which gives wrong colors on Intel GPUs",
-				"component", "tonemap", "device", device)
+			if _, warned := unreadableVendorWarned.LoadOrStore(device, true); !warned {
+				slog.WarnContext(ctx, "could not read the VAAPI device's GPU vendor, so HDR is tone mapped with tonemap_vaapi, which gives wrong colors on Intel GPUs",
+					"component", "tonemap", "device", device)
+			}
 		}
 		supported := smokeSourceKinds(ctx, run, ffmpegPath, hardwareProbeCommandTimeout(backend), validated, func(kind SourceKind) []string {
 			return hardwareSmokeArgs(fixturePath, backend, filter, device, kind)
