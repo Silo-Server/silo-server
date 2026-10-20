@@ -151,6 +151,33 @@ const REARM_AFTER_UNADOPTED_MS = 60_000;
 /** The contract's floor for `bandwidth_estimate_kbps`. */
 const MIN_ESTIMATE_KBPS = 100;
 
+/** The constants the shared vectors pin, by their names there. */
+export const BUFFERING_QUALITY_CONSTANTS = {
+  STARTUP_GRACE_MS,
+  STALL_MIN_MS,
+  RENDERER_WAIT_BUFFER_MS,
+  STALLS_BEFORE_TRIGGER,
+  STALL_WINDOW_MS,
+  LONG_STALL_MS,
+  PROMPT_SECONDS: BUFFERING_PILL_MS / 1000,
+  REOFFER_MIN_MS,
+  NO_LOWER_COOLDOWN_MS,
+  REARM_AFTER_UNADOPTED_MS,
+  STEP_DOWN_RATIO: 0.7,
+  MIN_ESTIMATE_KBPS,
+} as const;
+
+/** What the pills and notices say, the same on every client. */
+export const BUFFERING_QUALITY_COPY = {
+  prompt_title: "Playback keeps buffering",
+  prompt_lower: "Lower quality",
+  prompt_keep: "Keep quality",
+  undo_caption: "Quality lowered to stop buffering",
+  undo_action: "Restore quality",
+  lowered: "Quality lowered to stop buffering",
+  cant_lower: "Can't lower quality for this video",
+} as const;
+
 /**
  * The estimate Auto replans with after `deliveredKbps` stalled, or undefined
  * when it would fall below the contract's floor. Auto plans for 80% of an

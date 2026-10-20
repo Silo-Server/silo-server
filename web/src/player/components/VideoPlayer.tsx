@@ -1,5 +1,6 @@
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
 import { MEDIA_ENDED_EVENT, useAutoQualityDownshift } from "../hooks/useAutoQualityDownshift";
+import { BUFFERING_QUALITY_COPY } from "../buffering-quality";
 import type {
   BufferingAnswer,
   BufferingMode,
@@ -4400,10 +4401,7 @@ export function VideoPlayer({
       onQualitySelect?.(request.quality_preference, currentTime, request, onAdopt),
     onNotice: (key) => {
       const next: PlaybackNoticeState = {
-        message:
-          key === "lowered"
-            ? "Quality lowered to stop buffering"
-            : "Can't lower quality for this video",
+        message: BUFFERING_QUALITY_COPY[key],
         tone: "info",
         visibleMs: BUFFERING_NOTICE_VISIBLE_MS,
       };

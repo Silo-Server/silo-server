@@ -1,5 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { BUFFERING_PILL_MS, type BufferingAnswer, type BufferingPill } from "../buffering-quality";
+import {
+  BUFFERING_PILL_MS,
+  BUFFERING_QUALITY_COPY as COPY,
+  type BufferingAnswer,
+  type BufferingPill,
+} from "../buffering-quality";
 
 interface BufferingQualityPillProps {
   kind: BufferingPill;
@@ -58,7 +63,7 @@ export function BufferingQualityPill({
       className="animate-in fade-in pointer-events-auto max-w-xl rounded-2xl border border-sky-400/50 bg-sky-500/15 px-5 py-4 text-white shadow-2xl backdrop-blur duration-150"
     >
       <div id={titleId} role="status" className="text-sm font-semibold tracking-wide text-white">
-        {prompt ? "Playback keeps buffering" : "Quality lowered to stop buffering"}
+        {prompt ? COPY.prompt_title : COPY.undo_caption}
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <button
@@ -72,7 +77,7 @@ export function BufferingQualityPill({
             className="absolute inset-y-0 left-0 bg-white/15"
             style={{ width: `${progress * 100}%` }}
           />
-          <span className="relative">{prompt ? "Lower quality" : "Restore quality"}</span>
+          <span className="relative">{prompt ? COPY.prompt_lower : COPY.undo_action}</span>
         </button>
         {prompt ? (
           <button
@@ -81,7 +86,7 @@ export function BufferingQualityPill({
             className={ACTION_CLASS}
             onClick={() => onAnswer("select_keep")}
           >
-            Keep quality
+            {COPY.prompt_keep}
           </button>
         ) : null}
       </div>

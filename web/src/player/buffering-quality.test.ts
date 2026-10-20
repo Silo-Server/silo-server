@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import vectors from "../../../docs/design/schemas/buffering-quality/v1/vectors.json";
 import {
+  BUFFERING_QUALITY_CONSTANTS,
+  BUFFERING_QUALITY_COPY,
   BufferingQualityController,
   type BufferingEvent,
   type BufferingMode,
@@ -168,4 +170,9 @@ it("counts a stall that a pause ends in the summary's time but not its count", (
     stall_total_ms: 3000,
     stall_longest_ms: 3000,
   });
+});
+
+it("uses the vectors' constants and copy", () => {
+  expect(BUFFERING_QUALITY_CONSTANTS).toEqual(vectors.constants);
+  expect(BUFFERING_QUALITY_COPY).toEqual(vectors.copy);
 });
