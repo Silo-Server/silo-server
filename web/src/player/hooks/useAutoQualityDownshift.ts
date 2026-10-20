@@ -276,18 +276,21 @@ export function useAutoQualityDownshift(options: Options) {
       starting.current = false;
       send("playing");
     };
+    const waitCause = (): BufferingEvent["cause"] => {
+      if (video.seeking || seekSincePlaying) return "seek";
+      // Until its first frame, a start the viewer means to play is the plan's
+      // wait, though the transport emptied the element on the way and it has
+      // not begun to play yet; an explicit pause ends the start.
+      if (starting.current) return undefined;
+      if (reloadSincePlaying) return "reload";
+      if (video.paused) return "pause";
+      if (decoderRecovering(video) || bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS)
+        return "renderer";
+      return undefined;
+    };
     const waiting = () => {
       stalledAt = video.currentTime;
-      const cause =
-        video.seeking || seekSincePlaying
-          ? "seek"
-          : reloadSincePlaying
-            ? "reload"
-            : video.paused
-              ? "pause"
-              : decoderRecovering(video) || bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS
-                ? "renderer"
-                : undefined;
+      const cause = waitCause();
       rendererWait = cause === "renderer";
       send("waiting", cause);
     };

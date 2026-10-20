@@ -230,6 +230,33 @@ it("times a plan's slow start as a wait, from adoption", () => {
   });
 });
 
+it("keeps timing a slow start through the waiting that follows its reload", () => {
+  const video = document.createElement("video");
+  Object.defineProperty(video, "paused", { value: true, configurable: true });
+  const onReplan = vi.fn();
+  renderHook((props) => useAutoQualityDownshift(props), {
+    initialProps: {
+      videoRef: { current: video },
+      enabled: true,
+      sessionId: "title",
+      plan,
+      planRevision: 1,
+      mode: "always" as const,
+      obscured: false,
+      playIntent: () => true,
+      onReplan,
+      onNotice: vi.fn(),
+    },
+  });
+  // The transport empties the element, which then reports it is waiting.
+  act(() => {
+    video.dispatchEvent(new Event("emptied"));
+    video.dispatchEvent(new Event("waiting"));
+  });
+  act(() => vi.advanceTimersByTime(16_100));
+  expect(onReplan).toHaveBeenCalledTimes(1);
+});
+
 it("does not time a start the player will not play", () => {
   const video = document.createElement("video");
   Object.defineProperty(video, "paused", { value: true, configurable: true });
