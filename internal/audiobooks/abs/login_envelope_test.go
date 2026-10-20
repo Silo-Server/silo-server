@@ -18,7 +18,7 @@ func TestLoginEnvelope_HasRequiredKeys(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, time.Now(), "u1", "Display Name", "access.jwt", "refresh.jwt", true)
+	env := h.loginEnvelope(req.Context(), time.Now(), ctxAuth{UserID: "u1"}, "Display Name", "access.jwt", "refresh.jwt", true)
 	body, err := json.Marshal(env)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -106,7 +106,7 @@ func TestLoginEnvelope_XReturnTokens_SurfacesOnUser(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.Header.Set("x-return-tokens", "true")
 
-	env := h.loginEnvelope(req, time.Now(), "u1", "Display Name", "access.jwt", "refresh.jwt", true)
+	env := h.loginEnvelope(req.Context(), time.Now(), ctxAuth{UserID: "u1"}, "Display Name", "access.jwt", "refresh.jwt", true)
 	user, ok := env["user"].(map[string]any)
 	if !ok {
 		t.Fatalf("user is not a map: %T", env["user"])
@@ -127,7 +127,7 @@ func TestLoginEnvelope_NoXReturnTokens(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, time.Now(), "u1", "Display Name", "access.jwt", "refresh.jwt", false)
+	env := h.loginEnvelope(req.Context(), time.Now(), ctxAuth{UserID: "u1"}, "Display Name", "access.jwt", "refresh.jwt", false)
 	user, _ := env["user"].(map[string]any)
 	if user["accessToken"] != "access.jwt" {
 		t.Errorf("user.accessToken = %v, want access.jwt (must always be present)", user["accessToken"])
@@ -144,7 +144,7 @@ func TestLoginEnvelope_DisplayNameFallsBackToUserID(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, time.Now(), "user-42", "", "a", "r", false)
+	env := h.loginEnvelope(req.Context(), time.Now(), ctxAuth{UserID: "user-42"}, "", "a", "r", false)
 	user, _ := env["user"].(map[string]any)
 	if user["username"] != "user-42" {
 		t.Errorf("username = %v, want user-42 (fallback)", user["username"])
