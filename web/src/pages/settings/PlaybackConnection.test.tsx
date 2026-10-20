@@ -224,10 +224,7 @@ it.each([
     { type: "cellular" },
     "Speed tests are skipped on cellular, and the Cellular quality settings apply.",
   ],
-  [
-    { type: "wifi", saveData: true },
-    "Speed tests are skipped on metered networks.",
-  ],
+  [{ type: "wifi", saveData: true }, "Speed tests are skipped on metered networks."],
 ])("replaces the speed, Test speed and the budget on %o", async (network, note) => {
   probe.network = network;
   request.mockImplementation(async (operation: string) =>

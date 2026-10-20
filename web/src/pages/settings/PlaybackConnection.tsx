@@ -146,8 +146,7 @@ function meteredNote(): string | undefined {
   const network = networkInformation();
   if (network?.type === "cellular")
     return "Speed tests are skipped on cellular, and the Cellular quality settings apply.";
-  if (network?.saveData === true)
-    return "Speed tests are skipped on metered networks.";
+  if (network?.saveData === true) return "Speed tests are skipped on metered networks.";
   return undefined;
 }
 
