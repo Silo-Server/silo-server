@@ -12,6 +12,19 @@ to server rows. Paging uses that effective row's configuration. A row hidden or
 removed by the profile, a row belonging to another profile, or a row in an
 inaccessible library answers `404`, as an unknown section does.
 
+Every section type can be browsed. Query-backed rows (genre, custom filter,
+collection, recently added or released, random, watchlist, favorites) page their
+source. Every other row, such as the recommendation rows, trending, Continue
+Watching and Next Up, is built by its section fetcher, so it is
+row-backed: the server lists the items the row shows, in its order, then the
+rest of a fetch of at most 200 items, and pages that list. `total` is exact
+below the cap; a list that reaches 200 items answers `total_exact: false`, since
+the row may hold more. Some engines produce fewer items than the cap
+(recommendation rows stop at 60). On Home, row-backed lists drop watched items when the profile
+hides them, as the row does. Each page request rebuilds the list, so a row
+whose source moves (trending over a sliding window) can shift between pages. The
+frozen `/api/v1` catalog keeps answering row-backed sections with no items.
+
 ## People search
 
 `GET /api/v2/catalog/people` (`listPeople`) accepts a name query in `q` and
