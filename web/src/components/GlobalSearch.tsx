@@ -495,10 +495,13 @@ export function GlobalSearch({
     setSelectedKey(key);
   };
 
-  const showLoading = (previewQuery.isFetching || peopleQuery.isFetching) && resultCount === 0;
+  const boxSetsFetching = boxSetsInScope && boxSetQuery.isFetching;
+  const showLoading =
+    (previewQuery.isFetching || peopleQuery.isFetching || boxSetsFetching) && resultCount === 0;
   const showEmpty =
     !previewQuery.isFetching &&
     !peopleQuery.isFetching &&
+    !boxSetsFetching &&
     debouncedQuery.length > 0 &&
     resultCount === 0 &&
     !previewQuery.isError &&

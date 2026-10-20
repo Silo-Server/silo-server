@@ -477,6 +477,18 @@ describe("GlobalSearch box set results", () => {
     }
   });
 
+  it("waits for box sets before saying there are no matches", () => {
+    mocks.useQuery.mockReturnValue({
+      data: { total: 0, has_more: false, items: [] },
+      isFetching: false,
+      isError: false,
+    });
+    mocks.usePersonSearch.mockReturnValue({ data: [], isFetching: false });
+    mocks.useBoxSetSearch.mockReturnValue({ data: undefined, isFetching: true });
+    renderOpen();
+    expect(screen.queryByText("No matches")).toBeNull();
+  });
+
   it("opens the box set page from the keyboard", () => {
     const input = renderOpen();
 
