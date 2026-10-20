@@ -370,6 +370,8 @@ const LOWER_QUALITY_ACTION_LABEL = "Lower quality";
 // not a slow link, by the Auto downshift.
 const TRANSPORT_TROUBLE_WINDOW_MS = 15_000;
 const PLAYBACK_NOTICE_VISIBLE_MS = 8_000;
+/** The buffering controller's display-only notices show for 5 seconds on every client. */
+const BUFFERING_NOTICE_VISIBLE_MS = 5_000;
 const ROOM_RECONNECTING_MESSAGE = "Reconnecting to room. Controls are temporarily unavailable.";
 // The server returns a room to the lobby once its position is within two
 // seconds of the end of the file. A viewer this close to its own end when the
@@ -385,6 +387,8 @@ interface PlaybackNoticeState {
   tone: "info" | "warning";
   actionLabel?: string;
   onAction?: () => void;
+  /** How long it shows; PLAYBACK_NOTICE_VISIBLE_MS when absent. */
+  visibleMs?: number;
 }
 
 function watchTogetherNotice(
@@ -647,6 +651,16 @@ export function VideoPlayer({
   const [buffered, setBuffered] = useState<TimeRanges | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // iPhone Safari plays fullscreen in its own native view, which draws no
+  // page overlays, so no pill or notice can be seen there.
+  const [nativeVideoFullscreen, setNativeVideoFullscreen] = useState(false);
+  const [pageHidden, setPageHidden] = useState(
+    () => typeof document !== "undefined" && document.visibilityState === "hidden",
+  );
+  // A buffering notice that arrived while another notice held the slot.
+  const [queuedBufferingNotice, setQueuedBufferingNotice] = useState<PlaybackNoticeState | null>(
+    null,
+  );
   const [videoFit, setVideoFit] = useState<VideoFitMode>("contain");
   const [buffering, setBuffering] = useState(false);
   const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1081,6 +1095,7 @@ export function VideoPlayer({
 
   useEffect(() => {
     setNotice(null);
+    setQueuedBufferingNotice(null);
     setVideoFit("contain");
   }, [sessionId]);
 
@@ -1134,7 +1149,7 @@ export function VideoPlayer({
   // identical notice renders again. A minimized player keeps it until the
   // viewer can see it, and the reconnect warning stays for the whole outage.
   useEffect(() => {
-    if (!notice || isDetached) return;
+    if (!notice || isDetached || pageHidden || nativeVideoFullscreen) return;
     if (holdReconnectNotice) return;
     const timer = setTimeout(
       () =>
@@ -1144,10 +1159,23 @@ export function VideoPlayer({
             ? watchTogetherNotice(ROOM_RECONNECTING_MESSAGE, "warning")
             : null;
         }),
-      PLAYBACK_NOTICE_VISIBLE_MS,
+      notice.visibleMs ?? PLAYBACK_NOTICE_VISIBLE_MS,
     );
     return () => clearTimeout(timer);
-  }, [holdReconnectNotice, isDetached, notice]);
+  }, [holdReconnectNotice, isDetached, nativeVideoFullscreen, notice, pageHidden]);
+
+  // A queued buffering notice takes the slot once it is free.
+  useEffect(() => {
+    if (notice || !queuedBufferingNotice) return;
+    setNotice(queuedBufferingNotice);
+    setQueuedBufferingNotice(null);
+  }, [notice, queuedBufferingNotice]);
+
+  useEffect(() => {
+    const onVisibility = () => setPageHidden(document.visibilityState === "hidden");
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   useEffect(() => {
     compatibilityFallbackKeyRef.current = null;
@@ -3230,7 +3258,13 @@ export function VideoPlayer({
   // -- Fullscreen tracking --
   useEffect(() => {
     const video = videoRef.current;
-    const onChange = () => setIsFullscreen(isPlayerFullscreen(video));
+    const onChange = () => {
+      setIsFullscreen(isPlayerFullscreen(video));
+      setNativeVideoFullscreen(
+        !!(video as (HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }) | null)
+          ?.webkitDisplayingFullscreen,
+      );
+    };
 
     // A player mounted for the next episode can start inside a fullscreen
     // host, so read the current state rather than waiting for a change.
@@ -4296,7 +4330,9 @@ export function VideoPlayer({
     attemptId: playbackAttemptId,
     mode: bufferingMode ?? "never",
     plan: bufferingPlan,
-    obscured: higherPriorityPillActive || isDetached,
+    // Pills also wait while nobody can see them: a minimized player, a hidden
+    // tab, or iPhone's native fullscreen view.
+    obscured: higherPriorityPillActive || isDetached || pageHidden || nativeVideoFullscreen,
     playIntent: () =>
       shouldAutoPlay && !connectionReplacedRef.current && !roomPlaybackActiveRef.current,
     transportTrouble: () =>
@@ -4305,14 +4341,19 @@ export function VideoPlayer({
       Date.now() - lastTransportErrorAtRef.current < TRANSPORT_TROUBLE_WINDOW_MS,
     onReplan: (request, onAdopt) =>
       onQualitySelect?.(request.quality_preference, currentTime, request, onAdopt),
-    onNotice: (key) =>
-      setNotice({
+    onNotice: (key) => {
+      const next: PlaybackNoticeState = {
         message:
           key === "lowered"
             ? "Quality lowered to stop buffering"
             : "Can't lower quality for this video",
         tone: "info",
-      }),
+        visibleMs: BUFFERING_NOTICE_VISIBLE_MS,
+      };
+      // It waits while another notice holds the slot.
+      if (noticeRef.current) setQueuedBufferingNotice(next);
+      else setNotice(next);
+    },
     onSummary: (summaryPlan, summary, pageEnding) => {
       const fragments = fragmentThroughputRef.current;
       // Under a second of receiving can be one burst from a buffer, a rate
@@ -4331,7 +4372,8 @@ export function VideoPlayer({
     },
     onKeptEstimate,
   });
-  const bufferingPill = isDetached ? null : bufferingQuality.pill;
+  const bufferingPill =
+    isDetached || pageHidden || nativeVideoFullscreen ? null : bufferingQuality.pill;
   const { answer: answerBufferingPill } = bufferingQuality;
   // An answer removes the pill; focus that was on it moves to the transport.
   const answerBuffering = useCallback(
@@ -4350,6 +4392,8 @@ export function VideoPlayer({
     const promptSelector = '[data-buffering-prompt="true"]';
     const keydown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      // The reconnect overlay covers the pill and takes Back first.
+      if (connectionStatusRef.current !== "connected") return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       const targetInPill = target?.closest(promptSelector) != null;
       const isEditingOrInMenu =

@@ -5786,6 +5786,89 @@ describe("VideoPlayer buffering pill", () => {
     act(() => vi.advanceTimersByTime(15_000));
     expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
   });
+
+  function askPlayer(overrides: Partial<Parameters<typeof VideoPlayer>[0]> = {}) {
+    const rendered = renderPlayer({
+      bufferingMode: "ask",
+      qualityPreference: "auto",
+      plan: fixturePlanV3({
+        ...directPlan,
+        available_qualities: [
+          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
+          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
+        ],
+        source: { ...directPlan.source, bitrate_kbps: 20_000 },
+      }),
+      ...overrides,
+    });
+    const video = rendered.container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    fireEvent.loadedMetadata(video);
+    markPlaying(video);
+    fireEvent.playing(video);
+    act(() => vi.advanceTimersByTime(20_000));
+    return { ...rendered, video };
+  }
+
+  function setVisibility(state: "visible" | "hidden") {
+    Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+  }
+
+  it("keeps a prompt's timer while the tab is hidden", () => {
+    const { video } = askPlayer();
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+    try {
+      setVisibility("hidden");
+      act(() => vi.advanceTimersByTime(20_000));
+      setVisibility("visible");
+      act(() => vi.advanceTimersByTime(200));
+      expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+    } finally {
+      setVisibility("visible");
+    }
+  });
+
+  it("leaves Back to the reconnect overlay that covers the pill", () => {
+    const rendered = askPlayer();
+    fireEvent.waiting(rendered.video);
+    act(() => vi.advanceTimersByTime(7_000));
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+    rendered.rerenderPlayer({ connectionStatus: "reconnecting" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    rendered.rerenderPlayer({ connectionStatus: "connected" });
+    // Back did not answer the prompt as Keep quality.
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+  });
+
+  it("shows the buffering notice for five seconds", async () => {
+    const rendered = renderPlayer({
+      bufferingMode: "always",
+      qualityPreference: "auto",
+      plan: fixturePlanV3({
+        ...directPlan,
+        available_qualities: [{ label: "original", preserves_source: true, bitrate_kbps: 20_000 }],
+        source: { ...directPlan.source, bitrate_kbps: 20_000 },
+      }),
+    });
+    const video = rendered.container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    fireEvent.loadedMetadata(video);
+    markPlaying(video);
+    fireEvent.playing(video);
+    act(() => vi.advanceTimersByTime(20_000));
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(6_100));
+    expect(screen.getByText("Can't lower quality for this video")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(4_800));
+    expect(screen.getByText("Can't lower quality for this video")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.queryByText("Can't lower quality for this video")).toBeNull();
+  });
 });
 
 describe("VideoPlayer playback throughput", () => {
