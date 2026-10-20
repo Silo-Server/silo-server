@@ -43,6 +43,9 @@ func TestBandwidthProbeTarget(t *testing.T) {
 		{"remote cap lowers it", 91000, &access.Scope{MaxRemoteStreamBitrateKbps: 20000}, 25000},
 		{"a higher cap leaves it", 91000, &access.Scope{MaxRemoteStreamBitrateKbps: 200000}, 113750},
 		{"never above the estimate bound", 11_700_000, nil, 1_000_000},
+		// A remote cap of 50 kbps targets 63 by the arithmetic, which no
+		// probe result may report.
+		{"never below the probe floor", 91000, &access.Scope{MaxRemoteStreamBitrateKbps: 50}, 100},
 		{"no bitrates, no target", 0, &access.Scope{MaxRemoteStreamBitrateKbps: 20000}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

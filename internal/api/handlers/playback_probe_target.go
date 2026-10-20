@@ -27,7 +27,11 @@ const (
 	// A failed read is retried soon, without a query on every capability read.
 	probeTargetErrorTTL     = time.Minute
 	probeTargetQueryTimeout = 10 * time.Second
-	maxProbeTargetKbps      = 1_000_000
+	// A probe result is 100 to 1,000,000 kbps, so a target must be too: a
+	// quick test that reached a lower one would report a result the server
+	// refuses.
+	minProbeTargetKbps = 100
+	maxProbeTargetKbps = 1_000_000
 )
 
 // probeTargetCache keeps the percentile for each library scope, which changes
@@ -47,7 +51,8 @@ type probeTargetEntry struct {
 // this viewer: the highest bitrate the server would plan for them, plus the
 // 25% headroom Auto's 80% margin needs to send it untouched. That bitrate is
 // the percentile of the files they can play, lowered to the administrator's
-// cap for their network. It is 0 when there are no bitrates to go on.
+// cap for their network, and never below the floor of a probe result. It is 0
+// when there are no bitrates to go on.
 func (h *PlaybackHandler) bandwidthProbeTargetKbps(ctx context.Context) int {
 	kbps := h.sourceBitratePercentile(ctx, AccessFilterFromContext(ctx, ""))
 	if kbps <= 0 {
@@ -56,7 +61,7 @@ func (h *PlaybackHandler) bandwidthProbeTargetKbps(ctx context.Context) int {
 	if capKbps := requestBitrateCapV3(ctx); capKbps > 0 && capKbps < kbps {
 		kbps = capKbps
 	}
-	return min((kbps*5+3)/4, maxProbeTargetKbps)
+	return min(max((kbps*5+3)/4, minProbeTargetKbps), maxProbeTargetKbps)
 }
 
 func (h *PlaybackHandler) sourceBitratePercentile(ctx context.Context, filter catalog.AccessFilter) int {
