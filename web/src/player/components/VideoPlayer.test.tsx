@@ -331,7 +331,32 @@ function roomConnection(
   };
 }
 
+function roomPlayCommand(overrides: Record<string, unknown> = {}) {
+  return {
+    command_id: "room-command-1",
+    session_id: "session-1",
+    selection_revision: 1,
+    action: "play" as const,
+    position_seconds: 100,
+    execute_at: new Date().toISOString(),
+    issued_at: new Date().toISOString(),
+    playback_state: "playing" as const,
+    ...overrides,
+  };
+}
+
 const reconnectingMessage = "Reconnecting to room. Controls are temporarily unavailable.";
+
+/**
+ * Makes jsdom's paused element report data ahead of the playhead, as a player
+ * whose media has loaded does. A room play waits for this before it starts.
+ */
+function markReady(video: HTMLVideoElement) {
+  Object.defineProperty(video, "readyState", {
+    configurable: true,
+    value: HTMLMediaElement.HAVE_FUTURE_DATA,
+  });
+}
 
 /** Makes jsdom's element report playback with data ahead of the playhead. */
 function markPlaying(video: HTMLVideoElement) {
@@ -379,16 +404,8 @@ describe("VideoPlayer room catch-up", () => {
     const video = rendered.container.querySelector("video")!;
     video.currentTime = localPosition - timelineOffset;
     fireFrameTimeUpdate(video);
-    const command = {
-      command_id: "room-command-1",
-      session_id: "session-1",
-      selection_revision: 1,
-      action: "play" as const,
-      position_seconds: 100,
-      execute_at: new Date().toISOString(),
-      issued_at: new Date().toISOString(),
-      playback_state: "playing" as const,
-    };
+    markReady(video);
+    const command = roomPlayCommand();
     return { ...rendered, connection, video, command, onReanchorSeek };
   }
 
@@ -597,6 +614,14 @@ describe("VideoPlayer room catch-up", () => {
       });
       const video = container.querySelector("video")!;
       if (stage !== "canplay") {
+        // The room plays. Its command ran before the media loaded, so the
+        // player's startup is what starts playback.
+        rerenderPlayer({
+          shouldAutoPlay: true,
+          watchTogetherConnection: { ...connection, transportCommand: roomPlayCommand() },
+        });
+        await act(() => vi.advanceTimersByTimeAsync(0));
+        expect(play).not.toHaveBeenCalled();
         Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
         await act(async () => fireEvent.canPlay(video));
         expect(play).toHaveBeenCalledOnce();
@@ -624,6 +649,121 @@ describe("VideoPlayer room catch-up", () => {
       expect(video.load).not.toHaveBeenCalled();
     },
   );
+
+  it("keeps a room member paused when its media loads before the room plays", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    // The room starts 2 s from now; this member's media is already playable.
+    rerenderPlayer({
+      shouldAutoPlay: true,
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: { ...command, execute_at: new Date(Date.now() + 2_000).toISOString() },
+      },
+    });
+    await act(async () => fireEvent.canPlay(video));
+    expect(play).not.toHaveBeenCalled();
+
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    expect(play).toHaveBeenCalledOnce();
+  });
+
+  it("starts a member whose media loads after the room's play from where the room is then", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(98.5, 80);
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    // Still loading when the play runs: nothing to position or start yet.
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_NOTHING,
+    });
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        transportCommand: { ...command, execute_at: new Date(Date.now() - 1_000).toISOString() },
+      },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(play).not.toHaveBeenCalled();
+    expect(playerSeek).not.toHaveBeenCalled();
+
+    // A clock update re-runs the room effect for the same command meanwhile;
+    // it must neither run the play again nor lose it.
+    rerenderPlayer({
+      watchTogetherConnection: {
+        ...connection,
+        serverTimeOffsetMs: 0.5,
+        transportCommand: { ...command, execute_at: new Date(Date.now() - 1_000).toISOString() },
+      },
+    });
+
+    // The media arrives 2 s later. The room is at 103 by then, 4.5 s ahead.
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    expect(play).not.toHaveBeenCalled();
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 30 },
+    });
+    markReady(video);
+    await act(async () => fireEvent.canPlay(video));
+
+    expect(playerSeek).toHaveBeenCalledOnce();
+    expect(playerSeek.mock.calls[0]?.[0]).toBeCloseTo(23, 2);
+    expect(play).toHaveBeenCalledOnce();
+    expect(video.playbackRate).toBe(1);
+  });
+
+  it("offers a click when the browser refuses the room's start at startup", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_NOTHING,
+    });
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    vi.mocked(video.play).mockRejectedValueOnce(
+      new DOMException("Autoplay blocked", "NotAllowedError"),
+    );
+    markReady(video);
+    await act(async () => fireEvent.canPlay(video));
+
+    expect(screen.getByRole("button", { name: "Join playback" })).toBeInTheDocument();
+  });
+
+  it("plays a room play at once on a started member that is waiting for data", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    // Startup is over: the member settled paused with the room.
+    await act(async () => fireEvent.canPlay(video));
+    // A room seek left it short of data when the room's play runs.
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_METADATA,
+    });
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(play).toHaveBeenCalledOnce();
+  });
+
+  it("rebuilds a member's stream that fails before playing at the room's position", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(0);
+    const onPlanFailure = vi.fn();
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_NOTHING,
+    });
+    rerenderPlayer({
+      onPlanFailure,
+      watchTogetherConnection: { ...connection, transportCommand: command },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    setMediaError(video, "decode failed");
+    fireEvent.error(video);
+
+    expect(onPlanFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "decoder_error" }),
+      103,
+    );
+  });
 
   it.each([1500, 30])("shows a requested room seek to %ss before the command arrives", (target) => {
     const { connection, video, rerenderPlayer, onReanchorSeek } = setup(100);
@@ -1636,6 +1776,19 @@ describe("VideoPlayer room catch-up", () => {
     Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
     await act(() => vi.advanceTimersByTimeAsync(1_500));
     expect(messages).toHaveBeenCalledWith(expect.objectContaining({ type: "state_report" }));
+  });
+
+  it("sends no position reports while a room play waits for the member's media", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    const messages = vi.mocked(connection.sendRoomMessage);
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_NOTHING,
+    });
+    rerenderPlayer({ watchTogetherConnection: { ...connection, transportCommand: command } });
+    messages.mockClear();
+    await act(() => vi.advanceTimersByTimeAsync(4_000));
+    expect(messages).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state_report" }));
   });
 
   it("runs one correction rebuild at a time and aims the next ahead by its startup", async () => {
@@ -2763,17 +2916,9 @@ describe("VideoPlayer room correction reloads", () => {
     const video = rendered.container.querySelector("video")!;
     video.currentTime = localPosition;
     fireFrameTimeUpdate(video);
-    const command = (id: string, overrides: Record<string, unknown> = {}) => ({
-      command_id: id,
-      session_id: "session-1",
-      selection_revision: 1,
-      action: "play" as const,
-      position_seconds: 100,
-      execute_at: new Date().toISOString(),
-      issued_at: new Date().toISOString(),
-      playback_state: "playing" as const,
-      ...overrides,
-    });
+    markReady(video);
+    const command = (id: string, overrides: Record<string, unknown> = {}) =>
+      roomPlayCommand({ command_id: id, ...overrides });
     return { ...rendered, connection, video, command, onReanchorSeek };
   }
 

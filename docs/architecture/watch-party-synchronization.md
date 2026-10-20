@@ -94,6 +94,12 @@ never seeks, except on a player that does not correct by rate. Rate and play
 state change when a command executes, never when it arrives, and users cannot
 change playback speed in a room.
 
+On the web, a member's player does not start playback on its own: it waits
+paused until a command has the room playing. A play that executes while the
+player's stream is still starting, before it has playable media, takes effect
+once it does, from the room's position at that moment, and a stream that fails
+before its first frame is rebuilt at that position.
+
 A player does not correct by rate when the rate cannot take effect or cannot be
 watched smoothly. Android measures the playhead while it nudges and stops
 nudging a mount that plays on at 1x (tunneled playback, passthrough audio, or a
@@ -164,8 +170,9 @@ miss the scene.
 - Stalls shorter than 2 seconds stay local. Clients report buffering only
   after 2 seconds without playable media, and the viewer converges on the room
   by playback rate. It sends no position reports while its element is
-  stalled, or while its media is unplayable and a readiness acknowledgement is
-  pending, because a stalled position is not a decision.
+  stalled, while its media is unplayable and a readiness acknowledgement is
+  pending, or while its media is unplayable in a playing room, because a
+  stalled position is not a decision.
 - A longer stall pauses the room for at most the 10-second waiting deadline,
   and the overlay names who everyone is waiting for. When a guest stalls, the
   room pauses where it is; only that guest is sent a seek to that point, and

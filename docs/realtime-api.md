@@ -83,12 +83,22 @@ connections for account-scoped settings changes. These rules also apply to
 administrator connections. Notifications retain their exact account/profile
 match and require a profile-bound subscription.
 
+One `user_settings` event is addressed to every viewer instead: an
+administrator-default change (`scope: "default"`, see
+[settings-api.md](settings-api.md)) names no account or profile and reaches
+every connection subscribed to `user_settings`, bound or unbound, including a
+remote-playback handoff. Like other settings events it carries the key and
+scope, not the value. The server marks it for every viewer explicitly, so a
+personal event that lacks its account still reaches no one. In a cluster, the
+event reaches every viewer only once all nodes run a server that sets and
+honors that marker.
+
 An unbound socket can still subscribe to `user_state` and `user_settings`, but
-receives only account-scoped settings changes from those channels. A
-`user_state` producer without a profile, including an unmanaged download's
-`download` event, reaches no socket. Settings events name the changed key and
-scope; they do not carry its value. Channel eligibility, snapshots and socket
-authority/lifetime checks are unchanged.
+receives only account-scoped and administrator-default settings changes from
+those channels. A `user_state` producer without a profile, including an
+unmanaged download's `download` event, reaches no socket. Settings events name
+the changed key and scope; they do not carry its value. Channel eligibility,
+snapshots and socket authority/lifetime checks are unchanged.
 
 On the bridge socket, only a ticket from `POST /api/v1/events/ws-ticket` binds a
 profile. The handshake's `X-Profile-Id` decides administrator access but binds
