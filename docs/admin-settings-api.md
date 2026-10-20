@@ -30,10 +30,16 @@ compatibility does not expose these administrator settings contracts.
 check against the submitted `values` and `dirty_keys`, merged with stored settings.
 Supported kinds are `s3_public`, `s3_operational`, `s3_private`, `redis`,
 `recommendations_embedding`, `ai_chat`, `ai_transcription`, `meilisearch`, and
-`mdblist`. Stored AI and embedding credentials are sent only to the base URL
-they were saved for (same scheme, host and port): a draft that points
-`ai_chat`, `ai_transcription` or `recommendations_embedding` elsewhere is
-checked with the credential it submits in `values` and `dirty_keys`, or none.
+`mdblist`. Stored AI, embedding and Meilisearch credentials are sent only to the
+authority they were saved for (same scheme, normalized host and effective port;
+explicit HTTP port 80 and HTTPS port 443 equal their implicit defaults). A draft
+that points `ai_chat`, `ai_transcription`, `recommendations_embedding` or
+`meilisearch` elsewhere is checked with the credential it submits in `values`
+and `dirty_keys`, or none.
+Same-authority path changes retain saved credentials. Explicit empty credentials
+remain clears under each provider's existing fallback rules. Connection checks do
+not persist draft values. Credentialed Meilisearch checks refuse redirects;
+checks without a key retain the HTTP client's ordinary redirect behavior.
 Provider failures return `success: false` with a generic message that excludes
 provider error bodies and credentials. Invalid kinds/configuration return `422`.
 

@@ -206,6 +206,17 @@ func (c *meilisearchClient) Health(ctx context.Context) error {
 	return nil
 }
 
+// checkConnection keeps a credentialed administrative probe at its configured
+// endpoint. Runtime clients and checks without a key retain their redirect policy.
+func (c *meilisearchClient) checkConnection(ctx context.Context) error {
+	if c.apiKey != "" {
+		c.httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	return c.Health(ctx)
+}
+
 func (c *meilisearchClient) CreateIndex(ctx context.Context, uid string) (meilisearchTaskRef, error) {
 	var task meilisearchTask
 	err := c.do(ctx, http.MethodPost, "/indexes", map[string]string{
