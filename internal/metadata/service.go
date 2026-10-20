@@ -3245,7 +3245,7 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	providerIDs map[string]string,
 	identityChosen bool,
 ) error {
-	tx, err := s.dbPool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.dbPool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin metadata item/provider transaction: %w", err)
 	}
@@ -8280,7 +8280,7 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 		return fmt.Errorf("rebind skeleton requires database pool")
 	}
 
-	tx, err := s.dbPool.Begin(ctx)
+	tx, err := s.dbPool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin skeleton rebind transaction: %w", err)
 	}

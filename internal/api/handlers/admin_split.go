@@ -241,7 +241,7 @@ func (h *AdminSplitHandler) SplitAdminItem(ctx context.Context, sourceID string,
 	}
 
 	// Everything transactional happens here; a dry run rolls back at the end.
-	tx, err := h.pool.Begin(ctx)
+	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		slog.ErrorContext(ctx, "admin split: begin transaction", "component", "api", "error", err)
 		return AdminSplitResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to start split")
@@ -253,7 +253,7 @@ func (h *AdminSplitHandler) SplitAdminItem(ctx context.Context, sourceID string,
 		return AdminSplitResult{}, splitTransactionError(err)
 	}
 	if itemTypes[sourceID] != sourceItem.Type {
-		return AdminSplitResult{}, apiError(http.StatusConflict, "conflict", "Source item changed; retry the split")
+		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Source item changed; retry the split")
 	}
 	// Reload under file locks: scanner upserts may change folders without
 	// changing content_id. Every later scope decision and write uses these rows.
@@ -262,7 +262,7 @@ func (h *AdminSplitHandler) SplitAdminItem(ctx context.Context, sourceID string,
 		return AdminSplitResult{}, splitTransactionError(err)
 	}
 	if len(moved) != len(seen) {
-		return AdminSplitResult{}, apiError(http.StatusConflict, "conflict", "Selected files changed; retry the split")
+		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Selected files changed; retry the split")
 	}
 	var total int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM media_files WHERE content_id = $1`, sourceID).Scan(&total); err != nil {
@@ -276,29 +276,11 @@ func (h *AdminSplitHandler) SplitAdminItem(ctx context.Context, sourceID string,
 		return AdminSplitResult{}, splitTransactionError(err)
 	}
 	if req.Target.Unmatched && strings.TrimSpace(req.Target.ContentID) == "" && len(normalizeMatchProviderIDs(req.Target.ProviderIDs)) == 0 && target.contentID != contentid.ForLocal(moved[0].FilePath) {
-		return AdminSplitResult{}, apiError(http.StatusConflict, "conflict", "Selected file path changed; retry the split")
+		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Selected file path changed; retry the split")
 	}
-	if _, exists := itemTypes[target.contentID]; !exists {
-		if !target.created {
-			return AdminSplitResult{}, apiError(http.StatusNotFound, "not_found", "Target item not found")
-		}
-		target.created, err = insertSkeletonItem(ctx, tx, target, sourceItem)
-		if err != nil {
-			return AdminSplitResult{}, splitTransactionError(err)
-		}
-		if !target.created {
-			// INSERT lost to a concurrent creator. Authorize the actual existing
-			// row before adding libraries or moving any state onto it.
-			itemTypes, err = catalog.LockMetadataCurationItems(ctx, tx, sourceID, target.contentID)
-			if err != nil {
-				return AdminSplitResult{}, splitTransactionError(err)
-			}
-		}
-	} else {
-		target.created = false
-	}
-	if !target.created && itemTypes[target.contentID] != sourceItem.Type {
-		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Source and target item types must match")
+	target.created, err = ensureSplitTarget(ctx, tx, target, sourceItem, itemTypes)
+	if err != nil {
+		return AdminSplitResult{}, splitTransactionError(err)
 	}
 	moveResult, err := filesplit.Move(ctx, tx, filesplit.Options{
 		FromContentID: sourceID,
@@ -587,6 +569,34 @@ func scanSplitFiles(rows pgx.Rows) ([]splitFile, error) {
 	return files, rows.Err()
 }
 
+// ensureSplitTarget distinguishes this transaction's insert from an existing
+// destination, including one inserted after the initial parent-lock statement.
+func ensureSplitTarget(ctx context.Context, tx pgx.Tx, target splitTarget, source *models.MediaItem, itemTypes map[string]string) (bool, error) {
+	if itemType, exists := itemTypes[target.contentID]; exists {
+		if itemType != source.Type {
+			return false, apiError(http.StatusBadRequest, "bad_request", "Source and target item types must match")
+		}
+		return false, nil
+	}
+	if !target.created {
+		return false, apiError(http.StatusNotFound, "not_found", "Target item not found")
+	}
+	created, err := insertSkeletonItem(ctx, tx, target, source)
+	if err != nil || created {
+		return created, err
+	}
+	// INSERT lost to a concurrent creator. Authorize the actual existing row
+	// before adding libraries or moving any state onto it.
+	itemTypes, err = catalog.LockMetadataCurationItems(ctx, tx, source.ContentID, target.contentID)
+	if err != nil {
+		return false, err
+	}
+	if itemTypes[target.contentID] != source.Type {
+		return false, apiError(http.StatusBadRequest, "bad_request", "Source and target item types must match")
+	}
+	return false, nil
+}
+
 func insertSkeletonItem(ctx context.Context, tx pgx.Tx, target splitTarget, sourceItem *models.MediaItem) (bool, error) {
 	year := target.year
 	if year == 0 && target.providerIDs == nil {
@@ -760,6 +770,9 @@ func metadataCurationForbidden() error {
 }
 
 func splitTransactionError(err error) error {
+	if api, ok := errors.AsType[*APIError](err); ok {
+		return api
+	}
 	if errors.Is(err, access.ErrMetadataCurationScope) {
 		return metadataCurationForbidden()
 	}

@@ -2,12 +2,22 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 )
+
+// MetadataCurationTxOptions pins the fresh-snapshot isolation required by the
+// curation guard, without changing automatic processing's transaction defaults.
+func MetadataCurationTxOptions(ctx context.Context) pgx.TxOptions {
+	if access.HasMetadataCurationAuthorizer(ctx) {
+		return pgx.TxOptions{IsoLevel: pgx.ReadCommitted}
+	}
+	return pgx.TxOptions{}
+}
 
 // LockMetadataCurationItems locks existing parents in content-id order, then
 // authorizes each item's full library set in a separate READ COMMITTED statement.
@@ -86,7 +96,7 @@ func GuardMetadataCurationItems(ctx context.Context, tx pgx.Tx, ids ...string) e
 			return ErrItemNotFound
 		}
 		if types[id] != types[ids[0]] {
-			return fmt.Errorf("curation item types differ")
+			return errors.New("curation item types differ")
 		}
 	}
 	return nil

@@ -387,7 +387,7 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 	if contentID == "" {
 		return fmt.Errorf("content_id is required")
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin provisional provider-id clear: %w", err)
 	}
@@ -439,7 +439,7 @@ func canonicalizeProviderIDDuplicate(
 	if leftContentID == "" || rightContentID == "" || leftContentID == rightContentID {
 		return leftContentID, nil
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return "", fmt.Errorf("begin provider-id canonicalization: %w", err)
 	}
@@ -503,7 +503,7 @@ func canonicalizeProviderIDDuplicateInto(
 	if sourceID == canonicalID {
 		return canonicalID, nil
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return "", fmt.Errorf("begin provider-id canonicalization: %w", err)
 	}

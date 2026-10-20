@@ -130,9 +130,8 @@ func TestCurationScopeCarriesPolicyIntoTransactions(t *testing.T) {
 				if legacy {
 					gate = NewPermissionMiddleware(fakePermissionUserLoader{user: user}, fakeTargetLibraryResolver{ids: []int{1}}, primaryChecker(false, true, nil), nil)
 				}
-				var authority context.Context
 				next := gate.RequireMetadataCurationForItem(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					authority = context.WithoutCancel(r.Context())
+					assertCurationAuthority(t, context.WithoutCancel(r.Context()), mode, legacy)
 					w.WriteHeader(http.StatusNoContent)
 				}))
 				req := requestWithItemID(role)
@@ -141,18 +140,25 @@ func TestCurationScopeCarriesPolicyIntoTransactions(t *testing.T) {
 				}
 				rec := httptest.NewRecorder()
 				next.ServeHTTP(rec, req)
-				if rec.Code != http.StatusNoContent || authority == nil || !access.HasMetadataCurationAuthorizer(authority) {
-					t.Fatalf("legacy=%v: gate did not carry authority: %d", legacy, rec.Code)
-				}
-				for _, libraries := range [][]int{{1}, {1, 2}, {}} {
-					err := access.AuthorizeMetadataCurationLibraries(authority, libraries)
-					allowed := mode == "acting-admin" || len(libraries) > 0 && (mode == "unrestricted" || len(libraries) == 1)
-					if allowed && err != nil || !allowed && !errors.Is(err, access.ErrMetadataCurationScope) {
-						t.Fatalf("legacy=%v libraries=%v allowed=%v err=%v", legacy, libraries, allowed, err)
-					}
+				if rec.Code != http.StatusNoContent {
+					t.Fatalf("legacy=%v gate status=%d", legacy, rec.Code)
 				}
 			}
 		})
+	}
+}
+
+func assertCurationAuthority(t *testing.T, ctx context.Context, mode string, legacy bool) {
+	t.Helper()
+	if !access.HasMetadataCurationAuthorizer(ctx) {
+		t.Fatal("gate did not carry curation authority")
+	}
+	for _, libraries := range [][]int{{1}, {1, 2}, {}} {
+		err := access.AuthorizeMetadataCurationLibraries(ctx, libraries)
+		allowed := mode == "acting-admin" || len(libraries) > 0 && (mode == "unrestricted" || len(libraries) == 1)
+		if allowed && err != nil || !allowed && !errors.Is(err, access.ErrMetadataCurationScope) {
+			t.Fatalf("legacy=%v libraries=%v allowed=%v err=%v", legacy, libraries, allowed, err)
+		}
 	}
 }
 

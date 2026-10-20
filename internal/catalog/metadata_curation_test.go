@@ -12,18 +12,24 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 )
 
-func TestCurationScopeMembershipCommittedWhileWaitingPostgres(t *testing.T) {
+func curationLockFixture(t *testing.T, ctx context.Context) (*pgxpool.Pool, int, int) {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
+	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	// Task-owned connections only: exercise the guard under a non-default
+	// session isolation without changing any database or role setting.
+	config.ConnConfig.RuntimeParams["default_transaction_isolation"] = "repeatable read"
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
 	const item = "curation-lock-fixture"
 	var allowed, added int
 	for _, folder := range []*int{&allowed, &added} {
@@ -31,16 +37,24 @@ func TestCurationScopeMembershipCommittedWhileWaitingPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	defer func() {
+	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, item)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=ANY($1)`, []int{allowed, added})
-	}()
+	})
 	if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title) VALUES($1,'movie','Fixture')`, item); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, item, allowed); err != nil {
 		t.Fatal(err)
 	}
+	return pool, allowed, added
+}
+
+func TestCurationScopeMembershipCommittedWhileWaitingPostgres(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	pool, allowed, added := curationLockFixture(t, ctx)
+	const item = "curation-lock-fixture"
 	writer, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -50,11 +64,19 @@ func TestCurationScopeMembershipCommittedWhileWaitingPostgres(t *testing.T) {
 	if _, err := writer.Exec(ctx, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, item, added); err != nil {
 		t.Fatal(err)
 	}
-	guard, err := pool.Begin(ctx)
+	authority := access.WithMetadataCurationAuthorizer(ctx, func(context.Context, []int) error { return nil })
+	guard, err := pool.BeginTx(ctx, MetadataCurationTxOptions(authority))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = guard.Rollback(context.Background()) }()
+	var isolation string
+	if err := guard.QueryRow(ctx, `SHOW transaction_isolation`).Scan(&isolation); err != nil || isolation != "read committed" {
+		t.Fatalf("guard isolation=%q err=%v", isolation, err)
+	}
+	if MetadataCurationTxOptions(ctx).IsoLevel != "" {
+		t.Fatal("automatic processing isolation changed")
+	}
 	var pid int
 	if err := guard.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
 		t.Fatal(err)
@@ -85,7 +107,7 @@ func TestCurationScopeMembershipCommittedWhileWaitingPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Conversely, a later membership insert waits for the guard's parent lock.
-	guard, err = pool.Begin(ctx)
+	guard, err = pool.BeginTx(ctx, MetadataCurationTxOptions(authority))
 	if err != nil {
 		t.Fatal(err)
 	}
