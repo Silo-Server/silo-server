@@ -4351,7 +4351,7 @@ export function VideoPlayer({
     suspended: watchTogetherRoomActive || !!watchTogetherRoomId,
     sessionId: bufferingTitleId ?? sessionId,
     attemptId: playbackAttemptId,
-    mode: bufferingMode ?? "never",
+    mode: bufferingMode ?? "always",
     plan: bufferingPlan,
     // Pills also wait while nobody can see them: a minimized player, a hidden
     // tab, or iPhone's native fullscreen view.

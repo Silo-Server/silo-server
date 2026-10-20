@@ -43,6 +43,7 @@ import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
 import { invalidatePlaybackSurfaceQueries } from "@/hooks/queries/playbackSurfaceRefresh";
 import { useAuth } from "@/hooks/useAuth";
+import { lastBufferingMode, rememberBufferingMode } from "@/player/buffering-mode-memory";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
@@ -581,6 +582,7 @@ function WatchPlaybackHostContent() {
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
   const { profile: currentProfile } = useCurrentProfile();
+  const playbackProfileId = currentProfile?.id ?? null;
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
   const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
@@ -640,6 +642,14 @@ function WatchPlaybackHostContent() {
     ],
     enabled: signedIn,
   });
+  const loadedBufferingMode = supportsBufferingQualityMode
+    ? (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
+        | BufferingMode
+        | undefined)
+    : undefined;
+  useEffect(() => {
+    if (loadedBufferingMode) rememberBufferingMode(playbackProfileId, loadedBufferingMode);
+  }, [loadedBufferingMode, playbackProfileId]);
   const request = state.request;
   const isForegroundMode = request != null && state.mode === "foreground";
   const {
@@ -1153,17 +1163,14 @@ function WatchPlaybackHostContent() {
     if (legacy === undefined) return watchPageProps.introSkipMode ?? null;
     return legacy ? "always" : "ask";
   })();
-  // null until known, like introSkipMode: a guess of `never` would keep a
-  // learned limit out of the start, and a guess of `always` could lower
-  // quality for a viewer who turned that off. A server without the setting
-  // keeps the automatic lowering it always had.
-  const bufferingMode: BufferingMode | null = supportsBufferingQualityMode
-    ? ((effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
-        | BufferingMode
-        | undefined) ?? null)
-    : capabilitiesKnown
+  // Until the profile's mode loads, or if the read fails, the mode this
+  // browser saw last for the profile applies, and the default only when it
+  // has seen none: the start does not wait, and a `never` profile keeps its
+  // `ignore`. A server without the setting runs the default.
+  const bufferingMode: BufferingMode =
+    capabilitiesKnown && !supportsBufferingQualityMode
       ? "always"
-      : null;
+      : (loadedBufferingMode ?? lastBufferingMode(playbackProfileId) ?? "always");
   const autoSkipRecap = resolvedBool(
     SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
     watchPageProps.autoSkipRecap,
