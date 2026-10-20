@@ -2,8 +2,12 @@ package abs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -142,5 +146,94 @@ func assertEnvelopeLibraryMetadata(t *testing.T, env map[string]any, libraries [
 	user := env["user"].(map[string]any)
 	if env["userDefaultLibraryId"] != defaultID || user["defaultLibraryId"] != defaultID {
 		t.Fatalf("default metadata = %v/%v, want %v", env["userDefaultLibraryId"], user["defaultLibraryId"], defaultID)
+	}
+}
+
+// profileScopedHandler wires the token handlers to a resolver that gives the
+// "kid" profile library 72 only, over a store holding libraries 71 and 72.
+func profileScopedHandler(t *testing.T) (*Handler, *memTokenStore, *staticConfig) {
+	t.Helper()
+	h, store, cfg := newRefreshTestHandler(t)
+	h.deps.AccessResolver = envelopeScopeResolver{resolve: func(_ context.Context, userID, profileID string) (catalog.AccessFilter, error) {
+		if userID == "42" && profileID == "kid" {
+			return catalog.AccessFilter{AllowedLibraryIDs: []int{72}}, nil
+		}
+		return catalog.AccessFilter{}, nil
+	}}
+	h.deps.MediaStore = envelopeLibraryStore{list: func(_ context.Context, filter catalog.AccessFilter) ([]AudiobookLibrary, error) {
+		var out []AudiobookLibrary
+		for _, lib := range []AudiobookLibrary{{ID: 71, Name: "Books"}, {ID: 72, Name: "Kids"}} {
+			if filter.AllowedLibraryIDs == nil || slices.Contains(filter.AllowedLibraryIDs, int(lib.ID)) {
+				out = append(out, lib)
+			}
+		}
+		return out, nil
+	}}
+	return h, store, cfg
+}
+
+// The token routes run outside bearerAuth, so the envelope has to take the
+// profile from the credentials the handler just checked.
+func TestTokenHandlers_ScopeLibrariesToAuthenticatedProfile(t *testing.T) {
+	want := []AudiobookLibrary{{ID: 72, Name: "Kids"}}
+
+	t.Run("login", func(t *testing.T) {
+		h, _, _ := profileScopedHandler(t)
+		rec := httptest.NewRecorder()
+		h.completeLogin(rec, httptest.NewRequest(http.MethodPost, "/login", nil), Principal{UserID: "42", ProfileID: "kid", DisplayName: "Kid"})
+		assertResponseLibraries(t, rec, want)
+	})
+
+	t.Run("refresh", func(t *testing.T) {
+		h, store, cfg := profileScopedHandler(t)
+		refresh, err := IssueRefreshToken(cfg.secret, "42", "kid", nil, "kid-refresh", time.Hour)
+		if err != nil {
+			t.Fatalf("mint refresh: %v", err)
+		}
+		if err := store.InsertToken(t.Context(), ABSToken{ID: "kid-refresh", UserID: "42", ProfileID: "kid", Type: "refresh", JTI: "kid-refresh", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
+		req.Header.Set("x-refresh-token", refresh)
+		rec := httptest.NewRecorder()
+		h.handleRefresh(rec, req)
+		assertResponseLibraries(t, rec, want)
+	})
+
+	t.Run("authorize", func(t *testing.T) {
+		h, _, _ := profileScopedHandler(t)
+		req := httptest.NewRequest(http.MethodPost, "/api/authorize", nil)
+		req = req.WithContext(context.WithValue(req.Context(), ctxKey{}, ctxAuth{UserID: "42", ProfileID: "kid", Token: "access.jwt"}))
+		rec := httptest.NewRecorder()
+		h.handleABSAuthorize(rec, req)
+		assertResponseLibraries(t, rec, want)
+	})
+}
+
+func assertResponseLibraries(t *testing.T, rec *httptest.ResponseRecorder, want []AudiobookLibrary) {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var env struct {
+		Libraries []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"libraries"`
+		UserDefaultLibraryID string `json:"userDefaultLibraryId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(env.Libraries) != len(want) {
+		t.Fatalf("libraries = %+v, want %+v", env.Libraries, want)
+	}
+	for i, lib := range want {
+		if env.Libraries[i].ID != audiobookLibraryID(lib) || env.Libraries[i].Name != lib.Name {
+			t.Fatalf("library %d = %+v, want %+v", i, env.Libraries[i], lib)
+		}
+	}
+	if env.UserDefaultLibraryID != audiobookLibraryID(want[0]) {
+		t.Fatalf("userDefaultLibraryId = %q, want %q", env.UserDefaultLibraryID, audiobookLibraryID(want[0]))
 	}
 }

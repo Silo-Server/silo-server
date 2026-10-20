@@ -329,7 +329,9 @@ func (h *Handler) loginEnvelope(
 		libs, err = h.deps.MediaStore.ListAudiobookLibraries(ctx, access)
 	}
 	if err != nil {
-		slog.DebugContext(ctx, "abs login envelope: library metadata unavailable", "component", "audiobooks")
+		slog.WarnContext(ctx, "abs login envelope: library metadata unavailable", "component", "audiobooks",
+			"user_id", a.UserID, "profile_id", a.ProfileID, "err", err)
+		// Drop any partial listing so an unknown scope never widens the result.
 		libs = nil
 	}
 	for i, lib := range libs {
