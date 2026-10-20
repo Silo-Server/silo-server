@@ -812,6 +812,9 @@ export function usePlaybackSession(
     ): Promise<DecisionResponseV3> => {
       const bandwidthEstimateKbps = detectBandwidthEstimateKbpsV3();
       requestedEstimateRef.current = bandwidthEstimateKbps;
+      // An owed Restore's `clear` goes out once, on this start.
+      const clearOwed = clearOwedRef.current;
+      clearOwedRef.current = false;
       const body = buildStartRequestV3({
         extraClientFeatures: VIDEO_CLIENT_FEATURES_V3,
         fileId: targetFileId,
@@ -826,11 +829,7 @@ export function usePlaybackSession(
         bandwidthEstimateKbps,
         bandwidthEstimateSource: bandwidthEstimateKbps === undefined ? undefined : "probe",
         bandwidthCapKbps: maxBitrateKbps,
-        learnedLimit: clearOwedRef.current
-          ? "clear"
-          : bufferingMode === "never"
-            ? "ignore"
-            : undefined,
+        learnedLimit: clearOwed ? "clear" : bufferingMode === "never" ? "ignore" : undefined,
         clientCapabilities,
         clientPlaybackContext,
       });

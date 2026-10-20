@@ -3363,6 +3363,30 @@ it("refuses a lowering while another replan is in flight, and sends a Restore af
   unmount();
 });
 
+it("sends a displaced Restore's clear on one start only", async () => {
+  const server = holdingReplanServer();
+  const { result, unmount } = renderHook(
+    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  act(() => result.current.changeSubtitleTrack(null, 120));
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+  act(() => result.current.changeQuality("auto", 121, restore));
+  // A version switch starts over and takes the queued Restore's place.
+  act(() => result.current.switchVersion(99, 122));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(2));
+  expect(server.bodiesTo("/playback/start")[1]).toMatchObject({ learned_limit: "clear" });
+  await act(async () => server.release());
+  await waitFor(() => expect(result.current.planRevision).toBe(2));
+
+  // A later start must not clear a limit learned since.
+  act(() => result.current.switchVersion(100, 130));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(3));
+  expect(server.bodiesTo("/playback/start")[2]).not.toHaveProperty("learned_limit");
+  unmount();
+});
+
 it("carries a displaced Restore's clear on the request that replaced it", async () => {
   const server = holdingReplanServer();
   const { result, unmount } = renderHook(
