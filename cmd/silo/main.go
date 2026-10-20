@@ -67,6 +67,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/extrastills"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
@@ -3088,6 +3089,13 @@ func main() {
 		}
 		if chapterBackfiller, ok := deps.ChapterThumbnailQueuer.(*chapterthumbs.Service); ok {
 			taskMgr.Register(tasks.NewChapterThumbnailBackfillTask(chapterBackfiller, 25))
+			// Local extras without an image beside them get a frame through the
+			// same extractor, in every library.
+			stillCacher := imagecache.New(deps.Blobs.Assets)
+			stillCacher.SetArtworkRevisionTracker(catalog.NewArtworkRevisionTracker(deps.DB))
+			taskMgr.Register(tasks.NewGenerateExtraStillsTask(
+				extrastills.NewGenerator(deps.DB, deps.FileRepo, chapterBackfiller, stillCacher), 200,
+			))
 		}
 		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
