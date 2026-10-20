@@ -479,17 +479,14 @@ func (s *GroupStore) UpdateConditional(ctx context.Context, id int64, input Upda
 func (s *GroupStore) Delete(ctx context.Context, id int64) error {
 	return s.DeleteConditional(ctx, id, GroupPrecondition{Any: true})
 }
-func (s *GroupStore) DeleteConditional(ctx context.Context, id int64, guard GroupPrecondition) error {
-	return s.DeleteMovingMembers(ctx, id, guard)
-}
 
-// DeleteMovingMembers moves members into the default group and deletes the
-// source group in the same transaction, so a
-// regular account never falls back to having no group. Each moved account's
-// access_policy_revision is bumped, as for other group changes; members stay
-// signed in and pick up the default group's policy on their next request.
-// Without a default destination, a populated group's deletion fails unchanged.
-func (s *GroupStore) DeleteMovingMembers(ctx context.Context, id int64, guard GroupPrecondition) error {
+// DeleteConditional moves the group's members into the default group and
+// deletes the group in the same transaction, so a regular account never falls
+// back to having no group. Each moved account's access_policy_revision is
+// bumped, as for other group changes; members stay signed in and pick up the
+// default group's policy on their next request. Without a default
+// destination, a populated group's deletion fails unchanged.
+func (s *GroupStore) DeleteConditional(ctx context.Context, id int64, guard GroupPrecondition) error {
 	if !guard.valid() {
 		return ErrGroupInvalidPrecondition
 	}

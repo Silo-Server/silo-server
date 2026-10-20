@@ -456,7 +456,7 @@ func accessPolicyRevisionForUser(t *testing.T, ctx context.Context, pool *pgxpoo
 	return revision
 }
 
-func TestGroupStoreDeleteMovingMembersDB(t *testing.T) {
+func TestGroupStoreDeleteMovesMembersDB(t *testing.T) {
 	ctx, pool, store, suffix := newGroupStoreDBTest(t)
 	seedID := defaultAccessGroupSeedID(t, ctx, pool)
 	t.Cleanup(func() {
@@ -483,8 +483,8 @@ func TestGroupStoreDeleteMovingMembersDB(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM auth_sessions WHERE id = $1`, sessionID) })
 
-	if err := store.DeleteMovingMembers(ctx, group.ID, GroupPrecondition{Any: true}); err != nil {
-		t.Fatalf("DeleteMovingMembers() error: %v", err)
+	if err := store.DeleteConditional(ctx, group.ID, GroupPrecondition{Any: true}); err != nil {
+		t.Fatalf("DeleteConditional() error: %v", err)
 	}
 	var revokedAt *time.Time
 	if err := pool.QueryRow(ctx, `SELECT revoked_at FROM auth_sessions WHERE id = $1`, sessionID).Scan(&revokedAt); err != nil {

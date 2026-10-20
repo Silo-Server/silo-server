@@ -96,10 +96,6 @@ func (f *fakeGroupStore) UpdateConditional(_ context.Context, id int64, _ access
 }
 
 func (f *fakeGroupStore) DeleteConditional(context.Context, int64, access.GroupPrecondition) error {
-	return nil
-}
-
-func (f *fakeGroupStore) DeleteMovingMembers(context.Context, int64, access.GroupPrecondition) error {
 	f.deleted = true
 	return nil
 }

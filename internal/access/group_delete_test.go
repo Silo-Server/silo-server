@@ -14,9 +14,6 @@ func TestGroupDeletionPreservesMembershipDB(t *testing.T) {
 		"conditional": func(ctx context.Context, s *GroupStore, id int64) error {
 			return s.DeleteConditional(ctx, id, GroupPrecondition{Any: true})
 		},
-		"moving": func(ctx context.Context, s *GroupStore, id int64) error {
-			return s.DeleteMovingMembers(ctx, id, GroupPrecondition{Any: true})
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := guardedGroupStore(t)
@@ -66,8 +63,8 @@ func TestGroupDeletionWithoutDefaultDB(t *testing.T) {
 	if _, err := s.pool.Exec(ctx, `INSERT INTO users(id,access_group_id,access_policy_revision) VALUES (1,$1,7)`, source.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteMovingMembers(ctx, source.ID, GroupPrecondition{Any: true}); !errors.Is(err, ErrDefaultGroupRequired) {
-		t.Errorf("populated deletion without default=%v, want ErrDefaultGroupRequired", err)
+	if err := s.DeleteConditional(ctx, source.ID, GroupPrecondition{Any: true}); !errors.Is(err, ErrGroupDestinationRequired) {
+		t.Errorf("populated deletion without default=%v, want ErrGroupDestinationRequired", err)
 	}
 	var groupID *int64
 	var revision int64

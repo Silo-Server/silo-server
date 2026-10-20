@@ -14,12 +14,6 @@ import (
 var ErrInvalidAccessGroup = errors.New("invalid access group configuration")
 var ErrAccessGroupUnavailable = errors.New("access group administration unavailable")
 
-// memberMovingGroupStore deletes a group after moving its members into the
-// default group in the same transaction (access.GroupStore).
-type memberMovingGroupStore interface {
-	DeleteMovingMembers(context.Context, int64, access.GroupPrecondition) error
-}
-
 type guardedAccessGroupStore interface {
 	ListPage(context.Context, *access.GroupPageKey, int) ([]access.Group, bool, error)
 	UpdateConditional(context.Context, int64, access.UpdateGroupInput, access.GroupPrecondition) (*access.Group, error)
@@ -85,14 +79,7 @@ func (h *AccessGroupHandler) DeleteAdminAccessGroup(ctx context.Context, id int6
 	}
 	// The members are listed first: the delete moves them out of the group.
 	members := h.groupMembers(ctx, id)
-	var err error
-	if mover, ok := h.store.(memberMovingGroupStore); ok {
-		// Set-based, so the group-writer lock is not held for per-member statements.
-		err = mover.DeleteMovingMembers(ctx, id, guard)
-	} else {
-		err = s.DeleteConditional(ctx, id, guard)
-	}
-	if err != nil {
+	if err := s.DeleteConditional(ctx, id, guard); err != nil {
 		return err
 	}
 	notifyAccountsScopeChanged(ctx, h.RecWorker, members...)
