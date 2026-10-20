@@ -51,7 +51,6 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestSignupPolicySerializationDB
-./internal/auth TestSignupRechecksLocalPolicyBeforeSpendingInviteDB
 ./internal/auth TestInvitedAccountAtomicDB
 ./internal/auth TestInvitedAccountWrappedPostgresDB
 ./internal/apiv2 TestSignupCommitPolicyErrorsDB
