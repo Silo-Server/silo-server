@@ -1,17 +1,18 @@
-import { fetchWithSession } from "@/api/client";
-import { v2, V2_CLIENT_HEADERS } from "@/api/v2/request";
+import { v2 } from "@/api/v2/request";
 import { detachedMediaPlaying, onDetachedMediaChange } from "@/lib/detachedMedia";
 import { queryClient } from "@/lib/query-client";
-import { storage } from "@/utils/storage";
-import { detectFormFactor } from "./form-factor";
+import { DEFAULT_PROBE_URL, measureBandwidth, ProbeRateLimited } from "./bandwidth-measure";
 import {
-  MAX_PROBE_KBPS,
-  MIN_PROBE_KBPS,
-  PROBE_FIRST_BYTE_DEADLINE_MS,
-  ProbeMeter,
-  type ProbeMode,
-  type ProbeResult,
-} from "./probe-meter";
+  forgetServerReadings,
+  keepOwnResult,
+  keepServerReadings,
+  keptReadingCurrent,
+  resetPageReadings,
+  withinProbeBounds,
+} from "./bandwidth-readings";
+import { detectFormFactor } from "./form-factor";
+import { networkInformation, type NetworkInformationLike } from "./network-information";
+import type { ProbeMode, ProbeResult } from "./probe-meter";
 
 /**
  * The connection speed test (docs/design/2026-10-17-buffering-quality.md,
@@ -27,8 +28,12 @@ import {
  * after a new connection type and when the browser is back online, so an early
  * playback start already sends it, and runs the quick test a few seconds later
  * only when no reading proves the link. There is no timer. The current readings
- * are kept here so playback starts can read them at once.
+ * are kept (bandwidth-readings.ts) so playback starts can read them at once.
  */
+
+export { forgetBandwidthEstimate, readMeasuredBandwidthKbps } from "./bandwidth-readings";
+export { ProbeRateLimited } from "./bandwidth-measure";
+export { networkInformation, type NetworkInformationLike } from "./network-information";
 
 /** Let the first screen settle before spending bandwidth on a test. */
 const TEST_DELAY_MS = 5_000;
@@ -40,263 +45,20 @@ const TEST_DELAY_MS = 5_000;
 const SHORT_ABSENCE_MS = 60_000;
 /** How long a reading lasts when the server does not say. */
 const DEFAULT_READING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-/** The probe without connection_speed_v1, which keeps nothing for us. */
-const DEFAULT_PROBE_URL = "/api/v2/playback/bandwidth-probe";
-/** How long a 429 without a usable Retry-After holds automatic tests. */
-const DEFAULT_RETRY_AFTER_SECONDS = 30;
 /** The query Settings reads the connection with; the schedule keeps it current. */
 export const CONNECTION_QUERY_KEY = ["playback", "connection"] as const;
 
-/**
- * The slice of the Network Information API we use. It is not in the DOM lib
- * and is absent in Safari and Firefox, and desktop Chromium has no `type`, so
- * everything here is best effort and every reader tolerates `undefined`.
- */
-export interface NetworkInformationLike {
-  saveData?: boolean;
-  type?: string;
-}
-
-export function networkInformation(): NetworkInformationLike | undefined {
-  if (typeof navigator === "undefined") return undefined;
-  return (navigator as Navigator & { connection?: NetworkInformationLike }).connection;
-}
-
-/** The browser's connection type, or "unknown" where it cannot report one. */
-function currentNetwork(): string {
-  return networkInformation()?.type ?? "unknown";
-}
-
-/** A reading kept for playback starts. */
-interface KeptReading {
-  kbps: number;
-  measuredAt: number;
-  maxAgeMs: number;
-  /**
-   * The connection type a result this device measured itself was taken on,
-   * against a server without connection_speed_v1. A server's reading has none:
-   * it is for the connection the server saw.
-   */
-  network?: string;
-}
-
-/**
- * What the app keeps for playback starts: every current reading, so one that
- * outlives the best still counts once the best expires.
- */
-interface StoredEntry {
-  readings: KeptReading[];
-  writtenAt: number;
-}
-
-/**
- * The entry this page last wrote. localStorage can be full or unavailable,
- * and its writes then fail silently; this copy keeps the reading in effect
- * for this page anyway.
- */
-let pageEntry: string | undefined;
-/**
- * Whether this page has read the server since its schedule started. Until it
- * has, a server's reading in storage may be the last session's, taken on
- * another network or for another account, so starts do not send it.
- */
-let serverReadingConfirmed = false;
 /**
  * Bumped on a network change and when the schedule stops: a server read still
  * in flight then describes another network or account, and is dropped.
  */
 let readingEpoch = 0;
 
-function inBounds(kbps: number): boolean {
-  return kbps >= MIN_PROBE_KBPS && kbps <= MAX_PROBE_KBPS;
-}
-
-function parseStored(raw: string | null | undefined): StoredEntry | undefined {
-  if (!raw) return undefined;
-  try {
-    const parsed = JSON.parse(raw) as Partial<StoredEntry>;
-    // An entry an older build wrote has no reading list; the next look replaces it.
-    if (!Array.isArray(parsed.readings) || typeof parsed.writtenAt !== "number") return undefined;
-    const readings = parsed.readings.filter(
-      (reading): reading is KeptReading =>
-        typeof reading?.kbps === "number" &&
-        typeof reading.measuredAt === "number" &&
-        typeof reading.maxAgeMs === "number" &&
-        (reading.network === undefined || typeof reading.network === "string"),
-    );
-    return { readings, writtenAt: parsed.writtenAt };
-  } catch {
-    return undefined;
-  }
-}
-
-/** The newer of this page's entry and the shared one another tab may have written. */
-function readStored(): StoredEntry | undefined {
-  const page = parseStored(pageEntry);
-  const shared = parseStored(storage.get(storage.KEYS.BANDWIDTH_ESTIMATE));
-  if (!page) return shared;
-  if (!shared) return page;
-  return shared.writtenAt > page.writtenAt ? shared : page;
-}
-
-function writeStored(readings: KeptReading[]): void {
-  pageEntry = JSON.stringify({ readings, writtenAt: Date.now() } satisfies StoredEntry);
-  storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, pageEntry);
-}
-
-/**
- * The highest kept reading that is current at `now`: within its lifetime, not
- * dated ahead of `now`, within the estimate's bounds, and, for one this
- * device measured itself, taken on the connection type in use.
- */
-function bestKeptKbps(
-  readings: readonly KeptReading[],
-  now: number,
-  include: (reading: KeptReading) => boolean = () => true,
-): number | undefined {
-  const network = currentNetwork();
-  let best: number | undefined;
-  for (const reading of readings) {
-    if (reading.measuredAt > now || now - reading.measuredAt > reading.maxAgeMs) continue;
-    if (!inBounds(reading.kbps) || !include(reading)) continue;
-    if (reading.network !== undefined && reading.network !== network) continue;
-    if (best === undefined || reading.kbps > best) best = reading.kbps;
-  }
-  return best;
-}
-
-/** Drops the kept readings, in this page and in localStorage. */
-export function forgetBandwidthEstimate(): void {
-  pageEntry = undefined;
-  storage.remove(storage.KEYS.BANDWIDTH_ESTIMATE);
-}
-
-/** Drops the server's readings, keeping results this device measured per network. */
-function forgetServerReadings(): void {
-  const entry = readStored();
-  const own = entry?.readings.filter((reading) => reading.network !== undefined) ?? [];
-  if (own.length) writeStored(own);
-  else forgetBandwidthEstimate();
-}
-
-/** The highest current reading in kbps, for a playback start to send. */
-export function readMeasuredBandwidthKbps(now = Date.now()): number | undefined {
-  return bestKeptKbps(
-    readStored()?.readings ?? [],
-    now,
-    (reading) => reading.network !== undefined || serverReadingConfirmed,
-  );
-}
-
-export class ProbeRateLimited extends Error {
-  constructor(readonly retryAfter: number) {
-    super(`Try again in ${retryAfter} ${retryAfter === 1 ? "second" : "seconds"}`);
-  }
-}
-
 /** The test ran but the server did not keep its result. */
 export class ProbeNotSaved extends Error {
   constructor() {
     super("The speed test result could not be saved");
   }
-}
-
-/** A 429's wait: its Retry-After in seconds, 30 when missing or unreadable, and at least 1. */
-function retryAfterSeconds(header: string | null): number {
-  const seconds = header === null || header.trim() === "" ? Number.NaN : Number(header);
-  if (!Number.isFinite(seconds)) return DEFAULT_RETRY_AFTER_SECONDS;
-  return Math.max(1, Math.ceil(seconds));
-}
-
-/**
- * Runs one test against `url`: `size` from the mode, the clock from the first
- * byte, and the meter deciding when to stop. Resolves to undefined when the
- * probe answered without a usable body or measured nothing, or when an abort
- * landed after the transfer. Rejects when it is aborted mid-transfer,
- * abandoned at the first-byte deadline or its body fails, and with
- * ProbeRateLimited for a 429.
- */
-export async function measureBandwidth(
-  signal: AbortSignal,
-  mode: ProbeMode,
-  targetKbps?: number,
-  url = DEFAULT_PROBE_URL,
-  clock: () => number = () => performance.now(),
-): Promise<ProbeResult | undefined> {
-  const meter = new ProbeMeter(mode, targetKbps);
-  // The caller's signal cancels the probe; the first-byte deadline abandons a
-  // request or body that never starts flowing.
-  const controller = new AbortController();
-  const forwardAbort = () => controller.abort(signal.reason);
-  if (signal.aborted) forwardAbort();
-  else signal.addEventListener("abort", forwardAbort, { once: true });
-  let firstByteTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(
-    () => controller.abort(),
-    PROBE_FIRST_BYTE_DEADLINE_MS,
-  );
-  let ticker: ReturnType<typeof setInterval> | undefined;
-  let start: number | undefined;
-  let end = 0;
-  try {
-    const { res } = await fetchWithSession(
-      `${url}${url.includes("?") ? "&" : "?"}size=${meter.limits.bytes}`,
-      {
-        method: "GET",
-        headers: {
-          ...V2_CLIENT_HEADERS,
-          Accept: "application/octet-stream",
-          "X-Profile-Token": "",
-        },
-        cache: "no-store",
-        signal: controller.signal,
-      },
-    );
-    if (res.status === 429) {
-      await res.body?.cancel().catch(() => undefined);
-      throw new ProbeRateLimited(retryAfterSeconds(res.headers.get("Retry-After")));
-    }
-    if (!res.ok || !res.body) {
-      await res.body?.cancel().catch(() => undefined);
-      return undefined;
-    }
-    const reader = res.body.getReader();
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        const now = clock();
-        if (done) {
-          // The transfer ends when the body does, which can be after its last byte.
-          if (start !== undefined) end = now - start;
-          break;
-        }
-        if (start === undefined) {
-          start = now;
-          clearTimeout(firstByteTimer);
-          firstByteTimer = undefined;
-          // Windows close on the clock, not only when bytes arrive: a read
-          // that stops returning still ends the test at its limit, and the
-          // silence counts against the rate.
-          const begun = start;
-          ticker = setInterval(() => {
-            if (meter.tick(clock() - begun)) void reader.cancel().catch(() => undefined);
-          }, 100);
-        }
-        end = now - start;
-        if (meter.add(end, value.byteLength)) break;
-      }
-    } finally {
-      // Closing the body ends the transfer; the server stops at its next write.
-      await reader.cancel().catch(() => undefined);
-    }
-  } finally {
-    clearTimeout(firstByteTimer);
-    clearInterval(ticker);
-    signal.removeEventListener("abort", forwardAbort);
-  }
-  if (start === undefined || signal.aborted) return undefined;
-  // Without an outcome, neither the time limit nor an early stop ended the
-  // read: the body ended.
-  return (meter.outcome ?? meter.finish(end, true)).result ?? undefined;
 }
 
 /** The capability fields the test reads. */
@@ -362,20 +124,17 @@ async function readServerReading(schedule: ProbeSchedule): Promise<boolean> {
     });
   const now = Date.now();
   const current = readings.filter(
-    (reading) => inBounds(reading.kbps) && now - reading.measuredAt <= schedule.maxAgeMs,
+    (reading) => withinProbeBounds(reading.kbps) && now - reading.measuredAt <= schedule.maxAgeMs,
   );
   // The server's clock dates the reading; one behind this device's must not
   // read as from the future and be dropped.
-  if (current.length)
-    writeStored(
-      current.map((reading) => ({
-        kbps: reading.kbps,
-        measuredAt: Math.min(reading.measuredAt, now),
-        maxAgeMs: schedule.maxAgeMs,
-      })),
-    );
-  else forgetBandwidthEstimate();
-  serverReadingConfirmed = true;
+  keepServerReadings(
+    current.map((reading) => ({
+      kbps: reading.kbps,
+      measuredAt: Math.min(reading.measuredAt, now),
+      maxAgeMs: schedule.maxAgeMs,
+    })),
+  );
   // Without a target the server has nothing to measure against, and a failed
   // target lookup must not send every client into a test.
   return current.some(
@@ -384,18 +143,6 @@ async function readServerReading(schedule: ProbeSchedule): Promise<boolean> {
       schedule.targetKbps === undefined ||
       reading.kbps >= schedule.targetKbps,
   );
-}
-
-/** Keeps a result this device measured against a server that keeps nothing, per network. */
-function keepOwnResult(result: ProbeResult, schedule: ProbeSchedule): void {
-  const network = currentNetwork();
-  const others = (readStored()?.readings ?? []).filter(
-    (reading) => reading.network !== undefined && reading.network !== network,
-  );
-  writeStored([
-    ...others,
-    { kbps: result.kbps, measuredAt: Date.now(), maxAgeMs: schedule.maxAgeMs, network },
-  ]);
 }
 
 /**
@@ -410,7 +157,7 @@ async function collectProbe(
   const result = await measureBandwidth(signal, mode, schedule.targetKbps, schedule.url);
   if (!result || signal.aborted) return undefined;
   if (!schedule.reporting) {
-    keepOwnResult(result, schedule);
+    keepOwnResult(result.kbps, schedule.maxAgeMs);
     return result;
   }
   const type = networkInformation()?.type;
@@ -783,9 +530,7 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
     automaticTestAllowed() &&
     Date.now() >= notBefore;
   const readingProvesLink = (schedule: ProbeSchedule) =>
-    schedule.reporting
-      ? readServerReading(schedule)
-      : Promise.resolve(bestKeptKbps(readStored()?.readings ?? [], Date.now()) !== undefined);
+    schedule.reporting ? readServerReading(schedule) : Promise.resolve(keptReadingCurrent());
   // Until a look starts on this network, even a quick tab switch reads.
   let lookDue = true;
   // A look found nothing proving the link, and no test has reached an answer
@@ -870,7 +615,6 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
     readingEpoch++;
     stopProbe("network");
     forgetServerReadings();
-    serverReadingConfirmed = false;
     void queryClient.invalidateQueries({ queryKey: CONNECTION_QUERY_KEY });
     lookDue = true;
     later(0, look);
@@ -949,8 +693,7 @@ export function stopBandwidthProbes(): void {
   readingEpoch++;
   lastPlaybackStartAt = undefined;
   otherTabPlaybackStartAt = undefined;
-  serverReadingConfirmed = false;
-  pageEntry = undefined;
+  resetPageReadings();
   releaseStartHold?.();
   playbackChannel?.close();
   playbackChannel = undefined;

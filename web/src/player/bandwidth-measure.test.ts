@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The speed test's transfer and timing, with the network and the clock faked.
-// The schedule and Test speed are covered in bandwidth-probe.test.ts.
+// The schedule is covered in bandwidth-probe.schedule.test.ts, Test speed in
+// bandwidth-probe.test.ts.
 const fetchWithSession = vi.fn();
 vi.mock("@/api/v2/request", () => ({
   V2_CLIENT_HEADERS: {},
@@ -11,7 +12,7 @@ vi.mock("@/api/client", () => ({
   fetchWithSession: (...args: unknown[]) => fetchWithSession(...args),
 }));
 
-import { measureBandwidth, ProbeRateLimited } from "./bandwidth-probe";
+import { measureBandwidth, ProbeRateLimited } from "./bandwidth-measure";
 
 const PROBE_URL = "/api/v2/playback/bandwidth-probe?media_path=true";
 
