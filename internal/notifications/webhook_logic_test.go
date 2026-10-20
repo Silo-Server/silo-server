@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -71,14 +71,14 @@ func TestWebhookIPAllowed(t *testing.T) {
 		"::ffff:192.168.0.5", // v4-mapped private
 	}
 	for _, raw := range denied {
-		if webhookIPAllowed(net.ParseIP(raw)) {
+		if webhookIPAllowed(netip.MustParseAddr(raw), false) {
 			t.Errorf("webhookIPAllowed(%q) = true, want denied", raw)
 		}
 	}
 
 	allowed := []string{"1.1.1.1", "8.8.8.8", "151.101.1.69", "2606:4700::1111"}
 	for _, raw := range allowed {
-		if !webhookIPAllowed(net.ParseIP(raw)) {
+		if !webhookIPAllowed(netip.MustParseAddr(raw), false) {
 			t.Errorf("webhookIPAllowed(%q) = false, want allowed", raw)
 		}
 	}
@@ -97,10 +97,10 @@ func TestValidateWebhookURL(t *testing.T) {
 	if _, err := ValidateWebhookURL("https://[::ffff:127.0.0.1]/hook", false); err == nil {
 		t.Fatal("v4-mapped loopback literal must be rejected")
 	}
-	// allowPrivate bypasses the guard for dev environments.
+	// allowPrivate permits the Private class for dev environments.
 	host, err := ValidateWebhookURL("https://192.168.1.50/hook", true)
 	if err != nil || host != "192.168.1.50" {
-		t.Fatalf("allowPrivate bypass failed: %q %v", host, err)
+		t.Fatalf("allowPrivate failed: %q %v", host, err)
 	}
 }
 
