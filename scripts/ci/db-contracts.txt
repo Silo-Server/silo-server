@@ -100,6 +100,13 @@
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
 
+# Legacy mobile registration protects account ownership under the installation lock.
+./internal/notifications TestLegacyMobilePushRefusesForeignAccountDB
+./internal/notifications TestLegacyMobilePushProfileSwitchRollbackDB
+./internal/notifications TestLegacyMobilePushPreservesOrderedProofDB
+./internal/notifications TestLegacyMobilePushWaitsForOwnershipDB
+./internal/notifications TestLegacyPushRegistrationStaysOnTheAccount
+
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
 
