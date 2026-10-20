@@ -136,7 +136,7 @@ const STALL_WINDOW_MS = 120_000;
 const LONG_STALL_MS = 6_000;
 /** How long the prompt and the undo pill stay up, in wall-clock time. */
 export const BUFFERING_PILL_MS = 15_000;
-/** A prompt that timed out is offered again no sooner than this after it. */
+/** A prompt that timed out is offered again no sooner than this after it first showed. */
 const REOFFER_MIN_MS = 120_000;
 /** How long a plan that could not go lower is left alone. */
 const NO_LOWER_COOLDOWN_MS = 300_000;
@@ -190,7 +190,10 @@ export class BufferingQualityController {
   private answered = false;
   private cantLowerShown = false;
   private blockedUntil = 0;
-  private offeredAt = -Infinity;
+  /** When the current prompt first appeared on screen; it may wait behind another pill first. */
+  private promptShownAt?: number;
+  /** Only a timed-out prompt holds the next one off; a quality change ends the wait. */
+  private reofferUntil = 0;
   /** The replan this controller sent, until its plan is adopted or it rearms. */
   private pending?: { at: number; bitrate: number; undo: boolean; restore?: boolean };
   private lastTick: number;
@@ -300,6 +303,7 @@ export class BufferingQualityController {
       case "quality_changed":
         this.keep(undefined);
         this.answered = false;
+        this.reofferUntil = 0;
         this.pill = null;
         this.deferredPill = null;
         this.pending = undefined;
@@ -318,14 +322,18 @@ export class BufferingQualityController {
           this.setAction("kept");
         }
         break;
-      case "back":
-        // Back answers a prompt but only hides an undo pill.
+      case "back": {
+        // Back answers a prompt but only hides an undo pill, which ends its
+        // suppression the same way its timer does.
+        const undo = this.pill === "undo";
         if (this.pill === "prompt") {
           this.answered = true;
           this.setAction("kept");
         }
         this.pill = null;
+        if (undo && this.longStallInProgress(now)) this.check(now);
         break;
+      }
       case "select_restore":
         if (this.pill === "undo" && this.plan) {
           this.pill = null;
@@ -370,7 +378,6 @@ export class BufferingQualityController {
 
   /** Advances the clock: runs the pill timer, the rearm and long-stall checks. */
   tick(now: number, evaluate = true) {
-    const previousTick = this.lastTick;
     const elapsed = Math.max(0, now - this.lastTick);
     this.lastTick = now;
     if (this.summary) {
@@ -381,10 +388,12 @@ export class BufferingQualityController {
       this.remainingMs -= elapsed;
       if (this.remainingMs <= 0) {
         // An undo pill that runs out leaves the lower plan playing; a prompt
-        // that runs out is not an answer, so it starts the history over.
+        // that runs out is not an answer, so it starts the history over and
+        // holds the next prompt off.
         if (this.pill === "prompt") {
           this.setAction("timed_out");
           this.resetHistory(now);
+          this.reofferUntil = (this.promptShownAt ?? now) + REOFFER_MIN_MS;
         }
         this.pill = null;
       }
@@ -393,16 +402,14 @@ export class BufferingQualityController {
       this.pending = undefined;
       this.resetHistory(now);
     }
-    // A suppression that ends mid-stall re-evaluates it; one that ends while
-    // playing waits for the next stall.
-    const crossed = (until: number) => previousTick < until && now >= until;
-    const suppressionEnded = crossed(this.blockedUntil) || crossed(this.offeredAt + REOFFER_MIN_MS);
-    if (
-      evaluate &&
-      this.waiting &&
-      ((this.stall !== undefined && now - this.stall >= LONG_STALL_MS) || suppressionEnded)
-    )
-      this.check(now);
+    // A stall that reached the long-stall time is evaluated on every tick, so a
+    // suppression that ends while it lasts evaluates it at once. One that ends
+    // during a shorter wait, or while playing, waits for the next evaluation.
+    if (evaluate && this.longStallInProgress(now)) this.check(now);
+  }
+
+  private longStallInProgress(now: number) {
+    return this.waiting && this.stall !== undefined && now - this.stall >= LONG_STALL_MS;
   }
 
   private adopt(plan: BufferingPlan, controllerInitiated: boolean | undefined, now: number) {
@@ -456,6 +463,7 @@ export class BufferingQualityController {
     }
     this.deferredPill = null;
     this.pill = pill;
+    if (pill === "prompt") this.promptShownAt ??= now;
     this.emit({ type: pill === "prompt" ? "prompt_shown" : "undo_shown" }, now);
   }
 
@@ -570,8 +578,8 @@ export class BufferingQualityController {
       return;
     }
     if (this.mode === "always" && this.plan.quality === "auto") this.lower(now, true);
-    else if (now - this.offeredAt >= REOFFER_MIN_MS) {
-      this.offeredAt = now;
+    else if (now >= this.reofferUntil) {
+      this.promptShownAt = undefined;
       this.show("prompt", now);
     }
   }
