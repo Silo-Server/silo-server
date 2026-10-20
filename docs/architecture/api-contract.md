@@ -2091,9 +2091,12 @@ to 50 entries, default 10, without continuation. Connection and run identifiers 
 strings, and timestamps use the standard UTC instant representation.
 
 Mutation retries remain disabled: device authorization does not claim an exchange
-across API nodes, and manual sync's active-run/cooldown checks and run creation are
-separate calls. A process dispatches the run after creation; this is not a durable
-job-dispatch mechanism. Cooldown problems retain their Retry-After header and the
+across API nodes. Manual sync coalescing, cooldown and reservation now commit under
+the connection row lock, shared with scheduled insertion and terminal updates.
+Scheduled admission skips a live manual reservation within the existing manual
+timeout; scheduled overlap remains unchanged. A process dispatches the run after
+creation, without durable replay. Atomic admission does not guarantee exactly-once
+provider effects, and all API nodes must use the boundary for it to hold. Cooldown problems retain their Retry-After header and the
 web settings page displays the delay. No watch-provider consumers were found in
 the Apple and Android source inventory.
 

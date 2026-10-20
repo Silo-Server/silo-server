@@ -43,10 +43,9 @@ func (r *PostgresRepository) AdmitSyncRun(ctx context.Context, expected Connecti
 			return ErrConnectionNotFound
 		}
 		admitted.Connection = conn
-		now := run.StartedAt
-		if now.IsZero() {
-			now = time.Now().UTC()
-		}
+		// Sample after the row lock: settings or another admission can have
+		// held it across a timeout, deferral or cooldown boundary.
+		now := r.now().UTC()
 		if conn.RateLimitedUntil != nil {
 			if remaining := conn.RateLimitedUntil.Sub(now); remaining > 0 {
 				admitted.RetryAfterSeconds = ceilSeconds(remaining)
