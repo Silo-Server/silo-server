@@ -1,19 +1,21 @@
 // @vitest-environment jsdom
 
-import { useEffect } from "react";
+import { useEffect, type ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createWatchRouteRequest } from "@/pages/watchRouteHelpers";
-import type { WatchPageProps } from "@/player/components/WatchPage";
+import type { WatchPage } from "@/player/components/WatchPage";
 import { storage } from "@/utils/storage";
 import { WatchPlaybackHost, WatchPlaybackProvider } from "./WatchPlaybackChrome";
 import {
   useWatchPlaybackController,
   type WatchPlaybackControllerValue,
 } from "./watchPlaybackContext";
+
+type WatchPageProps = ComponentProps<typeof WatchPage>;
 
 const mocks = vi.hoisted(() => ({
   settings: undefined as Record<string, { value: unknown }> | undefined,
