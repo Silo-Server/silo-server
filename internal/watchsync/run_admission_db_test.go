@@ -93,6 +93,9 @@ func TestSyncRunAdmissionDB(t *testing.T) {
 		}
 		cfg.MaxConns = 1
 		cfg.ConnConfig.Tracer = tracer
+		// Admission must select its own isolation instead of inheriting this
+		// session's transaction-wide snapshot. No shared setting is changed.
+		cfg.ConnConfig.RuntimeParams["default_transaction_isolation"] = "repeatable read"
 		pool, err := pgxpool.NewWithConfig(ctx, cfg)
 		if err != nil {
 			t.Fatal(err)
@@ -101,6 +104,10 @@ func TestSyncRunAdmissionDB(t *testing.T) {
 		return pool
 	}
 	pool := newPool(t, nil)
+	var defaultIsolation string
+	if err := pool.QueryRow(ctx, "SHOW default_transaction_isolation").Scan(&defaultIsolation); err != nil || defaultIsolation != "repeatable read" {
+		t.Fatalf("fixture default isolation = %q, err %v", defaultIsolation, err)
+	}
 	repo := NewPostgresRepository(pool, cipher)
 	var userID int
 	if err := pool.QueryRow(ctx, "INSERT INTO users(username,role) VALUES($1,'user') RETURNING id", "admission-"+uuid.NewString()).Scan(&userID); err != nil {

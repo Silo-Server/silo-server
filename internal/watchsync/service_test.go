@@ -352,19 +352,6 @@ func (r *serviceFakeRepo) GetLatestSyncRun(_ context.Context, connectionID strin
 	return SyncRun{}, false, nil
 }
 
-func (r *serviceFakeRepo) GetActiveSyncRun(_ context.Context, connectionID string) (SyncRun, bool, error) {
-	r.syncRunMu.Lock()
-	defer r.syncRunMu.Unlock()
-	for i := len(r.syncRuns) - 1; i >= 0; i-- {
-		run := r.syncRuns[i]
-		if run.ConnectionID == connectionID &&
-			(run.Status == string(SyncRunStatusQueued) || run.Status == string(SyncRunStatusRunning)) {
-			return run, true, nil
-		}
-	}
-	return SyncRun{}, false, nil
-}
-
 func (r *serviceFakeRepo) ListSyncRuns(_ context.Context, connectionID string, limit int) ([]SyncRun, error) {
 	r.syncRunMu.Lock()
 	defer r.syncRunMu.Unlock()

@@ -30,8 +30,6 @@ type Repository interface {
 	DeferConnectionsForAccount(ctx context.Context, provider, providerAccountID string, until time.Time, lastError string) (int, error)
 	AdmitSyncRun(ctx context.Context, conn Connection, run SyncRun) (syncRunAdmission, error)
 	CompleteSyncRun(ctx context.Context, run SyncRun) (SyncRun, error)
-	GetLatestSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error)
-	GetActiveSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error)
 	ListSyncRuns(ctx context.Context, connectionID string, limit int) ([]SyncRun, error)
 	ListLocalWatchEventConnections(ctx context.Context, userID int, profileID string, kind LocalWatchEventKind) ([]Connection, error)
 	ListListEventConnections(ctx context.Context, userID int, profileID string, list ListKind) ([]Connection, error)
@@ -631,25 +629,6 @@ func (r *PostgresRepository) GetLatestSyncRun(ctx context.Context, connectionID 
 	}
 	if err != nil {
 		return SyncRun{}, false, fmt.Errorf("get latest watch provider sync run: %w", err)
-	}
-	return run, true, nil
-}
-
-func (r *PostgresRepository) GetActiveSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error) {
-	row := r.pool.QueryRow(ctx, `
-		SELECT `+syncRunColumns+`
-		FROM watch_provider_sync_runs
-		WHERE connection_id = $1::uuid
-		  AND status IN ('queued', 'running')
-		ORDER BY started_at DESC, created_at DESC
-		LIMIT 1
-	`, connectionID)
-	run, err := scanSyncRun(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return SyncRun{}, false, nil
-	}
-	if err != nil {
-		return SyncRun{}, false, fmt.Errorf("get active watch provider sync run: %w", err)
 	}
 	return run, true, nil
 }
