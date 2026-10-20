@@ -103,9 +103,12 @@ func TestNotificationDiscordUnlink(t *testing.T) {
 	deps.NotificationDiscordManagement = discordManagement([]userstore.Profile{{ID: "p-owner", IsPrimary: true}})
 	h := NewHandler(deps)
 	path := Prefix + "/notifications/discord-link"
-	for _, headers := range []map[string]string{profileOwner(), with(bearer(adminToken), "X-Profile-Id", "p-owner")} {
-		rec := do(t, h, http.MethodDelete, path, "", headers)
-		if rec.Code != 204 || rec.Body.Len() != 0 || f.user != 1 {
+	for _, tc := range []struct {
+		headers map[string]string
+		userID  int
+	}{{profileOwner(), 1}, {with(bearer(adminToken), "X-Profile-Id", "p-owner"), 2}} {
+		rec := do(t, h, http.MethodDelete, path, "", tc.headers)
+		if rec.Code != 204 || rec.Body.Len() != 0 || f.user != tc.userID {
 			t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), f)
 		}
 	}
