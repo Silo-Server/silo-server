@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useGridRowCap } from "./useGridRowCap";
 
 const observedNodes: Element[] = [];
+let resizeCallback: (() => void) | null = null;
 
 /**
  * jsdom performs no layout, so every offsetTop is 0. Each test supplies the row
@@ -46,6 +47,18 @@ function Harness({
   );
 }
 
+/** A grid whose cards are keyed like the episode grid's, by content id. */
+function KeyedHarness({ ids }: { ids: string[] }) {
+  const setGrid = useGridRowCap<HTMLDivElement>(4, ids.length);
+  return (
+    <div data-testid="grid" ref={setGrid}>
+      {ids.map((id) => (
+        <div key={id}>{id}</div>
+      ))}
+    </div>
+  );
+}
+
 /** `rows` rows of `columns` items, each row 100px below the last. */
 function grid(rows: number, columns: number): number[] {
   return Array.from({ length: rows * columns }, (_, i) => 4 + Math.floor(i / columns) * 100);
@@ -54,9 +67,13 @@ function grid(rows: number, columns: number): number[] {
 describe("useGridRowCap", () => {
   beforeEach(() => {
     observedNodes.length = 0;
+    resizeCallback = null;
     vi.stubGlobal(
       "ResizeObserver",
       class {
+        constructor(callback: () => void) {
+          resizeCallback = callback;
+        }
         observe(node: Element) {
           observedNodes.push(node);
         }
@@ -83,6 +100,36 @@ describe("useGridRowCap", () => {
 
     const narrow = render(<Harness visibleRows={4} tops={grid(6, 2)} />);
     expect(narrow.getByTestId("grid").style.maxHeight).toBe("388px");
+  });
+
+  it("re-measures when a card changes height but the episode count does not", () => {
+    // Descriptions appearing once spoiler settings load make every row taller
+    // while the capped grid keeps its box, so only the cards report a resize.
+    const tops = grid(6, 3);
+    render(<Harness visibleRows={4} tops={tops} />);
+    const element = screen.getByTestId("grid");
+    for (const child of element.children) expect(observedNodes).toContain(child);
+    expect(element.style.maxHeight).toBe("388px");
+
+    tops.splice(
+      0,
+      tops.length,
+      ...Array.from({ length: 18 }, (_, i) => 4 + Math.floor(i / 3) * 140),
+    );
+    resizeCallback?.();
+    expect(element.style.maxHeight).toBe("548px");
+  });
+
+  it("observes the new cards when a list with the same count replaces the old one", async () => {
+    // A cached season with as many episodes as the last swaps every card while
+    // the grid stays mounted; the old cards are gone, so the new ones must be
+    // watched for the description-loading resize above to reach the cap.
+    const { rerender } = render(<KeyedHarness ids={["a1", "a2", "a3"]} />);
+    rerender(<KeyedHarness ids={["b1", "b2", "b3"]} />);
+    await Promise.resolve();
+    for (const child of screen.getByTestId("grid").children) {
+      expect(observedNodes).toContain(child);
+    }
   });
 
   it("observes a grid that only mounts after loading finishes", () => {

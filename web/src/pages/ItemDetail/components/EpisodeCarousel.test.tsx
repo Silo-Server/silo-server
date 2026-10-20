@@ -40,6 +40,39 @@ vi.mock("@/hooks/useCarouselEmbla", () => ({
   }),
 }));
 
+it("captions each card like the series grid and hides unwatched descriptions on request", () => {
+  spoilerPrefs.hideOverviews = true;
+  const card = (id: string, number: number, played: boolean) => ({
+    content_id: id,
+    season_number: 1,
+    episode_number: number,
+    title: `Chapter ${number}`,
+    overview: `Overview ${number}`,
+    air_date: null,
+    runtime: 52,
+    still_url: "",
+    still_thumbhash: "",
+    files: [],
+    user_data: { played },
+  });
+  try {
+    render(
+      <MemoryRouter>
+        <EpisodeCarousel
+          currentEpisodeNumber={1}
+          episodes={[card("ep-1", 1, true), card("ep-2", 2, false)]}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("S01E01 · Chapter 1")).toBeInTheDocument();
+    expect(screen.getAllByText("52m")).toHaveLength(2);
+    expect(screen.getByText("Overview 1")).toBeInTheDocument();
+    expect(screen.queryByText("Overview 2")).not.toBeInTheDocument();
+  } finally {
+    spoilerPrefs.hideOverviews = false;
+  }
+});
+
 it("suppresses a protected still placeholder until the image loads", () => {
   spoilerPrefs.hideImages = true;
   const { container, rerender } = render(
