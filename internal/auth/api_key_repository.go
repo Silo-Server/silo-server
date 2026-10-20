@@ -106,8 +106,9 @@ func (r *APIKeyRepository) GetByKey(ctx context.Context, key string) (*models.AP
 		return nil, ErrAPIKeyNotFound
 	}
 	// These bearers contain 256 random bits. The indexed SHA-256 digest is
-	// both the lookup key and verifier, as for account-link tokens. Do not
-	// tighten the public format here: legacy credentials remain valid.
+	// both the lookup key and verifier, as for password-reset and invitation
+	// link tokens. Do not tighten the public format here: legacy credentials
+	// remain valid.
 	query := `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE key_hash = $1`
 	return scanAPIKey(r.pool.QueryRow(ctx, query, HashLinkToken(key)))
 }

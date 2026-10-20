@@ -38,6 +38,8 @@ ALTER TABLE api_keys ENABLE TRIGGER api_key_configuration_revision;
 
 -- +goose Down
 -- A verifier cannot recover a bearer. Only an empty table can be reverted.
+-- Lock first so the check also sees keys that in-flight writers commit.
+LOCK TABLE api_keys IN ACCESS EXCLUSIVE MODE;
 -- +goose StatementBegin
 DO $$
 BEGIN

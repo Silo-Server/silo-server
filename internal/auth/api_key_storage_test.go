@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -225,5 +226,63 @@ func TestAPIKeyVerifierMigrationRollback(t *testing.T) {
 	}
 	if _, err := repo.GetByKey(ctx, "sa_existing_credential_kept_unchanged"); err != nil {
 		t.Fatal("retry lost the existing credential")
+	}
+}
+
+func TestAPIKeyVerifierDownSeesConcurrentInsert(t *testing.T) {
+	repo := apiKeyLegacyRepository(t)
+	ctx := t.Context()
+	if _, err := repo.pool.Exec(ctx, `DELETE FROM api_keys`); err != nil {
+		t.Fatal(err)
+	}
+	up, down := apiKeyVerifierMigration(t)
+	if _, err := repo.pool.Exec(ctx, up); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := repo.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = writer.Rollback(ctx) }()
+	if _, err := writer.Exec(ctx, `INSERT INTO api_keys(user_id,label,key_hash) VALUES(1,'In flight',$1)`, HashLinkToken("sa_in_flight")); err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := repo.pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrator.Release()
+	var pid uint32
+	if err := migrator.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := migrator.Exec(ctx, down)
+		done <- err
+	}()
+	// Commit only once Down waits on the writer's table lock.
+	deadline := time.Now().Add(10 * time.Second)
+	for waiting := false; !waiting; {
+		select {
+		case err := <-done:
+			t.Fatalf("Down finished before the in-flight insert committed: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Down never waited for the in-flight insert")
+		}
+		if err := repo.pool.QueryRow(ctx, `SELECT COALESCE(wait_event_type='Lock',false) FROM pg_stat_activity WHERE pid=$1`, pid).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("Down reverted a table that held a committed key")
+	}
+	if _, err := repo.GetByKey(ctx, "sa_in_flight"); err != nil {
+		t.Fatal("refused downgrade damaged the in-flight credential")
 	}
 }

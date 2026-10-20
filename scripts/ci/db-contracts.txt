@@ -69,6 +69,7 @@
 ./internal/auth TestAPIKeyVerifierEmptyMigrationRoundTrip
 ./internal/auth TestAPIKeyVerifierLegacyDigestCollision
 ./internal/auth TestAPIKeyVerifierMigrationRollback
+./internal/auth TestAPIKeyVerifierDownSeesConcurrentInsert
 ./internal/api/handlers TestAPIKeyLegacyListsAndEditorNeverReturnStoredSecret
 ./internal/api/handlers TestAPIKeyCreationStillReturnsTheOnlyFullSecretResponse
 

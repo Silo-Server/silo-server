@@ -155,11 +155,12 @@ references); `oauth_completions.token_ciphertext` is no longer written (a comple
 ## API key verifiers
 
 Native API keys contain 256 random bits. `api_keys.key_hash` stores their
-SHA-256 hex digest, using the same high-entropy bearer pattern as account-link
-tokens. Authentication hashes the presented bearer and looks up the indexed
-digest; a stored digest is not itself a usable bearer. `key_prefix` contains
-only the existing eleven-character display prefix, or an empty string for
-malformed historical keys. Management projections omit both bearer and digest.
+SHA-256 hex digest, using the same high-entropy bearer pattern as password-reset
+and invitation link tokens. Authentication hashes the presented bearer and looks
+up the indexed digest; a stored digest is not itself a usable bearer.
+`key_prefix` contains only the existing eleven-character display prefix, or an
+empty string for malformed historical keys. Management projections omit both
+bearer and digest.
 Only creation returns the generated bearer; authentication reads leave the
 model's `Key` empty. Scope and current-owner checks remain at their existing
 authorization boundaries, including Jellyfin-compatible API-key access.
