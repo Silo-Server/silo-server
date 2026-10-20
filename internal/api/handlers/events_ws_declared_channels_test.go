@@ -315,7 +315,7 @@ func TestEventsWebSocketDeclaredChannelsCannotEscalate(t *testing.T) {
 func TestEventsWebSocketAdminAccountChildProfileIsNotAdmin(t *testing.T) {
 	hub := evt.NewHub("test", &cache.NoopEventBus{})
 	_, readFrame := eventsWSTestConnActing(t, &EventsHandler{hub: hub},
-		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=sessions,user_settings", actingAdminIs(false))
+		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=sessions,history_import", actingAdminIs(false))
 
 	hello := readFrame("hello")
 	if strings.Contains(string(hello["available_channels"]), `"sessions"`) {
@@ -325,15 +325,23 @@ func TestEventsWebSocketAdminAccountChildProfileIsNotAdmin(t *testing.T) {
 	if strings.Contains(string(subscribed["channels"]), `"sessions"`) {
 		t.Fatalf("child profile was granted the sessions channel: %s", subscribed["channels"])
 	}
-	readFrame("snapshot") // user_settings
+	readFrame("snapshot") // history_import
 
 	// Another account's event first, then this account's: receiving the
-	// second without the first proves the first was filtered.
-	publishUserSettingsEvent(context.Background(), hub, 2, "", "foreign-setting", "account")
-	publishUserSettingsEvent(context.Background(), hub, 1, "", "own-setting", "account")
+	// second without the first proves the first was filtered. history_import
+	// still reaches an acting admin across accounts, so only the demotion
+	// filters it here.
+	for _, env := range []evt.Envelope{
+		{Channel: evt.ChannelHistoryImport, Event: "foreign-import", UserID: 2},
+		{Channel: evt.ChannelHistoryImport, Event: "own-import", UserID: 1},
+	} {
+		if err := hub.Publish(context.Background(), env); err != nil {
+			t.Fatalf("publishing %s: %v", env.Event, err)
+		}
+	}
 	event := readFrame("event")
-	if !strings.Contains(string(event["data"]), `"own-setting"`) {
-		t.Fatalf("child profile received another account's event: %s", event["data"])
+	if string(event["event"]) != `"own-import"` {
+		t.Fatalf("child profile received another account's event: %s", event["event"])
 	}
 }
 
