@@ -97,6 +97,7 @@ type v1AuthorityFixture struct {
 	role                                             string
 	enabled                                          bool
 	revoked, keyDeleted, down, pinRevoked, secondary bool
+	degraded                                         bool
 	revision                                         int64
 	language                                         string
 	checks                                           chan struct{}
@@ -152,7 +153,7 @@ func (f *v1AuthorityFixture) Resolve(_ context.Context, in access.ResolveInput) 
 	if f.pinRevoked && !in.SkipPINVerification {
 		return access.Scope{}, access.ErrProfileUnverified
 	}
-	return access.Scope{UserID: in.UserID, ProfileID: in.ProfileID, ProfileVerified: true, PolicyRevision: f.revision, PreferredMetadataLanguage: f.language}, nil
+	return access.Scope{UserID: in.UserID, ProfileID: in.ProfileID, ProfileVerified: true, PolicyRevision: f.revision, PreferredMetadataLanguage: f.language, PreferencesDegraded: f.degraded}, nil
 }
 
 func (f *v1AuthorityFixture) acting(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
@@ -402,5 +403,46 @@ func TestV1RoomRetainsTerminalReconnectReason(t *testing.T) {
 				t.Fatalf("terminal frame = %v", frame)
 			}
 		})
+	}
+}
+
+// TestSocketAuthorityV1SkipsDegradedPreferenceRounds: a recheck whose
+// preferences fell back to defaults neither closes the socket nor compares
+// its fingerprint, as on v2; admission still refuses such a scope.
+func TestSocketAuthorityV1SkipsDegradedPreferenceRounds(t *testing.T) {
+	f := newV1AuthorityFixture()
+	r, cancel, err := f.monitor().bind(v1SocketRequest(auth.TokenTypeAccess), "profile", "proof", time.Minute, time.Time{}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	f.mu.Lock()
+	f.degraded = true
+	f.revision++
+	f.mu.Unlock()
+	for range 5 {
+		select {
+		case <-f.checks:
+		case <-r.Context().Done():
+			t.Fatal("a degraded preferences read ended the connection")
+		case <-time.After(time.Second):
+			t.Fatal("authority not checked")
+		}
+	}
+	if r.Context().Err() != nil {
+		t.Fatal("a degraded preferences read ended the connection")
+	}
+	_, stop, err := f.monitor().bind(v1SocketRequest(auth.TokenTypeAccess), "profile", "proof", time.Minute, time.Time{}, "", nil)
+	stop()
+	if err == nil {
+		t.Fatal("a degraded scope admitted a fresh connection")
+	}
+	f.mu.Lock()
+	f.degraded = false
+	f.mu.Unlock()
+	select {
+	case <-r.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("the policy change was not noticed once preferences recovered")
 	}
 }

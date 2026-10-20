@@ -114,7 +114,7 @@ func (a *SocketAuthorityV1) bind(r *http.Request, profileID, profileToken string
 			return access.Scope{}, "", evt.ErrSocketTicket
 		}
 		scope, ok := access.GetScope(validated)
-		if !ok || scope.PreferencesDegraded {
+		if !ok {
 			return access.Scope{}, "", evt.ErrSocketTicket
 		}
 		if extra != nil {
@@ -125,7 +125,9 @@ func (a *SocketAuthorityV1) bind(r *http.Request, profileID, profileToken string
 		return scope, current.Role, nil
 	}
 	scope, role, err := check()
-	if err != nil || (expectedRole != "" && role != expectedRole) {
+	// A fingerprint of fallback preferences would end the connection once the
+	// read recovers, so admission refuses it as the v2 ticket mint does.
+	if err != nil || scope.PreferencesDegraded || (expectedRole != "" && role != expectedRole) {
 		cancel()
 		return r, func() {}, evt.ErrSocketTicket
 	}
@@ -141,7 +143,10 @@ func (a *SocketAuthorityV1) bind(r *http.Request, profileID, profileToken string
 				return
 			case <-tick:
 				current, currentRole, err := check()
-				if err != nil || socketAccessFingerprintV1(current) != fingerprint || (expectedRole != "" && currentRole != expectedRole) {
+				// Fallback preferences say nothing about whether access
+				// changed; that round skips the comparison, as on v2.
+				changed := !current.PreferencesDegraded && socketAccessFingerprintV1(current) != fingerprint
+				if err != nil || changed || (expectedRole != "" && currentRole != expectedRole) {
 					cancel()
 					return
 				}

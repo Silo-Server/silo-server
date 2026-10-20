@@ -147,7 +147,11 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	var bound notifications.Ticket
 	if ticket := r.URL.Query().Get("ticket"); ticket != "" && h.notifications != nil {
 		binding, ok := h.notifications.Tickets.Consume(r.Context(), ticket)
-		if ok && binding.UserID == claims.UserID {
+		// A ticket for a profile other than the declared one is rejected
+		// too: the authority check below follows the declared profile, so
+		// keeping the binding would stream a profile nothing rechecks.
+		declared := apimw.GetProfileID(r.Context())
+		if ok && binding.UserID == claims.UserID && (declared == "" || declared == binding.ProfileID) {
 			bound = binding
 		} else {
 			// Expired, reused, consumed on a different node, or minted for

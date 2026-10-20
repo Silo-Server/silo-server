@@ -123,10 +123,11 @@ accounts' events only while it is the acting admin (see
 profile's PIN proof must still verify: the ticket keeps the `X-Profile-Token`
 sent when it was minted, server-side, and the socket re-verifies it. Any
 other profile on the account, such as a child profile, connects with the user
-channels. A rejected ticket (expired, reused, or for another account) leaves the
-connection unbound and judged as acting with no profile, so on a household with
-a PIN-protected or limited profile it also gets the user channels until the
-client reconnects with a fresh ticket. All four v1 sockets (events, administrator logs, playback control and Watch Together)
+channels. A rejected ticket (expired, reused, for another account, or for a profile other
+than the one the handshake declares in `X-Profile-Id`) leaves the connection
+unbound. Without a declared profile it is then judged as acting with no profile,
+so on a household with a PIN-protected or limited profile it also gets the user
+channels until the client reconnects with a fresh ticket. All four v1 sockets (events, administrator logs, playback control and Watch Together)
 recheck current authority every 15 seconds, with a two-second read budget. They close
 without a frame or dedicated code on credential revocation, account disablement,
 role or access-policy changes, loss of profile verification, or a failed authority

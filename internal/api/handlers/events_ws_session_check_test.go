@@ -211,3 +211,81 @@ func TestEventsWebSocketV1RechecksTicketProfileProof(t *testing.T) {
 		}
 	})
 }
+
+// TestEventsWebSocketV1TicketProfileFollowsAuthority covers the profile the
+// v1 recheck follows on a plain user account: a ticket-bound profile's PIN
+// change closes the connection, and a ticket for a profile other than the
+// declared one leaves the connection unbound, so it never streams a profile
+// the recheck does not verify.
+func TestEventsWebSocketV1TicketProfileFollowsAuthority(t *testing.T) {
+	decide := func(context.Context, apimw.ActingAdminRequest) (bool, error) { return false, nil }
+	claims := &auth.Claims{UserID: 1, Role: "user", SessionID: "session", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}}
+	newHandler := func(t *testing.T, proofs *profileProofFixture) (*EventsHandler, string) {
+		t.Helper()
+		tickets := notifications.NewTicketStore(nil)
+		ticket, _, err := tickets.Mint(t.Context(), notifications.Ticket{UserID: 1, ProfileID: "child", ProfileToken: "pin-proof"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions := new(sessionRoleFixture)
+		sessions.role.Store("user")
+		handler := &EventsHandler{hub: evt.NewHub("test", &cache.NoopEventBus{})}
+		handler.SetNotificationsSystem(&notifications.System{Tickets: tickets})
+		handler.SocketAuthority = NewSocketAuthorityV1(sessions, &socketUserFixture{user: models.User{ID: 1, Role: "user", Enabled: true}}, nil, proofs, decide)
+		handler.SocketAuthority.checkInterval = 10 * time.Millisecond
+		return handler, ticket
+	}
+
+	t.Run("ticket profile PIN changes while connected", func(t *testing.T) {
+		proofs := new(profileProofFixture)
+		handler, ticket := newHandler(t, proofs)
+		conn, readFrame := eventsWSTestConnActing(t, handler, claims, "?channels=user_settings&ticket="+url.QueryEscape(ticket), decide)
+		readFrame("hello")
+		readFrame("subscribed")
+		proofs.pinChanged.Store(true)
+		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				if strings.Contains(err.Error(), "timeout") {
+					t.Fatal("connection stayed open after the ticket profile's PIN changed")
+				}
+				return
+			}
+		}
+	})
+
+	t.Run("ticket for another profile than the declared one", func(t *testing.T) {
+		handler, ticket := newHandler(t, new(profileProofFixture))
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := apimw.SetActingAdminDecider(apimw.SetProfileID(apimw.SetClaims(r.Context(), claims), "sibling"), decide)
+			handler.HandleWebSocket(w, r.WithContext(ctx))
+		}))
+		defer server.Close()
+		conn, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"?channels=user_settings,notifications&ticket="+url.QueryEscape(ticket),
+			http.Header{"X-Profile-Token": []string{"pin-proof"}})
+		if err != nil {
+			t.Fatalf("dialing events websocket: %v", err)
+		}
+		if resp != nil && resp.Body != nil {
+			defer func() { _ = resp.Body.Close() }()
+		}
+		defer func() { _ = conn.Close() }()
+		for _, want := range []string{"hello", "subscribed"} {
+			if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			var frame evt.EventsSubscribedMessage
+			if err := conn.ReadJSON(&frame); err != nil {
+				t.Fatalf("reading %s frame: %v", want, err)
+			}
+			if frame.Type != want {
+				t.Fatalf("frame type = %q, want %q", frame.Type, want)
+			}
+			if want == "subscribed" && (len(frame.Rejected) != 1 || frame.Rejected[0].Channel != evt.ChannelNotifications) {
+				t.Fatalf("a ticket for another profile bound the connection: %+v", frame)
+			}
+		}
+	})
+}
