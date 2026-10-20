@@ -85,9 +85,13 @@ capacity, pilot or human acceptance result follows from source and finite tests.
 
 ## Coordination with work-rate admission
 
-Socket cardinality and realtime work cost are separate controls. Prepaid ticket
-work is not a socket reservation; quota-denied v2 tickets and prepaid credits
-stay spent. On v1 reserve before work charging. A work refusal releases a pending
+Socket cardinality and realtime work cost are separate controls. The work-rate
+admission change is separate from this implementation. The following ordering
+requirements apply when integrating both controls, and do not describe behavior
+provided by socket admission alone.
+
+Prepaid ticket work is not a socket reservation; quota-denied v2 tickets and
+prepaid credits stay spent. On v1 reserve before work charging. A work refusal releases a pending
 reservation; an in-socket work refusal leaves the connection and reservation
 intact. Upgrade precedes watcher startup and subscription. Combined verification
 requires both stable heads and finite composition tests.
