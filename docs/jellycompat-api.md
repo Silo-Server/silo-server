@@ -483,12 +483,14 @@ node answers. A revoked or expired login session ends the compat session with `4
 lookup that fails is a retryable `503` and keeps it. `sa_` API keys have no login
 session and are checked as keys instead.
 
-`POST /Sessions/Logout` evicts the local compat session and returns `204` once
-its stored row is removed or already absent. If deletion fails, it returns `500`
-with `Error: "ServerError"` and `Message: "Could not sign out"`; completion could
-not be confirmed. It adds no `Retry-After` header. Deletion is idempotent, but the
-route authenticates first, so a later request with an already-deleted session
-can receive `401` before reaching the handler. Client retry behavior varies.
+`POST /Sessions/Logout` drops this node's cached copy of the compat session and
+deletes its stored row, returning `204` when the row is deleted or was already
+gone. When the delete fails it returns `500` with `Error: "ServerError"` and
+`Message: "Could not sign out"`. The stored row normally survives that failure,
+so the token keeps working until a later sign-out succeeds or the session
+expires; jellyfin-web clears its saved token whatever the status. The route
+authenticates first, so retrying after a delete that completed despite the error
+returns `401`.
 
 ### Quick Connect
 

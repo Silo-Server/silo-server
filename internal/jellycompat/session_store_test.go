@@ -16,9 +16,8 @@ func fixedNow() time.Time {
 type rowSessionRepo struct {
 	rows    map[string]Session
 	deletes int
-	// beforeDelete observes the local eviction before persistence is attempted.
-	beforeDelete func()
-	deleteErr    error
+	// deleteErr, when set, is returned by DeleteByToken, which then keeps the row.
+	deleteErr error
 	// afterGet and afterUpdate, when set, run after GetByToken has read a row
 	// or UpdateByToken has written one, as a revocation committing then.
 	afterGet    func()
@@ -54,9 +53,6 @@ func (r *rowSessionRepo) GetByToken(_ context.Context, token string, _ time.Time
 
 func (r *rowSessionRepo) DeleteByToken(_ context.Context, token string) error {
 	r.deletes++
-	if r.beforeDelete != nil {
-		r.beforeDelete()
-	}
 	if r.deleteErr != nil {
 		return r.deleteErr
 	}
