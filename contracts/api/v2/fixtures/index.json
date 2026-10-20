@@ -11907,7 +11907,8 @@
         "method": "POST",
         "path": "/api/v2/notifications/discord/link/init",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-primary"
         }
       },
       "expected_status": 200,
@@ -11922,12 +11923,13 @@
     {
       "name": "notification_discord_mode",
       "operation_id": "updateNotificationDiscordPreferences",
-      "scenario": "A mode mutation reports account state without leaking the linked identity token.",
+      "scenario": "A household manager mode mutation reports account state without leaking the linked identity token.",
       "request": {
         "method": "PUT",
         "path": "/api/v2/notifications/discord-preferences",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-primary"
         },
         "body": "{\"mode\":\"off\"}"
       },
