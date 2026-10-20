@@ -2407,9 +2407,11 @@ func main() {
 	// White-label branding: one service shared by the API (public read + admin
 	// upload), the frontend handler (index.html title, favicon, manifest), the
 	// artwork reconcile task, and outgoing email. It is built before the
-	// notification system, which sends email. S3 is optional — pass a nil
-	// AssetStore (not the typed-nil *s3client.Client) when it isn't configured
-	// so text branding still works without it.
+	// notification system, which sends email. Uploaded images go to the
+	// artwork store (local disk or S3, whichever artwork storage uses), which
+	// configureBlobStorage always opens in a process that serves the API. Only
+	// a process without one passes a nil AssetStore (not a typed nil), so text
+	// branding still works there.
 	var brandingStore branding.AssetStore
 	if deps.Blobs.Assets != nil {
 		brandingStore = deps.Blobs.Assets
