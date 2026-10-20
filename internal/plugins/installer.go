@@ -243,6 +243,9 @@ func (i *Installer) replaceBinary(
 	if err := ValidateManifest(manifest); err != nil {
 		return nil, err
 	}
+	if manifest.GetPluginId() != existing.PluginID {
+		return nil, fmt.Errorf("replacement plugin id %q does not match installation %q", manifest.GetPluginId(), existing.PluginID)
+	}
 
 	manifestBytes, err := binaryManifestBytes(manifest, manifestJSON)
 	if err != nil {
@@ -253,7 +256,10 @@ func (i *Installer) replaceBinary(
 		return nil, fmt.Errorf("package plugin archive: %w", err)
 	}
 
-	installRoot := filepath.Join(i.baseDir, sanitizeFilesystemSegment(manifest.GetPluginId()), sanitizeFilesystemSegment(manifest.GetVersion()))
+	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
 		return nil, fmt.Errorf("create plugin install root %q: %w", installRoot, err)
 	}
@@ -304,12 +310,8 @@ func (i *Installer) replaceBinary(
 		return nil, fmt.Errorf("update replacement plugin installation: %w", err)
 	}
 
-	oldInstallDir := filepath.Dir(existing.InstallPath)
-	if oldInstallDir != "" && filepath.Clean(oldInstallDir) != filepath.Clean(installDir) {
-		_ = os.RemoveAll(oldInstallDir)
-	}
-
 	keepInstallDir = true
+	cleanupReplacedInstallation(ctx, existing, installDir, os.RemoveAll)
 
 	updated := *existing
 	updated.Version = version
@@ -340,8 +342,14 @@ func (i *Installer) replaceArchive(
 	if err != nil {
 		return nil, err
 	}
+	if manifest.GetPluginId() != existing.PluginID {
+		return nil, fmt.Errorf("replacement plugin id %q does not match installation %q", manifest.GetPluginId(), existing.PluginID)
+	}
 
-	installRoot := filepath.Join(i.baseDir, sanitizeFilesystemSegment(manifest.GetPluginId()), sanitizeFilesystemSegment(manifest.GetVersion()))
+	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
 		return nil, fmt.Errorf("create plugin install root %q: %w", installRoot, err)
 	}
@@ -388,12 +396,8 @@ func (i *Installer) replaceArchive(
 		return nil, fmt.Errorf("update replacement plugin installation: %w", err)
 	}
 
-	oldInstallDir := filepath.Dir(existing.InstallPath)
-	if oldInstallDir != "" && filepath.Clean(oldInstallDir) != filepath.Clean(installDir) {
-		_ = os.RemoveAll(oldInstallDir)
-	}
-
 	keepInstallDir = true
+	cleanupReplacedInstallation(ctx, existing, installDir, os.RemoveAll)
 
 	updated := *existing
 	updated.Version = version
@@ -419,7 +423,10 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 		return nil, fmt.Errorf("package plugin archive: %w", err)
 	}
 
-	installRoot := filepath.Join(i.baseDir, sanitizeFilesystemSegment(manifest.GetPluginId()), sanitizeFilesystemSegment(manifest.GetVersion()))
+	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
 		return nil, fmt.Errorf("create plugin install root %q: %w", installRoot, err)
 	}
@@ -517,7 +524,10 @@ func (i *Installer) installArchive(ctx context.Context, data []byte, req Install
 		return nil, err
 	}
 
-	installRoot := filepath.Join(i.baseDir, sanitizeFilesystemSegment(manifest.GetPluginId()), sanitizeFilesystemSegment(manifest.GetVersion()))
+	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
 		return nil, fmt.Errorf("create plugin install root %q: %w", installRoot, err)
 	}
