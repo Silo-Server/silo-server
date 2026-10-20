@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 20;
+export const SETTINGS_REVISION = 22;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -348,6 +348,9 @@ export interface SettingDefinition {
   scopeIntroducedIn: readonly number[];
   resolutionOrder: readonly string[];
   defaultValue: unknown;
+  /** The server administrator may replace defaultValue for the whole server,
+   * so a value with source "default" can differ from it. */
+  adminDefault?: boolean;
   label: string;
   description: string;
   category: string;
@@ -1498,6 +1501,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [1],
     resolutionOrder: ["profile", "default"],
     defaultValue: "combined",
+    adminDefault: true,
     label: "Next up episodes",
     description: "Whether upcoming episodes stay with Continue Watching or get their own row.",
     category: "navigation",
@@ -1517,6 +1521,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [18],
     resolutionOrder: ["profile", "default"],
     defaultValue: false,
+    adminDefault: true,
     label: "Show new episodes first",
     description:
       "Move a show you've caught up on to the front of Continue Watching and Next Up when a new episode or season arrives.",
@@ -1682,6 +1687,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [16, 16],
     resolutionOrder: ["profile", "profile_device", "default"],
     defaultValue: true,
+    adminDefault: true,
     label: "Show title art",
     description:
       "Use a title's logo artwork as its name on detail pages when one is available. When off, the name is always shown as text.",

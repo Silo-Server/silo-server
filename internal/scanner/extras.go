@@ -430,12 +430,15 @@ type extrasScanStats struct {
 // the media_extras entity, and upsert the backing media_files row (probe data
 // included) with extra_id set and content/episode ids cleared. Files whose
 // parent cannot be resolved yet (parent unmatched or ambiguous) are skipped;
-// the next scan retries once the parent has a content id.
+// the next scan retries once the parent has a content id. sidecars is the
+// walk's directory listing, used to find extras' images; nil reads each
+// extras folder instead.
 func (s *Scanner) processExtraFiles(
 	ctx context.Context,
 	folder *models.MediaFolder,
 	extras []extraCandidate,
 	existingByPath map[string]*scanStateFile,
+	sidecars SidecarListing,
 ) extrasScanStats {
 	var stats extrasScanStats
 	if len(extras) == 0 || s.extraRepo == nil {
@@ -469,6 +472,7 @@ func (s *Scanner) processExtraFiles(
 		}
 	}
 
+	stillDirs := newExtraStillDirs(sidecars)
 	for _, candidate := range extras {
 		if ctx.Err() != nil {
 			return stats
@@ -498,17 +502,20 @@ func (s *Scanner) processExtraFiles(
 
 		// Upsert the entity before the unchanged check so parent/kind/title
 		// converge on every scan (a rematched parent or reclassified kind
-		// must not be masked by an unchanged file).
-		if err := s.extraRepo.Upsert(ctx, models.MediaExtra{
+		// must not be masked by an unchanged file), and the sidecar image
+		// too: replacing only the image leaves the video unchanged.
+		stillSource, err := s.extraRepo.Upsert(ctx, models.MediaExtra{
 			ContentID: extraID,
 			ParentID:  parentID,
 			Kind:      candidate.Kind,
 			Title:     naming.ExtraTitleFromFile(candidate.Path),
-		}); err != nil {
+		})
+		if err != nil {
 			slog.WarnContext(ctx, "scanner: extra upsert failed", "component", "scanner", "path", candidate.Path, "error", err)
 			stats.Errors++
 			continue
 		}
+		s.syncExtraStill(ctx, extraID, candidate.Path, stillSource, stillDirs)
 
 		fileModifiedAt := normalizeFileModifiedAt(info.ModTime())
 		existing := existingByPath[candidate.Path]

@@ -531,6 +531,16 @@ export function VideoPlayer({
   // transport command for the current selection. The drift loop measures
   // against it; snapshots never move it.
   const roomReferenceRef = useRef<RoomPositionReference | null>(null);
+  // Starts a room member's player once its media is playable: true when the
+  // room's latest applied command has it playing and its position is now
+  // applied, so startup may play. The room effect keeps it current.
+  const roomStartRef = useRef<((video: HTMLVideoElement) => boolean) | null>(null);
+  // The current transport has not started or settled paused yet, so its
+  // startup will still run once the media is playable.
+  const transportStartupPendingRef = useRef(false);
+  // Offers a click to join when the browser refuses to start a room member's
+  // player for want of one; the room effect keeps it current.
+  const offerRoomJoinRef = useRef<(() => void) | null>(null);
   // When the latest room command executed or finished executing. The drift
   // loop leaves playback alone for a moment after a command.
   // Local intervals in room sync (this settle, reload staleness and pacing,
@@ -743,11 +753,16 @@ export function VideoPlayer({
       transportFailedForPlanRevisionRef.current = planRevision;
       setError(null);
       // Until this transport has played, the player's position is the
-      // previous route's or 0; recovery resumes where this one was heading.
-      onPlanFailure(
-        failure,
-        streamPlayedRef.current ? currentTimeRef.current : subtitleFetchAnchorRef.current,
-      );
+      // previous route's or 0; recovery resumes where this one was heading,
+      // which for a member of a playing room is where the room is now.
+      let resumeAt = subtitleFetchAnchorRef.current;
+      const roomReference = roomReferenceRef.current;
+      if (streamPlayedRef.current) {
+        resumeAt = currentTimeRef.current;
+      } else if (roomReference?.playing) {
+        resumeAt = roomPositionAt(roomReference, Date.now(), serverTimeOffsetRef.current);
+      }
+      onPlanFailure(failure, resumeAt);
       return true;
     },
     [onPlanFailure, plan.plan_attempt_key, planRevision, sessionId],
@@ -919,6 +934,10 @@ export function VideoPlayer({
     reportCommandId: roomReportCommandId,
   });
   const roomPlaybackActive = !!watchTogetherRoomId && !watchTogether.closedReason;
+  // Read by the transport's startup: a room member's player starts when the
+  // room says so, not when its media is ready.
+  const roomPlaybackActiveRef = useRef(roomPlaybackActive);
+  roomPlaybackActiveRef.current = roomPlaybackActive;
   // Read by timers that must use the newest clock estimate without restarting.
   const serverTimeOffsetRef = useRef(watchTogether.serverTimeOffsetMs);
   serverTimeOffsetRef.current = watchTogether.serverTimeOffsetMs;
@@ -2241,6 +2260,7 @@ export function VideoPlayer({
     transportIdleSinceRef.current = null;
     const video = videoRef.current;
     if (!video || !isPlayerReady || hlsStartupGuardRef.current?.hasFailed()) return;
+    transportStartupPendingRef.current = true;
 
     let hls: HlsType | null = null;
     let engineSession: BrowserEngineSession | null = null;
@@ -2263,6 +2283,7 @@ export function VideoPlayer({
     };
 
     const cleanupStartupListeners = () => {
+      transportStartupPendingRef.current = false;
       clearAutoplayRetry();
       video.removeEventListener("loadeddata", attemptAutoplayWhenReady);
       video.removeEventListener("canplay", attemptAutoplayWhenReady);
@@ -2301,7 +2322,16 @@ export function VideoPlayer({
       // the current frame. Starting earlier can produce a visible first-frame
       // freeze where audio advances before video begins moving.
       if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
-      if (!shouldAutoPlay) {
+      if (roomPlaybackActiveRef.current) {
+        // The room decides: its latest command starts this player from where
+        // the room is now. Until one has it playing, the player waits paused;
+        // starting on its own would put it ahead of everyone at the room's
+        // start, or leave it behind from 0 after the room already started.
+        if (!roomStartRef.current?.(video)) {
+          settlePaused();
+          return;
+        }
+      } else if (!shouldAutoPlay) {
         settlePaused();
         return;
       }
@@ -2331,6 +2361,13 @@ export function VideoPlayer({
           // The element is paused now, whatever happens next, so the transport
           // reflects that immediately.
           setPlaying(false);
+          if (roomPlaybackActiveRef.current && isAutoplayPolicyRejection(error)) {
+            // The room's start needs a click in this browser, as when the
+            // room's own play is refused.
+            settlePaused();
+            offerRoomJoinRef.current?.();
+            return;
+          }
           if (autoplayAttempts < MAX_AUTOPLAY_ATTEMPTS) {
             // Deliberately keeps the readiness listeners armed: whichever
             // wakes first — a later `canplay` or this timer — retries.
@@ -3625,27 +3662,30 @@ export function VideoPlayer({
       lastRoomCommandIdRef.current = null;
       appliedRoomCommandIdRef.current = null;
       roomReferenceRef.current = null;
+      roomStartRef.current = null;
+      offerRoomJoinRef.current = null;
       return;
     }
-    if (command.command_id === lastRoomCommandIdRef.current) {
-      return;
-    }
+    // A repeat run for the same command (a clock, plan, or callback update)
+    // only refreshes roomStartRef below; the command is already scheduled or run.
+    const repeat = command.command_id === lastRoomCommandIdRef.current;
+    if (!repeat) {
+      lastRoomCommandIdRef.current = command.command_id;
+      appliedRoomCommandIdRef.current = null;
+      // The room's seek for the held request. A seek for an earlier press in a
+      // burst does not answer it.
+      if (
+        command.action === "seek" &&
+        roomHeldSeekRef.current !== null &&
+        remainingRoomHeldSeek(roomHeldSeekRef.current, command.position_seconds) === null
+      ) {
+        roomHeldSeekAnsweredRef.current = true;
+      }
 
-    lastRoomCommandIdRef.current = command.command_id;
-    appliedRoomCommandIdRef.current = null;
-    // The room's seek for the held request. A seek for an earlier press in a
-    // burst does not answer it.
-    if (
-      command.action === "seek" &&
-      roomHeldSeekRef.current !== null &&
-      remainingRoomHeldSeek(roomHeldSeekRef.current, command.position_seconds) === null
-    ) {
-      roomHeldSeekAnsweredRef.current = true;
-    }
-
-    if (roomCommandTimerRef.current !== null) {
-      window.clearTimeout(roomCommandTimerRef.current);
-      roomCommandTimerRef.current = null;
+      if (roomCommandTimerRef.current !== null) {
+        window.clearTimeout(roomCommandTimerRef.current);
+        roomCommandTimerRef.current = null;
+      }
     }
 
     const serverExecuteAt = Date.parse(command.execute_at);
@@ -3807,6 +3847,46 @@ export function VideoPlayer({
       return true;
     };
 
+    // Startup runs this once the media is playable (see roomStartRef). A play
+    // that executed before then is decided here, against the position and
+    // seekable ranges the element has now.
+    roomStartRef.current = (video) =>
+      reference.playing &&
+      lastRoomCommandIdRef.current === command.command_id &&
+      appliedRoomCommandIdRef.current === command.command_id &&
+      applyRoomPosition(video);
+
+    // The browser refused to start playback without a click: offer one that
+    // joins the room where it is when clicked.
+    const offerJoinPlayback = () => {
+      resetRoomCatchupRate();
+      showWatchTogetherNotice(
+        "Your browser blocked automatic playback. Click to join playback.",
+        "warning",
+        () => {
+          if (!isMountedRef.current || lastRoomCommandIdRef.current !== command.command_id) return;
+          const currentVideo = videoRef.current;
+          if (!currentVideo) return;
+          roomCommandFinishedAtRef.current = performance.now();
+          if (!applyRoomPosition(currentVideo)) return;
+          void currentVideo
+            .play()
+            .then(() => {
+              if (!isMountedRef.current || lastRoomCommandIdRef.current !== command.command_id)
+                return;
+              reportRoomReadyRef.current();
+            })
+            .catch(() => {
+              if (!isMountedRef.current || lastRoomCommandIdRef.current !== command.command_id)
+                return;
+              resetRoomCatchupRate();
+            });
+        },
+      );
+    };
+    offerRoomJoinRef.current = offerJoinPlayback;
+    if (repeat) return;
+
     roomCommandTimerRef.current = window.setTimeout(() => {
       roomCommandTimerRef.current = null;
       void (async () => {
@@ -3826,7 +3906,17 @@ export function VideoPlayer({
           if (command.action === "seek") holdRoomSeek(null);
           else abandonRoomHeldSeek();
         }
-        const playAllowed = applyRoomPosition(video);
+        // A play that runs while this transport is still starting, before it
+        // has playable media, waits for its startup (see roomStartRef): the
+        // position and seekable ranges mean nothing yet, and a source still
+        // loading lands wherever its startup puts it. Once a transport has
+        // started, a play goes ahead as before and starts when data arrives.
+        const awaitingMedia =
+          command.action === "play" &&
+          video.paused &&
+          transportStartupPendingRef.current &&
+          video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
+        const playAllowed = !awaitingMedia && applyRoomPosition(video);
 
         if (command.action === "seek") {
           video.pause();
@@ -3852,37 +3942,7 @@ export function VideoPlayer({
               }, AUTOPLAY_RETRY_DELAY_MS);
               return;
             }
-            resetRoomCatchupRate();
-            showWatchTogetherNotice(
-              "Your browser blocked automatic playback. Click to join playback.",
-              "warning",
-              () => {
-                if (!isMountedRef.current || lastRoomCommandIdRef.current !== command.command_id)
-                  return;
-                const currentVideo = videoRef.current;
-                if (!currentVideo) return;
-                roomCommandFinishedAtRef.current = performance.now();
-                if (!applyRoomPosition(currentVideo)) return;
-                void currentVideo
-                  .play()
-                  .then(() => {
-                    if (
-                      !isMountedRef.current ||
-                      lastRoomCommandIdRef.current !== command.command_id
-                    )
-                      return;
-                    reportRoomReadyRef.current();
-                  })
-                  .catch(() => {
-                    if (
-                      !isMountedRef.current ||
-                      lastRoomCommandIdRef.current !== command.command_id
-                    )
-                      return;
-                    resetRoomCatchupRate();
-                  });
-              },
-            );
+            offerJoinPlayback();
           }
         }
 

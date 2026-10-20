@@ -222,7 +222,7 @@ func TestLegacyPushRegistrationStaysOnTheAccount(t *testing.T) {
 	ctx := t.Context()
 	repo := NewPushDeviceRepository(pool)
 	cipher := testPushCipher(t)
-	register := func(user int, device string) *PushDevice {
+	register := func(user int, device string) (*PushDevice, error) {
 		t.Helper()
 		registration, err := normalizeApplePushRegistration(ApplePushRegistrationInput{
 			DeviceID: device, APNsToken: strings.Repeat("a", 64), APNsEnvironment: APNsEnvironmentProd,
@@ -232,11 +232,7 @@ func TestLegacyPushRegistrationStaysOnTheAccount(t *testing.T) {
 			t.Fatal(err)
 		}
 		registration.UserID, registration.ProfileID = user, sharedID
-		row, err := repo.UpsertApple(ctx, registration, cipher)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return row
+		return repo.UpsertApple(ctx, registration, cipher)
 	}
 	owners := func(device string) []int {
 		t.Helper()
@@ -251,25 +247,28 @@ func TestLegacyPushRegistrationStaysOnTheAccount(t *testing.T) {
 		return out
 	}
 
-	first := register(accountA, "shared-phone")
-	// Account B signs in on the same install: A's registration (and the
-	// attempts that cascade with it) goes, B gets a new row.
-	second := register(accountB, "shared-phone")
-	if second.ID == first.ID || !slices.Equal(owners("shared-phone"), []int{accountB}) {
-		t.Fatalf("after B registers: row %s (A's was %s), owners %v; want a new row for B only", second.ID, first.ID, owners("shared-phone"))
-	}
-	if err := repo.DeleteByProfileDevice(ctx, accountA, sharedID, "shared-phone"); err != nil {
+	if _, err := register(accountA, "shared-phone"); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(owners("shared-phone"), []int{accountB}) {
-		t.Fatalf("account A's unregister removed account B's registration: %v", owners("shared-phone"))
+	// A supplied identifier and provider token do not authorize account transfer.
+	if _, err := register(accountB, "shared-phone"); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("foreign registration = %v", err)
+	}
+	if err := repo.DeleteByProfileDevice(ctx, accountB, sharedID, "shared-phone"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(owners("shared-phone"), []int{accountA}) {
+		t.Fatalf("foreign registration or unregister changed ownership: %v", owners("shared-phone"))
 	}
 	service := NewPushDeviceService(repo, cipher)
-	if err := service.Unregister(ctx, accountB, sharedID, "shared-phone"); err != nil {
+	if err := service.Unregister(ctx, accountA, sharedID, "shared-phone"); err != nil {
 		t.Fatal(err)
 	}
 	if got := owners("shared-phone"); len(got) != 0 {
-		t.Fatalf("account B's unregister left %v", got)
+		t.Fatalf("account A's unregister left %v", got)
+	}
+	if _, err := register(accountB, "shared-phone"); err != nil {
+		t.Fatalf("registration after owner unregisters: %v", err)
 	}
 }
 

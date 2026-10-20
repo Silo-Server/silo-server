@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
@@ -867,7 +868,37 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return value, nil
 	}
 
+	if def, ok := adminDefaultDefinition(key); ok {
+		return normalizeAdminDefault(def, value)
+	}
+
 	return raw, nil
+}
+
+// adminDefaultDefinition returns the settings-contract definition whose
+// server-wide default the key holds. A contract that fails to load leaves the
+// key unrecognized; the server refuses to start in that state anyway.
+func adminDefaultDefinition(key string) (*settingscontract.Definition, bool) {
+	contract, err := settingscontract.Load()
+	if err != nil {
+		return nil, false
+	}
+	return contract.AdminDefaultFor(key)
+}
+
+// normalizeAdminDefault validates an administrator default against the value
+// schema of the setting it stands in for. Empty clears it, so viewers inherit
+// the contract default again.
+func normalizeAdminDefault(def *settingscontract.Definition, value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	normalized, err := def.ValueSchema.NormalizeValue(json.RawMessage(value), settingscontract.ObjectSchemas())
+	if err != nil {
+		return "", fmt.Errorf("%s must be a valid %s value: %w",
+			settingscontract.AdminDefaultSettingKey(def.Key), def.Key, err)
+	}
+	return string(normalized), nil
 }
 
 // AdminSettingsCapabilities describes durable bootstrap configuration that is

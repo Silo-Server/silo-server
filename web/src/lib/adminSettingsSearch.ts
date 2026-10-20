@@ -99,7 +99,7 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
   {
     id: "appearance",
     label: "Appearance",
-    description: "Logos, the accent color, and poster badge defaults.",
+    description: "Logos, the accent color, poster badge defaults, and title art.",
     keywords: [
       "logo",
       "wordmark",
@@ -112,6 +112,9 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "pwa",
       "overlays",
       "poster badges",
+      "title art",
+      "logo art",
+      "title logo",
     ],
     settings: settingIndex(
       "Logos and icons",
@@ -126,6 +129,8 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "Show badges on poster art",
       "Badge style",
       "Restore defaults",
+      "Title pages",
+      "Show title art",
     ),
     icon: Paintbrush,
   },

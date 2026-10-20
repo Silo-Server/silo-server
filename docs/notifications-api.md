@@ -442,6 +442,13 @@ an acting administrator. Both require `name` and `url`; optional type and event
 flags retain the existing service defaults. Creation validates and stores the
 destination through the same service as the bridge and does not send a message.
 
+Destinations require HTTPS without embedded credentials. Registration resolves
+the host with a two-second deadline and rejects failed, empty, or disallowed
+answers. The administrator's private-destination setting permits the shared
+Private class, while Blocked addresses remain refused. Delivery checks the
+resolved connection address again, including redirect hops; see
+[outbound address policy](architecture/outbound-address-guard.md).
+
 A successful response is `201` with `id`, `name`, `type`, `url_host`, and an
 optional one-time `signing_secret`. It never returns the destination URL or
 stored credential ciphertext. Responses use `Cache-Control: no-store`.

@@ -1,30 +1,34 @@
 package notifications
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/netip"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
-// webhookIPAllowed reports whether a resolved destination IP is public
-// (docs/architecture/notifications.md, "Trust model and SSRF guard"). The
-// address classes are shared with every other user-supplied destination in
-// netguard; IPv4-mapped IPv6 addresses are classified as their IPv4 form, so
-// ::ffff:127.0.0.1 cannot bypass the IPv4 ranges.
-func webhookIPAllowed(ip net.IP) bool {
-	addr, ok := netip.AddrFromSlice(ip)
-	return ok && netguard.Classify(addr) == netguard.Public
+// webhookIPAllowed applies the shared outbound policy. Private access never
+// permits the Blocked class (including mapped and translated blocked addresses).
+func webhookIPAllowed(addr netip.Addr, allowPrivate bool) bool {
+	return netguard.CheckAddr(addr, allowPrivate) == nil
 }
 
 // ValidateWebhookURL enforces the destination guardrails the profile cannot
-// opt out of: HTTPS only, a well-formed host, and (unless the admin enabled
-// private destinations for development) resolution to public addresses only.
+// opt out of: HTTPS only, no URL credentials, and resolution to allowed addresses.
+// The admin's private-destination switch permits Private, never Blocked addresses.
 // Returns the host for the denormalized url_host column.
 func ValidateWebhookURL(rawURL string, allowPrivate bool) (host string, err error) {
+	return validateWebhookURL(rawURL, allowPrivate, net.DefaultResolver.LookupNetIP)
+}
+
+const webhookLookupTimeout = 2 * time.Second
+
+func validateWebhookURL(rawURL string, allowPrivate bool, lookup func(context.Context, string, string) ([]netip.Addr, error)) (host string, err error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return "", fmt.Errorf("invalid URL")
@@ -42,12 +46,8 @@ func ValidateWebhookURL(rawURL string, allowPrivate bool) (host string, err erro
 	if parsed.User != nil {
 		return "", fmt.Errorf("webhook URLs must not embed credentials")
 	}
-	if allowPrivate {
-		return host, nil
-	}
-
-	if ip := net.ParseIP(host); ip != nil {
-		if !webhookIPAllowed(ip) {
+	if addr, err := netip.ParseAddr(host); err == nil {
+		if !webhookIPAllowed(addr, allowPrivate) {
 			return "", fmt.Errorf("webhook destinations on private or special-use networks are not allowed")
 		}
 		return host, nil
@@ -55,13 +55,15 @@ func ValidateWebhookURL(rawURL string, allowPrivate bool) (host string, err erro
 
 	// Registration-time resolution check. Delivery-time re-validation happens
 	// in the HTTP client's dialer (DNS rebinding mitigation), so a host that
-	// later starts resolving privately is still refused.
-	addrs, err := net.LookupIP(host)
-	if err != nil {
+	// later resolves to a disallowed address is still refused.
+	ctx, cancel := context.WithTimeout(context.Background(), webhookLookupTimeout)
+	defer cancel()
+	addrs, err := lookup(ctx, "ip", host)
+	if err != nil || len(addrs) == 0 {
 		return "", fmt.Errorf("webhook host could not be resolved")
 	}
 	for _, addr := range addrs {
-		if !webhookIPAllowed(addr) {
+		if !webhookIPAllowed(addr, allowPrivate) {
 			return "", fmt.Errorf("webhook destinations on private or special-use networks are not allowed")
 		}
 	}

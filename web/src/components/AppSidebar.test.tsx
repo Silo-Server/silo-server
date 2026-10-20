@@ -116,9 +116,11 @@ function pluginInstallation(
   };
 }
 
+let mockRequestsEnabled = false;
+
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestFeatureStatus: () => ({
-    data: { requests_enabled: false },
+    data: { requests_enabled: mockRequestsEnabled },
   }),
 }));
 
@@ -126,8 +128,13 @@ vi.mock("@/hooks/queries/notifications", () => ({
   useUnreadNotificationCount: () => ({ data: 0 }),
 }));
 
+let mockNotificationsEnabled = true;
+
 vi.mock("@/hooks/queries/notificationWebhooks", () => ({
-  useNotificationCapability: () => ({ data: { in_app: { enabled: true } }, isError: false }),
+  useNotificationCapability: () => ({
+    data: { in_app: { enabled: mockNotificationsEnabled } },
+    isError: false,
+  }),
 }));
 
 vi.mock("@/hooks/useViewTransition", () => ({
@@ -168,6 +175,25 @@ function parseMarkup(markup: string): Document {
   return new DOMParser().parseFromString(markup, "text/html");
 }
 
+const SEARCH_HREF = "/catalog?source=query";
+
+function hrefsIn(list: Element | null | undefined) {
+  return [...(list?.querySelectorAll("a") ?? [])].map((link) => link.getAttribute("href"));
+}
+
+/** Links in the list at the top of the nav, above every section header. */
+function primaryMenuHrefs(document: Document) {
+  return hrefsIn(document.querySelector('nav[aria-label="Main navigation"] > ul'));
+}
+
+/** Links in the list under a plain (non-collapsible) section header. */
+function sectionHrefs(document: Document, title: string) {
+  const heading = [...document.querySelectorAll("nav div")].find(
+    (element) => element.children.length === 0 && element.textContent === title,
+  );
+  return hrefsIn(heading?.parentElement?.nextElementSibling);
+}
+
 describe("AppSidebar", () => {
   beforeEach(() => {
     mockLogout.mockReset();
@@ -176,6 +202,54 @@ describe("AppSidebar", () => {
     mockPluginInstallations = [];
     mockPrimaryMenu = null;
     mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
+    mockNotificationsEnabled = true;
+    mockRequestsEnabled = false;
+  });
+
+  it("puts Search directly under Home, above the libraries", () => {
+    for (const collapsed of [false, true]) {
+      const document = parseMarkup(renderSidebar("/", { collapsed }));
+
+      expect(primaryMenuHrefs(document)).toEqual(["/", SEARCH_HREF]);
+      expect(document.querySelectorAll(`a[href="${SEARCH_HREF}"]`)).toHaveLength(1);
+      expect(sectionHrefs(document, "Discover")).toEqual([
+        "/recommendations",
+        "/calendar",
+        "/notifications",
+      ]);
+    }
+  });
+
+  it("keeps Search after a customized primary menu, in the menu's own order", () => {
+    mockPrimaryMenu = {
+      items: [
+        { type: "collection", collection_id: "global-collection", label: "Global collection" },
+        { type: "builtin", destination: "home" },
+      ],
+    };
+
+    const hrefs = primaryMenuHrefs(parseMarkup(renderSidebar("/")));
+
+    expect(hrefs).toHaveLength(3);
+    expect(hrefs[0]).toContain("collection_id=global-collection");
+    expect(hrefs.slice(1)).toEqual(["/", SEARCH_HREF]);
+  });
+
+  it("hides Discover when a customized primary menu leaves it nothing to show", () => {
+    mockPrimaryMenu = { items: [{ type: "builtin", destination: "home" }] };
+
+    const withNotifications = parseMarkup(renderSidebar("/"));
+    expect(sectionHrefs(withNotifications, "Discover")).toEqual(["/notifications"]);
+
+    mockNotificationsEnabled = false;
+    const markup = renderSidebar("/");
+
+    expect(markup).not.toContain(">Discover<");
+    expect(primaryMenuHrefs(parseMarkup(markup))).toEqual(["/", SEARCH_HREF]);
+
+    mockRequestsEnabled = true;
+    const withRequests = parseMarkup(renderSidebar("/"));
+    expect(sectionHrefs(withRequests, "Discover")).toEqual(["/requests"]);
   });
 
   it("uses the cinema highlight text color for active catalog source links", () => {
@@ -288,12 +362,8 @@ describe("AppSidebar", () => {
     };
 
     const document = parseMarkup(renderSidebar("/"));
-    const primaryMenu = document.querySelector('nav[aria-label="Main navigation"] > ul');
-    const primaryHrefs = [...(primaryMenu?.querySelectorAll("a") ?? [])].map((link) =>
-      link.getAttribute("href"),
-    );
 
-    expect(primaryHrefs).toEqual(["/"]);
+    expect(primaryMenuHrefs(document)).toEqual(["/", SEARCH_HREF]);
     expect(document.querySelector('a[href="/library/7"]')).not.toBeNull();
     expect(document.querySelector('a[href="/library/14"]')).not.toBeNull();
   });

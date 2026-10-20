@@ -126,7 +126,7 @@ describe("SeasonEpisodeGrid", () => {
     // Only episode 3 has no readable version; episode 4 still plays its
     // second file.
     expect(screen.getAllByText("Damaged file")).toHaveLength(1);
-    const card = screen.getByText("Episode title 3").closest(".media-card");
+    const card = screen.getByText("S01E03 · Episode title 3").closest(".media-card");
     expect(card).not.toBeNull();
     expect(card).toHaveTextContent("Damaged file");
   });
@@ -182,7 +182,7 @@ describe("SeasonEpisodeGrid", () => {
     );
     // Only the watched episode shows its overview, so only it carries the label.
     expect(screen.getAllByText("Translated by AI")).toHaveLength(1);
-    const hiddenCard = screen.getByText("Episode title 2").closest("a");
+    const hiddenCard = screen.getByText("S01E02 · Episode title 2").closest("a");
     expect(hiddenCard).not.toHaveTextContent("Translated by AI");
   });
 });

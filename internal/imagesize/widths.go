@@ -20,7 +20,7 @@ const (
 	SlotBackdrop
 	// SlotLogo is every logo_url.
 	SlotLogo
-	// SlotStill is an episode row's still_url.
+	// SlotStill is every still_url: an episode row's and a local extra's.
 	SlotStill
 	// SlotPhoto is a cast or crew member's photo_url.
 	SlotPhoto
