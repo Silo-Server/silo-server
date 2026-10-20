@@ -26,7 +26,9 @@ type syncRunAdmission struct {
 // alongside other scheduled runs, without a new timeout or takeover policy.
 func (r *PostgresRepository) AdmitSyncRun(ctx context.Context, expected Connection, run SyncRun) (syncRunAdmission, error) {
 	var admitted syncRunAdmission
-	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	// Reads after the row lock must see a preceding admission's committed run,
+	// even when the session default uses a transaction-wide snapshot.
+	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
 		conn, err := r.scanConnection(tx.QueryRow(ctx, `
 			SELECT `+connectionColumns+`
 			FROM watch_provider_connections
@@ -135,7 +137,7 @@ func activeSyncRun(ctx context.Context, tx pgx.Tx, connectionID string, manualOn
 
 func (r *PostgresRepository) CompleteSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {
 	var completed SyncRun
-	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
 		var id string
 		if err := tx.QueryRow(ctx, `
 			SELECT id::text FROM watch_provider_connections

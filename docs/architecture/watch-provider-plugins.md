@@ -126,7 +126,8 @@ Several items with one key follow these rules:
 ## Sync-run admission
 
 Manual admission locks the current connection row for its provider, account and
-profile in a short PostgreSQL transaction. Provider deferral, active-run
+profile in a short Read Committed PostgreSQL transaction, independent of the
+session's default isolation. Provider deferral, active-run
 coalescing, stale-run retirement, the one-hour manual cooldown and insertion
 commit together. Queued or running rows through the existing ten-minute manual
 window coalesce. Older active rows are marked failed; that retirement commits
