@@ -367,10 +367,13 @@ v1, v2 and the Jellyfin-compatible listener share the counter. Distinct accounts
 behind one proxy have separate account allowances; existing source and global
 budgets still apply.
 
-The account budget uses `ratelimit.ip.requests_per_second`,
-`ratelimit.ip.requests_per_minute` and `ratelimit.ip.burst`: defaults are 120 requests
-per second, 6000 per minute and burst 120. The admin UI labels these settings
-**Per address and account**. IP, API-key and account checks run before the global
+The account budget is four times the per-address budget set by
+`ratelimit.ip.requests_per_second`, `ratelimit.ip.requests_per_minute` and
+`ratelimit.ip.burst`: with the defaults (120 per second, 6000 per minute, burst 120)
+an account gets 480 requests per second, 24000 per minute and burst 480. One login
+often spans several networks, and each address is already held to one per-address
+budget, so one busy address or integration can spend at most a quarter of its
+account. The admin UI labels these settings **Per address and account**. IP, API-key and account checks run before the global
 check, so a request rejected by a narrower budget does not consume global capacity.
 All applicable budgets must allow the request. Successful API-key response headers
 describe the key's tier budget; an account denial reports the exhausted account

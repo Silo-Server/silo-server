@@ -433,7 +433,7 @@ export default function SecurityAccessSettings() {
 
           <RateTriadRow
             label="Per address and account"
-            description="Each IP has a budget. Signed-in requests also share one account budget across profiles, sessions, devices and API keys."
+            description="Each IP has a budget. Signed-in requests also share an account budget, four times larger, across profiles, sessions, devices and API keys."
             disabled={savingRateLimits}
             perSecond={{
               value: config.ip_requests_per_second,

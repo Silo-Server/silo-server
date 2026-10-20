@@ -51,16 +51,26 @@ func TestAccountRedisSharingAcrossMiddlewareInstances(t *testing.T) {
 			}
 		})
 		minute := time.Now().Unix() / 60
-		first, second := httptest.NewRecorder(), httptest.NewRecorder()
-		// Empty source identities isolate the account counter from IP/key counters.
-		handlers[0].ServeHTTP(first, accountRequest(account, auth.TokenTypeAccess, ""))
-		handlers[1].ServeHTTP(second, accountRequest(account, auth.TokenTypeAccess, ""))
+		// Alternate instances; empty source identities isolate the account
+		// counter from IP/key counters.
+		var codes []int
+		for i := range accountBudgetMultiplier + 1 {
+			rec := httptest.NewRecorder()
+			handlers[i%2].ServeHTTP(rec, accountRequest(account, auth.TokenTypeAccess, ""))
+			codes = append(codes, rec.Code)
+		}
 		if time.Now().Unix()/60 != minute {
 			t.Logf("attempt %d crossed minute boundary", attempt)
 			continue
 		}
-		if first.Code != 204 || second.Code != 429 {
-			t.Fatalf("instance responses = %d, %d; want 204, 429", first.Code, second.Code)
+		for i, code := range codes {
+			want := 204
+			if i == accountBudgetMultiplier {
+				want = 429
+			}
+			if code != want {
+				t.Fatalf("instance responses = %v; want %d admitted, then 429", codes, accountBudgetMultiplier)
+			}
 		}
 		return
 	}

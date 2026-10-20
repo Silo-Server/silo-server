@@ -33,15 +33,28 @@ func TestCompatAccountSharesNativeAllowance(t *testing.T) {
 		}
 	}
 	router := newRateLimitedRouter(t, mw, sessions)
-	if rec := serveFrom(router, "203.0.113.1", http.MethodGet, "/SyncPlay/List", "", "one"); rec.Code != 200 {
-		t.Fatal(rec.Code)
+	// Fresh addresses keep the per-address budget out of the way: the compat
+	// session spends the account until it is refused.
+	admitted := 0
+	for i := range 64 {
+		rec := serveFrom(router, fmt.Sprintf("203.0.113.%d", 100+i), http.MethodGet, "/SyncPlay/List", "", "one")
+		if rec.Code == 429 {
+			break
+		}
+		if rec.Code != 200 {
+			t.Fatal(rec.Code)
+		}
+		admitted++
+	}
+	if admitted == 0 || admitted == 64 {
+		t.Fatalf("compat session admitted %d requests before the account refused", admitted)
 	}
 	r := httptest.NewRequest(http.MethodGet, "/api/v2/account/me", nil)
 	r = r.WithContext(apimw.SetClaims(clientip.SetContext(r.Context(), "203.0.113.2"), &auth.Claims{UserID: 42, TokenType: auth.TokenTypeAPIKey, APIKeyID: 7}))
 	rec := httptest.NewRecorder()
 	mw.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })).ServeHTTP(rec, r)
-	if rec.Code != 204 {
-		t.Fatal(rec.Code)
+	if rec.Code != 429 {
+		t.Fatalf("native key after compat spent the account = %d, want 429", rec.Code)
 	}
 	if rec := serveFrom(router, "203.0.113.3", http.MethodGet, "/SyncPlay/List", "", "two"); rec.Code != 429 || rec.Header().Get("Retry-After") == "" {
 		t.Fatalf("shared budget response = %d, %s", rec.Code, rec.Body.String())

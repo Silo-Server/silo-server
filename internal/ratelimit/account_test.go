@@ -43,7 +43,7 @@ func TestAccountDefaultRateAndRejectionOrder(t *testing.T) {
 					t.Fatalf("calls = %v, want %v", limiter.keys, want)
 				}
 				if index := slices.Index(limiter.keys, "account:42"); index >= 0 {
-					if got := limiter.rates[index]; got != (Rate{RequestsPerSecond: 120, RequestsPerMinute: 6000, Burst: 120}) {
+					if got := limiter.rates[index]; got != (Rate{RequestsPerSecond: 480, RequestsPerMinute: 24000, Burst: 480}) {
 						t.Fatalf("default account rate = %+v", got)
 					}
 				}
@@ -103,9 +103,13 @@ func TestAccountAllowanceSharesCredentialsAndSeparatesHouseholds(t *testing.T) {
 	t.Cleanup(global.Close)
 	mw := NewMiddleware(perKey, global, nil, true)
 	mw.cfg = DefaultConfig()
-	mw.cfg.IPReqPerSecond, mw.cfg.IPReqPerMinute, mw.cfg.IPBurst = .001, 2, 2
+	mw.cfg.IPReqPerSecond, mw.cfg.IPReqPerMinute, mw.cfg.IPBurst = .001, 1, 1
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })
-	for i, account := range []int{42, 42, 42, 42, 43, 43, 43} {
+	// Each request uses a fresh address, so only the account budget, sized at
+	// accountBudgetMultiplier one-request addresses, can refuse it.
+	accounts := append(slices.Repeat([]int{42}, accountBudgetMultiplier+2), slices.Repeat([]int{43}, accountBudgetMultiplier+1)...)
+	spent := map[int]int{}
+	for i, account := range accounts {
 		r := accountRequest(account, auth.TokenTypeAccess, fmt.Sprintf("203.0.113.%d", i+1))
 		claims := apimw.GetClaims(r.Context())
 		claims.SessionID = fmt.Sprintf("session-%d", i)
@@ -123,13 +127,22 @@ func TestAccountAllowanceSharesCredentialsAndSeparatesHouseholds(t *testing.T) {
 		}
 		rec := httptest.NewRecorder()
 		wrap(next).ServeHTTP(rec, r)
+		spent[account]++
 		want := 204
-		if i == 2 || i == 3 || i == 6 {
+		if spent[account] > accountBudgetMultiplier {
 			want = 429
 		}
 		if rec.Code != want {
 			t.Fatalf("request %d (account %d): status = %d, want %d", i, account, rec.Code, want)
 		}
+	}
+}
+
+func TestAccountRateStaysWithinLimiterBounds(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.IPReqPerSecond, cfg.IPReqPerMinute, cfg.IPBurst = MaxRequestsPerWindow, MaxRequestsPerWindow, MaxBurst
+	if got := accountRate(cfg); got.RequestsPerSecond > MaxRequestsPerWindow || got.RequestsPerMinute > MaxRequestsPerWindow || got.Burst > MaxBurst {
+		t.Fatalf("account rate %+v exceeds limiter bounds", got)
 	}
 }
 

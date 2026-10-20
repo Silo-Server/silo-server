@@ -292,19 +292,15 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 }
 
 // allowAccount uses an authenticated account identity, independent of forwarding
-// headers, profiles and credentials. The IP settings also size this household
-// allowance; distinct accounts behind a proxy keep independent account budgets.
-// With no authenticated identity, the existing source/global checks still run.
+// headers, profiles and credentials. Distinct accounts behind a proxy keep
+// independent account budgets. With no authenticated identity, the existing
+// source/global checks still run.
 func (mw *Middleware) allowAccount(w http.ResponseWriter, r *http.Request, cfg Config, reject RejectBodyWriter) bool {
 	accountID := accountFromContext(r.Context())
 	if accountID <= 0 {
 		return true
 	}
-	result := mw.perKey.Allow(r.Context(), fmt.Sprintf("account:%d", accountID), Rate{
-		RequestsPerSecond: cfg.IPReqPerSecond,
-		RequestsPerMinute: cfg.IPReqPerMinute,
-		Burst:             cfg.IPBurst,
-	})
+	result := mw.perKey.Allow(r.Context(), fmt.Sprintf("account:%d", accountID), accountRate(cfg))
 	if !result.Allowed {
 		writeRateLimitResponse(w, result, reject)
 	}
@@ -322,6 +318,22 @@ func authPeerRate(endpointRate Rate) Rate {
 		RequestsPerSecond: min(endpointRate.RequestsPerSecond*authPeerBudgetMultiplier, MaxRequestsPerWindow),
 		RequestsPerMinute: min(endpointRate.RequestsPerMinute*authPeerBudgetMultiplier, MaxRequestsPerWindow),
 		Burst:             min(endpointRate.Burst, MaxBurst/authPeerBudgetMultiplier) * authPeerBudgetMultiplier,
+	}
+}
+
+// accountBudgetMultiplier sizes the allowance every device, profile and key of
+// one account shares, in per-address budgets. One login commonly spans several
+// networks (a home, a phone on cellular, family elsewhere), and every address is
+// already capped at one per-address budget, so a single busy address or
+// integration can spend at most a quarter of its account. A client rotating
+// forwarding headers gets no more than this.
+const accountBudgetMultiplier = 4
+
+func accountRate(cfg Config) Rate {
+	return Rate{
+		RequestsPerSecond: min(cfg.IPReqPerSecond*accountBudgetMultiplier, MaxRequestsPerWindow),
+		RequestsPerMinute: min(cfg.IPReqPerMinute*accountBudgetMultiplier, MaxRequestsPerWindow),
+		Burst:             min(cfg.IPBurst, MaxBurst/accountBudgetMultiplier) * accountBudgetMultiplier,
 	}
 }
 

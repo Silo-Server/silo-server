@@ -55,8 +55,8 @@ func TestHandlerBoundsForwardedRotation(t *testing.T) {
 				}
 			}
 			t.Logf("synthetic trusted private peer, %s rotation: %d/%d allowed; source burst 1, global burst 1000", header, allowed, requests)
-			if allowed != 1 {
-				t.Fatalf("%d requests admitted with fresh forwarded identities, want exactly one shared account allowance", allowed)
+			if allowed != accountBudgetMultiplier {
+				t.Fatalf("%d requests admitted with fresh forwarded identities, want exactly one shared account allowance of %d", allowed, accountBudgetMultiplier)
 			}
 		})
 	}
