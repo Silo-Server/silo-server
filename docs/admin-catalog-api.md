@@ -329,10 +329,13 @@ it. Clearing a rating also deletes the item's stored score for that source
 show in its place. Clearing an episode's air date recomputes the series air
 dates. `null` on any other field preserves its value. Explicit empty strings,
 zeroes, and empty arrays remain edits. An air timezone must be empty or a valid
-IANA timezone. `status` is the item's match status and must be `pending`,
-`matched`, or `unmatched`; any other value fails with `422`. Frozen v1 treats `null` like omission and clears nothing. The
-service tries item, season, then episode ownership and returns
-canonical catalog detail after the update and existing invalidation events.
+IANA timezone. A date must be a `YYYY-MM-DD` calendar date; any other string,
+an empty one included, is `422 validation_failed` at that member and nothing is
+written. `status` is the item's match status and must be `pending`, `matched`,
+or `unmatched`; any other value fails with `422`. Frozen v1 treats `null` like
+omission, clears nothing, and does not check dates. The service tries item,
+season, then episode ownership and returns canonical catalog detail after the
+update and existing invalidation events.
 A follow-up detail-read failure can occur after persistence; it does not roll
 back the metadata change.
 
