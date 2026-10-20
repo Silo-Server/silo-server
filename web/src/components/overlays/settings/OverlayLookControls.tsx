@@ -80,10 +80,9 @@ const SHAPE_CHOICES: readonly { value: OverlayShape | Inherit; label: string }[]
 
 const WEIGHT_CHOICES: readonly { value: OverlayFontWeight | Inherit; label: string }[] = [
   PRESET_CHOICE,
-  { value: "medium", label: "Medium" },
+  { value: "regular", label: "Regular" },
   { value: "semibold", label: "Semibold" },
-  { value: "bold", label: "Bold" },
-  { value: "black", label: "Black" },
+  { value: "extrabold", label: "Extra bold" },
 ];
 
 type Toggle = "on" | "off" | Inherit;
