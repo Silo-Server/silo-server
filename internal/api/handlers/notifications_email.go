@@ -188,8 +188,24 @@ func (h *EmailLinkHandler) HandleVerify(w http.ResponseWriter, r *http.Request) 
 }
 
 // HandleUnsubscribe handles GET and POST /notifications/email/unsubscribe?token=...
-// POST is the RFC 8058 one-click target mail clients call directly.
+// GET only confirms intent. POST is also the RFC 8058 one-click target, so it
+// accepts requests without a login, including no-referrer form posts with Origin: null.
 func (h *EmailLinkHandler) HandleUnsubscribe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		w.Header().Set("Allow", "GET, POST")
+		writeEmailLinkPage(w, http.StatusMethodNotAllowed, "Method not allowed", "Open this link to confirm, or submit the confirmation to unsubscribe.")
+		return
+	}
+	if r.Method == http.MethodGet {
+		if r.URL.Query().Get("token") == "" {
+			writeEmailLinkPage(w, http.StatusBadRequest, "Link invalid",
+				"This unsubscribe link is no longer valid. Manage notifications in Silo's settings.")
+			return
+		}
+		writeEmailLinkPageWithConfirmation(w, http.StatusOK, "Unsubscribe from notification emails?",
+			"Choose Unsubscribe to stop notification emails for this profile. Opening this page has not changed your preferences.", true)
+		return
+	}
 	ok, err := h.system.UnsubscribeEmail(r.Context(), r.URL.Query().Get("token"))
 	switch {
 	case err != nil:
@@ -207,13 +223,26 @@ func (h *EmailLinkHandler) HandleUnsubscribe(w http.ResponseWriter, r *http.Requ
 // writeEmailLinkPage renders the minimal standalone page behind tokenized
 // email links.
 func writeEmailLinkPage(w http.ResponseWriter, status int, title, detail string) {
+	writeEmailLinkPageWithConfirmation(w, status, title, detail, false)
+}
+
+func writeEmailLinkPageWithConfirmation(w http.ResponseWriter, status int, title, detail string, confirm bool) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s — Silo</title></head>
+	_, _ = fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s — Silo</title>
+<style>button{font:inherit;font-weight:600;background:#e8e8ec;color:#101014;border:0;border-radius:6px;padding:12px 20px;cursor:pointer}button:focus-visible{outline:3px solid #e8e8ec;outline-offset:4px}</style></head>
 <body style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#101014;color:#e8e8ec;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
-<div style="max-width:420px;padding:32px;text-align:center;">
+<main style="max-width:420px;padding:32px;text-align:center;">
 <h1 style="font-size:20px;margin:0 0 12px;">%s</h1>
 <p style="font-size:14px;color:#9a9aa4;margin:0;">%s</p>
-</div></body></html>`,
+`,
 		html.EscapeString(title), html.EscapeString(title), html.EscapeString(detail))
+	if confirm {
+		// No action: POST back to this URL, preserving its token query and proxy
+		// prefix without reflecting either into the page.
+		_, _ = fmt.Fprint(w, `<form method="post" style="margin-top:24px;"><button type="submit">Unsubscribe</button></form>`)
+	}
+	_, _ = fmt.Fprint(w, `</main></body></html>`)
 }
