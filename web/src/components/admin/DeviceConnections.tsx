@@ -3,7 +3,7 @@ import { v2 } from "@/api/v2/request";
 import type { AdminDeviceDetail } from "@/api/types";
 import { formatRelative } from "@/components/admin/deviceOverrides";
 import { Button } from "@/components/ui/button";
-import { formatBitrateKbps } from "@/lib/bitrateOptions";
+import { formatConnectionRateKbps } from "@/lib/bitrateOptions";
 import { formatDate } from "@/lib/datetime";
 import { toast } from "sonner";
 
@@ -79,22 +79,22 @@ export function DeviceConnections({
           {connection.probe && (
             <p className="text-muted-foreground">
               {connection.probe.lower_bound && "Faster than "}
-              {formatBitrateKbps(connection.probe.kbps)} on{" "}
+              {formatConnectionRateKbps(connection.probe.kbps)} on{" "}
               {TRANSPORT_LABELS[connection.probe.transport] ?? connection.probe.transport} ·
               measured {formatRelative(connection.probe.measured_at)}
             </p>
           )}
           {connection.playback_sample && (
             <p className="text-muted-foreground">
-              Faster than {formatBitrateKbps(connection.playback_sample.kbps)} · seen during
+              Faster than {formatConnectionRateKbps(connection.playback_sample.kbps)} · seen during
               playback {formatRelative(connection.playback_sample.measured_at)}
             </p>
           )}
           {connection.learned_limit && (
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span>
-                Limited to {formatBitrateKbps(connection.learned_limit.kbps)} after buffering ·
-                until {formatDate(connection.learned_limit.expires_at, "medium")}
+                Limited to {formatConnectionRateKbps(connection.learned_limit.kbps)} after buffering
+                · until {formatDate(connection.learned_limit.expires_at, "medium")}
               </span>
               <Button
                 size="sm"

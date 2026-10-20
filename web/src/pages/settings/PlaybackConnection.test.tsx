@@ -1,22 +1,39 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  waitForElementToBeRemoved,
+} from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
 
 const request = vi.hoisted(() => vi.fn());
 const speedTest = vi.hoisted(() => vi.fn());
+const probe = vi.hoisted(() => ({
+  network: undefined as { type?: string; saveData?: boolean } | undefined,
+  RateLimited: class extends Error {
+    constructor(readonly retryAfter: number) {
+      super(`Try again in ${retryAfter} ${retryAfter === 1 ? "second" : "seconds"}`);
+    }
+  },
+  NotSaved: class extends Error {},
+}));
 vi.mock("@/player/bandwidth-probe", () => ({
-  networkInformation: () => undefined,
-  onMeteredConnection: () => false,
+  CONNECTION_QUERY_KEY: ["playback", "connection"],
+  networkInformation: () => probe.network,
   testConnectionSpeed: speedTest,
-  ProbeRateLimited: class extends Error {},
+  ProbeRateLimited: probe.RateLimited,
+  ProbeNotSaved: probe.NotSaved,
 }));
 vi.mock("@/api/v2/request", () => ({ v2: request }));
 beforeEach(() => {
   request.mockReset();
+  speedTest.mockReset();
+  probe.network = undefined;
 });
-function mount() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function mount(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={client}>
       <LearnedLimitRow />
@@ -24,6 +41,10 @@ function mount() {
     </QueryClientProvider>,
   );
 }
+const SPEED_FEATURES = { features: ["buffering_quality_v1", "connection_speed_v1"] };
+const connectionReads = () =>
+  request.mock.calls.filter(([op]) => op === "GET /api/v2/playback/connection");
+
 it("does not request connection state without the advertised feature", async () => {
   request.mockResolvedValue({ features: [] });
   mount();
@@ -52,17 +73,36 @@ it("resets the server limit and refreshes the row", async () => {
   });
   mount();
   expect(
-    await screen.findByText(/^Limited to 44.1 Mbps after buffering on [A-Z][a-z]{2} 17$/),
+    await screen.findByText(/^Limited to 44 Mbps after buffering on [A-Z][a-z]{2} 17$/),
   ).toBeInTheDocument();
   fireEvent.click(await screen.findByText("Reset"));
   await waitFor(() => expect(screen.queryByText("Reset")).not.toBeInTheDocument());
   expect(request).toHaveBeenCalledWith("DELETE /api/v2/playback/connection/learned-limit");
 });
 
+it("says in the row when a reset fails and keeps the limit", async () => {
+  request.mockImplementation(async (operation: string) => {
+    if (operation.endsWith("capabilities")) return { features: ["buffering_quality_v1"] };
+    if (operation.startsWith("DELETE")) throw new Error("offline");
+    return {
+      connection: "remote",
+      learned_limit: {
+        kbps: 44100,
+        observed_at: "2026-10-17T12:00:00Z",
+        expires_at: "2026-10-24T12:00:00Z",
+      },
+    };
+  });
+  mount();
+  fireEvent.click(await screen.findByText("Reset"));
+  expect(await screen.findByText("Couldn't reset the limit. Try again.")).toBeInTheDocument();
+  expect(screen.getByText(/^Limited to 44 Mbps after buffering/)).toBeInTheDocument();
+});
+
 it("shows server speed and budget and refreshes after a speed test", async () => {
   request.mockImplementation(async (operation: string) =>
     operation.endsWith("capabilities")
-      ? { features: ["buffering_quality_v1", "connection_speed_v1"] }
+      ? SPEED_FEATURES
       : {
           connection: "remote",
           learned_limit: null,
@@ -73,20 +113,42 @@ it("shows server speed and budget and refreshes after a speed test", async () =>
   speedTest.mockResolvedValue(48000);
   mount();
   expect(await screen.findByText(/48 Mbps.*Wi-Fi/)).toBeInTheDocument();
-  expect(screen.getByText(/35.3 Mbps without converting/)).toBeInTheDocument();
+  expect(
+    screen.getByText("Auto plays videos up to 35 Mbps without converting them."),
+  ).toBeInTheDocument();
   fireEvent.click(screen.getByText("Test speed"));
   await waitFor(() => expect(speedTest).toHaveBeenCalledOnce());
-  await waitFor(() =>
-    expect(
-      request.mock.calls.filter(([op]) => op === "GET /api/v2/playback/connection"),
-    ).toHaveLength(2),
+  await waitFor(() => expect(connectionReads()).toHaveLength(2));
+});
+
+it("reads the connection again whenever Settings opens", async () => {
+  request.mockImplementation(async (operation: string) =>
+    operation.endsWith("capabilities")
+      ? SPEED_FEATURES
+      : {
+          connection: "remote",
+          learned_limit: null,
+          probe: { kbps: 9949, measured_at: new Date().toISOString(), transport: "wifi" },
+        },
   );
+  // A reading cached from an earlier visit, on what may be another network.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  client.setQueryData(["playback", "connection"], {
+    connection: "remote",
+    learned_limit: null,
+    probe: { kbps: 48000, measured_at: new Date().toISOString(), transport: "ethernet" },
+  });
+  mount(client);
+  expect(await screen.findByText("9.9 Mbps · measured just now on Wi-Fi")).toBeInTheDocument();
+  expect(connectionReads()).toHaveLength(1);
 });
 
 it("says when a speed test fails rather than blaming playback", async () => {
   request.mockImplementation(async (operation: string) =>
     operation.endsWith("capabilities")
-      ? { features: ["buffering_quality_v1", "connection_speed_v1"] }
+      ? SPEED_FEATURES
       : {
           connection: "remote",
           learned_limit: null,
@@ -105,7 +167,7 @@ it("says when a speed test fails rather than blaming playback", async () => {
   expect(await screen.findByText("48 Mbps · measured 3 hours ago on Ethernet")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Test speed"));
   expect(
-    await screen.findByText("Could not measure connection speed. Try again."),
+    await screen.findByText("Couldn't measure the connection speed. Try again."),
   ).toBeInTheDocument();
   fireEvent.click(await screen.findByText("Test speed"));
   expect(
@@ -115,6 +177,75 @@ it("says when a speed test fails rather than blaming playback", async () => {
   expect(
     await screen.findByText("A speed test is already running. Try again in a moment."),
   ).toBeInTheDocument();
+});
+
+it("says a result could not be saved and keeps the server's reading", async () => {
+  request.mockImplementation(async (operation: string) =>
+    operation.endsWith("capabilities")
+      ? SPEED_FEATURES
+      : {
+          connection: "remote",
+          learned_limit: null,
+          probe: { kbps: 48000, measured_at: new Date().toISOString(), transport: "wifi" },
+        },
+  );
+  speedTest.mockRejectedValueOnce(new probe.NotSaved());
+  mount();
+  fireEvent.click(await screen.findByText("Test speed"));
+  expect(await screen.findByText("Couldn't save the speed test. Try again.")).toBeInTheDocument();
+  expect(screen.getByText("48 Mbps · measured just now on Wi-Fi")).toBeInTheDocument();
+});
+
+it("shows a 429's wait only while it lasts", async () => {
+  request.mockImplementation(async (operation: string) =>
+    operation.endsWith("capabilities")
+      ? SPEED_FEATURES
+      : { connection: "remote", learned_limit: null },
+  );
+  speedTest.mockRejectedValueOnce(new probe.RateLimited(1));
+  mount();
+  fireEvent.click(await screen.findByText("Test speed"));
+  const wait = await screen.findByText("Try again in 1 second");
+  await waitForElementToBeRemoved(wait, { timeout: 3000 });
+});
+
+it("says Not measured yet without a reading", async () => {
+  request.mockImplementation(async (operation: string) =>
+    operation.endsWith("capabilities")
+      ? SPEED_FEATURES
+      : { connection: "remote", learned_limit: null },
+  );
+  mount();
+  expect(await screen.findByText("Not measured yet")).toBeInTheDocument();
+});
+
+it.each([
+  [
+    { type: "cellular" },
+    "Speed tests are skipped on cellular, and the Cellular quality settings apply.",
+  ],
+  [
+    { type: "wifi", saveData: true },
+    "Speed tests are skipped on metered networks, and the Cellular quality settings apply.",
+  ],
+])("replaces the speed, Test speed and the budget on %o", async (network, note) => {
+  probe.network = network;
+  request.mockImplementation(async (operation: string) =>
+    operation.endsWith("capabilities")
+      ? SPEED_FEATURES
+      : {
+          connection: "remote",
+          learned_limit: null,
+          probe: { kbps: 48000, measured_at: new Date().toISOString(), transport: "wifi" },
+          auto_budget_kbps: 35280,
+        },
+  );
+  mount();
+  expect(await screen.findByText(note)).toBeInTheDocument();
+  await waitFor(() => expect(connectionReads()).toHaveLength(1));
+  expect(screen.queryByText(/48 Mbps/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Test speed")).not.toBeInTheDocument();
+  expect(screen.queryByText(/without converting/)).not.toBeInTheDocument();
 });
 
 it("words a lower bound and a playback sample as faster than, and shows a sample only without a probe", async () => {
@@ -133,7 +264,7 @@ it("words a lower bound and a playback sample as faster than, and shows a sample
   };
   request.mockImplementation(async (operation: string) =>
     operation.endsWith("capabilities")
-      ? { features: ["buffering_quality_v1", "connection_speed_v1"] }
+      ? SPEED_FEATURES
       : { connection: "remote", learned_limit: null, ...reading },
   );
   let finish: (value: unknown) => void = () => undefined;
@@ -143,13 +274,13 @@ it("words a lower bound and a playback sample as faster than, and shows a sample
     await screen.findByText("Faster than 48 Mbps · measured just now on Ethernet"),
   ).toBeInTheDocument();
   fireEvent.click(screen.getByText("Test speed"));
-  expect(await screen.findByText("Testing for up to 10 seconds.")).toBeInTheDocument();
+  expect(await screen.findByText("Testing…")).toBeInTheDocument();
 
   // Without a probe, the sample is the reading.
   reading = { playback_sample: reading.playback_sample };
   finish({ kbps: 48000, lower_bound: false, bytes: 18_000_000, duration_ms: 3000 });
   expect(
-    await screen.findByText("Faster than 51.2 Mbps · seen during playback 2 hours ago"),
+    await screen.findByText("Faster than 51 Mbps · seen during playback 2 hours ago"),
   ).toBeInTheDocument();
-  expect(screen.queryByText("Testing for up to 10 seconds.")).not.toBeInTheDocument();
+  expect(screen.getByText("Test speed")).toBeInTheDocument();
 });

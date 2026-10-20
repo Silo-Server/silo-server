@@ -4,7 +4,8 @@ import { Label } from "@/components/ui/label";
 
 interface SettingRowProps {
   label: string;
-  description: string;
+  /** Omitted when the label says it all. */
+  description?: string;
   control: (id: string) => ReactNode;
   /** Optional leading glyph, drawn in a small round tile. */
   icon?: ReactNode;
@@ -28,7 +29,9 @@ export function SettingRow({ label, description, control, icon }: SettingRowProp
           <Label htmlFor={id} className="text-sm font-medium">
             {label}
           </Label>
-          <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
+          {description ? (
+            <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
+          ) : null}
         </div>
       </div>
       <div className="flex md:justify-end">{control(id)}</div>

@@ -4,15 +4,15 @@ import { v2 } from "@/api/v2/request";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
-import { formatBitrateKbps } from "@/lib/bitrateOptions";
+import { formatConnectionRateKbps } from "@/lib/bitrateOptions";
 import { preferredDateLocale } from "@/lib/datetime";
 import {
+  CONNECTION_QUERY_KEY,
   networkInformation,
-  onMeteredConnection,
+  ProbeNotSaved,
   ProbeRateLimited,
   testConnectionSpeed,
 } from "@/player/bandwidth-probe";
-import { toast } from "sonner";
 
 const TRANSPORT_LABELS: Record<string, string> = {
   wifi: "Wi-Fi",
@@ -36,7 +36,10 @@ function measuredAgo(measuredAt: string, now: number): string {
 /**
  * The server's view of this device on the connection it is using now: the
  * learned limit (buffering_quality_v1) and, with connection_speed_v1, the
- * latest probe and Auto's budget. Both readers share one request.
+ * latest probe and Auto's budget. Both readers share one request, read afresh
+ * whenever the page opens. The probe schedule shares the query too: a read it
+ * makes updates the page, and a new network invalidates it, since a limit or
+ * speed shown from before the change belongs to the network left behind.
  */
 function usePlaybackConnection() {
   const capabilities = useQuery({
@@ -44,9 +47,10 @@ function usePlaybackConnection() {
     queryFn: () => v2("GET /api/v2/playback/capabilities"),
   });
   const connection = useQuery({
-    queryKey: ["playback", "connection"],
+    queryKey: CONNECTION_QUERY_KEY,
     queryFn: () => v2("GET /api/v2/playback/connection"),
     enabled: capabilities.data?.features.includes("buffering_quality_v1") === true,
+    staleTime: 0,
   });
   return {
     connection,
@@ -55,12 +59,13 @@ function usePlaybackConnection() {
 }
 
 /**
- * "Limited to 44.1 Mbps after buffering on Oct 17", with Reset. Shown under
+ * "Limited to 44 Mbps after buffering on Oct 17", with Reset. Shown under
  * Lower quality when buffering while this connection has a limit.
  */
 export function LearnedLimitRow() {
   const { connection } = usePlaybackConnection();
   const [resetting, setResetting] = useState(false);
+  const [failed, setFailed] = useState(false);
   const limit = connection.data?.learned_limit;
   if (!limit) return null;
   const observed = new Date(limit.observed_at).toLocaleDateString(preferredDateLocale(), {
@@ -68,25 +73,32 @@ export function LearnedLimitRow() {
     day: "numeric",
   });
   return (
-    <SettingRow
-      label="Learned limit"
-      description={`Limited to ${formatBitrateKbps(limit.kbps)} after buffering on ${observed}`}
-      control={() => (
-        <Button
-          variant="outline"
-          disabled={resetting}
-          onClick={() => {
-            setResetting(true);
-            void v2("DELETE /api/v2/playback/connection/learned-limit")
-              .then(() => connection.refetch())
-              .catch(() => toast.error("Failed to reset learned limit"))
-              .finally(() => setResetting(false));
-          }}
-        >
-          Reset
-        </Button>
+    <>
+      <SettingRow
+        label={`Limited to ${formatConnectionRateKbps(limit.kbps)} after buffering on ${observed}`}
+        control={() => (
+          <Button
+            variant="outline"
+            disabled={resetting}
+            onClick={() => {
+              setResetting(true);
+              setFailed(false);
+              void v2("DELETE /api/v2/playback/connection/learned-limit")
+                .then(() => connection.refetch())
+                .catch(() => setFailed(true))
+                .finally(() => setResetting(false));
+            }}
+          >
+            Reset
+          </Button>
+        )}
+      />
+      {failed && (
+        <p className="text-muted-foreground text-[13px] leading-relaxed" role="status">
+          Couldn't reset the limit. Try again.
+        </p>
       )}
-    />
+    </>
   );
 }
 
@@ -116,13 +128,27 @@ function speedDescription(
   // must not hide behind an older, higher sample.
   if (probe) {
     const rate = probe.lower_bound
-      ? `Faster than ${formatBitrateKbps(probe.kbps)}`
-      : formatBitrateKbps(probe.kbps);
+      ? `Faster than ${formatConnectionRateKbps(probe.kbps)}`
+      : formatConnectionRateKbps(probe.kbps);
     return `${rate} · measured ${measuredAgo(probe.measured_at, now)} on ${TRANSPORT_LABELS[probe.transport] ?? "this connection"}`;
   }
   if (sample) {
-    return `Faster than ${formatBitrateKbps(sample.kbps)} · seen during playback ${measuredAgo(sample.measured_at, now)}`;
+    return `Faster than ${formatConnectionRateKbps(sample.kbps)} · seen during playback ${measuredAgo(sample.measured_at, now)}`;
   }
+  return undefined;
+}
+
+/**
+ * What replaces the speed on a link that is not tested: cellular, where the
+ * browser reports it, or a metered link (Data Saver). Playback uses the
+ * Cellular quality settings on both, as the apps say where that holds.
+ */
+function meteredNote(): string | undefined {
+  const network = networkInformation();
+  if (network?.type === "cellular")
+    return "Speed tests are skipped on cellular, and the Cellular quality settings apply.";
+  if (network?.saveData === true)
+    return "Speed tests are skipped on metered networks, and the Cellular quality settings apply.";
   return undefined;
 }
 
@@ -130,69 +156,75 @@ function speedDescription(
 export function PlaybackConnection() {
   const { connection, speedAvailable } = usePlaybackConnection();
   const [testing, setTesting] = useState(false);
-  const [message, setMessage] = useState<string>();
+  // A message shown for `forMs` hides itself then.
+  const [message, setMessage] = useState<{ text: string; forMs?: number }>();
   const [now, setNow] = useState(Date.now);
-  const [metered, setMetered] = useState(onMeteredConnection);
+  const [note, setNote] = useState(meteredNote);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     const network = networkInformation() as EventTarget | undefined;
-    const update = () => setMetered(onMeteredConnection());
+    const update = () => setNote(meteredNote());
     network?.addEventListener?.("change", update);
     return () => {
       clearInterval(timer);
       network?.removeEventListener?.("change", update);
     };
   }, []);
+  // "Try again in N seconds" is only true for those N seconds.
+  useEffect(() => {
+    if (message?.forMs === undefined) return;
+    const timer = setTimeout(() => setMessage(undefined), message.forMs);
+    return () => clearTimeout(timer);
+  }, [message]);
   if (!speedAvailable) return null;
   const budget = connection.data?.auto_budget_kbps;
-  const description = metered
-    ? "Speed tests are skipped on cellular or metered connections. Cellular quality settings apply."
-    : (speedDescription(connection.data, now) ?? "Test the connection used to stream videos.");
+  const description = note ?? speedDescription(connection.data, now) ?? "Not measured yet";
+  const say = (text: string, forMs?: number) => setMessage({ text, forMs });
   return (
     <SettingsGroup title="Connection">
       <SettingRow
         label="Connection speed"
         description={description}
-        control={() => (
-          <Button
-            variant="outline"
-            disabled={testing || metered}
-            onClick={() => {
-              setTesting(true);
-              setMessage("Testing for up to 10 seconds.");
-              void testConnectionSpeed()
-                .then(async (result) => {
-                  if (result === "playing")
-                    setMessage("Stop playback before testing, then try again.");
-                  else if (result === "busy")
-                    setMessage("A speed test is already running. Try again in a moment.");
-                  else {
-                    setMessage(undefined);
-                    await connection.refetch();
-                  }
-                })
-                .catch((error: unknown) =>
-                  setMessage(
-                    error instanceof ProbeRateLimited
-                      ? error.message
-                      : "Could not measure connection speed. Try again.",
-                  ),
-                )
-                .finally(() => setTesting(false));
-            }}
-          >
-            {testing ? "Testing…" : "Test speed"}
-          </Button>
-        )}
+        control={() =>
+          note ? null : (
+            <Button
+              variant="outline"
+              disabled={testing}
+              onClick={() => {
+                setTesting(true);
+                setMessage(undefined);
+                void testConnectionSpeed()
+                  .then(async (result) => {
+                    if (result === "playing") say("Stop playback before testing, then try again.");
+                    else if (result === "busy")
+                      say("A speed test is already running. Try again in a moment.");
+                    // The link turned metered: the row already shows why.
+                    else if (result === "metered") setNote(meteredNote());
+                    else await connection.refetch();
+                  })
+                  .catch((error: unknown) => {
+                    if (error instanceof ProbeRateLimited)
+                      say(error.message, error.retryAfter * 1000);
+                    else if (error instanceof ProbeNotSaved)
+                      say("Couldn't save the speed test. Try again.");
+                    else say("Couldn't measure the connection speed. Try again.");
+                  })
+                  .finally(() => setTesting(false));
+              }}
+            >
+              {testing ? "Testing…" : "Test speed"}
+            </Button>
+          )
+        }
       />
       {message && (
         <p className="text-muted-foreground text-[13px] leading-relaxed" role="status">
-          {message}
+          {message.text}
         </p>
       )}
-      {budget !== undefined && !metered && (
+      {budget !== undefined && !note && (
         <p className="text-muted-foreground text-[13px] leading-relaxed">
-          Auto plays videos up to {formatBitrateKbps(budget)} without converting them.
+          Auto plays videos up to {formatConnectionRateKbps(budget)} without converting them.
         </p>
       )}
     </SettingsGroup>
