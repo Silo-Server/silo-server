@@ -2278,6 +2278,11 @@ func (s *DetailService) fetchItemExtras(ctx context.Context, contentID string, f
 	if len(extras) == 0 {
 		return nil
 	}
+	stillPaths := make([]string, 0, len(extras))
+	for _, e := range extras {
+		stillPaths = append(stillPaths, e.StillPath)
+	}
+	stillURLs := s.PresignImageURLs(ctx, stillPaths, "still", string(filter.ImageSizeFor(imagesize.SlotStill)))
 	infos := make([]ItemExtraInfo, 0, len(extras))
 	for _, e := range extras {
 		info := ItemExtraInfo{
@@ -2287,8 +2292,9 @@ func (s *DetailService) fetchItemExtras(ctx context.Context, contentID string, f
 			DurationSeconds: e.Duration,
 			FileID:          e.FileID,
 			StillPath:       e.StillPath,
+			StillURL:        stillURLs[e.StillPath],
 		}
-		if info.StillURL = s.PresignImageURL(ctx, e.StillPath, "still", string(filter.ImageSizeFor(imagesize.SlotStill))); info.StillURL != "" {
+		if info.StillURL != "" {
 			info.StillThumbhash = e.StillThumbhash
 		}
 		infos = append(infos, info)
