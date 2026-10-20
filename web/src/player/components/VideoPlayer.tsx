@@ -851,9 +851,12 @@ export function VideoPlayer({
   backendDurationRef.current = backendDuration;
   const effectiveInitialPosition = plan.timeline.player_start_seconds;
   const canSeekAnywhere = plan.timeline.can_seek_anywhere;
-  // The menu is the plan's; which entry is lit is the session's own preference,
-  // since `auto` is a valid preference that names no rung.
+  // The menu is the plan's. The session's preference decides whether Auto is
+  // lit, since `auto` names no rung; otherwise the plan names the entry it
+  // delivers.
   const activeQualityId = qualityPreference;
+  const activeQuality = plan.active_quality;
+  const deliveredBitrateKbps = plan.effective_recipe.bitrate_kbps;
   const qualityOptions = useMemo(() => qualityOptionsFromPlanV3(plan), [plan]);
 
   // The file the server actually planned against, which is not necessarily the
@@ -4224,18 +4227,18 @@ export function VideoPlayer({
   }, [activeQualityId, sessionId, watchTogetherRoomId]);
 
   const lowerQualityChoiceRef = useRef(() =>
-    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe, plan.source),
+    lowerQualityOption(qualityOptions, activeQualityId, activeQuality, deliveredBitrateKbps),
   );
   useEffect(() => {
     lowerQualityChoiceRef.current = () =>
-      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe, plan.source);
+      lowerQualityOption(qualityOptions, activeQualityId, activeQuality, deliveredBitrateKbps);
     // A replan can leave no lower rung; an offer that cannot act is withdrawn.
     if (!lowerQualityChoiceRef.current()) {
       setNotice((current) =>
         current?.actionLabel === LOWER_QUALITY_ACTION_LABEL ? null : current,
       );
     }
-  }, [activeQualityId, plan.effective_recipe, plan.source, qualityOptions]);
+  }, [activeQuality, activeQualityId, deliveredBitrateKbps, qualityOptions]);
 
   // A viewer who keeps stalling in a room cannot keep up at this quality.
   // Offer one step down, once per quality; the room's shared source is kept.
@@ -4245,7 +4248,7 @@ export function VideoPlayer({
     const recent = roomStallTimesRef.current.filter((at) => now - at < ROOM_STALL_WINDOW_MS);
     roomStallTimesRef.current = recent;
     if (recent.length < ROOM_STALLS_BEFORE_LOWER_QUALITY) return;
-    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe, plan.source)) {
+    if (!lowerQualityOption(qualityOptions, activeQualityId, activeQuality, deliveredBitrateKbps)) {
       return;
     }
     lowerQualityOfferedRef.current = true;
@@ -4261,9 +4264,9 @@ export function VideoPlayer({
       LOWER_QUALITY_ACTION_LABEL,
     );
   }, [
+    activeQuality,
     activeQualityId,
-    plan.effective_recipe,
-    plan.source,
+    deliveredBitrateKbps,
     qualityOptions,
     roomStallSignal,
     showWatchTogetherNotice,
@@ -4985,8 +4988,7 @@ export function VideoPlayer({
           onAudioSelect={onAudioSelect}
           qualityOptions={qualityOptions}
           activeQualityId={activeQualityId}
-          deliveredRecipe={plan.effective_recipe}
-          playbackSource={plan.source}
+          activeQuality={plan.active_quality}
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={handleQualitySelect}
