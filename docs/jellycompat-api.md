@@ -483,6 +483,13 @@ node answers. A revoked or expired login session ends the compat session with `4
 lookup that fails is a retryable `503` and keeps it. `sa_` API keys have no login
 session and are checked as keys instead.
 
+`POST /Sessions/Logout` evicts the local compat session and returns `204` once
+its stored row is removed or already absent. If deletion fails, it returns `500`
+with `Error: "ServerError"` and `Message: "Could not sign out"`; completion could
+not be confirmed. It adds no `Retry-After` header. Deletion is idempotent, but the
+route authenticates first, so a later request with an already-deleted session
+can receive `401` before reaching the handler. Client retry behavior varies.
+
 ### Quick Connect
 
 Jellyfin apps sign in with Quick Connect on top of Silo's device sign-in
