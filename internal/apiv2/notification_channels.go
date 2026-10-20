@@ -9,6 +9,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
+// discordManagementDescription states the household-manager rule on every
+// operation that changes the account-wide Discord destination or mode.
+const discordManagementDescription = "Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied."
+
 type NotificationDiscordManagementService interface {
 	MayManageDiscordNotifications(context.Context, int, string, func(string) error) (bool, error)
 }
@@ -108,6 +112,7 @@ func registerNotificationChannels(reg *Registry) {
 	unlink.DefaultStatus = http.StatusNoContent
 	unlink.RetrySafety = RetrySafetyNonRetryable
 	unlink.Summary = "Unlink the account's current Discord identity and turn delivery off. Send once; replay can unlink a later connection."
+	unlink.Description = discordManagementDescription
 	Register(reg, unlink, func(ctx context.Context, _ *struct{}) (*struct{}, error) {
 		if p := reg.requireDiscordNotificationManagement(ctx); p != nil {
 			return nil, p
@@ -150,6 +155,7 @@ func registerNotificationChannels(reg *Registry) {
 	discordWrite.ProfileOptional = true
 	discordWrite.RetrySafety = RetrySafetyNonRetryable
 	discordWrite.Summary = "Set the login account's Discord delivery mode."
+	discordWrite.Description = discordManagementDescription
 	Register(reg, discordWrite, func(ctx context.Context, in *NotificationChannelModeInput) (*NotificationDiscordPreferencesOutput, error) {
 		if p := reg.requireDiscordNotificationManagement(ctx); p != nil {
 			return nil, p

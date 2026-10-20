@@ -173191,6 +173191,7 @@
     },
     "/api/v2/notifications/discord-link": {
       "delete": {
+        "description": "Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "unlinkNotificationDiscord",
         "parameters": [
           {
@@ -173468,6 +173469,7 @@
         "x-silo-service-backed": true
       },
       "put": {
+        "description": "Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "updateNotificationDiscordPreferences",
         "parameters": [
           {
@@ -173717,6 +173719,7 @@
     },
     "/api/v2/notifications/discord/link/init": {
       "post": {
+        "description": "Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "beginNotificationDiscordLink",
         "parameters": [
           {
