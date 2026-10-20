@@ -31473,7 +31473,7 @@
         "path": "/api/v2/notifications/email/unsubscribe",
         "operation_id": "unsubscribeNotificationEmail"
       },
-      "notes": "Transport and actual consumers independently reviewed. Existing service behavior preserved; test sends keep synchronous outcomes without retry/counter writes, and tokenized email links retain standalone HTML. No native in-app caller. Registration and guarded configuration mutations remain separate."
+      "notes": "Transport and actual consumers independently reviewed. Intentional safe-method correction (#2755): GET previously disabled email; it now renders a read-only confirmation and an explicit POST disables email. RFC 8058 POST, existing capability tokens, status conventions and standalone HTML remain supported. Both versions send no-store/no-referrer; HEAD and unsupported methods remain 405. No native in-app caller. Registration and guarded configuration mutations remain separate."
     },
     {
       "listener": "api",

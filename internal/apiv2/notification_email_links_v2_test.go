@@ -61,7 +61,11 @@ func TestNotificationEmailLinksV2PreserveHTML(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer unrelated-expired-session")
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
-			if rec.Code != tc.status || fake.calls != 1 || fake.token != "synthetic-proof" {
+			wantCalls, wantToken := 1, "synthetic-proof"
+			if tc.path == "unsubscribe" && tc.method == http.MethodGet {
+				wantCalls, wantToken = 0, ""
+			}
+			if rec.Code != tc.status || fake.calls != wantCalls || fake.token != wantToken {
 				t.Fatalf("%d %s calls=%d token=%s", rec.Code, rec.Body.String(), fake.calls, fake.token)
 			}
 			bridge := httptest.NewRecorder()
@@ -91,9 +95,50 @@ func TestNotificationEmailLinksV2MissingProofAndService(t *testing.T) {
 	if rec.Code != 400 || fake.calls != 1 || fake.token != "" {
 		t.Fatalf("missing token: %d calls=%d", rec.Code, fake.calls)
 	}
+	*fake = fakeNotificationEmailLinks{}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v2/notifications/email/unsubscribe", nil))
+	if rec.Code != 400 || fake.calls != 0 || !strings.Contains(rec.Body.String(), "Link invalid") {
+		t.Fatalf("missing unsubscribe token: %d calls=%d", rec.Code, fake.calls)
+	}
 	rec = httptest.NewRecorder()
 	apiv2.NewHandler(apiv2.Dependencies{}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v2/notifications/email/unsubscribe?token=synthetic", nil))
 	if rec.Code != 503 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/problem+json") {
 		t.Fatalf("missing service: %d %v", rec.Code, rec.Header())
+	}
+}
+
+func TestNotificationEmailLinksV2UnsubscribePostForms(t *testing.T) {
+	for _, body := range []string{"", "List-Unsubscribe=One-Click", "token=unrelated-body-proof"} {
+		t.Run(body, func(t *testing.T) {
+			fake := &fakeNotificationEmailLinks{unsubscribed: true}
+			h := apiv2.NewHandler(apiv2.Dependencies{NotificationEmailLinks: handlers.NewEmailLinkHandler(fake)})
+			req := httptest.NewRequest(http.MethodPost, "/api/v2/notifications/email/unsubscribe?token=synthetic-proof", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Origin", "null")
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK || fake.calls != 1 || fake.token != "synthetic-proof" || !strings.Contains(rec.Body.String(), "Unsubscribed") {
+				t.Fatalf("POST result: %d calls=%d token=%q body=%s", rec.Code, fake.calls, fake.token, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestNotificationEmailLinksV2UnsubscribeUnsupportedMethods(t *testing.T) {
+	for _, method := range []string{http.MethodHead, http.MethodOptions, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			fake := new(fakeNotificationEmailLinks)
+			h := apiv2.NewHandler(apiv2.Dependencies{NotificationEmailLinks: handlers.NewEmailLinkHandler(fake)})
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(method, "/api/v2/notifications/email/unsubscribe?token=synthetic-proof", nil))
+			if rec.Code != http.StatusMethodNotAllowed || fake.calls != 0 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/problem+json") {
+				t.Fatalf("method response: %d calls=%d headers=%v", rec.Code, fake.calls, rec.Header())
+			}
+			allow := strings.Join(rec.Header().Values("Allow"), ", ")
+			if !strings.Contains(allow, "GET") || !strings.Contains(allow, "POST") || strings.Contains(allow, method) {
+				t.Fatalf("Allow: %s", allow)
+			}
+		})
 	}
 }
