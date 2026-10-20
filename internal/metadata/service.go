@@ -3251,6 +3251,10 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, item.ContentID); err != nil {
+		return err
+	}
+
 	if err := itemRepo.UpsertTx(ctx, tx, item); err != nil {
 		return fmt.Errorf("upserting item: %w", err)
 	}
@@ -8281,6 +8285,10 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 		return fmt.Errorf("begin skeleton rebind transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, fromContentID, toContentID); err != nil {
+		return err
+	}
 
 	steps := []struct {
 		name string

@@ -139,6 +139,10 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, from); err != nil {
+		return err
+	}
+
 	sources, targets := []string{from}, []string{to}
 	if withSeriesChildren {
 		// Lock the series row before listing its children. A scan inserting a

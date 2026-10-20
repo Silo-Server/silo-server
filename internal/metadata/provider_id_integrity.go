@@ -393,6 +393,10 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, contentID); err != nil {
+		return err
+	}
+
 	var status string
 	err = tx.QueryRow(ctx, `SELECT status FROM media_items WHERE content_id = $1 FOR UPDATE`, contentID).Scan(&status)
 	if err != nil {
@@ -440,6 +444,10 @@ func canonicalizeProviderIDDuplicate(
 		return "", fmt.Errorf("begin provider-id canonicalization: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, leftContentID, rightContentID); err != nil {
+		return "", err
+	}
 
 	canonical, source, err := chooseCanonicalProviderOwner(ctx, tx, leftContentID, rightContentID)
 	if err != nil {
@@ -500,6 +508,10 @@ func canonicalizeProviderIDDuplicateInto(
 		return "", fmt.Errorf("begin provider-id canonicalization: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, sourceID, canonicalID); err != nil {
+		return "", err
+	}
 
 	candidates := make(map[string]canonicalCandidate, 2)
 	rows, err := tx.Query(ctx, `
