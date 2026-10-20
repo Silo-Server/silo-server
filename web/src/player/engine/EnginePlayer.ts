@@ -135,6 +135,7 @@ export class EnginePlayer {
   private shown: QueuedPicture | null = null;
   private presentedFrames = 0;
   private decoderRestarts = 0;
+  private recovering = false;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   /** Decoded frames skipped because a later one was already due. */
   private droppedFrames = 0;
@@ -262,6 +263,15 @@ export class EnginePlayer {
     const last = this.queue[this.queue.length - 1];
     const end = Math.max(this.currentTime, last ? last.timestamp + last.duration : 0);
     return new EngineTimeRanges([[Math.min(this.seekTarget, this.currentTime), end]]);
+  }
+
+  /**
+   * A decoder restart is under way: the wait it causes is the decoder's, not
+   * the network's, though the engine holds little media past the playhead.
+   * Ends with the new run's first picture.
+   */
+  get decoderRecovering(): boolean {
+    return this.recovering;
   }
 
   get seekable(): TimeRanges {
@@ -688,6 +698,7 @@ export class EnginePlayer {
     if (this.restartTimer !== null) return true;
     if (!this.info || this.decoderRestarts >= MAX_DECODER_RESTARTS) return false;
     this.decoderRestarts += 1;
+    this.recovering = true;
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
       if (this.stopped) return;
@@ -748,6 +759,7 @@ export class EnginePlayer {
     if (this.shown) this.release(this.shown);
     this.shown = picture;
     this.presentedFrames += 1;
+    if (picture.generation === this.generation) this.recovering = false;
     if (this.callbacks.size === 0) return;
     const callbacks = this.callbacks;
     this.callbacks = new Map();

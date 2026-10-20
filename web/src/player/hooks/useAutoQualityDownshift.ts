@@ -31,6 +31,14 @@ const GAP_SKIP_MAX_SECONDS = 1;
 /** Stalls and pill timers use elapsed real time, not the system clock. */
 const now = () => performance.now();
 
+/**
+ * The browser decoder holds little media past the playhead, so a wait while
+ * it restarts its decoder is recognised from its own flag.
+ */
+function decoderRecovering(video: HTMLVideoElement): boolean {
+  return (video as HTMLVideoElement & { decoderRecovering?: boolean }).decoderRecovering === true;
+}
+
 /** Media buffered past the playhead, in milliseconds; 0 when none is. */
 function bufferedAheadMs(video: HTMLVideoElement): number {
   const position = video.currentTime;
@@ -277,7 +285,7 @@ export function useAutoQualityDownshift(options: Options) {
             ? "reload"
             : video.paused
               ? "pause"
-              : bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS
+              : decoderRecovering(video) || bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS
                 ? "renderer"
                 : undefined;
       rendererWait = cause === "renderer";
@@ -326,7 +334,11 @@ export function useAutoQualityDownshift(options: Options) {
     if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) playing();
     const timer = setInterval(() => {
       syncTrouble();
-      if (rendererWait && bufferedAheadMs(video) <= RENDERER_WAIT_BUFFER_MS) {
+      if (
+        rendererWait &&
+        !decoderRecovering(video) &&
+        bufferedAheadMs(video) <= RENDERER_WAIT_BUFFER_MS
+      ) {
         rendererWait = false;
         c.event({ type: "waiting" }, now());
       }

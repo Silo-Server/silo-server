@@ -314,3 +314,16 @@ it("tracks stalls in a Watch Party room without lowering", () => {
     buffering_action: "none",
   });
 });
+
+it("does not count the wait while the browser decoder restarts", () => {
+  const h = setup();
+  const video = h.options.videoRef.current as HTMLVideoElement & { decoderRecovering?: boolean };
+  video.decoderRecovering = true;
+  h.send("waiting");
+  h.advance(10_000);
+  expect(h.options.onReplan).not.toHaveBeenCalled();
+  // The restart is over and the wait goes on: from now it is a stall.
+  video.decoderRecovering = false;
+  h.advance(6_200);
+  expect(h.options.onReplan).toHaveBeenCalledTimes(1);
+});

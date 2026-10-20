@@ -926,6 +926,28 @@ describe("EnginePlayer", () => {
     player.destroy();
   });
 
+  it("reports a decoder restart as under way until the new run shows a picture", async () => {
+    const { player, worker } = start();
+    await open(worker);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    expect(player.decoderRecovering).toBe(false);
+    worker.emit({
+      type: "error",
+      generation: worker.generation,
+      classification: "browser_engine_video_decode_failed",
+      message: "Decoder failure",
+    });
+    expect(player.decoderRecovering).toBe(true);
+    await vi.advanceTimersByTimeAsync(DECODER_RESTART_DELAY_MS);
+    expect(player.decoderRecovering).toBe(true);
+    worker.emit({ type: "frame", generation: worker.generation, frame: fakeFrame(0) });
+    await settle();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(player.decoderRecovering).toBe(false);
+    player.destroy();
+  });
+
   it("fails over as a decode failure when the restarted decoder shows nothing", async () => {
     const { player, worker, onFailure } = start();
     await open(worker);
