@@ -92,7 +92,7 @@ export default function ItemGrid(props: ItemGridProps) {
     gridRef,
     onTopRowChange,
   } = props;
-  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
+  const { prefs: overlayPrefs, watchStatus, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const gridGap = cardPresentation.poster_size === "large" ? 16 : 12;
   const gridClasses = cardGridClasses(cardPresentation.poster_size);
@@ -336,6 +336,7 @@ export default function ItemGrid(props: ItemGridProps) {
                         libraryId={libraryId}
                         sortField={sortField}
                         overlayPrefs={overlayPrefs}
+                        watchStatus={watchStatus}
                         quickActionMode={quickActionMode}
                         narrowPosterActions={narrowPosterActions}
                         selectionMode={selectionMode}

@@ -239,6 +239,8 @@ DELETE /api/v2/admin/notifications/server-channels/{id}	non-media
 PUT /api/v2/admin/notifications/server-channels/{id}	non-media
 POST /api/v2/admin/notifications/server-channels/{id}/rotate-secret	non-media
 POST /api/v2/admin/notifications/server-channels/{id}/test	non-media
+POST /api/v2/admin/overlay-images	non-media
+DELETE /api/v2/admin/overlay-images/{ref}	non-media
 PATCH /api/v2/admin/people/{id}	non-media
 POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
@@ -699,6 +701,8 @@ GET /api/v2/onboarding/flow	non-media
 PUT /api/v2/onboarding/progress	non-media
 GET /api/v2/onboarding/state	non-media
 GET /api/v2/openapi.json	non-media
+GET /api/v2/overlay-images/{ref}	non-media
+HEAD /api/v2/overlay-images/{ref}	non-media
 POST /api/v2/password-resets	non-media
 GET /api/v2/password-resets/{token}	non-media
 POST /api/v2/password-resets/{token}/complete	non-media
@@ -1522,6 +1526,8 @@ DELETE /api/v2/admin/notifications/server-channels/{id}	non-media
 PUT /api/v2/admin/notifications/server-channels/{id}	non-media
 POST /api/v2/admin/notifications/server-channels/{id}/rotate-secret	non-media
 POST /api/v2/admin/notifications/server-channels/{id}/test	non-media
+POST /api/v2/admin/overlay-images	non-media
+DELETE /api/v2/admin/overlay-images/{ref}	non-media
 PATCH /api/v2/admin/people/{id}	non-media
 POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
@@ -1982,6 +1988,8 @@ GET /api/v2/onboarding/flow	non-media
 PUT /api/v2/onboarding/progress	non-media
 GET /api/v2/onboarding/state	non-media
 GET /api/v2/openapi.json	non-media
+GET /api/v2/overlay-images/{ref}	non-media
+HEAD /api/v2/overlay-images/{ref}	non-media
 POST /api/v2/password-resets	non-media
 GET /api/v2/password-resets/{token}	non-media
 POST /api/v2/password-resets/{token}/complete	non-media

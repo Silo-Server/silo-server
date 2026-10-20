@@ -1096,7 +1096,7 @@ var operationalPrefixes = append(append([]string(nil), operationalArtifactPrefix
 
 // preservedAssetPrefixes are the assets preserve_uploads copies: uploads that
 // cannot be downloaded again from a provider.
-var preservedAssetPrefixes = []string{"branding", "collection-images", "user-collection-images", "library-posters", "subtitles"}
+var preservedAssetPrefixes = []string{"branding", "collection-images", "user-collection-images", "library-posters", "overlay-images", "subtitles"}
 
 // operationalStore mirrors blobstore.Open: a private bucket owns diagnostics,
 // job artifacts, and avatars whatever the backend is, a local backend without

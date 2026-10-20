@@ -1,3 +1,4 @@
+import type { MediaItemUserState } from "@/api/types";
 import type { OverlayData } from "./types";
 
 // Sample OverlayData used by the settings preview cards so users can see how
@@ -72,4 +73,20 @@ export const OVERLAY_PREVIEW_SAMPLES: Readonly<Record<OverlayPreviewVariant, Ove
   movie: SAMPLE_MOVIE_DATA,
   show: SAMPLE_SHOW_DATA,
   requested: SAMPLE_REQUEST_DATA,
+};
+
+// The watch state each sample shows in its top-right status corner: a watched
+// movie, a show with episodes left, and a title nobody has started.
+export const OVERLAY_PREVIEW_WATCH_STATES: Readonly<
+  Record<OverlayPreviewVariant, MediaItemUserState | undefined>
+> = {
+  movie: { played: true, is_favorite: false, in_watchlist: false },
+  show: {
+    played: false,
+    is_favorite: false,
+    in_watchlist: false,
+    watched_count: 5,
+    unplayed_count: 3,
+  },
+  requested: undefined,
 };

@@ -104,6 +104,44 @@ every asset response carries `X-Content-Type-Options: nosniff` and a sandboxing
 `Content-Security-Policy` — a directly-navigated SVG cannot run script in the
 viewer's session.
 
+## Card overlay images
+
+Administrators upload images that card overlay badges draw: a logo beside a badge's
+label, or an image that replaces the whole badge for one value. The library is
+server-wide; profiles and the server default (`defaults.card_overlays`) name images
+by `ref` in their `ui.card_overlays` document (see
+[card-overlays.md](architecture/card-overlays.md)).
+
+| Route                                       | Auth      | Purpose                                                                |
+| ------------------------------------------- | --------- | ---------------------------------------------------------------------- |
+| `POST /api/v2/admin/overlay-images`         | admin     | Upload (multipart, fields `file` and `name`). `201` with the image.    |
+| `DELETE /api/v2/admin/overlay-images/{ref}` | admin     | Remove the image and delete its bytes. `204`; an unknown ref is `404`. |
+| `GET /api/v2/overlay-images/{ref}`          | public    | Serve the stored WebP. Content-addressed, so `immutable` cached.       |
+| `GET /api/v2/settings/overlay-config`       | signed in | Lists the library under `images`, with `image_uploads_available`.      |
+
+`file` accepts PNG, JPEG or WebP up to 4 MiB. The server re-encodes it to WebP,
+keeping transparency, scaled down to fit 600×300 and never enlarged; `width` and
+`height` report the stored size. `ref` is the SHA-256 of the stored bytes plus
+`.webp`, so uploading the same image again keeps one entry and takes the new
+`name` (1 to 64 characters after trimming). The library holds at most 256 images.
+
+The image row in `overlay_images` is what makes a ref current: the public read
+answers `404` for a ref that was deleted, even while a client still has its bytes
+cached. A document that names a missing image falls back to the badge's own
+rendering. The bytes live under `overlay-images/` in the assets store, and the
+`preserve_uploads` storage transition copies them.
+
+Failure modes: `422 validation_failed` at `body.file` for a missing file, a
+content type outside the list, or bytes that are not a readable image, and at
+`body.name` for a missing or overlong name; `413 payload_too_large` past 4 MiB;
+`409 conflict` when the library is full; `409 capability_not_configured` when
+the server has no asset storage. Both routes are demo-restricted, and the
+upload is `non_retryable`: a delayed retry can restore an image deleted in
+between.
+
+Image responses carry `X-Content-Type-Options: nosniff` and a sandboxing
+`Content-Security-Policy`, like branding assets.
+
 ## Server status and restarts
 
 Some settings are only read at startup. Two routes carry that contract:

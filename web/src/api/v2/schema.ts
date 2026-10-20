@@ -3254,6 +3254,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/overlay-images": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Add an image to the card overlay image library. The image is re-encoded and addressed by its content: uploading the same image again keeps one entry and renames it. No automatic retry: a delayed retry can restore an image deleted in between. */
+    post: operations["uploadAdminOverlayImage"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/overlay-images/{ref}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Remove an image from the card overlay image library and delete its bytes. Badges that name it fall back to their own rendering. */
+    delete: operations["deleteAdminOverlayImage"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/people/{id}": {
     parameters: {
       query?: never;
@@ -9579,6 +9613,24 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/overlay-images/{ref}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read a card overlay image. The ref addresses the content, so a response never changes. */
+    get: operations["getOverlayImage"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    /** Read a card overlay image. The ref addresses the content, so a response never changes. */
+    head: operations["headOverlayImage"];
     patch?: never;
     trace?: never;
   };
@@ -16450,6 +16502,15 @@ export interface components {
       timestamp: string;
       user_id?: string;
     };
+    AdminOverlayImageForm: {
+      /**
+       * Format: binary
+       * @description The image: PNG, JPEG or WebP, at most 4 MiB. Silo stores it as WebP no larger than 600x300, keeping transparency.
+       */
+      file: string;
+      /** @description Label administrators see when they assign the image to a badge: 1 to 64 characters after trimming. Required. */
+      name?: string;
+    };
     AdminPasswordReset: {
       /**
        * @example link
@@ -20979,6 +21040,18 @@ export interface components {
       not_interested: boolean;
       /** @example false */
       played: boolean;
+      /**
+       * Format: int64
+       * @description Available episodes the profile has not watched; present on a series or season the profile has not finished
+       * @example 6
+       */
+      unplayed_count?: number;
+      /**
+       * Format: int64
+       * @description Episodes the profile has watched; present on a series or season the profile has not finished
+       * @example 4
+       */
+      watched_count?: number;
     };
     CatalogLetter: {
       /**
@@ -26656,6 +26729,13 @@ export interface components {
        */
       enabled: boolean;
       /**
+       * @description Whether this server has the asset storage uploadAdminOverlayImage needs
+       * @example true
+       */
+      image_uploads_available: boolean;
+      /** @description Images administrators uploaded for badges, in upload order; card overlay documents name them by ref */
+      images: components["schemas"]["OverlayImage"][];
+      /**
        * @description Default quick-action mode; one of the ui.card_quick_actions values in the settings contract
        * @example both
        */
@@ -26665,6 +26745,35 @@ export interface components {
        * @example false
        */
       quick_actions_enabled: boolean;
+    };
+    OverlayImage: {
+      /**
+       * Format: int64
+       * @description Stored height in pixels
+       * @example 120
+       */
+      height: number;
+      /**
+       * @description Administrator's label for the image
+       * @example 4K Dolby Vision
+       */
+      name: string;
+      /**
+       * @description Content reference card overlay documents use; it changes exactly when the stored bytes change
+       * @example 9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp
+       */
+      ref: string;
+      /**
+       * @description Public, immutable path of the image bytes
+       * @example /api/v2/overlay-images/9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp
+       */
+      url: string;
+      /**
+       * Format: int64
+       * @description Stored width in pixels
+       * @example 300
+       */
+      width: number;
     };
     PageInfo: {
       /**
@@ -30006,6 +30115,11 @@ export interface components {
        * @example true
        */
       supports_idempotent_writes: boolean;
+      /**
+       * @description Whether this server keeps a card overlay image library: getOverlayConfig lists it and card overlay documents may name its images
+       * @example true
+       */
+      supports_overlay_images: boolean;
     };
     SettingSourceContext: {
       /**
@@ -61576,6 +61690,260 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["NotificationDestinationTestResult"];
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  uploadAdminOverlayImage: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["AdminOverlayImageForm"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OverlayImage"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteAdminOverlayImage: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Content reference of the image */
+        ref: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {
@@ -117595,6 +117963,128 @@ export interface operations {
         content: {
           "application/problem+json": components["schemas"]["Problem"];
         };
+      };
+    };
+  };
+  getOverlayImage: {
+    parameters: {
+      query?: never;
+      header?: {
+        "If-None-Match"?: string;
+      };
+      path: {
+        ref: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Image bytes (no body for HEAD) */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Security-Policy"?: string;
+          ETag?: string;
+          "X-Content-Type-Options"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "image/webp": string;
+        };
+      };
+      /** @description Image unchanged */
+      304: {
+        headers: {
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Security-Policy"?: string;
+          ETag?: string;
+          "X-Content-Type-Options"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown or deleted image */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Image could not be read */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Overlay images are not available on this server */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  headOverlayImage: {
+    parameters: {
+      query?: never;
+      header?: {
+        "If-None-Match"?: string;
+      };
+      path: {
+        ref: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Image bytes (no body for HEAD) */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Security-Policy"?: string;
+          ETag?: string;
+          "X-Content-Type-Options"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Image unchanged */
+      304: {
+        headers: {
+          "Cache-Control"?: string;
+          "Content-Length"?: string;
+          "Content-Security-Policy"?: string;
+          ETag?: string;
+          "X-Content-Type-Options"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown or deleted image */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Image could not be read */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Overlay images are not available on this server */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

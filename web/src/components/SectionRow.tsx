@@ -56,7 +56,7 @@ function SectionPinButton({
 export default memo(function SectionRow({ section, libraryId, priority = false }: SectionRowProps) {
   const navigate = useViewTransitionNavigate();
   const browseSupported = isSectionBrowseSupported(section.section_type);
-  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
+  const { prefs: overlayPrefs, watchStatus, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterSize = cardPresentation.poster_size;
   const posterWidthClasses = carouselCardWidthClasses(posterSize);
@@ -145,6 +145,7 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
                 item={item}
                 libraryId={libraryId}
                 overlayPrefs={overlayPrefs}
+                watchStatus={watchStatus}
                 quickActionMode={quickActionMode}
                 priority={index < priorityCount}
               />

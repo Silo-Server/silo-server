@@ -29,6 +29,7 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `branding/…` | branding assets |
 | `collection-images/…` | collection artwork |
 | `library-posters/…` | library posters |
+| `overlay-images/…` | card overlay badge images, one `<sha256>.webp` per image the `overlay_images` table lists |
 | `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w{width}.webp` per chapter at `playback.preview_image_width`, the key `thumbnail_path` holds |
 | `markers/…` | intro and credit markers |
 | `subtitles/…` | downloaded subtitles |
@@ -231,10 +232,11 @@ rejected as invalid, since the store could not open on restart.
 
 Administrators change a recorded local or S3 location through the managed
 storage-transition API. `start_fresh` does not read the source;
-`preserve_uploads` copies personal artwork uploads and downloaded subtitles when
-the assets location changes, and profile avatars when the operational location
-changes. When the assets location changes, provider artwork returns to its saved
-provider URL under `start_fresh` and `preserve_uploads`. Cached NFO/sidecar
+`preserve_uploads` copies personal artwork uploads, card overlay images, and
+downloaded subtitles when the assets location changes, and profile avatars when
+the operational location changes. When the assets location changes, provider
+artwork returns to its saved provider URL under `start_fresh` and
+`preserve_uploads`. Cached NFO/sidecar
 artwork is not copied by either policy; refresh metadata for affected libraries
 after restart and artwork reconciliation. Backfill Metadata Images does not
 process local sidecar sources. `migrate_all` copies all data from each source

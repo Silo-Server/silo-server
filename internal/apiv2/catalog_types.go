@@ -93,6 +93,8 @@ type CatalogItemUserState struct {
 	IsFavorite    bool `json:"is_favorite" example:"false"`
 	InWatchlist   bool `json:"in_watchlist" example:"false"`
 	NotInterested bool `json:"not_interested" doc:"The profile marked the movie or series Not interested: recommendations leave it out and rank similar titles lower" example:"false"`
+	WatchedCount  *int `json:"watched_count,omitempty" doc:"Episodes the profile has watched; present on a series or season the profile has not finished" example:"4"`
+	UnplayedCount *int `json:"unplayed_count,omitempty" doc:"Available episodes the profile has not watched; present on a series or season the profile has not finished" example:"6"`
 }
 
 // CatalogItemUpcomingEvent is the next airing a card announces.
@@ -139,7 +141,7 @@ func catalogUserStateOf(s *handlers.ItemUserStateView) *CatalogItemUserState {
 	if s == nil {
 		return nil
 	}
-	return &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist, NotInterested: s.NotInterested}
+	return &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist, NotInterested: s.NotInterested, WatchedCount: s.WatchedCount, UnplayedCount: s.UnplayedCount}
 }
 
 // instantOfRFC3339 parses a stored RFC 3339 stamp; an unparseable one is
