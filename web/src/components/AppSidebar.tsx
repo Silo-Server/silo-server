@@ -525,7 +525,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
               Home with an ordered shortcut rail, Search stays fixed after it,
               and the full library tree remains available below as a safe
               browsing fallback. */}
-          <ul className="list-none space-y-0.5">
+          <ul className="mb-4 list-none space-y-0.5">
             {primaryMenuLinks ? (
               primaryMenuLinks.map((link) => {
                 const [targetPath, targetQuery] = link.href.split("?", 2);
