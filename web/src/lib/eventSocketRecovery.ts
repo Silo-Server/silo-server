@@ -22,7 +22,7 @@ export function scheduleEventSocketReconnect(callback: () => void, delayMs: numb
   return () => window.clearTimeout(timer);
 }
 
-/** Generic events only. Known work refusals and input-shield recovery take precedence. */
+/** Generic events only; integrating work-rate recovery must preserve its reason-specific floors. */
 export function createEventSocketRecovery(random = Math.random, now = () => performance.now()) {
   let failures = 0;
   let acceptedAt: number | null = null;
