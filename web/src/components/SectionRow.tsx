@@ -52,17 +52,6 @@ function SectionPinButton({
   );
 }
 
-/**
- * Whether the row likely holds more than it shows. Many row types report a
- * total equal to the items they returned, so a full row counts as truncated.
- */
-function isSectionRowTruncated(
-  section: Pick<ResolvedSection, "items" | "item_limit" | "total_count">,
-): boolean {
-  const shown = section.items.length;
-  return section.total_count > shown || (section.item_limit > 0 && shown >= section.item_limit);
-}
-
 export default memo(function SectionRow({ section, libraryId, priority = false }: SectionRowProps) {
   const browseHref = useMemo(
     () =>
@@ -119,7 +108,7 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
     <MediaCarousel
       title={section.title}
       titleHref={browseHref}
-      viewAllHref={isSectionRowTruncated(section) ? browseHref : undefined}
+      viewAllHref={browseHref}
       headerActions={headerActions}
       windowing={windowing}
     >

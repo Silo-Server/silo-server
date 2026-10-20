@@ -330,29 +330,21 @@ describe("SectionRow", () => {
     }
   });
 
-  it("shows Explore all only when the row is truncated", () => {
-    const base: ResolvedSection = {
+  it("shows Explore all on every row, even one that looks complete", () => {
+    // Home drops titles another row already shows, so a short row can still
+    // have more on its page.
+    renderRow({
       id: "picks",
-      section_type: "hidden_gems",
-      title: "Hidden Gems",
+      section_type: "because_you_watched",
+      title: "Because You Watched",
       featured: false,
-      item_limit: 3,
+      item_limit: 40,
       total_count: 2,
       is_custom: false,
       customized: false,
       items: [movie("movie-1", "Heat"), movie("movie-2", "Alien")],
-    };
-
-    renderRow(base);
-    expect(latestCarouselProps?.titleHref).toContain("section_id=picks");
-    expect(latestCarouselProps?.viewAllHref).toBeUndefined();
-
-    // A full row: many fetchers report total as the items they returned.
-    renderRow({ ...base, item_limit: 2 });
-    expect(latestCarouselProps?.viewAllHref).toContain("section_id=picks");
-
-    // Hide-watched removed items: the source holds more than the row shows.
-    renderRow({ ...base, total_count: 9 });
+    });
+    expect(latestCarouselProps?.viewAllHref).toBe(latestCarouselProps?.titleHref);
     expect(latestCarouselProps?.viewAllHref).toContain("section_id=picks");
   });
 
