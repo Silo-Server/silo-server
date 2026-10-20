@@ -202,19 +202,24 @@ func TestBoxSetGroupedBrowseDB(t *testing.T) {
 func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	f := seedBoxSets(t)
 	ctx := t.Context()
-	byName, err := f.repo.SearchCollectionIDs(ctx, f.prefix+" saga", 10, 0)
+	byName, err := f.repo.SearchCollectionIDs(ctx, f.prefix+" saga", []int{f.lib}, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(byName, []int64{f.franchise}) {
 		t.Fatalf("name search = %v, want [%d]", byName, f.franchise)
 	}
-	if next, err := f.repo.SearchCollectionIDs(ctx, f.prefix+" saga", 10, 1); err != nil || len(next) != 0 {
+	if next, err := f.repo.SearchCollectionIDs(ctx, f.prefix+" saga", []int{f.lib}, 10, 1); err != nil || len(next) != 0 {
 		t.Fatalf("second page = %v, %v; want empty", next, err)
+	}
+	// A library without the collection's movies finds nothing, so matches
+	// elsewhere cannot use up a library's candidates.
+	if other, err := f.repo.SearchCollectionIDs(ctx, f.prefix+" saga", []int{f.lib + 1_000_000}, 10, 0); err != nil || len(other) != 0 {
+		t.Fatalf("search in another library = %v, %v; want empty", other, err)
 	}
 	// "kappa" is in two of the franchise's titles but one of the single
 	// collection's, and in neither name.
-	byTitle, err := f.repo.SearchCollectionIDs(ctx, "kappa", 50, 0)
+	byTitle, err := f.repo.SearchCollectionIDs(ctx, "kappa", []int{f.lib}, 50, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -105,13 +105,13 @@ func (r *BoxSetRepository) Collections(ctx context.Context, ids []int64) (map[in
 	return out, nil
 }
 
-// SearchCollectionIDs returns up to limit stored collections that match
-// query, skipping the first offset: first those whose name contains every word
-// of it, then those with at least two movies whose titles do,
-// case-insensitively.
-func (r *BoxSetRepository) SearchCollectionIDs(ctx context.Context, query string, limit, offset int) ([]int64, error) {
+// SearchCollectionIDs returns up to limit stored collections with a movie in
+// one of libraryIDs that match query, skipping the first offset: first those
+// whose name contains every word of it, then those with at least two movies
+// whose titles do, case-insensitively.
+func (r *BoxSetRepository) SearchCollectionIDs(ctx context.Context, query string, libraryIDs []int, limit, offset int) ([]int64, error) {
 	words := strings.Fields(strings.ToLower(query))
-	if r == nil || r.pool == nil || len(words) == 0 {
+	if r == nil || r.pool == nil || len(words) == 0 || len(libraryIDs) == 0 {
 		return nil, nil
 	}
 	patterns := make([]string, 0, len(words))
@@ -131,9 +131,16 @@ func (r *BoxSetRepository) SearchCollectionIDs(ctx context.Context, query string
 			GROUP BY m.tmdb_collection_id
 			HAVING count(*) >= 2
 		) matches
+		-- Only collections with a movie in the searched libraries, so matches
+		-- elsewhere do not use up the candidates a page reads.
+		WHERE EXISTS (
+			SELECT 1 FROM media_item_tmdb_collections lm
+			JOIN media_items li ON li.content_id = lm.content_id AND li.tmdb_id = lm.checked_tmdb_id::text
+			JOIN media_item_libraries mil ON mil.content_id = lm.content_id
+			WHERE lm.tmdb_collection_id = matches.tmdb_collection_id AND mil.media_folder_id = ANY($4))
 		GROUP BY tmdb_collection_id
 		ORDER BY min(match_rank), min(name_length), tmdb_collection_id
-		LIMIT $2 OFFSET $3`, patterns, limit, offset)
+		LIMIT $2 OFFSET $3`, patterns, limit, offset, libraryIDs)
 	if err != nil {
 		return nil, fmt.Errorf("searching tmdb collections: %w", err)
 	}

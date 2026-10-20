@@ -292,14 +292,18 @@ func (h *CatalogHandler) SearchBoxSets(ctx context.Context, v ItemViewer, query 
 	if err != nil {
 		return nil, boxSetError(ctx, err)
 	}
-	if libraryID > 0 {
-		libraries = slices.DeleteFunc(libraries, func(l catalog.BoxSetLibrary) bool { return l.ID != libraryID })
+	libraries = slices.DeleteFunc(libraries, func(l catalog.BoxSetLibrary) bool {
+		return !l.InSearch || (libraryID > 0 && l.ID != libraryID)
+	})
+	libraryIDs := make([]int, 0, len(libraries))
+	for _, l := range libraries {
+		libraryIDs = append(libraryIDs, l.ID)
 	}
 	out := []BoxSetView{}
 	// Matches are read a page at a time: the viewer may see too few movies of
-	// the best-ranked ones, or they may be in libraries outside search.
+	// the best-ranked ones.
 	for page := range boxSetSearchPages {
-		candidates, err := h.boxSets.SearchCollectionIDs(ctx, query, boxSetSearchCandidates, page*boxSetSearchCandidates)
+		candidates, err := h.boxSets.SearchCollectionIDs(ctx, query, libraryIDs, boxSetSearchCandidates, page*boxSetSearchCandidates)
 		if err != nil {
 			return nil, boxSetError(ctx, err)
 		}
