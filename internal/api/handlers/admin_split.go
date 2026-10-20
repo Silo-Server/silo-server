@@ -590,7 +590,7 @@ func ensureSplitTarget(ctx context.Context, tx pgx.Tx, target splitTarget, sourc
 	}
 	// INSERT lost to a concurrent creator. Authorize the actual existing row
 	// before adding libraries or moving any state onto it.
-	itemTypes, err = catalog.LockMetadataCurationItems(ctx, tx, source.ContentID, target.contentID)
+	itemTypes, err = catalog.LockMetadataCurationItems(ctx, tx, target.contentID)
 	if err != nil {
 		return false, err
 	}

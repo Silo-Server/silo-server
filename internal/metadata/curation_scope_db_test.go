@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -158,10 +159,117 @@ func TestCurationScopeRebindPreservesAuthorizedStatePostgres(t *testing.T) {
 	}
 }
 
+func TestCurationScopeRebindToleratesVanishedSourcePostgres(t *testing.T) {
+	for _, admin := range []bool{false, true} {
+		name := "delegated"
+		if admin {
+			name = "acting-admin"
+		}
+		t.Run(name, func(t *testing.T) {
+			pool, source, target, allowed, _ := curationFixture(t)
+			ctx := curationScope(t.Context(), allowed)
+			if admin {
+				ctx = access.WithMetadataCurationAuthorizer(t.Context(), func(context.Context, []int) error { return nil })
+			}
+			// A scan merged or deleted the source after Process loaded it.
+			if _, err := pool.Exec(t.Context(), `DELETE FROM media_items WHERE content_id=$1`, source); err != nil {
+				t.Fatal(err)
+			}
+			svc := &MetadataService{dbPool: pool}
+			if err := svc.rebindItemOnto(ctx, source, target, true, true); err != nil {
+				t.Fatalf("rebinding a vanished source = %v, want the no-op the caller continues after", err)
+			}
+			if err := svc.rebindItemOnto(ctx, target, source, true, true); !errors.Is(err, catalog.ErrItemNotFound) {
+				t.Fatalf("rebinding onto a vanished target = %v, want ErrItemNotFound", err)
+			}
+		})
+	}
+}
+
 func TestCurationScopeClearToleratesVanishedOwnerPostgres(t *testing.T) {
 	pool, _, _, allowed, _ := curationFixture(t)
 	// The provisional owner was merged or deleted after the caller found it.
 	if err := clearProvisionalProviderIDsLocked(curationScope(t.Context(), allowed), pool, "curation-vanished-"+t.Name()); err != nil {
 		t.Fatalf("clearing a vanished owner = %v, want the no-op the caller retries after", err)
+	}
+}
+
+// A split holds its selected files, then locks their parent item. Rebind and
+// rename update the source's files under curation authority, so they must take
+// those file locks before the parent lock, or the two deadlock.
+func TestCurationScopeLocksFilesBeforeParentPostgres(t *testing.T) {
+	for _, sink := range []string{"rebind", "rename"} {
+		t.Run(sink, func(t *testing.T) {
+			pool, source, target, allowed, _ := curationFixture(t)
+			var file int
+			if err := pool.QueryRow(t.Context(), `INSERT INTO media_files(content_id,media_folder_id,file_path) VALUES($1,$2,$3) RETURNING id`, source, allowed, "/synthetic/"+t.Name()).Scan(&file); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `DELETE FROM media_files WHERE id=$1`, file)
+				_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, source+"-renamed")
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			split, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = split.Rollback(context.Background()) }()
+			var splitPID int
+			if err := split.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&splitPID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := split.Exec(ctx, `SELECT 1 FROM media_files WHERE id = $1 FOR UPDATE`, file); err != nil {
+				t.Fatal(err)
+			}
+			svc := &MetadataService{dbPool: pool}
+			done := make(chan error, 1)
+			go func() {
+				ctx := curationScope(ctx, allowed)
+				if sink == "rebind" {
+					done <- svc.rebindItemOnto(ctx, source, target, true, true)
+				} else {
+					done <- svc.renameContentID(ctx, source, source+"-renamed", false)
+				}
+			}()
+			waitForBlockedBy(t, ctx, pool, splitPID)
+			if _, err := split.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, source); err != nil {
+				t.Fatalf("split's parent lock while the %s waits: %v", sink, err)
+			}
+			if err := split.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("%s after the split committed: %v", sink, err)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		})
+	}
+}
+
+// waitForBlockedBy returns once another backend waits on a lock held by pid.
+func waitForBlockedBy(t *testing.T, ctx context.Context, pool *pgxpool.Pool, pid int) {
+	t.Helper()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var blocked bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, pid).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }

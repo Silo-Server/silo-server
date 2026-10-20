@@ -81,6 +81,21 @@ func LockMetadataCurationItems(ctx context.Context, tx pgx.Tx, ids ...string) (m
 	return types, nil
 }
 
+// LockMetadataCurationFiles locks the files an explicit curation is about to
+// move or rename, before GuardMetadataCurationItems locks their parents. Split
+// and scanner writers lock files before parent items; taking the parents first
+// deadlocks with them. Automatic processing is unchanged.
+func LockMetadataCurationFiles(ctx context.Context, tx pgx.Tx, ids ...string) error {
+	if !access.HasMetadataCurationAuthorizer(ctx) {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_files
+		WHERE content_id = ANY($1::text[]) ORDER BY id FOR UPDATE`, ids); err != nil {
+		return fmt.Errorf("lock curation files: %w", err)
+	}
+	return nil
+}
+
 // GuardMetadataCurationItems leaves automatic metadata processing unchanged.
 // Explicit curation must find every expected existing item under these locks.
 func GuardMetadataCurationItems(ctx context.Context, tx pgx.Tx, ids ...string) error {

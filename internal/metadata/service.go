@@ -8286,8 +8286,24 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if err := catalog.GuardMetadataCurationItems(ctx, tx, fromContentID, toContentID); err != nil {
+	if err := catalog.LockMetadataCurationFiles(ctx, tx, fromContentID); err != nil {
 		return err
+	}
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, fromContentID, toContentID); err != nil {
+		if !errors.Is(err, catalog.ErrItemNotFound) {
+			return err
+		}
+		// A source merged or deleted after the caller found it leaves nothing
+		// to move, as without curation authority; the caller continues with
+		// toContentID. A missing target still fails.
+		var sourceExists bool
+		if existsErr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_items WHERE content_id = $1)`, fromContentID).Scan(&sourceExists); existsErr != nil {
+			return existsErr
+		}
+		if sourceExists {
+			return err
+		}
+		return nil
 	}
 
 	steps := []struct {

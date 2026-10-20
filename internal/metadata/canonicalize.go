@@ -139,6 +139,10 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// The rename cascades into the item's files.
+	if err := catalog.LockMetadataCurationFiles(ctx, tx, from); err != nil {
+		return err
+	}
 	if err := catalog.GuardMetadataCurationItems(ctx, tx, from); err != nil {
 		return err
 	}

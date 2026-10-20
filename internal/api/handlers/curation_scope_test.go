@@ -224,6 +224,10 @@ func TestCurationScopeSplitLocksFilesBeforeParentPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = writer.Rollback(context.Background()) }()
+	var writerPID int
+	if err := writer.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&writerPID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := writer.Exec(ctx, `UPDATE media_files SET updated_at = now() WHERE id = $1`, f.selected); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +238,7 @@ func TestCurationScopeSplitLocksFilesBeforeParentPostgres(t *testing.T) {
 		_, err := h.SplitAdminItem(f.authority(t, "lock-order"), f.source, req)
 		done <- err
 	}()
-	waitForBlockedSplit(t, ctx, f.pool)
+	waitForBlockedSplit(t, ctx, f.pool, writerPID)
 	if _, err := writer.Exec(ctx, `UPDATE media_items SET latest_episode_added_at = now() WHERE content_id = $1`, f.source); err != nil {
 		t.Fatalf("parent update while split waits for the file: %v", err)
 	}
@@ -251,7 +255,7 @@ func TestCurationScopeSplitLocksFilesBeforeParentPostgres(t *testing.T) {
 	}
 }
 
-func waitForBlockedSplit(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+func waitForBlockedSplit(t *testing.T, ctx context.Context, pool *pgxpool.Pool, writerPID int) {
 	t.Helper()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
@@ -259,8 +263,8 @@ func waitForBlockedSplit(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 		var blocked bool
 		if err := pool.QueryRow(ctx, `SELECT EXISTS (
 			SELECT 1 FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock'
-			  AND query LIKE '%FROM media_files WHERE content_id = $1 AND id = ANY%')`).Scan(&blocked); err != nil {
+			WHERE $1 = ANY(pg_blocking_pids(pid))
+			  AND query LIKE '%FROM media_files WHERE content_id = $1 AND id = ANY%')`, writerPID).Scan(&blocked); err != nil {
 			t.Fatal(err)
 		}
 		if blocked {

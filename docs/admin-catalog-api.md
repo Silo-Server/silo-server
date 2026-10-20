@@ -496,7 +496,8 @@ an existing item with no memberships is refused. A newly inserted split target
 inherits only the authorized selected-file libraries. Concurrent target creation
 is treated as an existing target. V2 split/merge retain acting-administrator access;
 the frozen v1 bridge retains delegated curation under the same library policy.
-A policy refusal returns `403 forbidden` (v2 Problem Details). Each refused
+A policy refusal returns 403: the v1 bridge uses its legacy `forbidden` error
+envelope, and v2 match/apply a `permission_denied` problem. Each refused
 transaction rolls back; the multi-step match pipeline has no whole-request atomicity
 guarantee. Detached split identification retains the originating curation authority.
 
