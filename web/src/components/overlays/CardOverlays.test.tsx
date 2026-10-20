@@ -259,6 +259,25 @@ describe("CardOverlays", () => {
     expect(disconnect).toHaveBeenCalledOnce();
   });
 
+  // jsdom resolves no CSS variables, so this reads where the radius comes from.
+  it.each([
+    { shape: undefined, themed: true },
+    { shape: "rounded", themed: false },
+    { shape: "square", themed: false },
+  ] as const)(
+    "takes badge corners from the theme unless the style picks a shape: $shape",
+    ({ shape, themed }) => {
+      const prefs = {
+        ...prefsWithOnly("resolution", "minimal"),
+        style: shape ? { shape } : undefined,
+      };
+      const badge = render(
+        <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />,
+      ).container.querySelector<HTMLElement>("span.inline-flex");
+      expect(badge?.style.borderRadius.includes("--radius-")).toBe(themed);
+    },
+  );
+
   it("scales legacy browsers from the measured poster width", () => {
     let callback: ResizeObserverCallback | undefined;
     const disconnect = vi.fn();

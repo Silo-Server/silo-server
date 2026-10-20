@@ -256,13 +256,17 @@ function Badge({ badge, preset, scalingMode, rail }: BadgeProps) {
     );
   }
 
-  const borderRadiusVariable = preset.borderRadiusVariable ?? "--radius-sm";
+  // A preset that follows the theme's corners names the theme's radius token;
+  // any other radius, such as a style's shape, is drawn as declared.
+  const baseRadius = preset.borderRadiusVariable
+    ? `var(${preset.borderRadiusVariable}, ${preset.borderRadius}px)`
+    : `${preset.borderRadius}px`;
   const radius =
     preset.borderRadius === "full"
       ? "9999px"
       : scalingMode === "fixed"
-        ? `var(${borderRadiusVariable}, ${preset.borderRadius}px)`
-        : `var(${POSTER_VARS.borderRadius}, var(${borderRadiusVariable}, ${preset.borderRadius}px))`;
+        ? baseRadius
+        : `var(${POSTER_VARS.borderRadius}, ${baseRadius})`;
   const geometry: CSSProperties = {
     columnGap: length(preset.iconGap, POSTER_VARS.iconGap),
     paddingInline: length(preset.paddingInline, POSTER_VARS.paddingInline),

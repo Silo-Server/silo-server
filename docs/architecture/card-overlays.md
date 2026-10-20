@@ -27,9 +27,10 @@ renderer follows, and the uploaded images badges can use.
 - `style` overrides parts of the preset: `size` (0.75–2, scales text, padding and icons), `shape`,
   `background` and `borderColor` (`#RRGGBBAA`), `textColor`, `borderWidth` (0–3 at the 185-unit
   reference card width), `fontWeight`, `uppercase`, and `shadow`. An absent field keeps the
-  preset's value. A per-badge `accentColor` still applies on top: it tints a custom background in
-  presets that fill with the accent, and replaces a custom text or border colour in presets that
-  paint the accent there.
+  preset's value. A `shape` replaces any theme radius the preset follows: `pill` is fully round,
+  and `rounded` and `square` have corner radii of 6 and 2 at the reference width. A per-badge
+  `accentColor` still applies on top: it tints a custom background in presets that fill with the
+  accent, and replaces a custom text or border colour in presets that paint the accent there.
 - A `background` that isn't fully transparent, or a `borderWidth` above 0, gives a badge padding
   of at least 0.6 times the font size across and 0.2 times down. Presets other than `minimal` and
   `band`, which draw bare text, already have about that much. From 50% opacity the fill sits
