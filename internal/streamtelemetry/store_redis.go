@@ -51,31 +51,36 @@ func digest128(value []byte) [16]byte {
 
 func snapshotHashFields(snapshot Snapshot) (map[string][]byte, error) {
 	fields := make(map[string][]byte, len(snapshot.Sessions)+len(snapshot.Transfers)+1)
+	sessionCount, transferCount := 0, 0
+	for _, session := range snapshot.Sessions {
+		encoded, err := encodeSession(session)
+		if err != nil {
+			snapshot.Truncated = true
+			continue
+		}
+		fields["s:"+session.SessionID] = encoded
+		sessionCount++
+	}
+	for _, transfer := range snapshot.Transfers {
+		encoded, err := encodeTransfer(transfer)
+		if err != nil {
+			snapshot.Truncated = true
+			continue
+		}
+		fields["t:"+transfer.ID] = encoded
+		transferCount++
+	}
 	meta, err := encodeMeta(publisherMeta{
 		PublisherID: snapshot.PublisherID, NodeID: snapshot.NodeID, Epoch: snapshot.PublisherEpoch,
 		Sequence: snapshot.Sequence, CapturedAtUnixNano: timeToUnixNano(snapshot.CapturedAt), Truncated: snapshot.Truncated,
 		DroppedObservations: snapshot.DroppedObservations, DroppedBytes: snapshot.DroppedBytes,
 		UnattributedObservations: snapshot.UnattributedObservations, UnattributedBytes: snapshot.UnattributedBytes,
-		SessionCount: len(snapshot.Sessions), TransferCount: len(snapshot.Transfers),
+		SessionCount: sessionCount, TransferCount: transferCount,
 	})
 	if err != nil {
 		return nil, err
 	}
 	fields[publisherMetaField] = meta
-	for _, session := range snapshot.Sessions {
-		encoded, encodeErr := encodeSession(session)
-		if encodeErr != nil {
-			return nil, fmt.Errorf("encode session %q: %w", session.SessionID, encodeErr)
-		}
-		fields["s:"+session.SessionID] = encoded
-	}
-	for _, transfer := range snapshot.Transfers {
-		encoded, encodeErr := encodeTransfer(transfer)
-		if encodeErr != nil {
-			return nil, fmt.Errorf("encode transfer %q: %w", transfer.ID, encodeErr)
-		}
-		fields["t:"+transfer.ID] = encoded
-	}
 	return fields, nil
 }
 
@@ -324,6 +329,11 @@ func decodeSnapshotHash(publisherID string, fields map[string]string, maxSession
 		problem.Reason = publisherReasonMetaMissing
 		return Snapshot{}, problem, nil
 	}
+	if len(metaBytes) > maxMetaEncodedBytes {
+		problem.DecodeErrors = 1
+		problem.Reason = publisherReasonOversized
+		return Snapshot{}, problem, errRecordBounds
+	}
 	meta, err := decodeMeta([]byte(metaBytes))
 	if err != nil {
 		problem.DecodeErrors = 1
@@ -352,6 +362,10 @@ func decodeSnapshotHash(publisherID string, fields map[string]string, maxSession
 			if len(snapshot.Sessions) >= maxSessions {
 				continue
 			}
+			if len(field) > maxIdentityBytes+2 || len(fields[field]) > maxSessionEncodedBytes {
+				problem.DecodeErrors++
+				continue
+			}
 			value, decodeErr := decodeSession([]byte(fields[field]))
 			if decodeErr != nil {
 				problem.DecodeErrors++
@@ -361,6 +375,10 @@ func decodeSnapshotHash(publisherID string, fields map[string]string, maxSession
 		case strings.HasPrefix(field, "t:"):
 			decodedTransfers++
 			if len(snapshot.Transfers) >= maxTransfers {
+				continue
+			}
+			if len(field) > maxTransferIDBytes+2 || len(fields[field]) > maxTransferEncodedBytes {
+				problem.DecodeErrors++
 				continue
 			}
 			value, decodeErr := decodeTransfer([]byte(fields[field]))
