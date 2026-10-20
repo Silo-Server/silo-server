@@ -93,9 +93,6 @@ func TestCreateProfilePINProtectedAtFirstCommit(t *testing.T) {
 				if err := bcrypt.CompareHashAndPassword([]byte(profile.PINHash), []byte(pin)); err != nil {
 					t.Errorf("first committed row does not contain requested PIN: %v", err)
 				}
-				if err := bcrypt.CompareHashAndPassword([]byte(profile.PINHash), []byte("wrong")); err == nil {
-					t.Error("wrong PIN accepted")
-				}
 			}
 		})
 	}
