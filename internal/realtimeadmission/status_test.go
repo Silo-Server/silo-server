@@ -11,7 +11,7 @@ import (
 
 func TestAdmissionStatusDefaultsAndEpoch(t *testing.T) {
 	for _, tc := range []struct{ backend, scope string }{
-		{"memory", "per_node"}, {"redis", "shared"}, {"unknown", "unavailable"},
+		{"memory", "per_node"}, {redisBackend, "shared"}, {"unknown", "unavailable"},
 	} {
 		c := New(storeFunc(func(context.Context, string, ratelimit.WorkLimit) ratelimit.WorkResult {
 			return ratelimit.WorkResult{Allowed: true}
@@ -39,8 +39,9 @@ func TestAdmissionStatusDefaultsAndEpoch(t *testing.T) {
 }
 
 func TestAdmissionMissingStoreReportsUnavailable(t *testing.T) {
-	c := New(nil, "redis")
-	if status := c.Status(); status.Backend != "redis" || status.Scope != unavailableScope {
+	backend := redisBackend
+	c := New(nil, backend)
+	if status := c.Status(); status.Backend != backend || status.Scope != unavailableScope {
 		t.Fatalf("missing store status=%+v", status)
 	}
 	requireRefusal(t, c.Admit(t.Context(), Events, Identity{UserID: 1}), UnavailableCode, 2*time.Second)

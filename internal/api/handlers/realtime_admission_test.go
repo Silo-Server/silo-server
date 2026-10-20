@@ -208,6 +208,23 @@ func TestRealtimeRoomActionResultFollowsServiceSnapshot(t *testing.T) {
 
 type admissionShieldSocket struct{ frames []string }
 
+func TestRealtimeRoomConflictHasNoAppliedResultOrReplayPermission(t *testing.T) {
+	rc := &watchTogetherRoomConn{includeMemberStatus: true, outgoing: make(chan watchTogetherFrame, 2), done: make(chan struct{}), replaced: make(chan struct{})}
+	message := watchTogetherClientMessage{Type: "transport_request", RequestID: "conflicting-action"}
+	err := rc.finishClientAction(message, watchtogether.ErrRoomStateConflict)
+	if !errors.Is(err, watchtogether.ErrRoomStateConflict) || len(rc.outgoing) != 0 {
+		t.Fatal("conflict received an applied acknowledgement")
+	}
+	rc.writeClientError(&roomClientMessageError{cause: err, requestID: message.RequestID, workStarted: true})
+	var frame realtimeErrorFrame
+	if err := json.Unmarshal((<-rc.outgoing).data, &frame); err != nil {
+		t.Fatal(err)
+	}
+	if frame.RequestID != message.RequestID || frame.WorkStarted == nil || !*frame.WorkStarted || frame.RetryAfterMS != 0 {
+		t.Fatalf("downstream conflict must not authorize replay: %+v", frame)
+	}
+}
+
 func (*admissionShieldSocket) SetWriteDeadline(time.Time) error { return nil }
 func (s *admissionShieldSocket) WriteMessage(_ int, data []byte) error {
 	s.frames = append(s.frames, string(data))

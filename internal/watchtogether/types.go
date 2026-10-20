@@ -148,6 +148,10 @@ type TransportRequest struct {
 	Action          TransportAction
 	PositionSeconds *float64
 	IsPaused        bool
+	// ReportConflict lets a caller distinguish a failed write from successful
+	// completion before acknowledging the action. Legacy callers keep the
+	// authoritative-snapshot response to an optimistic write conflict.
+	ReportConflict bool
 }
 
 type StateReport struct {

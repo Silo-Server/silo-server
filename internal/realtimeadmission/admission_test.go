@@ -205,7 +205,7 @@ func TestAdmissionOneTotalDeadline(t *testing.T) {
 			<-ctx.Done()
 			return ratelimit.WorkResult{Allowed: true} // Ambiguous completion never grants.
 		})
-		c := New(store, "redis")
+		c := New(store, redisBackend)
 		id := Identity{UserID: 1, ProfileID: "profile", RoomID: "room"}
 		requireRefusal(t, c.Admit(t.Context(), RoomAction, id), UnavailableCode, 2*time.Second)
 		if calls != 2 || time.Since(start) != 250*time.Millisecond {
@@ -222,7 +222,7 @@ func TestAdmissionCallerDeadlineWins(t *testing.T) {
 		c := New(storeFunc(func(ctx context.Context, _ string, _ ratelimit.WorkLimit) ratelimit.WorkResult {
 			<-ctx.Done()
 			return ratelimit.WorkResult{Unavailable: true}
-		}), "redis")
+		}), redisBackend)
 		requireRefusal(t, c.Admit(ctx, Events, Identity{UserID: 1}), UnavailableCode, 2*time.Second)
 		if time.Since(start) != 100*time.Millisecond {
 			t.Fatalf("caller deadline ignored: %s", time.Since(start))
@@ -253,7 +253,7 @@ func TestAdmissionInvalidAndAmbiguousDecisions(t *testing.T) {
 		c.store = storeFunc(func(context.Context, string, ratelimit.WorkLimit) ratelimit.WorkResult { return result })
 		requireRefusal(t, c.Admit(t.Context(), Events, Identity{UserID: 1}), UnavailableCode, 2*time.Second)
 	}
-	requireRefusal(t, New(nil, "redis").Admit(t.Context(), Events, Identity{UserID: 1}), UnavailableCode, 2*time.Second)
+	requireRefusal(t, New(nil, redisBackend).Admit(t.Context(), Events, Identity{UserID: 1}), UnavailableCode, 2*time.Second)
 }
 
 func TestAdmissionRetryRoundingAndBounds(t *testing.T) {

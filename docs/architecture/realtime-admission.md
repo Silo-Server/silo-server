@@ -127,7 +127,9 @@ No snapshot coalescing or server pending-work queue is introduced.
 V2 one-shot `transport_request` and `lobby_ready` success adds
 `{"type":"action_result","request_id":"…","action":"transport_request","status":"applied"}`
 after existing operation snapshots/commands and successful service completion,
-including no-ops. Refusal has no success acknowledgement. Downstream errors echo
+including no-ops. An optimistic transport-write conflict is a downstream error
+on v2, with no `applied` result; v1 retains its authoritative-snapshot behavior.
+Refusal has no success acknowledgement. Downstream errors echo
 the request ID with `work_started: true`; they never authorize automatic replay.
 IDs correlate attempts and are not deduplication receipts. V1 success shapes
 remain unchanged and use authoritative snapshot echoes with weaker correlation.

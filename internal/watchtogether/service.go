@@ -881,6 +881,9 @@ func (s *Service) handleTransportRequestForConnection(
 	if conflict {
 		snapshot := s.buildSnapshotLocked(live, userID, profileID)
 		s.mu.Unlock()
+		if request.ReportConflict {
+			return snapshot, ErrRoomStateConflict
+		}
 		return snapshot, nil
 	}
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)

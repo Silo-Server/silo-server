@@ -69,6 +69,7 @@ func (h *WatchTogetherHandler) handleRoomClientMessage(
 			Action:          msg.Action,
 			PositionSeconds: msg.PositionSeconds,
 			IsPaused:        msg.IsPaused,
+			ReportConflict:  rc.includeMemberStatus,
 		})
 		return rc.finishClientAction(base, err)
 	case roomMessageStateReport, roomMessageReady, roomMessageBuffering:

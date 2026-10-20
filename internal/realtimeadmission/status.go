@@ -3,6 +3,7 @@ package realtimeadmission
 import "github.com/Silo-Server/silo-server/internal/ratelimit"
 
 const unavailableScope = "unavailable"
+const redisBackend = "redis"
 
 // RoomLimits apply member first, then account, with no refund on later denial.
 type RoomLimits struct {
@@ -31,7 +32,7 @@ func newStatus(backend, epoch string, config configuration) Status {
 	switch backend {
 	case "memory":
 		scope = "per_node"
-	case "redis":
+	case redisBackend:
 		scope = "shared"
 	}
 	return Status{
