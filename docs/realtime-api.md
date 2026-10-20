@@ -90,6 +90,11 @@ receives only account-scoped settings changes from those channels. A
 scope; they do not carry its value. Channel eligibility, snapshots and socket
 authority/lifetime checks are unchanged.
 
+On the bridge socket, only a ticket from `POST /api/v1/events/ws-ticket` binds a
+profile. The handshake's `X-Profile-Id` decides administrator access but binds
+nothing, so a bridge socket opened with that header and no ticket is unbound and
+receives no `user_state`, including its own profile's.
+
 ### Access changes
 
 When the recheck finds that the login session is still valid but the access the
