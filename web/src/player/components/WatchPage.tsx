@@ -716,10 +716,11 @@ function WatchPagePlayer({
       bufferingTitleId={contentId}
       playbackAttemptId={session.playbackAttemptId}
       onKeptEstimate={session.setKeptEstimate}
-      onBufferingSummary={(plan, summary) =>
+      onBufferingSummary={(plan, summary, pageEnding) =>
         session.reportEvent("plan_summary", {
           adoptionId: plan.adoption_id,
           diagnostics: { ...summary },
+          keepalive: pageEnding,
         })
       }
       credits={activeMarkers.credits}

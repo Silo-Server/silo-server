@@ -269,7 +269,11 @@ interface VideoPlayerProps {
    * then only watches, as in `never`, rather than lower quality on a guess.
    */
   bufferingMode?: BufferingMode | null;
-  onBufferingSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void;
+  onBufferingSummary?: (
+    plan: BufferingPlan,
+    summary: BufferingSummary,
+    pageEnding?: boolean,
+  ) => void;
   /** The playback attempt; a new start drops the kept step-down estimate. */
   playbackAttemptId?: string | null;
   /** The latest Auto lowering's estimate, for the session's own later Auto replans. */
@@ -4309,7 +4313,7 @@ export function VideoPlayer({
             : "Can't lower quality for this video",
         tone: "info",
       }),
-    onSummary: (summaryPlan, summary) => {
+    onSummary: (summaryPlan, summary, pageEnding) => {
       const fragments = fragmentThroughputRef.current;
       // Under a second of receiving can be one burst from a buffer, a rate
       // the link never held; the server keeps the highest sample.
@@ -4322,6 +4326,7 @@ export function VideoPlayer({
       onBufferingSummary?.(
         summaryPlan,
         kbps >= MIN_PROBE_KBPS ? { ...summary, throughput_kbps: kbps } : summary,
+        pageEnding,
       );
     },
     onKeptEstimate,

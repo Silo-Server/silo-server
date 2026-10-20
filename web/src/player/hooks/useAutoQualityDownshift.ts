@@ -68,7 +68,8 @@ interface Options {
     onAdopt: (planId?: string, planRevision?: number, sent?: boolean) => void,
   ) => void;
   onNotice: (key: BufferingNotice) => void;
-  onSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void;
+  /** `pageEnding` when the page is closing and the summary must go out at once. */
+  onSummary?: (plan: BufferingPlan, summary: BufferingSummary, pageEnding: boolean) => void;
   /** The step-down estimate the client's own Auto replans repeat, or undefined. */
   onKeptEstimate?: (kbps: number | undefined) => void;
 }
@@ -104,6 +105,8 @@ export function useAutoQualityDownshift(options: Options) {
   const attempt = useRef<string | null | undefined>(undefined);
   // The adopted plan is starting with play intent and has not played yet.
   const starting = useRef(false);
+  // The page is closing, so the playing plan's summary is its last word.
+  const pageEnding = useRef(false);
   const [pill, setPill] = useState<BufferingPillState | null>(null);
   // The pill state changes only when it shows, hides, freezes or resumes; the
   // pill counts down from its deadline itself.
@@ -137,13 +140,23 @@ export function useAutoQualityDownshift(options: Options) {
         if (output.type === "notice") latest.current.onNotice(output.key);
       },
       Date.now(),
-      (plan, summary) => latest.current.onSummary?.(plan, summary),
+      (plan, summary) => latest.current.onSummary?.(plan, summary, pageEnding.current),
       (kbps) => latest.current.onKeptEstimate?.(kbps),
     );
     controller.current = c;
+    // A closed tab, a reload or a navigation away ends the playing plan, and
+    // nothing else reports it. A page restored from the back-forward cache
+    // keeps playing unreported until its next adoption.
+    const pagehide = () => {
+      pageEnding.current = true;
+      c.stop(Date.now());
+      pageEnding.current = false;
+    };
+    window.addEventListener("pagehide", pagehide);
     adoptedPlan.current = undefined;
     attempt.current = latest.current.attemptId;
     return () => {
+      window.removeEventListener("pagehide", pagehide);
       c.stop(Date.now());
       controller.current = null;
       // The next controller starts without a kept estimate and could never

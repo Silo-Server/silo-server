@@ -242,6 +242,8 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
       /** For `plan_summary`: the adoption it summarizes. */
       adoptionId?: string;
       diagnostics?: Record<string, string | number | boolean | undefined | null>;
+      /** The page is closing; the request must outlive it. */
+      keepalive?: boolean;
     },
   ) => void;
 }
@@ -656,8 +658,11 @@ export function usePlaybackSession(
         /** For `plan_summary`: the adoption it summarizes. */
         adoptionId?: string;
         diagnostics?: Record<string, string | number | boolean | undefined | null>;
+        /** The page is closing; the request must outlive it. */
+        keepalive?: boolean;
       },
     ) => {
+      const { keepalive, ...fields } = extra ?? {};
       const attemptId = playbackAttemptIdRef.current;
       if (!attemptId) return;
       let input: RouteEventInput;
@@ -686,12 +691,12 @@ export function usePlaybackSession(
             sessionIdRef.current,
             planAttemptIdRef.current,
           ),
-          ...extra,
+          ...fields,
         };
       }
       const sessionId = input.sessionId;
       if (sessionId && hasSequencedProgress(sessionId)) {
-        void reportSessionRouteEventV2(config, sessionId, buildRouteEventV3(input));
+        void reportSessionRouteEventV2(config, sessionId, buildRouteEventV3(input), { keepalive });
       }
       // A terminal start never produced a session; there is nothing to report it against.
     },

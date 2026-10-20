@@ -250,3 +250,15 @@ it("does not time a start the player will not play", () => {
   act(() => vi.advanceTimersByTime(30_000));
   expect(onReplan).not.toHaveBeenCalled();
 });
+
+it("reports the playing plan when the page closes", () => {
+  const h = setup();
+  act(() => {
+    window.dispatchEvent(new Event("pagehide"));
+  });
+  expect(h.options.onSummary).toHaveBeenCalledTimes(1);
+  expect(h.options.onSummary.mock.calls[0]![2]).toBe(true);
+  h.unmount();
+  // Stopping again at unmount reports nothing more.
+  expect(h.options.onSummary).toHaveBeenCalledTimes(1);
+});
