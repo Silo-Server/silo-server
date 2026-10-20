@@ -527,12 +527,7 @@ export function invalidateSettingValueQueries(
   identity: SettingIdentity,
   key: SettingKey,
 ) {
-  const invalidations = [
-    queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
-    refreshHomeForSetting(queryClient, key),
-    refreshLibrariesForSetting(queryClient, key),
-    refreshLocalizedMediaForSetting(queryClient, key),
-  ];
+  const invalidations: Promise<unknown>[] = [refreshForSettingChange(queryClient, key)];
   // A device-scoped write changes that device's "how many things differ"
   // count, which the device list shows. Without this the badge stays stale
   // until the list's own staleTime expires.

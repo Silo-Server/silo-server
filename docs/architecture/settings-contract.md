@@ -124,9 +124,9 @@ after a short delay. An admin write reloads the writing node's snapshot before
 the client event is published, and a read that began before the write can no
 longer publish over it. Every other node reloads on the admin-channel
 `settings_changed` event, which travels separately from the client event, so a
-client of another node can re-read before that node has reloaded; a 10-second
-TTL bounds how long any node serves the old default, and the web client re-reads
-once more after it.
+client of another node can re-read before that node has reloaded; while a node
+can read its settings, a 10-second TTL bounds how long it serves the old
+default, and the web client re-reads once more after it.
 
 ## Preferences versus restrictions
 

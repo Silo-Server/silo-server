@@ -181,10 +181,10 @@ deleting the stored rows, not writing the default. Changing an administrator def
 `user_settings.changed` event addressed to no account, carrying the setting key and
 `scope: "default"`, so a client subscribed to the `user_settings` channel can re-read its effective
 values; other clients see the new default on their next effective read. On a server with several
-nodes, a node can answer with the previous default for up to 10 seconds after the event, so a
-client that keeps what it read should read once more after that. The server applies the same value
-wherever it reads the setting itself, such as the Next Up row and ordering in home sections and in
-Jellyfin `/Shows/NextUp`.
+nodes, a node that can read its settings answers with the previous default for at most 10 seconds
+after the event, so a client that keeps what it read should read once more after that. The server
+applies the same value wherever it reads the setting itself, such as the Next Up row and ordering in
+home sections and in Jellyfin `/Shows/NextUp`.
 
 ### Batch effective resolution
 

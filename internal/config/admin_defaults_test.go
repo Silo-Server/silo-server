@@ -88,6 +88,21 @@ func (f *fakeManyReader) waitDone(t *testing.T, call int32) {
 	}
 }
 
+// waitPublished waits for read number call to return and then for the refresh
+// in flight to finish. The fake reports a read done before AdminDefaults
+// stores its result, so a test that asserts on the snapshot right after
+// waitDone would race the publish.
+func waitPublished(t *testing.T, a *AdminDefaults, reader *fakeManyReader, call int32) {
+	t.Helper()
+	reader.waitDone(t, call)
+	a.mu.Lock()
+	wait := a.inflight
+	a.mu.Unlock()
+	if wait != nil {
+		<-wait
+	}
+}
+
 const (
 	nextUpModeDefault  = "defaults.ui.next_up_mode"
 	newReleasesDefault = "defaults.ui.next_up_new_releases_first"
@@ -146,7 +161,7 @@ func TestAdminDefaultsReadsEveryKeyInOneQueryPerTTL(t *testing.T) {
 	if got := get(t, a, nextUpModeDefault); got != `"separate"` {
 		t.Fatalf("expired read = %q, want the previous snapshot while refreshing", got)
 	}
-	reader.waitDone(t, 2)
+	waitPublished(t, a, reader, 2)
 	if got := get(t, a, nextUpModeDefault); got != `"combined"` {
 		t.Fatalf("after the refresh = %q, want the new value", got)
 	}
@@ -258,7 +273,7 @@ func TestAdminDefaultsChangedFencesOffOlderReads(t *testing.T) {
 	reader.set(newReleasesDefault, "true", nil)
 	advance(clock, adminDefaultsRetryDelay)
 	get(t, a, newReleasesDefault)
-	reader.waitDone(t, 4)
+	waitPublished(t, a, reader, 4)
 	if got := get(t, a, newReleasesDefault); got != "true" {
 		t.Fatalf("after the retry = %q, want true", got)
 	}
@@ -298,7 +313,7 @@ func TestAdminDefaultsRunRefreshesWithoutReads(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go a.Run(ctx)
-	reader.waitDone(t, 2)
+	waitPublished(t, a, reader, 2)
 
 	if got := get(t, a, nextUpModeDefault); got != `"separate"` {
 		t.Fatalf("after a background refresh with no reads = %q, want separate", got)

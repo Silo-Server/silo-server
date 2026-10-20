@@ -1009,8 +1009,6 @@ func main() {
 
 	appCtx, appCancel := context.WithCancel(ctx)
 	defer appCancel()
-	// Keep the administrator defaults fresh without waiting for a request.
-	go adminDefaults.Run(appCtx)
 	stopDebugOnCancel := context.AfterFunc(appCtx, stopDebugListener)
 	defer stopDebugOnCancel()
 	var streamTelemetryRegistry *streamtelemetry.Registry
@@ -1222,6 +1220,11 @@ func main() {
 		startStandaloneServer(cfg.Server.Listen, handler, appCancel, shutdownStandalone, standaloneHooks)
 		return
 	}
+
+	// Keep the administrator defaults fresh without waiting for a request.
+	// Started past the proxy/transcode return: those nodes never resolve a
+	// viewer's settings, so polling there would read for nothing.
+	go adminDefaults.Run(appCtx)
 
 	// Hot-reload config watcher for integrated/api mode. Reloads on
 	// EventSettingsChanged (Redis) with a 60s poll fallback, so settings
