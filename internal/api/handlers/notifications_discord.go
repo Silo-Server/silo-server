@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -36,20 +35,7 @@ type DiscordNotificationsHandler struct {
 // MayManageDiscordNotifications applies the existing household-manager rule
 // to the account-wide destination and delivery mode, before any mutation.
 func (h *DiscordNotificationsHandler) MayManageDiscordNotifications(ctx context.Context, userID int, profileID string, verify func(string) error) (bool, error) {
-	if h.Stores == nil {
-		return false, nil
-	}
-	store, err := h.Stores.ForUser(ctx, userID)
-	if err != nil {
-		return false, fmt.Errorf("opening user store: %w", err)
-	}
-	if store == nil {
-		return false, nil
-	}
-	if verify == nil {
-		verify = func(string) error { return access.ErrProfileUnverified }
-	}
-	return canManageHouseholdAs(ctx, store, profileID, verify)
+	return mayManageHouseholdOf(ctx, h.Stores, userID, profileID, verify)
 }
 
 func (h *DiscordNotificationsHandler) requireManagement(r *http.Request) error {
