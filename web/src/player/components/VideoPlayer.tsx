@@ -590,8 +590,11 @@ export function VideoPlayer({
   // after one is an outage, not a slow link, for the Auto downshift.
   const lastTransportErrorAtRef = useRef(0);
   // The trouble came from the element's own `stalled`: no data arrived for the
-  // browser's idle time. The next data that arrives ends it.
+  // browser's idle time. The next data that arrives ends it: a buffered end
+  // past the one at the stall. A `progress` alone is not enough, since the
+  // browser decoder fires one every second whether data arrived or not.
   const transportStalledRef = useRef(false);
+  const stalledBufferedEndRef = useRef(0);
   const reportedPlanFailureKeyRef = useRef<string | null>(null);
   // Whether the current transport has shown a frame. A network error after
   // that is a lost connection, not a route that cannot play. Reset whenever
@@ -2979,9 +2982,11 @@ export function VideoPlayer({
       clearBuffering();
     };
     const onDurationChange = () => applyElementDuration(video);
+    const bufferedEnd = () =>
+      video.buffered.length ? video.buffered.end(video.buffered.length - 1) : 0;
     const onProgress = () => {
       setBuffered(video.buffered);
-      if (transportStalledRef.current) {
+      if (transportStalledRef.current && bufferedEnd() > stalledBufferedEndRef.current) {
         transportStalledRef.current = false;
         lastTransportErrorAtRef.current = 0;
       }
@@ -3038,6 +3043,7 @@ export function VideoPlayer({
       // The browser received no data for its idle time (the engine reports a
       // failed read the same way): the transport is failing, not slow.
       transportStalledRef.current = true;
+      stalledBufferedEndRef.current = bufferedEnd();
       lastTransportErrorAtRef.current = Date.now();
       if (watchTogetherRoomActive && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportBuffering();

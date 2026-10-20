@@ -5886,12 +5886,23 @@ describe("VideoPlayer buffering pill", () => {
 
   it("treats a wait with no data arriving as an outage until data comes back", () => {
     const { video } = askPlayer();
+    // Too little ahead of the playhead to be the renderer's wait.
+    let end = 0.2;
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      get: () => ({ length: 1, start: () => 0, end: () => end }),
+    });
     // The browser received nothing for its idle time.
     fireEvent(video, new Event("stalled"));
     fireEvent.waiting(video);
-    act(() => vi.advanceTimersByTime(8_000));
+    act(() => vi.advanceTimersByTime(4_000));
+    // The browser decoder's once-a-second progress brings no data, so the
+    // outage goes on: no stall is timed from here.
+    fireEvent(video, new Event("progress"));
+    act(() => vi.advanceTimersByTime(6_200));
     expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
     // Data arrives again but too slowly: from now it is a stall.
+    end = 0.4;
     fireEvent(video, new Event("progress"));
     act(() => vi.advanceTimersByTime(6_200));
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
