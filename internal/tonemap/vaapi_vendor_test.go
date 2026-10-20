@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
-	"time"
 )
 
 // TestMain keeps probe tests from depending on the GPU of the machine that
@@ -17,77 +17,127 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// fakeDRMVendor points sysfsRoot at a tree where renderD128 reports vendor.
-func fakeDRMVendor(t *testing.T, vendor string) {
+// fakeDRMVendors points sysfsRoot at a tree where each named DRM node reports
+// its vendor.
+func fakeDRMVendors(t *testing.T, vendors map[string]string) {
 	t.Helper()
 	root := t.TempDir()
-	dir := filepath.Join(root, "class", "drm", "renderD128", "device")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "vendor"), []byte(vendor+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+	for node, vendor := range vendors {
+		dir := filepath.Join(root, "class", "drm", node, "device")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "vendor"), []byte(vendor+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	previous := sysfsRoot
 	sysfsRoot = root
 	t.Cleanup(func() { sysfsRoot = previous })
 }
 
-// vaapiProbeRunner accepts every command and records whether a VAAPI HDR
-// tone-map smoke ran.
-func vaapiProbeRunner(hdrHardwareSmoke *bool) CommandRunner {
+// vaapiProbeRunner accepts every command, lists the given filters, and records
+// each smoke command it runs.
+func vaapiProbeRunner(filters string, commands *[]string) CommandRunner {
+	var mu sync.Mutex
 	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		joined := strings.Join(args, " ")
 		switch {
 		case slices.Contains(args, "-filters"):
-			return []byte(" .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_vaapi V->V\n .S. scale_vaapi V->V\n"), nil
+			return []byte(filters), nil
 		case slices.Contains(args, "-encoders"):
 			return []byte("libx264 h264_vaapi"), nil
-		case strings.Contains(joined, "h264_vaapi") && strings.Contains(joined, HardwareFilterVAAPI):
-			*hdrHardwareSmoke = true
 		}
+		mu.Lock()
+		*commands = append(*commands, strings.Join(args, " "))
+		mu.Unlock()
 		return nil, nil
 	}
 }
 
-// TestProbeOffersIntelVAAPISDRSourcesOnly covers #2414: Intel's VAAPI tone
-// mapper gives wrong colors for HLG and PQ, so VAAPI on an Intel GPU must not
-// advertise HDR sources, and other vendors keep them.
-func TestProbeOffersIntelVAAPISDRSourcesOnly(t *testing.T) {
-	hdr := []SourceKind{SourcePQ, SourceHLG, SourceHLGBT709}
-	sdr := []SourceKind{SourceSDRBT709, SourceSDRBT2020}
+const vaapiProbeFilters = " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_vaapi V->V\n .S. scale_vaapi V->V\n" +
+	" .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"
+
+// TestProbeIntelVAAPIToneMapsHDROnOpenCL covers #2414: Intel's VAAPI tone
+// mapper gives wrong colors for HLG and PQ, so VAAPI on an Intel GPU tone maps
+// on OpenCL, as QSV does, and other vendors keep tonemap_vaapi.
+func TestProbeIntelVAAPIToneMapsHDROnOpenCL(t *testing.T) {
 	for _, tc := range []struct {
-		name, vendor  string
-		wantHDR       bool
-		wantHDRSmokes bool
+		name, vendor, wantFilter string
+		wantDolbyVision          bool
 	}{
-		{name: "intel", vendor: "0x8086"},
-		{name: "amd", vendor: "0x1002", wantHDR: true, wantHDRSmokes: true},
+		{name: "intel", vendor: "0x8086", wantFilter: HardwareFilterOpenCL, wantDolbyVision: true},
+		{name: "amd", vendor: "0x1002", wantFilter: HardwareFilterVAAPI},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fakeDRMVendor(t, tc.vendor)
-			hdrSmoke := false
-			got := ProbeWithRunner(context.Background(), "/ffmpeg", BackendVAAPI, "/dev/dri/renderD128", vaapiProbeRunner(&hdrSmoke))
-			for _, kind := range sdr {
+			fakeDRMVendors(t, map[string]string{"renderD128": tc.vendor})
+			var commands []string
+			got := ProbeWithRunner(context.Background(), "/ffmpeg", BackendVAAPI, "/dev/dri/renderD128", vaapiProbeRunner(vaapiProbeFilters, &commands))
+			if filter := got.FilterFor(ModeHardware, SourceHLG); filter != tc.wantFilter {
+				t.Fatalf("VAAPI hardware filter = %q, want %q: %#v", filter, tc.wantFilter, got)
+			}
+			for _, kind := range StandardSourceKinds() {
 				if !got.Supports(ModeHardware, kind) {
-					t.Fatalf("VAAPI does not advertise SDR source %s: %#v", kind, got)
+					t.Fatalf("VAAPI does not advertise %s: %#v", kind, got)
 				}
 			}
-			for _, kind := range hdr {
-				if got.Supports(ModeHardware, kind) != tc.wantHDR {
-					t.Fatalf("VAAPI hardware %s support = %t, want %t: %#v", kind, !tc.wantHDR, tc.wantHDR, got)
-				}
-				if !got.Supports(ModeSoftware, kind) {
-					t.Fatalf("software tone mapping lost %s: %#v", kind, got)
-				}
+			if got.Supports(ModeHardware, SourceDolbyVision) != tc.wantDolbyVision {
+				t.Fatalf("VAAPI Dolby Vision support = %t, want %t", !tc.wantDolbyVision, tc.wantDolbyVision)
 			}
-			if hdrSmoke != tc.wantHDRSmokes {
-				t.Fatalf("VAAPI HDR smoke ran = %t, want %t", hdrSmoke, tc.wantHDRSmokes)
-			}
-			if !probeCapabilitiesComplete(got, BackendVAAPI, "/dev/dri/renderD128") {
+			if !probeCapabilitiesComplete(got, BackendVAAPI) {
 				t.Fatalf("probe result counted as incomplete: %#v", got)
 			}
+			for _, command := range commands {
+				if !strings.Contains(command, "h264_vaapi") {
+					continue
+				}
+				openCL := strings.Contains(command, "opencl=ocl@va")
+				sdr := strings.Contains(command, "color_trc=bt709:")
+				if tc.wantFilter == HardwareFilterOpenCL {
+					if strings.Contains(command, HardwareFilterVAAPI) {
+						t.Fatalf("Intel smoke ran tonemap_vaapi: %s", command)
+					}
+					// SDR bases convert on VAAPI alone and must not need an
+					// OpenCL runtime.
+					if openCL == sdr {
+						t.Fatalf("Intel smoke OpenCL device = %t for SDR = %t: %s", openCL, sdr, command)
+					}
+				} else if openCL || strings.Contains(command, HardwareFilterOpenCL) {
+					t.Fatalf("non-Intel smoke used OpenCL: %s", command)
+				}
+			}
 		})
+	}
+}
+
+// TestProbeIntelVAAPIRequiresOpenCLFilters keeps an FFmpeg build without the
+// OpenCL graph's filters from offering hardware tone mapping on Intel VAAPI,
+// where tonemap_vaapi alone would give wrong colors.
+func TestProbeIntelVAAPIRequiresOpenCLFilters(t *testing.T) {
+	fakeDRMVendors(t, map[string]string{"renderD128": "0x8086"})
+	var commands []string
+	filters := " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_vaapi V->V\n .S. scale_vaapi V->V\n"
+	got := ProbeWithRunner(context.Background(), "/ffmpeg", BackendVAAPI, "/dev/dri/renderD128", vaapiProbeRunner(filters, &commands))
+	if slices.ContainsFunc(got, func(capability Capability) bool { return capability.Mode == ModeHardware }) {
+		t.Fatalf("Intel VAAPI without OpenCL filters advertised hardware tone mapping: %#v", got)
+	}
+	if !got.Supports(ModeSoftware, SourcePQ) {
+		t.Fatalf("software tone mapping lost PQ: %#v", got)
+	}
+}
+
+// TestVAAPIFilterUsesOpenCLWhenAnyDeviceIsIntel covers a device list mixing
+// vendors: one filter serves every device, and tonemap_vaapi is wrong on the
+// Intel one.
+func TestVAAPIFilterUsesOpenCLWhenAnyDeviceIsIntel(t *testing.T) {
+	fakeDRMVendors(t, map[string]string{"renderD128": "0x1002", "renderD129": "0x8086"})
+	for devices, want := range map[string]string{
+		"/dev/dri/renderD128":                     HardwareFilterVAAPI,
+		"/dev/dri/renderD128,/dev/dri/renderD129": HardwareFilterOpenCL,
+		"": HardwareFilterVAAPI,
+	} {
+		if got := vaapiFilter(devices); got != want {
+			t.Fatalf("vaapiFilter(%q) = %q, want %q", devices, got, want)
+		}
 	}
 }
 
@@ -112,44 +162,33 @@ func TestDRMNodeNameFollowsByPathLinks(t *testing.T) {
 	}
 }
 
-// TestDRMVendorUnreadableKeepsEveryKind covers a host whose sysfs can't be
-// read: no vendor is reported and VAAPI keeps every kind, as before.
-func TestDRMVendorUnreadableKeepsEveryKind(t *testing.T) {
+// TestDRMVendorUnreadableKeepsVAAPIFilter covers a host whose sysfs can't be
+// read: no vendor is reported and VAAPI keeps tonemap_vaapi, as before.
+func TestDRMVendorUnreadableKeepsVAAPIFilter(t *testing.T) {
 	if got := drmVendor("/dev/dri/renderD128"); got != "" {
 		t.Fatalf("drmVendor without sysfs = %q, want empty", got)
 	}
-	kinds := StandardSourceKinds()
-	if got := vaapiCandidateSourceKinds(kinds, "/dev/dri/renderD128"); !slices.Equal(got, kinds) {
-		t.Fatalf("candidate kinds without sysfs = %v, want %v", got, kinds)
-	}
-	fakeDRMVendor(t, "0x8086")
-	if got := drmVendor("/dev/dri/renderD128"); got != "0x8086" {
-		t.Fatalf("drmVendor = %q, want 0x8086", got)
+	if got := vaapiFilter("/dev/dri/renderD128"); got != HardwareFilterVAAPI {
+		t.Fatalf("vaapiFilter without sysfs = %q, want %q", got, HardwareFilterVAAPI)
 	}
 }
 
-// TestProbeIntelVAAPIResultDoesNotExpire keeps the narrowed Intel result
-// cached, so the GPU smoke matrix doesn't rerun every negative-cache interval.
-func TestProbeIntelVAAPIResultDoesNotExpire(t *testing.T) {
-	resetProbeCache(t)
-	fakeDRMVendor(t, "0x8086")
-	now := time.Unix(100, 0)
-	hdrSmoke := false
-	calls := 0
-	base := vaapiProbeRunner(&hdrSmoke)
-	runner := func(ctx context.Context, path string, args ...string) ([]byte, error) {
-		calls++
-		return base(ctx, path, args...)
+// TestVAAPIOpenCLPreflightUsesTheOpenCLGraph keeps the source preflight on the
+// graph playback runs: an Intel VAAPI recipe frozen with tonemap_opencl
+// declares the OpenCL device and never reaches tonemap_vaapi.
+func TestVAAPIOpenCLPreflightUsesTheOpenCLGraph(t *testing.T) {
+	request := SourcePreflightRequest{Mode: ModeHardware, Backend: BackendVAAPI, Filter: HardwareFilterOpenCL, Kind: SourceHLG, InputPath: "/media/in.mkv", HardwareDevice: "/dev/dri/renderD128"}
+	args := strings.Join(sourceConversionPreflightArgs(request, 10, ""), " ")
+	for _, want := range []string{"-init_hw_device vaapi=va:/dev/dri/renderD128 -init_hw_device opencl=ocl@va", "tonemap_opencl=", IntelOpenCLReturnFilter(), "-c:v h264_vaapi"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("preflight args lack %q: %s", want, args)
+		}
 	}
-	if _, err := probeCached(context.Background(), "/ffmpeg-intel-vaapi", BackendVAAPI, "/dev/dri/renderD128", runner, func() time.Time { return now }); err != nil {
-		t.Fatalf("probe error = %v", err)
+	if strings.Contains(args, HardwareFilterVAAPI) || strings.Contains(args, QSVInteropFilter()) {
+		t.Fatalf("preflight args reach tonemap_vaapi or the QSV interop: %s", args)
 	}
-	firstCalls := calls
-	now = now.Add(24 * time.Hour)
-	if _, err := probeCached(context.Background(), "/ffmpeg-intel-vaapi", BackendVAAPI, "/dev/dri/renderD128", runner, func() time.Time { return now }); err != nil {
-		t.Fatalf("cached probe error = %v", err)
-	}
-	if calls != firstCalls {
-		t.Fatalf("Intel VAAPI probe reran: calls = %d, want %d", calls, firstCalls)
+	request.SoftwareVideoDecode = true
+	if filter := sourceConversionPreflightFilter(request); !strings.HasPrefix(filter, "format=p010le,hwupload,") {
+		t.Fatalf("software-decoded HDR preflight upload = %q, want a 10-bit upload", filter)
 	}
 }

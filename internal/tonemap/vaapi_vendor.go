@@ -12,10 +12,21 @@ var sysfsRoot = "/sys"
 
 const intelPCIVendorID = "0x8086"
 
-// vaapiHDRUnreliable reports whether device is an Intel GPU. Intel's VAAPI
-// tone mapper turns HLG teal and darkens PQ (#2414), so the VAAPI backend
-// offers it SDR sources only; QSV converts HDR on Intel through OpenCL.
-func vaapiHDRUnreliable(device string) bool {
+// vaapiFilter returns the tone-map filter the VAAPI backend uses for the
+// configured devices. Intel's VAAPI tone mapper turns HLG teal and inverted and
+// crushes PQ midtones (#2414), so when any device is an Intel GPU, VAAPI tone
+// maps HDR on OpenCL with the graph QSV uses (IntelFilter). Other vendors keep
+// tonemap_vaapi. One filter covers the whole device list, so a non-Intel
+// device listed beside an Intel one fails the OpenCL HDR smoke and the backend
+// offers HDR on neither.
+func vaapiFilter(hardwareDevice string) string {
+	if slices.ContainsFunc(probeDevices(hardwareDevice, BackendVAAPI), isIntelDRMDevice) {
+		return HardwareFilterOpenCL
+	}
+	return HardwareFilterVAAPI
+}
+
+func isIntelDRMDevice(device string) bool {
 	return strings.EqualFold(drmVendor(device), intelPCIVendorID)
 }
 
@@ -44,26 +55,13 @@ func drmNodeName(device string) string {
 	return filepath.Base(device)
 }
 
-// vaapiCandidateSourceKinds narrows kinds to the sources the VAAPI backend
-// may convert on device.
-func vaapiCandidateSourceKinds(kinds []SourceKind, device string) []SourceKind {
-	if !vaapiHDRUnreliable(device) {
-		return kinds
+// VAAPIOpenCLInitArgs declares the OpenCL device a VAAPI graph derives from
+// the VAAPI device alias. Only an HDR source tone mapped on OpenCL needs it;
+// SDR bases convert on VAAPI alone, so they keep working on a host without an
+// OpenCL runtime.
+func VAAPIOpenCLInitArgs(alias, filter string, kind SourceKind) []string {
+	if filter != HardwareFilterOpenCL || IsSDRSource(kind) {
+		return nil
 	}
-	return slices.DeleteFunc(slices.Clone(kinds), func(kind SourceKind) bool {
-		return !IsSDRSource(kind)
-	})
-}
-
-// expectedHardwareSourceKinds is the standard set a complete probe of backend
-// on hardwareDevice advertises.
-func expectedHardwareSourceKinds(backend, hardwareDevice string) []SourceKind {
-	kinds := StandardSourceKinds()
-	if backend != BackendVAAPI {
-		return kinds
-	}
-	for _, device := range probeDevices(hardwareDevice, backend) {
-		kinds = vaapiCandidateSourceKinds(kinds, device)
-	}
-	return kinds
+	return []string{initHWDeviceFlag, "opencl=ocl@" + alias}
 }

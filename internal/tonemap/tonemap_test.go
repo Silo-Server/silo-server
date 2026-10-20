@@ -204,11 +204,11 @@ func TestFiltersDeclareBT709Output(t *testing.T) {
 	for name, filter := range map[string]string{
 		"software pq":  SoftwareFilter(SourcePQ, "tonemapx"),
 		"software hlg": SoftwareFilter(SourceHLG, "tonemap"),
-		"qsv":          QSVFilter(SourcePQ, 0),
+		"qsv":          IntelFilter(SourcePQ, 0),
 		"vaapi":        VAAPIFilter(SourcePQ),
 		"cuda":         CUDAFilter(SourcePQ),
 		"software dv":  SoftwareFilter(SourceDolbyVision, SoftwareFilterBT2390),
-		"qsv dv":       QSVFilter(SourceDolbyVision, 0),
+		"qsv dv":       IntelFilter(SourceDolbyVision, 0),
 		"cuda dv":      CUDAFilter(SourceDolbyVision),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -242,20 +242,20 @@ func TestSoftwareFiltersUseThePixelFormatExpectedByEachToneMapper(t *testing.T) 
 	}
 }
 
-// TestQSVFilterScalesHDRBeforeOpenCL checks where QSVFilter places the resize:
+// TestQSVFilterScalesHDRBeforeOpenCL checks where IntelFilter places the resize:
 // before the OpenCL tone mapper for HDR kinds, after color conversion for SDR
 // bases, and nowhere when the height is 0.
 func TestQSVFilterScalesHDRBeforeOpenCL(t *testing.T) {
-	hdr := QSVFilter(SourcePQ, 720)
+	hdr := IntelFilter(SourcePQ, 720)
 	resize := strings.Index(hdr, "scale_vaapi=w=-2:h=720:format=p010")
 	if resize < 0 || resize > strings.Index(hdr, HardwareFilterOpenCL) {
 		t.Fatalf("HDR QSV filter %q does not resize before tone mapping", hdr)
 	}
-	if sdr := QSVFilter(SourceSDRBT2020, 720); !strings.HasSuffix(sdr, ",scale_vaapi=w=-2:h=720:format=nv12") {
+	if sdr := IntelFilter(SourceSDRBT2020, 720); !strings.HasSuffix(sdr, ",scale_vaapi=w=-2:h=720:format=nv12") {
 		t.Fatalf("SDR QSV filter %q does not resize after color conversion", sdr)
 	}
 	for _, kind := range []SourceKind{SourcePQ, SourceSDRBT2020} {
-		if filter := QSVFilter(kind, 0); strings.Contains(filter, "scale_vaapi=w=") {
+		if filter := IntelFilter(kind, 0); strings.Contains(filter, "scale_vaapi=w=") {
 			t.Fatalf("unscaled %s QSV filter %q resizes", kind, filter)
 		}
 	}
@@ -271,7 +271,7 @@ func TestSoftwareAndQSVToneMapsPinTheSourcePeak(t *testing.T) {
 		}
 		for name, filter := range map[string]string{
 			"software": SoftwareFilter(kind, SoftwareFilterBT2390),
-			"qsv":      QSVFilter(kind, 0),
+			"qsv":      IntelFilter(kind, 0),
 		} {
 			options := strings.FieldsFunc(filter, func(r rune) bool { return r == ',' || r == ':' })
 			if !slices.Contains(options, "peak=100") {
@@ -287,7 +287,7 @@ func TestSoftwareAndQSVToneMapsPinTheSourcePeak(t *testing.T) {
 func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
 	for name, filter := range map[string]string{
 		"software": SoftwareFilter(SourceDolbyVision, SoftwareFilterBT2390),
-		"qsv":      QSVFilter(SourceDolbyVision, 0),
+		"qsv":      IntelFilter(SourceDolbyVision, 0),
 		"cuda":     CUDAFilter(SourceDolbyVision),
 	} {
 		if !strings.Contains(filter, "apply_dovi=1") {
@@ -296,7 +296,7 @@ func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
 	}
 	for name, filter := range map[string]string{
 		"software": SoftwareFilter(SourcePQ, SoftwareFilterBT2390),
-		"qsv":      QSVFilter(SourcePQ, 0),
+		"qsv":      IntelFilter(SourcePQ, 0),
 	} {
 		if strings.Contains(filter, "apply_dovi") {
 			t.Errorf("%s PQ filter %q changed its Dolby Vision handling", name, filter)
