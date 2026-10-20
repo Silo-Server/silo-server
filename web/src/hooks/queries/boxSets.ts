@@ -14,32 +14,38 @@ export interface BoxSetDetail extends BoxSetSummary {
 // refreshes catalog cards (watched state, a refresh, a scan) refreshes them too.
 export const boxSetKeys = {
   all: [...catalogKeys.all, "box-sets"] as const,
-  search: (q: string) => [...boxSetKeys.all, "search", q] as const,
+  search: (q: string, libraryId?: string) =>
+    [...boxSetKeys.all, "search", q, libraryId ?? ""] as const,
   detail: (id: string, libraryId: string) => [...boxSetKeys.all, "detail", id, libraryId] as const,
 };
 
 /** The box sets matching a search, best match first; see searchCatalogBoxSets. */
 export async function searchBoxSets(
   q: string,
+  libraryId?: string,
   options?: Pick<RequestInit, "signal">,
 ): Promise<BoxSetSummary[]> {
   const result = await v2("GET /api/v2/catalog/box-sets", {
-    query: { q, limit: 5 },
+    query: { q, limit: 5, library_id: libraryId || undefined },
     signal: options?.signal ?? undefined,
   });
   return result.items;
 }
 
 /**
- * Box sets for search text. Box sets only come from libraries with box sets
- * in search, so most servers answer with none; a failed read shows none
- * rather than failing the search around it.
+ * Box sets for search text, from one library when libraryId is set. Box sets
+ * only come from libraries with box sets in search, so most servers answer
+ * with none. Callers show none while the read fails, and a failed refresh
+ * keeps the box sets already shown.
  */
-export function useBoxSetSearch(q: string, options: { enabled?: boolean } = {}) {
+export function useBoxSetSearch(
+  q: string,
+  options: { enabled?: boolean; libraryId?: string } = {},
+) {
   const query = q.trim();
   return useQuery({
-    queryKey: boxSetKeys.search(query),
-    queryFn: ({ signal }) => searchBoxSets(query, { signal }).catch(() => []),
+    queryKey: boxSetKeys.search(query, options.libraryId),
+    queryFn: ({ signal }) => searchBoxSets(query, options.libraryId, { signal }),
     enabled: (options.enabled ?? true) && query.length > 0,
     staleTime: 60 * 1000,
   });

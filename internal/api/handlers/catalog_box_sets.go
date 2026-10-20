@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"slices"
 	"sort"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
@@ -283,13 +284,16 @@ func (h *CatalogHandler) BoxSet(ctx context.Context, v ItemViewer, collectionID 
 // the collection's name contains every word, or at least two of its movies'
 // titles do. Only libraries with box sets in search take part. A collection
 // in several libraries is listed once, for the library holding most of it.
-func (h *CatalogHandler) SearchBoxSets(ctx context.Context, v ItemViewer, query string, limit int) ([]BoxSetView, error) {
+func (h *CatalogHandler) SearchBoxSets(ctx context.Context, v ItemViewer, query string, libraryID, limit int) ([]BoxSetView, error) {
 	if h == nil || h.boxSets == nil || h.resolver == nil || h.itemsH == nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Box sets are not configured")
 	}
 	libraries, err := h.boxSets.BoxSetLibraries(ctx)
 	if err != nil {
 		return nil, boxSetError(ctx, err)
+	}
+	if libraryID > 0 {
+		libraries = slices.DeleteFunc(libraries, func(l catalog.BoxSetLibrary) bool { return l.ID != libraryID })
 	}
 	out := []BoxSetView{}
 	// Matches are read a page at a time: the viewer may see too few movies of
@@ -323,6 +327,13 @@ func (h *CatalogHandler) visibleBoxSets(ctx context.Context, v ItemViewer, libra
 	if len(candidates) == 0 {
 		return best, nil
 	}
+	// A collection in several libraries is listed once, under the library
+	// with the most of its movies, so only those groups become views.
+	type choice struct {
+		libraryID int
+		group     catalog.BoxSetGroup
+	}
+	chosen := map[int64]choice{}
 	for _, library := range libraries {
 		if !library.InSearch {
 			continue
@@ -331,18 +342,22 @@ func (h *CatalogHandler) visibleBoxSets(ctx context.Context, v ItemViewer, libra
 		if err != nil {
 			return nil, boxSetError(ctx, err)
 		}
-		if len(groups) == 0 {
-			continue
+		for _, g := range groups {
+			if current, ok := chosen[g.CollectionID]; !ok || len(g.MemberContentIDs) > len(current.group.MemberContentIDs) {
+				chosen[g.CollectionID] = choice{libraryID: library.ID, group: g}
+			}
 		}
-		views, err := h.boxSetViews(ctx, v, library.ID, groups, false)
+	}
+	byLibrary := map[int][]catalog.BoxSetGroup{}
+	for _, c := range chosen {
+		byLibrary[c.libraryID] = append(byLibrary[c.libraryID], c.group)
+	}
+	for libraryID, groups := range byLibrary {
+		views, err := h.boxSetViews(ctx, v, libraryID, groups, false)
 		if err != nil {
 			return nil, boxSetError(ctx, err)
 		}
-		for id, view := range views {
-			if current, ok := best[id]; !ok || view.MemberCount > current.MemberCount {
-				best[id] = view
-			}
-		}
+		maps.Copy(best, views)
 	}
 	return best, nil
 }

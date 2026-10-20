@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   useRequestSearch: vi.fn(),
   usePersonSearch: vi.fn(),
   useBoxSetSearch: vi.fn(),
+  // Overrides the profile's search scope when set.
+  searchScope: null as null | "all" | "video" | "audiobook",
   // Most tests only check the props GlobalSearch passes; the wiring tests for
   // request rows need the real section.
   renderRealRequestSection: false,
@@ -51,6 +53,16 @@ vi.mock("@/hooks/queries/personSearch", () => ({
 vi.mock("@/hooks/queries/boxSets", () => ({
   useBoxSetSearch: (...args: unknown[]) => mocks.useBoxSetSearch(...args),
 }));
+vi.mock("@/hooks/useSearchMediaScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useSearchMediaScope")>();
+  return {
+    ...actual,
+    useSearchMediaScope: () =>
+      mocks.searchScope
+        ? { scope: mocks.searchScope, setScope: vi.fn() }
+        : actual.useSearchMediaScope(),
+  };
+});
 
 vi.mock("@/components/RequestToAddSection", async () => {
   const actual =
@@ -452,6 +464,17 @@ describe("GlobalSearch box set results", () => {
     expect(boxSets).toContainElement(options[0]!);
     expect(boxSets).not.toHaveClass("border-t");
     expect(screen.getByRole("group", { name: "Titles" })).toHaveClass("border-t");
+  });
+
+  it("hides box sets an audiobook search still holds from before", () => {
+    mocks.searchScope = "audiobook";
+    try {
+      renderOpen();
+      expect(screen.queryByRole("group", { name: "Box sets" })).toBeNull();
+      expect(mocks.useBoxSetSearch).toHaveBeenLastCalledWith("harry potter", { enabled: false });
+    } finally {
+      mocks.searchScope = null;
+    }
   });
 
   it("opens the box set page from the keyboard", () => {

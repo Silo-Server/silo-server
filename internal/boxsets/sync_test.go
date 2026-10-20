@@ -1,8 +1,10 @@
 package boxsets
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"testing"
@@ -20,10 +22,10 @@ type fakeStore struct {
 	touched     []int64
 }
 
-func (s *fakeStore) MoviesNeedingCollectionLookup(_ context.Context, _ time.Time, limit int) ([]catalog.MovieCollectionLookup, error) {
+func (s *fakeStore) MoviesNeedingCollectionLookup(_ context.Context, _ time.Time, limit int, skip []string) ([]catalog.MovieCollectionLookup, error) {
 	var out []catalog.MovieCollectionLookup
 	for _, m := range s.due {
-		if _, done := s.recorded[m.ContentID]; !done && len(out) < limit {
+		if _, done := s.recorded[m.ContentID]; !done && !slices.Contains(skip, m.ContentID) && len(out) < limit {
 			out = append(out, m)
 		}
 	}
@@ -35,10 +37,10 @@ func (s *fakeStore) RecordMovieCollection(_ context.Context, contentID string, _
 	return nil
 }
 
-func (s *fakeStore) CollectionsNeedingFetch(context.Context, time.Time, int) ([]int64, error) {
+func (s *fakeStore) CollectionsNeedingFetch(_ context.Context, _ time.Time, _ int, skip []int64) ([]int64, error) {
 	var out []int64
 	for _, id := range s.recorded {
-		if id == nil || slices.Contains(out, *id) || slices.Contains(s.touched, *id) {
+		if id == nil || slices.Contains(out, *id) || slices.Contains(s.touched, *id) || slices.Contains(skip, *id) {
 			continue
 		}
 		if _, stored := s.collections[*id]; !stored {
@@ -54,9 +56,12 @@ func (s *fakeStore) UpsertCollection(_ context.Context, c catalog.TMDBMovieColle
 	return nil
 }
 
-func (s *fakeStore) CollectionArtworkNeedingCache(context.Context, int) ([]catalog.CollectionArtworkDue, error) {
+func (s *fakeStore) CollectionArtworkNeedingCache(_ context.Context, _ int, skip []int64) ([]catalog.CollectionArtworkDue, error) {
 	var due []catalog.CollectionArtworkDue
 	for _, id := range slices.Sorted(maps.Keys(s.collections)) {
+		if slices.Contains(skip, id) {
+			continue
+		}
 		c := s.collections[id]
 		if c.PosterSourcePath != "" && c.PosterPath == "" {
 			due = append(due, catalog.CollectionArtworkDue{CollectionID: id, Slot: catalog.BoxSetPosterSlot, SourcePath: c.PosterSourcePath})
@@ -92,11 +97,17 @@ type fakeTMDB struct {
 	movies      map[int]*tmdb.CollectionRef
 	collections map[int]*tmdb.Collection
 	movieErr    error
+	// failing movies answer with an error; lookups counts every request.
+	failing map[int]bool
+	lookups map[int]int
 }
 
 func (f *fakeTMDB) GetMovieCollection(_ context.Context, id int) (*tmdb.CollectionRef, error) {
-	if f.movieErr != nil {
-		return nil, f.movieErr
+	if f.lookups != nil {
+		f.lookups[id]++
+	}
+	if f.movieErr != nil || f.failing[id] {
+		return nil, cmp.Or(f.movieErr, errors.New("tmdb error"))
 	}
 	ref, ok := f.movies[id]
 	if !ok {
@@ -172,6 +183,25 @@ func TestRunStopsAfterRepeatedFailures(t *testing.T) {
 	}
 	if res.Failures != maxFailures || len(store.recorded) != 0 {
 		t.Fatalf("result = %+v, recorded = %d; want %d failures and nothing recorded", res, len(store.recorded), maxFailures)
+	}
+}
+
+// A movie whose lookup keeps failing is tried once in a run, so it costs one
+// failure rather than one per batch, and the movies behind it are still
+// looked up.
+func TestRunTriesAFailingMovieOncePerRun(t *testing.T) {
+	var due []catalog.MovieCollectionLookup
+	for i := range 3*batchSize + 1 {
+		due = append(due, catalog.MovieCollectionLookup{ContentID: fmt.Sprintf("m%04d", i), TMDBID: int64(i + 1)})
+	}
+	store := newFakeStore(due...)
+	client := &fakeTMDB{movies: map[int]*tmdb.CollectionRef{}, failing: map[int]bool{1: true}, lookups: map[int]int{}}
+	res, err := NewSyncer(store, client).Run(t.Context(), noReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failures != 1 || client.lookups[1] != 1 || res.MoviesChecked != len(due)-1 {
+		t.Fatalf("result = %+v, lookups of the failing movie = %d", res, client.lookups[1])
 	}
 }
 

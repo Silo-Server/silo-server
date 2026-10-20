@@ -25,7 +25,7 @@ const (
 // BoxSetService is the slice of *handlers.CatalogHandler the box set reads
 // use.
 type BoxSetService interface {
-	SearchBoxSets(ctx context.Context, v handlers.ItemViewer, query string, limit int) ([]handlers.BoxSetView, error)
+	SearchBoxSets(ctx context.Context, v handlers.ItemViewer, query string, libraryID, limit int) ([]handlers.BoxSetView, error)
 	BoxSet(ctx context.Context, v handlers.ItemViewer, collectionID int64, libraryID int) (handlers.BoxSetDetailView, error)
 }
 
@@ -58,8 +58,9 @@ type CatalogBoxSetList struct {
 
 // CatalogBoxSetSearchInput is the searchCatalogBoxSets query.
 type CatalogBoxSetSearchInput struct {
-	Q     string `query:"q" required:"true" minLength:"1" maxLength:"200" doc:"Search text; a box set matches when its name contains every word, or when two or more of its movies' titles do" example:"harry potter"`
-	Limit int    `query:"limit" minimum:"1" maximum:"20" default:"5" doc:"Most box sets to return; default 5, maximum 20"`
+	Q         string `query:"q" required:"true" minLength:"1" maxLength:"200" doc:"Search text; a box set matches when its name contains every word, or when two or more of its movies' titles do" example:"harry potter"`
+	LibraryID ID     `query:"library_id" doc:"Only box sets of this library; absent searches every library with box sets in search" example:"1"`
+	Limit     int    `query:"limit" minimum:"1" maximum:"20" default:"5" doc:"Most box sets to return; default 5, maximum 20"`
 }
 
 // CatalogBoxSetInput names one box set of one library.
@@ -102,11 +103,17 @@ func (reg *Registry) searchCatalogBoxSets(ctx context.Context, in *CatalogBoxSet
 	if p != nil {
 		return nil, p
 	}
+	libraryID := 0
+	if in.LibraryID != "" {
+		if libraryID, p = in.LibraryID.positive("query.library_id"); p != nil {
+			return nil, p
+		}
+	}
 	limit := in.Limit
 	if limit <= 0 {
 		limit = boxSetSearchDefault
 	}
-	views, err := svc.SearchBoxSets(ctx, viewer, strings.TrimSpace(in.Q), limit)
+	views, err := svc.SearchBoxSets(ctx, viewer, strings.TrimSpace(in.Q), libraryID, limit)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

@@ -810,6 +810,8 @@ title, overview, and artwork, and a `box_set` object with its `id`,
 `library_id`, `movie_count`, `played_count`, `first_year`, and `last_year`.
 The card stands at its first movie in the requested order and carries that
 movie's `sort_metrics`; totals, cursors, and `seek` count the grouped list.
+`name_prefix` matches that first movie, so a box set is listed under one
+letter, the one the letter index files it under.
 Any other request with `group=box_set` returns the ordinary list. Send the
 same `group` to `queryCatalogLetters` so the letter index counts the grouped
 list. A collection's artwork is cached like item artwork when the server
@@ -821,7 +823,8 @@ box set with its movies in that library that the viewer can see, in collection
 can see too few of its movies. `GET /api/v2/catalog/box-sets?q=`
 (`searchCatalogBoxSets`) answers the box sets of libraries with
 `box_sets_in_search` whose name contains every word of `q`, or with two or
-more movies whose titles do, best match first. Search results keep listing the
+more movies whose titles do, best match first; `library_id` limits it to one
+library. Search results keep listing the
 movies themselves; clients show matching box sets ahead of them.
 
 ## History ordering

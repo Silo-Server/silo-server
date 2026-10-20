@@ -184,10 +184,14 @@ function CatalogResults({
   const mediaScope = effectiveState.query_definition.media_scope;
   const peopleQuery = usePersonSearch(state.q ?? "", 20, isQuerySource, mediaScope);
   // Box sets are movies; a scope without movies leaves them out.
+  const boxSetsInScope =
+    isQuerySource && (!mediaScope || mediaScope === "movie" || mediaScope === "video");
   const boxSetQuery = useBoxSetSearch(state.q ?? "", {
-    enabled: isQuerySource && (!mediaScope || mediaScope === "movie" || mediaScope === "video"),
+    enabled: boxSetsInScope,
+    libraryId: state.library_id ? String(state.library_id) : undefined,
   });
-  const boxSets = boxSetQuery.data ?? [];
+  // A disabled query still holds its last answer, so another scope hides it.
+  const boxSets = boxSetsInScope ? (boxSetQuery.data ?? []) : [];
   const people = peopleQuery.data ?? [];
   const activeChipScope: SearchMediaScope =
     mediaScope === "audiobook" ? "audiobook" : mediaScope ? "video" : "all";

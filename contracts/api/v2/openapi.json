@@ -143099,6 +143099,20 @@
             }
           },
           {
+            "description": "Only box sets of this library; absent searches every library with box sets in search",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "Only box sets of this library; absent searches every library with box sets in search",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
             "description": "Most box sets to return; default 5, maximum 20",
             "explode": false,
             "in": "query",

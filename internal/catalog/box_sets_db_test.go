@@ -179,6 +179,24 @@ func TestBoxSetGroupedBrowseDB(t *testing.T) {
 	if total != 4 {
 		t.Fatalf("letter index counts %d titles, want the 4 grouped rows: %+v", total, index.Letters)
 	}
+	// A name prefix lists the box set only under its representative's letter,
+	// where the letter index files it: "Alpha Kappa Two" leads it by title, so
+	// "Zulu Kappa One" does not bring it under Z.
+	for prefix, want := range map[string][]string{"a": {f.id("second")}, "z": nil} {
+		viewer := f.viewer
+		viewer.NamePrefix = prefix
+		page, err := grouped.PreviewCursorPage(t.Context(), f.def(QuerySort{Field: "title", Order: "asc"}), viewer, 10, nil, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, item := range page.Items {
+			got = append(got, item.ContentID)
+		}
+		if !slices.Equal(got, want) || page.Total != len(want) {
+			t.Fatalf("prefix %q: rows = %v (total %d), want %v", prefix, got, page.Total, want)
+		}
+	}
 }
 
 func TestBoxSetSearchAndSyncDB(t *testing.T) {
@@ -215,7 +233,7 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	if _, err := f.pool.Exec(ctx, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, f.id("padded"), f.lib); err != nil {
 		t.Fatal(err)
 	}
-	due, err := f.repo.MoviesNeedingCollectionLookup(ctx, time.Now().Add(-time.Hour), 1000)
+	due, err := f.repo.MoviesNeedingCollectionLookup(ctx, time.Now().Add(-time.Hour), 1000, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,6 +246,16 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	slices.Sort(mine)
 	if want := []string{f.id("solo"), f.id("stale")}; !slices.Equal(mine, want) {
 		t.Fatalf("due = %v, want the never looked up and the rematched movie %v", mine, want)
+	}
+	// A movie this run already tried is skipped.
+	due, err = f.repo.MoviesNeedingCollectionLookup(ctx, time.Now().Add(-time.Hour), 1000, []string{f.id("solo")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range due {
+		if m.ContentID == f.id("solo") {
+			t.Fatalf("due = %v, want the skipped movie left out", due)
+		}
 	}
 }
 
@@ -252,7 +280,7 @@ func TestBoxSetCollectionArtworkDB(t *testing.T) {
 	}
 	isDue := func() bool {
 		t.Helper()
-		due, err := f.repo.CollectionArtworkNeedingCache(ctx, 10_000)
+		due, err := f.repo.CollectionArtworkNeedingCache(ctx, 10_000, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

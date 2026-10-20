@@ -94717,6 +94717,8 @@ export interface operations {
   searchCatalogBoxSets: {
     parameters: {
       query: {
+        /** @description Only box sets of this library; absent searches every library with box sets in search */
+        library_id?: string;
         /** @description Most box sets to return; default 5, maximum 20 */
         limit?: number;
         /** @description Search text; a box set matches when its name contains every word, or when two or more of its movies' titles do */

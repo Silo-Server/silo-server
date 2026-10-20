@@ -181,7 +181,7 @@ type MovieCollectionLookup struct {
 // MoviesNeedingCollectionLookup returns up to limit movies of box set
 // libraries that were never looked up, were rematched to another TMDB movie
 // since, or were last looked up before staleBefore.
-func (r *BoxSetRepository) MoviesNeedingCollectionLookup(ctx context.Context, staleBefore time.Time, limit int) ([]MovieCollectionLookup, error) {
+func (r *BoxSetRepository) MoviesNeedingCollectionLookup(ctx context.Context, staleBefore time.Time, limit int, skip []string) ([]MovieCollectionLookup, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT mi.content_id, mi.tmdb_id::bigint
 		FROM media_items mi
@@ -195,8 +195,9 @@ func (r *BoxSetRepository) MoviesNeedingCollectionLookup(ctx context.Context, st
 			JOIN media_folders f ON f.id = mil.media_folder_id
 			WHERE mil.content_id = mi.content_id AND f.box_sets_enabled AND f.enabled IS NOT FALSE)
 		  AND (m.content_id IS NULL OR m.checked_tmdb_id::text <> mi.tmdb_id OR m.checked_at < $1)
+		  AND NOT (mi.content_id = ANY($3::text[]))
 		ORDER BY m.checked_at NULLS FIRST, mi.content_id
-		LIMIT $2`, staleBefore, limit)
+		LIMIT $2`, staleBefore, limit, nonNilSlice(skip))
 	if err != nil {
 		return nil, fmt.Errorf("querying movies needing a collection lookup: %w", err)
 	}
@@ -230,14 +231,15 @@ func (r *BoxSetRepository) RecordMovieCollection(ctx context.Context, contentID 
 
 // CollectionsNeedingFetch returns up to limit collections some movie belongs
 // to that are not stored yet or were fetched before staleBefore.
-func (r *BoxSetRepository) CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int) ([]int64, error) {
+func (r *BoxSetRepository) CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int, skip []int64) ([]int64, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT DISTINCT m.tmdb_collection_id, c.fetched_at
 		FROM media_item_tmdb_collections m
 		LEFT JOIN tmdb_movie_collections c ON c.tmdb_collection_id = m.tmdb_collection_id
 		WHERE m.tmdb_collection_id IS NOT NULL AND (c.tmdb_collection_id IS NULL OR c.fetched_at < $1)
+		  AND NOT (m.tmdb_collection_id = ANY($3::bigint[]))
 		ORDER BY c.fetched_at NULLS FIRST, m.tmdb_collection_id
-		LIMIT $2`, staleBefore, limit)
+		LIMIT $2`, staleBefore, limit, nonNilSlice(skip))
 	if err != nil {
 		return nil, fmt.Errorf("querying collections needing a fetch: %w", err)
 	}
@@ -306,7 +308,7 @@ type CollectionArtworkDue struct {
 
 // CollectionArtworkNeedingCache returns up to limit collection images that are
 // served from their provider URL rather than a cached copy.
-func (r *BoxSetRepository) CollectionArtworkNeedingCache(ctx context.Context, limit int) ([]CollectionArtworkDue, error) {
+func (r *BoxSetRepository) CollectionArtworkNeedingCache(ctx context.Context, limit int, skip []int64) ([]CollectionArtworkDue, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT tmdb_collection_id, slot, source FROM (
 			SELECT tmdb_collection_id, 'poster' AS slot, poster_source_path AS source
@@ -315,8 +317,9 @@ func (r *BoxSetRepository) CollectionArtworkNeedingCache(ctx context.Context, li
 			SELECT tmdb_collection_id, 'backdrop', backdrop_source_path
 			FROM tmdb_movie_collections WHERE backdrop_source_path <> '' AND backdrop_path = backdrop_source_path
 		) due
+		WHERE NOT (tmdb_collection_id = ANY($2::bigint[]))
 		ORDER BY tmdb_collection_id, slot
-		LIMIT $1`, limit)
+		LIMIT $1`, limit, nonNilSlice(skip))
 	if err != nil {
 		return nil, fmt.Errorf("querying collection artwork to cache: %w", err)
 	}
@@ -472,4 +475,13 @@ func (e *QueryExecutor) boxSetGroups(ctx context.Context, def QueryDefinition, a
 		return nil, fmt.Errorf("reading box sets: %w", err)
 	}
 	return groups, nil
+}
+
+// nonNilSlice binds an absent skip list as an empty array: ANY of NULL is
+// NULL, which would exclude every row.
+func nonNilSlice[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }

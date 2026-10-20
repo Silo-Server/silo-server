@@ -378,8 +378,9 @@ export function GlobalSearch({
     searchScope === "all" ? undefined : searchScope,
   );
   // Box sets are movies, so an audiobook-scoped search leaves them out.
+  const boxSetsInScope = searchScope !== "audiobook";
   const boxSetQuery = useBoxSetSearch(debouncedQuery, {
-    enabled: open && searchScope !== "audiobook",
+    enabled: open && boxSetsInScope,
   });
 
   useEffect(() => {
@@ -459,7 +460,8 @@ export function GlobalSearch({
   const peopleFirst = exactPeople.length > 0;
   const people = peopleFirst ? exactPeople : matchedPeople;
   // A matching box set leads, ahead of its movies and of people.
-  const boxSets = boxSetQuery.data ?? [];
+  // A disabled query still holds its last answer, so another scope hides it.
+  const boxSets = boxSetsInScope ? (boxSetQuery.data ?? []) : [];
   const itemOffset = boxSets.length + (peopleFirst ? people.length : 0);
   const peopleOffset = boxSets.length + (peopleFirst ? 0 : items.length);
   const contentKeys = [

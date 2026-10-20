@@ -51,12 +51,21 @@ func (p previewPagePlan) groupedByWork(boxSetCollections []int64) previewPagePla
 		p.args = append(p.args, p.maxResults)
 		sourceLimit = fmt.Sprintf(" LIMIT $%d", len(p.cteArgs)+len(p.args))
 	}
-	candidates := fmt.Sprintf("catalog_work_candidates AS (SELECT %s %s LEFT JOIN literary_work_items work_link ON work_link.content_id=mi.content_id%s %s %s%s)", strings.Join(columns, ", "), p.fromClausePaged, boxSetJoin, p.whereClause, sourceOrder, sourceLimit)
+	// A box set spans titles under several letters, so a name prefix filters
+	// representatives: the box set is listed under the letter of the movie
+	// that represents it, as the letter index files it, and no other.
+	candidateWhere, groupWhere := p.whereClause, "WHERE mi.catalog_work_rank = 1"
+	if len(boxSetCollections) > 0 && p.namePrefixWhere != "" {
+		candidateWhere = p.whereWithoutNamePrefix
+		groupWhere += " AND " + p.namePrefixWhere
+	}
+	candidates := fmt.Sprintf("catalog_work_candidates AS (SELECT %s %s LEFT JOIN literary_work_items work_link ON work_link.content_id=mi.content_id%s %s %s%s)", strings.Join(columns, ", "), p.fromClausePaged, boxSetJoin, candidateWhere, sourceOrder, sourceLimit)
 	ranked := "catalog_work_ranked AS (SELECT catalog_work_candidates.*, ROW_NUMBER() OVER (PARTITION BY catalog_work_key ORDER BY " + strings.Join(innerOrder, ", ") + ") AS catalog_work_rank FROM catalog_work_candidates)"
 	p.ctes = append(p.ctes, candidates, ranked)
 	p.fromClausePaged = "FROM catalog_work_ranked mi"
 	p.fromClauseCount = p.fromClausePaged
-	p.whereClause = "WHERE mi.catalog_work_rank = 1"
+	p.whereClause = groupWhere
+	p.namePrefixWhere, p.whereWithoutNamePrefix = "", ""
 	p.orderBy = "ORDER BY " + strings.Join(outerOrder, ", ")
 	p.cursorTerms = terms
 	p.maxResults = 0
