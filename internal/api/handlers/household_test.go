@@ -251,8 +251,14 @@ func TestCanManageHousehold(t *testing.T) {
 	// Nil dependencies must fail closed. A settings handler built without a
 	// token service is not a reason to skip the PIN check.
 	t.Run("pin with no token service may not", func(t *testing.T) {
-		store, _ := setup(t, "1234")
-		_, err := canManageHousehold(householdRequest("primary", false, "tok"), store, nil)
+		store, tokens := setup(t, "1234")
+		token, _, err := tokens.Mint(access.ProfileTokenClaims{
+			UserID: 1, SessionID: "session-1", ProfileID: "primary", PINRevision: pinRevision(t, store, "primary"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = canManageHousehold(householdRequest("primary", false, token), store, nil)
 		if !errors.Is(err, access.ErrProfileUnverified) {
 			t.Fatalf("nil token service err = %v, want ErrProfileUnverified", err)
 		}

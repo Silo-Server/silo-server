@@ -54,7 +54,7 @@ type APIKeyHandler struct {
 // which on an admin account is the acting admin. verify confirms a PIN-locked
 // primary profile and returns access.ErrProfileUnverified when it is not.
 // The admin-role check stays with the callers, which run it first.
-func (h *APIKeyHandler) MayCreatePersonalAPIKey(ctx context.Context, userID int, activeProfileID string, verify func(profileID string) error) (bool, error) {
+func (h *APIKeyHandler) MayCreatePersonalAPIKey(ctx context.Context, userID int, activeProfileID string, verify func(profile *userstore.Profile) error) (bool, error) {
 	if h.Stores == nil {
 		return false, nil
 	}
@@ -63,7 +63,7 @@ func (h *APIKeyHandler) MayCreatePersonalAPIKey(ctx context.Context, userID int,
 		return false, fmt.Errorf("opening user store: %w", err)
 	}
 	if verify == nil {
-		verify = func(string) error { return access.ErrProfileUnverified }
+		verify = func(*userstore.Profile) error { return access.ErrProfileUnverified }
 	}
 	return canManageHouseholdAs(ctx, store, activeProfileID, verify)
 }
@@ -213,9 +213,13 @@ func (h *APIKeyHandler) HandleCreateAPIKey(w http.ResponseWriter, r *http.Reques
 	}
 	// The admin acts only through the account's primary profile, verified
 	// when it has a PIN; a child profile on the admin's account may not mint
-	// a key that would skip every profile's PIN.
-	allowed, err := h.MayCreatePersonalAPIKey(r.Context(), claims.UserID, activeProfileIDOf(r), func(profileID string) error {
-		return verifyProfileToken(r, h.Stores, h.ProfileTokens, profileID)
+	// a key that would skip every profile's PIN. The body is read first so a
+	// PIN change during a slow upload revokes the proof.
+	if !readHouseholdRequestBody(w, r) {
+		return
+	}
+	allowed, err := h.MayCreatePersonalAPIKey(r.Context(), claims.UserID, activeProfileIDOf(r), func(profile *userstore.Profile) error {
+		return verifyProfileTokenFor(r, h.ProfileTokens, profile)
 	})
 	if err != nil {
 		writeProfileManagementPermissionError(w, err)

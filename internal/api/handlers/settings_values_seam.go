@@ -87,7 +87,7 @@ type SettingIdentityRequest struct {
 	LibraryID    string
 	SeriesID     string
 	// VerifyProfile confirms a PIN-locked primary profile; nil never verifies.
-	VerifyProfile func(profileID string) error
+	VerifyProfile func(profile *userstore.Profile) error
 }
 
 // EffectiveSettingsQuery is one effective resolution request. Keys empty
@@ -101,7 +101,7 @@ type EffectiveSettingsQuery struct {
 	ClientFamily    string
 	LibraryIDs      []int
 	SeriesIDs       []string
-	VerifyProfile   func(profileID string) error
+	VerifyProfile   func(profile *userstore.Profile) error
 }
 
 // settingMutationResult is a completed write: the stored row, and for an
@@ -220,10 +220,10 @@ func (h *SettingValuesHandler) sessionIdentity(
 // account is simply absent there, so it is 404 and the caller learns nothing.
 func (h *SettingValuesHandler) mayActFor(
 	ctx context.Context, store userstore.UserStore, activeProfileID string,
-	verify func(profileID string) error, profileID string,
+	verify func(profile *userstore.Profile) error, profileID string,
 ) *APIError {
 	if verify == nil {
-		verify = func(string) error { return access.ErrProfileUnverified }
+		verify = func(*userstore.Profile) error { return access.ErrProfileUnverified }
 	}
 	allowed, err := canManageHouseholdAs(ctx, store, activeProfileID, verify)
 	if err != nil {

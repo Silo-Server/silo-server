@@ -28,6 +28,9 @@ type PreferenceSettingsSnapshotter interface {
 // a transaction-scoped writer to WithPreferenceSettingsTransaction so callers
 // can commit the legacy row and every canonical row as one unit.
 type PreferenceSettingsWriter interface {
+	// CheckProfilePINRevision compares the acting profile's revision and
+	// serializes PIN writes until this transaction ends. Missing rows fail.
+	CheckProfilePINRevision(ctx context.Context, id string, revision int64) (bool, error)
 	CreateProfile(ctx context.Context, profile Profile) error
 	ListSettings(ctx context.Context) ([]SettingEntry, error)
 	// ListProfileIDs reads the current household membership inside the same

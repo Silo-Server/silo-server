@@ -403,3 +403,6 @@
 # values fails the run without allocating it.
 ./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
 ./internal/historyimport TestImportRunFailsOnExpandingSourceListing
+
+# Household PIN proof must still match when the protected write transaction starts.
+./internal/userstore/pgstore TestPostgresProfilePINRevisionTransactions

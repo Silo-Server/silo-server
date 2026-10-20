@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -197,4 +198,13 @@ func (tx *preferenceSettingsTx) UpsertSettingValue(
 
 func (tx *preferenceSettingsTx) DeleteSettingValue(ctx context.Context, id userstore.SettingIdentity) (bool, error) {
 	return deleteSettingValue(ctx, tx.exec, tx.userID, id)
+}
+
+func (tx *preferenceSettingsTx) CheckProfilePINRevision(ctx context.Context, id string, revision int64) (bool, error) {
+	var matches bool
+	err := tx.exec.QueryRow(ctx, "SELECT pin_revision = $3 FROM user_profiles WHERE user_id = $1 AND id = $2 FOR UPDATE", tx.userID, id, revision).Scan(&matches)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return matches, err
 }

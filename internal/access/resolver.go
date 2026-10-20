@@ -128,6 +128,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		if err != nil {
 			return Scope{}, err
 		}
+		scope.ProfilePINRevision = profile.PINRevision
 		scope.ProfileVerified = verified
 		scope.PINVerificationSkipped = verified && profile.PINHash != "" && input.SkipPINVerification
 	}
@@ -312,4 +313,13 @@ func cloneInts(values []int) []int {
 	out := make([]int, len(values))
 	copy(out, values)
 	return out
+}
+
+// CheckProfileVerification checks request proof against a freshly loaded profile.
+// PIN exemptions cannot authorize household management of a locked profile.
+func (s Scope) CheckProfileVerification(profile *userstore.Profile) error {
+	if profile == nil || s.ProfileID != profile.ID || !s.ProfileVerified || s.PINVerificationSkipped || s.ProfilePINRevision != profile.PINRevision {
+		return ErrProfileUnverified
+	}
+	return nil
 }

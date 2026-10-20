@@ -23,7 +23,7 @@ func profileServiceContext(activeProfileID string) context.Context {
 	return ctx
 }
 
-func noProfileVerification(string) error { return nil }
+func noProfileVerification(*userstore.Profile) error { return nil }
 
 func requireAPIStatus(t *testing.T, err error, status int) *APIError {
 	t.Helper()

@@ -43,11 +43,11 @@ func TestDeviceSettingsServiceScope(t *testing.T) {
 	if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PIN: new("1234")}); err != nil {
 		t.Fatal(err)
 	}
-	actor.VerifyProfile = func(string) error { return access.ErrProfileUnverified }
+	actor.VerifyProfile = func(*userstore.Profile) error { return access.ErrProfileUnverified }
 	if _, err := h.DeviceSettingsPage(ctx, actor, true, userstore.DevicePageOptions{Limit: 10}); err == nil {
 		t.Fatal("unverified primary allowed")
 	}
-	actor.VerifyProfile = func(string) error { return nil }
+	actor.VerifyProfile = func(*userstore.Profile) error { return nil }
 	if _, err := h.DeviceSettingsPage(ctx, actor, true, userstore.DevicePageOptions{Limit: 10}); err != nil {
 		t.Fatal(err)
 	}
