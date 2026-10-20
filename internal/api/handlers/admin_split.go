@@ -248,39 +248,42 @@ func (h *AdminSplitHandler) SplitAdminItem(ctx context.Context, sourceID string,
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Reload under file locks: scanner upserts may change folders without
+	// changing content_id. Every later scope decision and write uses these rows.
+	// Files lock before their parent items, the order scanner writers use
+	// (episode linking updates a series' files, then the series row); the
+	// reverse order deadlocks with them.
+	moved, err = loadSelectedSplitFiles(ctx, tx, sourceID, req.FileIDs)
+	if err != nil {
+		return AdminSplitResult{}, splitTransactionError(ctx, err)
+	}
 	itemTypes, err := catalog.LockMetadataCurationItems(ctx, tx, sourceID, target.contentID)
 	if err != nil {
-		return AdminSplitResult{}, splitTransactionError(err)
+		return AdminSplitResult{}, splitTransactionError(ctx, err)
 	}
 	if itemTypes[sourceID] != sourceItem.Type {
 		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Source item changed; retry the split")
-	}
-	// Reload under file locks: scanner upserts may change folders without
-	// changing content_id. Every later scope decision and write uses these rows.
-	moved, err = loadSelectedSplitFiles(ctx, tx, sourceID, req.FileIDs)
-	if err != nil {
-		return AdminSplitResult{}, splitTransactionError(err)
 	}
 	if len(moved) != len(seen) {
 		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Selected files changed; retry the split")
 	}
 	var total int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM media_files WHERE content_id = $1`, sourceID).Scan(&total); err != nil {
-		return AdminSplitResult{}, splitTransactionError(err)
+		return AdminSplitResult{}, splitTransactionError(ctx, err)
 	}
 	if len(moved) == total {
 		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request",
 			"Selection covers every file; use match/apply to re-identify the whole item instead of splitting it")
 	}
 	if err := access.AuthorizeMetadataCurationLibraries(ctx, distinctFolderIDs(moved)); err != nil {
-		return AdminSplitResult{}, splitTransactionError(err)
+		return AdminSplitResult{}, splitTransactionError(ctx, err)
 	}
 	if req.Target.Unmatched && strings.TrimSpace(req.Target.ContentID) == "" && len(normalizeMatchProviderIDs(req.Target.ProviderIDs)) == 0 && target.contentID != contentid.ForLocal(moved[0].FilePath) {
 		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Selected file path changed; retry the split")
 	}
 	target.created, err = ensureSplitTarget(ctx, tx, target, sourceItem, itemTypes)
 	if err != nil {
-		return AdminSplitResult{}, splitTransactionError(err)
+		return AdminSplitResult{}, splitTransactionError(ctx, err)
 	}
 	moveResult, err := filesplit.Move(ctx, tx, filesplit.Options{
 		FromContentID: sourceID,
@@ -769,12 +772,13 @@ func metadataCurationForbidden() error {
 	return apiError(http.StatusForbidden, "forbidden", "Item is outside your assigned libraries")
 }
 
-func splitTransactionError(err error) error {
+func splitTransactionError(ctx context.Context, err error) error {
 	if api, ok := errors.AsType[*APIError](err); ok {
 		return api
 	}
 	if errors.Is(err, access.ErrMetadataCurationScope) {
 		return metadataCurationForbidden()
 	}
+	slog.ErrorContext(ctx, "admin split: preparing split", "component", "api", "error", err)
 	return apiError(http.StatusInternalServerError, "internal_error", "Failed to prepare split")
 }

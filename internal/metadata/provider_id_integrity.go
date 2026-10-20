@@ -394,6 +394,11 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if err := catalog.GuardMetadataCurationItems(ctx, tx, contentID); err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			// A provisional owner that vanished leaves nothing to clear, as
+			// the status lookup below treats it; the caller retries persist.
+			return nil
+		}
 		return err
 	}
 

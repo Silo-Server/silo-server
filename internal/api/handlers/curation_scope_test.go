@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -110,11 +111,34 @@ func (f *curationSplitFixture) injectConcurrentChange(t *testing.T, mode string)
 		f.createTarget(t, f.denied, "movie")
 	case "creation-collision-allowed":
 		f.createTarget(t, f.allowed, "movie")
-	case "file-folder-change":
-		if _, err := f.pool.Exec(t.Context(), `UPDATE media_files SET media_folder_id=$1 WHERE id=$2`, f.denied, f.selected); err != nil {
-			t.Fatal(err)
-		}
 	}
+}
+
+// racingLookup moves the selected file to the denied library when split
+// resolves its target: after the pre-transaction file load, before the
+// transaction locks the file.
+type racingLookup struct {
+	*fakeItemLookup
+	race func(contentID string)
+}
+
+func (l racingLookup) GetByID(ctx context.Context, contentID string) (*models.MediaItem, error) {
+	l.race(contentID)
+	return l.fakeItemLookup.GetByID(ctx, contentID)
+}
+
+func (f *curationSplitFixture) itemLookup(t *testing.T, mode string) MatchItemLookup {
+	if mode != "file-folder-change" {
+		return f.lookup
+	}
+	return racingLookup{fakeItemLookup: f.lookup, race: func(contentID string) {
+		if contentID != f.target {
+			return
+		}
+		if _, err := f.pool.Exec(t.Context(), `UPDATE media_files SET media_folder_id=$1 WHERE id=$2`, f.denied, f.selected); err != nil {
+			t.Error(err)
+		}
+	}}
 }
 
 func TestCurationScopeSplitPostgres(t *testing.T) {
@@ -127,7 +151,7 @@ func TestCurationScopeSplitPostgres(t *testing.T) {
 				cancel()
 				ctx = canceled
 			}
-			h := NewAdminSplitHandler(f.pool, f.lookup, nil, nil, nil, nil, nil)
+			h := NewAdminSplitHandler(f.pool, f.itemLookup(t, mode), nil, nil, nil, nil, nil)
 			req := AdminSplitRequest{FileIDs: []int{f.selected}, Target: AdminSplitTarget{ProviderIDs: map[string]string{"tmdb": "424243"}}, PersistOverride: new(false), DryRun: mode == "dry-run"}
 			out, err := h.SplitAdminItem(ctx, f.source, req)
 			f.assertResult(t, mode, out, err)
@@ -163,6 +187,15 @@ func (f *curationSplitFixture) assertResult(t *testing.T, mode string, out Admin
 		t.Fatalf("file owner=%s want=%s", owner, want)
 	}
 	if !refused {
+		// The target ends up in the moved file's library: inserted by the
+		// move for a new target, kept for an existing one.
+		var memberships int
+		if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM media_item_libraries WHERE content_id=$1 AND media_folder_id=$2`, f.target, f.allowed).Scan(&memberships); err != nil {
+			t.Fatal(err)
+		}
+		if memberships != 1 {
+			t.Fatalf("target memberships in the moved file's library = %d", memberships)
+		}
 		return
 	}
 	var targetAdded int
@@ -175,6 +208,69 @@ func (f *curationSplitFixture) assertResult(t *testing.T, mode string, out Admin
 	}
 	if targetAdded != wantCount {
 		t.Fatalf("refused split added target membership: %d", targetAdded)
+	}
+}
+
+// Scanner writers lock a file row before its parent item (episode linking
+// updates the series' files, then the series row). Split takes the same order,
+// so a link that already holds a selected file makes split wait instead of
+// deadlocking with it.
+func TestCurationScopeSplitLocksFilesBeforeParentPostgres(t *testing.T) {
+	f := newCurationSplitFixture(t, "lock-order")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	writer, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = writer.Rollback(context.Background()) }()
+	if _, err := writer.Exec(ctx, `UPDATE media_files SET updated_at = now() WHERE id = $1`, f.selected); err != nil {
+		t.Fatal(err)
+	}
+	h := NewAdminSplitHandler(f.pool, f.lookup, nil, nil, nil, nil, nil)
+	req := AdminSplitRequest{FileIDs: []int{f.selected}, Target: AdminSplitTarget{ProviderIDs: map[string]string{"tmdb": "424243"}}, PersistOverride: new(false)}
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.SplitAdminItem(f.authority(t, "lock-order"), f.source, req)
+		done <- err
+	}()
+	waitForBlockedSplit(t, ctx, f.pool)
+	if _, err := writer.Exec(ctx, `UPDATE media_items SET latest_episode_added_at = now() WHERE content_id = $1`, f.source); err != nil {
+		t.Fatalf("parent update while split waits for the file: %v", err)
+	}
+	if err := writer.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("split after the writer committed: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+func waitForBlockedSplit(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var blocked bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'
+			  AND query LIKE '%FROM media_files WHERE content_id = $1 AND id = ANY%')`).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -201,7 +297,7 @@ func TestCurationScopeDetachedSplitRetainsAuthority(t *testing.T) {
 		if !errors.Is(err, access.ErrMetadataCurationScope) {
 			t.Fatalf("detached follow-up lost authority or inherited cancellation: %v", err)
 		}
-	case <-t.Context().Done():
+	case <-time.After(5 * time.Second):
 		t.Fatal("follow-up did not execute")
 	}
 }

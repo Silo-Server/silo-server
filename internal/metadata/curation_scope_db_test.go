@@ -157,3 +157,11 @@ func TestCurationScopeRebindPreservesAuthorizedStatePostgres(t *testing.T) {
 		})
 	}
 }
+
+func TestCurationScopeClearToleratesVanishedOwnerPostgres(t *testing.T) {
+	pool, _, _, allowed, _ := curationFixture(t)
+	// The provisional owner was merged or deleted after the caller found it.
+	if err := clearProvisionalProviderIDsLocked(curationScope(t.Context(), allowed), pool, "curation-vanished-"+t.Name()); err != nil {
+		t.Fatalf("clearing a vanished owner = %v, want the no-op the caller retries after", err)
+	}
+}
