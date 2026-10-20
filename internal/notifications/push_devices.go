@@ -321,7 +321,7 @@ func (r *PushDeviceRepository) UpsertApple(ctx context.Context, registration App
 	if generation > 0 {
 		return nil, ErrPushLegacyWriter
 	}
-	if err := checkLegacyPushOwner(ctx, tx, registration.DeviceID, PushPlatformApple, registration.UserID); err != nil {
+	if err := checkPushInstallationOwner(ctx, tx, registration.DeviceID, PushPlatformApple, registration.UserID); err != nil {
 		return nil, err
 	}
 
@@ -388,7 +388,7 @@ func (r *PushDeviceRepository) UpsertFCM(ctx context.Context, registration FCMPu
 	if generation > 0 {
 		return nil, ErrPushLegacyWriter
 	}
-	if err := checkLegacyPushOwner(ctx, tx, registration.DeviceID, PushPlatformAndroid, registration.UserID); err != nil {
+	if err := checkPushInstallationOwner(ctx, tx, registration.DeviceID, PushPlatformAndroid, registration.UserID); err != nil {
 		return nil, err
 	}
 
@@ -436,12 +436,14 @@ func (r *PushDeviceRepository) UpsertFCM(ctx context.Context, registration FCMPu
 	return device, nil
 }
 
-// checkLegacyPushOwner runs while the platform's installation lock is held, so
-// ownership cannot change between this check and the registration write.
-func checkLegacyPushOwner(ctx context.Context, tx pgx.Tx, deviceID, platform string, userID int) error {
+// checkPushInstallationOwner refuses a generation-zero write (bridge
+// registration or ordered bootstrap) when another account holds a destination
+// for this installation. Callers hold the platform's installation lock, so
+// ownership cannot change between this check and the write.
+func checkPushInstallationOwner(ctx context.Context, tx pgx.Tx, deviceID, platform string, userID int) error {
 	var foreign bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM push_devices WHERE device_id=$1 AND platform=$2 AND user_id<>$3)`, deviceID, platform, userID).Scan(&foreign); err != nil {
-		return fmt.Errorf("check legacy push owner: %w", err)
+		return fmt.Errorf("check push installation owner: %w", err)
 	}
 	if foreign {
 		return ErrPushGenerationConflict

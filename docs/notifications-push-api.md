@@ -230,6 +230,9 @@ which serializes bridge writers and ordered v2 writers across API nodes.
 
 An older client switching accounts can therefore receive a conflict while the
 previous account's destination remains registered. Repeating registration does
-not resolve it. Ordered bootstrap must occur while that existing account is
-selected; subsequent account transfers require its installation key and a newer
-generation. This repair adds no recovery or automatic rebinding mechanism.
+not resolve it, and neither does signing out or revoking the owning account's
+sessions. The conflict clears only when the owning account unregisters that
+device, or when the owning profile or account is deleted. Ordered bootstrap must
+occur while that existing account is selected; subsequent account transfers
+require its installation key and a newer generation. This repair adds no
+recovery or automatic rebinding mechanism.
