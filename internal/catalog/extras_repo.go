@@ -78,13 +78,15 @@ func (r *ExtraRepository) SetStill(ctx context.Context, contentID, path, source,
 // rows RETURNING id, extra_id. It clears the image of each local extra those
 // rows leave without any file, so the artwork revision GC collects it; the
 // media_extras row itself is kept. A file that is only marked missing still
-// counts, so an offline share keeps its extras' images.
+// counts, so an offline share keeps its extras' images. It updates the extra
+// even when it has no image: a frame the extra stills task saves while this
+// statement waits on the file row is newer than the statement's snapshot, and
+// only the row the update locks shows it.
 const ClearEmptiedExtraStillsCTE = `,
 	emptied_extras AS (
 		UPDATE media_extras e
 		SET still_path = '', still_source = '', still_thumbhash = '', updated_at = now()
 		WHERE e.content_id IN (SELECT extra_id FROM deleted WHERE extra_id IS NOT NULL)
-		  AND (e.still_path <> '' OR e.still_source <> '')
 		  AND NOT EXISTS (
 			SELECT 1 FROM media_files f
 			WHERE f.extra_id = e.content_id AND f.id NOT IN (SELECT id FROM deleted)
@@ -158,17 +160,25 @@ func (r *ExtraRepository) ListPendingFrameStills(ctx context.Context, limit int)
 	return pending, nil
 }
 
-// SetStillIfSource is SetStill for the extra stills task: it applies only
+// SetStillIfSource is SetStill for the extra stills task. It applies only
 // while the extra's still_source is still expectedSource, so a sidecar a scan
-// saved meanwhile is never overwritten, and it records when a failure may be
+// saved meanwhile is never overwritten, and while fileID, the frame's file,
+// still belongs to the extra. It locks that file row, so a concurrent delete
+// either commits first and the frame is dropped, or waits and then clears it
+// (ClearEmptiedExtraStillsCTE). retryAfter records when a failure may be
 // retried (nil for a saved frame, or a file that cannot be decoded). It
 // reports whether the row changed.
-func (r *ExtraRepository) SetStillIfSource(ctx context.Context, contentID, expectedSource, path, source, thumbhash string, retryAfter *time.Time) (bool, error) {
+func (r *ExtraRepository) SetStillIfSource(ctx context.Context, contentID, expectedSource string, fileID int, path, source, thumbhash string, retryAfter *time.Time) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE media_extras
 		SET still_path = $3, still_source = $4, still_thumbhash = $5, still_retry_after = $6, updated_at = now()
-		WHERE content_id = $1 AND still_source = $2`,
-		contentID, expectedSource, path, source, thumbhash, retryAfter)
+		WHERE content_id = $1 AND still_source = $2
+		  AND EXISTS (
+			SELECT 1 FROM media_files f
+			WHERE f.id = $7 AND f.extra_id = $1
+			FOR SHARE
+		  )`,
+		contentID, expectedSource, path, source, thumbhash, retryAfter, fileID)
 	if err != nil {
 		return false, fmt.Errorf("set media extra still: %w", err)
 	}

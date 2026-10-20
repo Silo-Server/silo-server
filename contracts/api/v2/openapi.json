@@ -48762,7 +48762,7 @@
             "type": "string"
           },
           "poster_url": {
-            "description": "The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls",
+            "description": "The item's poster, an episode's still, or a local extra's still (its parent's poster when it has none), sized by image_size; for system media controls",
             "type": "string"
           },
           "preview": {

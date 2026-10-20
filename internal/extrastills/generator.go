@@ -132,11 +132,11 @@ func (g *Generator) recordFailure(ctx context.Context, p catalog.PendingFrameSti
 	return nil
 }
 
-// save records the result unless a scan changed the extra's image meanwhile.
-// A stored frame that lost that race is left unreferenced for the artwork
-// revision GC.
+// save records the result unless a scan changed the extra's image or deleted
+// its file meanwhile. A stored frame that lost that race is left unreferenced
+// for the artwork revision GC.
 func (g *Generator) save(ctx context.Context, p catalog.PendingFrameStill, path, source, thumbhash string, retryAfter *time.Time) bool {
-	saved, err := g.extras.SetStillIfSource(ctx, p.ExtraID, p.StillSource, path, source, thumbhash, retryAfter)
+	saved, err := g.extras.SetStillIfSource(ctx, p.ExtraID, p.StillSource, p.FileID, path, source, thumbhash, retryAfter)
 	if err != nil {
 		slog.WarnContext(ctx, "extra stills: saving failed", "component", "extrastills", "extra_id", p.ExtraID, "error", err)
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/chapterthumbs"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -176,6 +177,76 @@ func TestGenerateLosesARaceToASidecar(t *testing.T) {
 	}
 	if path, source := fx.still(ctx, t); path != "sidecar" || source != sidecar {
 		t.Fatalf("still = %q from %q, want the sidecar kept", path, source)
+	}
+}
+
+// A frame whose file was deleted while it was being taken is discarded, so the
+// extra left without a file keeps no image the artwork GC can't collect.
+func TestGenerateDiscardsAFrameForADeletedFile(t *testing.T) {
+	ctx := t.Context()
+	fx := seedExtra(ctx, t, "")
+	cacher := &fakeCacher{before: func() {
+		if _, err := fx.pool.Exec(ctx, `
+			WITH deleted AS (DELETE FROM media_files WHERE id = $1 RETURNING id, extra_id)`+
+			catalog.ClearEmptiedExtraStillsCTE+`
+			SELECT 1`, fx.fileID); err != nil {
+			t.Error(err)
+		}
+	}}
+	if saved, err := NewGenerator(fx.pool, fakeFiles{fx.fileID}, &fakeFrames{}, cacher).Generate(ctx, pendingLimit); err != nil || saved != 0 {
+		t.Fatalf("Generate = %d, %v; want the frame discarded", saved, err)
+	}
+	if path, source := fx.still(ctx, t); path != "" || source != "" {
+		t.Fatalf("still = %q from %q, want none for an extra without a file", path, source)
+	}
+}
+
+// A delete that waits on a frame being saved for its file clears the frame
+// once it goes ahead.
+func TestDeleteWaitingOnASavedFrameClearsIt(t *testing.T) {
+	ctx := t.Context()
+	fx := seedExtra(ctx, t, "")
+	tx, err := fx.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	// What SetStillIfSource does, held open.
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_extras SET still_path = 'frame', still_source = 'frame:1'
+		WHERE content_id = $1
+		  AND EXISTS (SELECT 1 FROM media_files f WHERE f.id = $2 AND f.extra_id = $1 FOR SHARE)`,
+		fx.extraID, fx.fileID); err != nil {
+		t.Fatal(err)
+	}
+	deleted := make(chan error, 1)
+	go func() {
+		_, err := fx.pool.Exec(ctx, `
+			WITH deleted AS (DELETE FROM media_files WHERE id = $1 RETURNING id, extra_id)`+
+			catalog.ClearEmptiedExtraStillsCTE+`
+			SELECT 1`, fx.fileID)
+		deleted <- err
+	}()
+	for waiting := false; !waiting; {
+		select {
+		case err := <-deleted:
+			t.Fatalf("delete finished (%v) without waiting on the file row", err)
+		default:
+		}
+		if err := fx.pool.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%DELETE FROM media_files WHERE id = $1%')`).
+			Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-deleted; err != nil {
+		t.Fatal(err)
+	}
+	if path, source := fx.still(ctx, t); path != "" || source != "" {
+		t.Fatalf("still = %q from %q, want none for an extra without a file", path, source)
 	}
 }
 

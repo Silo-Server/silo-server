@@ -212,6 +212,12 @@ since clients read an episode's show logo there; both are removed when a list
 request disables Logo images. `/Shows/Upcoming` episodes carry no series
 artwork, so they have neither these nor the parent poster and backdrop.
 
+Local extras in `/Items/{id}/SpecialFeatures` and `/Items/{id}/LocalTrailers`
+carry a `Primary` tag in `ImageTags` when they have a still: the image beside
+the extra's file, or a frame the server took from it. `/Items/{extraId}/Images/Primary`
+serves that 16:9 still, `Backdrop` and `Logo` serve the parent item's, and the
+request is allowed only when the parent item is.
+
 ### Extended artwork
 
 Movies and series that have a banner, landscape thumb, clear art or disc art
