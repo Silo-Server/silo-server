@@ -268,17 +268,40 @@ describe("media holds", () => {
     server({});
     const locks = fakeLocks();
     hangingProbe();
-    cancelBandwidthProbe();
+    const endStart = cancelBandwidthProbe();
     await settle();
     expect(await testConnectionSpeed()).toBe("playing");
 
-    playbackStartEnded();
+    endStart();
     await settle();
     expect(locks.held).toEqual([]);
     const result = testConnectionSpeed();
     await vi.waitFor(() => expect(fetchWithSession).toHaveBeenCalledTimes(1));
     stopBandwidthProbes();
     await expect(result).rejects.toThrow("could not be measured");
+  });
+
+  // A start the viewer replaced may fail after its replacement began.
+  it("keeps the hold of the start that replaced one that failed", async () => {
+    server({});
+    fakeLocks();
+    hangingProbe();
+    const endFirst = cancelBandwidthProbe();
+    cancelBandwidthProbe();
+    endFirst();
+    await settle();
+    expect(await testConnectionSpeed()).toBe("playing");
+  });
+
+  it("ends every start's hold when the player goes away", async () => {
+    server({});
+    const locks = fakeLocks();
+    hangingProbe();
+    cancelBandwidthProbe();
+    await settle();
+    playbackStartEnded();
+    await settle();
+    expect(locks.held).toEqual([]);
   });
 
   it("holds only automatic tests in the quiet period after a start that played", async () => {

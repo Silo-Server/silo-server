@@ -288,6 +288,8 @@ let cancelEpoch = 0;
  */
 let lastPlaybackStartAt: number | undefined;
 let otherTabPlaybackStartAt: number | undefined;
+/** Counts starts and source loads, so only the latest can end the hold. */
+let startGeneration = 0;
 /** How long after a playback start an automatic test holds off, at most. */
 const PLAYBACK_START_QUIET_MS = 60_000;
 /**
@@ -339,16 +341,15 @@ export function onMeteredConnection(): boolean {
 function handheldOnUnknownLink(): boolean {
   if (networkInformation()?.type !== undefined) return false;
   const formFactor = detectFormFactor();
-  return formFactor === "phone" || formFactor === "tablet" || iPadInDesktopMode();
-}
-
-/**
- * iPadOS Safari asks for desktop sites by default and so sends a Mac user
- * agent; its touch screen tells it from a Mac.
- */
-function iPadInDesktopMode(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /\bmacintosh\b/i.test(navigator.userAgent ?? "") && (navigator.maxTouchPoints ?? 0) > 1;
+  if (formFactor === "phone" || formFactor === "tablet") return true;
+  if (formFactor === "tv" || typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent ?? "";
+  // Two handhelds pass for desktops: iPadOS Safari asks for desktop sites and
+  // so sends a Mac user agent, which its touch screen gives away, and an
+  // Android tablet's browser may name neither "Mobile" nor "Tablet".
+  return (
+    (/\bmacintosh\b/i.test(ua) && (navigator.maxTouchPoints ?? 0) > 1) || /\bandroid\b/i.test(ua)
+  );
 }
 
 /**
@@ -661,10 +662,13 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
 /**
  * Called when playback starts and when a player loads a new source: stops a
  * running test so it does not compete with playback, and holds tests off
- * while the media loads. The next look tries again.
+ * while the media loads. The next look tries again. The returned function
+ * ends the hold for a start that loads nothing, unless a later start or
+ * source load has taken it over.
  */
-export function cancelBandwidthProbe(): void {
+export function cancelBandwidthProbe(): () => void {
   cancelEpoch++;
+  const generation = ++startGeneration;
   lastPlaybackStartAt = Date.now();
   stopProbe("playback");
   // Tell other tabs: a test running there stops now, and the lock keeps new
@@ -679,6 +683,9 @@ export function cancelBandwidthProbe(): void {
   } catch {
     // Local cancellation above already happened.
   }
+  return () => {
+    if (generation === startGeneration) playbackStartEnded();
+  };
 }
 
 /**

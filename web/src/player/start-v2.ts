@@ -11,7 +11,7 @@
  */
 
 import type { components } from "@/api/v2/schema";
-import { cancelBandwidthProbe, playbackStartEnded } from "./bandwidth-probe";
+import { cancelBandwidthProbe } from "./bandwidth-probe";
 import type { PlayerConfig } from "./context/PlayerConfigContext";
 import {
   isTransientPlayerRequestError,
@@ -111,15 +111,15 @@ export async function startPlaybackV2(
   options: { signal?: AbortSignal } = {},
 ): Promise<DecisionResponseV3> {
   // A background bandwidth probe would compete with the media about to load.
-  cancelBandwidthProbe();
+  const endStart = cancelBandwidthProbe();
   // A start that fails or returns no plan loads no media, so speed tests need
   // not wait for it.
   try {
     const decision = await requestPlaybackStartV2(config, body, options);
-    if (!decision.playback_plan) playbackStartEnded();
+    if (!decision.playback_plan) endStart();
     return decision;
   } catch (error) {
-    playbackStartEnded();
+    endStart();
     throw error;
   }
 }

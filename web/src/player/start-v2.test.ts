@@ -13,7 +13,7 @@ import { playbackCapabilitiesV2, resetPlaybackCapabilitiesV2, startPlaybackV2 } 
 const startEnded = vi.hoisted(() => vi.fn());
 vi.mock("./bandwidth-probe", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./bandwidth-probe")>()),
-  playbackStartEnded: startEnded,
+  cancelBandwidthProbe: () => startEnded,
 }));
 
 const config: PlayerConfig = {

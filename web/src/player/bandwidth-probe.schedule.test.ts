@@ -519,6 +519,19 @@ describe("scheduleBandwidthProbe", () => {
     expect(fetchWithSession).not.toHaveBeenCalled();
   });
 
+  it("runs no automatic test on an Android tablet that names neither Mobile nor Tablet", async () => {
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      userAgent:
+        "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 Chrome/128.0 Safari/537.36",
+    });
+    server({});
+    hangingProbe();
+    scheduleBandwidthProbe();
+    await readThenTest();
+    expect(fetchWithSession).not.toHaveBeenCalled();
+  });
+
   it("runs the automatic test on a desktop that cannot tell its link type", async () => {
     vi.stubGlobal("navigator", { ...navigator, userAgent: "Mozilla/5.0 (Macintosh) Firefox" });
     server({});
