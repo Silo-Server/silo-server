@@ -94,6 +94,12 @@ never seeks, except on a player that does not correct by rate. Rate and play
 state change when a command executes, never when it arrives, and users cannot
 change playback speed in a room.
 
+On the web, a member's player does not start playback on its own: it waits
+paused until a command has the room playing. A play that executes while the
+player's stream is still starting, before it has playable media, takes effect
+once it does, from the room's position at that moment, and a stream that fails
+before its first frame is rebuilt at that position.
+
 A player does not correct by rate when the rate cannot take effect or cannot be
 watched smoothly. Android measures the playhead while it nudges and stops
 nudging a mount that plays on at 1x (tunneled playback, passthrough audio, or a
