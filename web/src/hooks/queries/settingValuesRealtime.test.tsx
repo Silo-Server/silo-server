@@ -110,6 +110,36 @@ describe("useSettingValuesRealtime", () => {
     },
   );
 
+  // Another node can answer the first re-read before it has reloaded the
+  // administrator's defaults, so a server-default change is re-read once more
+  // after the server's cache TTL; a profile's own change is not.
+  it.each([
+    ["default", 2],
+    ["profile", 1],
+  ])("re-reads Home after a %s-scope Next Up change %d time(s)", async (scope, refreshes) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { queryClient, wrapper } = createHarness();
+      queryClient.setQueryData(mediaSurfaceKeys.refreshSignal(), 0);
+      render(<Subscriber />, { wrapper });
+      subscriptions
+        .find((entry) => entry.channel === "user_settings")
+        ?.handlers?.onEvent?.(
+          changedFrame({
+            key: SETTING_KEYS.UI_NEXT_UP_MODE,
+            scope,
+            ...(scope === "profile" ? { profile_id: "profile-1" } : {}),
+          }),
+        );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(refreshes);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refetches the library list when another device hides or shows a library", async () => {
     const { queryClient, wrapper } = createHarness();
     const librariesKey = libraryKeys.user("profile-1");

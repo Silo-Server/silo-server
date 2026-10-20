@@ -30,6 +30,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/themedelivery"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -38,6 +39,7 @@ import (
 // ItemsHandler serves Jellyfin browse/search/item endpoints.
 type ItemsHandler struct {
 	storeProvider    userstore.UserStoreProvider
+	adminDefaults    settingsresolve.ServerSettings
 	themeSongs       themeSongStore
 	themeRouter      *themedelivery.Router
 	themeFFmpegPath  func() string
@@ -2342,8 +2344,9 @@ func (h *ItemsHandler) HandleNextUp(w http.ResponseWriter, r *http.Request) {
 }
 
 // nextUpNewReleasesFirst reads the profile's ui.next_up_new_releases_first,
-// so Jellyfin clients see Next Up in the order Silo's Home uses. Without a
-// store, or when the read fails, it is the default, off.
+// so Jellyfin clients see Next Up in the order Silo's Home uses, including the
+// administrator's default for a profile that has not chosen. Without a store,
+// or when the read fails, it is the default, off.
 func (h *ItemsHandler) nextUpNewReleasesFirst(ctx context.Context, session *Session) bool {
 	if h.storeProvider == nil || session.ProfileID == "" {
 		return false
@@ -2352,7 +2355,7 @@ func (h *ItemsHandler) nextUpNewReleasesFirst(ctx context.Context, session *Sess
 	if err != nil {
 		return false
 	}
-	return access.ResolveViewerPreferences(ctx, store, session.ProfileID).NextUpNewReleasesFirst
+	return access.ResolveViewerPreferences(ctx, store, h.adminDefaults, session.ProfileID).NextUpNewReleasesFirst
 }
 
 // writeNextUpResponse renders a slice of catalog.NextUpResult into the

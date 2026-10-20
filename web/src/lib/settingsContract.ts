@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 21;
+export const SETTINGS_REVISION = 22;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -1501,6 +1501,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [1],
     resolutionOrder: ["profile", "default"],
     defaultValue: "combined",
+    adminDefault: true,
     label: "Next up episodes",
     description: "Whether upcoming episodes stay with Continue Watching or get their own row.",
     category: "navigation",
@@ -1520,6 +1521,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [18],
     resolutionOrder: ["profile", "default"],
     defaultValue: false,
+    adminDefault: true,
     label: "Show new episodes first",
     description:
       "Move a show you've caught up on to the front of Continue Watching and Next Up when a new episode or season arrives.",

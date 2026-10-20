@@ -102,15 +102,31 @@ source `default`: clients that only know the contract default keep treating it
 as inherited, and an explicit value at any scope, including one equal to the
 default, still wins. A stored administrator default the schema no longer
 accepts, or one that cannot be read, falls back to `default_value` rather than
-failing the read. `ui.title_art` declares it.
+failing the read. `ui.title_art`, `ui.next_up_mode` and
+`ui.next_up_new_releases_first` declare it.
 
-Only resolvers built with `WithAdminDefaults` read administrator defaults;
-today that is the settings-values handler, which is the only server-side
-reader of `ui.title_art`. Before a definition that another server path
-resolves (playback, home sections, jellycompat) declares `admin_default`, that
-path's resolver must be built the same way, or it will answer with
-`default_value` while the settings API answers with the administrator's
-value.
+Only resolvers built with `WithAdminDefaults` read administrator defaults. Each
+node builds one `config.AdminDefaults` in `cmd/silo` and passes it to every
+resolver that needs one: the settings-values handler, the viewer access and
+policy resolvers (whose scope carries the Next Up settings to home sections),
+the sections fetchers, progress sync, and jellycompat's Next Up ordering and
+scope resolvers. Before another server path resolves a key that declares
+`admin_default`, give its resolver the same instance, or it will answer with
+`default_value` while the settings API answers with the administrator's value.
+
+`config.AdminDefaults` is a per-node snapshot of every `defaults.<key>`, read in
+one query, because the viewer scope resolves on nearly every authenticated
+request. A fresh snapshot is read without a lock. `cmd/silo` runs its refresh
+loop, which reloads it every half TTL whether or not anything reads it; at most
+one refresh runs at a time, and a caller that still finds it expired keeps it
+while one refreshes in the background. A failed refresh keeps the last good snapshot and retries
+after a short delay. An admin write reloads the writing node's snapshot before
+the client event is published, and a read that began before the write can no
+longer publish over it. Every other node reloads on the admin-channel
+`settings_changed` event, which travels separately from the client event, so a
+client of another node can re-read before that node has reloaded; while a node
+can read its settings, a 10-second TTL bounds how long it serves the old
+default, and the web client re-reads once more after it.
 
 ## Preferences versus restrictions
 
