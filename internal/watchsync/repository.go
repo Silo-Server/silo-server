@@ -28,7 +28,7 @@ type Repository interface {
 	DeleteConnection(ctx context.Context, provider string, userID int, profileID string) error
 	ListConnectionsDueForSync(ctx context.Context, now time.Time) ([]Connection, error)
 	DeferConnectionsForAccount(ctx context.Context, provider, providerAccountID string, until time.Time, lastError string) (int, error)
-	CreateSyncRun(ctx context.Context, run SyncRun) (SyncRun, error)
+	AdmitSyncRun(ctx context.Context, conn Connection, run SyncRun) (syncRunAdmission, error)
 	CompleteSyncRun(ctx context.Context, run SyncRun) (SyncRun, error)
 	GetLatestSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error)
 	GetActiveSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error)
@@ -525,14 +525,14 @@ func (r *PostgresRepository) DeferConnectionsForAccount(
 	return int(tag.RowsAffected()), nil
 }
 
-func (r *PostgresRepository) CreateSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {
+func createSyncRun(ctx context.Context, tx pgx.Tx, run SyncRun) (SyncRun, error) {
 	if run.Status == "" {
 		run.Status = string(SyncRunStatusRunning)
 	}
 	if run.StartedAt.IsZero() {
 		run.StartedAt = time.Now().UTC()
 	}
-	row := r.pool.QueryRow(ctx, `
+	row := tx.QueryRow(ctx, `
 		INSERT INTO watch_provider_sync_runs (
 			connection_id, trigger, status, provider,
 			inbound_watched_found, inbound_watched_imported,
@@ -571,8 +571,8 @@ func (r *PostgresRepository) CreateSyncRun(ctx context.Context, run SyncRun) (Sy
 	return created, nil
 }
 
-func (r *PostgresRepository) CompleteSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {
-	row := r.pool.QueryRow(ctx, `
+func completeSyncRun(ctx context.Context, tx pgx.Tx, run SyncRun) (SyncRun, error) {
+	row := tx.QueryRow(ctx, `
 		UPDATE watch_provider_sync_runs
 		SET status = $2,
 			inbound_watched_found = $3,

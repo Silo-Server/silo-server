@@ -296,61 +296,19 @@ func (s *Service) DeleteConnection(ctx context.Context, userID int, profileID st
 }
 
 func (s *Service) RequestManualSync(ctx context.Context, userID int, profileID string, providerKey string) (ManualSyncResult, error) {
-	conn, ok, err := s.repo.GetConnection(ctx, providerKey, userID, profileID)
+	admitted, err := s.repo.AdmitSyncRun(ctx, Connection{
+		Provider: providerKey, UserID: userID, ProfileID: profileID,
+	}, SyncRun{Trigger: manualSyncTrigger, StartedAt: s.now()})
 	if err != nil {
 		return ManualSyncResult{}, err
 	}
-	if !ok {
-		return ManualSyncResult{}, ErrConnectionNotFound
+	if admitted.RetryAfterSeconds > 0 {
+		return ManualSyncResult{}, SyncCooldownError{RetryAfterSeconds: admitted.RetryAfterSeconds}
 	}
-	// A manual sync against a rate-limited provider would fail immediately
-	// while still spending the account's request quota, so honor the deferral.
-	if conn.RateLimitedUntil != nil {
-		if remaining := conn.RateLimitedUntil.Sub(s.now()); remaining > 0 {
-			return ManualSyncResult{}, SyncCooldownError{RetryAfterSeconds: ceilSeconds(remaining)}
-		}
+	if !admitted.Created {
+		return ManualSyncResult{Run: admitted.Run}, nil
 	}
-
-	for {
-		active, ok, err := s.repo.GetActiveSyncRun(ctx, conn.ID)
-		if err != nil {
-			return ManualSyncResult{}, err
-		}
-		if !ok {
-			break
-		}
-		if !active.StartedAt.IsZero() && s.now().Sub(active.StartedAt) <= manualSyncTimeout {
-			return ManualSyncResult{Run: active}, nil
-		}
-		active.Status = string(SyncRunStatusFailed)
-		active.Error = "watch provider sync timed out before completion"
-		if _, err := s.completeSyncRun(ctx, active); err != nil {
-			return ManualSyncResult{}, err
-		}
-	}
-
-	if latest, ok, err := s.repo.GetLatestSyncRun(ctx, conn.ID); err != nil {
-		return ManualSyncResult{}, err
-	} else if ok {
-		reference := latest.StartedAt
-		if latest.CompletedAt != nil {
-			reference = *latest.CompletedAt
-		}
-		if retryAfter := retryAfterSeconds(s.now(), reference, manualSyncCooldown); retryAfter > 0 {
-			return ManualSyncResult{}, SyncCooldownError{RetryAfterSeconds: retryAfter}
-		}
-	}
-
-	run, err := s.repo.CreateSyncRun(ctx, SyncRun{
-		ConnectionID: conn.ID,
-		Trigger:      "manual",
-		Status:       string(SyncRunStatusRunning),
-		Provider:     conn.Provider,
-		StartedAt:    s.now(),
-	})
-	if err != nil {
-		return ManualSyncResult{}, err
-	}
+	conn, run := admitted.Connection, admitted.Run
 
 	go func() {
 		runCtx, cancel := context.WithTimeout(context.Background(), manualSyncTimeout)
@@ -746,28 +704,21 @@ func (s *Service) SyncDueConnections(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) SyncConnection(ctx context.Context, conn Connection, trigger string) (err error) {
-	run := SyncRun{
-		ConnectionID: conn.ID,
-		Trigger:      trigger,
-		Status:       string(SyncRunStatusRunning),
-		Provider:     conn.Provider,
-		StartedAt:    s.now(),
-	}
+func (s *Service) SyncConnection(ctx context.Context, conn Connection, trigger string) error {
 	if conn.ID == "" {
 		return fmt.Errorf("connection id is required")
 	}
-	unlock, ok := s.tryLock(conn.ID)
-	if !ok {
-		return fmt.Errorf("watch provider sync already running for connection %s", conn.ID)
-	}
-	defer unlock()
-
-	run, err = s.repo.CreateSyncRun(ctx, run)
+	admitted, err := s.repo.AdmitSyncRun(ctx, conn, SyncRun{Trigger: trigger, StartedAt: s.now()})
 	if err != nil {
 		return err
 	}
-	_, err = s.executeSyncRun(ctx, conn, run)
+	if !admitted.Created {
+		return nil
+	}
+	// Both producers reserve before taking the local execution guard. Taking
+	// the guard first could make the manual worker and scheduled admission
+	// each skip in favor of the other, leaving neither to perform the sync.
+	_, err = s.syncConnectionWithRun(ctx, admitted.Connection, admitted.Run)
 	return err
 }
 
@@ -1098,7 +1049,11 @@ func providerSyncNeedsAccessToken(caps Capabilities) bool {
 func (s *Service) completeSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {
 	completedAt := s.now()
 	run.CompletedAt = &completedAt
-	return s.repo.CompleteSyncRun(ctx, run)
+	// Persist terminal state even after a manual deadline or task cancellation.
+	// Provider work continues to use its original context.
+	completeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signalsNotifyTimeout)
+	defer cancel()
+	return s.repo.CompleteSyncRun(completeCtx, run)
 }
 
 func retryAfterSeconds(now time.Time, reference time.Time, cooldown time.Duration) int {

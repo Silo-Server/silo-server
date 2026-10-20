@@ -123,6 +123,29 @@ Several items with one key follow these rules:
   names one. Plugin tombstones carry only the key, so one whose rows name more
   than one kind of title changes nothing and adds a warning.
 
+## Sync-run admission
+
+Manual admission locks the current connection row for its provider, account and
+profile in a short PostgreSQL transaction. Provider deferral, active-run
+coalescing, stale-run retirement, the one-hour manual cooldown and insertion
+commit together. Queued or running rows through the existing ten-minute manual
+window coalesce. Older active rows are marked failed; that retirement commits
+even when its completion time causes a cooldown response.
+
+Scheduled insertion takes the same row lock and skips a live manual reservation
+within that window. Scheduled runs retain their existing overlap behavior with
+other scheduled runs and have no new timeout or takeover policy. A manual
+request can still retire an older scheduled row without stopping that worker.
+Both producers reserve before taking the process-local execution guard, and only
+a newly created reservation starts work.
+
+Completion takes the same short row lock, preserving real late results and
+counters even after timeout retirement. Terminal persistence uses a bounded
+context detached from work cancellation. No transaction spans provider work.
+All API nodes must use this admission boundary for the guarantee to hold; older
+nodes can still insert independently during a mixed-version rollout. Dispatch
+remains process-local, without durable replay or exactly-once provider effects.
+
 ## Watched-history export
 
 A sync drains a connection's whole pending history-export backlog, oldest play

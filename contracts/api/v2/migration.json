@@ -42477,7 +42477,7 @@
       },
       "notes": "Native v2 profile-scoped lifecycle; watch-provider sync runs use a bounded recent window (default 10, maximum 50), without continuation. External exchanges and mutations have no durable replay guarantee.",
       "retry_safety": "non_retryable",
-      "retry_safety_note": "Active-run lookup, cooldown check and run creation are separate database calls, and dispatch is process-local. Concurrent API nodes can create multiple runs. Add an atomic durable reservation and recoverable dispatch before advertising coalescing or automatic retry."
+      "retry_safety_note": "Manual coalescing, cooldown and reservation commit under the connection row lock. Scheduled admission skips a live manual run; scheduled overlap and manual timeout are unchanged. All nodes must use this boundary. Process-local dispatch has no durable replay guarantee; automatic retry remains unsafe."
     },
     {
       "listener": "api",
