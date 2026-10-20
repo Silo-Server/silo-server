@@ -126,6 +126,7 @@ describe("EnginePlayer", () => {
       "seeking",
       "seeked",
       "ended",
+      "stalled",
     ]) {
       element.addEventListener(type, () => events.push(type));
     }
@@ -190,6 +191,16 @@ describe("EnginePlayer", () => {
       "canplay",
     ]);
     expect(player.readyState).toBe(4);
+    player.destroy();
+  });
+
+  it("reports a failed read from its source as a stalled media element does", async () => {
+    const { player, worker } = start();
+    await open(worker);
+    events.length = 0;
+    worker.emit({ type: "read-failed" });
+    await settle();
+    expect(events).toEqual(["stalled"]);
     player.destroy();
   });
 

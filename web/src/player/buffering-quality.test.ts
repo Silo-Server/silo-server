@@ -120,3 +120,52 @@ it("omits an unknown delivered bitrate from the summary", () => {
   c.stop(1000);
   expect(summaries[0]).not.toHaveProperty("delivered_kbps");
 });
+
+it("tracks and reports stalls in a Watch Party room without acting, then starts over on leaving", () => {
+  const outputs: unknown[] = [];
+  const summaries: BufferingSummary[] = [];
+  const c = new BufferingQualityController(
+    "always",
+    (output) => outputs.push(output),
+    0,
+    (_plan, summary) => summaries.push(summary),
+  );
+  c.event({ type: "plan_adopted", plan }, 0);
+  c.event({ type: "playing" }, 0);
+  c.setSuspended(true, 15000);
+  c.event({ type: "waiting" }, 20000);
+  for (let t = 20100; t <= 30000; t += 100) c.tick(t);
+  c.event({ type: "playing" }, 30000);
+  expect(outputs).toEqual([]);
+  // Leaving is not a plan boundary, and the room's long stall is forgotten.
+  c.setSuspended(false, 40000);
+  c.event({ type: "waiting" }, 50000);
+  c.event({ type: "playing" }, 51500);
+  expect(outputs).toEqual([]);
+  c.event({ type: "waiting" }, 60000);
+  for (let t = 60100; t <= 66000; t += 100) c.tick(t);
+  expect(outputs).toHaveLength(1);
+  c.stop(70000);
+  expect(summaries).toHaveLength(1);
+  expect(summaries[0]).toMatchObject({ stall_count: 3, buffering_action: "lowered" });
+});
+
+it("counts a stall that a pause ends in the summary's time but not its count", () => {
+  const summaries: BufferingSummary[] = [];
+  const c = new BufferingQualityController(
+    "never",
+    () => {},
+    0,
+    (_plan, summary) => summaries.push(summary),
+  );
+  c.event({ type: "plan_adopted", plan }, 0);
+  c.event({ type: "playing" }, 0);
+  c.event({ type: "waiting" }, 20000);
+  c.event({ type: "pause" }, 23000);
+  c.stop(30000);
+  expect(summaries[0]).toMatchObject({
+    stall_count: 0,
+    stall_total_ms: 3000,
+    stall_longest_ms: 3000,
+  });
+});

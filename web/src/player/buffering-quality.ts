@@ -213,6 +213,8 @@ export class BufferingQualityController {
   /** A pill waiting behind a higher-priority one, with its timer frozen. */
   private deferredPill: BufferingPill | null = null;
   private obscured = false;
+  /** In a Watch Party room: stalls are tracked and reported, but nothing acts. */
+  private suspended = false;
   /** The latest Auto lowering's step-down estimate, for this playback attempt. */
   private keptEstimate?: number;
 
@@ -242,6 +244,27 @@ export class BufferingQualityController {
       this.deferredPill = this.pill;
       this.pill = null;
     } else if (!value && this.deferredPill) this.show(this.deferredPill, now, false);
+  }
+
+  /**
+   * Joining or leaving a Watch Party room. Inside one the controller does not
+   * act: no trigger, pill or notice, and summaries report `none`. Leaving
+   * starts fresh stall history with the grace over. Neither is a plan boundary.
+   */
+  setSuspended(value: boolean, now: number) {
+    this.tick(now);
+    if (value === this.suspended) return;
+    this.suspended = value;
+    if (value) {
+      this.pill = null;
+      this.deferredPill = null;
+      this.pending = undefined;
+      // A room start is a new start; it does not repeat a lowering.
+      this.keep(undefined);
+    } else {
+      this.graceEndsAt = Math.min(this.graceEndsAt ?? now, now);
+      this.resetHistory(now);
+    }
   }
 
   /** The player stops: report the plan that was playing. */
@@ -278,7 +301,7 @@ export class BufferingQualityController {
       case "waiting":
         this.playing = false;
         if (event.cause || this.paused) {
-          this.clearStall();
+          this.endStallUncounted(now);
           this.waiting = false;
           break;
         }
@@ -290,17 +313,17 @@ export class BufferingQualityController {
       case "pause":
         this.paused = true;
         this.playing = false;
-        this.clearStall();
+        this.endStallUncounted(now);
         this.waiting = false;
         break;
       case "seek":
         // A seek within the buffer keeps playing; one that runs out of data
         // reports a `waiting` with its cause.
-        this.clearStall();
+        this.endStallUncounted(now);
         this.waiting = false;
         break;
       case "reload":
-        this.clearStall();
+        this.endStallUncounted(now);
         this.waiting = false;
         this.playing = false;
         break;
@@ -503,6 +526,19 @@ export class BufferingQualityController {
     this.stallBegan = undefined;
   }
 
+  /**
+   * A pause, seek or reload ends a stall without counting it; its time so far
+   * still counts in the summary's total and longest.
+   */
+  private endStallUncounted(now: number) {
+    if (this.stallBegan !== undefined && this.summary) {
+      const duration = Math.max(0, now - this.stallBegan);
+      this.summary.stall_total_ms += duration;
+      this.summary.stall_longest_ms = Math.max(this.summary.stall_longest_ms, duration);
+    }
+    this.clearStall();
+  }
+
   /** Starts the stall history over; a stall in progress is timed again from now. */
   private resetHistory(now: number) {
     this.stalls = [];
@@ -574,6 +610,7 @@ export class BufferingQualityController {
     // Suppressions leave the history in place for a later evaluation.
     if (
       !this.plan ||
+      this.suspended ||
       this.paused ||
       this.outage ||
       this.answered ||

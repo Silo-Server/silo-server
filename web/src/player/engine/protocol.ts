@@ -81,6 +81,8 @@ export type WorkerToPageMessage =
    * while the AudioContext is suspended for lack of a user gesture.
    */
   | { type: "audio-buffered"; generation: number }
+  /** A read from the source failed and will be retried, or has given up. */
+  | { type: "read-failed" }
   | {
       type: "error";
       generation: number | null;

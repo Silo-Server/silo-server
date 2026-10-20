@@ -549,6 +549,11 @@ export class EnginePlayer {
       case "audio-buffered":
         if (message.generation === this.generation) this.audioBuffered = true;
         return;
+      case "read-failed":
+        // The page treats this like the element's own \`stalled\`: the
+        // transport is failing, so the wait is an outage, not a slow link.
+        this.dispatch("stalled");
+        break;
       case "error":
         if (message.generation === null || message.generation === this.generation) {
           if (message.classification === ENGINE_VIDEO_DECODE_FAILED && this.restartDecoding()) {

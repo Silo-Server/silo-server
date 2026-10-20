@@ -31,7 +31,7 @@ export function BufferingQualityPill({
 }: BufferingQualityPillProps) {
   const titleId = useId();
   const primaryRef = useRef<HTMLButtonElement>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => performance.now());
   // Decided once as the pill appears; later keyboard input must not pull
   // focus onto it.
   const [takeFocus] = useState(focusOnMount);
@@ -42,7 +42,7 @@ export function BufferingQualityPill({
 
   useEffect(() => {
     if (deadlineMs === null) return;
-    const interval = window.setInterval(() => setNow(Date.now()), 50);
+    const interval = window.setInterval(() => setNow(performance.now()), 50);
     return () => window.clearInterval(interval);
   }, [deadlineMs]);
 

@@ -5845,6 +5845,19 @@ describe("VideoPlayer buffering pill", () => {
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
   });
 
+  it("treats a wait with no data arriving as an outage until data comes back", () => {
+    const { video } = askPlayer();
+    // The browser received nothing for its idle time.
+    fireEvent(video, new Event("stalled"));
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(8_000));
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+    // Data arrives again but too slowly: from now it is a stall.
+    fireEvent(video, new Event("progress"));
+    act(() => vi.advanceTimersByTime(6_200));
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+  });
+
   it("shows the buffering notice for five seconds", async () => {
     const rendered = renderPlayer({
       bufferingMode: "always",
@@ -5868,6 +5881,70 @@ describe("VideoPlayer buffering pill", () => {
     expect(screen.getByText("Can't lower quality for this video")).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(300));
     expect(screen.queryByText("Can't lower quality for this video")).toBeNull();
+  });
+});
+
+describe("VideoPlayer hls.js request timeouts", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    hlsJS.supported = false;
+    hlsJS.latest = null;
+  });
+
+  async function stallAfterTimeout(loaded: number) {
+    hlsJS.supported = true;
+    const rendered = renderPlayer({
+      bufferingMode: "ask",
+      qualityPreference: "auto",
+      plan: fixturePlanV3({
+        stream: {
+          url: "/playback/transcode/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+        available_qualities: [
+          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
+          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
+        ],
+        source: { ...directPlan.source, bitrate_kbps: 20_000 },
+      }),
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    const video = rendered.container.querySelector("video");
+    if (!video || !hlsJS.latest) throw new Error("expected hls.js on a video element");
+    markPlaying(video);
+    fireEvent.playing(video);
+    act(() => vi.advanceTimersByTime(20_000));
+    act(() =>
+      hlsJS.latest?.emit("error", {
+        type: "networkError",
+        details: "fragLoadTimeOut",
+        fatal: false,
+        stats: { loaded },
+      }),
+    );
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    return screen.queryByRole("button", { name: "Lower quality" });
+  }
+
+  it("treats a timeout with no data received as an outage", async () => {
+    expect(await stallAfterTimeout(0)).toBeNull();
+  });
+
+  it("treats a timeout on a request that was still receiving as a slow link", async () => {
+    expect(await stallAfterTimeout(2_000_000)).not.toBeNull();
   });
 });
 

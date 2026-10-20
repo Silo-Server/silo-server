@@ -1,5 +1,5 @@
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
-import { useAutoQualityDownshift } from "../hooks/useAutoQualityDownshift";
+import { MEDIA_ENDED_EVENT, useAutoQualityDownshift } from "../hooks/useAutoQualityDownshift";
 import type {
   BufferingAnswer,
   BufferingMode,
@@ -558,6 +558,9 @@ export function VideoPlayer({
   // When hls.js last reported a failed load (not a timeout). Buffering soon
   // after one is an outage, not a slow link, for the Auto downshift.
   const lastTransportErrorAtRef = useRef(0);
+  // The trouble came from the element's own `stalled`: no data arrived for the
+  // browser's idle time. The next data that arrives ends it.
+  const transportStalledRef = useRef(false);
   const reportedPlanFailureKeyRef = useRef<string | null>(null);
   // Whether the current transport has shown a frame. A network error after
   // that is a lost connection, not a route that cannot play. Reset whenever
@@ -2554,10 +2557,14 @@ export function VideoPlayer({
 
             hls.on(Hls.Events.ERROR, (_event, data) => {
               // A load error (refused, reset, HTTP failure) is the transport
-              // failing; a load timeout can be a slow link and is left out.
+              // failing, and so is a timeout with no data received. hls.js
+              // times the whole load, so a timeout on a request that was
+              // still receiving is a slow link and is left out.
+              const details = String(data.details);
+              const loaded = (data as { stats?: { loaded?: number } }).stats?.loaded ?? 0;
               if (
                 data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-                String(data.details).endsWith("LoadError")
+                (details.endsWith("LoadError") || (details.endsWith("LoadTimeOut") && loaded <= 0))
               ) {
                 lastTransportErrorAtRef.current = Date.now();
               }
@@ -2630,6 +2637,10 @@ export function VideoPlayer({
               attemptAutoplayWhenReady();
             });
 
+            hls.on(Hls.Events.MEDIA_ENDED, (_event, data) => {
+              if ((data as { stalled?: boolean }).stalled)
+                video.dispatchEvent(new Event(MEDIA_ENDED_EVENT));
+            });
             hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
               const { loaded, loading } = data.frag.stats;
               const ms = loading.end - loading.first;
@@ -2927,7 +2938,13 @@ export function VideoPlayer({
       clearBuffering();
     };
     const onDurationChange = () => applyElementDuration(video);
-    const onProgress = () => setBuffered(video.buffered);
+    const onProgress = () => {
+      setBuffered(video.buffered);
+      if (transportStalledRef.current) {
+        transportStalledRef.current = false;
+        lastTransportErrorAtRef.current = 0;
+      }
+    };
     const onVolumeChange = () => {
       // A room seek pre-roll mutes the element for a moment. That mute is not
       // the viewer's, so it is neither shown nor saved; a viewer unmuting
@@ -2977,12 +2994,17 @@ export function VideoPlayer({
       }
     };
     const onStalled = () => {
+      // The browser received no data for its idle time (the engine reports a
+      // failed read the same way): the transport is failing, not slow.
+      transportStalledRef.current = true;
+      lastTransportErrorAtRef.current = Date.now();
       if (watchTogetherRoomActive && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportBuffering();
       }
     };
     const onError = () => {
       if (video.error) {
+        if (video.error.code === MEDIA_ERR_NETWORK) lastTransportErrorAtRef.current = Date.now();
         if (video.error.code === MEDIA_ERR_NETWORK && reportConnectionLost()) return;
         const message = video.error.message || "Unknown media element error";
         if (!reportCurrentPlanFailure({ classification: "decoder_error", message })) {
@@ -4325,7 +4347,8 @@ export function VideoPlayer({
   const bufferingQuality = useAutoQualityDownshift({
     videoRef,
     planRevision,
-    enabled: !watchTogetherRoomActive,
+    enabled: true,
+    suspended: watchTogetherRoomActive || !!watchTogetherRoomId,
     sessionId: bufferingTitleId ?? sessionId,
     attemptId: playbackAttemptId,
     mode: bufferingMode ?? "never",

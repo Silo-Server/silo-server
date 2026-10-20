@@ -21,6 +21,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 
 /** How often the controller's timers are advanced. */
 const TICK_MS = 100;
+/**
+ * hls.js steps over a small hole in the buffer by setting `currentTime` a
+ * fraction of a second ahead while playback is starved. A seek that short and
+ * forward during a stall is that, not the viewer's, and must not erase it.
+ */
+const GAP_SKIP_MAX_SECONDS = 1;
+
+/** Stalls and pill timers use elapsed real time, not the system clock. */
+const now = () => performance.now();
 
 /** Media buffered past the playhead, in milliseconds; 0 when none is. */
 function bufferedAheadMs(video: HTMLVideoElement): number {
@@ -35,8 +44,12 @@ function bufferedAheadMs(video: HTMLVideoElement): number {
 
 interface Options {
   videoRef: RefObject<HTMLVideoElement | null>;
-  /** Off inside a Watch Party room, which has its own lower-quality offer. */
   enabled: boolean;
+  /**
+   * Inside a Watch Party room, which has its own lower-quality offer: stalls
+   * are still tracked and summarized, but the controller does not act.
+   */
+  suspended?: boolean;
   /** The title; a new one starts a new controller. */
   sessionId: string;
   /** The playback attempt; a new start within the title drops the kept estimate. */
@@ -92,6 +105,12 @@ function samePill(a: BufferingPillState | null, b: BufferingPillState | null) {
   );
 }
 
+/**
+ * Dispatched on the element when hls.js finds the stream ended while the
+ * element itself fires no `ended`; the wait that follows is the end of media.
+ */
+export const MEDIA_ENDED_EVENT = "silo:media-ended";
+
 export function useAutoQualityDownshift(options: Options) {
   const latest = useRef(options);
   useEffect(() => {
@@ -134,12 +153,12 @@ export function useAutoQualityDownshift(options: Options) {
           latest.current.onReplan(output.body, (_id, revision, sent) => {
             if (controller.current !== c) return;
             requestedPlan.current = revision;
-            if (sent === false) c.event({ type: "replan_failed", unsent: true }, Date.now());
+            if (sent === false) c.event({ type: "replan_failed", unsent: true }, now());
           });
         }
         if (output.type === "notice") latest.current.onNotice(output.key);
       },
-      Date.now(),
+      now(),
       (plan, summary) => latest.current.onSummary?.(plan, summary, pageEnding.current),
       (kbps) => latest.current.onKeptEstimate?.(kbps),
     );
@@ -149,7 +168,7 @@ export function useAutoQualityDownshift(options: Options) {
     // keeps playing unreported until its next adoption.
     const pagehide = () => {
       pageEnding.current = true;
-      c.stop(Date.now());
+      c.stop(now());
       pageEnding.current = false;
     };
     window.addEventListener("pagehide", pagehide);
@@ -157,7 +176,7 @@ export function useAutoQualityDownshift(options: Options) {
     attempt.current = latest.current.attemptId;
     return () => {
       window.removeEventListener("pagehide", pagehide);
-      c.stop(Date.now());
+      c.stop(now());
       controller.current = null;
       // The next controller starts without a kept estimate and could never
       // discard this one, so the session stops repeating it.
@@ -168,13 +187,14 @@ export function useAutoQualityDownshift(options: Options) {
     const c = controller.current;
     if (!c || options.attemptId === attempt.current) return;
     attempt.current = options.attemptId;
-    c.event({ type: "new_attempt" }, Date.now());
+    c.event({ type: "new_attempt" }, now());
   }, [options.attemptId, options.enabled, options.sessionId]);
   useEffect(() => {
     const c = controller.current;
     if (!c) return;
     c.mode = options.mode;
-    c.setObscured(options.obscured, Date.now());
+    c.setSuspended(options.suspended ?? false, now());
+    c.setObscured(options.obscured, now());
     const isNewPlan = adoptedPlan.current !== options.planRevision;
     adoptedPlan.current = options.planRevision;
     c.event(
@@ -183,7 +203,7 @@ export function useAutoQualityDownshift(options: Options) {
         plan: { ...options.plan, adoption_id: String(options.planRevision) },
         controllerInitiated: requestedPlan.current === options.planRevision,
       },
-      Date.now(),
+      now(),
     );
     if (isNewPlan) requestedPlan.current = undefined;
     const video = options.videoRef.current;
@@ -191,15 +211,15 @@ export function useAutoQualityDownshift(options: Options) {
     if (isNewPlan && video) {
       // A plan adopted while the element is already playing fires no `playing`.
       if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA)
-        c.event({ type: "playing" }, Date.now());
+        c.event({ type: "playing" }, now());
       else if (
         latest.current.playIntent?.() &&
         video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
       ) {
         // The element waits for data before it plays, and fires no `waiting`.
         starting.current = true;
-        c.event({ type: "play" }, Date.now());
-        c.event({ type: "waiting" }, Date.now());
+        c.event({ type: "play" }, now());
+        c.event({ type: "waiting" }, now());
       }
     }
   }, [
@@ -207,6 +227,7 @@ export function useAutoQualityDownshift(options: Options) {
     options.planRevision,
     options.mode,
     options.obscured,
+    options.suspended,
     options.enabled,
     options.sessionId,
     options.videoRef,
@@ -223,32 +244,42 @@ export function useAutoQualityDownshift(options: Options) {
     // A wait that began with media buffered, until playback resumes or the
     // buffer runs down and makes it a stall.
     let rendererWait = false;
+    // Buffering after a seek or a source reload is theirs until playback runs
+    // again, including a seek made while paused.
+    let seekSincePlaying = false;
+    let reloadSincePlaying = false;
+    let lastPosition = video.currentTime;
     const syncTrouble = () => {
       const next = latest.current.transportTrouble?.() ?? false;
       if (next !== trouble)
-        c.event({ type: next ? "transport_error_start" : "transport_error_end" }, Date.now());
+        c.event({ type: next ? "transport_error_start" : "transport_error_end" }, now());
       trouble = next;
     };
     const send = (type: BufferingEvent["type"], cause?: BufferingEvent["cause"]) => {
       syncTrouble();
-      c.event({ type, cause }, Date.now());
+      c.event({ type, cause }, now());
       refresh();
     };
     const playing = () => {
       stalledAt = undefined;
       rendererWait = false;
+      seekSincePlaying = false;
+      reloadSincePlaying = false;
       starting.current = false;
       send("playing");
     };
     const waiting = () => {
       stalledAt = video.currentTime;
-      const cause = video.seeking
-        ? "seek"
-        : video.paused
-          ? "pause"
-          : bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS
-            ? "renderer"
-            : undefined;
+      const cause =
+        video.seeking || seekSincePlaying
+          ? "seek"
+          : reloadSincePlaying
+            ? "reload"
+            : video.paused
+              ? "pause"
+              : bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS
+                ? "renderer"
+                : undefined;
       rendererWait = cause === "renderer";
       send("waiting", cause);
     };
@@ -259,19 +290,24 @@ export function useAutoQualityDownshift(options: Options) {
     };
     const play = () => send("play");
     const seek = () => {
+      const forward = video.currentTime - (stalledAt ?? lastPosition);
+      if (stalledAt !== undefined && forward >= 0 && forward <= GAP_SKIP_MAX_SECONDS) return;
       stalledAt = undefined;
       rendererWait = false;
+      seekSincePlaying = true;
       send("seek");
     };
     const reload = () => {
       stalledAt = undefined;
       rendererWait = false;
+      reloadSincePlaying = true;
       send("reload");
       // The new transport empties the element as it attaches; its start is
       // still the plan's wait.
       if (starting.current) send("waiting");
     };
     const timeupdate = () => {
+      lastPosition = video.currentTime;
       if (stalledAt !== undefined && video.currentTime > stalledAt) playing();
     };
     const events = {
@@ -282,6 +318,8 @@ export function useAutoQualityDownshift(options: Options) {
       seeking: seek,
       emptied: reload,
       ended: pause,
+      // hls.js stalled at the end of the stream without the element ending.
+      [MEDIA_ENDED_EVENT]: pause,
       timeupdate,
     };
     for (const [name, handler] of Object.entries(events)) video.addEventListener(name, handler);
@@ -290,9 +328,9 @@ export function useAutoQualityDownshift(options: Options) {
       syncTrouble();
       if (rendererWait && bufferedAheadMs(video) <= RENDERER_WAIT_BUFFER_MS) {
         rendererWait = false;
-        c.event({ type: "waiting" }, Date.now());
+        c.event({ type: "waiting" }, now());
       }
-      c.tick(Date.now());
+      c.tick(now());
       refresh();
     }, TICK_MS);
     return () => {
@@ -303,7 +341,7 @@ export function useAutoQualityDownshift(options: Options) {
   }, [options.videoRef, options.enabled, options.sessionId, refresh]);
   const answer = useCallback(
     (type: BufferingAnswer | "quality_changed") => {
-      controller.current?.event({ type }, Date.now());
+      controller.current?.event({ type }, now());
       refresh();
     },
     [refresh],

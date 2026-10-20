@@ -176,7 +176,12 @@ async function open(spec: EngineSourceSpec): Promise<void> {
     source: new UrlSource(spec.url, {
       requestInit: { headers: spec.headers },
       maxCacheSize: URL_CACHE_BYTES,
-      getRetryDelay: (attempts) => (attempts < 4 ? Math.min(4, 0.5 * 2 ** attempts) : null),
+      getRetryDelay: (attempts) => {
+        // A failed read is the transport failing; the page treats it as an
+        // outage rather than a slow link.
+        post({ type: "read-failed" });
+        return attempts < 4 ? Math.min(4, 0.5 * 2 ** attempts) : null;
+      },
     }),
   });
   try {

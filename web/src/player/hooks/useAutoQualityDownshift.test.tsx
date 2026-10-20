@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { useAutoQualityDownshift } from "./useAutoQualityDownshift";
+import { MEDIA_ENDED_EVENT, useAutoQualityDownshift } from "./useAutoQualityDownshift";
 import type { BufferingPlan } from "../buffering-quality";
 
 const plan: BufferingPlan = {
@@ -32,6 +32,7 @@ function setup() {
     onSummary: vi.fn(),
     onKeptEstimate: vi.fn(),
     attemptId: "attempt-1" as string | null,
+    suspended: false,
   };
   const hook = renderHook((props) => useAutoQualityDownshift(props), { initialProps: options });
   const send = (name: string) =>
@@ -261,4 +262,55 @@ it("reports the playing plan when the page closes", () => {
   h.unmount();
   // Stopping again at unmount reports nothing more.
   expect(h.options.onSummary).toHaveBeenCalledTimes(1);
+});
+
+it("keeps a stall that hls.js steps over a hole in", () => {
+  const h = setup();
+  const video = h.options.videoRef.current;
+  Object.defineProperty(video, "currentTime", { value: 30, configurable: true, writable: true });
+  h.send("waiting");
+  h.advance(2_000);
+  // The next fragment leaves a 0.08 s hole; hls.js sets currentTime past it.
+  video.currentTime = 30.08;
+  h.send("seeking");
+  h.advance(4_100);
+  expect(h.options.onReplan).toHaveBeenCalledTimes(1);
+});
+
+it("treats the wait after a seek made while paused as the seek's", () => {
+  const h = setup();
+  const video = h.options.videoRef.current;
+  Object.defineProperty(video, "currentTime", { value: 30, configurable: true, writable: true });
+  h.send("pause");
+  video.currentTime = 600;
+  h.send("seeking");
+  h.send("play");
+  h.send("waiting");
+  h.advance(8_000);
+  expect(h.options.onReplan).not.toHaveBeenCalled();
+});
+
+it("does not count the wait at the end of a stream hls.js found ended", () => {
+  const h = setup();
+  h.send("waiting");
+  h.advance(2_000);
+  h.send(MEDIA_ENDED_EVENT);
+  h.advance(10_000);
+  expect(h.options.onReplan).not.toHaveBeenCalled();
+});
+
+it("tracks stalls in a Watch Party room without lowering", () => {
+  const h = setup();
+  h.rerender({ ...h.options, suspended: true });
+  h.send("waiting");
+  h.advance(8_000);
+  h.send("playing");
+  expect(h.options.onReplan).not.toHaveBeenCalled();
+  // Joining is not a plan boundary: nothing is reported until the plan ends.
+  expect(h.options.onSummary).not.toHaveBeenCalled();
+  h.unmount();
+  expect(h.options.onSummary.mock.calls[0]![1]).toMatchObject({
+    stall_count: 1,
+    buffering_action: "none",
+  });
 });
