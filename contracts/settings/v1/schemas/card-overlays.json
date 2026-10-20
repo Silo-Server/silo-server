@@ -144,8 +144,9 @@
           "maximum": 3
         },
         "fontWeight": {
+          "description": "Text weight: regular 400, semibold 600, extrabold 800. The steps are 200 apart so each reads differently at badge sizes.",
           "type": "string",
-          "enum": ["medium", "semibold", "bold", "black"]
+          "enum": ["regular", "semibold", "extrabold"]
         },
         "uppercase": { "type": "boolean" },
         "shadow": {

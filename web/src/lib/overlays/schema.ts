@@ -74,7 +74,7 @@ export function isOverlayImageRef(v: unknown): v is string {
 }
 
 const SHAPES: readonly OverlayShape[] = ["pill", "rounded", "square"];
-const FONT_WEIGHTS: readonly OverlayFontWeight[] = ["medium", "semibold", "bold", "black"];
+const FONT_WEIGHTS: readonly OverlayFontWeight[] = ["regular", "semibold", "extrabold"];
 
 export const STYLE_SIZE_MIN = 0.75;
 export const STYLE_SIZE_MAX = 2;

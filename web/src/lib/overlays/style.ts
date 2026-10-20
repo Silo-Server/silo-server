@@ -8,11 +8,12 @@ import type {
   WatchStatusMode,
 } from "./types";
 
+// 200 apart, since closer weights look alike at badge sizes. 800 is also the
+// heaviest weight the UI font has.
 const FONT_WEIGHTS: Record<OverlayFontWeight, number> = {
-  medium: 500,
+  regular: 400,
   semibold: 600,
-  bold: 700,
-  black: 900,
+  extrabold: 800,
 };
 
 const SHAPE_RADIUS: Record<OverlayShape, number | "full"> = {

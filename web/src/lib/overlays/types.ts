@@ -111,7 +111,7 @@ export interface OverlayItemConfig {
 export type PresetId = "minimal" | "classic" | "vibrant" | "pill" | "square" | "plate" | "band";
 
 export type OverlayShape = "pill" | "rounded" | "square";
-export type OverlayFontWeight = "medium" | "semibold" | "bold" | "black";
+export type OverlayFontWeight = "regular" | "semibold" | "extrabold";
 
 // Overrides layered on the preset. Each absent field keeps the preset's value.
 export interface OverlayStyle {

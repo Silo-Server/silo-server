@@ -1431,7 +1431,7 @@ func TestObjectSchemasAcceptTheShapesClientsStore(t *testing.T) {
 		"catalog.metadata_language_overrides": `{"ja":"en","no":"x-silo-original"}`,
 		"ui.card_overlays": `{"version":2,"preset":"plate","watchStatus":"watched",` +
 			`"style":{"size":1.4,"shape":"rounded","background":"#000000b3","textColor":"#ffffff",` +
-			`"borderColor":"#ffffff26","borderWidth":1,"fontWeight":"black","uppercase":false,"shadow":true},` +
+			`"borderColor":"#ffffff26","borderWidth":1,"fontWeight":"extrabold","uppercase":false,"shadow":true},` +
 			`"order":["hdr","year"],` +
 			`"items":{"hdr":{"enabled":true,"position":"top-left","accentColor":"#f5c518"},` +
 			`"resolution":{"enabled":true,"position":"left-edge",` +
