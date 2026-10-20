@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vite",
     "test": "vitest run",
-    "build": "tsrs -b && vite build",
+    "build": "node scripts/typecheck.mjs && vite build",
     "budget:check": "node scripts/check-bundle-budget.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
