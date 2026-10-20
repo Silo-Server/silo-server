@@ -107,3 +107,16 @@ it("does not keep the estimate of a lowering the player refused to send", () => 
     body: { operation: "track_change", quality_preference: "auto" },
   });
 });
+
+it("omits an unknown delivered bitrate from the summary", () => {
+  const summaries: BufferingSummary[] = [];
+  const c = new BufferingQualityController(
+    "always",
+    () => {},
+    0,
+    (_plan, summary) => summaries.push(summary),
+  );
+  c.event({ type: "plan_adopted", plan: { ...plan, delivered_kbps: 0 } }, 0);
+  c.stop(1000);
+  expect(summaries[0]).not.toHaveProperty("delivered_kbps");
+});

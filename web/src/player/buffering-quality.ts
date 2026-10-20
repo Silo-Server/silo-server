@@ -114,7 +114,8 @@ export interface BufferingSummary {
   stall_count: number;
   stall_total_ms: number;
   stall_longest_ms: number;
-  delivered_kbps: number;
+  /** Omitted when the plan has no delivered bitrate. */
+  delivered_kbps?: number;
   buffering_mode: BufferingMode;
   buffering_action: BufferingAction;
   /**
@@ -446,7 +447,7 @@ export class BufferingQualityController {
       stall_count: 0,
       stall_total_ms: 0,
       stall_longest_ms: 0,
-      delivered_kbps: plan.delivered_kbps,
+      ...(plan.delivered_kbps > 0 ? { delivered_kbps: plan.delivered_kbps } : {}),
       buffering_mode: this.mode,
       buffering_action: "none",
     };
