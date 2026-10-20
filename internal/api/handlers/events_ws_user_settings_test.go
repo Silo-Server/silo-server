@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -105,12 +107,45 @@ func TestEventsWebSocketDeliversUserSettingsToNonAdmins(t *testing.T) {
 	}
 }
 
+// loopbackEventBus delivers each published event to every subscribed handler,
+// standing in for Redis between the nodes of a cluster.
+type loopbackEventBus struct {
+	mu       sync.Mutex
+	handlers []cache.EventHandler
+}
+
+func (b *loopbackEventBus) Publish(_ context.Context, _ string, event cache.Event) error {
+	b.mu.Lock()
+	handlers := slices.Clone(b.handlers)
+	b.mu.Unlock()
+	for _, handler := range handlers {
+		handler(event)
+	}
+	return nil
+}
+
+func (b *loopbackEventBus) Subscribe(_ context.Context, _ string, handler cache.EventHandler) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.handlers = append(b.handlers, handler)
+	return nil
+}
+
+func (b *loopbackEventBus) Close() error { return nil }
+
 // TestAdminDefaultChangeReachesEveryViewer covers the event that refreshes
-// viewers inheriting an administrator default: it is addressed to no account,
-// so a plain user on another account must still receive it, and a server
-// setting that holds no administrator default publishes nothing.
+// viewers inheriting an administrator default: it is addressed to every
+// viewer, so an unbound plain user on another account must still receive it,
+// and a server setting that holds no administrator default publishes nothing.
+// The change is made on another node, so the every-viewer address has to
+// survive the event bus.
 func TestAdminDefaultChangeReachesEveryViewer(t *testing.T) {
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
+	bus := &loopbackEventBus{}
+	hub := evt.NewHub("socket-node", bus)
+	if err := hub.Start(t.Context()); err != nil {
+		t.Fatalf("starting hub: %v", err)
+	}
+	adminNode := evt.NewHub("admin-node", bus)
 	handler := &EventsHandler{hub: hub}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -151,8 +186,8 @@ func TestAdminDefaultChangeReachesEveryViewer(t *testing.T) {
 	readUntil("snapshot")
 
 	// Published first: if it produced an event, the read below would see it.
-	publishAdminDefaultEvent(context.Background(), hub, "defaults.card_overlays")
-	publishAdminDefaultEvent(context.Background(), hub, "defaults.ui.title_art")
+	publishAdminDefaultEvent(context.Background(), adminNode, "defaults.card_overlays")
+	publishAdminDefaultEvent(context.Background(), adminNode, "defaults.ui.title_art")
 
 	event := readUntil("event")
 	var data userSettingsEventPayload

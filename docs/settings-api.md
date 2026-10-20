@@ -178,7 +178,8 @@ validated against the definition's value schema; an empty value removes it. A vi
 row at any allowed scope then resolves to the administrator's value, still with `source: "default"`
 and no row members, because the viewer did not choose it. Returning to that inherited value means
 deleting the stored rows, not writing the default. Changing an administrator default publishes one
-`user_settings.changed` event addressed to no account, carrying the setting key and
+`user_settings.changed` event addressed to every viewer rather than to one account (see
+[realtime-api.md](realtime-api.md#personal-event-recipients)), carrying the setting key and
 `scope: "default"`, so a client subscribed to the `user_settings` channel can re-read its effective
 values; other clients see the new default on their next effective read. On a server with several
 nodes, a node that can read its settings answers with the previous default for at most 10 seconds

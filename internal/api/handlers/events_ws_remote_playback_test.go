@@ -31,6 +31,7 @@ func TestEventsForRemotePlaybackStayOnTheBoundProfile(t *testing.T) {
 		{"another profile's watch state", evt.Envelope{Channel: evt.ChannelUserState, UserID: 7, ProfileID: "parent"}, false, false},
 		{"another profile's settings", evt.Envelope{Channel: evt.ChannelUserSettings, UserID: 7, ProfileID: "parent"}, false, false},
 		{"account-wide settings", evt.Envelope{Channel: evt.ChannelUserSettings, UserID: 7}, true, true},
+		{"administrator default", evt.Envelope{Channel: evt.ChannelUserSettings, AllViewers: true}, true, true},
 		{"catalog", evt.Envelope{Channel: evt.ChannelCatalog}, true, true},
 	} {
 		if got := allowsEventForClaims(handoff, "kid", tc.env); got != tc.handoff {

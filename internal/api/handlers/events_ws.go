@@ -738,6 +738,11 @@ func allowsEventForClaims(claims *auth.Claims, boundProfileID string, env evt.En
 			return false
 		}
 	case evt.ChannelUserSettings:
+		// An administrator default reaches every viewer: it names no account
+		// or profile and carries the key, never a value.
+		if env.AllViewers && env.UserID == 0 && env.ProfileID == "" {
+			return true
+		}
 		// An empty profile identifies an account-scoped settings change.
 		if env.UserID <= 0 || env.UserID != claims.UserID {
 			return false
