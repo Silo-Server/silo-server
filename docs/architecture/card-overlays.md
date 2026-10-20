@@ -22,13 +22,20 @@ renderer follows, and the uploaded images badges can use.
 - `preset` picks a built-in look: `minimal`, `classic`, `vibrant`, `pill`, `square`, `plate`
   (large plates, ratings with a coloured source chip) or `band` (each edge's badges in one strip
   of marks over a scrim). Clients draw the same visual intent; exact pixels may differ per
-  platform.
+  platform. A band strip shows the marks that fit whole, in order, and drops the rest; only a
+  first mark too wide on its own truncates.
 - `style` overrides parts of the preset: `size` (0.75–2, scales text, padding and icons), `shape`,
   `background` and `borderColor` (`#RRGGBBAA`), `textColor`, `borderWidth` (0–3 at the 185-unit
   reference card width), `fontWeight`, `uppercase`, and `shadow`. An absent field keeps the
   preset's value. A per-badge `accentColor` still applies on top: it tints a custom background in
   presets that fill with the accent, and replaces a custom text or border colour in presets that
   paint the accent there.
+- A `background` that isn't fully transparent, or a `borderWidth` above 0, gives a badge padding
+  of at least 0.6 times the font size across and 0.2 times down. Presets other than `minimal` and
+  `band`, which draw bare text, already have about that much. From 50% opacity the fill sits
+  behind the text: without a `textColor` the text is black or white, whichever reads better on
+  it, and the preset's text shadow is dropped. An accent the preset writes as text keeps that role
+  only at a contrast ratio of at least 3 against the fill; below that it tints the fill instead.
 - `watchStatus` decides what the top-right corner shows (see below). Absent means `remaining`.
 - `items` holds one entry per badge: `enabled`, `position`, optional `accentColor` and `showIcon`,
   and optional uploaded-image references (see below). `order` ranks badges that share a position;

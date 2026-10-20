@@ -161,6 +161,28 @@ describe("CardOverlays", () => {
     expect(disconnect).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { id: "resolution", fill: "#FFFFFFE6", framed: true, color: "rgb(0, 0, 0)" },
+    { id: "resolution", fill: "#000000B3", framed: true, color: "rgb(255, 255, 255)" },
+    { id: "resolution", fill: "#00000000", framed: false, color: "white" },
+    // IMDb gold stays as text where it reads and gives way where it doesn't.
+    { id: "rating_imdb", fill: "#000000B3", framed: true, color: "rgb(245, 197, 24)" },
+    { id: "rating_imdb", fill: "#FFFFFFE6", framed: true, color: "rgb(0, 0, 0)" },
+  ] as const)(
+    "gives bare band text room and a readable colour: $id on $fill",
+    ({ id, fill, framed, color }) => {
+      const prefs = { ...prefsWithOnly(id, "band"), style: { background: fill } };
+      const badge = render(
+        <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} variant="wide" />,
+      ).container.querySelector<HTMLElement>("span.inline-flex");
+
+      const padding = Number.parseFloat(badge?.style.paddingInline ?? "");
+      expect(padding > 0).toBe(framed);
+      expect(badge?.style.color).toBe(color);
+      expect(badge?.style.textShadow === "").toBe(framed);
+    },
+  );
+
   it("keeps the badge layer beneath card actions and non-interactive", () => {
     // MediaItemMenu renders its quick actions at z-20 in the card wrapper's
     // stacking context (see MediaItemMenu.test.tsx), so this z-10 layer paints
