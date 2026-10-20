@@ -191,7 +191,8 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
     label: string,
     currentPosition: number,
     buffering?: BufferingReplan,
-    onAdopt?: (planId?: string, planRevision?: number) => void,
+    /** `sent` is false when the replan was refused before it was sent. */
+    onAdopt?: (planId?: string, planRevision?: number, sent?: boolean) => void,
   ) => void;
   /**
    * The step-down estimate of the latest Auto lowering, or undefined. The
@@ -543,6 +544,8 @@ export function usePlaybackSession(
   // decide against, so only it is waited on.
   const adoptionsInFlightRef = useRef(new Map<number, number>());
   const adoptionWaitersRef = useRef<Array<{ loadSequence: number; resolve: () => void }>>([]);
+  /** A Restore's `learned_limit: "clear"` that has not gone out yet. */
+  const clearOwedRef = useRef(false);
   const pendingReplanRef = useRef<{
     options: ReplanOptions;
     loadSequence: number;
@@ -817,7 +820,11 @@ export function usePlaybackSession(
         bandwidthEstimateKbps,
         bandwidthEstimateSource: bandwidthEstimateKbps === undefined ? undefined : "probe",
         bandwidthCapKbps: maxBitrateKbps,
-        learnedLimit: bufferingMode === "never" ? "ignore" : undefined,
+        learnedLimit: clearOwedRef.current
+          ? "clear"
+          : bufferingMode === "never"
+            ? "ignore"
+            : undefined,
         clientCapabilities,
         clientPlaybackContext,
       });
@@ -1220,6 +1227,9 @@ export function usePlaybackSession(
       const playbackAttemptId = playbackAttemptIdRef.current;
       if (!plan || !sessionId || !playbackAttemptId) return false;
       if (replanInFlightRef.current) {
+        // Whatever happens to a Restore here, its `clear` is owed to the next
+        // request that goes out.
+        if (options.learnedLimit === "clear") clearOwedRef.current = true;
         const isPendingFailureRecovery =
           options.operation === "failure_recovery" || options.operation === "seek_failure_recovery";
         const isPendingOutputChange = options.operation === "output_change";
@@ -1307,6 +1317,12 @@ export function usePlaybackSession(
       const bandwidthEstimateSource =
         options.bandwidthEstimateKbps !== undefined ? options.bandwidthEstimateSource : undefined;
       requestedEstimateRef.current = bandwidthEstimateKbps;
+      // A Restore that could not go at once rides its `clear` on the request
+      // that replaced it.
+      const learnedLimit =
+        options.learnedLimit ??
+        (clearOwedRef.current ? "clear" : bufferingMode === "never" ? "ignore" : undefined);
+      clearOwedRef.current = false;
       const body = buildReplanRequestV3({
         ...options,
         extraClientFeatures: VIDEO_CLIENT_FEATURES_V3,
@@ -1320,7 +1336,7 @@ export function usePlaybackSession(
         bandwidthEstimateKbps,
         bandwidthEstimateSource,
         bandwidthCapKbps: maxBitrateKbps,
-        learnedLimit: options.learnedLimit ?? (bufferingMode === "never" ? "ignore" : undefined),
+        learnedLimit,
         clientCapabilities,
         clientPlaybackContext,
       });
@@ -1555,8 +1571,19 @@ export function usePlaybackSession(
       label: string,
       currentPosition: number,
       buffering?: BufferingReplan,
-      onAdopt?: (planId?: string, planRevision?: number) => void,
+      onAdopt?: (planId?: string, planRevision?: number, sent?: boolean) => void,
     ) => {
+      // A lowering waits for nothing: refused while another replan is in
+      // flight, it is not sent, and the controller rearms. A Restore waits
+      // behind it instead (see `replan`).
+      if (
+        buffering &&
+        buffering.learned_limit !== "clear" &&
+        (replanInFlightRef.current || !planRef.current || !sessionIdRef.current)
+      ) {
+        onAdopt?.(undefined, undefined, false);
+        return;
+      }
       const normalized = normalizeQualityPreferenceV3(label);
       const previousPreference = qualityRef.current;
       qualityRef.current = normalized;

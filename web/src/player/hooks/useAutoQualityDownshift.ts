@@ -53,10 +53,13 @@ interface Options {
    * path owns, so it never counts as a stall.
    */
   transportTrouble?: () => boolean;
-  /** Sends the replan; `onAdopt` names the revision it adopted, if any. */
+  /**
+   * Sends the replan; `onAdopt` names the revision it adopted, if any, and
+   * `sent` is false when the session refused it before sending it.
+   */
   onReplan: (
     request: BufferingReplan,
-    onAdopt: (planId?: string, planRevision?: number) => void,
+    onAdopt: (planId?: string, planRevision?: number, sent?: boolean) => void,
   ) => void;
   onNotice: (key: BufferingNotice) => void;
   onSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void;
@@ -117,8 +120,10 @@ export function useAutoQualityDownshift(options: Options) {
         // are sent from here.
         if (output.type === "replan" && output.body.operation === "quality_change") {
           requestedPlan.current = undefined;
-          latest.current.onReplan(output.body, (_id, revision) => {
-            if (controller.current === c) requestedPlan.current = revision;
+          latest.current.onReplan(output.body, (_id, revision, sent) => {
+            if (controller.current !== c) return;
+            requestedPlan.current = revision;
+            if (sent === false) c.event({ type: "replan_failed", unsent: true }, Date.now());
           });
         }
         if (output.type === "notice") latest.current.onNotice(output.key);

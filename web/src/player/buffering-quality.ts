@@ -91,6 +91,11 @@ export interface BufferingEvent {
   cause?: "seek" | "pause" | "reload" | "renderer";
   /** Whether a `plan_adopted` answers this controller's own replan. */
   controllerInitiated?: boolean;
+  /**
+   * On `replan_failed`: the player refused the replan before sending it, so
+   * its estimate is not kept. It still rearms like a failed replan.
+   */
+  unsent?: boolean;
 }
 
 /** The last action on a plan, as `plan_summary` reports it. */
@@ -195,7 +200,14 @@ export class BufferingQualityController {
   /** Only a timed-out prompt holds the next one off; a quality change ends the wait. */
   private reofferUntil = 0;
   /** The replan this controller sent, until its plan is adopted or it rearms. */
-  private pending?: { at: number; bitrate: number; undo: boolean; restore?: boolean };
+  private pending?: {
+    at: number;
+    bitrate: number;
+    undo: boolean;
+    restore?: boolean;
+    /** The kept estimate before this lowering, restored if it is never sent. */
+    keptBefore?: number;
+  };
   private lastTick: number;
   /** A pill waiting behind a higher-priority one, with its timer frozen. */
   private deferredPill: BufferingPill | null = null;
@@ -355,7 +367,10 @@ export class BufferingQualityController {
         }
         break;
       case "replan_failed":
-        // The rearm is timed from the request, whether it failed or was never adopted.
+        // The rearm is timed from the request, whether it failed or was never
+        // adopted. A lowering that was never sent is not kept.
+        if (event.unsent && this.pending && !this.pending.restore)
+          this.keep(this.pending.keptBefore);
         break;
       case "new_attempt":
         this.keep(undefined);
@@ -592,7 +607,7 @@ export class BufferingQualityController {
       this.showCantLower(now);
       return;
     }
-    this.pending = { at: now, bitrate: plan.delivered_kbps, undo };
+    this.pending = { at: now, bitrate: plan.delivered_kbps, undo, keptBefore: this.keptEstimate };
     this.setAction(undo ? "lowered" : "accepted");
     // Kept from the moment the lowering is sent; the next one replaces it.
     if (plan.quality === "auto") this.keep(estimate);

@@ -80,3 +80,30 @@ it("reports one stall that outlasts a prompt's timeout as one stall", () => {
     }),
   ]);
 });
+
+it("does not keep the estimate of a lowering the player refused to send", () => {
+  const kept: (number | undefined)[] = [];
+  const outputs: unknown[] = [];
+  const c = new BufferingQualityController(
+    "always",
+    (output) => outputs.push(output),
+    0,
+    undefined,
+    (kbps) => kept.push(kbps),
+  );
+  c.event(
+    { type: "plan_adopted", plan: { ...plan, available_qualities: [...plan.available_qualities] } },
+    0,
+  );
+  c.event({ type: "playing" }, 0);
+  c.event({ type: "waiting" }, 20000);
+  for (let t = 20100; t <= 26000; t += 100) c.tick(t);
+  expect(kept).toEqual([44100]);
+  c.event({ type: "replan_failed", unsent: true }, 26000);
+  expect(kept).toEqual([44100, undefined]);
+  c.event({ type: "client_replan", operation: "track_change" }, 27000);
+  expect(outputs.at(-1)).toEqual({
+    type: "replan",
+    body: { operation: "track_change", quality_preference: "auto" },
+  });
+});

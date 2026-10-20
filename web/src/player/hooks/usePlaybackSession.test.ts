@@ -30,6 +30,13 @@ import {
 // These hook tests exercise plan adoption and replacement against a transport
 // boundary. The v2 start/replan helpers are covered by their own tests; here
 // they forward to the same fetch stubs under the v2 base.
+// The stored speed-test reading a start would send; tests set it.
+const speedReading = vi.hoisted(() => ({ kbps: undefined as number | undefined }));
+vi.mock("../client-context-v3", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../client-context-v3")>()),
+  detectBandwidthEstimateKbpsV3: () => speedReading.kbps,
+}));
+
 vi.mock("../start-v2", () => ({
   startPlaybackV2: async (config: PlayerConfig, body: unknown) => {
     const { playerFetch } = await import("../player-fetch");
@@ -75,6 +82,7 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 }
 
 afterEach(() => {
+  speedReading.kbps = undefined;
   resetCodecDetectionForTests();
   resetSessionMutations();
   forgetBandwidthEstimate();
@@ -3238,5 +3246,120 @@ it("repeats the kept step-down estimate, without a source, on later Auto replans
   act(() => result.current.changeQuality("720p", 130));
   await waitFor(() => expect(replans()).toHaveLength(2));
   expect(replans()[1]).not.toHaveProperty("bandwidth_estimate_kbps");
+  unmount();
+});
+
+/** A server whose first replan waits for `release`, and that records every body. */
+function holdingReplanServer() {
+  const plan = fixturePlanV3({ session_id: "session-1" });
+  const decision = (planId: string) =>
+    jsonResponse({
+      protocol_version: 3,
+      server_features: ["playback_plan_v3", "buffering_quality_v1"],
+      outcome: "playable",
+      session_id: "session-1",
+      playback_plan: { ...plan, plan_id: planId, plan_attempt_key: `v3:${planId}` },
+    });
+  let release: (() => void) | undefined;
+  const held = new Promise<Response>((resolve) => {
+    release = () => resolve(decision("plan:held0001"));
+  });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/playback/start")) return decision(plan.plan_id);
+    if (url.endsWith("/replan")) {
+      const count = fetchMock.mock.calls.filter(([u]) => String(u).endsWith("/replan")).length;
+      return count === 1 ? held : decision(`plan:next000${count}`);
+    }
+    if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+    if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const bodiesTo = (suffix: string) =>
+    fetchMock.mock.calls
+      .filter(([url]) => String(url).endsWith(suffix))
+      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+  return { bodiesTo, release: () => release?.() };
+}
+
+const lowering = {
+  operation: "quality_change",
+  quality_preference: "auto",
+  bandwidth_estimate_kbps: 44100,
+  bandwidth_estimate_source: "observed_rebuffer",
+} as const;
+const restore = {
+  operation: "quality_change",
+  quality_preference: "auto",
+  learned_limit: "clear",
+} as const;
+
+it("sends the speed-test reading on a start but never on a replan", async () => {
+  speedReading.kbps = 48000;
+  const server = holdingReplanServer();
+  const { result, unmount } = renderHook(
+    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  expect(server.bodiesTo("/playback/start")[0]).toMatchObject({
+    bandwidth_estimate_kbps: 48000,
+    bandwidth_estimate_source: "probe",
+  });
+  act(() => result.current.changeSubtitleTrack(null, 120));
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+  expect(server.bodiesTo("/replan")[0]).not.toHaveProperty("bandwidth_estimate_kbps");
+  expect(server.bodiesTo("/replan")[0]).not.toHaveProperty("bandwidth_estimate_source");
+  server.release();
+  unmount();
+});
+
+it("refuses a lowering while another replan is in flight, and sends a Restore after it", async () => {
+  const server = holdingReplanServer();
+  const { result, unmount } = renderHook(
+    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  act(() => result.current.changeSubtitleTrack(null, 120));
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+
+  // The lowering is not queued: the controller hears it was never sent.
+  const lowered = vi.fn();
+  act(() => result.current.changeQuality("auto", 121, lowering, lowered));
+  expect(lowered).toHaveBeenCalledWith(undefined, undefined, false);
+
+  const restored = vi.fn();
+  act(() => result.current.changeQuality("auto", 122, restore, restored));
+  await act(async () => server.release());
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(2));
+  expect(server.bodiesTo("/replan")[1]).toMatchObject({
+    operation: "quality_change",
+    learned_limit: "clear",
+  });
+  expect(server.bodiesTo("/replan")[1]).not.toHaveProperty("bandwidth_estimate_kbps");
+  await waitFor(() => expect(restored).toHaveBeenCalledWith(expect.any(String), 3));
+  unmount();
+});
+
+it("carries a displaced Restore's clear on the request that replaced it", async () => {
+  const server = holdingReplanServer();
+  const { result, unmount } = renderHook(
+    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  act(() => result.current.changeSubtitleTrack(null, 120));
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+  act(() => result.current.changeQuality("auto", 121, restore));
+  // The viewer's track change takes the queued Restore's place.
+  act(() => result.current.switchAudioTrack(1, 122));
+  await act(async () => server.release());
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(2));
+  expect(server.bodiesTo("/replan")[1]).toMatchObject({
+    operation: "track_change",
+    learned_limit: "clear",
+  });
   unmount();
 });
