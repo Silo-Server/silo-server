@@ -343,6 +343,28 @@ describe("CardOverlays", () => {
     expect(vibrant?.style.boxShadow).toBe("0px 1px 2px 0px rgb(0 0 0 / 0.25)");
   });
 
+  it.each([
+    { id: "resolution", fill: "#FFFFFFE6", framed: true, color: "rgb(0, 0, 0)" },
+    { id: "resolution", fill: "#000000B3", framed: true, color: "rgb(255, 255, 255)" },
+    { id: "resolution", fill: "#00000000", framed: false, color: "white" },
+    // IMDb gold stays as text where it reads and gives way where it doesn't.
+    { id: "rating_imdb", fill: "#000000B3", framed: true, color: "rgb(245, 197, 24)" },
+    { id: "rating_imdb", fill: "#FFFFFFE6", framed: true, color: "rgb(0, 0, 0)" },
+  ] as const)(
+    "gives bare band text room and a readable colour: $id on $fill",
+    ({ id, fill, framed, color }) => {
+      const prefs = { ...prefsWithOnly(id, "band"), style: { background: fill } };
+      const badge = render(
+        <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} variant="wide" />,
+      ).container.querySelector<HTMLElement>("span.inline-flex");
+
+      const padding = Number.parseFloat(badge?.style.paddingInline ?? "");
+      expect(padding > 0).toBe(framed);
+      expect(badge?.style.color).toBe(color);
+      expect(badge?.style.textShadow === "").toBe(framed);
+    },
+  );
+
   it("anchors bottom-corner badges flush in the corners like the top row", () => {
     // Card quick actions cover bottom badges by design, so the bottom row
     // reserves no clearance for them and insets exactly like the top row.

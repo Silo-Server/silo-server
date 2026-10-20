@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { useLanguageNamesLoaded } from "@/lib/languageNamesLoader";
 import {
@@ -319,10 +319,11 @@ function Badge({ badge, preset, scalingMode, rail }: BadgeProps) {
   const text = scoreOnly ? badge.score : labelRedundantWithIcon(badge) ? null : badge.label;
   const chipColor = badge.accentColor ?? "#ffffff";
 
+  // min-w-0 lets a band's first mark truncate when it is too wide on its own.
   return (
     <span
       {...dataAttributes}
-      className={`inline-flex max-w-full items-center gap-1 ${preset.badgeClass}`}
+      className={`inline-flex max-w-full min-w-0 items-center gap-1 ${preset.badgeClass}`}
       style={{ ...preset.badgeStyle(badge.accentColor), ...geometry }}
     >
       {iconImage ? (
@@ -387,7 +388,10 @@ function BadgeStack({
 }
 
 // The band layout draws an edge's badges as one row of marks with thin
-// dividers between them.
+// dividers between them. The row shows the marks that fit whole, in the
+// viewer's order, and drops the rest, as a corner drops badges past its cap:
+// a cut mark ("AT…") says nothing. Only a first mark too wide on its own
+// truncates.
 function BandMarks({
   badges,
   preset,
@@ -397,11 +401,46 @@ function BandMarks({
   preset: OverlayPreset;
   scalingMode: ScalingMode;
 }) {
+  const rowRef = useRef<HTMLDivElement>(null);
   const gap = overlayLength(preset.stackGap, scalingMode, POSTER_VARS.stackGap);
+  const marksKey = badges.map((badge) => `${badge.def.id}:${badge.label}`).join("|");
+
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const units = Array.from(row?.children ?? []) as HTMLElement[];
+    const [first] = units;
+    if (!row || !first || units.length < 2) return;
+    const fit = () => {
+      // Measure every mark at its full width.
+      for (const unit of units) unit.style.display = "";
+      first.style.flexShrink = "0";
+      // Half a pixel absorbs subpixel rounding of the measured edges.
+      const limit = row.getBoundingClientRect().right + 0.5;
+      const firstDropped = units.findIndex(
+        (unit, index) => index > 0 && unit.getBoundingClientRect().right > limit,
+      );
+      if (firstDropped === -1) return;
+      for (const unit of units.slice(firstDropped)) unit.style.display = "none";
+      // The first mark may shrink, and truncate, once it is alone.
+      if (firstDropped === 1) first.style.flexShrink = "";
+    };
+    fit();
+    if (typeof ResizeObserver === "undefined") return;
+    // The marks resize too, when the badge font or an uploaded image loads.
+    const observer = new ResizeObserver(fit);
+    observer.observe(row);
+    for (const unit of units) observer.observe(unit);
+    return () => observer.disconnect();
+  }, [marksKey, preset, scalingMode]);
+
   return (
-    <div className="flex min-w-0 items-center" style={{ gap }}>
+    <div ref={rowRef} className="flex min-w-0 items-center" style={{ gap }}>
       {badges.map((badge, index) => (
-        <Fragment key={badge.def.id}>
+        <span
+          key={badge.def.id}
+          className={cn("flex items-center", index === 0 ? "min-w-0" : "shrink-0")}
+          style={{ gap }}
+        >
           {index > 0 && (
             <span
               aria-hidden="true"
@@ -412,7 +451,7 @@ function BandMarks({
             />
           )}
           <Badge badge={badge} preset={preset} scalingMode={scalingMode} />
-        </Fragment>
+        </span>
       ))}
     </div>
   );
