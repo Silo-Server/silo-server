@@ -38,6 +38,8 @@ import {
   type OverlayPosition,
   type PresetId,
 } from "@/lib/overlays";
+import { adminDefaultServerKey } from "@/lib/settingsAdminDefaults";
+import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
@@ -61,6 +63,13 @@ const ACCENT_PRESETS = [
 const ACCENT_KEY = "branding.accent_color";
 const OVERLAYS_ENABLED_KEY = "overlays.enabled";
 const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
+/**
+ * The server-wide default for ui.title_art, which its manifest definition marks
+ * admin_default. Unset means the contract default; viewers who chose their own
+ * keep it.
+ */
+const TITLE_ART_DEFAULT_KEY = adminDefaultServerKey(SETTING_KEYS.UI_TITLE_ART);
+const TITLE_ART = SETTING_DEFINITIONS[SETTING_KEYS.UI_TITLE_ART];
 
 /**
  * Every appearance key the page stages, saved as one batch by the shared
@@ -71,7 +80,8 @@ const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
  * server identity, not look and feel.
  */
 const OVERLAY_KEYS = [OVERLAYS_ENABLED_KEY, OVERLAY_DEFAULTS_KEY];
-const KEYS = [ACCENT_KEY, ...OVERLAY_KEYS];
+const TITLE_ART_KEYS = [TITLE_ART_DEFAULT_KEY];
+const KEYS = [ACCENT_KEY, ...OVERLAY_KEYS, ...TITLE_ART_KEYS];
 
 /**
  * Silo's built-in overlay configuration, derived from the registry's own
@@ -383,6 +393,17 @@ export default function AppearanceSettings() {
               );
             })}
           </div>
+        </FieldGroup>
+
+        <FieldGroup label="Title pages" restartAll={allRestart(TITLE_ART_KEYS)}>
+          <SettingField
+            label={TITLE_ART.label}
+            description="Default for people who have not chosen their own. Anyone can still change it for themselves."
+            type="toggle"
+            value={form.getValue(TITLE_ART_DEFAULT_KEY) || String(TITLE_ART.defaultValue)}
+            onChange={(v) => form.setValue(TITLE_ART_DEFAULT_KEY, v)}
+            restartRequired={restartKeys.has(TITLE_ART_DEFAULT_KEY)}
+          />
         </FieldGroup>
       </div>
 

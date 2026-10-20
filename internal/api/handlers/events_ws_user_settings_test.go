@@ -104,3 +104,62 @@ func TestEventsWebSocketDeliversUserSettingsToNonAdmins(t *testing.T) {
 		t.Errorf("event = %s, want %q", event["event"], userSettingsChangedEvent)
 	}
 }
+
+// TestAdminDefaultChangeReachesEveryViewer covers the event that refreshes
+// viewers inheriting an administrator default: it is addressed to no account,
+// so a plain user on another account must still receive it, and a server
+// setting that holds no administrator default publishes nothing.
+func TestAdminDefaultChangeReachesEveryViewer(t *testing.T) {
+	hub := evt.NewHub("test", &cache.NoopEventBus{})
+	handler := &EventsHandler{hub: hub}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := apimw.SetClaims(r.Context(), &auth.Claims{UserID: 7, Role: "user"})
+		handler.HandleWebSocket(w, r.WithContext(ctx))
+	}))
+	defer server.Close()
+
+	conn, resp, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(server.URL, "http")+"?channels=user_settings", nil)
+	if err != nil {
+		t.Fatalf("dialing events websocket: %v", err)
+	}
+	if resp != nil && resp.Body != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+	defer func() { _ = conn.Close() }()
+
+	readUntil := func(wantType string) map[string]json.RawMessage {
+		t.Helper()
+		for {
+			if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatalf("setting read deadline: %v", err)
+			}
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				t.Fatalf("reading until %s frame: %v", wantType, err)
+			}
+			var frame map[string]json.RawMessage
+			if err := json.Unmarshal(data, &frame); err != nil {
+				t.Fatalf("frame is not JSON: %v (%s)", err, data)
+			}
+			if string(frame["type"]) == `"`+wantType+`"` {
+				return frame
+			}
+		}
+	}
+	readUntil("snapshot")
+
+	// Published first: if it produced an event, the read below would see it.
+	publishAdminDefaultEvent(context.Background(), hub, "defaults.card_overlays")
+	publishAdminDefaultEvent(context.Background(), hub, "defaults.ui.title_art")
+
+	event := readUntil("event")
+	var data userSettingsEventPayload
+	if err := json.Unmarshal(event["data"], &data); err != nil {
+		t.Fatalf("event data: %v (%s)", err, event["data"])
+	}
+	if data.Key != "ui.title_art" || data.Scope != "default" || data.ProfileID != "" {
+		t.Fatalf("event data = %+v, want ui.title_art at default for every profile", data)
+	}
+}
