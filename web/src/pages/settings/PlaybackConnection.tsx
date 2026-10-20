@@ -140,15 +140,14 @@ function speedDescription(
 
 /**
  * What replaces the speed on a link that is not tested: cellular, where the
- * browser reports it, or a metered link (Data Saver). Playback uses the
- * Cellular quality settings on both, as the apps say where that holds.
+ * browser reports it, or a metered link (Data Saver), in the spec's words.
  */
 function meteredNote(): string | undefined {
   const network = networkInformation();
   if (network?.type === "cellular")
     return "Speed tests are skipped on cellular, and the Cellular quality settings apply.";
   if (network?.saveData === true)
-    return "Speed tests are skipped on metered networks, and the Cellular quality settings apply.";
+    return "Speed tests are skipped on metered networks.";
   return undefined;
 }
 

@@ -226,7 +226,7 @@ it.each([
   ],
   [
     { type: "wifi", saveData: true },
-    "Speed tests are skipped on metered networks, and the Cellular quality settings apply.",
+    "Speed tests are skipped on metered networks.",
   ],
 ])("replaces the speed, Test speed and the budget on %o", async (network, note) => {
   probe.network = network;

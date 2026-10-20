@@ -544,6 +544,9 @@ return to connectivity after none. A client that cannot observe network changes
   unmetered when it reads, sends a reading and runs **Test speed**. On a phone
   or tablet it runs no automatic test. The cellular Settings row and the
   cellular quality pair apply only where the platform reports the link type.
+  That rule is for a link with no signal at all. The viewer's data-saving
+  mode, where the platform reports it, is a metered signal of its own and
+  still selects the cellular quality pair.
 - Media is any playback in the app: streamed or downloaded video, audiobooks and
   theme music. A paused player counts only while it is still loading, and
   resuming it cancels a running test.
