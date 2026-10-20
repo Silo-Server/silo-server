@@ -16,6 +16,10 @@ import (
 // gets the API listener's absolute two minutes, not a streaming stall window.
 var probeWriteTimeout = 2 * time.Minute
 
+// probeEndHook, set only by tests, runs as a probe ends and before it gives
+// its slot back, so a test can observe a probe that is over but still counted.
+var probeEndHook func()
+
 type probeCountingWriter struct {
 	http.ResponseWriter
 	bytes int
@@ -49,7 +53,12 @@ func (s *Server) handleBandwidthProbe(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(probeWriteTimeout))
 	writer := &probeCountingWriter{ResponseWriter: w}
-	defer func() { s.probeLimiter.Release(claims.UserID, size-writer.bytes, window, time.Now()) }()
+	defer func() {
+		if probeEndHook != nil {
+			probeEndHook()
+		}
+		s.probeLimiter.Release(claims.UserID, size-writer.bytes, window, time.Now())
+	}()
 	streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID), StartedAtSource: streamtelemetry.StartedAtSourceFirstSeen, TokenIssuedAtSource: streamtelemetry.TokenIssuedAtSourceNone})
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.Itoa(size))
