@@ -120,7 +120,7 @@ func (s *accessGroupHandlerTestStore) Create(_ context.Context, input access.Cre
 		DownloadTranscodeAllowed: input.DownloadTranscodeAllowed,
 		MaxStreams:               input.MaxStreams,
 		MaxTranscodes:            input.MaxTranscodes,
-		AllowedPermissions:       append([]string(nil), input.AllowedPermissions...),
+		AllowedPermissions:       slices.Clone(input.AllowedPermissions),
 		RequestsAllowed:          input.RequestsAllowed,
 		IsDefault:                input.IsDefault,
 		CreatedAt:                now,
@@ -164,7 +164,7 @@ func (s *accessGroupHandlerTestStore) Update(_ context.Context, id int64, input 
 		group.MaxTranscodes = *input.MaxTranscodes
 	}
 	if input.AllowedPermissions != nil {
-		group.AllowedPermissions = append([]string(nil), (*input.AllowedPermissions)...)
+		group.AllowedPermissions = slices.Clone(*input.AllowedPermissions)
 	}
 	if input.RequestsAllowed != nil {
 		group.RequestsAllowed = *input.RequestsAllowed
@@ -256,6 +256,39 @@ func TestAccessGroupUpdateLibraryPolicy(t *testing.T) {
 			h.HandleUpdate(replayed, accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/1", strings.NewReader(string(body)), "1"))
 			if replayed.Code != http.StatusOK || !reflect.DeepEqual(store.groups[1].LibraryIDs, tc.want) {
 				t.Fatalf("read/save round trip: status = %d, library_ids = %#v, want %#v", replayed.Code, store.groups[1].LibraryIDs, tc.want)
+			}
+		})
+	}
+}
+
+// A v1 read then save must keep an empty permission mask; null allows every
+// assignable permission.
+func TestAccessGroupPermissionPolicyRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stored []string
+	}{
+		{"all", nil},
+		{"none", []string{}},
+		{"some", []string{"marker_edit"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newAccessGroupHandlerTestStore()
+			store.groups[1] = access.Group{ID: 1, Name: "Synthetic group", AllowedPermissions: tc.stored}
+			h := NewAccessGroupHandler(store)
+			read := httptest.NewRecorder()
+			h.HandleGet(read, accessGroupRequestWithID(http.MethodGet, "/api/v1/admin/access-groups/1", nil, "1"))
+			if read.Code != http.StatusOK {
+				t.Fatalf("get status = %d, body %s", read.Code, read.Body.String())
+			}
+			body, err := json.Marshal(map[string][]string{"allowed_permissions": decodeAccessGroupResponse(t, read).AllowedPermissions})
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved := httptest.NewRecorder()
+			h.HandleUpdate(saved, accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/1", strings.NewReader(string(body)), "1"))
+			if saved.Code != http.StatusOK || !reflect.DeepEqual(store.groups[1].AllowedPermissions, tc.stored) {
+				t.Fatalf("read/save: status = %d, allowed_permissions = %#v, want %#v", saved.Code, store.groups[1].AllowedPermissions, tc.stored)
 			}
 		})
 	}

@@ -123,14 +123,6 @@ func (f *accessGroupStringSliceField) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &f.Value)
 }
 
-func (f accessGroupStringSliceField) Ptr() *[]string {
-	if !f.Set {
-		return nil
-	}
-	value := append([]string(nil), f.Value...)
-	return &value
-}
-
 func (h *AccessGroupHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.store == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Access groups are not configured")
@@ -420,7 +412,7 @@ func toAccessGroupResponse(group access.Group) accessGroupResponse {
 		AudioTranscodeAllowed:    group.AudioTranscodeAllowed,
 		MaxStreams:               group.MaxStreams,
 		MaxTranscodes:            group.MaxTranscodes,
-		AllowedPermissions:       append([]string(nil), group.AllowedPermissions...),
+		AllowedPermissions:       slices.Clone(group.AllowedPermissions),
 		RequestsAllowed:          group.RequestsAllowed,
 		IsDefault:                group.IsDefault,
 		MemberCount:              group.MemberCount,
