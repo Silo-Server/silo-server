@@ -8294,16 +8294,16 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 			return err
 		}
 		// A source merged or deleted after the caller found it leaves nothing
-		// to move, as without curation authority; the caller continues with
-		// toContentID. A missing target still fails.
-		var sourceExists bool
-		if existsErr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_items WHERE content_id = $1)`, fromContentID).Scan(&sourceExists); existsErr != nil {
+		// to move. Carry on as without curation authority, so an Identify
+		// still marks the target, which the guard has locked and authorized.
+		// A missing target still fails, including when the source is gone too.
+		var targetExists bool
+		if existsErr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_items WHERE content_id = $1)`, toContentID).Scan(&targetExists); existsErr != nil {
 			return existsErr
 		}
-		if sourceExists {
+		if !targetExists {
 			return err
 		}
-		return nil
 	}
 
 	steps := []struct {

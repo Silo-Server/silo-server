@@ -179,8 +179,18 @@ func TestCurationScopeRebindToleratesVanishedSourcePostgres(t *testing.T) {
 			if err := svc.rebindItemOnto(ctx, source, target, true, true); err != nil {
 				t.Fatalf("rebinding a vanished source = %v, want the no-op the caller continues after", err)
 			}
+			var marked bool
+			if err := pool.QueryRow(t.Context(), `SELECT identity_chosen_at IS NOT NULL FROM media_items WHERE content_id=$1`, target).Scan(&marked); err != nil {
+				t.Fatal(err)
+			}
+			if !marked {
+				t.Fatal("an Identify whose source vanished did not mark the target, as it does without curation authority")
+			}
 			if err := svc.rebindItemOnto(ctx, target, source, true, true); !errors.Is(err, catalog.ErrItemNotFound) {
 				t.Fatalf("rebinding onto a vanished target = %v, want ErrItemNotFound", err)
+			}
+			if err := svc.rebindItemOnto(ctx, source, "curation-vanished-"+t.Name(), true, true); !errors.Is(err, catalog.ErrItemNotFound) {
+				t.Fatalf("rebinding a vanished source onto a vanished target = %v, want ErrItemNotFound", err)
 			}
 		})
 	}
