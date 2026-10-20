@@ -237,12 +237,32 @@ describe("detectBandwidthEstimateKbpsV3", () => {
     }
   });
 
-  it("prefers the kept speed reading over the downlink hint", () => {
+  /** A reading this device measured on its current, unreported, connection type. */
+  const keptReading = (kbps: number, network = "unknown") =>
+    JSON.stringify({
+      readings: [{ kbps, measuredAt: Date.now(), maxAgeMs: 7 * 24 * 60 * 60 * 1000, network }],
+      writtenAt: Date.now(),
+    });
+
+  it("does not send a server's reading kept from before this page read the server", () => {
     vi.stubGlobal("navigator", { connection: { downlink: 10 } });
     localStorage.setItem(
       "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 180_000, measuredAt: Date.now(), maxAgeMs: 7 * 24 * 60 * 60 * 1000 }),
+      JSON.stringify({
+        readings: [{ kbps: 180_000, measuredAt: Date.now(), maxAgeMs: 7 * 24 * 60 * 60 * 1000 }],
+        writtenAt: Date.now(),
+      }),
     );
+    try {
+      expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
+    } finally {
+      localStorage.removeItem("silo-bandwidth-estimate");
+    }
+  });
+
+  it("prefers the kept speed reading over the downlink hint", () => {
+    vi.stubGlobal("navigator", { connection: { downlink: 10 } });
+    localStorage.setItem("silo-bandwidth-estimate", keptReading(180_000));
     try {
       expect(detectBandwidthEstimateKbpsV3()).toBe(180_000);
     } finally {
@@ -252,10 +272,7 @@ describe("detectBandwidthEstimateKbpsV3", () => {
 
   it("ignores a cached measurement while Data Saver is on", () => {
     vi.stubGlobal("navigator", { connection: { downlink: 10, saveData: true } });
-    localStorage.setItem(
-      "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 180_000, measuredAt: Date.now(), maxAgeMs: 7 * 24 * 60 * 60 * 1000 }),
-    );
+    localStorage.setItem("silo-bandwidth-estimate", keptReading(180_000));
     try {
       expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
     } finally {
@@ -265,10 +282,7 @@ describe("detectBandwidthEstimateKbpsV3", () => {
 
   it("ignores a cached measurement on cellular without falling back to the downlink", () => {
     vi.stubGlobal("navigator", { connection: { downlink: 4.5, type: "cellular" } });
-    localStorage.setItem(
-      "silo-bandwidth-estimate",
-      JSON.stringify({ kbps: 180_000, measuredAt: Date.now(), maxAgeMs: 7 * 24 * 60 * 60 * 1000 }),
-    );
+    localStorage.setItem("silo-bandwidth-estimate", keptReading(180_000));
     try {
       expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
     } finally {

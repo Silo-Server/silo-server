@@ -141,6 +141,7 @@ import {
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
 import { MIN_PROBE_KBPS } from "../probe-meter";
+import { mediaElementReleased } from "../bandwidth-probe";
 
 let hlsJSModule: Promise<typeof HlsType> | null = null;
 
@@ -2849,6 +2850,8 @@ export function VideoPlayer({
       if (video) {
         video.removeAttribute("src");
         video.load();
+        // A removed player's media events never reach the document.
+        mediaElementReleased(video);
       }
     };
     // `planRevision` is the single signal that the transport changed: two plans

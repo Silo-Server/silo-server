@@ -24,6 +24,7 @@ import {
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
 import { onMeteredConnection, readMeasuredBandwidthKbps } from "./bandwidth-probe";
+import { detectFormFactor } from "./form-factor";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
 import type { EngineCapabilities } from "./engine/capabilities";
 
@@ -249,16 +250,6 @@ export function buildDeliveriesV3(
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
   return onMeteredConnection() ? undefined : readMeasuredBandwidthKbps();
-}
-
-/** Coarse form factor, used by the server only for quirk lookups. */
-function detectFormFactor(): string {
-  if (typeof navigator === "undefined") return "desktop";
-  const ua = navigator.userAgent.toLowerCase();
-  if (/\b(smart-?tv|smarttv|googletv|appletv|hbbtv|netcast|webos|tizen)\b/.test(ua)) return "tv";
-  if (/\b(ipad|tablet)\b/.test(ua)) return "tablet";
-  if (/\b(iphone|ipod|android.*mobile|mobile)\b/.test(ua)) return "phone";
-  return "desktop";
 }
 
 /** Bounded (≤128 chars) opaque platform detail; the server treats it as text. */

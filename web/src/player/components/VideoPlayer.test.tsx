@@ -100,6 +100,17 @@ vi.mock("../engine/routing", async (importOriginal) => {
 });
 const attachBrowserEngine = vi.hoisted(() => vi.fn(() => ({ destroy: vi.fn() })));
 vi.mock("../engine", () => ({ attachBrowserEngine }));
+const releasedMedia = vi.hoisted(() => vi.fn());
+vi.mock("../bandwidth-probe", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../bandwidth-probe")>();
+  return {
+    ...actual,
+    mediaElementReleased: (element: HTMLMediaElement) => {
+      releasedMedia(element, element.isConnected);
+      actual.mediaElementReleased(element);
+    },
+  };
+});
 vi.mock("../hooks/useKeyboardShortcuts", () => ({ useKeyboardShortcuts: vi.fn() }));
 vi.mock("../hooks/useRemuxSeeking", () => ({
   useRemuxSeeking: () => ({ handleSeek: playerSeek }),
@@ -6032,5 +6043,28 @@ describe("VideoPlayer playback throughput", () => {
       { loaded: 4_000_000, loading: { start: 1000, first: 1050, end: 1850 } },
     ]);
     expect(summary).not.toHaveProperty("throughput_kbps");
+  });
+});
+
+// H7: a removed element's media events never reach the document, where the
+// speed test watches for media.
+describe("VideoPlayer speed test media hold", () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("releases its element's media hold when the player goes away", () => {
+    const { container, unmount } = renderPlayer();
+    const video = container.querySelector("video");
+    releasedMedia.mockClear();
+    unmount();
+    expect(releasedMedia).toHaveBeenCalledWith(video, false);
   });
 });

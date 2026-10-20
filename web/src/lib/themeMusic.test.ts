@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { detachedMediaPlaying } from "./detachedMedia";
 import {
   ThemeMusic,
   resetThemeAudioFormats,
@@ -42,6 +43,20 @@ afterEach(() => {
 });
 
 describe("ThemeMusic", () => {
+  // The speed test treats it as media: it streams over the link playback uses.
+  it("counts its element as playing media until it stops", async () => {
+    const element = audio();
+    const music = new ThemeMusic(
+      vi.fn(async () => ({ url: "/audio?token=current" })),
+      () => element,
+    );
+    music.select(selection, false);
+    await flush();
+    expect(detachedMediaPlaying()).toBe(true);
+    music.stop(true);
+    expect(detachedMediaPlaying()).toBe(false);
+  });
+
   it("aborts a pending grant while suspended and reloads only after selection resumes", async () => {
     let resolve!: (grant: ThemeGrant) => void;
     const grant = vi

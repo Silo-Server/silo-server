@@ -84,19 +84,27 @@ that serves probes, the answer is `503 dependency_unavailable`, never a
 measurement of the API path.
 
 The web app reads the connection endpoint as soon as a profile is active, when
-a tab hidden for a minute or more is shown again, and after the browser reports
-a new connection type, so a playback start in the first seconds already sends the
-reading. A tab back from a shorter switch sends nothing unless the hide stopped
-a test it owed, which it then resumes. A few seconds
-later it runs the quick test only when no current reading proves the link (any
-reading does when capabilities carry no target), never while the tab is hidden, and never on Data Saver or
-cellular connections or while media plays; playback starting cancels a running
-test. **Test speed** runs the accurate test. Tabs share the reading, and a Web
-Lock lets only one of them probe at a time. A tab holds a shared lock while its
-media plays or playback starts, and no tab probes while any tab holds it. A
-playback start is also broadcast to the other tabs, so a probe already running
-in one of them stops and discards its measurement. On a metered link (Data Saver or cellular) it
-sends no cached measurement.
+a tab hidden for a minute or more is shown again, after the browser reports a
+new connection type, and when it comes back online, so a playback start in the
+first seconds already sends the reading. A start sends a reading the server
+kept only after this page has read it, never one left from an earlier visit. A
+tab back from a shorter switch sends nothing unless the hide stopped a test it
+owed, which it then resumes without reading again. A few seconds later it runs
+the quick test only when no current reading proves the link (any reading does
+when capabilities carry no target). It never runs one while the tab is hidden,
+on Data Saver or cellular, on a phone or tablet whose browser does not report
+the link type, while any media plays (theme music included) or a start loads,
+or within a minute of a playback start; playback starting cancels a running
+test. A `429` from any test holds automatic tests for its `Retry-After` (30
+seconds when missing), across profile switches. **Test speed** runs the
+accurate test, only while nothing plays or loads; it replaces a running
+automatic test, and a second press joins the running one. Tabs share the
+reading, and a Web Lock lets only one of them probe at a time. A tab holds a
+shared lock while its media plays or a start loads, and releases it when the
+player goes away; no tab probes while any tab holds it. A playback start is
+also broadcast to the other tabs, so a probe already running in one of them
+stops and discards its measurement. On a metered link (Data Saver or cellular)
+it sends no cached measurement. Signing out discards the kept readings.
 
 Every mutation body carries the `installation_id` the client read from
 capabilities. A different value is `409 installation_changed`: refresh

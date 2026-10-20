@@ -163,6 +163,36 @@ describe("measureBandwidth", () => {
     ).toBeUndefined();
   });
 
+  // WEB-MEASURE-1: the vectors' `end` is when the body ends, which can come
+  // after its last byte.
+  it("times a whole transfer to the end of the body", async () => {
+    // 100 MB whose last byte arrives at 594 ms and whose body ends at 900 ms.
+    let time = 0;
+    let sent = 0;
+    const reader = {
+      read: async () => {
+        if (sent >= 100) {
+          time = 900;
+          return { done: true, value: undefined };
+        }
+        if (sent > 0) time += 6;
+        sent++;
+        return { done: false, value: new Uint8Array(1_000_000) };
+      },
+      cancel: vi.fn(async () => undefined),
+    };
+    fetchWithSession.mockResolvedValue({ res: { ok: true, body: { getReader: () => reader } } });
+    expect(
+      await measureBandwidth(
+        new AbortController().signal,
+        "quick",
+        undefined,
+        PROBE_URL,
+        () => time,
+      ),
+    ).toEqual({ kbps: 888_888, lower_bound: true, bytes: 100_000_000, duration_ms: 900 });
+  });
+
   it("preserves Retry-After from a 429", async () => {
     fetchWithSession.mockResolvedValue({
       res: { status: 429, headers: new Headers({ "Retry-After": "19" }) },
@@ -171,6 +201,24 @@ describe("measureBandwidth", () => {
       retryAfter: 19,
     });
     expect(new ProbeRateLimited(19).message).toBe("Try again in 19 seconds");
+    expect(new ProbeRateLimited(1).message).toBe("Try again in 1 second");
+  });
+
+  // D22: a missing or unreadable Retry-After holds for 30 s, and a wait is at least 1 s.
+  it.each([
+    [null, 30],
+    ["", 30],
+    ["Wed, 21 Oct 2026 07:28:00 GMT", 30],
+    ["0", 1],
+    ["-5", 1],
+    ["1.5", 2],
+  ])("reads Retry-After %j as %i seconds", async (header, seconds) => {
+    fetchWithSession.mockResolvedValue({
+      res: { status: 429, headers: new Headers(header === null ? {} : { "Retry-After": header }) },
+    });
+    await expect(measureBandwidth(new AbortController().signal, "quick")).rejects.toMatchObject({
+      retryAfter: seconds,
+    });
   });
 });
 

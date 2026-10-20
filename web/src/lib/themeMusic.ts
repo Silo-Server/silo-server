@@ -1,3 +1,5 @@
+import { trackDetachedMedia } from "@/lib/detachedMedia";
+
 export const THEME_MUSIC_INTERRUPT_EVENT = "silo:theme-music-interrupt";
 
 export interface ThemeTrack {
@@ -71,6 +73,8 @@ export class ThemeMusic {
   private suspended = false;
   private fade: ReturnType<typeof setInterval> | null = null;
   private gesture: (() => void) | null = null;
+  /** Stops counting the element as media the app plays, for the speed test. */
+  private untrackAudio: (() => void) | null = null;
 
   constructor(
     private readonly grant: GrantRequest,
@@ -110,6 +114,8 @@ export class ThemeMusic {
       this.clearAudio();
       const audio = this.createAudio();
       this.audio = audio;
+      // The theme streams from the server over the same link as playback.
+      this.untrackAudio = trackDetachedMedia(audio);
       this.converted = grant.delivery === "converted";
       audio.preload = "none";
       audio.volume = 0;
@@ -197,6 +203,8 @@ export class ThemeMusic {
       this.audio.load();
       this.audio = null;
     }
+    this.untrackAudio?.();
+    this.untrackAudio = null;
   }
 
   suspend() {
