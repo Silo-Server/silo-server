@@ -101,10 +101,15 @@ vi.mock("../engine/routing", async (importOriginal) => {
 const attachBrowserEngine = vi.hoisted(() => vi.fn(() => ({ destroy: vi.fn() })));
 vi.mock("../engine", () => ({ attachBrowserEngine }));
 const releasedMedia = vi.hoisted(() => vi.fn());
+const sourceLoads = vi.hoisted(() => vi.fn());
 vi.mock("../bandwidth-probe", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../bandwidth-probe")>();
   return {
     ...actual,
+    cancelBandwidthProbe: () => {
+      sourceLoads();
+      actual.cancelBandwidthProbe();
+    },
     mediaElementReleased: (element: HTMLMediaElement) => {
       releasedMedia(element, element.isConnected);
       actual.mediaElementReleased(element);
@@ -6066,5 +6071,16 @@ describe("VideoPlayer speed test media hold", () => {
     releasedMedia.mockClear();
     unmount();
     expect(releasedMedia).toHaveBeenCalledWith(video, false);
+  });
+
+  // A replan's source loads paused, like a start's, and holds tests off too.
+  it("holds speed tests off while each new source loads", async () => {
+    const { container, rerenderPlayer } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    sourceLoads.mockClear();
+    rerenderPlayer({ planRevision: 2 });
+    expect(sourceLoads).toHaveBeenCalledTimes(1);
   });
 });

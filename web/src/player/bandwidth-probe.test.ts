@@ -34,6 +34,7 @@ import {
   cancelBandwidthProbe,
   forgetBandwidthEstimate,
   mediaElementReleased,
+  playbackStartEnded,
   ProbeNotSaved,
   ProbeRateLimited,
   readMeasuredBandwidthKbps,
@@ -136,6 +137,40 @@ function server(options: {
     throw new Error(`unexpected ${operation}`);
   }) as never);
   return { posted };
+}
+
+/** How many times the schedule has read the server's reading for this connection. */
+function connectionReads() {
+  return vi
+    .mocked(v2)
+    .mock.calls.filter(([operation]) => operation === "GET /api/v2/playback/connection").length;
+}
+
+/** The server() mock's answer, for a test that wraps it. */
+function serverAnswer() {
+  return vi.mocked(v2).getMockImplementation() as unknown as (
+    operation: string,
+    init?: unknown,
+  ) => Promise<unknown>;
+}
+
+/**
+ * Holds the next connection read's answer, taken from the server as it is
+ * now, until the returned function runs.
+ */
+function holdNextConnectionRead() {
+  const answer = serverAnswer();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held = false;
+  vi.mocked(v2).mockImplementation((async (operation: string, init?: unknown) => {
+    if (operation !== "GET /api/v2/playback/connection" || held) return answer(operation, init);
+    held = true;
+    const response = await answer(operation, init);
+    await gate;
+    return response;
+  }) as never);
+  return release;
 }
 
 /** How long the schedule lets the first screen settle before it tests. */
@@ -898,6 +933,59 @@ describe("scheduleBandwidthProbe", () => {
     expect(readMeasuredBandwidthKbps(Date.now() + 2 * DAY)).toBe(48_000);
   });
 
+  // A read that answers after a network change describes the network left.
+  it("drops a read that answers after the network changed", async () => {
+    const connection = Object.assign(new EventTarget(), { type: "wifi" });
+    vi.stubGlobal("navigator", { ...navigator, connection });
+    server({ reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: DAY } } });
+    const release = holdNextConnectionRead();
+    scheduleBandwidthProbe();
+    await vi.advanceTimersByTimeAsync(0);
+
+    server({ reading: { probe: { kbps: 9_000, lower_bound: false, ageMs: DAY } } });
+    connection.type = "ethernet";
+    connection.dispatchEvent(new Event("change"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readMeasuredBandwidthKbps()).toBe(9_000);
+
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readMeasuredBandwidthKbps()).toBe(9_000);
+  });
+
+  it("reads the new network at once when it changes during a test's read", async () => {
+    const connection = Object.assign(new EventTarget(), { type: "wifi" });
+    vi.stubGlobal("navigator", { ...navigator, connection });
+    server({});
+    hangingProbe();
+    scheduleBandwidthProbe();
+    await vi.advanceTimersByTimeAsync(0);
+    const release = holdNextConnectionRead();
+    await vi.advanceTimersByTimeAsync(TEST_DELAY_MS);
+    const reads = connectionReads();
+
+    connection.type = "ethernet";
+    connection.dispatchEvent(new Event("change"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connectionReads()).toBe(reads + 1);
+    release();
+  });
+
+  // D23: a change of metering is a network change.
+  it("reads again when Data Saver turns off", async () => {
+    const connection = Object.assign(new EventTarget(), { type: "wifi", saveData: true });
+    vi.stubGlobal("navigator", { ...navigator, connection });
+    server({ reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: DAY } } });
+    scheduleBandwidthProbe();
+    await vi.advanceTimersByTimeAsync(0);
+    const reads = connectionReads();
+
+    connection.saveData = false;
+    connection.dispatchEvent(new Event("change"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connectionReads()).toBe(reads + 1);
+  });
+
   it("does nothing after it is stopped", async () => {
     server({});
     const stop = scheduleBandwidthProbe(1000);
@@ -955,6 +1043,24 @@ describe("Test speed", () => {
       expect(readMeasuredBandwidthKbps()).toBe(800_000);
     } finally {
       set.mockRestore();
+      clock.mockRestore();
+    }
+  });
+
+  // The server kept the result, so it is the viewer's even if reading it back fails.
+  it("reports a saved result whose read-back fails", async () => {
+    server({});
+    const answer = serverAnswer();
+    vi.mocked(v2).mockImplementation((async (operation: string, init?: unknown) => {
+      if (operation === "GET /api/v2/playback/connection") throw new Error("offline");
+      return answer(operation, init);
+    }) as never);
+    const body = timedBody(1000, 1_000_000, 10);
+    fetchWithSession.mockResolvedValue({ res: body.res });
+    const clock = vi.spyOn(performance, "now").mockImplementation(body.clock);
+    try {
+      expect(await testConnectionSpeed()).toMatchObject({ kbps: 800_000 });
+    } finally {
       clock.mockRestore();
     }
   });
@@ -1050,6 +1156,24 @@ describe("media holds", () => {
 
     const video = document.createElement("video");
     mediaElementReleased(video);
+    await settle();
+    expect(locks.held).toEqual([]);
+    const result = testConnectionSpeed();
+    await vi.waitFor(() => expect(fetchWithSession).toHaveBeenCalledTimes(1));
+    stopBandwidthProbes();
+    await expect(result).rejects.toThrow("could not be measured");
+  });
+
+  // A refused start, or one the viewer left before it loaded, holds nothing.
+  it("lets Test speed run once a start ends without loading media", async () => {
+    server({});
+    const locks = fakeLocks();
+    hangingProbe();
+    cancelBandwidthProbe();
+    await settle();
+    expect(await testConnectionSpeed()).toBe("playing");
+
+    playbackStartEnded();
     await settle();
     expect(locks.held).toEqual([]);
     const result = testConnectionSpeed();

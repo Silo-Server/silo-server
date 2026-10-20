@@ -101,6 +101,11 @@ let pageEntry: string | undefined;
  * another network or for another account, so starts do not send it.
  */
 let serverReadingConfirmed = false;
+/**
+ * Bumped on a network change and when the schedule stops: a server read still
+ * in flight then describes another network or account, and is dropped.
+ */
+let readingEpoch = 0;
 
 function inBounds(kbps: number): boolean {
   return kbps >= MIN_PROBE_KBPS && kbps <= MAX_PROBE_KBPS;
@@ -338,7 +343,9 @@ interface ServerReading {
  * target.
  */
 async function readServerReading(schedule: ProbeSchedule): Promise<boolean> {
+  const epoch = readingEpoch;
   const connection = await v2("GET /api/v2/playback/connection");
+  if (epoch !== readingEpoch) throw new Error("The connection changed during the read");
   queryClient.setQueryData(CONNECTION_QUERY_KEY, connection);
   const readings: ServerReading[] = [];
   if (connection.probe)
@@ -409,11 +416,15 @@ async function collectProbe(
   const type = networkInformation()?.type;
   const transport = type === "wifi" || type === "ethernet" || type === "cellular" ? type : "other";
   try {
-    await v2("POST /api/v2/playback/bandwidth-probe/results", { body: { ...result, transport } });
+    await v2("POST /api/v2/playback/bandwidth-probe/results", {
+      body: { ...result, transport },
+      signal,
+    });
   } catch {
     throw new ProbeNotSaved();
   }
-  await readServerReading(schedule);
+  // The server kept the result; if reading it back fails, the next look does.
+  await readServerReading(schedule).catch(() => undefined);
   return result;
 }
 
@@ -433,6 +444,11 @@ let speedTest: Promise<ProbeResult | SpeedTestSkipped> | undefined;
 
 function stopProbe(reason: ProbeStop): void {
   activeProbe?.abort(reason);
+}
+
+/** Whether a test is measuring and has not been stopped. */
+function probeRunning(): boolean {
+  return activeProbe !== undefined && !activeProbe.signal.aborted;
 }
 
 function stopReason(signal: AbortSignal): ProbeStop | undefined {
@@ -683,21 +699,28 @@ function installMediaTracking(): void {
 }
 
 /**
+ * A playback start ended without media to load: it failed, the viewer left
+ * before it loaded, or its player went away. The quiet period and the
+ * start's hold end with it.
+ */
+export function playbackStartEnded(): void {
+  if (lastPlaybackStartAt === undefined && !releaseStartHold) return;
+  lastPlaybackStartAt = undefined;
+  releaseStartHold?.();
+  try {
+    playbackChannel?.postMessage("end");
+  } catch {
+    // Cross-tab notice is optional.
+  }
+}
+
+/**
  * A player reset or removed its media element. A removed element's media
  * events no longer reach the document, so the hold is synced here, and a
- * removed one also ends the playback start it was loading: the quiet period
- * and the start's hold end with the player.
+ * removed one also ends the playback start it was loading.
  */
 export function mediaElementReleased(element: HTMLMediaElement): void {
-  if (!element.isConnected && (lastPlaybackStartAt !== undefined || releaseStartHold)) {
-    lastPlaybackStartAt = undefined;
-    releaseStartHold?.();
-    try {
-      playbackChannel?.postMessage("end");
-    } catch {
-      // Cross-tab notice is optional.
-    }
-  }
+  if (!element.isConnected) playbackStartEnded();
   syncPlayingHold();
 }
 
@@ -753,7 +776,7 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
   };
   /** Whether nothing stops an automatic test from running now. */
   const testMayRun = () =>
-    !activeProbe &&
+    !probeRunning() &&
     !speedTest &&
     !tabHidden() &&
     generation === scheduleGeneration &&
@@ -778,8 +801,9 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
   const planTest = (schedule: ProbeSchedule, readFirst = true) =>
     later(testDelayMs, () => testUnderLock(schedule, readFirst).catch(() => undefined));
   const look = async () => {
-    // A test already running keeps what it measures when it settles.
-    if (activeProbe || tabHidden() || generation !== scheduleGeneration) return;
+    // A test already running keeps what it measures when it settles; one that
+    // was stopped, as by a network change, measures nothing.
+    if (probeRunning() || tabHidden() || generation !== scheduleGeneration) return;
     lookDue = false;
     owedTest = undefined;
     try {
@@ -840,8 +864,10 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
   // not a new network.
   const network = networkInformation() as (NetworkInformationLike & EventTarget) | undefined;
   let networkType = network?.type;
+  let metered = onMeteredConnection();
   const networkChanged = () => {
     cancelEpoch++;
+    readingEpoch++;
     stopProbe("network");
     forgetServerReadings();
     serverReadingConfirmed = false;
@@ -850,10 +876,13 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
     later(0, look);
   };
   const onNetworkChange = () => {
-    // Data Saver can turn on without a new network; a test then stops.
-    if (onMeteredConnection()) stopProbe("metered");
-    if (network?.type === networkType) return;
+    // Data Saver can turn on or off without a new link type; that changes the
+    // metering, which counts as a new network too.
+    const nowMetered = onMeteredConnection();
+    if (nowMetered) stopProbe("metered");
+    if (network?.type === networkType && nowMetered === metered) return;
     networkType = network?.type;
+    metered = nowMetered;
     networkChanged();
   };
   const onVisibility = () => {
@@ -886,9 +915,9 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
 }
 
 /**
- * Called when playback starts: stops a running test so it does not compete
- * with playback, and holds tests off while the media loads. The next look
- * tries again.
+ * Called when playback starts and when a player loads a new source: stops a
+ * running test so it does not compete with playback, and holds tests off
+ * while the media loads. The next look tries again.
  */
 export function cancelBandwidthProbe(): void {
   cancelEpoch++;
@@ -917,6 +946,7 @@ export function stopBandwidthProbes(): void {
   scheduleCleanup?.();
   scheduleCleanup = undefined;
   scheduleGeneration++;
+  readingEpoch++;
   lastPlaybackStartAt = undefined;
   otherTabPlaybackStartAt = undefined;
   serverReadingConfirmed = false;

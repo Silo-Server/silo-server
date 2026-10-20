@@ -37,6 +37,12 @@ vi.mock("../client-context-v3", async (importOriginal) => ({
   detectBandwidthEstimateKbpsV3: () => speedReading.kbps,
 }));
 
+const startEnded = vi.hoisted(() => vi.fn());
+vi.mock("../bandwidth-probe", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../bandwidth-probe")>()),
+  playbackStartEnded: startEnded,
+}));
+
 vi.mock("../start-v2", () => ({
   startPlaybackV2: async (config: PlayerConfig, body: unknown) => {
     const { playerFetch } = await import("../player-fetch");
@@ -3294,6 +3300,20 @@ const restore = {
   quality_preference: "auto",
   learned_limit: "clear",
 } as const;
+
+// A start the player leaves still loading must not hold off speed tests.
+it("ends its start's hold on speed tests when the player goes away", async () => {
+  const server = holdingReplanServer();
+  const { result, unmount } = renderHook(
+    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  startEnded.mockClear();
+  unmount();
+  expect(startEnded).toHaveBeenCalledTimes(1);
+  server.release();
+});
 
 it("sends the speed-test reading on a start but never on a replan", async () => {
   speedReading.kbps = 48000;

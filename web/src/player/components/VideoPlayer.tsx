@@ -141,7 +141,7 @@ import {
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
 import { MIN_PROBE_KBPS } from "../probe-meter";
-import { mediaElementReleased } from "../bandwidth-probe";
+import { cancelBandwidthProbe, mediaElementReleased } from "../bandwidth-probe";
 
 let hlsJSModule: Promise<typeof HlsType> | null = null;
 
@@ -2396,6 +2396,9 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video || !isPlayerReady || hlsStartupGuardRef.current?.hasFailed()) return;
     transportStartupPendingRef.current = true;
+    // A source is loading, a replan's as well as the first: speed tests wait
+    // for it as for a start.
+    cancelBandwidthProbe();
 
     let hls: HlsType | null = null;
     let engineSession: BrowserEngineSession | null = null;

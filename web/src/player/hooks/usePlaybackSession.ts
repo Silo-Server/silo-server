@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { startPlaybackV2 } from "../start-v2";
+import { playbackStartEnded } from "../bandwidth-probe";
 import { hasSequencedProgress, stopSequencedSession } from "../session-mutations";
 import {
   CONNECTION_LOST_ERROR,
@@ -1201,6 +1202,8 @@ export function usePlaybackSession(
       loadSequenceRef.current += 1;
       // A viewer who leaves while the player reconnects stops the retries.
       endReconnect(false);
+      // A start this player left still loading no longer holds off speed tests.
+      playbackStartEnded();
       const sid = sessionIdRef.current;
       if (!sid) return;
       // sendBeacon doesn't support DELETE, so the stop uses fetch keepalive.
