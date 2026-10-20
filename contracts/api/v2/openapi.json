@@ -159328,6 +159328,24 @@
             },
             "description": "Handshake refused."
           },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Handshake refused.",
+            "headers": {
+              "Retry-After": {
+                "description": "Socket admission refusals use a five-second retry floor; this is not a release forecast.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "503": {
             "content": {
               "text/plain": {
@@ -159336,7 +159354,15 @@
                 }
               }
             },
-            "description": "Handshake refused."
+            "description": "Handshake refused.",
+            "headers": {
+              "Retry-After": {
+                "description": "Socket admission refusals use a five-second retry floor; this is not a release forecast.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "Connect using one session-bound ticket in Sec-WebSocket-Protocol.",

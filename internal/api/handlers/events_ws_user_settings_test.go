@@ -26,7 +26,7 @@ import (
 // client could ever receive, while every Hub-level test stayed green.
 func TestEventsWebSocketDeliversUserSettingsToNonAdmins(t *testing.T) {
 	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	handler := &EventsHandler{hub: hub}
+	handler := &EventsHandler{hub: hub, socketAdmission: testSocketAdmission(t)}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The router authenticates before the handler runs; a plain (non-admin)

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	evt "github.com/Silo-Server/silo-server/internal/events"
+
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"go.opentelemetry.io/otel/trace"
@@ -17,6 +19,38 @@ import (
 const wsKeepAlive = "KeepAlive"
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+
+type compatSocket interface {
+	Close() error
+	ReadJSON(any) error
+	WriteJSON(any) error
+	WriteControl(int, []byte, time.Time) error
+	SetWriteDeadline(time.Time) error
+	SetReadLimit(int64)
+}
+
+// SocketLifecycle is independent of optional user-data notifications. Every
+// compatibility socket, including KeepAlive-only connections, spends capacity.
+type SocketLifecycle struct {
+	Admission    *evt.ClientSocketAdmission
+	AppContext   context.Context //nolint:containedctx // Process lifecycle dependency, not an individual request context.
+	ShuttingDown func() bool
+	upgrade      func(http.ResponseWriter, *http.Request) (compatSocket, error)
+}
+
+func (l SocketLifecycle) draining() bool {
+	return (l.ShuttingDown != nil && l.ShuttingDown()) || (l.AppContext != nil && l.AppContext.Err() != nil)
+}
+
+func refuseCompatSocket(w http.ResponseWriter, refusal evt.ClientSocketRefusal) {
+	w.Header().Set("Retry-After", "5")
+	w.Header().Set("Cache-Control", "no-store")
+	status := http.StatusServiceUnavailable
+	if refusal == evt.ClientSocketAccountLimit {
+		status = http.StatusTooManyRequests
+	}
+	writeError(w, status, http.StatusText(status), "Realtime connection unavailable")
+}
 
 // wsMessage is one socket frame. Jellyfin stamps every outbound message with
 // a fresh MessageId, and jellyfin-sdk-kotlin rejects messages without one.
@@ -28,14 +62,14 @@ type wsMessage struct {
 
 // NewSocketHandler implements Jellyfin's application KeepAlive protocol without
 // advertising remote-control commands. Tokens are revalidated while connected.
-func NewSocketHandler(sessions *SessionStore, keys *AdminAPIKeyAuthenticator) http.HandlerFunc {
-	return NewSocketHandlerWithUserData(sessions, keys, nil, nil)
+func NewSocketHandler(sessions *SessionStore, keys *AdminAPIKeyAuthenticator, lifecycle SocketLifecycle) http.HandlerFunc {
+	return NewSocketHandlerWithUserData(sessions, keys, nil, nil, lifecycle)
 }
 
 // NewSocketHandlerWithUserData is NewSocketHandler that also forwards the
 // session's watched-state changes as Jellyfin UserDataChanged messages, so
 // clients such as Jellyfin Web refresh Continue Watching without a reload.
-func NewSocketHandlerWithUserData(sessions *SessionStore, keys *AdminAPIKeyAuthenticator, events UserStateEvents, codec *ResourceIDCodec) http.HandlerFunc {
+func NewSocketHandlerWithUserData(sessions *SessionStore, keys *AdminAPIKeyAuthenticator, events UserStateEvents, codec *ResourceIDCodec, lifecycle SocketLifecycle) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token, ok := ExtractToken(r)
 		// resolve returns ErrSessionNotFound for a token that is signed out;
@@ -73,13 +107,30 @@ func NewSocketHandlerWithUserData(sessions *SessionStore, keys *AdminAPIKeyAuthe
 			writeSessionLookupFailed(w, r, token, err)
 			return
 		}
-		var notices <-chan wsMessage
-		if events != nil && codec != nil {
-			var stop func()
-			notices, stop = userDataNotices(events, session, codec)
+		reservation, refusal := lifecycle.Admission.Reserve(session.StreamAppUserID, lifecycle.draining())
+		if refusal != "" {
+			refuseCompatSocket(w, refusal)
+			return
+		}
+		defer reservation.Release()
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		if lifecycle.AppContext != nil {
+			stop := context.AfterFunc(lifecycle.AppContext, cancel)
 			defer stop()
 		}
-		serveCompatSocketWithNotices(w, r, validate, 12*time.Second, notices)
+		if ctx.Err() != nil || lifecycle.draining() {
+			lifecycle.Admission.RecordDrainingRefusal()
+			refuseCompatSocket(w, evt.ClientSocketDraining)
+			return
+		}
+		startNotices := func() (<-chan wsMessage, func()) {
+			if events != nil && codec != nil {
+				return userDataNotices(events, session, codec)
+			}
+			return nil, func() {}
+		}
+		serveCompatSocketWithSource(w, r.WithContext(ctx), validate, 12*time.Second, startNotices, lifecycle.upgrade)
 	}
 }
 
@@ -90,7 +141,9 @@ func userDataNotices(events UserStateEvents, session *Session, codec *ResourceID
 	envelopes, unsubscribe := events.Subscribe()
 	notices := make(chan wsMessage, 8)
 	done := make(chan struct{})
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		for {
 			select {
 			case <-done:
@@ -110,13 +163,11 @@ func userDataNotices(events UserStateEvents, session *Session, codec *ResourceID
 			}
 		}
 	}()
-	var once sync.Once
-	return notices, func() {
-		once.Do(func() {
-			close(done)
-			unsubscribe()
-		})
-	}
+	return notices, sync.OnceFunc(func() {
+		close(done)
+		unsubscribe()
+		<-stopped
+	})
 }
 
 // serveCompatSocket runs the KeepAlive protocol and revalidates the session
@@ -132,15 +183,31 @@ func serveCompatSocket(w http.ResponseWriter, r *http.Request, validate func(con
 // server-initiated message from notices to the client. A nil channel sends
 // none.
 func serveCompatSocketWithNotices(w http.ResponseWriter, r *http.Request, validate func(context.Context) bool, checkInterval time.Duration, notices <-chan wsMessage) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	serveCompatSocketWithSource(w, r, validate, checkInterval, func() (<-chan wsMessage, func()) { return notices, func() {} }, nil)
+}
+
+func serveCompatSocketWithSource(w http.ResponseWriter, r *http.Request, validate func(context.Context) bool, checkInterval time.Duration, startNotices func() (<-chan wsMessage, func()), upgrade func(http.ResponseWriter, *http.Request) (compatSocket, error)) {
+	if r.Context().Err() != nil {
+		return
+	}
+	if upgrade == nil {
+		upgrade = func(w http.ResponseWriter, r *http.Request) (compatSocket, error) { return upgrader.Upgrade(w, r, nil) }
+	}
+	conn, err := upgrade(w, r)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
+	stopClose := context.AfterFunc(r.Context(), func() { _ = conn.Close() })
+	defer stopClose()
+	if r.Context().Err() != nil {
+		return
+	}
+	notices, stopNotices := startNotices()
+	defer stopNotices()
 	checkCtx := trace.ContextWithSpanContext(r.Context(), trace.SpanContext{})
 	conn.SetReadLimit(64 * 1024)
 	done := make(chan struct{})
-	defer close(done)
 	messages := make(chan wsMessage, 1)
 	readDone := make(chan struct{})
 	go func() {
@@ -156,6 +223,11 @@ func serveCompatSocketWithNotices(w http.ResponseWriter, r *http.Request, valida
 				return
 			}
 		}
+	}()
+	defer func() {
+		close(done)
+		_ = conn.Close()
+		<-readDone
 	}()
 	write := func(message wsMessage) error {
 		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {

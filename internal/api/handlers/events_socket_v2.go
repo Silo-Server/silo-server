@@ -112,6 +112,15 @@ func (h *EventsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid upgrade", http.StatusBadRequest)
 		return
 	}
+	if h.Events.socketAdmission == nil {
+		refuseEventSocket(w, evt.ClientSocketUnavailable)
+		return
+	}
+	if h.Events.socketDraining() {
+		h.Events.socketAdmission.RecordDrainingRefusal()
+		refuseEventSocket(w, evt.ClientSocketDraining)
+		return
+	}
 	identity, err := h.Tickets.Consume(r.Context(), strings.TrimPrefix(protocols[1], eventsTicketProtocolPrefix))
 	if err != nil {
 		http.Error(w, "invalid realtime credential", http.StatusUnauthorized)
@@ -122,37 +131,48 @@ func (h *EventsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "realtime authority expired", http.StatusUnauthorized)
 		return
 	}
+	if claims == nil || claims.UserID != identity.UserID {
+		http.Error(w, "realtime authority expired", http.StatusUnauthorized)
+		return
+	}
+	r, release, admitted := h.Events.admitClientSocket(w, r.WithContext(validated), claims.UserID)
+	if !admitted {
+		return
+	}
+	defer release()
 	deadline := time.Now().Add(evt.SocketMaxLifetime)
 	if identity.AccessExpiresAt.Before(deadline) {
 		deadline = identity.AccessExpiresAt
 	}
-	ctx, cancel := context.WithDeadline(validated, deadline)
+	ctx, cancel := context.WithDeadline(r.Context(), deadline)
 	defer cancel()
 	// Poll the actual session/account/profile validator without extending the
 	// deadline. Revocation and policy changes close an otherwise healthy socket.
 	accessChanged := make(chan struct{})
-	go func() {
-		err := h.awaitAuthorityLoss(ctx, identity)
-		if err == nil {
-			return
-		}
-		if !errors.Is(err, errSocketAccessChanged) {
-			cancel()
-			return
-		}
-		// The connection loop is the only data writer, so it sends the
-		// access_changed frame and close code. Canceling now would close the
-		// connection under it; cancel only if it does not finish in time.
-		close(accessChanged)
-		grace := time.NewTimer(eventsAccessChangedGrace)
-		defer grace.Stop()
-		select {
-		case <-ctx.Done():
-		case <-grace.C:
-			cancel()
-		}
-	}()
-	h.Events.serveWebSocket(w, r.WithContext(ctx), claims, identity.ProfileID, websocket.Upgrader{Subprotocols: []string{EventsSocketProtocol}, CheckOrigin: h.validOrigin}, accessChanged)
+	startAuthority := func(ctx context.Context, cancel context.CancelFunc) {
+		go func() {
+			err := h.awaitAuthorityLoss(ctx, identity)
+			if err == nil {
+				return
+			}
+			if !errors.Is(err, errSocketAccessChanged) {
+				cancel()
+				return
+			}
+			// The connection loop is the only data writer, so it sends the
+			// access_changed frame and close code. Canceling now would close the
+			// connection under it; cancel only if it does not finish in time.
+			close(accessChanged)
+			grace := time.NewTimer(eventsAccessChangedGrace)
+			defer grace.Stop()
+			select {
+			case <-ctx.Done():
+			case <-grace.C:
+				cancel()
+			}
+		}()
+	}
+	h.Events.serveWebSocket(w, r.WithContext(ctx), claims, identity.ProfileID, websocket.Upgrader{Subprotocols: []string{EventsSocketProtocol}, CheckOrigin: h.validOrigin}, accessChanged, startAuthority)
 }
 
 // awaitAuthorityLoss re-validates the connection's identity every check

@@ -92,6 +92,11 @@ func TestEventsSocketUpgradeThroughV2Router(t *testing.T) {
 	socket := &handlers.EventsSocketV2{Events: handlers.NewEventsHandler(evt.NewHub("v2-router-fixture", nil), nil, nil, nil, nil, nil, nil), Tickets: store, Validate: func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		return ctx, &auth.Claims{UserID: proof.UserID, Role: "user", SessionID: proof.SessionID}, nil
 	}}
+	admission, err := evt.NewClientSocketAdmission(2, 3, evt.ClientSocketObserve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket.Events.SetClientSocketAdmission(admission, t.Context(), nil)
 	deps.EventsSocket = socket
 	ticket, err := store.Mint(t.Context(), evt.SocketIdentity{UserID: 1, SessionID: "session", AccessFingerprint: "scope", Role: "user", AccessExpiresAt: time.Now().Add(time.Minute)})
 	if err != nil {

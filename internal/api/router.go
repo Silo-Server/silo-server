@@ -212,6 +212,7 @@ type Dependencies struct {
 	Notifications             *notifications.System // user-facing release notifications (may be nil)
 	PolicySystem              *policy.System        // policy engine lifecycle (may be nil)
 	EventsHub                 *evt.Hub
+	ClientSocketAdmission     *evt.ClientSocketAdmission
 	ScanRegistry              *evt.ScanRegistry
 	LibraryScanQueue          *scanqueue.Service
 	LibraryMonitor            interface{ Poke() }            // real-time library monitor, reconciled after library mutations (nil when this node runs none)
@@ -2754,6 +2755,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.EventsHub != nil {
 		events := handlers.NewEventsHandler(deps.EventsHub, adminJobsHandler, adminHandler, deps.TaskManager, deps.ScanRegistry, deps.LibraryScanQueue, historyImportSvc)
+		events.SetClientSocketAdmission(deps.ClientSocketAdmission, deps.AppContext, deps.ShuttingDown)
 		events.SetNotificationsSystem(deps.Notifications)
 		v2deps.EventsCapability = events
 		if sessionRepo != nil && userRepo != nil {
@@ -3449,6 +3451,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 						historyImportSvc,
 					)
 					eventsHandler.SetNotificationsSystem(deps.Notifications)
+					eventsHandler.SetClientSocketAdmission(deps.ClientSocketAdmission, deps.AppContext, deps.ShuttingDown)
 					if sessionRepo != nil {
 						eventsHandler.SetSessionRoles(sessionRepo)
 					}

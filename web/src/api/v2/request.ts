@@ -304,12 +304,19 @@ function retryAfterSecondsOf(res: Response): number | null {
 export class V2TransportError extends Error {
   readonly operationId: string;
   readonly status: number;
+  readonly retryAfterSeconds: number | null;
 
-  constructor(operationId: string, status: number, reason: string) {
+  constructor(
+    operationId: string,
+    status: number,
+    reason: string,
+    retryAfterSeconds: number | null = null,
+  ) {
     super(`${operationId}: ${reason} (HTTP ${status})`);
     this.name = "V2TransportError";
     this.operationId = operationId;
     this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -392,12 +399,22 @@ async function readBody(res: Response, operationId: string): Promise<unknown> {
   const text = await res.text();
   if (text.trim() === "") return undefined;
   if (!isJsonMediaType(res.headers.get("Content-Type"))) {
-    throw new V2TransportError(operationId, res.status, "the response body is not JSON");
+    throw new V2TransportError(
+      operationId,
+      res.status,
+      "the response body is not JSON",
+      retryAfterSecondsOf(res),
+    );
   }
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new V2TransportError(operationId, res.status, "the response body is not valid JSON");
+    throw new V2TransportError(
+      operationId,
+      res.status,
+      "the response body is not valid JSON",
+      retryAfterSecondsOf(res),
+    );
   }
 }
 
@@ -541,6 +558,7 @@ export async function decodeV2Response<K extends V2OperationKey>(
       operationId,
       res.status,
       "the error response is not a problem document",
+      retryAfterSecondsOf(res),
     );
   }
   throw new V2ProblemError(

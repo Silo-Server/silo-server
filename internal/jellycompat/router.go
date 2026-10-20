@@ -341,7 +341,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Delete("/Videos/ActiveEncodings", playbackHandler.HandleDeleteActiveEncodings)
 			r.Post("/Sessions/Logout", authHandler.HandleLogout)
 			r.Post("/ClientLog/Document", HandleClientLogDocument)
-			r.Get("/socket", NewSocketHandlerWithUserData(deps.SessionStore, adminAPIKeyAuth, deps.UserStateEvents, deps.IDCodec))
+			r.Get("/socket", NewSocketHandlerWithUserData(deps.SessionStore, adminAPIKeyAuth, deps.UserStateEvents, deps.IDCodec, SocketLifecycle{Admission: deps.ClientSocketAdmission, AppContext: deps.AppContext, ShuttingDown: deps.ShuttingDown}))
 		})
 	}
 

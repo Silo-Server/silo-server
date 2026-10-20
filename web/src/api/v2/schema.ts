@@ -103675,8 +103675,21 @@ export interface operations {
         };
       };
       /** @description Handshake refused. */
+      429: {
+        headers: {
+          /** @description Socket admission refusals use a five-second retry floor; this is not a release forecast. */
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
+      };
+      /** @description Handshake refused. */
       503: {
         headers: {
+          /** @description Socket admission refusals use a five-second retry floor; this is not a release forecast. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {

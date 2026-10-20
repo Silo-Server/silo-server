@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -37,6 +38,9 @@ type Dependencies struct {
 	// periodic orphan-transcode sweep so it stops on shutdown; nil (tests) makes
 	// the sweep a single boot-time run instead of a long-lived ticker.
 	AppContext context.Context
+
+	ClientSocketAdmission *events.ClientSocketAdmission
+	ShuttingDown          func() bool
 	// RegisterShutdownWork retains asynchronous cleanup completion until the
 	// owning process's graceful-shutdown deadline. Nil is valid for embeddings.
 	RegisterShutdownWork func(<-chan struct{})

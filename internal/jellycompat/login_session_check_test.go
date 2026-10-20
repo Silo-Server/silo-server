@@ -128,7 +128,7 @@ func TestSocketRechecksTheLoginSession(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	socket := NewSocketHandler(store, nil)
+	socket := NewSocketHandler(store, nil, socketTestLifecycle(t))
 	if status := serveCompat(socket, compatRequest("/socket", "signed-out")); status != http.StatusUnauthorized {
 		t.Fatalf("signed-out session: status = %d, want 401", status)
 	}
@@ -145,7 +145,7 @@ func TestSocketKeepsTheSessionWhenTheCheckFails(t *testing.T) {
 	if err := store.Put(Session{Token: "tok", StreamAppUserID: 1, LoginSessionID: "login-1"}); err != nil {
 		t.Fatal(err)
 	}
-	if status := serveCompat(NewSocketHandler(store, nil), compatRequest("/socket", "tok")); status != http.StatusServiceUnavailable {
+	if status := serveCompat(NewSocketHandler(store, nil, socketTestLifecycle(t)), compatRequest("/socket", "tok")); status != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", status)
 	}
 	if _, ok := store.sessions["tok"]; !ok {

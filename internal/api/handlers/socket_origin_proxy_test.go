@@ -61,7 +61,7 @@ func TestSocketOriginTrustedProxy(t *testing.T) {
 }
 
 func TestEventsSocketV2TrustedProxyDenialPreservesTicket(t *testing.T) {
-	h, _ := socketTestHandler()
+	h, _ := socketTestHandler(t)
 	cidrs, _ := clientip.ParseCIDRs("127.0.0.0/8,::1/128")
 	server := httptest.NewServer(clientip.Middleware(clientip.NewResolver(cidrs))(h))
 	defer server.Close()
@@ -105,7 +105,7 @@ func TestEventsSocketV2TrustedProxyDenialPreservesTicket(t *testing.T) {
 // forwards a TLS WebSocket upgrade with X-Forwarded-Proto: wss, and the
 // browser's https origin must still pass the origin check and open the socket.
 func TestEventsSocketV2TraefikWebSocketForwardedProto(t *testing.T) {
-	h, _ := socketTestHandler()
+	h, _ := socketTestHandler(t)
 	cidrs, _ := clientip.ParseCIDRs("127.0.0.0/8,::1/128")
 	server := httptest.NewServer(clientip.Middleware(clientip.NewResolver(cidrs))(h))
 	defer server.Close()

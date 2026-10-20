@@ -2594,3 +2594,16 @@ that fails compilation retains its identity. In-flight validation and save resul
 associated with their submitted source. Mutations disable both query-library retries and
 authentication refresh replay; read refresh remains enabled. Persistence and local application
 are reported separately.
+
+### Event socket bridge security exception
+
+The frozen v1 event socket participates in the same client socket accounting as
+native v2 and Jellyfin. This critical bridge security fix adds pre-upgrade `429`
+for account capacity and `503` for process capacity/draining, with `Retry-After: 5`
+and `Cache-Control: no-store`, without changing success frames or adding machine
+error codes. Startup remains observation-only for account/process thresholds;
+quota refusal requires the separate observation and enforcement decision in
+[client socket admission](client-socket-admission.md). V1 origin checks precede
+reservation, its optional profile ticket follows reservation, and recurring
+watchers start only after upgrade. Client recovery coordination applies during
+the bridge window.
