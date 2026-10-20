@@ -2,14 +2,15 @@ package notifications
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
-	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -166,48 +167,45 @@ func TestWebhookDialPolicyUpdates(t *testing.T) {
 	}
 }
 
-type webhookPolicyRoundTripper func(*http.Request) (*http.Response, error)
+// The production client must refuse through its own dialer, including on a
+// redirect hop. Every destination is loopback or 0.0.0.0 (which Linux dials as
+// loopback), so nothing leaves the machine; the server certificate does not
+// cover 0.0.0.0, so a dial the guard misses surfaces as a TLS failure instead.
+func TestWebhookClientDialPolicy(t *testing.T) {
+	var finished atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
+			http.Redirect(w, r, "https://"+net.JoinHostPort("0.0.0.0", port)+"/finish", http.StatusTemporaryRedirect)
+			return
+		}
+		finished.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	rootCAs := server.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
 
-func (fn webhookPolicyRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	return fn(req)
-}
-
-// Synthetic redirect responses exercise net/http's redirect processing and the
-// production Control callback. Production DialContext wiring is verified in source;
-// this test substitutes the transport to avoid opening any connection.
-func TestWebhookRedirectPolicy(t *testing.T) {
 	for _, tc := range []struct {
-		name, destination  string
-		allowPrivate, want bool
+		name, path   string
+		allowPrivate bool
+		ok           bool
+		message      string
 	}{
-		{"public", "8.8.4.4", false, true},
-		{"private-denied", "192.168.1.10", false, false},
-		{"private-allowed", "192.168.1.10", true, true},
-		{"blocked", "ff02::1", true, false},
+		{"private-refused-by-default", "/finish", false, false, "destination resolves to a private network"},
+		{"private-allowed", "/finish", true, true, ""},
+		{"blocked-redirect-refused-in-private-mode", "/start", true, false, "destination resolves to a private network"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			finished.Store(0)
 			client := newWebhookHTTPClient(func() bool { return tc.allowPrivate })
-			dialer := newNotificationDialer(func() bool { return tc.allowPrivate })
-			checks := 0
-			client.Transport = webhookPolicyRoundTripper(func(req *http.Request) (*http.Response, error) {
-				address := "8.8.8.8"
-				if req.URL.Path == "/finish" {
-					address = tc.destination
-				}
-				checks++
-				if err := dialer.Control("tcp", net.JoinHostPort(address, "443"), nil); err != nil {
-					return nil, err
-				}
-				resp := &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: req}
-				if req.URL.Path == "/start" {
-					resp.StatusCode = http.StatusTemporaryRedirect
-					resp.Header.Set("Location", "https://redirect.example/finish")
-				}
-				return resp, nil
-			})
-			result := sendWebhook(t.Context(), client, "https://initial.example/start", []byte("{}"), nil)
-			if result.OK != tc.want || checks != 2 {
-				t.Fatalf("OK=%v checks=%d message=%q", result.OK, checks, result.Message)
+			client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{RootCAs: rootCAs}
+			result := sendWebhook(t.Context(), client, server.URL+tc.path, []byte("{}"), nil)
+			if result.OK != tc.ok || result.Message != tc.message {
+				t.Fatalf("OK=%v message=%q, want OK=%v message=%q", result.OK, result.Message, tc.ok, tc.message)
+			}
+			if want := int32(map[bool]int{true: 1, false: 0}[tc.ok]); finished.Load() != want {
+				t.Fatalf("destination reached %d times, want %d", finished.Load(), want)
 			}
 		})
 	}
