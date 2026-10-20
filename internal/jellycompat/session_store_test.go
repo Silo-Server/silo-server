@@ -76,10 +76,8 @@ func TestEvictUser(t *testing.T) {
 	}
 }
 
-// Revocation deletes the stored rows in its own transaction; EvictUser must
-// then drop the copies this replica cached, or a cached session keeps serving
-// after its row is gone.
-func TestEvictUserAfterRevokedRowsEndsCachedSessions(t *testing.T) {
+// The stored row is authoritative even when the eviction event never arrives.
+func TestDeletedRowEndsCachedSessionWithoutEviction(t *testing.T) {
 	repo := &rowSessionRepo{rows: map[string]Session{}}
 	store := NewPersistentSessionStore(24*time.Hour, fixedNow, repo)
 	for _, s := range []Session{{Token: "aaa", StreamAppUserID: 1}, {Token: "bbb", StreamAppUserID: 2}} {
@@ -89,8 +87,11 @@ func TestEvictUserAfterRevokedRowsEndsCachedSessions(t *testing.T) {
 	}
 
 	delete(repo.rows, "aaa") // the revoking transaction
-	if _, err := store.Lookup(t.Context(), "aaa"); err != nil {
-		t.Fatalf("before eviction the cached copy still serves: %v", err)
+	if _, err := store.Lookup(t.Context(), "aaa"); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("deleted row before eviction = %v, want ErrSessionNotFound", err)
+	}
+	if _, ok := store.sessions["aaa"]; ok {
+		t.Fatal("missing stored row left a cached copy")
 	}
 	store.EvictUser(1)
 
@@ -139,7 +140,7 @@ func TestCachedSessionWritesDoNotRestoreRevokedRow(t *testing.T) {
 }
 
 // A load that read the row before a revocation committed must not cache it
-// after EvictUser ran, or this replica keeps serving the revoked session.
+// after EvictUser ran. Later persistent lookups also check the stored row.
 func TestEvictUserDuringLoadDoesNotCacheStaleCopy(t *testing.T) {
 	repo := &rowSessionRepo{rows: map[string]Session{"aaa": {Token: "aaa", StreamAppUserID: 1}}}
 	store := NewPersistentSessionStore(24*time.Hour, fixedNow, repo)

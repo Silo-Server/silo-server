@@ -478,10 +478,19 @@ state is unaffected, and signing in works again once the password is changed.
 Each sign-in, by password or Quick Connect, opens its own Silo login session, and the
 compat session lives only as long as it (see
 [login sessions](auth-api.md#login-sessions)). Every authenticated request, stream
-grant, and socket re-check looks the login session up, one indexed read, on whichever
-node answers. A revoked or expired login session ends the compat session with `401`; a
-lookup that fails is a retryable `503` and keeps it. `sa_` API keys have no login
-session and are checked as keys instead.
+grant, and socket re-check reads the stored compatibility session and looks its login
+session up, two indexed reads, on whichever node answers. A revoked or expired
+login session ends the compat session with `401`; a lookup that fails is a
+retryable `503` and keeps it. `sa_` API keys have no login session and are checked
+as keys instead.
+
+Once token logout deletes the stored compatibility row, later checks through the
+session store refuse it on every node, including media requests and playback-grant
+resolution. Cached copies and missed eviction events do not grant authority. Other
+compatibility sessions and the linked native login session are unchanged. A request
+whose authority read preceded a concurrent logout may finish. Already issued signed
+node stream URLs retain their existing lifetime; logout does not withdraw them or
+cancel a transfer already authorized. Socket re-check timing is unchanged.
 
 ### Quick Connect
 
