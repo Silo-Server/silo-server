@@ -310,9 +310,8 @@ func (i *Installer) replaceBinary(
 		return nil, fmt.Errorf("update replacement plugin installation: %w", err)
 	}
 
-	oldInstallDir := filepath.Dir(existing.InstallPath)
-	if oldInstallDir != "" && filepath.Clean(oldInstallDir) != filepath.Clean(installDir) {
-		_ = os.RemoveAll(oldInstallDir)
+	if filepath.Clean(filepath.Dir(existing.InstallPath)) != filepath.Clean(installDir) {
+		_ = removeInstallationFiles(ctx, existing)
 	}
 
 	keepInstallDir = true
@@ -400,9 +399,8 @@ func (i *Installer) replaceArchive(
 		return nil, fmt.Errorf("update replacement plugin installation: %w", err)
 	}
 
-	oldInstallDir := filepath.Dir(existing.InstallPath)
-	if oldInstallDir != "" && filepath.Clean(oldInstallDir) != filepath.Clean(installDir) {
-		_ = os.RemoveAll(oldInstallDir)
+	if filepath.Clean(filepath.Dir(existing.InstallPath)) != filepath.Clean(installDir) {
+		_ = removeInstallationFiles(ctx, existing)
 	}
 
 	keepInstallDir = true

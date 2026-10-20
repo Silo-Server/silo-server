@@ -138,3 +138,50 @@ func TestPluginPathReplacementRejectsDifferentPlugin(t *testing.T) {
 		t.Fatalf("mismatched replacement mutated store: %+v", store)
 	}
 }
+
+// Uninstall trusts a valid row's host-written path, legacy layouts included,
+// and leaves a pre-check row's files alone: with plugin id and version ".." a
+// legacy layout's directory is the grandparent of the plugin root. Either way
+// the row goes and Delete succeeds, so the handler finishes the uninstall.
+func TestInstallationStoreDeleteRemovesOnlyTrustedFiles(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	store := NewInstallationStore(pool)
+	parent := t.TempDir()
+	base := filepath.Join(parent, "data", "plugins")
+	sentinel := filepath.Join(parent, "data", "keep")
+	legacyRelease := filepath.Join(base, "silo.example", "1.2.3")
+	for _, dir := range []string{sentinel, legacyRelease} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		pluginID, version string
+		removed, kept     string
+	}{
+		{"..", "..", "", sentinel},
+		{"silo.example", "1.2.3", legacyRelease, sentinel},
+	} {
+		installation, err := store.Create(t.Context(), CreateInstallationInput{
+			PluginID: tc.pluginID, Version: tc.version,
+			InstallPath: filepath.Join(base, sanitizeFilesystemSegment(tc.pluginID), sanitizeFilesystemSegment(tc.version), "plugin"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Delete(t.Context(), installation.ID); err != nil {
+			t.Fatalf("Delete(%s@%s) = %v, want nil", tc.pluginID, tc.version, err)
+		}
+		if _, err := store.GetByID(t.Context(), installation.ID); !errors.Is(err, ErrInstallationNotFound) {
+			t.Errorf("row for %s@%s still present: %v", tc.pluginID, tc.version, err)
+		}
+		if _, err := os.Stat(tc.kept); err != nil {
+			t.Errorf("Delete(%s@%s) removed %s: %v", tc.pluginID, tc.version, tc.kept, err)
+		}
+		if tc.removed != "" {
+			if _, err := os.Stat(tc.removed); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("Delete(%s@%s) left %s: %v", tc.pluginID, tc.version, tc.removed, err)
+			}
+		}
+	}
+}

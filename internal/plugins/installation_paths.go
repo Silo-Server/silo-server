@@ -1,7 +1,10 @@
 package plugins
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -46,4 +49,26 @@ func pluginPathUnder(root string, parts ...string) (string, error) {
 		return "", fmt.Errorf("plugin path %q is not below root %q", path, root)
 	}
 	return path, nil
+}
+
+// removeInstallationFiles removes an installation's release directory. Stored
+// paths are host-written and trusted for valid identities, including legacy
+// layouts and roots from another replica or configuration. A row with an
+// invalid identity may predate the admission check, and in a legacy layout its
+// directory can sit above the plugin root, so its files are left in place: the
+// row is still removed and the caller's operation still succeeds.
+func removeInstallationFiles(ctx context.Context, installation *Installation) error {
+	dir := filepath.Dir(installation.InstallPath)
+	reason := ""
+	if _, _, err := pluginIdentitySegments(installation.PluginID, installation.Version); err != nil {
+		reason = err.Error()
+	} else if dir == "." || dir == filepath.Dir(dir) {
+		reason = "install path has no release directory"
+	}
+	if reason != "" {
+		slog.WarnContext(ctx, "leaving plugin installation files in place", "component", "plugins",
+			"installation_id", installation.ID, "plugin_id", installation.PluginID, "path", dir, "reason", reason)
+		return nil
+	}
+	return os.RemoveAll(dir) //nolint:gosec // host-written install path of a row with a valid identity, checked above.
 }
