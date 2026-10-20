@@ -20,6 +20,9 @@ const (
 
 type QueryExecutor struct {
 	GroupByWork bool
+	// BoxSetCollections groups the movies of these TMDB collections into one
+	// row each. It applies only together with GroupByWork.
+	BoxSetCollections []int64
 	// SourceWhere and SourceArgs are trusted internal source predicates. The
 	// predicate numbers its parameters from $1; the executor rebinds them.
 	SourceWhere string
@@ -551,7 +554,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 			len(e.SourceOrder) == 0 && e.SourceJoin == "",
 	}
 	if e.GroupByWork {
-		return plan.groupedByWork(), nil
+		return plan.groupedByWork(e.BoxSetCollections), nil
 	}
 	return plan, nil
 }

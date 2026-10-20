@@ -16,6 +16,8 @@ import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import SearchScopeChips from "@/components/catalog/SearchScopeChips";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import { usePersonSearch } from "@/hooks/queries/personSearch";
+import { useBoxSetSearch } from "@/hooks/queries/boxSets";
+import BoxSetSearchResults from "@/components/boxsets/BoxSetSearchResults";
 import { useSetCollectionSortPreference } from "@/hooks/queries/collections";
 import { querySortToSelectValue } from "@/lib/collectionSortConfig";
 import { useSearchMediaScope, type SearchMediaScope } from "@/hooks/useSearchMediaScope";
@@ -181,6 +183,11 @@ function CatalogResults({
 
   const mediaScope = effectiveState.query_definition.media_scope;
   const peopleQuery = usePersonSearch(state.q ?? "", 20, isQuerySource, mediaScope);
+  // Box sets are movies; a scope without movies leaves them out.
+  const boxSetQuery = useBoxSetSearch(state.q ?? "", {
+    enabled: isQuerySource && (!mediaScope || mediaScope === "movie" || mediaScope === "video"),
+  });
+  const boxSets = boxSetQuery.data ?? [];
   const people = peopleQuery.data ?? [];
   const activeChipScope: SearchMediaScope =
     mediaScope === "audiobook" ? "audiobook" : mediaScope ? "video" : "all";
@@ -345,7 +352,10 @@ function CatalogResults({
     [loadedHistoryItems, selectedIds],
   );
   const selectedHistoryTargets = useMemo(
-    () => selectedHistoryItems.map((item) => buildHistoryRemovalTarget(item.content_id, item.type)),
+    () =>
+      selectedHistoryItems.flatMap((item) =>
+        item.type === "box_set" ? [] : [buildHistoryRemovalTarget(item.content_id, item.type)],
+      ),
     [selectedHistoryItems],
   );
   // A collection the viewer cannot reach answers 404, the same for a deleted
@@ -585,6 +595,8 @@ function CatalogResults({
               </div>
             </section>
           )}
+
+          {isQuerySource && boxSets.length > 0 ? <BoxSetSearchResults boxSets={boxSets} /> : null}
 
           {showPeopleSection ? (
             <section aria-label="People" className="space-y-3">
