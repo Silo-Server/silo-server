@@ -111,3 +111,17 @@ it("does not count open time or time following refusal as healthy accepted opera
   backoff.interrupted();
   expect(backoff.reconnect(true)).toBe(20_000);
 });
+it.each([29_999, 30_000])(
+  "checks accepted quiet health before a new refusal at %ims",
+  (elapsed) => {
+    const backoff = createRealtimeBackoff(() => 0);
+    const refusal = { code: "realtime_unavailable" as const, retryAfterMs: 2_000 };
+    for (let attempt = 0; attempt < 4; attempt++) backoff.refusal(refusal);
+    backoff.useful();
+    vi.advanceTimersByTime(elapsed);
+    expect(backoff.refusal(refusal)).toBe(elapsed < 30_000 ? 30_000 : 2_000);
+    // The refused interval itself never supplies accepted health.
+    vi.advanceTimersByTime(30_000);
+    expect(backoff.refusal(refusal)).toBe(elapsed < 30_000 ? 30_000 : 4_000);
+  },
+);

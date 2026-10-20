@@ -77,6 +77,7 @@ export function createRealtimeBackoff(random = Math.random, now = () => performa
   const stepped = (steps: number[], attempt: number) => steps[Math.min(attempt, steps.length - 1)]!;
   return {
     refusal(refusal: WorkRefusal) {
+      resetIfHealthy();
       usefulSince = null;
       const outageMs =
         refusal.code === "realtime_unavailable"

@@ -28,12 +28,13 @@ function fixture() {
   const send = vi.fn((_message: Record<string, unknown>) => true);
   const notice = vi.fn();
   const reconcile = vi.fn();
+  const backoff = createRealtimeBackoff(() => 0);
   const recovery = createRoomWorkRecovery({
     context: () => context,
     send,
     notice,
     reconcile,
-    backoff: createRealtimeBackoff(() => 0),
+    backoff,
   });
   const last = () => send.mock.calls.at(-1)![0];
   const refuse = (changes = {}) =>
@@ -45,7 +46,7 @@ function fixture() {
       work_started: false,
       ...changes,
     });
-  return { context, send, notice, reconcile, recovery, last, refuse };
+  return { context, send, notice, reconcile, recovery, backoff, last, refuse };
 }
 const transport = {
   type: "transport_request",
@@ -54,6 +55,23 @@ const transport = {
   position_seconds: 10,
   is_paused: true,
 };
+it("retains a transport retry after an old outage followed by accepted quiet health", () => {
+  const f = fixture();
+  const refusal = { code: "realtime_unavailable" as const, retryAfterMs: 2_000 };
+  for (let attempt = 0; attempt < 4; attempt++) f.backoff.refusal(refusal);
+  f.backoff.useful();
+  vi.advanceTimersByTime(30_000);
+  f.recovery.send(transport);
+  const original = f.last();
+  f.refuse({ code: refusal.code, retry_after_ms: refusal.retryAfterMs });
+  vi.advanceTimersByTime(1_999);
+  expect(f.send).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(1);
+  expect(f.send).toHaveBeenCalledTimes(2);
+  expect(f.last()).toEqual(original);
+  expect(f.notice).not.toHaveBeenCalledWith(expect.objectContaining({ discarded: true }));
+  f.recovery.dispose();
+});
 it("retries transport once only after its explicit correlated refusal, with the same request ID", () => {
   const f = fixture();
   f.recovery.send(transport);
