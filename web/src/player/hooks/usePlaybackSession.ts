@@ -1295,25 +1295,17 @@ export function usePlaybackSession(
 
       // A lowering or Restore names its own estimate. The client's other Auto
       // replans repeat the kept step-down estimate, without a source because
-      // it is not a new observation, or else send a fresh probe result.
+      // it is not a new observation. The speed-test reading is for starts
+      // only: a replan never sends it, so it cannot raise or hold quality
+      // mid-title.
       const kept =
         options.bandwidthEstimateKbps === undefined && qualityRef.current === "auto"
           ? keptEstimateRef.current
           : undefined;
-      const probe =
-        options.bandwidthEstimateKbps === undefined && kept === undefined
-          ? detectBandwidthEstimateKbpsV3()
-          : undefined;
       const bandwidthEstimateKbps =
-        options.bandwidthEstimateKbps !== undefined
-          ? options.bandwidthEstimateKbps
-          : (kept ?? probe);
+        options.bandwidthEstimateKbps !== undefined ? options.bandwidthEstimateKbps : kept;
       const bandwidthEstimateSource =
-        options.bandwidthEstimateKbps !== undefined
-          ? options.bandwidthEstimateSource
-          : probe !== undefined
-            ? "probe"
-            : undefined;
+        options.bandwidthEstimateKbps !== undefined ? options.bandwidthEstimateSource : undefined;
       requestedEstimateRef.current = bandwidthEstimateKbps;
       const body = buildReplanRequestV3({
         ...options,
