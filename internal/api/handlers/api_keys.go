@@ -213,7 +213,11 @@ func (h *APIKeyHandler) HandleCreateAPIKey(w http.ResponseWriter, r *http.Reques
 	}
 	// The admin acts only through the account's primary profile, verified
 	// when it has a PIN; a child profile on the admin's account may not mint
-	// a key that would skip every profile's PIN.
+	// a key that would skip every profile's PIN. The body is read first so a
+	// PIN change during a slow upload revokes the proof.
+	if !readHouseholdRequestBody(w, r) {
+		return
+	}
 	allowed, err := h.MayCreatePersonalAPIKey(r.Context(), claims.UserID, activeProfileIDOf(r), func(profile *userstore.Profile) error {
 		return verifyProfileTokenFor(r, h.ProfileTokens, profile)
 	})

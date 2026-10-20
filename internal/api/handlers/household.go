@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -191,6 +193,25 @@ func verifyProfileTokenFor(r *http.Request, tokens *access.ProfileTokenService, 
 		return access.ErrProfileUnverified
 	}
 	return access.CheckProfileToken(tokens, r.Header.Get("X-Profile-Token"), claims.UserID, claims.SessionID, profile)
+}
+
+// maxHouseholdRequestBody bounds the JSON bodies readHouseholdRequestBody buffers.
+const maxHouseholdRequestBody = 1 << 20
+
+// readHouseholdRequestBody reads a v1 request's whole body before the handler
+// checks household authority. The check then sees the acting profile as it
+// stands once the body has arrived, so a client that holds its body open
+// cannot keep PIN proof that a PIN change made in the meantime revoked. v2
+// needs no equivalent: Huma reads the body before the handler runs. It writes
+// a 400 and returns false when the body cannot be read.
+func readHouseholdRequestBody(w http.ResponseWriter, r *http.Request) bool {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxHouseholdRequestBody))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return true
 }
 
 // checkHouseholdPINRevision runs after the existing account transaction lock.

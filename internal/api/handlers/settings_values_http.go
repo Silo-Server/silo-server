@@ -109,6 +109,11 @@ func (h *SettingValuesHandler) HandleSetValue(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	// Writing another profile's value needs household authority. The body is
+	// read first so a PIN change during a slow upload revokes the proof.
+	if !readHouseholdRequestBody(w, r) {
+		return
+	}
 	identity, ok := h.identityFromRequest(w, r, store)
 	if !ok {
 		return

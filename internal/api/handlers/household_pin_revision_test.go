@@ -3,14 +3,23 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -91,5 +100,132 @@ func TestHistoryImportRequestActorRechecksPINRevision(t *testing.T) {
 	}
 	if err := actor.VerifyProfile(&userstore.Profile{ID: "parent", PINRevision: 1}); !errors.Is(err, access.ErrProfileUnverified) {
 		t.Fatalf("changed PIN revision accepted: %v", err)
+	}
+}
+
+// pinChangeOnRead changes the primary PIN when the handler starts reading the
+// body, standing in for a PIN change made while a client holds its upload.
+type pinChangeOnRead struct {
+	io.Reader
+	change func()
+	once   sync.Once
+}
+
+func (b *pinChangeOnRead) Read(p []byte) (int, error) {
+	b.once.Do(b.change)
+	return b.Reader.Read(p)
+}
+
+// pinLockedHousehold is a migrated store, which carries the pin_revision
+// trigger that InitSchema alone does not: a PIN-locked primary and a child.
+func pinLockedHousehold(t *testing.T) userstore.UserStore {
+	t.Helper()
+	db, err := userdb.NewUserDB(filepath.Join(t.TempDir(), "user.db"), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := userdb.NewSQLiteUserStore(db.DB)
+	for _, p := range []userstore.Profile{{ID: "profile-1", Name: "Parent"}, {ID: "profile-2", Name: "Child"}} {
+		if err := store.CreateProfile(t.Context(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.UpdateProfile(t.Context(), "profile-1", userstore.UpdateProfileInput{PIN: new("1234")}); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+// v1 handlers that decoded the body after the household check let a held
+// upload keep PIN proof that a PIN change revoked.
+func TestV1HouseholdWritesRecheckPINAfterBody(t *testing.T) {
+	type v1Write struct {
+		store   userstore.UserStore
+		method  string
+		serve   http.HandlerFunc
+		target  string
+		body    string
+		written func() bool
+	}
+	tokens := access.NewProfileTokenService("test-secret-value-at-least-32-chars", time.Minute)
+	setups := map[string]func(t *testing.T) v1Write{
+		"API key": func(t *testing.T) v1Write {
+			keys := &fakeAPIKeyStore{}
+			store := pinLockedHousehold(t)
+			h := NewAPIKeyHandler(keys)
+			h.Stores = testUserStoreProvider{store: store}
+			h.ProfileTokens = tokens
+			return v1Write{
+				store: store, method: http.MethodPost, serve: h.HandleCreateAPIKey,
+				target: "/api/v1/api-keys", body: `{"label":"ci"}`,
+				written: func() bool { return keys.created },
+			}
+		},
+		"another profile's setting": func(t *testing.T) v1Write {
+			contract, err := settingscontract.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := pinLockedHousehold(t)
+			h := NewSettingValuesHandler(testUserStoreProvider{store: store}, contract)
+			h.ProfileTokens = tokens
+			return v1Write{
+				store: store, method: http.MethodPut,
+				serve: func(rec http.ResponseWriter, req *http.Request) {
+					routeCtx := chi.NewRouteContext()
+					routeCtx.URLParams.Add("key", "ui.next_up_mode")
+					h.HandleSetValue(rec, req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)))
+				},
+				target: "/settings/values/ui.next_up_mode?scope=profile&profile_id=profile-2",
+				body:   `{"value":"separate"}`,
+				written: func() bool {
+					value, err := store.GetSettingValue(t.Context(), userstore.SettingIdentity{
+						Key: "ui.next_up_mode", Scope: settingscontract.ScopeProfile, ProfileID: "profile-2",
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					return value != nil
+				},
+			}
+		},
+	}
+	for name, setup := range setups {
+		for _, revoke := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/revoked=%v", name, revoke), func(t *testing.T) {
+				w := setup(t)
+				primary, err := w.store.GetProfile(t.Context(), "profile-1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				token, _, err := tokens.Mint(access.ProfileTokenClaims{UserID: 1, SessionID: "sess-1", ProfileID: "profile-1", PINRevision: primary.PINRevision})
+				if err != nil {
+					t.Fatal(err)
+				}
+				body := &pinChangeOnRead{Reader: strings.NewReader(w.body), change: func() {
+					if revoke {
+						if err := w.store.UpdateProfile(t.Context(), "profile-1", userstore.UpdateProfileInput{PIN: new("4321")}); err != nil {
+							t.Error(err)
+						}
+					}
+				}}
+				req := httptest.NewRequest(w.method, w.target, body)
+				req.Header.Set("X-Profile-Token", token)
+				ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, Role: models.RoleAdmin, TokenType: auth.TokenTypeAccess, SessionID: "sess-1"})
+				req = req.WithContext(apimw.SetProfileID(ctx, "profile-1"))
+				rec := httptest.NewRecorder()
+				w.serve(rec, req)
+				if revoke {
+					if rec.Code != http.StatusForbidden || w.written() {
+						t.Fatalf("revoked proof: status=%d written=%v %s", rec.Code, w.written(), rec.Body.String())
+					}
+					return
+				}
+				if rec.Code >= 300 || !w.written() {
+					t.Fatalf("unchanged PIN: status=%d written=%v %s", rec.Code, w.written(), rec.Body.String())
+				}
+			})
+		}
 	}
 }
