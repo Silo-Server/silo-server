@@ -325,13 +325,22 @@ describe("generic events provider recovery", () => {
     ["retry-after", 12_000],
     ["opaque", 5_000],
     ["transport", 5_000],
+    ["transport-retry-after-429", 12_000],
+    ["transport-retry-after-503", 12_000],
   ])("backs off a %s mint failure, then mints a fresh ticket", async (kind, delay) => {
     if (kind === "opaque") fetchFixture.mockRejectedValueOnce(new TypeError("fixture failure"));
-    else if (kind === "transport") {
+    else if (kind.startsWith("transport-retry-after-")) {
+      fetchFixture.mockResolvedValueOnce(
+        new Response("Unavailable", {
+          status: kind.endsWith("429") ? 429 : 503,
+          headers: { "Content-Type": "text/plain", "Retry-After": "8" },
+        }),
+      );
+    } else if (kind === "transport") {
       fetchFixture.mockResolvedValueOnce(new Response("Unavailable", { status: 503 }));
     } else
       fetchFixture.mockResolvedValueOnce(problemResponse(kind === "retry-after" ? "8" : undefined));
-    vi.mocked(Math.random).mockReturnValue(kind === "retry-after" ? 1 : 0);
+    vi.mocked(Math.random).mockReturnValue(kind.includes("retry-after") ? 1 : 0);
     mountProvider();
     await act(async () => {});
     expect(FixtureSocket.instances).toHaveLength(0);
