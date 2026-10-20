@@ -174729,7 +174729,7 @@
         "operationId": "unsubscribeNotificationEmail",
         "parameters": [
           {
-            "description": "Email capability token. Missing, expired or consumed proof returns an HTML error page.",
+            "description": "Email capability token. Missing proof returns an HTML error page; validity is checked only when the confirmation is submitted with POST.",
             "in": "query",
             "name": "token",
             "schema": {
@@ -174833,7 +174833,7 @@
             "description": "Service Unavailable"
           }
         },
-        "summary": "Process a tokenized notification email link and render its standalone result.",
+        "summary": "Render an unsubscribe confirmation page without changing email preferences.",
         "tags": [
           "notifications"
         ],

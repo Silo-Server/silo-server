@@ -392,10 +392,18 @@ They require no Silo login or profile header and accept mail-client HTML
 negotiation and one-click form bodies. Verification consumes the single-use
 proof and promotes the pending address; success is 200, expired/consumed/missing
 proof is 400, an address ownership conflict is 409, and storage errors are 500.
-Unsubscribe retains the existing profile capability token and switches email
-mode off: 200 on success, 400 for invalid/missing proof, and 500 on storage error.
-An unavailable service returns a 503 problem. API v2 adds no-store and
-no-referrer headers; pages never reflect the proof or internal error text.
+Unsubscribe retains the existing profile capability token. GET renders a 200
+confirmation page without reading or changing email preferences; missing proof
+returns 400. A nonempty token is checked only on POST. The page's explicit
+Unsubscribe button posts to the current URL, retaining the capability query.
+Both this interactive POST and the RFC 8058 one-click POST switch email mode
+off: 200 on success, 400 for invalid/missing proof, and 500 on storage error.
+Neither requires a login or an Origin header; no-referrer browser form posts
+may send `Origin: null`. HEAD and other unsupported methods return 405 without
+changing preferences. An unavailable v2 service returns a 503 problem.
+Both v1 and v2 HTML pages send `Cache-Control: no-store` and
+`Referrer-Policy: no-referrer`; pages never reflect the proof or internal error
+text. The documented GET 500 response remains for contract compatibility.
 
 The one-click POST is `non_retryable`: the existing capability token can turn
 email off again after the profile later re-enables it. This migration adds no
