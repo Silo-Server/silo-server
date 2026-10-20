@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -1874,7 +1875,11 @@ func (h *SectionHandler) maybeInjectNextUp(ctx context.Context, resolved []secti
 	if err != nil {
 		return resolved
 	}
-	if sections.NextUpMode(ctx, store, apimw.GetProfileID(ctx)) == sections.NextUpModeSeparate {
+	var adminDefaults settingsresolve.ServerSettings
+	if h.fetcher != nil {
+		adminDefaults = h.fetcher.AdminDefaults
+	}
+	if sections.NextUpMode(ctx, store, adminDefaults, apimw.GetProfileID(ctx)) == sections.NextUpModeSeparate {
 		return injectNextUpSection(resolved)
 	}
 	return resolved

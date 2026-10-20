@@ -31815,6 +31815,13 @@
           "kind": {
             "type": "string"
           },
+          "still_thumbhash": {
+            "type": "string"
+          },
+          "still_url": {
+            "description": "Presigned, short-lived. 16:9 image of the extra; absent when it has none",
+            "type": "string"
+          },
           "title": {
             "type": "string"
           }
@@ -49030,7 +49037,7 @@
             "type": "string"
           },
           "poster_url": {
-            "description": "The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls",
+            "description": "The item's poster, an episode's still, or a local extra's still (its parent's poster when it has none), sized by image_size; for system media controls",
             "type": "string"
           },
           "preview": {
@@ -135469,12 +135476,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -135841,12 +135848,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -136722,12 +136729,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -137005,12 +137012,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -137288,12 +137295,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -138748,12 +138755,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -139716,12 +139723,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -140213,12 +140220,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -140493,12 +140500,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -140777,12 +140784,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -160032,12 +160039,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -160759,12 +160766,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -163208,12 +163215,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -163450,12 +163457,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -163706,12 +163713,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -170896,12 +170903,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -171166,12 +171173,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -172620,12 +172627,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -176907,12 +176914,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -188669,12 +188676,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -188911,12 +188918,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -189170,12 +189177,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -189429,12 +189436,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -189704,12 +189711,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -189979,12 +189986,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -190273,12 +190280,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -190532,12 +190539,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -190805,12 +190812,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -191405,12 +191412,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -191664,12 +191671,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -191979,12 +191986,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -199929,12 +199936,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -200585,12 +200592,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -200847,12 +200854,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -201150,12 +201157,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -215231,12 +215238,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -215957,12 +215964,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],

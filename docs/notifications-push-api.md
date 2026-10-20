@@ -187,7 +187,8 @@ be unsent; this contract does not guarantee immediate remote-delivery revocation
 
 Once an installation adopts v2, bridge Android registration and generic device
 removal for that installation return `409 push_registration_upgrade_required`.
-Unadopted installations keep their existing bridge behavior. Deploy the migration
+Unadopted installations can still register and switch profiles within their
+account through the bridge, subject to the ownership rule below. Deploy the migration
 and guarded writer code to every API node before activating ordered native
 registration; older binaries that do not acquire the installation lock are not
 safe concurrent writers. No existing installation is enrolled by the migration.
@@ -213,3 +214,25 @@ This operation is **non-retryable**: a delayed repeat can remove a newer registr
 Registration is **non-retryable**. The existing endpoint upsert may re-enable delivery or replace a newer profile/token intent; it is not an ordered installation protocol. Existing provider callbacks and registration identity behavior remain unchanged, including the absence of generation-based late-callback isolation. The response describes stored registration state, not successful delivery. Android installation keys/generations and Apple display-token renewal do not apply.
 
 The browser captures authority before permission and checks it after each service-worker/subscription await and HTTP response. It sends once without authentication replay and publishes only under the captured authority. An already-issued browser or server operation cannot be undone by these checks. Failure or uncertainty does not trigger automatic retry, local unsubscribe, or compensating server removal; such compensation could remove a newer intent. Browser permission and local subscription may therefore remain after a failed registration.
+
+## Legacy mobile registration ownership
+
+The frozen bridge routes `POST /api/v1/devices/push/apple` and
+`POST /api/v1/notifications/push/devices` refuse a generation-zero registration
+when any destination for that device ID and platform belongs to another account.
+They return `409` with code `conflict` and leave every destination and queued
+attempt unchanged. A matching provider token, disabled destination, or matching
+profile ID does not bypass account ownership; profile IDs can repeat across accounts.
+
+Same-account profile switching still retires the previous profile's destination
+and attempts atomically. Refusal is checked under the existing installation lock,
+which serializes bridge writers and ordered v2 writers across API nodes.
+
+An older client switching accounts can therefore receive a conflict while the
+previous account's destination remains registered. Repeating registration does
+not resolve it, and neither does signing out or revoking the owning account's
+sessions. The conflict clears only when the owning account unregisters that
+device, or when the owning profile or account is deleted. Ordered bootstrap must
+occur while that existing account is selected; subsequent account transfers
+require its installation key and a newer generation. This repair adds no
+recovery or automatic rebinding mechanism.

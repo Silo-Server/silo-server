@@ -191,6 +191,20 @@ export interface SyncOutcome {
   itemsUnmatched: number;
 }
 
+// The path builders annotate their destructured options: tsrs 0.18 does not
+// contextually type a destructured parameter that has a default.
+type ListPathOptions = { libraryId?: number | null; view?: "list" | "arrange" };
+type CreatePathOptions = {
+  type?: CollectionKind;
+  source?: SyncedSource;
+  libraryId?: number | null;
+};
+type EditPathOptions = {
+  libraryId?: number | null;
+  view?: "list" | "arrange";
+  focus?: "titles";
+};
+
 export interface CollectionScope<Raw extends WireCollection = WireCollection> {
   readonly kind: ScopeKind;
   /** The value the item hooks take to pick the admin or personal item routes. */
@@ -205,16 +219,9 @@ export interface CollectionScope<Raw extends WireCollection = WireCollection> {
   readonly allowPersonalizedRules: boolean;
 
   paths: {
-    list(options?: { libraryId?: number | null; view?: "list" | "arrange" }): string;
-    create(options?: {
-      type?: CollectionKind;
-      source?: SyncedSource;
-      libraryId?: number | null;
-    }): string;
-    edit(
-      id: string,
-      options?: { libraryId?: number | null; view?: "list" | "arrange"; focus?: "titles" },
-    ): string;
+    list(options?: ListPathOptions): string;
+    create(options?: CreatePathOptions): string;
+    edit(id: string, options?: EditPathOptions): string;
     browse(view: CollectionView<Raw>): string;
   };
 
@@ -690,11 +697,11 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
   paths: {
     // A bare `?libraryId=N` opens that library's Arrange (older links), so a
     // library's List names its view.
-    list: ({ libraryId, view = libraryId ? "list" : undefined } = {}) =>
+    list: ({ libraryId, view = libraryId ? "list" : undefined }: ListPathOptions = {}) =>
       withQuery("/admin/collections", { libraryId, view }),
-    create: ({ type, source, libraryId } = {}) =>
+    create: ({ type, source, libraryId }: CreatePathOptions = {}) =>
       withQuery("/admin/collections/new", { type, source, libraryId }),
-    edit: (id, { libraryId, view, focus } = {}) =>
+    edit: (id, { libraryId, view, focus }: EditPathOptions = {}) =>
       withQuery(`/admin/collections/${encodeURIComponent(id)}/edit`, { libraryId, view, focus }),
     browse: (view) => buildLibraryCollectionCatalogHref(view.id, view.name),
   },
@@ -822,8 +829,9 @@ export const PERSONAL_SCOPE: CollectionScope<Collection> = {
 
   paths: {
     list: () => "/collections",
-    create: ({ type, source } = {}) => withQuery("/collections/new", { type, source }),
-    edit: (id, { focus } = {}) =>
+    create: ({ type, source }: CreatePathOptions = {}) =>
+      withQuery("/collections/new", { type, source }),
+    edit: (id, { focus }: EditPathOptions = {}) =>
       withQuery(`/collections/${encodeURIComponent(id)}/edit`, { focus }),
     browse: (view) => buildUserCollectionCatalogHref(view.id, view.name),
   },

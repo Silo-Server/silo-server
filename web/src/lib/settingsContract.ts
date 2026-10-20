@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 21;
+export const SETTINGS_REVISION = 23;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -350,6 +350,9 @@ export interface SettingDefinition {
   scopeIntroducedIn: readonly number[];
   resolutionOrder: readonly string[];
   defaultValue: unknown;
+  /** The server administrator may replace defaultValue for the whole server,
+   * so a value with source "default" can differ from it. */
+  adminDefault?: boolean;
   label: string;
   description: string;
   category: string;
@@ -680,9 +683,9 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     type: "enum",
     nullable: false,
     persistence: "remote",
-    introducedIn: 21,
+    introducedIn: 23,
     scopes: ["profile", "profile_device"],
-    scopeIntroducedIn: [21, 21],
+    scopeIntroducedIn: [23, 23],
     resolutionOrder: ["profile_device", "profile", "default"],
     defaultValue: "always",
     label: "Lower quality when buffering",
@@ -691,9 +694,9 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "playback",
     control: "select",
     values: [
-      { value: "never", label: "Never", introducedIn: 21 },
-      { value: "ask", label: "Ask first", introducedIn: 21 },
-      { value: "always", label: "Automatically", introducedIn: 21 },
+      { value: "never", label: "Never", introducedIn: 23 },
+      { value: "ask", label: "Ask first", introducedIn: 23 },
+      { value: "always", label: "Automatically", introducedIn: 23 },
     ],
   },
   "playback.cellular_max_bitrate_kbps": {
@@ -1521,6 +1524,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [1],
     resolutionOrder: ["profile", "default"],
     defaultValue: "combined",
+    adminDefault: true,
     label: "Next up episodes",
     description: "Whether upcoming episodes stay with Continue Watching or get their own row.",
     category: "navigation",
@@ -1540,6 +1544,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [18],
     resolutionOrder: ["profile", "default"],
     defaultValue: false,
+    adminDefault: true,
     label: "Show new episodes first",
     description:
       "Move a show you've caught up on to the front of Continue Watching and Next Up when a new episode or season arrives.",
@@ -1705,6 +1710,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [16, 16],
     resolutionOrder: ["profile", "profile_device", "default"],
     defaultValue: true,
+    adminDefault: true,
     label: "Show title art",
     description:
       "Use a title's logo artwork as its name on detail pages when one is available. When off, the name is always shown as text.",

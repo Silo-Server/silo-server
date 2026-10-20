@@ -234,8 +234,8 @@ the destination URL is attacker-controllable input against that server's
 network position:
 
 - HTTPS only; TLS verification is not user-overridable.
-- The destination host must never resolve to a private or special-purpose
-  address. The deny set covers the IPv4 private/special ranges (loopback,
+- By default, the destination host must never resolve to a private or
+  special-purpose address. The deny set covers the IPv4 private/special ranges (loopback,
   RFC 1918, link-local, CGNAT, TEST-NETs, benchmarking, multicast, reserved)
   and the IPv6 equivalents (unspecified, loopback, ULA, site-local, link-local,
   documentation, NAT64, multicast). IPv4-mapped IPv6 addresses are unwrapped
@@ -246,7 +246,12 @@ network position:
   re-validates the resolved address) to defeat DNS rebinding. Redirects are
   bounded and each hop is re-checked.
 - An admin-only `notifications.webhooks.allow_private_destinations` setting
-  exists for development environments.
+  exists for development environments. It permits the shared Private class;
+  Blocked addresses remain refused at registration and every connection.
+  Registration in either mode requires every resolved address to be allowed;
+  lookup failure, an empty answer, or the two-second lookup deadline rejects
+  the destination. Public-only requests also refuse the server's own interface
+  addresses, as required by the shared policy.
 
 Webhook URLs and generic signing secrets are encrypted at rest, never
 returned by the API after creation (only the host is readable — a Discord

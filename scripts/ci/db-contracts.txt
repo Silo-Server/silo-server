@@ -41,6 +41,7 @@
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
 
 # Profile history and account/invitation persistence.
+./internal/api/handlers TestAccessGroupUpdateLibraryPolicyDB
 ./internal/api/handlers TestClearResumePositionTargetsDB
 ./internal/api/handlers TestEbookProgressEventsPostgres
 ./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
@@ -98,6 +99,13 @@
 # Verification delivery survives a lost persistence receipt with bounded retries.
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
+
+# Legacy mobile registration protects account ownership under the installation lock.
+./internal/notifications TestLegacyMobilePushRefusesForeignAccountDB
+./internal/notifications TestLegacyMobilePushProfileSwitchRollbackDB
+./internal/notifications TestLegacyMobilePushPreservesOrderedProofDB
+./internal/notifications TestLegacyMobilePushWaitsForOwnershipDB
+./internal/notifications TestLegacyPushRegistrationStaysOnTheAccount
 
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
@@ -417,3 +425,6 @@
 ./internal/api/handlers TestLearnedLimitCarriesThroughReplansDB
 ./internal/api/handlers TestConnectionReadingsDB
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
+# Explore all on a row the catalog cannot express as a query pages the row's
+# own fetch past its item limit, on Home and on its library page.
+./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
