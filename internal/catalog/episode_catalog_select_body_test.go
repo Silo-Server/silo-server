@@ -45,6 +45,22 @@ func TestEpisodeCatalogSelectBodyExposesQualifiedColumns(t *testing.T) {
 	}
 }
 
+// TestEpisodeCatalogSelectBodyExposesSortColumns guards the sorts that read a
+// bare column off "mi": episode-scoped and mixed episode searches sort on the
+// same relation, so a missing column fails with SQLSTATE 42703 (issue #2061).
+func TestEpisodeCatalogSelectBodyExposesSortColumns(t *testing.T) {
+	exposed := episodeCatalogSelectBodyOutputColumns(t)
+	for field, def := range querySortDefs {
+		column := def.columnSQL
+		if column == "" || strings.ContainsAny(column, "%(") {
+			continue
+		}
+		if !exposed[column] {
+			t.Errorf("sort %q reads mi.%s, which episodeCatalogSelectBody does not expose", field, column)
+		}
+	}
+}
+
 // TestEpisodeCatalogSelectBodyExcludesNonSeriesEpisodes guards the invariant
 // that the episode catalog only ever hydrates episodes whose parent is a TV
 // series. episode_libraries (and episode_catalog_entries) also contain podcast
