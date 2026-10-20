@@ -3073,6 +3073,14 @@ library chains as on v1. Success is 201 with the installation. There is no repla
 and no database uniqueness, so the row is non-retryable: a lost response may follow a
 committed install and the client reconciles from the installation list.
 
+The host rejects a manifest ID or version that maps to an empty, `.` or `..` directory
+component. Its existing mapping of `/`, `\`, `:` and `@` to `_` is unchanged; IDs remain
+opaque. New install and proxy-cache paths must be strict descendants of the root that
+constructs them. For valid stored identities, the host preserves its recorded install
+path, including legacy layouts and roots used by another replica or earlier configuration.
+These are lexical checks under trusted local-root and host-written-database assumptions;
+they do not protect against a local writer racing symlink changes or sandbox native plugins.
+
 `PUT /api/v2/admin/plugins/installations/{id}` assigns `enabled` and/or `update_policy`
 (`auto`, `notify`, `off`, `manual`); an empty body is 422. Disabling stops the running plugin
 before the write; any enabled change rebuilds the event subscriber index. Repeating the
@@ -3119,8 +3127,10 @@ restart, an update or a configuration change clears that failure.
 `DELETE /api/v2/admin/plugins/installations/{id}` stops the plugin, deletes the row
 (configuration, bindings and archives cascade) and removes its files; on a failed row delete
 an enabled plugin is restarted. Row delete and file removal are not one transaction and a
-repeat finds no row, so a later 404 is not this caller's receipt; non-retryable. Success is
-204.
+repeat finds no row, so a later 404 is not this caller's receipt; non-retryable. A stored
+invalid identity leaves the files untouched and returns the existing cleanup error after
+the row is removed. Replacement cleanup instead remains best-effort: unsafe old cleanup
+is skipped without failing the committed replacement. Success is 204.
 
 `POST /api/v2/admin/plugins/uploads` installs one uploaded archive from the multipart
 `archive` part, capped at 256 MiB; JSON on this operation is 415, a missing part 422 at

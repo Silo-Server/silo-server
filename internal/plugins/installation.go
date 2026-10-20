@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -97,7 +96,14 @@ type UpdateInstallationInput struct {
 }
 
 type InstallationStore struct {
-	pool *pgxpool.Pool
+	pool installationDB
+}
+
+type installationDB interface {
+	Begin(context.Context) (pgx.Tx, error)
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
 func NewInstallationStore(pool *pgxpool.Pool) *InstallationStore {
@@ -486,8 +492,7 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 		return ErrInstallationNotFound
 	}
 
-	installDir := filepath.Dir(installation.InstallPath)
-	if err := os.RemoveAll(installDir); err != nil {
+	if err := removeInstallationFiles(installation, os.RemoveAll); err != nil {
 		return fmt.Errorf("removing plugin installation files: %w", err)
 	}
 
