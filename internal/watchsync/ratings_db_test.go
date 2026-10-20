@@ -101,10 +101,11 @@ func TestRatingSyncRepositoryDB(t *testing.T) {
 	})
 
 	t.Run("sync run counters round-trip", func(t *testing.T) {
-		run, err := repo.CreateSyncRun(ctx, SyncRun{ConnectionID: conn.ID, Trigger: "test", Provider: "ratings", InboundRatingsFound: 1})
+		admitted, err := repo.AdmitSyncRun(ctx, conn, SyncRun{Trigger: "test", InboundRatingsFound: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
+		run := admitted.Run
 		run.InboundRatingsFound, run.InboundRatingsImported, run.OutboundRatingsFound, run.OutboundRatingsSent = 4, 3, 2, 1
 		run.Status = string(SyncRunStatusSuccess)
 		completed, err := repo.CompleteSyncRun(ctx, run)

@@ -28,10 +28,8 @@ type Repository interface {
 	DeleteConnection(ctx context.Context, provider string, userID int, profileID string) error
 	ListConnectionsDueForSync(ctx context.Context, now time.Time) ([]Connection, error)
 	DeferConnectionsForAccount(ctx context.Context, provider, providerAccountID string, until time.Time, lastError string) (int, error)
-	CreateSyncRun(ctx context.Context, run SyncRun) (SyncRun, error)
+	AdmitSyncRun(ctx context.Context, conn Connection, run SyncRun) (syncRunAdmission, error)
 	CompleteSyncRun(ctx context.Context, run SyncRun) (SyncRun, error)
-	GetLatestSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error)
-	GetActiveSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error)
 	ListSyncRuns(ctx context.Context, connectionID string, limit int) ([]SyncRun, error)
 	ListLocalWatchEventConnections(ctx context.Context, userID int, profileID string, kind LocalWatchEventKind) ([]Connection, error)
 	ListListEventConnections(ctx context.Context, userID int, profileID string, list ListKind) ([]Connection, error)
@@ -139,6 +137,7 @@ const listItemStateColumns = `
 type PostgresRepository struct {
 	pool   *pgxpool.Pool
 	cipher *secret.Cipher
+	now    func() time.Time
 	// ratingLock serializes a connection's rating reconciliation; see
 	// WithRatingSyncLock.
 	ratingLock connectionLock
@@ -180,7 +179,7 @@ func (l *connectionLock) sessionLimit(pool *pgxpool.Pool) chan struct{} {
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool, cipher *secret.Cipher) *PostgresRepository {
-	r := &PostgresRepository{pool: pool, cipher: cipher}
+	r := &PostgresRepository{pool: pool, cipher: cipher, now: time.Now}
 	r.ratingLock.class, r.ratingLock.name = ratingSyncLockClass, "rating sync"
 	r.tokenRefreshLock.class, r.tokenRefreshLock.name = tokenRefreshLockClass, "token refresh"
 	return r
@@ -525,14 +524,14 @@ func (r *PostgresRepository) DeferConnectionsForAccount(
 	return int(tag.RowsAffected()), nil
 }
 
-func (r *PostgresRepository) CreateSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {
+func createSyncRun(ctx context.Context, tx pgx.Tx, run SyncRun) (SyncRun, error) {
 	if run.Status == "" {
 		run.Status = string(SyncRunStatusRunning)
 	}
 	if run.StartedAt.IsZero() {
 		run.StartedAt = time.Now().UTC()
 	}
-	row := r.pool.QueryRow(ctx, `
+	row := tx.QueryRow(ctx, `
 		INSERT INTO watch_provider_sync_runs (
 			connection_id, trigger, status, provider,
 			inbound_watched_found, inbound_watched_imported,
@@ -571,8 +570,8 @@ func (r *PostgresRepository) CreateSyncRun(ctx context.Context, run SyncRun) (Sy
 	return created, nil
 }
 
-func (r *PostgresRepository) CompleteSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {
-	row := r.pool.QueryRow(ctx, `
+func completeSyncRun(ctx context.Context, tx pgx.Tx, run SyncRun) (SyncRun, error) {
+	row := tx.QueryRow(ctx, `
 		UPDATE watch_provider_sync_runs
 		SET status = $2,
 			inbound_watched_found = $3,
@@ -630,25 +629,6 @@ func (r *PostgresRepository) GetLatestSyncRun(ctx context.Context, connectionID 
 	}
 	if err != nil {
 		return SyncRun{}, false, fmt.Errorf("get latest watch provider sync run: %w", err)
-	}
-	return run, true, nil
-}
-
-func (r *PostgresRepository) GetActiveSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error) {
-	row := r.pool.QueryRow(ctx, `
-		SELECT `+syncRunColumns+`
-		FROM watch_provider_sync_runs
-		WHERE connection_id = $1::uuid
-		  AND status IN ('queued', 'running')
-		ORDER BY started_at DESC, created_at DESC
-		LIMIT 1
-	`, connectionID)
-	run, err := scanSyncRun(row)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return SyncRun{}, false, nil
-	}
-	if err != nil {
-		return SyncRun{}, false, fmt.Errorf("get active watch provider sync run: %w", err)
 	}
 	return run, true, nil
 }
