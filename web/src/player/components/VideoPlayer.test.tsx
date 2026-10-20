@@ -5845,6 +5845,29 @@ describe("VideoPlayer buffering pill", () => {
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
   });
 
+  it("ignores a pick of the quality already playing, and hides the pill on another", () => {
+    const onQualitySelect = vi.fn();
+    askPlayer({ onQualitySelect, qualityPreference: "auto" });
+    const qualityControls = controls.current as unknown as {
+      onQualitySelect: (id: string) => void;
+    };
+    act(() => qualityControls.onQualitySelect("auto"));
+    expect(onQualitySelect).not.toHaveBeenCalled();
+    act(() => qualityControls.onQualitySelect("1080p-high"));
+    expect(onQualitySelect).toHaveBeenCalledWith("1080p-high", expect.any(Number));
+  });
+
+  it("starts over when the cap its replans send changes", () => {
+    const rendered = askPlayer({ bandwidthCapKbps: null });
+    fireEvent.waiting(rendered.video);
+    act(() => vi.advanceTimersByTime(7_000));
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+    // The link turned metered, and the cellular cap applies from now on.
+    rendered.rerenderPlayer({ bandwidthCapKbps: 4_000 });
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+  });
+
   it("treats a wait with no data arriving as an outage until data comes back", () => {
     const { video } = askPlayer();
     // The browser received nothing for its idle time.

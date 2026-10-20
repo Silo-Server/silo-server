@@ -713,6 +713,7 @@ function WatchPagePlayer({
       intro={activeMarkers.intro}
       introSkipMode={introSkipMode}
       bufferingMode={bufferingMode}
+      bandwidthCapKbps={maxBitrateKbps}
       bufferingTitleId={contentId}
       playbackAttemptId={session.playbackAttemptId}
       onKeptEstimate={session.setKeptEstimate}

@@ -269,6 +269,12 @@ interface VideoPlayerProps {
    * then only watches, as in `never`, rather than lower quality on a guess.
    */
   bufferingMode?: BufferingMode | null;
+  /**
+   * The bitrate cap the session's replans send. It changes when the link
+   * turns metered or unmetered and the other quality pair applies: a quality
+   * change, so the controller starts over and drops its kept estimate.
+   */
+  bandwidthCapKbps?: number | null;
   onBufferingSummary?: (
     plan: BufferingPlan,
     summary: BufferingSummary,
@@ -508,6 +514,7 @@ export function VideoPlayer({
   intro,
   introSkipMode = "ask",
   bufferingMode = "always",
+  bandwidthCapKbps,
   bufferingTitleId,
   onBufferingSummary,
   playbackAttemptId,
@@ -4426,6 +4433,14 @@ export function VideoPlayer({
   const bufferingPill =
     isDetached || pageHidden || nativeVideoFullscreen ? null : bufferingQuality.pill;
   const { answer: answerBufferingPill } = bufferingQuality;
+  // A new cap on the session's replans is a quality change (see the prop).
+  const capForBuffering = bandwidthCapKbps ?? null;
+  const capForBufferingRef = useRef(capForBuffering);
+  useEffect(() => {
+    if (capForBufferingRef.current === capForBuffering) return;
+    capForBufferingRef.current = capForBuffering;
+    answerBufferingPill("quality_changed");
+  }, [answerBufferingPill, capForBuffering]);
   // An answer removes the pill; focus that was on it moves to the transport.
   const answerBuffering = useCallback(
     (answer: BufferingAnswer) => {
@@ -5271,6 +5286,8 @@ export function VideoPlayer({
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={(id) => {
+            // Picking the quality already playing changes nothing.
+            if (id === activeQualityId) return;
             answerBufferingPill("quality_changed");
             handleQualitySelect(id);
           }}
@@ -5289,7 +5306,11 @@ export function VideoPlayer({
           }
           onSwitchVersion={
             onSwitchVersion && !watchTogetherRoomId
-              ? (fileId) => onSwitchVersion(fileId, currentTime)
+              ? (fileId) => {
+                  // A version the viewer chooses is a quality change.
+                  answerBufferingPill("quality_changed");
+                  onSwitchVersion(fileId, currentTime);
+                }
               : undefined
           }
           playbackSpeed={playbackSpeed}
