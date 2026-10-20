@@ -274,6 +274,8 @@ describe("app boot request budget", () => {
     signInReturningOwner();
     await boot(server);
     expect(screen.getByTestId("home"), describeRequests(server.requests)).toBeInTheDocument();
+    // A connection speed reading the session kept for playback starts.
+    storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, '{"readings":[],"writtenAt":0}');
 
     server.revokeSessions();
     await act(async () => {
@@ -286,6 +288,8 @@ describe("app boot request budget", () => {
     expect(screen.queryByTestId("home"), log).not.toBeInTheDocument();
     expect(appRouter!.state.location.pathname, log).toBe("/login");
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
+    // A reading from before a sign-out goes with it.
+    expect(storage.get(storage.KEYS.BANDWIDTH_ESTIMATE)).toBeNull();
     // One refused refresh is shared; nothing retries the rejected session.
     const refusedRefreshes = server.requests.filter(
       (request) => request.operation === "POST /api/v2/auth/refresh" && request.status === 401,

@@ -353,6 +353,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // an empty cache instead of being thrown away a render later.
       if (signedInUserIdRef.current !== null && signedInUserIdRef.current !== data.user.id) {
         queryClient.clear();
+        // The connection speed the server kept for the old account is not this one's.
+        storage.remove(storage.KEYS.BANDWIDTH_ESTIMATE);
       }
       setAccessToken(data.access_token);
       setRefreshToken(data.refresh_token);
@@ -376,6 +378,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     endProfileEpoch();
     clearProfile();
     queryClient.clear();
+    // A speed reading from before a sign-out is discarded.
+    storage.remove(storage.KEYS.BANDWIDTH_ESTIMATE);
     setUser(null);
     setSetupRequired(false);
   }, [clearProfile]);
