@@ -136,54 +136,11 @@ func profileLessAdminMayManage(ctx context.Context, store userstore.UserStore) (
 	return !access.HouseholdRequiresProfile(profiles), nil
 }
 
-// verifyProfileToken checks the X-Profile-Token a PIN-locked profile must
-// present, reading the profile from the caller's own store. Missing
-// dependencies fail closed: a handler wired without a token service cannot
-// verify a PIN, and "cannot verify" is not "verified".
-func verifyProfileToken(
-	r *http.Request,
-	stores userstore.UserStoreProvider,
-	tokens *access.ProfileTokenService,
-	profileID string,
-) error {
-	if stores == nil || tokens == nil {
-		return access.ErrProfileUnverified
-	}
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		return access.ErrProfileUnverified
-	}
-	store, err := stores.ForUser(r.Context(), userID)
-	if err != nil {
-		return fmt.Errorf("opening user store: %w", err)
-	}
-	return verifyProfileTokenIn(r, store, tokens, profileID)
-}
-
-// verifyProfileTokenIn is verifyProfileToken against an already opened store
-// for the calling account. The token must match the profile's current PIN
-// revision (see access.CheckProfileToken).
-func verifyProfileTokenIn(
-	r *http.Request,
-	store userstore.UserStore,
-	tokens *access.ProfileTokenService,
-	profileID string,
-) error {
-	if store == nil || tokens == nil {
-		return access.ErrProfileUnverified
-	}
-
-	profile, err := store.GetProfile(r.Context(), profileID)
-	if err != nil {
-		return fmt.Errorf("loading profile: %w", err)
-	}
-	if profile == nil {
-		return access.ErrProfileUnverified
-	}
-
-	return verifyProfileTokenFor(r, tokens, profile)
-}
-
+// verifyProfileTokenFor checks the X-Profile-Token a PIN-locked profile must
+// present against the profile row the household check just loaded, so the
+// token must match that row's current PIN revision (see
+// access.CheckProfileToken). A handler wired without a token service fails
+// closed: "cannot verify" is not "verified".
 func verifyProfileTokenFor(r *http.Request, tokens *access.ProfileTokenService, profile *userstore.Profile) error {
 	if tokens == nil {
 		return access.ErrProfileUnverified

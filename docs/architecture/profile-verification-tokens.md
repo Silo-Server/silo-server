@@ -5,7 +5,7 @@ PIN-locked profile's PIN in the current login session. `POST
 /api/v2/profiles/{id}/verify-pin` and v1 `POST /profiles/{id}/verify-pin` mint it,
 and a remote-playback device sign-in returns one for the approved profile. The
 viewer gate (`access.VerifyProfileForRequest`) and the v1 household check
-(`handlers.verifyProfileToken`) accept it through one function,
+(`handlers.verifyProfileTokenFor`) accept it through one function,
 `access.CheckProfileToken`.
 
 ## What the token is bound to
@@ -41,6 +41,30 @@ the events socket's `access_changed` signal. It no longer gates profile tokens.
 Before this binding, a household parent whose PIN-locked profile saved a child's
 parental controls advanced the account revision and lost its own token on the
 next request.
+
+## Household writes
+
+Managing the household (creating, editing or deleting profiles, writing another
+profile's settings or devices, importing history for another profile, creating
+a personal API key) needs the primary profile's proof to still hold when the
+write happens, not only when the request arrived. A request can sit on its body
+while another request changes the primary PIN.
+
+- The household check (`handlers.householdManagerAs`) loads the primary profile
+  afresh and compares the request's proof with that row's `pin_revision`. On
+  v2 the viewer gate records the revision it verified in
+  `access.Scope.ProfilePINRevision`, and `Scope.CheckProfileVerification`
+  compares it. On v1 the token itself is checked against the fresh row.
+- The check runs after the body has been read. Huma reads v2 bodies before the
+  handler runs; a v1 handler that checks household authority before decoding
+  its body reads it first (`handlers.readHouseholdRequestBody`).
+- Profile create and update repeat the comparison inside their write
+  transaction (`PreferenceSettingsWriter.CheckProfilePINRevision`), which locks
+  the primary row in Postgres and runs in the writer transaction in SQLite, so a
+  PIN change cannot commit between the check and the write. Other household
+  writes keep the short gap between the check and the write.
+- `Scope.ProfilePINRevision` is excluded from JSON so scope fingerprints used by
+  the events socket and progress sync do not change with it.
 
 ## Upgrade and rolling deploys
 
