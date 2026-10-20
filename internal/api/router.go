@@ -61,6 +61,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/overlays"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/planstore"
@@ -151,6 +152,7 @@ type Dependencies struct {
 	}
 	S3Private         *s3client.Client              // private internal bucket client (may be nil)
 	BrandingService   *branding.Service             // white-label branding (nil when DB unavailable)
+	OverlayImages     *overlays.ImageLibrary        // card overlay image library (nil when DB unavailable)
 	EmailBrand        *mail.BrandLoader             // server branding for outgoing email (nil sends Silo's default)
 	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
 	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
@@ -2598,6 +2600,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService
+	}
+	if deps.OverlayImages != nil {
+		v2deps.OverlayImages = deps.OverlayImages
 	}
 
 	if inviteCodeRepo != nil {

@@ -60,6 +60,7 @@ type SettingsContractCapabilities struct {
 	SupportsIdempotentWrites bool     `json:"supports_idempotent_writes" doc:"Whether repeating a value write converges on the same state" example:"true"`
 	SupportsAtomicShortcuts  bool     `json:"supports_atomic_shortcuts" doc:"Whether navigation shortcut list mutations are atomic" example:"true"`
 	SupportsDeviceRename     bool     `json:"supports_device_rename" doc:"Whether updateDevice can give a device a custom name, which listDevices returns as custom_name" example:"true"`
+	SupportsOverlayImages    bool     `json:"supports_overlay_images" doc:"Whether this server keeps a card overlay image library: getOverlayConfig lists it and card overlay documents may name its images" example:"true"`
 }
 
 // SettingsContractCapabilitiesOutput is the getSettingsContractCapabilities
@@ -75,10 +76,12 @@ type SettingsContractCapabilitiesOutput struct {
 // QuickActionsEnabled are defaults for profiles that have not chosen; an
 // explicit profile setting overrides them either way.
 type OverlayConfig struct {
-	Enabled             bool   `json:"enabled" doc:"Whether card overlays are enabled server-wide" example:"true"`
-	Defaults            string `json:"defaults,omitempty" doc:"Administrator-chosen overlay defaults document; absent when none is set" example:"{\"badges\":true}"`
-	QuickActionsEnabled bool   `json:"quick_actions_enabled" doc:"Default for profiles that have not chosen whether cards show quick actions" example:"false"`
-	QuickActionsDefault string `json:"quick_actions_default" doc:"Default quick-action mode; one of the ui.card_quick_actions values in the settings contract" example:"both"`
+	Enabled               bool           `json:"enabled" doc:"Whether card overlays are enabled server-wide" example:"true"`
+	Defaults              string         `json:"defaults,omitempty" doc:"Administrator-chosen overlay defaults document; absent when none is set" example:"{\"badges\":true}"`
+	QuickActionsEnabled   bool           `json:"quick_actions_enabled" doc:"Default for profiles that have not chosen whether cards show quick actions" example:"false"`
+	QuickActionsDefault   string         `json:"quick_actions_default" doc:"Default quick-action mode; one of the ui.card_quick_actions values in the settings contract" example:"both"`
+	Images                []OverlayImage `json:"images" doc:"Images administrators uploaded for badges, in upload order; card overlay documents name them by ref"`
+	ImageUploadsAvailable bool           `json:"image_uploads_available" doc:"Whether this server has the asset storage uploadAdminOverlayImage needs" example:"true"`
 }
 
 // OverlayConfigOutput is the getOverlayConfig response.
@@ -436,6 +439,7 @@ func (reg *Registry) getSettingsContractCapabilities(ctx context.Context, _ *Cap
 		SupportsIdempotentWrites: view.SupportsIdempotentWrites,
 		SupportsAtomicShortcuts:  view.SupportsAtomicShortcuts,
 		SupportsDeviceRename:     reg.deps.DeviceSettings != nil,
+		SupportsOverlayImages:    reg.deps.OverlayImages != nil,
 	}}, nil
 }
 
@@ -444,13 +448,16 @@ func (reg *Registry) getOverlayConfig(ctx context.Context, _ *struct{}) (*Overla
 		return nil, unavailable("settings")
 	}
 	view := reg.deps.Settings.OverlayConfig(ctx)
+	images, uploadsAvailable := reg.overlayImagesFor(ctx)
 	return &OverlayConfigOutput{
 		CacheControl: cachePrivateNoCache,
 		Body: OverlayConfig{
-			Enabled:             view.Enabled,
-			Defaults:            view.Defaults,
-			QuickActionsEnabled: view.QuickActionsEnabled,
-			QuickActionsDefault: view.QuickActionsDefault,
+			Enabled:               view.Enabled,
+			Defaults:              view.Defaults,
+			QuickActionsEnabled:   view.QuickActionsEnabled,
+			QuickActionsDefault:   view.QuickActionsDefault,
+			Images:                images,
+			ImageUploadsAvailable: uploadsAvailable,
 		},
 	}, nil
 }

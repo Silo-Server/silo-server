@@ -39,6 +39,8 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     iconId: "monitor",
     iconCapable: true,
     getValue: (d) => prettyResolution(d.resolution),
+    getValueKey: (d) => d.resolution || null,
+    valueKeySuggestions: ["2160p", "1080p", "720p", "480p"],
   },
   {
     id: "hdr",
@@ -49,6 +51,8 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: true,
     iconCapable: true,
     getValue: (d) => d.hdr ?? null,
+    getValueKey: (d) => d.hdr || null,
+    valueKeySuggestions: ["DV", "DV HDR10", "DV HDR10+", "HDR10", "HDR10+", "HLG", "HDR"],
     getIcon: (d) => hdrIcon(d.hdr),
   },
   {
@@ -68,6 +72,9 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     // Only the DV circle mark works next to a combined label; a wordmark
     // (HDR10) would visually duplicate the label's HDR suffix.
     getIcon: (d) => (d.hdr?.includes("DV") ? "dolby-vision" : null),
+    // The resolution and dynamic range as the API returns them, joined by a
+    // space: "2160p DV HDR10", or "1080p" without HDR.
+    getValueKey: (d) => (d.resolution ? [d.resolution, d.hdr].filter(Boolean).join(" ") : null),
   },
   {
     id: "audio",
@@ -78,6 +85,8 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: true,
     iconCapable: true,
     getValue: (d) => d.audio ?? null,
+    getValueKey: (d) => d.audio || null,
+    valueKeySuggestions: ["Atmos", "TrueHD", "DTS-HD", "DTS", "EAC3", "AC3", "AAC", "FLAC"],
     getIcon: (d) => audioIcon(d.audio),
   },
   {
@@ -90,6 +99,7 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     iconId: "volume",
     iconCapable: true,
     getValue: (d) => d.audio_channels ?? null,
+    getValueKey: (d) => d.audio_channels || null,
   },
   {
     id: "video_codec",
@@ -101,6 +111,8 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     iconId: "film",
     iconCapable: true,
     getValue: (d) => d.video_codec ?? null,
+    getValueKey: (d) => d.video_codec || null,
+    valueKeySuggestions: ["H.265", "H.264", "AV1", "VP9"],
     getIcon: (d) => videoCodecIcon(d.video_codec),
   },
   {
@@ -112,6 +124,7 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: false,
     iconCapable: false,
     getValue: (d) => d.container ?? null,
+    getValueKey: (d) => d.container || null,
   },
   {
     id: "aspect_ratio",
@@ -123,6 +136,7 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     iconId: "layout",
     iconCapable: true,
     getValue: (d) => d.aspect_ratio ?? null,
+    getValueKey: (d) => d.aspect_ratio || null,
   },
   {
     id: "release_type",
@@ -133,6 +147,8 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: true,
     iconCapable: false,
     getValue: (d) => d.release_type ?? null,
+    getValueKey: (d) => d.release_type || null,
+    valueKeySuggestions: ["REMUX", "BluRay", "WEB-DL", "WEBRip", "HDTV", "DVD"],
   },
   {
     id: "edition",
@@ -143,6 +159,7 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: false,
     iconCapable: false,
     getValue: (d) => d.edition ?? null,
+    getValueKey: (d) => d.edition || null,
   },
   {
     id: "multi_audio",

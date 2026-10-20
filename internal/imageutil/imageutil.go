@@ -172,16 +172,26 @@ func EncodeWebPWidth(data []byte, width int) ([]byte, error) {
 // returns the encoded dimensions. Email uses it: unlike WebP, PNG renders in
 // every mail client.
 func EncodePNGWithin(data []byte, maxWidth, maxHeight int) (out []byte, width, height int, err error) {
+	return encodeWithin(data, bimg.Options{Type: bimg.PNG, StripMetadata: true}, "png", maxWidth, maxHeight)
+}
+
+// EncodeWebPWithin is EncodePNGWithin for WebP, with transparency kept. Card
+// overlay images use it: one small image per badge, with no variants beside
+// it.
+func EncodeWebPWithin(data []byte, maxWidth, maxHeight int) (out []byte, width, height int, err error) {
+	return encodeWithin(data, bimg.Options{Type: bimg.WEBP, Quality: webpQuality, StripMetadata: true}, "webp", maxWidth, maxHeight)
+}
+
+// encodeWithin re-encodes data with opts so it fits within
+// maxWidth×maxHeight, never upscaling, and returns the encoded dimensions. A
+// source libvips cannot read wraps ErrInvalidImage.
+func encodeWithin(data []byte, opts bimg.Options, format string, maxWidth, maxHeight int) (out []byte, width, height int, err error) {
 	size, err := bimg.NewImage(data).Size()
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("imageutil: invalid image: %w", err)
+		return nil, 0, 0, fmt.Errorf("%w: %w", ErrInvalidImage, err)
 	}
 	if size.Width <= 0 || size.Height <= 0 {
-		return nil, 0, 0, fmt.Errorf("imageutil: invalid image size %dx%d", size.Width, size.Height)
-	}
-	opts := bimg.Options{
-		Type:          bimg.PNG,
-		StripMetadata: true,
+		return nil, 0, 0, fmt.Errorf("%w: size %dx%d", ErrInvalidImage, size.Width, size.Height)
 	}
 	// Constrain only the binding edge so libvips keeps the aspect ratio.
 	if size.Width*maxHeight >= size.Height*maxWidth {
@@ -193,11 +203,11 @@ func EncodePNGWithin(data []byte, maxWidth, maxHeight int) (out []byte, width, h
 	}
 	out, err = bimg.NewImage(data).Process(opts)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("imageutil: encode png: %w", err)
+		return nil, 0, 0, fmt.Errorf("imageutil: encode %s: %w", format, err)
 	}
 	outSize, err := bimg.NewImage(out).Size()
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("imageutil: read png size: %w", err)
+		return nil, 0, 0, fmt.Errorf("imageutil: read %s size: %w", format, err)
 	}
 	return out, outSize.Width, outSize.Height, nil
 }

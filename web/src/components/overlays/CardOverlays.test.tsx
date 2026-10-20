@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -457,7 +457,9 @@ describe("CardOverlays", () => {
     it.each(OVERLAY_POSITIONS)("renders in the %s corner", (position) => {
       const prefs = prefsWithOnly("request_status");
       prefs.items.request_status = { ...prefs.items.request_status, position };
-      const [edge, side] = position.split("-");
+      // Corners are "<edge>-<side>"; rails are "<side>-edge" on their own edge.
+      const [edge, part] = position.split("-");
+      const side = part === "edge" ? edge : part;
       const { container } = render(<CardOverlays data={SAMPLE_REQUEST_DATA} prefs={prefs} />);
       const stack = container.querySelector(
         `[data-overlay-edge="${edge}"] > div.${side === "left" ? "items-start" : "items-end"}`,
@@ -494,6 +496,40 @@ describe("CardOverlays", () => {
         badgeStyle({ ...attention, request_status_attention: false }, custom),
       );
     });
+  });
+
+  it("replaces a badge with the uploaded image for its value, and falls back to text without it", () => {
+    const ref = `${"ab".repeat(32)}.webp`;
+    const prefs = prefsWithOnly("resolution");
+    prefs.items.resolution = { ...prefs.items.resolution, valueImages: { "2160p": ref } };
+    const { container } = render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />);
+    const image = container.querySelector<HTMLImageElement>("[data-overlay-badge] img");
+
+    expect(image?.getAttribute("src")).toBe(`/api/v2/overlay-images/${ref}`);
+    expect(image?.alt).toBe("4K");
+
+    // A deleted image answers 404; the badge goes back to its label.
+    fireEvent.error(image as HTMLImageElement);
+    expect(container.querySelector("[data-overlay-badge] img")).toBeNull();
+    expect(badgeTexts(container)).toEqual(["4K"]);
+  });
+
+  it("shows a rating's score beside its source chip or uploaded logo, not the mark twice", () => {
+    const chip = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefsWithOnly("rating_imdb", "plate")} />,
+    ).container;
+    expect(badgeTexts(chip)).toEqual(["IMDb8.7"]);
+
+    const prefs = prefsWithOnly("rating_imdb");
+    prefs.items.rating_imdb = { ...prefs.items.rating_imdb, image: `${"cd".repeat(32)}.webp` };
+    const logo = render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />).container;
+    expect(badgeTexts(logo)).toEqual(["8.7"]);
+    expect(logo.querySelector("[data-overlay-badge] img")).not.toBeNull();
+
+    const plain = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefsWithOnly("rating_imdb")} />,
+    ).container;
+    expect(badgeTexts(plain)).toEqual(["IMDb 8.7"]);
   });
 
   it("renders nothing when no enabled overlay has data", () => {

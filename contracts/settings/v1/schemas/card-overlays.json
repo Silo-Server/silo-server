@@ -10,7 +10,16 @@
     "version": { "const": 2 },
     "preset": {
       "type": "string",
-      "enum": ["minimal", "classic", "vibrant", "pill", "square"]
+      "enum": ["minimal", "classic", "vibrant", "pill", "square", "plate", "band"]
+    },
+    "watchStatus": {
+      "description": "What the top-right status corner shows: a check on watched titles plus the episodes left on a started series (remaining), only the check (watched), or nothing (off). Absent means remaining.",
+      "type": "string",
+      "enum": ["remaining", "watched", "off"]
+    },
+    "style": {
+      "description": "Overrides on top of the preset. Each absent field keeps the preset's own value.",
+      "$ref": "#/$defs/style"
     },
     "order": {
       "description": "Explicit render order. Empty means use the registry's own order.",
@@ -28,10 +37,7 @@
         "required": ["enabled", "position"],
         "properties": {
           "enabled": { "type": "boolean" },
-          "position": {
-            "type": "string",
-            "enum": ["top-left", "top-right", "bottom-left", "bottom-right"]
-          },
+          "position": { "$ref": "#/$defs/position" },
           "accentColor": {
             "description": "Hex colour. Absent means the overlay's own default accent.",
             "type": "string",
@@ -40,6 +46,21 @@
           "showIcon": {
             "description": "Absent means inherit from the preset.",
             "type": "boolean"
+          },
+          "image": {
+            "description": "Uploaded image drawn in place of the badge's icon, beside its label. Absent means the built-in icon.",
+            "$ref": "#/$defs/imageRef"
+          },
+          "valueImages": {
+            "description": "Uploaded images that replace the whole badge when its value key matches, for example {\"4K\": ref}. Keys are the value keys docs/architecture/card-overlays.md lists per badge.",
+            "type": "object",
+            "maxProperties": 32,
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "additionalProperties": { "$ref": "#/$defs/imageRef" }
           }
         }
       }
@@ -77,6 +98,61 @@
         "imdb_top_250",
         "rt_certified_fresh"
       ]
+    },
+    "position": {
+      "description": "Where a badge sits. top-right is reserved for the status corner: clients draw a badge stored there on the right edge and write right-edge instead.",
+      "type": "string",
+      "enum": ["top-left", "top-right", "bottom-left", "bottom-right", "left-edge", "right-edge"]
+    },
+    "imageRef": {
+      "description": "Content reference of an image an administrator uploaded, as listed by the overlay-config endpoint.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}\\.webp$"
+    },
+    "style": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "description": "Scale applied to the preset's text, padding and icons.",
+          "type": "number",
+          "minimum": 0.75,
+          "maximum": 2
+        },
+        "shape": {
+          "type": "string",
+          "enum": ["pill", "rounded", "square"]
+        },
+        "background": {
+          "description": "Badge fill, #RRGGBBAA.",
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{8}$"
+        },
+        "textColor": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "borderColor": {
+          "description": "#RRGGBBAA.",
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{8}$"
+        },
+        "borderWidth": {
+          "description": "Border width at the 185-unit reference card width.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "fontWeight": {
+          "type": "string",
+          "enum": ["medium", "semibold", "bold", "black"]
+        },
+        "uppercase": { "type": "boolean" },
+        "shadow": {
+          "description": "Drop shadow under the badge.",
+          "type": "boolean"
+        }
+      }
     }
   }
 }

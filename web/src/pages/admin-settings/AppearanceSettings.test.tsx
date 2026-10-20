@@ -38,8 +38,28 @@ import { buildDefaultPrefs, serializeOverlayPrefs } from "@/lib/overlays";
 
 import AppearanceSettings from "./AppearanceSettings";
 
+// The badge size slider (Radix) measures itself with ResizeObserver.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (typeof globalThis.ResizeObserver === "undefined") {
+  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+    ResizeObserverStub;
+}
+
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
+
+vi.mock("@/hooks/useOverlayPrefs", () => ({
+  useOverlayPrefs: () => ({ images: [], imageUploadsAvailable: true, supportsStyles: true }),
+}));
+
+vi.mock("@/hooks/queries/admin/overlayImages", () => ({
+  useUploadOverlayImage: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteOverlayImage: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 const BUILT_IN_OVERLAY_DEFAULTS = serializeOverlayPrefs(buildDefaultPrefs());

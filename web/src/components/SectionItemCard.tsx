@@ -7,7 +7,12 @@ import MediaCardArtwork, {
 } from "@/components/MediaCardArtwork";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
-import { overlayDataFromSectionItem, type CardOverlayPrefs } from "@/lib/overlays";
+import CardWatchStatus from "@/components/overlays/CardWatchStatus";
+import {
+  overlayDataFromSectionItem,
+  type CardOverlayPrefs,
+  type WatchStatusMode,
+} from "@/lib/overlays";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import {
@@ -26,6 +31,8 @@ interface SectionItemCardProps {
   item: SectionItem;
   libraryId?: number;
   overlayPrefs?: CardOverlayPrefs | null;
+  /** What the top-right corner shows; see CardWatchStatus. */
+  watchStatus?: WatchStatusMode;
   quickActionMode?: CardQuickActionMode;
   /** On screen in the first row at first paint: load the poster eagerly. */
   priority?: boolean;
@@ -35,6 +42,7 @@ export default memo(function SectionItemCard({
   item,
   libraryId,
   overlayPrefs = null,
+  watchStatus = "off",
   quickActionMode = "none",
   priority = false,
 }: SectionItemCardProps) {
@@ -78,6 +86,9 @@ export default memo(function SectionItemCard({
             )}
             {item.status === "matched" && overlayPrefs && (
               <CardOverlays data={overlayDataFromSectionItem(item)} prefs={overlayPrefs} />
+            )}
+            {item.status === "matched" && !upcomingEvent && (
+              <CardWatchStatus userState={item.user_state} mode={watchStatus} />
             )}
             {upcomingEvent && upcomingEvent.badges.length > 0 && (
               <div className="absolute top-2.5 left-2.5 flex max-w-[calc(100%-2.5rem)] flex-wrap gap-1">

@@ -1,8 +1,11 @@
 import CardOverlays from "./CardOverlays";
+import CardWatchStatus from "./CardWatchStatus";
 import { RequestDownloadBar } from "./RequestDownloadBar";
 import {
   OVERLAY_PREVIEW_SAMPLES,
+  OVERLAY_PREVIEW_WATCH_STATES,
   requestDownloadBarPercent,
+  watchStatusOf,
   type CardOverlayPrefs,
   type OverlayPreviewVariant,
 } from "@/lib/overlays";
@@ -54,6 +57,10 @@ export function OverlayPreviewCard({
         {showPosterOverlays ? (
           <CardOverlays data={data} prefs={prefs} hasProgressBar={downloadPercent !== null} />
         ) : null}
+        <CardWatchStatus
+          userState={OVERLAY_PREVIEW_WATCH_STATES[variant]}
+          mode={watchStatusOf(prefs)}
+        />
       </div>
     </div>
   );

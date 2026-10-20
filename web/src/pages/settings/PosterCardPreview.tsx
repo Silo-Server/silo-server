@@ -1,6 +1,7 @@
 import { Eye, Heart } from "lucide-react";
 
 import CardOverlays from "@/components/overlays/CardOverlays";
+import CardWatchStatus from "@/components/overlays/CardWatchStatus";
 import { RequestDownloadBar } from "@/components/overlays/RequestDownloadBar";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
@@ -10,12 +11,13 @@ import {
   type CardQuickActionMode,
 } from "@/lib/cardQuickActions";
 import {
-  buildDefaultPrefs,
   OVERLAY_PREVIEW_SAMPLES,
   OVERLAY_PREVIEW_VARIANTS,
+  OVERLAY_PREVIEW_WATCH_STATES,
   requestDownloadBarPercent,
   type CardOverlayPrefs,
   type OverlayPreviewVariant,
+  type WatchStatusMode,
 } from "@/lib/overlays";
 import type { CardPresentation } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
@@ -57,6 +59,7 @@ interface PosterCardPreviewViewProps {
   presentation: CardPresentation;
   /** Null while badges are off. */
   overlayPrefs: CardOverlayPrefs | null;
+  watchStatus?: WatchStatusMode;
   quickActionMode: CardQuickActionMode;
   /** Samples this server can show; the request sample needs request support. */
   variants: readonly OverlayPreviewVariant[];
@@ -67,6 +70,7 @@ interface PosterCardPreviewViewProps {
 export function PosterCardPreviewView({
   presentation,
   overlayPrefs,
+  watchStatus = "off",
   quickActionMode,
   variants,
   revealShortcuts = false,
@@ -113,6 +117,10 @@ export function PosterCardPreviewView({
                     hasProgressBar={downloadPercent !== null}
                   />
                 ) : null}
+                <CardWatchStatus
+                  userState={OVERLAY_PREVIEW_WATCH_STATES[variant]}
+                  mode={watchStatus}
+                />
                 {hasShortcuts ? (
                   <div
                     aria-hidden="true"
@@ -163,8 +171,14 @@ export function PosterCardPreviewView({
  */
 export function PosterCardPreview({ revealShortcuts }: { revealShortcuts: boolean }) {
   const { cardPresentation } = useUICustomization();
-  const { prefs, overlaysEnabled, quickActionPreference, quickActionsEnabled, isOverlaySupported } =
-    useOverlayPrefs();
+  const {
+    editablePrefs,
+    overlaysEnabled,
+    watchStatus,
+    quickActionPreference,
+    quickActionsEnabled,
+    isOverlaySupported,
+  } = useOverlayPrefs();
   // The request sample only shows a badge this server lets the profile keep.
   const variants = isOverlaySupported("request_status")
     ? OVERLAY_PREVIEW_VARIANTS
@@ -173,7 +187,8 @@ export function PosterCardPreview({ revealShortcuts }: { revealShortcuts: boolea
   return (
     <PosterCardPreviewView
       presentation={cardPresentation}
-      overlayPrefs={overlaysEnabled ? (prefs ?? buildDefaultPrefs()) : null}
+      overlayPrefs={overlaysEnabled ? editablePrefs : null}
+      watchStatus={watchStatus}
       quickActionMode={quickActionsEnabled ? quickActionPreference : "none"}
       variants={variants}
       revealShortcuts={revealShortcuts}

@@ -40,6 +40,7 @@ export const METADATA_OVERLAYS: readonly OverlayDef[] = [
     iconId: "globe",
     iconCapable: true,
     getValue: (d) => (d.original_language ? formatLanguageWhenLoaded(d.original_language) : null),
+    getValueKey: (d) => d.original_language || null,
   },
   {
     id: "studio",
@@ -51,6 +52,7 @@ export const METADATA_OVERLAYS: readonly OverlayDef[] = [
     iconId: "building",
     iconCapable: true,
     getValue: (d) => d.studio ?? null,
+    getValueKey: (d) => d.studio || null,
   },
   {
     id: "network",
@@ -62,5 +64,6 @@ export const METADATA_OVERLAYS: readonly OverlayDef[] = [
     iconId: "tv",
     iconCapable: true,
     getValue: (d) => d.network ?? null,
+    getValueKey: (d) => d.network || null,
   },
 ];

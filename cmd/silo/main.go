@@ -86,6 +86,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/overlays"
 
 	// Built-in metadata providers self-register into the metadata package's
 	// builtin registry on import; buildProviders resolves their seeded chain
@@ -3536,6 +3537,13 @@ func main() {
 	// API and the frontend handler.
 	deps.BrandingService = brandingSvc
 	server.Branding = brandingSvc
+	// Card overlay images share the assets store with branding; without one the
+	// library lists nothing new and uploads report storage as unconfigured.
+	var overlayImageStore overlays.ImageStore
+	if deps.Blobs.Assets != nil {
+		overlayImageStore = deps.Blobs.Assets
+	}
+	deps.OverlayImages = overlays.NewImageLibrary(deps.DB, overlayImageStore)
 	var transitionPrivate blobstore.Store
 	if deps.S3Private != nil {
 		transitionPrivate = deps.Blobs.Operational

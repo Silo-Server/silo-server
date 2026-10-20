@@ -461,6 +461,20 @@ and the watchlist alone. A change publishes `user_state.changed` with
 clients can update. The frozen v1 surface has no mark and does not show it. See
 [recommendations.md](architecture/recommendations.md#rows).
 
+## Episodes left on a series card
+
+On a series or season card the profile has not finished, v2 `user_state` adds
+`watched_count` (episodes the profile watched) and `unplayed_count` (available
+episodes it has not). Both are absent on a finished series or season, on movies
+and episodes, and when the user store has no episode rollup; the frozen v1 card
+never carries them. "Available" and "watched" follow `played`: an episode counts
+while it belongs to a library, and is watched when its visible progress or a
+visible completed history row says so. Clients draw the episodes-left mark in a
+card's top-right status corner from the pair (see
+[card-overlays.md](architecture/card-overlays.md)). `played` still comes from the
+completion query; the counts come from one batched rollup per kind for just the
+unfinished series and seasons on the page.
+
 ## Watchlist titles outside the library
 
 The watchlist can also hold movies and series the library doesn't have, keyed by

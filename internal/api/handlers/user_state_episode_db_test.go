@@ -108,7 +108,9 @@ func checkEpisodeCompletionUserStates(t *testing.T, pool *pgxpool.Pool, store us
 		t.Fatal(err)
 	}
 	items := []*models.MediaItem{nil, {ContentID: series, Type: "series"}, {ContentID: season, Type: "season"}, {ContentID: empty, Type: "series"}, {ContentID: episode1, Type: "episode"}, {ContentID: series, Type: "series"}}
-	check := func(wantCompleted bool) {
+	// want is the watched/unplayed split of an unfinished series and season;
+	// a finished one carries no counts.
+	check := func(wantCompleted bool, wantWatched, wantUnplayed int) {
 		t.Helper()
 		states, err := resolveItemUserStates(t.Context(), store, profileID, catalog.NewEpisodeRepository(pool), items)
 		if err != nil {
@@ -118,7 +120,9 @@ func checkEpisodeCompletionUserStates(t *testing.T, pool *pgxpool.Pool, store us
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(states, original) {
+		// The fallback wrappers hide the rollup as well, so the episode counts
+		// are compared on their own below.
+		if !reflect.DeepEqual(withoutEpisodeCounts(states), original) {
 			t.Fatalf("completion optimization changed user states: got %#v, want %#v", states, original)
 		}
 		failed, err := resolveItemUserStates(t.Context(), failingCompletionStore{store}, profileID, catalog.NewEpisodeRepository(pool), items)
@@ -155,20 +159,36 @@ func checkEpisodeCompletionUserStates(t *testing.T, pool *pgxpool.Pool, store us
 		if !states[series].IsFavorite || !states[season].InWatchlist {
 			t.Fatal("favorites/watchlist state changed")
 		}
+		_, hasRollup := store.(userstore.SeriesEpisodeRollupStore)
+		for _, id := range []string{series, season} {
+			got := states[id]
+			if !hasRollup || wantCompleted {
+				if got.WatchedCount != nil || got.UnplayedCount != nil {
+					t.Fatalf("%s carries episode counts %v/%v, want none", id, got.WatchedCount, got.UnplayedCount)
+				}
+				continue
+			}
+			if got.WatchedCount == nil || got.UnplayedCount == nil || *got.WatchedCount != wantWatched || *got.UnplayedCount != wantUnplayed {
+				t.Fatalf("%s episode counts = %v/%v, want %d/%d", id, got.WatchedCount, got.UnplayedCount, wantWatched, wantUnplayed)
+			}
+		}
+		if states[empty].WatchedCount != nil || states[episode1].WatchedCount != nil {
+			t.Fatal("an empty series or an episode carries episode counts")
+		}
 	}
-	check(false)
+	check(false, 1, 1)
 	if err := store.AddHistory(t.Context(), userstore.WatchHistoryEntry{ProfileID: profileID, MediaItemID: episode2, WatchedAt: at.Format(time.RFC3339), Completed: true, Source: userstore.WatchHistorySourceTrakt}); err != nil {
 		t.Fatal(err)
 	}
-	check(true)
+	check(true, 0, 0)
 	if err := store.RemoveHistoryItems(t.Context(), profileID, []string{episode2}, at.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	check(false)
+	check(false, 1, 1)
 	if err := store.SetProgressAt(t.Context(), profileID, episode2, 100, 100, true, at.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	check(true)
+	check(true, 0, 0)
 	// Membership changes must take effect immediately, including an episode
 	// with no media-file row. Completion uses membership, not file presence.
 	if _, err := pool.Exec(t.Context(), `INSERT INTO episode_libraries (episode_id,media_folder_id)
@@ -176,12 +196,12 @@ func checkEpisodeCompletionUserStates(t *testing.T, pool *pgxpool.Pool, store us
 		FROM episodes WHERE series_id=$1 AND episode_number=3`, series, episode1); err != nil {
 		t.Fatal(err)
 	}
-	check(false)
+	check(false, 2, 1)
 	if _, err := pool.Exec(t.Context(), `DELETE FROM episode_libraries WHERE episode_id IN
 		(SELECT content_id FROM episodes WHERE series_id=$1 AND episode_number=3)`, series); err != nil {
 		t.Fatal(err)
 	}
-	check(true)
+	check(true, 0, 0)
 	other, err := resolveItemUserStates(t.Context(), store, otherProfileID, catalog.NewEpisodeRepository(pool), items)
 	if err != nil {
 		t.Fatal(err)
@@ -189,4 +209,15 @@ func checkEpisodeCompletionUserStates(t *testing.T, pool *pgxpool.Pool, store us
 	if other[series].Played || other[series].IsFavorite || other[season].InWatchlist {
 		t.Fatal("state leaked across profiles")
 	}
+}
+
+// withoutEpisodeCounts copies states with the rollup-only counts cleared.
+func withoutEpisodeCounts(states map[string]*itemUserStateResponse) map[string]*itemUserStateResponse {
+	out := make(map[string]*itemUserStateResponse, len(states))
+	for id, state := range states {
+		copied := *state
+		copied.WatchedCount, copied.UnplayedCount = nil, nil
+		out[id] = &copied
+	}
+	return out
 }

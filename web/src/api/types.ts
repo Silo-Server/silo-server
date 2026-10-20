@@ -770,6 +770,12 @@ export interface MediaItemUserState {
   in_watchlist: boolean;
   /** The profile marked the movie or series Not interested. */
   not_interested?: boolean;
+  /**
+   * Episodes watched and episodes left, on a series or season the profile
+   * has not finished. Absent on everything else.
+   */
+  watched_count?: number;
+  unplayed_count?: number;
 }
 
 export interface BrowseItemSortMetrics {

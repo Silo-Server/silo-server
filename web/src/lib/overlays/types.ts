@@ -1,8 +1,21 @@
 import type { CSSProperties } from "react";
 
-// Position on the poster card where a badge group is anchored.
-export const OVERLAY_POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
+// Position on the poster card where a badge group is anchored: three corners
+// and a rail centred on each side edge. The top-right corner belongs to the
+// watch-status indicator (CardWatchStatus), so no badge is placed there.
+export const OVERLAY_POSITIONS = [
+  "top-left",
+  "bottom-left",
+  "bottom-right",
+  "left-edge",
+  "right-edge",
+] as const;
 export type OverlayPosition = (typeof OVERLAY_POSITIONS)[number];
+
+// What the top-right status corner shows: a check on a watched title plus the
+// episodes left on a started series, only the check, or nothing.
+export const WATCH_STATUS_MODES = ["remaining", "watched", "off"] as const;
+export type WatchStatusMode = (typeof WATCH_STATUS_MODES)[number];
 
 // Logical groupings used by the settings UI to organize controls.
 export const OVERLAY_CATEGORIES = ["tech", "ratings", "metadata", "ribbons"] as const;
@@ -88,16 +101,49 @@ export interface OverlayItemConfig {
   position: OverlayPosition;
   accentColor?: string; // hex string e.g. "#f5c518"
   showIcon?: boolean; // undefined = use preset default
+  // Uploaded image refs (see OverlayImage). image takes the icon's place
+  // beside the label; a valueImages entry replaces the whole badge while the
+  // badge's value key (OverlayDef.getValueKey) matches.
+  image?: string;
+  valueImages?: Record<string, string>;
 }
 
-export type PresetId = "minimal" | "classic" | "vibrant" | "pill" | "square";
+export type PresetId = "minimal" | "classic" | "vibrant" | "pill" | "square" | "plate" | "band";
+
+export type OverlayShape = "pill" | "rounded" | "square";
+export type OverlayFontWeight = "medium" | "semibold" | "bold" | "black";
+
+// Overrides layered on the preset. Each absent field keeps the preset's value.
+export interface OverlayStyle {
+  size?: number; // 0.75–2, scales text, padding and icons
+  shape?: OverlayShape;
+  background?: string; // #RRGGBBAA
+  textColor?: string; // #RRGGBB
+  borderColor?: string; // #RRGGBBAA
+  borderWidth?: number; // 0–3 at the reference card width
+  fontWeight?: OverlayFontWeight;
+  uppercase?: boolean;
+  shadow?: boolean;
+}
 
 // Versioned root document stored under user_settings.card_overlays.
 export interface CardOverlayPrefs {
   version: 2;
   preset: PresetId;
+  // Absent means "remaining", the default.
+  watchStatus?: WatchStatusMode;
+  style?: OverlayStyle;
   order: OverlayId[]; // empty = use registry order
   items: Record<OverlayId, OverlayItemConfig>;
+}
+
+// An image an administrator uploaded for badges, as getOverlayConfig lists it.
+export interface OverlayImage {
+  ref: string;
+  name: string;
+  url: string;
+  width: number;
+  height: number;
 }
 
 // How a preset paints the accent color when one is set.
@@ -115,6 +161,14 @@ export interface OverlayPreset {
   id: PresetId;
   label: string;
   description: string;
+  // "stack" stacks each corner's badges; "band" draws each edge's badges as
+  // one strip of marks over a scrim.
+  layout: "stack" | "band";
+  // A rating badge with a source mark draws the mark as an accent-coloured
+  // chip ahead of the score instead of one "IMDb 7.8" label.
+  sourceChips: boolean;
+  fontWeight: number;
+  uppercase: boolean;
   badgeClass: string; // Tailwind classes also provide a fixed-size legacy-browser fallback
   badgeStyle: (accentColor: string | undefined) => CSSProperties;
   fontSize: number;
@@ -153,6 +207,16 @@ export interface OverlayDef {
   // hide. Settings offer the badge only while getRatingsCapability lists it.
   ratingSource?: string;
   getValue: (data: OverlayData) => string | null;
+  // A rating's source mark ("IMDb") and its bare score, for presets that draw
+  // the mark as a chip. Both are set together.
+  sourceMark?: string;
+  getScore?: (data: OverlayData) => string | null;
+  // The key a valueImages entry matches: the value as the API returns it, so
+  // every client matches the same keys. Absent means the badge takes no
+  // per-value images (continuous values such as scores and runtimes).
+  getValueKey?: (data: OverlayData) => string | null;
+  // Value keys the settings UI suggests when assigning per-value images.
+  valueKeySuggestions?: readonly string[];
   getIcon?: (data: OverlayData) => OverlayIconId | null; // dynamic icon by data
   // Accent by data, used when the viewer has not picked an accent for the
   // badge; null falls back to defaultAccent.
