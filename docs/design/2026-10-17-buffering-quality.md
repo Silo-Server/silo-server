@@ -120,9 +120,25 @@ measured and where it came from, and never do Auto's arithmetic.
 - **Stall**: the player has run out of data while it should be playing. These
   never count as stalls:
   - buffering caused by a seek, a pause, the end of the media, or a source
-    reload;
+    reload. Buffering after a seek belongs to the seek until playback next
+    runs, including a seek made while paused. A wait after resuming from a
+    pause is a stall unless a seek or reload happened since playback last ran.
+    A source reload begins when the client replaces or reopens the playing
+    source, not when it sends the replan that leads to one; until then the
+    current plan is still playing.
+  - playback the platform stops when the app leaves the foreground. If the
+    platform stops or tears down playback then, a stall in progress ends
+    uncounted, as for a pause. If playback continues in the background, its
+    stalls count as usual.
   - buffering while media requests are failing, or while the device is offline.
-    That is an outage, and the reconnect path owns it.
+    That is an outage, and the reconnect path owns it. Media requests are the
+    plan's playlist, segment and range requests; a failed API request is not a
+    media failure. A media request is failing when it errors, cannot connect,
+    or receives no data for the client's idle or first-byte timeout. A request
+    that is still receiving data is not failing, even when it runs past a
+    whole-request time limit: a slow link is what the controller exists to
+    catch. While an outage lasts the controller does not evaluate; the next
+    `playing` after it does.
   - a renderer wait: one that begins with more than
     `RENDERER_WAIT_BUFFER_MS = 1000` of media buffered past the playhead. The
     decoder or renderer is behind, as when a weak device drops frames to the
@@ -130,18 +146,20 @@ measured and where it came from, and never do Auto's arithmetic.
     playhead falls to `RENDERER_WAIT_BUFFER_MS` or less before playback
     resumes, the stall begins at that moment.
   - stall time inside the startup grace: the first `STARTUP_GRACE_MS = 10000` of
-    a plan, counted from its first frame, or from its first wait if no frame has
-    appeared yet. A stall that begins in the grace counts from the end of the
-    grace.
+    a plan, counted from whichever comes first after adoption: when its playback
+    first runs, or a wait before that. A plan opened paused starts its grace when
+    the viewer plays it. A first frame that follows a wait does not restart the
+    grace. A stall that begins in the grace counts from the end of the grace.
 - **Counted stall**: a stall that lasted at least `STALL_MIN_MS = 1000` when
   playback resumed.
 - **Trigger**: either of these, using the web constants:
-  - `STALLS_BEFORE_TRIGGER = 2` counted stalls that ended within
-    `STALL_WINDOW_MS = 120000` of each other;
+  - `STALLS_BEFORE_TRIGGER = 2` counted stalls that ended within the last
+    `STALL_WINDOW_MS = 120000` when the trigger is evaluated;
   - one stall reaching `LONG_STALL_MS = 6000`, while it is still in progress or
     within the window after it ends.
 - **Lower rung**: the highest `available_qualities` entry whose bitrate is below
-  the bitrate of the active rung. When the active quality is Auto, the
+  the bitrate of the active rung. When the active quality is Auto, or matches no
+  `available_qualities` label (a saved plain resolution such as `1080p`), the
   comparison is against the delivered bitrate. This is the web's
   `lowerQualityOption`.
 - **Step-down estimate**: `floor(delivered bitrate × 7 / 10)`, in exact integer
@@ -153,12 +171,27 @@ measured and where it came from, and never do Auto's arithmetic.
   the client only detects and reports (`ignored`).
 - **Answered**: the viewer has decided about buffering for this title at this
   quality, by **Keep quality** or **Restore quality**. An answered title is not
-  lowered or prompted again until the viewer changes quality.
+  lowered or prompted again until the viewer changes quality. The answer, the
+  once-per-title notice and the re-offer wait belong to the title: a new
+  playback attempt of the same title that the viewer did not choose (a renewal
+  after a server restart, Retry, failure recovery) keeps them.
+- **Quality change**: a pick from the quality menu, a switch between Wi-Fi and
+  cellular quality, or a version switch the viewer chooses. A pick the player
+  refuses is not one, and neither is picking the quality already playing. A
+  network change counts only when it changes the quality preference or cap a
+  replan sends.
+- **Clock**: stalls, pill timers and summary durations use elapsed real time
+  from a monotonic clock. "Wall-clock time" below means real time rather than
+  media time, not the system clock.
 
 ## Behaviour
 
-The controller runs while a video plan plays. Inside a Watch Party room it is
-off, and the room's own lower-quality offer applies.
+The controller runs while a video plan plays. Inside a Watch Party room it does
+not act: no trigger lowers, prompts or reports `ignored`, and no pill or notice
+shows; the room's own lower-quality offer applies. Stall tracking and plan
+summaries continue, with `buffering_action: none`. Joining or leaving a room is
+not a plan boundary. On leaving, the controller resumes on the playing plan
+with fresh stall history and the grace over.
 
 Its mode comes from `playback.buffering_quality_mode`:
 
@@ -171,13 +204,15 @@ Its mode comes from `playback.buffering_quality_mode`:
 A quality the viewer picked always gets a prompt first, because lowering it
 silently would override an explicit choice.
 
-Trigger evaluation follows the media event clock:
+Trigger evaluation follows the media events:
 
 - Evaluate when a stall ends (`playing`) and when a stall in progress reaches
   `LONG_STALL_MS`. A new wait does not re-evaluate old stall history.
-- After the long-stall timer fires, keep watching the stall. If a time-based
-  suppression expires while the stall is still in progress, evaluate again. An
-  expiry while playing triggers nothing by itself.
+- After the long-stall timer fires, keep watching the stall. When a cooldown,
+  the re-offer wait or the undo pill ends while that stall is still in
+  progress, evaluate again at once. The undo pill ends by its timer or by
+  Back; both count. A suppression that ends during a shorter wait, or while
+  playing, triggers nothing by itself.
 - A suppressed trigger leaves stall history intact. A trigger is suppressed
   while the title is answered, during a cooldown, before a rearm or re-offer is
   due, and while a buffering prompt or undo pill is visible or waiting behind a
@@ -185,9 +220,10 @@ Trigger evaluation follows the media event clock:
   startup grace already over, and times a stall in progress again from that
   moment.
 - Back on an undo pill only hides it; it does not answer the title.
-- The no-lower-rung notice shows once per title. A lowering whose adopted plan
-  is no lower shows the failure notice on every such adoption, then starts its
-  cooldown.
+- "Can't lower quality for this video" for a missing lower rung shows only if
+  it has not shown for this title yet, whichever rule showed it. A lowering
+  whose adopted plan is no lower shows it on every such adoption, then starts
+  its cooldown.
 
 The controller acts only when the trigger fires and the title is not answered
 at this quality. If there is no lower rung, the client instead shows the
@@ -195,12 +231,17 @@ display-only notice **"Can't lower quality for this video"**, once per title.
 
 Both pills use `PROMPT_SECONDS = 15`, measured in wall-clock time.
 
+Display-only notices ("Quality lowered to stop buffering", "Can't lower
+quality for this video") use the platform's notice style with an information
+tone and show for 5 seconds. A notice waits while the player cannot show it or
+a higher-priority notice holds the slot.
+
 ### Lower automatically
 
 | Event | Outcome |
 | --- | --- |
 | Trigger fires on Auto | Send a `quality_change` replan with `quality_preference: "auto"`, `bandwidth_estimate_kbps` set to the step-down estimate, and `bandwidth_estimate_source: "observed_rebuffer"`. Nothing shows yet. |
-| The adopted plan is lower | Show the undo pill: the caption **"Quality lowered to stop buffering"** over the action **"Restore quality"**, with its timer running. Focus-driven platforms move focus to **Restore quality**, unless the viewer is mid-scrub or has a menu open (the intro-skip rule). |
+| The adopted plan is lower | Show the undo pill: the caption **"Quality lowered to stop buffering"** over the action **"Restore quality"**, with its timer running. Focus-driven platforms move focus to **Restore quality**, unless the viewer is mid-scrub or has a menu open (the intro-skip rule). A plan is lower when its delivered bitrate is below the delivered bitrate of the plan the lowering left. A plan with no delivered bitrate counts as lower unless it carries `quality_reduction_unavailable`. |
 | **Restore quality** | Send a `quality_change` replan with `quality_preference: "auto"`, no estimate, and `learned_limit: "clear"`. The title is answered at the restored quality. |
 | The undo timer runs out, or Back | The pill hides, and the lower plan keeps playing. Back is consumed, so a second Back behaves normally. |
 | The lower plan keeps buffering | It is a new plan, with its own grace. Its trigger lowers again from its own delivered bitrate. |
@@ -216,7 +257,7 @@ The prompt has a title, **"Playback keeps buffering"**, a primary action,
 | **Lower quality** on Auto | Send the replan from the first row of *Lower automatically*. The prompt hides. |
 | **Lower quality** on a quality the viewer picked | Send a `quality_change` replan with the lower rung's `label`. This applies to this playback only: the saved preference does not change, and no limit is recorded. |
 | **Keep quality**, or Back | The prompt hides, and the title is answered at this quality. Back is consumed. |
-| The timer runs out | The prompt hides. The title is not answered: stall history clears, and a new trigger can offer again, but no sooner than `REOFFER_MIN_MS = 120000` after the last offer. |
+| The timer runs out | The prompt hides. The title is not answered: stall history clears. A new prompt can show no sooner than `REOFFER_MIN_MS = 120000` after this prompt first appeared on screen. Only a timeout starts this wait; **Lower quality** and **Keep quality** do not. A quality change or a new title ends it; a new attempt of the same title does not. |
 | The plan adopted after **Lower quality** is lower | Show the display-only notice **"Quality lowered to stop buffering"**. |
 
 ### In every mode
@@ -224,9 +265,9 @@ The prompt has a title, **"Playback keeps buffering"**, a primary action,
 | Event | Outcome |
 | --- | --- |
 | Pause while a pill shows | The timer freezes, and resumes on play. |
-| The viewer changes quality, or a replan the controller did not send is adopted | Any pill hides and stall history clears. A quality change also clears the answer. |
+| The viewer changes quality (see *Quality change*), or a replan the controller did not send is adopted | Any pill hides and stall history clears. An adoption the controller did not request also drops a pending lowering, with no notice. A quality change also clears the answer and ends the re-offer wait. |
 | The plan adopted after a lowering is no lower, or carries `quality_reduction_unavailable` | Show **"Can't lower quality for this video"**. Leave this plan alone for `NO_LOWER_COOLDOWN_MS = 300000`. |
-| The replan fails, or its plan is never adopted | Keep playing the current plan. Watch it again after `REARM_AFTER_UNADOPTED_MS = 60000`. Rearming starts fresh stall history without startup grace; an in-progress stall is timed from the rearm. |
+| The replan fails, or its plan is never adopted | Keep playing the current plan. Watch it again after `REARM_AFTER_UNADOPTED_MS = 60000`. Rearming starts fresh stall history without startup grace; an in-progress stall is timed from the rearm. If the player cannot send the replan now, because another replan is in flight, the replan fails: the client does not queue it. |
 
 Presentation rules:
 
@@ -238,10 +279,15 @@ Presentation rules:
   resume that remaining timer, only if the plan has not changed. A plan change
   or a manual quality change discards the waiting or hidden pill. An automatic
   lowering does not wait; only its undo pill does.
-- A player that cannot show its pills, because it is minimized or in picture
-  in picture, hides them the same way: a pill waits with its remaining timer
-  and shows when the full player returns.
-- Select and Back are handled at the player root, as for intro skip.
+- A player that cannot show its pills hides them the same way: when it is
+  minimized, in picture in picture, in the background or a hidden browser tab,
+  playing in a native fullscreen view that draws no app overlays, or covered by
+  a menu or overlay that hides the pill. A pill waits with its remaining timer
+  and shows when it can be seen again. A platform whose menus leave the pill
+  visible keeps it showing.
+- Select and Back are handled at the player root, as for intro skip. They reach
+  a pill only while the viewer can see it; an open menu or a full-screen overlay
+  takes Back first.
 - The pills use the platform's notice position. A caption and its action, or
   two actions, are separate elements, never one phrase.
 
@@ -254,7 +300,8 @@ request without a device ID or with `learned_limit: "ignore"`. The source then
 stalls and the controller lowers again, in a loop.
 
 So the client keeps the step-down estimate of its latest Auto lowering in
-memory, from the moment it sends that replan until the playback attempt ends:
+memory, from the moment it sends that replan until the playback attempt ends.
+A lowering refused before it is sent is not kept.
 
 - Every later Auto replan the client sends for its own reasons, such as a track
   change, seek reanchor, seek failure recovery, failure recovery or output
@@ -262,14 +309,21 @@ memory, from the moment it sends that replan until the playback attempt ends:
   `bandwidth_estimate_source`. It repeats an earlier observation; it is not a
   new one.
 - The next lowering replaces it.
-- **Restore quality**, a quality change the controller did not send (the
-  viewer's pick, or a switch between Wi-Fi and cellular quality), and a new
-  start each discard it. The **Restore quality** replan sends no estimate, and
-  `learned_limit: "clear"` when the server advertises `buffering_quality_v1`.
+- **Restore quality**, a quality change the controller did not send (see
+  *Quality change*), a new start, and a new attempt of the same title each
+  discard it. A new attempt discards nothing else. The **Restore quality**
+  replan sends no estimate, and `learned_limit: "clear"` when the server
+  advertises `buffering_quality_v1`. A **Restore quality** that cannot be sent
+  at once, because another replan is in flight, is sent after it, or its
+  `learned_limit: "clear"` rides on the request that replaces it.
 - A retry of the lowering request itself resends its original body, source
   included, so the server can replay its decision.
 - The kept estimate is never written to storage, and it does not replace the
   server's learned limit.
+- Replans never send the speed-test reading (see *When to test*). Without a
+  kept estimate, a replan the client sends for its own reasons carries no
+  estimate, so after a start the reading limited, such a replan can return Auto
+  to the source; repeated rebuffering then lowers it.
 
 ### The setting
 
@@ -281,6 +335,14 @@ memory, from the moment it sends that replan until the playback attempt ends:
 - Values: `never` ("Never"), `ask` ("Ask first"), `always` ("Automatically").
 - Scopes: `profile` and `profile_device`, the same as `playback.intro_skip_mode`.
 - Default: `always`.
+
+Until the profile's mode loads, a client uses the last mode it saw for this
+profile on this device, and the default only when it has seen none. A start
+does not wait for the settings read. Against a server whose manifest lacks the
+setting, a client hides the row and runs `always`; nothing device-local stands
+in for the setting. Clients detect the setting by the key's presence in the
+server's settings manifest or resolved settings, not by comparing a revision
+number.
 
 The existing **Maximum bitrate** setting (`playback.max_bitrate_kbps`) remains
 the way to cap Auto by hand. It reaches the server as `bandwidth_cap_kbps`, and
@@ -316,7 +378,9 @@ A limit is recorded when a start or replan carries
   Absent, the limit applies. `ignore` plans without it and leaves it stored;
   clients in `never` mode send this on every request, so a limit learned by
   another profile on the same device does not reach them. `clear` deletes the
-  limit for this key, then plans without it; **Restore quality** sends this.
+  limit for this key, then plans without it; **Restore quality** sends this. A
+  request for playback on another device (Cast) sends `ignore` in every mode,
+  and no estimate: the limit belongs to the sending device and its connection.
 - **Visibility**: a plan the limit lowered carries
   `playback_plan.bandwidth_limit = {kbps, source: "observed_rebuffer", expires_at}`.
   The quality menu labels Auto as **"Auto · limited after buffering"**. The
@@ -363,14 +427,15 @@ With `connection_speed_v1`, the capability response carries:
 
 | Field | Meaning |
 | --- | --- |
-| `bandwidth_probe_url` | The probe on the path this client's media takes. |
+| `bandwidth_probe_url` | The probe on the path this client's media takes, on the origin the capability request arrived on. When that is the server's local-network origin (a local route), clients send the probe with the saved server's credentials and trust, as they do for any request to that server. |
 | `bandwidth_probe_target_kbps` | The rate a quick test has to prove. Absent when the server has no target, for example before any video is scanned. |
 | `bandwidth_probe_automatic` | `false` when the admin turned automatic tests off. **Test speed** still works. |
 | `bandwidth_probe_max_age_seconds` | How long a reading stays current. |
 
 The target is the highest bitrate the server would plan for this viewer, plus
-25%: `ceil(P × 5 / 4)`, at most 1,000,000, the estimate whose 80% budget carries
-P untouched. P is
+25%: `max(ceil(P × 5 / 4), 100)`, at most 1,000,000, the estimate whose 80%
+budget carries P untouched, and never below the 100 kbps a probe result needs.
+P is
 the lower of the administrator bitrate cap for the caller's network, when one
 applies, and the 99.9th percentile of the source bitrates of the video files
 this profile can play. It is a percentile because one file with a bogus bitrate
@@ -405,15 +470,21 @@ after window 0 when there are fewer. Its rate is `floor(bytes × 8 / (windows ×
 - A link fast enough to deliver the whole probe before the first complete
   window after window 0 (100 MB in under a second, above about 800 Mbps) is
   measured over the whole transfer instead: `floor(bytes × 8 / ms)` from the
-  first byte to the last. The ramp is inside that average, so it can only read
-  low, and it is reported with `lower_bound: true`, or as the target when a
-  quick test's average reaches it.
+  first byte to the end of the transfer, when the client sees the body end. The
+  ramp is inside that average, so it can only read low, and it is reported with
+  `lower_bound: true`, or as the target when a quick test's average reaches it.
 - Otherwise a test with no complete window after window 0, or with a result
-  under 100 kbps, measured nothing. So does a transfer that ends short of the
-  bytes it asked for before a complete window after window 0.
+  under 100 kbps, including a target under 100, measured nothing. So does a
+  transfer that ends short of the bytes it asked for before a complete window
+  after window 0.
+- A transfer that fails before the test stops, because the connection drops or
+  the body ends short of its `Content-Length`, measured nothing, whatever
+  windows completed. `end` in `probe_cases` is a clean end of the body.
 - A result above 1,000,000 kbps is reported as 1,000,000 with `lower_bound: true`.
+  A client never keeps or sends a result of its own outside 100 to 1,000,000.
 - Without a target, the quick test runs its full 3 seconds.
-- A test whose first byte has not arrived within 10 seconds is abandoned.
+- A test whose first byte has not arrived within 10 seconds of sending the
+  request, the redirect included, is abandoned.
 
 The reported `bytes` and `duration_ms` are those of the windows the rate came
 from. `probe_cases` in the vectors pin this arithmetic (see *Conformance*).
@@ -436,31 +507,65 @@ it is younger than `bandwidth_probe_max_age_seconds`.
 - Without a target, any current reading proves the link. The server then has
   no bitrates to measure against, and a failed target lookup must not send
   every client holding a lower bound into a test at once.
+- A reading is not current until the client knows this server's
+  `bandwidth_probe_max_age_seconds`, so a check reads the capability response
+  with the connection.
 
-Clients check on sign-in, on a return to the foreground and after a network
-change. A check reads `GET /api/v2/playback/connection` at once, as soon as the
-client is signed in and online, so a playback start in the first seconds already
-sends the reading. Only a test waits: a few seconds, so the first screen can
-settle, and it runs only if automatic tests are on and no current reading proves
-the link. A reinstalled app, or a phone back on its usual Wi-Fi, finds the
-reading it left there. On the web, a tab shown again less than a minute after
-it was hidden has not returned to the foreground: it is still on the network
-it left, so it reads nothing and only resumes a test the hide stopped.
+Clients check on every sign-in, on a return to the foreground and after a
+network change. A re-login to the same server, account and profile is a sign-in
+too, and a result from before a sign-out is discarded. A check reads
+`GET /api/v2/playback/connection` once, at once, as soon as the client is
+signed in and online, so a playback start in the first seconds already sends
+the reading; a client may read again just before a test. Only a test waits: a
+few seconds, so the first screen can settle, and it runs only if automatic
+tests are on and no current reading proves the link. A reinstalled app, or a
+phone back on its usual Wi-Fi, finds the reading it left there. On the web, a
+tab shown again less than a minute after it was hidden has not returned to the
+foreground: it is still on the network it left, so it reads nothing and only
+resumes a test the hide stopped.
+
+A network change is a change of the interface or network in use, of metering,
+of VPN state, of the local route a native client uses for this server, or a
+return to connectivity after none. A client that cannot observe network changes
+(a desktop browser) reads again when the browser reports it is back online.
 
 - There is no periodic test. A test that fails or is refused waits for the next
-  check. A `429` holds automatic tests against the server that sent it until
-  its `Retry-After`.
-- No test runs while media plays or starts, on a metered or cellular link, or
-  while the app is in the background. On the web, that includes a hidden tab. A
-  test that is running when one of these begins is cancelled and measured
-  nothing.
-- **Test speed** runs the accurate test whenever no media plays, even with
-  automatic tests off or a current reading.
+  check. A connection read that fails changes nothing the client holds and runs
+  no test; the next check reads again.
+- A `429` from any test, **Test speed** included, holds automatic tests against
+  the server that sent it until its `Retry-After`, across profile and account
+  changes, for as long as the app runs. A missing or unreadable `Retry-After`
+  counts as 30 seconds, and a value under 1 counts as 1.
+- Metered means the system marks the link metered or expensive, or the viewer's
+  data-saving mode is on, ignoring a VPN's own flag. Where a platform has a
+  cellular quality pair, the same test chooses it. On a metered or cellular link
+  a check may skip the read; nothing read there is sent.
+- A client whose platform cannot report the link type treats the link as
+  unmetered when it reads, sends a reading and runs **Test speed**. On a phone
+  or tablet it runs no automatic test. The cellular Settings row and the
+  cellular quality pair apply only where the platform reports the link type.
+- Media is any playback in the app: streamed or downloaded video, audiobooks and
+  theme music. A paused player counts only while it is still loading, and
+  resuming it cancels a running test.
+- No automatic test runs while media plays or starts, on a metered or cellular
+  link, or while the app is in the background. On the web, that includes a
+  hidden tab. A test that is running when one of these begins is cancelled and
+  measured nothing. The quiet period after a start holds automatic tests only.
+- **Test speed** runs the accurate test whenever no media plays or loads, even
+  with automatic tests off or a current reading. It replaces a running automatic
+  test and joins a running **Test speed**.
+- A client may keep its own result for playback starts only if the server
+  accepted it, or the POST failed for a transport reason. A result the server
+  refused is never kept.
 - A playback start sends the highest current reading as
   `bandwidth_estimate_kbps` with `bandwidth_estimate_source: "probe"`. This holds
-  for as long as the reading is current; the 30-minute expiry is gone. On a
-  metered or cellular link it sends none, and the cellular quality settings
-  apply. The rules in *Later replans after a lowering* are unchanged.
+  for as long as the reading is current; the 30-minute expiry is gone. A start
+  sends a reading only to the server that holds it, taken on the route the
+  start's media uses. On a metered or cellular link it sends none, and the
+  cellular quality settings apply.
+- Replans never send the reading. A replan the client sends for its own reasons
+  carries the kept step-down estimate or no estimate (see *Later replans after a
+  lowering*).
 - Against a server without `connection_speed_v1`, a client may run the quick
   test without a target against `/api/v2/playback/bandwidth-probe`, and keep
   the result on the device for 7 days per network.
@@ -494,7 +599,12 @@ limit, the probe answers `429` with `Retry-After`.
 
 A plan's `plan_summary` may carry `throughput_kbps`. It is the rate at which the
 plan's long media requests received data, counted only while a request was
-receiving, from its first byte to its last.
+receiving, from its first byte to its last. Only this plan's main media
+requests count (video and audio segments, or a progressive body), from its
+adoption until it stops being the playing plan; not subtitles, images, probes
+or other playback in the app. A request's receiving time starts at the first
+byte of its body; a platform that sees only the response headers may start
+there, which reads low.
 
 - Only a request that spent at least 1,000 ms receiving counts, in bytes and in
   time. A short request on a warm connection, such as one HLS segment, arrives
@@ -575,11 +685,23 @@ Phase 2 adds a Connection group:
   as a lower bound: "Faster than 51 Mbps · seen during playback 2 hours ago".
   **Test speed** runs the accurate test in the foreground, which takes up to 10
   seconds, reports the result and refreshes the row. A `429` shows "Try again in
-  N seconds".
+  N seconds" ("1 second" at one) until N seconds have passed. If the report
+  fails, the row says the test could not be saved and keeps showing the
+  server's reading.
 - "Auto plays videos up to 35 Mbps without converting them," from
   `auto_budget_kbps`.
 - On cellular, the row says that speed tests are skipped on cellular, and the
-  cellular quality settings apply.
+  cellular quality settings apply. On a metered network that is not cellular it
+  says "Speed tests are skipped on metered networks." The note replaces the
+  speed, and **Test speed** and the budget line are hidden. The cellular note
+  appears only where the platform reports the link type.
+
+Settings shows rates in Mbps, rounded down: one decimal below 10 Mbps, whole
+from 10 Mbps, and kbps below 1 Mbps, with no digit grouping. Rounding down
+keeps a lower bound and the budget from overstating the link.
+
+Settings reads the connection whenever it opens the Playback settings, after a
+network change while it is open, and after **Reset** and **Test speed**.
 
 ### Admin
 
@@ -604,19 +726,32 @@ The server first advertises the client feature `playback_plan_summary_v1`. Once
 it does, clients send a new route event, `plan_summary`, when a plan stops being
 the playing plan, whether it was replaced, stopped or failed.
 
+A plan also stops being the playing plan when the app or page ends: closed,
+reloaded, terminated or killed. Send its summary at that moment where the
+platform allows it (a keepalive request, a background task). Otherwise keep the
+summary on the device, updated each time the app leaves the foreground, and
+send it at the next launch while its playback attempt is current (under 24
+hours), without `throughput_kbps`. Each plan's summary has one `event_id`, so a
+resend is a no-op: the server dedupes on `(playback_attempt_id, event_id)`.
+
 The event adds these keys to the diagnostics allowlist:
 
 | Key | Value |
 | --- | --- |
 | `played_ms` | Milliseconds the plan was playing |
 | `stall_count` | Counted stalls |
-| `stall_total_ms` | Total stall time, startup grace excluded |
-| `stall_longest_ms` | The longest single stall |
-| `delivered_kbps` | The plan's delivered bitrate |
+| `stall_total_ms` | The time of every stall, counted or not, up to whatever ended it (resume, pause, seek, source reload or the plan's end). Startup grace and outage time are excluded, including the part of a stall before the outage was detected. |
+| `stall_longest_ms` | The longest single stall, on the same terms |
+| `delivered_kbps` | The plan's delivered bitrate; omitted when the plan has none |
 | `buffering_mode` | `never`, `ask` or `always` |
 | `buffering_action` | The last action on this plan: `none`, `ignored` (a trigger in `never`), `lowered` (automatically), `restored`, `accepted`, `kept`, `timed_out` or `cant_lower` |
-| `bandwidth_estimate_kbps` | Already on the allowlist: the estimate the plan was requested with |
+| `bandwidth_estimate_kbps` | Already on the allowlist: the value the start or replan request for this adoption carried, including a seek reanchor's; omitted when it carried none |
 | `throughput_kbps` | Optional: the rate the plan's media requests received data (see *Playback samples*) |
+
+A stall still in progress when its plan stops being the playing plan ends then.
+Its time counts in `stall_total_ms` and `stall_longest_ms`, and it counts in
+`stall_count` if it had lasted at least `STALL_MIN_MS`. Durations use the
+monotonic clock (see *Terms*).
 
 The server exports:
 
@@ -649,7 +784,7 @@ in parallel:
 | `learned_limit` | Start and replan, optional: `ignore` or `clear`. |
 | `playback_plan.bandwidth_limit` | Optional object: `kbps` (integer), `source` (`"observed_rebuffer"`), `expires_at` (RFC 3339). Present only when the learned limit lowered the plan. |
 | Connection endpoints | `GET /api/v2/playback/connection`, and `DELETE /api/v2/playback/connection/learned-limit` returning 204. Both exist when the feature is advertised. They use normal authenticated profile-scoped headers and `X-Silo-Device-Id`; no installation ID or body is required. |
-| Setting | `playback.buffering_quality_mode`, introduced in the next manifest revision (21 at the time of writing). |
+| Setting | `playback.buffering_quality_mode`, introduced in manifest revision 23. The revision is informational: clients detect the setting by the key's presence in the server's settings manifest or resolved settings, not by comparing revision numbers. |
 | Telemetry | Feature `playback_plan_summary_v1`, route event `plan_summary`, and the allowlist keys under *Telemetry*. |
 | Phase 2 | The server advertises `connection_speed_v1` and adds `bandwidth_probe_url` to the capability response: the probe on the path this client's media takes. With it, clients probe that URL, report to `POST /api/v2/playback/bandwidth-probe/results`, and read `probe` and `auto_budget_kbps` from the connection endpoint. |
 | Speed test | With `connection_speed_v1`, the capability response also carries `bandwidth_probe_target_kbps` (optional integer), `bandwidth_probe_automatic` (boolean) and `bandwidth_probe_max_age_seconds` (integer). Probe results accept optional `lower_bound` (boolean), and `bytes` up to 1,000,000,000. The connection endpoint's `probe` gains `lower_bound`, and the endpoint gains optional `playback_sample: {kbps, measured_at}`; the admin device `connections` gain the same. `plan_summary` may carry `throughput_kbps`. Tests run as *Connection speed test* says, and `probe_cases` pins the measurement. |
@@ -664,15 +799,17 @@ events are:
 
 - `plan_adopted`, carrying the plan's delivered bitrate, quality, menu and
   warnings. A missing delivered bitrate is `delivered_kbps: 0`. An adoption with
-  `controllerInitiated: false` answers a replan the controller did not send.
+  `controllerInitiated: false` answers a replan the controller did not send;
+  without the field, an adoption that follows the controller's own replan
+  answers it. A client's harness needs this input to drop a pending lowering.
 - `playing`, `waiting` (optionally with a `seek`, `pause`, `reload` or
   `renderer` cause), `pause`, `seek`, `transport_error_start`,
   `transport_error_end` and `replan_failed`. A plain `waiting` during a
   renderer wait means its buffer fell to the threshold.
 - The pill answers `select_lower`, `select_keep`, `select_restore` and `back`.
 - `pill_obscured` and `pill_unobscured`: a higher-priority actionable pill
-  appears, or the last one disappears. The player leaving and regaining the
-  full view (minimized, picture in picture) sends the same events. A pill that
+  appears, or the last one disappears. Every state in which the player cannot
+  show its pills (see *Presentation rules*) sends the same events. A pill that
   comes back emits its `prompt_shown` or `undo_shown` output again.
 - `client_replan`, with an `operation` of `track_change`, `seek_reanchor`,
   `seek_failure_recovery`, `failure_recovery` or `output_change`: the client
@@ -683,8 +820,10 @@ events are:
 - `quality_changed`: a quality change the controller did not send, such as the
   viewer's pick. It has no fields; the new quality arrives with the next
   `plan_adopted`.
-- `new_attempt`: the client starts a new playback attempt. It has no fields,
-  and the cases rely only on its discarding the kept estimate.
+- `new_attempt`: the client starts a new playback attempt of the same title
+  that the viewer did not choose. It has no fields. It discards the kept
+  estimate and nothing else: the answer, the once-per-title notice and the
+  re-offer wait belong to the title.
 
 Outputs are `replan` with its body, `prompt_shown`, `undo_shown`, and `notice`
 with its copy key. Some cases also give the `buffering_action` each plan's
@@ -777,6 +916,20 @@ The remaining cases pin the rules added since:
 | `new_attempt_discards_kept_estimate` | After a new start, a track change carries no estimate. |
 | `renderer_waits_do_not_count` | Waits that begin with media buffered never trigger, however long. |
 | `renderer_wait_drains_into_stall` | A renderer wait whose buffer falls to the threshold becomes a stall from that moment. |
+| `accepted_lower_has_no_reoffer_wait` | **Lower quality** on a picked quality starts no re-offer wait: the lower plan's own trigger prompts again at once. |
+| `reoffer_wait_counts_from_first_display` | A prompt held behind another pill starts its re-offer wait when it first shows, so the next prompt waits until 120 seconds after that. |
+| `quality_change_ends_reoffer_wait` | A quality change ends the re-offer wait, so the new plan's trigger prompts at once. |
+| `undo_timeout_reevaluates_stall_in_progress`, `undo_expiry_reevaluates_long_stall` | The undo pill's timer ending during a long stall in progress evaluates it at once, including a timer that a hidden pill or a pause froze. |
+| `back_on_undo_reevaluates_stall_in_progress` | Back on the undo pill ends its suppression like the timer. |
+| `reoffer_end_during_short_wait_waits_for_playing` | A suppression that ends during a wait shorter than `LONG_STALL_MS` evaluates nothing; the next `playing` does. |
+| `lowering_result_without_bitrate` | A lowering's plan with no delivered bitrate counts as lower and shows the undo pill. |
+| `failure_notice_spends_cant_lower_once` | A no-lower result's notice uses up the once-per-title notice. |
+| `new_attempt_keeps_the_answer`, `new_attempt_keeps_cant_lower_once`, `new_attempt_keeps_the_reoffer_wait` | A new attempt of the same title keeps the answer, the once-per-title notice and the re-offer wait. |
+| `unrequested_adoption_discards_pending_lowering` | An adoption the controller did not request drops its pending lowering with no notice or cooldown. |
+| `startup_wait_then_frame_keeps_grace_anchor`, `slow_start_frame_after_grace` | The grace starts at the first wait before a frame, and the frame does not restart it. |
+| `pause_ends_a_stall_uncounted`, `seek_ends_a_stall_uncounted`, `pause_and_reload_waits_never_count` | A pause or seek ends a stall without counting it, and waits caused by a pause or reload never count. |
+| `client_replan_keeps_a_picked_quality` | Off Auto, the client's own replans, a seek failure recovery included, carry the picked quality and no estimate. |
+| `ask_lower_keeps_the_estimate` | **Lower quality** on Auto keeps its estimate for the client's later replans, as an automatic lowering does. |
 
 ## Phases
 

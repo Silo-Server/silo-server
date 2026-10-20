@@ -33,12 +33,15 @@ server instance UUID that diagnostics also report. `protocol_versions` is
 `fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`,
 `bandwidth_probe_v1` and `connection_speed_v1`. With `connection_speed_v1` the
 response adds `bandwidth_probe_url`, the media-path probe below, on the origin
-the request arrived on, and the speed test schedule:
+the request arrived on. When that is the server's local-network origin (a local
+route), clients send the probe with the saved server's credentials and trust,
+as they do for any request to that server. The response also adds the speed
+test schedule:
 `bandwidth_probe_automatic` (the `playback.bandwidth_probe_automatic` server
 setting), `bandwidth_probe_max_age_seconds` (from
 `playback.bandwidth_probe_max_age_days`) and, when the server has video
 bitrates to go on, `bandwidth_probe_target_kbps`. The target is
-`ceil(P × 5 / 4)`, at most 1,000,000, where `P` is the lower of the
+`max(ceil(P × 5 / 4), 100)`, at most 1,000,000, where `P` is the lower of the
 administrator bitrate cap for the caller's network, when one applies, and the
 99.9th percentile of the video bitrates in the libraries the profile can play.
 The [buffering-quality design](design/2026-10-17-buffering-quality.md#connection-speed-test)
@@ -63,7 +66,7 @@ closed the connection early are not counted. Beyond any limit the probe gets `42
 `Retry-After`. The bytes are random so a compressing
 proxy cannot inflate the result. A client times the transfer from its first
 byte, may close the connection once it has timed enough, and sends the result
-as `bandwidth_estimate_kbps` on start and replan. Without a measurement a
+as `bandwidth_estimate_kbps` on start. Replans never carry it. Without a measurement a
 browser has only `navigator.connection.downlink`, which Chromium caps at
 10 Mbps, too low for Auto quality ever to send a 4K source as-is. Its bytes
 count as viewer transfer egress, not playback, and are exempt from stream caps,

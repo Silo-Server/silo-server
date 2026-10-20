@@ -1,7 +1,7 @@
 {
   "version": 1,
   "spec": "docs/design/2026-10-17-buffering-quality.md",
-  "about": "Replay each case against the buffering-quality controller with a fake wall clock. Apply each event at its time t (ms on the case clock), advancing the clock between events so timers fire, then advance to until. expect is the complete ordered list of outputs; any other output fails the case. A case's mode defaults to defaults.mode. buffering_action, when present, is the plan_summary value each listed plan must report. Trigger evaluation occurs on playing and an in-progress long-stall timer, not on waiting or suppression expiry while playing. Suppressed history is retained; timeout and rearm clear it. Plan labels identify local adoptions, not unique server plan IDs; a server plan_id may repeat. Compute the step-down estimate as the exact integer floor of delivered_kbps * 7 / 10. A plan_adopted with controllerInitiated false answers a replan the controller did not send. client_replan has an operation (track_change, seek_reanchor, seek_failure_recovery, failure_recovery or output_change): the client sends a replan for its own reasons, and the output is a replan whose body holds that operation, the adopted plan's quality as quality_preference and, on Auto with a kept step-down estimate, bandwidth_estimate_kbps without bandwidth_estimate_source; the client's other request fields are outside these vectors. quality_changed is a quality change the controller did not send, such as the viewer's pick; it has no fields, and the new quality arrives with the next plan_adopted. new_attempt is a new playback attempt of the title; it has no fields, and the cases rely only on its discarding the kept estimate. A waiting with cause renderer began with more than RENDERER_WAIT_BUFFER_MS of media buffered past the playhead: the decoder or renderer is behind, so it is not a stall. A plain waiting during a renderer wait means the media buffered past the playhead fell to RENDERER_WAIT_BUFFER_MS or less, and the stall begins then.",
+  "about": "Replay each case against the buffering-quality controller with a fake wall clock. Apply each event at its time t (ms on the case clock), advancing the clock between events so timers fire, then advance to until. expect is the complete ordered list of outputs; any other output fails the case. A case's mode defaults to defaults.mode. buffering_action, when present, is the plan_summary value each listed plan must report. Trigger evaluation occurs on playing and an in-progress long-stall timer, not on waiting or suppression expiry while playing. Suppressed history is retained; timeout and rearm clear it. Plan labels identify local adoptions, not unique server plan IDs; a server plan_id may repeat. Compute the step-down estimate as the exact integer floor of delivered_kbps * 7 / 10. A plan_adopted with controllerInitiated false answers a replan the controller did not send. client_replan has an operation (track_change, seek_reanchor, seek_failure_recovery, failure_recovery or output_change): the client sends a replan for its own reasons, and the output is a replan whose body holds that operation, the adopted plan's quality as quality_preference and, on Auto with a kept step-down estimate, bandwidth_estimate_kbps without bandwidth_estimate_source; the client's other request fields are outside these vectors. quality_changed is a quality change the controller did not send, such as the viewer's pick; it has no fields, and the new quality arrives with the next plan_adopted. new_attempt is a new playback attempt of the same title that the viewer did not choose; it has no fields, and it discards the kept estimate and nothing else: the answer, the once-per-title notice and the re-offer wait belong to the title. A plan_adopted without controllerInitiated that follows the controller's own replan answers it. A waiting with cause renderer began with more than RENDERER_WAIT_BUFFER_MS of media buffered past the playhead: the decoder or renderer is behind, so it is not a stall. A plain waiting during a renderer wait means the media buffered past the playhead fell to RENDERER_WAIT_BUFFER_MS or less, and the stall begins then.",
   "constants": {
     "STARTUP_GRACE_MS": 10000,
     "STALL_MIN_MS": 1000,
@@ -3811,6 +3811,1980 @@
           }
         }
       ]
+    },
+    {
+      "name": "accepted_lower_has_no_reoffer_wait",
+      "note": "Only a timed-out prompt starts the re-offer wait; an accepted Lower quality does not.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 10000,
+            "quality": "1080p-high",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 133000,
+          "type": "select_lower"
+        },
+        {
+          "t": 135000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 6000,
+            "quality": "1080p-medium",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 135000,
+          "type": "playing"
+        },
+        {
+          "t": 145000,
+          "type": "waiting"
+        }
+      ],
+      "until": 155000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        },
+        {
+          "t": 133000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "1080p-medium"
+          }
+        },
+        {
+          "t": 135000,
+          "type": "notice",
+          "key": "lowered"
+        },
+        {
+          "t": 151000,
+          "type": "prompt_shown"
+        }
+      ],
+      "buffering_action": {
+        "p1": "accepted"
+      }
+    },
+    {
+      "name": "reoffer_wait_counts_from_first_display",
+      "mode": "ask",
+      "note": "The re-offer wait counts from when the prompt first appeared on screen, not from the trigger that offered it behind another pill.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 120000,
+          "type": "pill_obscured"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 140000,
+          "type": "playing"
+        },
+        {
+          "t": 151000,
+          "type": "pill_unobscured"
+        },
+        {
+          "t": 250000,
+          "type": "waiting"
+        }
+      ],
+      "until": 275000,
+      "expect": [
+        {
+          "t": 151000,
+          "type": "prompt_shown"
+        },
+        {
+          "t": 271000,
+          "type": "prompt_shown"
+        }
+      ],
+      "buffering_action": {
+        "p1": "timed_out"
+      }
+    },
+    {
+      "name": "quality_change_ends_reoffer_wait",
+      "mode": "ask",
+      "note": "A quality change ends the re-offer wait a timed-out prompt started.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 132000,
+          "type": "playing"
+        },
+        {
+          "t": 150000,
+          "type": "quality_changed"
+        },
+        {
+          "t": 152000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 10000,
+            "quality": "1080p-high",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 152000,
+          "type": "playing"
+        },
+        {
+          "t": 170000,
+          "type": "waiting"
+        }
+      ],
+      "until": 180000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        },
+        {
+          "t": 176000,
+          "type": "prompt_shown"
+        }
+      ],
+      "buffering_action": {
+        "p1": "timed_out"
+      }
+    },
+    {
+      "name": "undo_timeout_reevaluates_stall_in_progress",
+      "note": "The undo pill's timer ending during a stall that reached LONG_STALL_MS evaluates it at once.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 134000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 31600,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 134000,
+          "type": "playing"
+        },
+        {
+          "t": 135000,
+          "type": "pill_obscured"
+        },
+        {
+          "t": 144000,
+          "type": "waiting"
+        },
+        {
+          "t": 160000,
+          "type": "pill_unobscured"
+        }
+      ],
+      "until": 180000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        },
+        {
+          "t": 134000,
+          "type": "undo_shown"
+        },
+        {
+          "t": 160000,
+          "type": "undo_shown"
+        },
+        {
+          "t": 174000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 22120,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ],
+      "buffering_action": {
+        "p1": "lowered",
+        "p2": "lowered"
+      }
+    },
+    {
+      "name": "back_on_undo_reevaluates_stall_in_progress",
+      "note": "Back on the undo pill ends it like its timer: a stall in progress that reached LONG_STALL_MS is evaluated at once.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 134000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 31600,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 134000,
+          "type": "playing"
+        },
+        {
+          "t": 135000,
+          "type": "pill_obscured"
+        },
+        {
+          "t": 144000,
+          "type": "waiting"
+        },
+        {
+          "t": 160000,
+          "type": "pill_unobscured"
+        },
+        {
+          "t": 165000,
+          "type": "back"
+        }
+      ],
+      "until": 180000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        },
+        {
+          "t": 134000,
+          "type": "undo_shown"
+        },
+        {
+          "t": 160000,
+          "type": "undo_shown"
+        },
+        {
+          "t": 165000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 22120,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ],
+      "buffering_action": {
+        "p1": "lowered",
+        "p2": "lowered"
+      }
+    },
+    {
+      "name": "undo_expiry_reevaluates_long_stall",
+      "note": "An undo pill frozen by a pause expires later; a long stall in progress at its expiry is evaluated then.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 134000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 31600,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 134000,
+          "type": "playing"
+        },
+        {
+          "t": 135000,
+          "type": "pause"
+        },
+        {
+          "t": 145000,
+          "type": "playing"
+        },
+        {
+          "t": 150000,
+          "type": "waiting"
+        }
+      ],
+      "until": 170000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        },
+        {
+          "t": 134000,
+          "type": "undo_shown"
+        },
+        {
+          "t": 159000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 22120,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ]
+    },
+    {
+      "name": "reoffer_end_during_short_wait_waits_for_playing",
+      "mode": "ask",
+      "note": "A suppression that ends during a wait shorter than LONG_STALL_MS evaluates nothing; the next playing does.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 132000,
+          "type": "playing"
+        },
+        {
+          "t": 200000,
+          "type": "waiting"
+        },
+        {
+          "t": 201500,
+          "type": "playing"
+        },
+        {
+          "t": 230000,
+          "type": "waiting"
+        },
+        {
+          "t": 231500,
+          "type": "playing"
+        },
+        {
+          "t": 250000,
+          "type": "waiting"
+        },
+        {
+          "t": 252500,
+          "type": "playing"
+        }
+      ],
+      "until": 260000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        },
+        {
+          "t": 252500,
+          "type": "prompt_shown"
+        }
+      ]
+    },
+    {
+      "name": "lowering_result_without_bitrate",
+      "note": "A lowering's plan with no delivered bitrate counts as lower; it then has no lower rung of its own.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 134000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 0,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 134000,
+          "type": "playing"
+        },
+        {
+          "t": 150000,
+          "type": "waiting"
+        }
+      ],
+      "until": 160000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        },
+        {
+          "t": 134000,
+          "type": "undo_shown"
+        },
+        {
+          "t": 156000,
+          "type": "notice",
+          "key": "cant_lower"
+        }
+      ],
+      "buffering_action": {
+        "p1": "lowered",
+        "p2": "cant_lower"
+      }
+    },
+    {
+      "name": "failure_notice_spends_cant_lower_once",
+      "note": "A no-lower result's notice uses up the once-per-title Can't lower quality notice.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 134000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              }
+            ],
+            "degradation_warnings": [
+              "quality_reduction_unavailable"
+            ]
+          }
+        },
+        {
+          "t": 134000,
+          "type": "playing"
+        },
+        {
+          "t": 440000,
+          "type": "waiting"
+        }
+      ],
+      "until": 450000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        },
+        {
+          "t": 134000,
+          "type": "notice",
+          "key": "cant_lower"
+        }
+      ],
+      "buffering_action": {
+        "p1": "lowered",
+        "p2": "cant_lower"
+      }
+    },
+    {
+      "name": "new_attempt_keeps_the_answer",
+      "mode": "ask",
+      "note": "A new attempt of the same title keeps the viewer's Keep quality.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 132000,
+          "type": "select_keep"
+        },
+        {
+          "t": 133000,
+          "type": "playing"
+        },
+        {
+          "t": 140000,
+          "type": "new_attempt"
+        },
+        {
+          "t": 141000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 141000,
+          "type": "playing"
+        },
+        {
+          "t": 260000,
+          "type": "waiting"
+        }
+      ],
+      "until": 270000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        }
+      ],
+      "buffering_action": {
+        "p1": "kept",
+        "p2": "none"
+      }
+    },
+    {
+      "name": "new_attempt_keeps_cant_lower_once",
+      "note": "A new attempt of the same title does not show Can't lower quality again.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 132000,
+          "type": "playing"
+        },
+        {
+          "t": 140000,
+          "type": "new_attempt"
+        },
+        {
+          "t": 141000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              }
+            ]
+          }
+        },
+        {
+          "t": 141000,
+          "type": "playing"
+        },
+        {
+          "t": 160000,
+          "type": "waiting"
+        }
+      ],
+      "until": 170000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "notice",
+          "key": "cant_lower"
+        }
+      ],
+      "buffering_action": {
+        "p1": "cant_lower",
+        "p2": "cant_lower"
+      }
+    },
+    {
+      "name": "new_attempt_keeps_the_reoffer_wait",
+      "mode": "ask",
+      "note": "A new attempt of the same title keeps the re-offer wait a timed-out prompt started.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 132000,
+          "type": "playing"
+        },
+        {
+          "t": 150000,
+          "type": "new_attempt"
+        },
+        {
+          "t": 151000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 151000,
+          "type": "playing"
+        },
+        {
+          "t": 180000,
+          "type": "waiting"
+        },
+        {
+          "t": 187000,
+          "type": "playing"
+        }
+      ],
+      "until": 200000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        }
+      ],
+      "buffering_action": {
+        "p1": "timed_out",
+        "p2": "none"
+      }
+    },
+    {
+      "name": "unrequested_adoption_discards_pending_lowering",
+      "note": "An adoption the controller did not request drops its pending lowering with no notice; the new plan lowers on its own trigger.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 132000,
+          "type": "plan_adopted",
+          "controllerInitiated": false,
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 132000,
+          "type": "playing"
+        },
+        {
+          "t": 150000,
+          "type": "waiting"
+        }
+      ],
+      "until": 160000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        },
+        {
+          "t": 156000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ],
+      "buffering_action": {
+        "p1": "lowered",
+        "p2": "lowered"
+      }
+    },
+    {
+      "name": "startup_wait_then_frame_keeps_grace_anchor",
+      "note": "A wait before the first frame starts the grace; the frame does not restart it.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "waiting"
+        },
+        {
+          "t": 4000,
+          "type": "playing"
+        },
+        {
+          "t": 12000,
+          "type": "waiting"
+        },
+        {
+          "t": 14000,
+          "type": "playing"
+        },
+        {
+          "t": 60000,
+          "type": "waiting"
+        },
+        {
+          "t": 61500,
+          "type": "playing"
+        }
+      ],
+      "until": 70000,
+      "expect": [
+        {
+          "t": 61500,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ]
+    },
+    {
+      "name": "slow_start_frame_after_grace",
+      "note": "A start that outlasts the grace counts from its end, and the grace does not run again from the frame.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "waiting"
+        },
+        {
+          "t": 14000,
+          "type": "playing"
+        },
+        {
+          "t": 20000,
+          "type": "waiting"
+        },
+        {
+          "t": 21500,
+          "type": "playing"
+        }
+      ],
+      "until": 30000,
+      "expect": [
+        {
+          "t": 21500,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ]
+    },
+    {
+      "name": "pause_ends_a_stall_uncounted",
+      "note": "A pause ends a stall in progress without counting it.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 129000,
+          "type": "pause"
+        },
+        {
+          "t": 140000,
+          "type": "playing"
+        },
+        {
+          "t": 150000,
+          "type": "waiting"
+        },
+        {
+          "t": 151500,
+          "type": "playing"
+        }
+      ],
+      "until": 160000,
+      "expect": []
+    },
+    {
+      "name": "seek_ends_a_stall_uncounted",
+      "note": "A seek ends a stall in progress without counting it.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 129000,
+          "type": "seek"
+        },
+        {
+          "t": 129500,
+          "type": "playing"
+        },
+        {
+          "t": 150000,
+          "type": "waiting"
+        },
+        {
+          "t": 151500,
+          "type": "playing"
+        }
+      ],
+      "until": 160000,
+      "expect": []
+    },
+    {
+      "name": "pause_and_reload_waits_never_count",
+      "note": "Waits caused by a pause or a source reload never count, however long.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 30000,
+          "type": "waiting",
+          "cause": "pause"
+        },
+        {
+          "t": 38000,
+          "type": "playing"
+        },
+        {
+          "t": 60000,
+          "type": "waiting",
+          "cause": "reload"
+        },
+        {
+          "t": 68000,
+          "type": "playing"
+        }
+      ],
+      "until": 80000,
+      "expect": []
+    },
+    {
+      "name": "client_replan_keeps_a_picked_quality",
+      "note": "Off Auto, the client's own replans carry the picked quality and no estimate.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 10000,
+            "quality": "1080p-high",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 20000,
+          "type": "client_replan",
+          "operation": "track_change"
+        },
+        {
+          "t": 30000,
+          "type": "client_replan",
+          "operation": "seek_failure_recovery"
+        }
+      ],
+      "until": 40000,
+      "expect": [
+        {
+          "t": 20000,
+          "type": "replan",
+          "body": {
+            "operation": "track_change",
+            "quality_preference": "1080p-high"
+          }
+        },
+        {
+          "t": 30000,
+          "type": "replan",
+          "body": {
+            "operation": "seek_failure_recovery",
+            "quality_preference": "1080p-high"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ask_lower_keeps_the_estimate",
+      "mode": "ask",
+      "note": "Lower quality on Auto in ask keeps its estimate like an automatic lowering: a seek failure recovery carries it.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 133000,
+          "type": "select_lower"
+        },
+        {
+          "t": 135000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 31600,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 135000,
+          "type": "playing"
+        },
+        {
+          "t": 140000,
+          "type": "client_replan",
+          "operation": "seek_failure_recovery"
+        }
+      ],
+      "until": 150000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        },
+        {
+          "t": 133000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        },
+        {
+          "t": 135000,
+          "type": "notice",
+          "key": "lowered"
+        },
+        {
+          "t": 140000,
+          "type": "replan",
+          "body": {
+            "operation": "seek_failure_recovery",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100
+          }
+        }
+      ],
+      "buffering_action": {
+        "p1": "accepted"
+      }
     }
   ],
   "connection_budget_cases": [
@@ -3867,7 +5841,7 @@
       "expected_kbps": 35280
     }
   ],
-  "probe_about": "probe_cases replay the speed test arithmetic in Connection speed test > Measuring. chunks are [t, bytes] arrivals in ms after the first byte; a chunk counts in window floor(t / PROBE_WINDOW_MS) and only before the test stops. end is when the transfer ended; absent, it ran past the test's limit. expect is null when the test measured nothing, else {kbps, lower_bound, bytes, duration_ms, stop}, stop being when the client stops reading. connection_budget_cases take current readings only; the reading is the higher of probe_kbps and playback_sample_kbps. When the transfer ends having delivered every byte the mode requests (QUICK_PROBE_BYTES or ACCURATE_PROBE_BYTES) before the first complete window after window 0, the test reports the average over the whole transfer, bytes x 8 / end, with lower_bound true, or the target when a quick test's average reaches it.",
+  "probe_about": "probe_cases replay the speed test arithmetic in Connection speed test > Measuring. chunks are [t, bytes] arrivals in ms after the first byte; a chunk counts in window floor(t / PROBE_WINDOW_MS) and only before the test stops. end is when the client saw the body end cleanly; absent, the transfer ran past the test's limit. A transfer that fails, or ends short of its Content-Length, measured nothing and has no case here. expect is null when the test measured nothing, else {kbps, lower_bound, bytes, duration_ms, stop}, stop being when the client stops reading. connection_budget_cases take current readings only; the reading is the higher of probe_kbps and playback_sample_kbps. When the transfer ends having delivered every byte the mode requests (QUICK_PROBE_BYTES or ACCURATE_PROBE_BYTES) before the first complete window after window 0, the test reports the average over the whole transfer, bytes x 8 / end, with lower_bound true, or the target when a quick test's average reaches it.",
   "probe_constants": {
     "PROBE_WINDOW_MS": 500,
     "QUICK_PROBE_BYTES": 100000000,
