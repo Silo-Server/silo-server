@@ -206,15 +206,33 @@ func (c *meilisearchClient) Health(ctx context.Context) error {
 	return nil
 }
 
+// ErrMeilisearchCheckRedirected reports a credentialed connection check that
+// Meilisearch redirected to another scheme, host or port.
+var ErrMeilisearchCheckRedirected = errors.New("meilisearch redirected the connection check to another address")
+
 // checkConnection keeps a credentialed administrative probe at its configured
-// endpoint. Runtime clients and checks without a key retain their redirect policy.
+// scheme, host and port: it follows redirects within them and reports any
+// other as ErrMeilisearchCheckRedirected. Runtime clients and checks without a
+// key retain their redirect policy.
 func (c *meilisearchClient) checkConnection(ctx context.Context) error {
-	if c.apiKey != "" {
-		c.httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+	if c.apiKey == "" {
+		return c.Health(ctx)
+	}
+	c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != via[0].URL.Scheme || req.URL.Host != via[0].URL.Host {
 			return http.ErrUseLastResponse
 		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
 	}
-	return c.Health(ctx)
+	err := c.Health(ctx)
+	var httpErr *meilisearchHTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode >= 300 && httpErr.StatusCode < 400 {
+		return ErrMeilisearchCheckRedirected
+	}
+	return err
 }
 
 func (c *meilisearchClient) CreateIndex(ctx context.Context, uid string) (meilisearchTaskRef, error) {

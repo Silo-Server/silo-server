@@ -83,6 +83,9 @@ func TestConnectionCheckAuthorityEquivalence(t *testing.T) {
 		{"other scheme", "https://search.example.test:443", "http://search.example.test:443", false},
 		{"trailing dot stays distinct", "https://search.example.test", "https://search.example.test.", false},
 		{"malformed stays distinct", "https://search.example.test", "https://search.example.test:bad", false},
+		{"empty port is the default", "https://search.example.test:", "https://search.example.test", true},
+		{"IDNA twin stays distinct", "https://search.example.test", "https://search.example.t\u0130st", false},
+		{"Unicode host equals its punycode", "https://b\u00fccher.example.test", "https://xn--bcher-kva.example.test", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := endpointAuthority(tc.left) == endpointAuthority(tc.right); got != tc.equal {
@@ -190,6 +193,13 @@ func TestMeilisearchCheckBridgesUseOnlyBoundDraftCredentials(t *testing.T) {
 				t.Fatalf("v1 status = %d, combined calls = %d", rec.Code, calls)
 			}
 		})
+	}
+	checkAdminMeilisearchSettingsConnection = func(context.Context, catalog.CatalogSearchSettings) error {
+		return catalog.ErrMeilisearchCheckRedirected
+	}
+	redirected := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{catalog.SearchSettingMeilisearchURL: "http://search.example.test"}}}
+	if result, err := redirected.CheckAdminSettingsConnection(t.Context(), "meilisearch", nil, nil); err != nil || result.Success || result.Message != adminMeilisearchRedirectMessage {
+		t.Fatalf("redirected check result = %+v, %v", result, err)
 	}
 	checkAdminMeilisearchSettingsConnection = func(context.Context, catalog.CatalogSearchSettings) error {
 		return errors.New("SYNTHETIC_PROVIDER_DETAIL")

@@ -12,8 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/net/idna"
 
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
@@ -26,6 +28,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
+
+// adminMeilisearchRedirectMessage answers a credentialed Meilisearch check
+// that was redirected to another scheme, host or port, which it does not follow.
+const adminMeilisearchRedirectMessage = "Meilisearch redirected the check to another address. Enter the address it redirects to, such as its https:// URL, and enter the API key again."
 
 const adminTextAIConnectionFailureMessage = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
 
@@ -315,6 +321,9 @@ func checkMeilisearchConnection(ctx context.Context, settings map[string]string)
 	}
 	searchSettings.Provider = catalog.SearchProviderMeilisearch
 	if err := checkAdminMeilisearchSettingsConnection(ctx, searchSettings); err != nil {
+		if errors.Is(err, catalog.ErrMeilisearchCheckRedirected) {
+			return connectionCheckResponse{Message: adminMeilisearchRedirectMessage, safeMessage: adminMeilisearchRedirectMessage}
+		}
 		return connectionCheckResponse{Success: false, Message: err.Error()}
 	}
 	return connectionCheckResponse{Success: true, Message: "Meilisearch connection successful"}
@@ -451,10 +460,27 @@ func endpointAuthority(rawURL string) string {
 		return strings.ToLower(trimmed)
 	}
 	scheme := strings.ToLower(parsed.Scheme)
-	host := strings.ToLower(parsed.Host)
-	port, _ := strconv.Atoi(parsed.Port())
-	if (scheme == eventsSchemeHTTPS && port == 443) || (scheme == eventsSchemeHTTP && port == 80) {
-		host = strings.TrimSuffix(host, ":"+parsed.Port())
+	// Compare the name net/http dials. It converts a non-ASCII host with IDNA
+	// lookup, which Unicode lowercasing does not match: "İ" lowercases to "i"
+	// but dials a punycode name. A host IDNA rejects equals only itself.
+	host := parsed.Hostname()
+	if strings.ContainsFunc(host, func(r rune) bool { return r >= utf8.RuneSelf }) {
+		ascii, idnaErr := idna.Lookup.ToASCII(host)
+		if idnaErr != nil {
+			return trimmed
+		}
+		host = ascii
+	}
+	host = strings.ToLower(host)
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	port := parsed.Port()
+	if number, _ := strconv.Atoi(port); (scheme == eventsSchemeHTTPS && number == 443) || (scheme == eventsSchemeHTTP && number == 80) {
+		port = ""
+	}
+	if port != "" {
+		host += ":" + port
 	}
 	return scheme + "://" + host
 }
