@@ -764,6 +764,19 @@ describe("scheduleBandwidthProbe", () => {
     await expect(result).resolves.toBe("playing");
   });
 
+  it("runs no automatic test on an iPad that asks for desktop sites", async () => {
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/17.0 Safari/605.1.15",
+      maxTouchPoints: 5,
+    });
+    server({});
+    hangingProbe();
+    scheduleBandwidthProbe();
+    await readThenTest();
+    expect(fetchWithSession).not.toHaveBeenCalled();
+  });
+
   it("runs the automatic test on a desktop that cannot tell its link type", async () => {
     vi.stubGlobal("navigator", { ...navigator, userAgent: "Mozilla/5.0 (Macintosh) Firefox" });
     server({});

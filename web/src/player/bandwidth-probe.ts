@@ -576,7 +576,16 @@ export function onMeteredConnection(): boolean {
 function handheldOnUnknownLink(): boolean {
   if (networkInformation()?.type !== undefined) return false;
   const formFactor = detectFormFactor();
-  return formFactor === "phone" || formFactor === "tablet";
+  return formFactor === "phone" || formFactor === "tablet" || iPadInDesktopMode();
+}
+
+/**
+ * iPadOS Safari asks for desktop sites by default and so sends a Mac user
+ * agent; its touch screen tells it from a Mac.
+ */
+function iPadInDesktopMode(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /\bmacintosh\b/i.test(navigator.userAgent ?? "") && (navigator.maxTouchPoints ?? 0) > 1;
 }
 
 /**
