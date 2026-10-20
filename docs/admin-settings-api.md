@@ -40,7 +40,7 @@ and `dirty_keys`, or none.
 Same-authority path changes retain saved credentials. Explicit empty credentials
 remain clears under each provider's existing fallback rules. Connection checks do
 not persist draft values. Credentialed Meilisearch checks follow redirects only
-within the same scheme, host and port; any other redirect fails the check with a
+within the same scheme, exact host and effective port; any other redirect fails the check with a
 message asking for the final address. Checks without a key retain the HTTP
 client's ordinary redirect behavior.
 Provider failures return `success: false` with a generic message that excludes

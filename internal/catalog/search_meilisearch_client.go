@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -219,20 +220,33 @@ func (c *meilisearchClient) checkConnection(ctx context.Context) error {
 		return c.Health(ctx)
 	}
 	c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if req.URL.Scheme != via[0].URL.Scheme || req.URL.Host != via[0].URL.Host {
-			return http.ErrUseLastResponse
+		if !sameCheckAuthority(req.URL, via[0].URL) {
+			return ErrMeilisearchCheckRedirected
 		}
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
 		}
 		return nil
 	}
-	err := c.Health(ctx)
-	var httpErr *meilisearchHTTPError
-	if errors.As(err, &httpErr) && httpErr.StatusCode >= 300 && httpErr.StatusCode < 400 {
-		return ErrMeilisearchCheckRedirected
+	return c.Health(ctx)
+}
+
+// sameCheckAuthority reports whether a redirect keeps the scheme, host and
+// effective port the check started at, so "host" and "host:443" match over
+// https. Hosts compare exactly. That is stricter than net/http, which keeps
+// the Authorization header on a redirect to a subdomain.
+func sameCheckAuthority(a, b *url.URL) bool {
+	return a.Scheme == b.Scheme && a.Hostname() == b.Hostname() && checkEffectivePort(a) == checkEffectivePort(b)
+}
+
+func checkEffectivePort(u *url.URL) int {
+	if port, err := strconv.Atoi(u.Port()); err == nil {
+		return port
 	}
-	return err
+	if u.Scheme == "https" {
+		return 443
+	}
+	return 80
 }
 
 func (c *meilisearchClient) CreateIndex(ctx context.Context, uid string) (meilisearchTaskRef, error) {

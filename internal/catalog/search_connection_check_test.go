@@ -19,14 +19,18 @@ func (f connectionCheckTransport) RoundTrip(req *http.Request) (*http.Response, 
 func TestMeilisearchConnectionCheckRedirectPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name, key, location string
+		status              int
 		wantCalls           int
-		wantErr             error
+		wantRedirected      bool
 		wantSuccess         bool
 	}{
 		{name: "credential direct", key: "SYNTHETIC_CREDENTIAL", wantCalls: 1, wantSuccess: true},
 		{name: "credential same-authority redirect followed", key: "SYNTHETIC_CREDENTIAL", location: "/health-next", wantCalls: 2, wantSuccess: true},
-		{name: "credential other-host redirect refused", key: "SYNTHETIC_CREDENTIAL", location: "https://other.example.test/health", wantCalls: 1, wantErr: ErrMeilisearchCheckRedirected},
-		{name: "credential scheme-change redirect refused", key: "SYNTHETIC_CREDENTIAL", location: "http://search.example.test/health", wantCalls: 1, wantErr: ErrMeilisearchCheckRedirected},
+		{name: "credential other-host redirect refused", key: "SYNTHETIC_CREDENTIAL", location: "https://other.example.test/health", wantCalls: 1, wantRedirected: true},
+		{name: "credential scheme-change redirect refused", key: "SYNTHETIC_CREDENTIAL", location: "http://search.example.test/health", wantCalls: 1, wantRedirected: true},
+		{name: "credential other-port redirect refused", key: "SYNTHETIC_CREDENTIAL", location: "https://search.example.test:8443/health", wantCalls: 1, wantRedirected: true},
+		{name: "credential explicit default port redirect followed", key: "SYNTHETIC_CREDENTIAL", location: "https://search.example.test:443/health-next", wantCalls: 2, wantSuccess: true},
+		{name: "credential 3xx without location is not a redirect", key: "SYNTHETIC_CREDENTIAL", status: http.StatusFound, wantCalls: 1},
 		{name: "no credential direct", wantCalls: 1, wantSuccess: true},
 		{name: "no credential redirect preserved", location: "/health-next", wantCalls: 2, wantSuccess: true},
 	} {
@@ -41,7 +45,7 @@ func TestMeilisearchConnectionCheckRedirectPolicy(t *testing.T) {
 				if calls > 2 {
 					t.Fatal("unexpected extra request")
 				}
-				if req.URL.Scheme != "https" || req.URL.Host != "search.example.test" {
+				if req.URL.Scheme != "https" || req.URL.Hostname() != "search.example.test" || (req.URL.Port() != "" && req.URL.Port() != "443") {
 					t.Fatal("check left its configured authority")
 				}
 				wantAuth := ""
@@ -56,14 +60,17 @@ func TestMeilisearchConnectionCheckRedirectPolicy(t *testing.T) {
 					response.StatusCode = http.StatusPermanentRedirect
 					response.Header.Set("Location", tc.location)
 				}
+				if tc.status != 0 {
+					response.StatusCode = tc.status
+				}
 				return response, nil
 			})
 			err = client.checkConnection(t.Context())
 			if (err == nil) != tc.wantSuccess || calls != tc.wantCalls {
 				t.Fatalf("check success = %v, calls = %d; want %v, %d", err == nil, calls, tc.wantSuccess, tc.wantCalls)
 			}
-			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
-				t.Fatalf("check error = %v, want %v", err, tc.wantErr)
+			if errors.Is(err, ErrMeilisearchCheckRedirected) != tc.wantRedirected {
+				t.Fatalf("check error = %v, want redirected = %v", err, tc.wantRedirected)
 			}
 			if client.httpClient.Timeout != 1234*time.Millisecond {
 				t.Fatal("connection deadline changed")
