@@ -97,6 +97,13 @@ writers never block and never log. Neither Redis nor Postgres is on that path.
   class 22, for example a client address that is not an `inet`), the consumer inserts
   that batch one row at a time, so only the rejected rows are dropped. Any other batch
   the server rejects is dropped at once, so it cannot hold up the stream.
+- Audit User-Agent metadata is an owned prefix of at most 512 UTF-8 bytes, bounded
+  before queue admission and in transactional audit capture. The raw prefix is
+  bounded before invalid-text replacement, and the result is bounded again because
+  replacement can expand it. A valid rune crossing the boundary is omitted. The
+  consumer enforces the same bound for alternate inputs; retained history bounds
+  the returned database projection and normalizes its byte length without changing
+  stored rows. This diagnostic policy does not change request headers or identities.
 - `opslog.Handler` encodes non-scalar attribute values (maps, slices, structs,
   pointers) to JSON when the record is logged. The consumer builds the row on its own
   goroutine later, and a caller may change a map once the log call returns.

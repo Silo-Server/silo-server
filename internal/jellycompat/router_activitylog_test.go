@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
@@ -90,6 +91,20 @@ func TestRouter_ActivityLog(t *testing.T) {
 		}
 		if entries[0].UserID != nil || entries[0].StatusCode != http.StatusUnauthorized {
 			t.Fatalf("entry = %+v, want no user and status 401", entries[0])
+		}
+	})
+
+	t.Run("failed request bounds diagnostic user agent without changing headers", func(t *testing.T) {
+		raw := strings.Repeat("agent/", 86)
+		req := httptest.NewRequest(http.MethodGet, "/Sessions", nil)
+		req.Header.Set("User-Agent", raw)
+		router.ServeHTTP(httptest.NewRecorder(), req)
+		entries := capture.take()
+		if len(entries) != 1 || entries[0].StatusCode != http.StatusUnauthorized || entries[0].UserID != nil {
+			t.Fatalf("failed-request audit lost: %+v", entries)
+		}
+		if entries[0].UserAgent != raw[:auditmutation.MaxUserAgentBytes] || req.UserAgent() != raw {
+			t.Fatal("audit prefix or original request header changed unexpectedly")
 		}
 	})
 
