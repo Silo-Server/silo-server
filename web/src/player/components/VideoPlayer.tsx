@@ -329,6 +329,26 @@ const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
  */
 const FIREFOX_STALL_BUFFERED_SECONDS = 2;
 
+/** Adds `[start, end]` to sorted, disjoint spans, merging any it overlaps. */
+function mergeSpan(spans: [number, number][], span: [number, number]): [number, number][] {
+  const merged: [number, number][] = [];
+  let [start, end] = span;
+  for (const [a, b] of spans) {
+    if (b < start || a > end) merged.push([a, b]);
+    else {
+      start = Math.min(start, a);
+      end = Math.max(end, b);
+    }
+  }
+  merged.push([start, end]);
+  return merged.sort((x, y) => x[0] - y[0]);
+}
+
+/** The time the spans cover. */
+function spanLength(spans: [number, number][]): number {
+  return spans.reduce((total, [a, b]) => total + (b - a), 0);
+}
+
 /** Media buffered past the playhead, in seconds; 0 when none is. */
 function bufferedAheadSeconds(video: HTMLVideoElement): number {
   const position = video.currentTime;
@@ -545,8 +565,10 @@ export function VideoPlayer({
   // The fragments the current plan received, for plan_summary's
   // throughput_kbps: bytes, and the time spent receiving them from each
   // response's first byte to its last.
+  // The plan's long media fragments: their bytes, and the times they were
+  // receiving, merged so that overlapping requests count once.
   const fragmentThroughputRef = useRef<
-    { planRevision: number; bytes: number; ms: number } | undefined
+    { planRevision: number; bytes: number; spans: [number, number][] } | undefined
   >(undefined);
   const planRevisionForThroughputRef = useRef(planRevision);
   useEffect(() => {
@@ -2646,14 +2668,19 @@ export function VideoPlayer({
               const ms = loading.end - loading.first;
               // A short fragment on a warm connection arrives at the burst
               // rate, which can be twice what the link sustains; only long
-              // ones count.
+              // ones count. Subtitles are not the plan's media.
               if (destroyed || loaded <= 0 || ms < MIN_THROUGHPUT_SAMPLE_MS) return;
+              if ((data.frag as { type?: string }).type === "subtitle") return;
               const revision = planRevisionForThroughputRef.current;
-              const current = fragmentThroughputRef.current;
-              fragmentThroughputRef.current =
-                current?.planRevision === revision
-                  ? { planRevision: revision, bytes: current.bytes + loaded, ms: current.ms + ms }
-                  : { planRevision: revision, bytes: loaded, ms };
+              const current =
+                fragmentThroughputRef.current?.planRevision === revision
+                  ? fragmentThroughputRef.current
+                  : { planRevision: revision, bytes: 0, spans: [] };
+              fragmentThroughputRef.current = {
+                planRevision: revision,
+                bytes: current.bytes + loaded,
+                spans: mergeSpan(current.spans, [loading.first, loading.end]),
+              };
             });
 
             hls.on(Hls.Events.BUFFER_APPENDED, () => {
@@ -4379,13 +4406,14 @@ export function VideoPlayer({
     },
     onSummary: (summaryPlan, summary, pageEnding) => {
       const fragments = fragmentThroughputRef.current;
+      const ms = fragments ? spanLength(fragments.spans) : 0;
       // Under a second of receiving can be one burst from a buffer, a rate
       // the link never held; the server keeps the highest sample.
       const kbps =
         fragments &&
         String(fragments.planRevision) === summaryPlan.adoption_id &&
-        fragments.ms >= MIN_THROUGHPUT_SAMPLE_MS
-          ? Math.min(Math.floor((fragments.bytes * 8) / fragments.ms), 1_000_000)
+        ms >= MIN_THROUGHPUT_SAMPLE_MS
+          ? Math.min(Math.floor((fragments.bytes * 8) / ms), 1_000_000)
           : 0;
       onBufferingSummary?.(
         summaryPlan,

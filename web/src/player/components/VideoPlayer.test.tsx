@@ -5957,7 +5957,11 @@ describe("VideoPlayer playback throughput", () => {
   });
 
   async function summaryAfterFragments(
-    fragments: { loaded: number; loading: { start: number; first: number; end: number } }[],
+    fragments: {
+      loaded: number;
+      loading: { start: number; first: number; end: number };
+      type?: string;
+    }[],
   ) {
     hlsJS.supported = true;
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
@@ -5972,7 +5976,8 @@ describe("VideoPlayer playback throughput", () => {
     });
     const { unmount } = renderPlayer({ plan, onBufferingSummary });
     await waitFor(() => expect(hlsJS.latest).not.toBeNull());
-    for (const stats of fragments) act(() => hlsJS.latest?.emit("fragLoaded", { frag: { stats } }));
+    for (const { type = "main", ...stats } of fragments)
+      act(() => hlsJS.latest?.emit("fragLoaded", { frag: { type, stats } }));
     unmount();
     expect(onBufferingSummary).toHaveBeenCalled();
     return onBufferingSummary.mock.calls.at(-1)![1] as Record<string, unknown>;
@@ -5986,6 +5991,16 @@ describe("VideoPlayer playback throughput", () => {
       { loaded: 3_000_000, loading: { start: 900, first: 1000, end: 2200 } },
     ]);
     expect(summary.throughput_kbps).toBe(20_000);
+  });
+
+  it("counts the time overlapping video and audio fragments were receiving once", async () => {
+    // A separate audio rendition loads beside the video; subtitles do not count.
+    const summary = await summaryAfterFragments([
+      { loaded: 3_000_000, loading: { start: 0, first: 0, end: 1200 } },
+      { loaded: 1_000_000, loading: { start: 200, first: 200, end: 1400 }, type: "audio" },
+      { loaded: 900_000, loading: { start: 2000, first: 2000, end: 3500 }, type: "subtitle" },
+    ]);
+    expect(summary.throughput_kbps).toBe(22_857);
   });
 
   it("reports no throughput when every fragment arrived in under a second", async () => {
