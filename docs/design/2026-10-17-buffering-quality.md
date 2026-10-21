@@ -140,11 +140,12 @@ measured and where it came from, and never do Auto's arithmetic.
     media request is failing when it errors, cannot connect, or receives no
     data for the client's idle or first-byte timeout. A request that is still
     receiving data is not failing, even when it runs past a whole-request time
-    limit: a slow link is what the controller exists to catch. An outage ends when the plan's media data arrives again (a segment
-    or range request receives data, or the buffered position advances) or when
-    playback runs. A playlist, subtitle or API request that succeeds does not
-    end it on its own. While an outage lasts the controller does not evaluate;
-    the next `playing` after it does.
+    limit: a slow link is what the controller exists to catch. An outage
+    ends when the plan's media data arrives again (a segment or range request
+    receives data, or the buffered position advances) or when playback runs.
+    A playlist, subtitle or API request that succeeds does not end it on its
+    own. No time limit ends an outage. While an outage lasts the controller
+    does not evaluate; the next `playing` after it does.
   - a renderer wait: one that begins with more than
     `RENDERER_WAIT_BUFFER_MS = 1000` of media buffered past the playhead. The
     decoder or renderer is behind, as when a weak device drops frames to the
