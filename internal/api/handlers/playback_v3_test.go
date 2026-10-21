@@ -3997,6 +3997,17 @@ func TestHandlePlaybackRouteEventV3RejectsMalformedEvents(t *testing.T) {
 	}
 }
 
+func TestHandlePlaybackRouteEventV3RejectsPlanSummary(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	body := `{"protocol_version":3,"playback_attempt_id":"attempt-summary-0001","event":"plan_summary","diagnostics":{"played_ms":"60000","buffering_mode":"always","buffering_action":"none"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/route-events", strings.NewReader(body)).WithContext(newAuthorizedPlaybackContext())
+	rr := httptest.NewRecorder()
+	handler.HandlePlaybackRouteEventV3(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestHandlePlaybackRouteEventV3AuthorizesPersistedTerminalStart(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	store := &recordingRouteEventPlanStoreV3{

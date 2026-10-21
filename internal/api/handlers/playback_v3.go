@@ -6434,7 +6434,9 @@ func (h *PlaybackHandler) HandlePlaybackRouteEventV3(w http.ResponseWriter, r *h
 		return
 	}
 	var event playback.RouteEventV3
-	if err := json.Unmarshal(body, &event); err != nil || !validRouteEventV3(event) {
+	// Plan summaries are a native /api/v2 feature; the frozen v1 route keeps
+	// rejecting them as it did before they existed.
+	if err := json.Unmarshal(body, &event); err != nil || !validRouteEventV3(event) || event.Event == playback.RouteEventPlanSummaryV3 {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid route event")
 		return
 	}
