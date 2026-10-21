@@ -167,10 +167,12 @@ measured and where it came from, and never do Auto's arithmetic.
   - one stall reaching `LONG_STALL_MS = 6000`, while it is still in progress or
     within the window after it ends.
 - **Lower rung**: the highest `available_qualities` entry whose bitrate is below
-  the bitrate of the active rung. When the active quality is Auto, or matches no
-  `available_qualities` label (a saved plain resolution such as `1080p`), the
-  comparison is against the delivered bitrate. This is the web's
-  `lowerQualityOption`.
+  the lower of the bitrate of the entry the plan names in `active_quality`
+  (with `plan_active_quality_v1`) and the delivered bitrate. When the plan names
+  no `active_quality`, or one that matches no entry, the comparison is against
+  the delivered bitrate. A cap can lower an encode while it keeps the named
+  rung's resolution, and the rung below must still be below what plays. This is
+  the web's `lowerQualityOption`.
 - **Step-down estimate**: `floor(delivered bitrate × 7 / 10)`, in exact integer
   arithmetic: 22120 gives 15484, while multiplying by the floating-point `0.7`
   gives 15483. Auto plans for 80% of an estimate, so the next stream targets
@@ -635,6 +637,8 @@ there, which reads low.
 - A summary sent at a later launch carries no sample. The server files a sample
   under the connection of the request that delivers it, so a replay could
   credit one network with another's rate.
+- For the same reason, a client omits `throughput_kbps` when its network
+  changed while the plan played, as far as the platform can tell.
 - A client that cannot measure this omits it.
 - Apple will measure it on Aether's upstream reader once AetherEngine reports
   it, and omits it until then. AVPlayer reads from Aether on 127.0.0.1, so its
@@ -948,6 +952,8 @@ The remaining cases pin the rules added since:
 | `pause_ends_a_stall_uncounted`, `seek_ends_a_stall_uncounted`, `pause_and_reload_waits_never_count` | A pause or seek ends a stall without counting it, and waits caused by a pause or reload never count. |
 | `client_replan_keeps_a_picked_quality` | Off Auto, the client's own replans, a seek failure recovery included, carry the picked quality and no estimate. |
 | `ask_lower_keeps_the_estimate` | **Lower quality** on Auto keeps its estimate for the client's later replans, as an automatic lowering does. |
+| `lower_rung_below_a_capped_named_rung` | A cap that keeps the named rung's resolution encodes below that rung: **Lower quality** steps from the delivered bitrate. |
+| `lower_rung_from_the_named_rung` | A cap that changes the resolution names a lower rung than the one picked: **Lower quality** steps from the named rung. |
 
 ## Phases
 

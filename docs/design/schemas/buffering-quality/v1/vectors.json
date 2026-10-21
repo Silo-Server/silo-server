@@ -1,7 +1,7 @@
 {
   "version": 1,
   "spec": "docs/design/2026-10-17-buffering-quality.md",
-  "about": "Replay each case against the buffering-quality controller with a fake wall clock. Apply each event at its time t (ms on the case clock), advancing the clock between events so timers fire, then advance to until. expect is the complete ordered list of outputs; any other output fails the case. A case's mode defaults to defaults.mode. buffering_action, when present, is the plan_summary value each listed plan must report. Trigger evaluation occurs on playing and an in-progress long-stall timer, not on waiting or suppression expiry while playing. Suppressed history is retained; timeout and rearm clear it. Plan labels identify local adoptions, not unique server plan IDs; a server plan_id may repeat. Compute the step-down estimate as the exact integer floor of delivered_kbps * 7 / 10. A plan_adopted with controllerInitiated false answers a replan the controller did not send. client_replan has an operation (track_change, seek_reanchor, seek_failure_recovery, failure_recovery or output_change): the client sends a replan for its own reasons, and the output is a replan whose body holds that operation, the adopted plan's quality as quality_preference and, on Auto with a kept step-down estimate, bandwidth_estimate_kbps without bandwidth_estimate_source; the client's other request fields are outside these vectors. quality_changed is a quality change the controller did not send, such as the viewer's pick; it has no fields, and the new quality arrives with the next plan_adopted. new_attempt is a new playback attempt of the same title that the viewer did not choose; it has no fields, and it discards the kept estimate and nothing else: the answer, the once-per-title notice and the re-offer wait belong to the title. A plan_adopted without controllerInitiated that follows the controller's own replan answers it. A waiting with cause renderer began with more than RENDERER_WAIT_BUFFER_MS of media buffered past the playhead: the decoder or renderer is behind, so it is not a stall. A plain waiting during a renderer wait means the media buffered past the playhead fell to RENDERER_WAIT_BUFFER_MS or less, and the stall begins then.",
+  "about": "Replay each case against the buffering-quality controller with a fake wall clock. Apply each event at its time t (ms on the case clock), advancing the clock between events so timers fire, then advance to until. expect is the complete ordered list of outputs; any other output fails the case. A case's mode defaults to defaults.mode. buffering_action, when present, is the plan_summary value each listed plan must report. Trigger evaluation occurs on playing and an in-progress long-stall timer, not on waiting or suppression expiry while playing. Suppressed history is retained; timeout and rearm clear it. Plan labels identify local adoptions, not unique server plan IDs; a server plan_id may repeat. A plan's optional active_quality names the available_qualities entry it delivers; the lower rung is the highest entry below the lower of that entry's bitrate and delivered_kbps, or below delivered_kbps when it names none or no entry. Compute the step-down estimate as the exact integer floor of delivered_kbps * 7 / 10. A plan_adopted with controllerInitiated false answers a replan the controller did not send. client_replan has an operation (track_change, seek_reanchor, seek_failure_recovery, failure_recovery or output_change): the client sends a replan for its own reasons, and the output is a replan whose body holds that operation, the adopted plan's quality as quality_preference and, on Auto with a kept step-down estimate, bandwidth_estimate_kbps without bandwidth_estimate_source; the client's other request fields are outside these vectors. quality_changed is a quality change the controller did not send, such as the viewer's pick; it has no fields, and the new quality arrives with the next plan_adopted. new_attempt is a new playback attempt of the same title that the viewer did not choose; it has no fields, and it discards the kept estimate and nothing else: the answer, the once-per-title notice and the re-offer wait belong to the title. A plan_adopted without controllerInitiated that follows the controller's own replan answers it. A waiting with cause renderer began with more than RENDERER_WAIT_BUFFER_MS of media buffered past the playhead: the decoder or renderer is behind, so it is not a stall. A plain waiting during a renderer wait means the media buffered past the playhead fell to RENDERER_WAIT_BUFFER_MS or less, and the stall begins then.",
   "constants": {
     "STARTUP_GRACE_MS": 10000,
     "STALL_MIN_MS": 1000,
@@ -5785,6 +5785,154 @@
       "buffering_action": {
         "p1": "accepted"
       }
+    },
+    {
+      "name": "lower_rung_below_a_capped_named_rung",
+      "note": "A cap that keeps the named rung's resolution lowers the encode below that rung's bitrate: Lower quality steps from the delivered bitrate, which is lower.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 5000,
+            "quality": "1080p-high",
+            "active_quality": "1080p-high",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              },
+              {
+                "label": "720p-medium",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 2500
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 133000,
+          "type": "select_lower"
+        }
+      ],
+      "until": 140000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        },
+        {
+          "t": 133000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "720p-high"
+          }
+        }
+      ]
+    },
+    {
+      "name": "lower_rung_from_the_named_rung",
+      "note": "A cap that changes the resolution makes the plan name a lower rung than the one picked: Lower quality steps from the named rung, not the picked label.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 4000,
+            "quality": "1080p-high",
+            "active_quality": "720p-high",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              },
+              {
+                "label": "720p-medium",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 2500
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 133000,
+          "type": "select_lower"
+        }
+      ],
+      "until": 140000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        },
+        {
+          "t": 133000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "720p-medium"
+          }
+        }
+      ]
     }
   ],
   "connection_budget_cases": [
