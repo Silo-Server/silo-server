@@ -3291,6 +3291,9 @@ export interface AdminPlaybackHistoryItem {
   watched_seconds: number;
   duration_seconds: number | null;
   completed: boolean;
+  series_title: string;
+  season_number: number | null;
+  episode_number: number | null;
 }
 
 export interface AdminUserProfile {

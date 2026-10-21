@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -454,7 +453,7 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 			var size int64
 			var revision string
 			if data, err := playback.LoadExternalSubtitleRaw(ext.Path); err == nil {
-				timed, rev, timingErr := subtitles.ExternalDelivery(ctx, b.externalTimings, file.ID, subtitles.SubtitleFormat(strings.ToLower(ext.Format)), data)
+				timed, rev, timingErr := subtitles.ExternalDelivery(ctx, b.externalTimings, file.ID, subtitles.SubtitleFormat(strings.ToLower(ext.Format)), ext.Language, data)
 				if timingErr != nil {
 					slog.WarnContext(ctx, "download sidecar timing lookup failed", "file_id", file.ID, "error", timingErr)
 				} else {
@@ -500,7 +499,7 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 					HearingImpaired: sub.HearingImpaired,
 					External:        false,
 					FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("downloaded:%d", sub.ID)),
-					Revision:        strconv.FormatInt(sub.Revision, 10),
+					Revision:        subtitles.DeliveryRevision(&sub),
 				})
 			}
 		}

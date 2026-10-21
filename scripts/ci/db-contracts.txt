@@ -6,6 +6,9 @@
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
 ./internal/catalog TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB
+./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
+./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
+./internal/catalog TestCatalogManualCollectionCursorDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
@@ -24,7 +27,11 @@
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
 ./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
+./internal/scanner TestScanKeepsFileRowAcrossRenameDB
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
+
+# A watched special does not anchor Next Up for a series with regular seasons.
+./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
 
 # Series air-date sort keys advance when a known episode airs.
 ./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
@@ -58,6 +65,8 @@
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
+./internal/jellycompat TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas
+./internal/jellycompat TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
@@ -180,10 +189,12 @@
 ./migrations TestSubtitleTimingFileReplacePostgres
 ./internal/notifications TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
+./internal/notifications TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
+./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
 ./internal/notifications TestFanoutRetriesWhenRecipientScopeFails
 ./internal/notifications TestFanoutResolvesOnlyEligibleRecipients
@@ -232,6 +243,7 @@
 ./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage
+./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
 
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
@@ -412,6 +424,9 @@
 # AI metadata translations never replace provider or manual localized text.
 ./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
 
+# A provider refresh with no translation clears only a copy of the base item's text.
+./internal/catalog TestProviderUpsertClearsCopiedBaseTextOnly
+
 # An unmatched item an admin ignored stays off the unmatched and scan-retry
 # lists, the matcher queues and library refreshes across a rescan, the matcher
 # and item refreshes skip it, and a match clears the mark.
@@ -435,3 +450,19 @@
 # Explore all on a row the catalog cannot express as a query pages the row's
 # own fetch past its item limit, on Home and on its library page.
 ./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
+
+# Server collections show a restricted viewer only the members it can open, and
+# leave out a collection whose members it can open none of (#2828).
+./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
+
+# The household profile limit holds under concurrent creates (issue #2423).
+./internal/api/handlers TestCreateProfileLimitConcurrentDB
+
+# A scan cut short by shutdown goes back to the queue with its owed follow-up;
+# an admin cancel still ends it cancelled, and a late requeue never takes back
+# another worker's claim.
+./internal/scanqueue TestShutdownRequeuesRunningScanWithFollowUpDB
+./internal/scanqueue TestShutdownDuringLibraryLoadRequeuesScanDB
+./internal/scanqueue TestCancelByLibraryStillCancelsRunningScanDB
+./internal/scanqueue TestRequeueLeavesACancelledRunCancelledDB
+./internal/scanqueue TestRequeueLeavesALaterClaimRunningDB

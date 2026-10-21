@@ -25,7 +25,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+import type { AdminPlaybackHistoryItem } from "@/api/types";
 
+import { episodeCode } from "./admin-users/detail/format";
 import { formatDecisionLabel } from "./adminActivityPresentation";
 
 const ALL_USERS = "all";
@@ -120,7 +122,7 @@ export default function AdminPlaybackHistory() {
   const allRows = history.data ?? [];
   const total = allRows.length;
   const paginatedRows = allRows.slice(page * pageSize, (page + 1) * pageSize);
-  const activeMediaItemLabel = allRows[0]?.media_title || selectedMediaItemId;
+  const activeMediaItemLabel = allRows[0] ? historyRowLabel(allRows[0]) : selectedMediaItemId;
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
@@ -267,22 +269,29 @@ export default function AdminPlaybackHistory() {
                   </TableHeader>
                   <TableBody>
                     {paginatedRows.map((row) => {
-                      const title =
-                        row.media_title || row.media_item_id || `File #${row.media_file_id}`;
+                      const { title, detail } = historyRowTitle(row);
+                      const titleBlock = (
+                        <>
+                          {title}
+                          {detail ? (
+                            <div className="text-muted-foreground font-normal">{detail}</div>
+                          ) : null}
+                        </>
+                      );
                       const profileLabel = row.profile_name || row.profile_id;
                       return (
                         <TableRow key={row.session_id}>
                           <TableCell>
-                            <div className="space-y-1">
+                            <div className="max-w-[18rem] min-w-[12rem] space-y-1 break-words whitespace-normal">
                               {row.media_item_id ? (
                                 <Link
                                   to={`/item/${encodeURIComponent(row.media_item_id)}`}
                                   className="hover:text-primary block font-medium transition-colors hover:underline"
                                 >
-                                  {title}
+                                  {titleBlock}
                                 </Link>
                               ) : (
-                                <div className="font-medium">{title}</div>
+                                <div className="font-medium">{titleBlock}</div>
                               )}
                               <div className="text-muted-foreground text-xs">
                                 {row.media_type || "unknown"} · session {row.session_id.slice(0, 8)}
@@ -408,6 +417,30 @@ export default function AdminPlaybackHistory() {
       </Card>
     </div>
   );
+}
+
+/**
+ * An episode leads with its series title, with "S02E04 · Episode title" as the
+ * detail line. A row without a series title keeps its own title.
+ */
+function historyRowTitle(row: AdminPlaybackHistoryItem): { title: string; detail: string } {
+  if (row.series_title) {
+    // A pilot named after its show would otherwise repeat the series title.
+    const episodeTitle = row.media_title === row.series_title ? "" : row.media_title;
+    const detail = [episodeCode(row.season_number, row.episode_number), episodeTitle]
+      .filter(Boolean)
+      .join(" · ");
+    return { title: row.series_title, detail };
+  }
+  return {
+    title: row.media_title || row.media_item_id || `File #${row.media_file_id}`,
+    detail: "",
+  };
+}
+
+function historyRowLabel(row: AdminPlaybackHistoryItem): string {
+  const { title, detail } = historyRowTitle(row);
+  return detail ? `${title} · ${detail}` : title;
 }
 
 function InfoCard({ label, value }: { label: string; value: string }) {

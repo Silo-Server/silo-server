@@ -377,33 +377,40 @@ type CapabilityInfo struct {
 	// Builtin marks a builtin-host capability: the local tier, which always
 	// runs ahead of remote providers. See local_tier.go.
 	Builtin bool
+	// defaultEnabled is the capability's default_enabled flag, read by
+	// ListEnabledMetadataCapabilities; capabilities built elsewhere leave it
+	// unset.
+	defaultEnabled bool
 }
 
 // resolveEnabledProviders returns all enabled providers in installation ID order.
 // Used by callers that don't have a content-level context (e.g. person refresh).
+//
+// The capability listing already reads each capability's metadata, filters on
+// the installation's enabled flag and reports builtin installations, so the
+// providers are built from that one query. A failed listing is the only way
+// resolution fails, and it returns the error rather than a partial list.
 func resolveEnabledProviders(
 	ctx context.Context,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
-	checker InstallationEnabledChecker,
 ) ([]Provider, error) {
 	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
-	// Exclude capabilities that opt out of default-enable (a specialist
-	// plugin). Like the chain-less fallback, an installed-but-off provider
-	// must not activate itself through this content-level-agnostic path
-	// (person refresh); only an admin enabling its chain row does.
-	// Absent/unparseable metadata stays eligible (legacy).
 	eligible := make([]CapabilityInfo, 0, len(caps))
 	for _, c := range caps {
-		if !extractDefaultEnabled(lookupCapabilityMetadata(ctx, pool, c.PluginInstallationID, c.CapabilityID)) {
-			continue
+		// Exclude capabilities that opt out of default-enable (a specialist
+		// plugin). Like the chain-less fallback, an installed-but-off provider
+		// must not activate itself through this content-level-agnostic path
+		// (person refresh); only an admin enabling its chain row does.
+		// Absent/unparseable metadata stays eligible (legacy).
+		if c.defaultEnabled {
+			eligible = append(eligible, c)
 		}
-		eligible = append(eligible, c)
 	}
-	return buildProviders(ctx, eligible, resolver, pool, checker), nil
+	return providersFromCapabilities(ctx, eligible, resolver), nil
 }
 
 // resolveEnabledProvidersByPriority returns all enabled providers sorted by
@@ -788,6 +795,7 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 			return nil, fmt.Errorf("scanning capability: %w", err)
 		}
 		c.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
+		c.defaultEnabled = extractDefaultEnabled(metadataJSON)
 		c.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
 		c.RatingSources = extractRatingSources(metadataJSON)
 		if c.Builtin && len(c.RatingSources) == 0 {
@@ -860,8 +868,7 @@ func buildProviders(
 	pool *pgxpool.Pool,
 	checker InstallationEnabledChecker,
 ) []Provider {
-	local := make([]Provider, 0, 1)
-	providers := make([]Provider, 0, len(caps))
+	enabledCaps := make([]CapabilityInfo, 0, len(caps))
 	for _, c := range caps {
 		enabled, err := installationEnabled(ctx, checker, pool, c.PluginInstallationID)
 		if err != nil {
@@ -874,10 +881,22 @@ func buildProviders(
 				"installation_id", c.PluginInstallationID, "capability_id", c.CapabilityID)
 			continue
 		}
+		c.Builtin = installationIsBuiltin(ctx, checker, pool, c.PluginInstallationID)
+		enabledCaps = append(enabledCaps, c)
+	}
+	return providersFromCapabilities(ctx, enabledCaps, resolver)
+}
 
-		// A builtin installation's capabilities resolve to in-process providers
-		// from the builtin registry; everything else is a gRPC plugin provider.
-		if installationIsBuiltin(ctx, checker, pool, c.PluginInstallationID) {
+// providersFromCapabilities constructs a Provider for each capability, which
+// the caller has already checked is enabled, with builtin (local) providers
+// first. A builtin capability resolves to an in-process provider from the
+// builtin registry; everything else is a gRPC plugin provider. A capability
+// that cannot be constructed is logged and skipped.
+func providersFromCapabilities(ctx context.Context, caps []CapabilityInfo, resolver pluginMetadataResolver) []Provider {
+	local := make([]Provider, 0, 1)
+	providers := make([]Provider, 0, len(caps))
+	for _, c := range caps {
+		if c.Builtin {
 			provider, ok := builtinProvider(c.CapabilityID)
 			if !ok {
 				slog.WarnContext(ctx, "skipping builtin metadata provider: no registered constructor", "component", "metadata",

@@ -2013,7 +2013,12 @@ func (s *Scanner) markMissingExcludingProtected(
 		if existing.MissingSince != nil {
 			continue
 		}
-		if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
+		if err := s.fileRepo.MarkMissing(ctx, existing.ID, existing.FilePath, now); err != nil {
+			if errors.Is(err, ErrFileNotFound) {
+				// This scan relinked the row to the file's new path, or it
+				// was deleted meanwhile. Either way nothing is missing here.
+				continue
+			}
 			slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
 				"path", existing.FilePath,
 				"error", err,
@@ -2874,7 +2879,7 @@ func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *mod
 // is, and runs the reconciliation that follows a removed file.
 func (s *Scanner) retireMissingFile(ctx context.Context, folder *models.MediaFolder, file *models.MediaFile) error {
 	if file.MissingSince == nil {
-		if err := s.fileRepo.MarkMissing(ctx, file.ID, time.Now().UTC()); err != nil {
+		if err := s.fileRepo.MarkMissing(ctx, file.ID, file.FilePath, time.Now().UTC()); err != nil && !errors.Is(err, ErrFileNotFound) {
 			return fmt.Errorf("marking media file %s missing: %w", file.FilePath, err)
 		}
 	}
@@ -3266,6 +3271,10 @@ func (s *Scanner) processFile(
 	// Gather hints (OSHash only).
 	hints := s.gatherHints(filePath)
 	fileHash := hints.FileHash
+
+	if s.relinkMovedFile(ctx, folder, filePath, fileSize, fileModifiedAt, fileHash, assignment, groupAssignment, loadExternalSubs) {
+		return actionUpdated, []string{"moved"}, nil
+	}
 
 	// Try to get probe data.
 	probe, probeSource, probeRejected := s.probeFile(ctx, filePath)

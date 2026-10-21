@@ -80,6 +80,9 @@ export function adminPlaybackHistoryItemFromV2(
     watched_seconds: entry.watched_seconds,
     duration_seconds: entry.duration_seconds,
     completed: entry.completed,
+    series_title: entry.series_title,
+    season_number: entry.season_number,
+    episode_number: entry.episode_number,
   };
 }
 

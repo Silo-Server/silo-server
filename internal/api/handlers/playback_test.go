@@ -635,7 +635,7 @@ type recordingMissingMarker struct {
 	ids []int
 }
 
-func (m *recordingMissingMarker) MarkMissing(_ context.Context, id int, _ time.Time) error {
+func (m *recordingMissingMarker) MarkMissing(_ context.Context, id int, _ string, _ time.Time) error {
 	m.ids = append(m.ids, id)
 	return nil
 }

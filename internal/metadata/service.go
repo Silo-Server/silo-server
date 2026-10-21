@@ -207,6 +207,11 @@ type metadataSeasonRepo interface {
 	BulkUpsert(ctx context.Context, seasons []*models.Season) error
 }
 
+type metadataItemLocalizationRepo interface {
+	Get(ctx context.Context, contentID, language string) (*models.MediaItemLocalization, error)
+	Upsert(ctx context.Context, loc *models.MediaItemLocalization) error
+}
+
 type metadataSeasonLocalizationRepo interface {
 	Get(ctx context.Context, seasonContentID, language string) (*models.SeasonLocalization, error)
 	GetBySeasonIDs(ctx context.Context, seasonIDs []string, language string) (map[string]*models.SeasonLocalization, error)
@@ -442,7 +447,7 @@ type MetadataService struct {
 	seasonRepo              metadataSeasonRepo
 	libraryRepo             metadataLibraryRepo
 	folderRepo              metadataFolderRepo
-	itemLocalizationRepo    *catalog.MediaItemLocalizationRepository
+	itemLocalizationRepo    metadataItemLocalizationRepo
 	itemBackdropRepo        metadataItemBackdropRepo
 	itemAliasRepo           *catalog.ItemAliasRepository
 	seasonLocalizationRepo  metadataSeasonLocalizationRepo
@@ -542,7 +547,7 @@ func NewMetadataService(
 	staleIDRepo metadataStaleIDRepo,
 	rootClaimRepo *catalog.RootClaimRepository,
 ) *MetadataService {
-	var itemLocalizationRepo *catalog.MediaItemLocalizationRepository
+	var itemLocalizationRepo metadataItemLocalizationRepo
 	var itemBackdropRepo metadataItemBackdropRepo
 	var itemAliasRepo *catalog.ItemAliasRepository
 	var seasonLocalizationRepo metadataSeasonLocalizationRepo
@@ -2339,9 +2344,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		return &ProcessResult{Updated: false, Decision: matchDecision}, nil
 	}
 
+	ctx = withLocalMetadataUnreadable(ctx, localMetadataUnreadable)
 	if s.localArtworkUsable() {
 		ctx = withLocalArtworkSearched(ctx, localArtworkSearched)
-		ctx = withLocalMetadataUnreadable(ctx, localMetadataUnreadable)
 	}
 	result, err := s.mergeAndPersist(ctx, req, accumulator, allImages, allSeasons, allEpisodes, contentType)
 	if err != nil {
@@ -2839,6 +2844,19 @@ func (s *MetadataService) mergeAndPersist(
 	// Whether the providers listed any people, before the merge below folds
 	// the stored item into the accumulator.
 	providersListPeople := len(accumulator.People) > 0
+	// The merge below replaces accumulator with the stored item, whose text is
+	// in the canonical language; a non-canonical write keeps the text it
+	// fetched in req.Language for the localization row.
+	var fetchedText *MetadataResult
+	if !isCanonicalWrite {
+		fetchedText = &MetadataResult{
+			Title:           accumulator.Title,
+			SortTitle:       accumulator.SortTitle,
+			Overview:        accumulator.Overview,
+			Tagline:         accumulator.Tagline,
+			TitleIsFallback: accumulator.TitleIsFallback,
+		}
+	}
 
 	if existingItem != nil {
 		existingResult := itemToMetadataResult(existingItem)
@@ -3017,8 +3035,15 @@ func (s *MetadataService) mergeAndPersist(
 		if err != nil {
 			return nil, fmt.Errorf("loading item localization: %w", err)
 		}
+		// A pass that could not read the NFO keeps what the NFO set, even
+		// where it matches the canonical text.
+		copiesOf := accumulator
+		if localMetadataUnreadableLevels(ctx)&localArtworkItem != 0 {
+			copiesOf = nil
+		}
 		loc := buildItemLocalizationRecord(
-			existingLoc, contentID, req.Language, contentType, accumulator, images, mergeMode, req.Language,
+			existingLoc, contentID, req.Language, contentType, localizedItemText(fetchedText, accumulator, locked), copiesOf,
+			images, mergeMode, req.Language,
 			isFieldLocked(locked, FieldName),
 			keepStored,
 		)
@@ -5008,12 +5033,44 @@ func dropAIText(value *string, source string) {
 	}
 }
 
+// localizedItemText is the text a non-canonical write stores in the item's
+// localization row: the text fetched in the request language, except that a
+// locked field keeps the stored canonical value, as the base item does. A
+// provider's fallback title (the original title, for want of one in the
+// request language) is no translation, so the row keeps what it has or falls
+// back to the base title.
+func localizedItemText(fetched, canonical *MetadataResult, locked []MetadataField) *MetadataResult {
+	text := *fetched
+	if text.TitleIsFallback {
+		text.Title, text.SortTitle = "", ""
+	}
+	if isFieldLocked(locked, FieldName) {
+		text.Title, text.SortTitle = canonical.Title, canonical.SortTitle
+	}
+	if isFieldLocked(locked, FieldOverview) {
+		text.Overview, text.Tagline = canonical.Overview, canonical.Tagline
+	}
+	return &text
+}
+
+// clearCanonicalCopy empties a stored localized value identical to the
+// canonical one. Such a value is a copy of the base text, not a translation:
+// earlier releases wrote the canonical text into the localization row of
+// every non-canonical refresh. Cleared, it takes this refresh's text in either
+// merge mode, and with none it falls back to the identical base value.
+func clearCanonicalCopy(value *string, canonical string) {
+	if *value != "" && *value == canonical {
+		*value = ""
+	}
+}
+
 func buildItemLocalizationRecord(
 	existing *models.MediaItemLocalization,
 	contentID string,
 	language string,
 	contentType string,
 	accumulator *MetadataResult,
+	canonical *MetadataResult,
 	images []RemoteImage,
 	mergeMode MergeMode,
 	preferredLanguage string,
@@ -5028,9 +5085,20 @@ func buildItemLocalizationRecord(
 		*loc = *existing
 		loc.ContentID = contentID
 		loc.Language = language
-		// AI text is not dropped here, unlike seasons and episodes: a refresh
-		// in a non-canonical language passes the canonical-language result as
-		// accumulator, so a dropped field would fill with canonical text.
+		// AI text is not dropped here, unlike seasons and episodes: a locked
+		// field passes the canonical value as accumulator, so a dropped field
+		// would fill with canonical text. A nil canonical leaves stored copies
+		// alone.
+		if canonical != nil {
+			clearCanonicalCopy(&loc.Title, canonical.Title)
+			clearCanonicalCopy(&loc.SortTitle, canonical.SortTitle)
+			if loc.OverviewSource == models.LocalizationSourceProvider {
+				clearCanonicalCopy(&loc.Overview, canonical.Overview)
+			}
+			if loc.TaglineSource == models.LocalizationSourceProvider {
+				clearCanonicalCopy(&loc.Tagline, canonical.Tagline)
+			}
+		}
 	}
 
 	mergeScalar(&loc.Title, accumulator.Title, mergeMode)

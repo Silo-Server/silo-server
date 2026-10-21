@@ -567,6 +567,47 @@ func TestBuildProxyRedirectURLCarriesMPEGTSForRemoteCopyRecipe(t *testing.T) {
 	}
 }
 
+// The proxy remux adds aac_adtstoasc for a copied AAC track, and that filter
+// rejects every other codec, so the token names the copied track's codec.
+func TestBuildProxyRedirectURLCarriesCopiedRemuxAudioCodec(t *testing.T) {
+	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	for _, test := range []struct {
+		name           string
+		codec          string
+		transcodeAudio bool
+		want           string
+	}{
+		{name: "copied ac3", codec: "ac3", want: "ac3"},
+		{name: "copied aac", codec: "aac", want: "aac"},
+		{name: "ac3 encoded to aac", codec: "ac3", transcodeAudio: true, want: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := PlaybackMediaSource{
+				TranscodeAudio: test.transcodeAudio,
+				Version: catalog.FileVersion{
+					VideoTracks: []models.VideoTrack{{Codec: "h264"}},
+					AudioTracks: []models.AudioTrack{{Codec: test.codec, Channels: 2, Default: true}},
+				},
+			}
+			redirectURL, err := h.buildProxyRedirectURL(
+				"play-1", "upstream-1", string(playback.PlayRemux),
+				&models.MediaFile{FilePath: "/media/movie.ts"}, source, nil, time.Time{},
+				"", 0, &nodepool.Node{URL: "http://proxy-1"}, netaccess.Path{},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claims, err := streamtoken.Verify(proxyTokenFromRedirect(t, redirectURL, string(playback.PlayRemux)), h.JWTSecret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if claims.CopyAudioCodec != test.want {
+				t.Fatalf("remux proxy token copied audio codec = %q, want %q", claims.CopyAudioCodec, test.want)
+			}
+		})
+	}
+}
+
 // The keyframe playlist only applies to copy streams; an encoded stream's
 // recipe and live session must match whatever the flag says.
 func TestKeyframePlaylistOnlyComparedForCopyStreams(t *testing.T) {

@@ -395,7 +395,7 @@ func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, r *h
 		if err != nil {
 			return fmt.Errorf("reading external subtitle: %w", ErrAssetNotFound)
 		}
-		return s.serveExternalSubtitle(ctx, w, r, file.ID, ext.Format, data)
+		return s.serveExternalSubtitle(ctx, w, r, file.ID, ext.Format, ext.Language, data)
 	case subtitleRefEmbedded:
 		return s.serveEmbeddedSubtitle(w, r.WithContext(ctx), dl, value)
 	case "downloaded":
@@ -418,10 +418,10 @@ func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, r *h
 }
 
 // downloadedSubtitleETag names one delivered representation of a stored
-// subtitle. Its bytes are immutable, so the row revision, which changes with
-// the timing correction, identifies the timed bytes.
+// subtitle. Its bytes are immutable, so the delivery revision, which changes
+// with the timing correction, identifies the delivered bytes.
 func downloadedSubtitleETag(sub *subtitles.DownloadedSubtitle) string {
-	return fmt.Sprintf(`"downloaded-%d-%d"`, sub.ID, sub.Revision)
+	return fmt.Sprintf(`"downloaded-%d-%s"`, sub.ID, subtitles.DeliveryRevision(sub))
 }
 
 // serveDownloadedSubtitle writes a stored subtitle with its timing correction.
@@ -523,9 +523,9 @@ func parseSubtitleRef(ref string) (kind string, value int, err error) {
 // serveExternalSubtitle writes a sidecar with its timing correction. Like a
 // stored subtitle it is revalidated on every use: the correction, or the file
 // on disk, can change behind the same ref.
-func (s *Service) serveExternalSubtitle(ctx context.Context, w http.ResponseWriter, r *http.Request, fileID int, format string, data []byte) error {
+func (s *Service) serveExternalSubtitle(ctx context.Context, w http.ResponseWriter, r *http.Request, fileID int, format, language string, data []byte) error {
 	subFormat := subtitles.SubtitleFormat(strings.ToLower(format))
-	timed, revision, err := subtitles.ExternalDelivery(ctx, s.externalTimings, fileID, subFormat, data)
+	timed, revision, err := subtitles.ExternalDelivery(ctx, s.externalTimings, fileID, subFormat, language, data)
 	if err != nil {
 		return fmt.Errorf("applying external subtitle timing: %w", err)
 	}

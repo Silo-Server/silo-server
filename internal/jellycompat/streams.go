@@ -711,14 +711,18 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 			audioTrackIndex = resolvedAudioTrackIndex
 		}
 		sourceAudioChannels := 0
+		copyAudioCodec := ""
 		if source.TranscodeAudio {
 			sourceAudioChannels = compatSourceAudioChannels(*source)
+		} else {
+			copyAudioCodec = compatSourceAudioCodec(*source)
 		}
 		_ = playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, source.TranscodeAudio, audioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
 			ContentType:         playback.RemuxContentType(file.IsAudioOnly()),
 			AudioOnly:           file.IsAudioOnly(),
 			FFmpegPath:          h.FFmpegPath,
 			SourceAudioChannels: sourceAudioChannels,
+			CopyAudioCodec:      copyAudioCodec,
 		})
 	default:
 		_ = playback.ServeDirectPlay(w, r, file.FilePath)
@@ -1547,7 +1551,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				h.deliverSubtitle(w, r, requestedFormat, data, segmentPTSOffset)
 				return
 			}
-			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.FFmpegPath)
+			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub, h.FFmpegPath)
 			if subErr != nil {
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 				return
@@ -2722,8 +2726,13 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			// otherwise a concurrent method switch made this caller's
 			// negotiated stream obsolete — surface the conflict rather than
 			// continuing on a session with mismatched transcode bookkeeping.
+			// A winner attached on another replica has no native session here,
+			// and rebuilding one before its recipe is committed would start a
+			// second transcode under its id, so the client retries instead.
 			if winner, ok := h.playbackStore.Get(playSessionID); ok && winner.UpstreamPlayMethod == method {
-				return winner, nil
+				if _, err := h.sessionMgr.GetSession(winner.UpstreamSessionID); err == nil {
+					return winner, nil
+				}
 			}
 			return nil, errUpstreamReplaced
 		}
