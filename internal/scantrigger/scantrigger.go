@@ -175,7 +175,7 @@ func (r *Resolver) ResolveMissingSubtree(ctx context.Context, subtreePath, trigg
 	if filepath.Clean(cleanPath) == filepath.Clean(matchedRoot) {
 		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Subtree path must be below a library root", Reason: ReasonSubtreeOutsideLibrary}
 	}
-	return &Target{Folder: folder, Mode: ModeSubtree, Path: cleanPath, Trigger: normalizeTrigger(trigger)}, nil
+	return &Target{Folder: folder, Mode: ModeSubtree, Path: subtitleFolderScope(cleanPath, matchedRoot, folder.Type), Trigger: normalizeTrigger(trigger)}, nil
 }
 
 // matchEnabledFolder lists the configured libraries and returns the enabled

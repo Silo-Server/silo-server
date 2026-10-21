@@ -379,6 +379,14 @@ func TestResolverRoutesLocalSidecarsToTheirDirectory(t *testing.T) {
 	if err != nil || target.Mode != ModeSubtree || target.Path != movie {
 		t.Fatalf("vanished Subs folder: target=%+v err=%v", target, err)
 	}
+	// The library monitor and autoscan subtree changes resolve through
+	// ResolveMissingSubtree, which must widen the same way.
+	for _, path := range []string{subs, filepath.Join(subs, "Film (2020)")} {
+		target, err = resolver.ResolveMissingSubtree(t.Context(), path, "realtime_monitor")
+		if err != nil || target.Mode != ModeSubtree || target.Path != movie {
+			t.Fatalf("missing subtree %s: target=%+v err=%v", path, target, err)
+		}
+	}
 }
 
 func TestResolverDoesNotRouteRootOrNonVideoSidecars(t *testing.T) {
