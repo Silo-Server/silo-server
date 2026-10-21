@@ -398,6 +398,10 @@
 ./migrations TestLibraryDeleteRacingAccessWritePostgres
 ./migrations TestPruneDeletedLibraryAccessMigrationRepairsStaleIDsPostgres
 
+# Deleting a library keeps the admin collections that cover other libraries,
+# moving one off the deleted library without a slug clash.
+./internal/catalog TestFolderDeleteKeepsMultiLibraryCollectionsDB
+
 # AI metadata translations never replace provider or manual localized text.
 ./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
 

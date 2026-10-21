@@ -753,8 +753,18 @@ func (r *FolderRepository) DeleteWithStats(
 	// Phase 4: delete the now-lightweight folder row. Tolerate 0 rows so a
 	// resumed run that already removed it still succeeds.
 	if err := retryOnDeadlock(ctx, func() error {
-		_, e := r.pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, id)
-		return e
+		tx, e := r.pool.Begin(ctx)
+		if e != nil {
+			return e
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if e := moveCollectionsOffFolder(ctx, tx, id); e != nil {
+			return e
+		}
+		if _, e := tx.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, id); e != nil {
+			return e
+		}
+		return tx.Commit(ctx)
 	}); err != nil {
 		return nil, fmt.Errorf("deleting folder: %w", err)
 	}
@@ -763,6 +773,107 @@ func (r *FolderRepository) DeleteWithStats(
 		progress(orphanTotal, orphanTotal, "Library deletion completed")
 	}
 	return stats, nil
+}
+
+// moveCollectionsOffFolder keeps admin collections that cover other libraries
+// when folderID is deleted. library_collections.library_id still holds the
+// first library an admin picked and cascades with it, so a collection whose
+// library_id is folderID moves to another library it covers. Collections that
+// cover only folderID are left for the cascade.
+func moveCollectionsOffFolder(ctx context.Context, tx pgx.Tx, folderID int) error {
+	// Collection writers lock collections in ID order
+	// (lockLibraryCollectionParents) before their foreign keys lock the folder,
+	// so take the collections the cascade touches first, then hold the folder so
+	// no writer adds a reference to it, then take any collection that gained one
+	// in between.
+	lockCollections := func() error {
+		_, err := tx.Exec(ctx, `
+			SELECT c.id FROM library_collections c
+			WHERE c.library_id = $1
+			   OR EXISTS (SELECT 1 FROM library_collection_libraries l WHERE l.collection_id = c.id AND l.library_id = $1)
+			ORDER BY c.id
+			FOR UPDATE OF c`, folderID)
+		return err
+	}
+	if err := lockCollections(); err != nil {
+		return fmt.Errorf("locking folder collections: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_folders WHERE id = $1 FOR UPDATE`, folderID); err != nil {
+		return fmt.Errorf("locking folder: %w", err)
+	}
+	if err := lockCollections(); err != nil {
+		return fmt.Errorf("locking folder collections: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT c.id, c.slug, array_agg(l.library_id ORDER BY l.library_id)
+		FROM library_collections c
+		JOIN library_collection_libraries l ON l.collection_id = c.id AND l.library_id <> $1
+		WHERE c.library_id = $1
+		GROUP BY c.id
+		ORDER BY c.id`, folderID)
+	if err != nil {
+		return fmt.Errorf("listing collections to move: %w", err)
+	}
+	type sharedCollection struct {
+		id, slug  string
+		libraries []int32
+	}
+	shared, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (sharedCollection, error) {
+		var c sharedCollection
+		return c, row.Scan(&c.id, &c.slug, &c.libraries)
+	})
+	if err != nil {
+		return fmt.Errorf("listing collections to move: %w", err)
+	}
+	for _, c := range shared {
+		if err := moveCollectionToLibrary(ctx, tx, c.id, c.slug, c.libraries); err != nil {
+			return fmt.Errorf("moving collection %s: %w", c.id, err)
+		}
+	}
+	return nil
+}
+
+// moveCollectionToLibrary points a collection at the lowest of libraries where
+// its slug is free, keeping links that name the slug working. When every
+// library already has the slug, it takes the lowest library and the first free
+// "<slug>-<n>". A writer that claims the slug first is retried.
+func moveCollectionToLibrary(ctx context.Context, tx pgx.Tx, collectionID, slug string, libraries []int32) error {
+	for range 5 {
+		var libraryID int32
+		target := slug
+		err := tx.QueryRow(ctx, `
+			SELECT lib FROM unnest($2::int[]) lib
+			WHERE NOT EXISTS (SELECT 1 FROM library_collections WHERE library_id = lib AND slug = $1)
+			ORDER BY lib LIMIT 1`, slug, libraries).Scan(&libraryID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			libraryID = libraries[0]
+			err = tx.QueryRow(ctx, `
+				SELECT candidate FROM (
+					SELECT n, $1 || '-' || n AS candidate FROM generate_series(2, 10000) n
+				) s
+				WHERE NOT EXISTS (SELECT 1 FROM library_collections WHERE library_id = $2 AND slug = s.candidate)
+				ORDER BY n LIMIT 1`, slug, libraryID).Scan(&target)
+		}
+		if err != nil {
+			return fmt.Errorf("choosing library and slug: %w", err)
+		}
+
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = sp.Exec(ctx, `UPDATE library_collections SET library_id = $2, slug = $3 WHERE id = $1`, collectionID, libraryID, target)
+		if err == nil {
+			return sp.Commit(ctx)
+		}
+		_ = sp.Rollback(ctx)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.ConstraintName != "library_collections_library_slug_unique" {
+			return err
+		}
+	}
+	return errors.New("slug kept being claimed by other writers")
 }
 
 // collectOrphanBatch returns up to limit content IDs whose only library
