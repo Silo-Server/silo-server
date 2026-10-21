@@ -34,7 +34,7 @@ const (
 	// remoteOverhead covers the transfer and the node's own start on top of
 	// a request's attempt timeouts.
 	remoteOverhead = 30 * time.Second
-	// Generation caps chunks at 64 million pixels, including the initial
+	// Generation caps chunks at 32 million pixels, including the initial
 	// geometry sample. This also fits the base64 form of uncompressible JPEGs.
 	maxRemoteResultBytes = 512 << 20
 )
@@ -130,7 +130,9 @@ func trickplayNodeEligible(node *nodepool.Node) bool {
 }
 
 // makesTrickplay reports whether a node's capability report advertises the
-// trickplay endpoint.
+// trickplay endpoint at the version this server's requests need: one that
+// reads the tone-map source signal, which an older node would ignore and
+// convert with the best-effort chains.
 func makesTrickplay(report []byte) bool {
 	var capabilities struct {
 		TransportFeatures []string `json:"transport_features"`
@@ -138,7 +140,7 @@ func makesTrickplay(report []byte) bool {
 	if len(report) == 0 || json.Unmarshal(report, &capabilities) != nil {
 		return false
 	}
-	return slices.Contains(capabilities.TransportFeatures, playback.TransportFeatureTrickplayExtractV1)
+	return slices.Contains(capabilities.TransportFeatures, playback.TransportFeatureTrickplayExtractV2)
 }
 
 // remote runs req on node. The node decides whether its hardware can decode,

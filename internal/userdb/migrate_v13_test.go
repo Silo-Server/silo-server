@@ -1,7 +1,6 @@
 package userdb
 
 import (
-	"database/sql"
 	"testing"
 	"time"
 )
@@ -23,14 +22,7 @@ END;`
 // batch mark-played advances event_at, so a queued offline event older than
 // the mark can no longer win LWW (the v1 trigger left event_at frozen).
 func TestMigrateToV13ReplacesStampTriggers(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	// Simulate an existing v12 database still carrying the v1 trigger body.
 	if _, err := db.Exec(`DROP TRIGGER IF EXISTS watch_progress_stamp_upd`); err != nil {

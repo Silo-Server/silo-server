@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -23,15 +24,15 @@ const (
 )
 
 func ownerAccount() models.User {
-	return models.User{ID: testOwnerID, Username: "owner", Email: "owner@example.test", Role: models.RoleAdmin, Enabled: true, IsOwner: true, LocalPasswordLoginEnabled: true, MaxProfiles: 5}
+	return models.User{ID: testOwnerID, Username: "owner", Email: "owner@example.test", Role: models.RoleAdmin, Enabled: true, IsOwner: true, LocalPasswordLoginEnabled: true, MaxProfiles: new(5)}
 }
 
 func adminAccount() models.User {
-	return models.User{ID: testAdminID, Username: "admin", Email: "admin@example.test", Role: models.RoleAdmin, Enabled: true, LocalPasswordLoginEnabled: true, MaxProfiles: 5}
+	return models.User{ID: testAdminID, Username: "admin", Email: "admin@example.test", Role: models.RoleAdmin, Enabled: true, LocalPasswordLoginEnabled: true, MaxProfiles: new(5)}
 }
 
 func userAccount() models.User {
-	return models.User{ID: testAdminID, Username: "user", Email: "user@example.test", Role: models.RoleUser, Enabled: true, LocalPasswordLoginEnabled: true, MaxProfiles: 5}
+	return models.User{ID: testAdminID, Username: "user", Email: "user@example.test", Role: models.RoleUser, Enabled: true, LocalPasswordLoginEnabled: true, MaxProfiles: new(5)}
 }
 
 // providerAdminAccount is an admin that signs in only through a provider:
@@ -177,6 +178,9 @@ func TestCreateAdminNeedsOwner(t *testing.T) {
 }
 
 func TestV1AdminUserHandlersProtectAdmins(t *testing.T) {
+	// An admin that inherits the profile limit; the v1 body reports it as 5.
+	inheritingAdmin := adminAccount()
+	inheritingAdmin.MaxProfiles = nil
 	for _, tc := range []struct {
 		name, method, body string
 		target             models.User
@@ -194,6 +198,8 @@ func TestV1AdminUserHandlersProtectAdmins(t *testing.T) {
 		{"admin saves self with its role unchanged", http.MethodPut, `{"role":"admin","email":"new@example.test"}`, adminAccount(), testAdminID, http.StatusOK},
 		{"admin changes own policy", http.MethodPut, `{"download_transcode_allowed":false}`, adminAccount(), testAdminID, http.StatusForbidden},
 		{"admin saves self with its policy unchanged", http.MethodPut, `{"email":"new@example.test","max_streams":null}`, adminAccount(), testAdminID, http.StatusOK},
+		{"admin saves self re-sending the profile limit it read", http.MethodPut, `{"email":"new@example.test","max_profiles":5}`, inheritingAdmin, testAdminID, http.StatusOK},
+		{"admin changes own inherited profile limit", http.MethodPut, `{"max_profiles":3}`, inheritingAdmin, testAdminID, http.StatusForbidden},
 		{"owner limits admin", http.MethodPut, `{"max_streams":2}`, adminAccount(), scopedKeyTestOwnerID, http.StatusOK},
 		{"provider-only admin sets own password", http.MethodPut, `{"password":"long-enough-password"}`, providerAdminAccount(), testAdminID, http.StatusForbidden},
 		{"owner sets a provider-only admin's password", http.MethodPut, `{"password":"long-enough-password"}`, providerAdminAccount(), scopedKeyTestOwnerID, http.StatusOK},
@@ -414,5 +420,109 @@ func TestAdminAPIKeysProtectOwner(t *testing.T) {
 		if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != codeOwnerProtected || store.created || store.changed {
 			t.Errorf("%s: status = %d body %s, store touched %v", tc.name, rec.Code, rec.Body.String(), store.created || store.changed)
 		}
+	}
+}
+
+// A v1 client that sends back the profile limit it read leaves an inheriting
+// account inheriting; a different limit becomes its override.
+func TestV1UpdateUserKeepsInheritedProfileLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		body    string
+		wantSet bool
+	}{
+		{"re-sent limit", `{"email":"new@example.test","max_profiles":5}`, false},
+		{"new limit", `{"max_profiles":3}`, true},
+	} {
+		target := userAccount()
+		target.MaxProfiles = nil
+		repo := &scopedKeyUserRepo{user: &target}
+		h := &AdminHandler{userRepo: repo}
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/9", strings.NewReader(tc.body))
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "9")
+		req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), &auth.Claims{UserID: scopedKeyTestOwnerID, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
+		rec := httptest.NewRecorder()
+		h.HandleUpdateUser(rec, req)
+		if rec.Code != http.StatusOK || repo.updated == nil {
+			t.Fatalf("%s: status = %d (body %s), updated %v", tc.name, rec.Code, rec.Body.String(), repo.updated != nil)
+		}
+		if repo.updated.MaxProfiles.Set != tc.wantSet {
+			t.Errorf("%s: max_profiles set = %v, want %v", tc.name, repo.updated.MaxProfiles.Set, tc.wantSet)
+		}
+	}
+}
+
+func v1UpdateUser(t *testing.T, target models.User, body string) *scopedKeyUserRepo {
+	t.Helper()
+	repo := &scopedKeyUserRepo{user: &target}
+	h := &AdminHandler{userRepo: repo}
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/9", strings.NewReader(body))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "9")
+	req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), &auth.Claims{UserID: scopedKeyTestOwnerID, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateUser(rec, req)
+	if rec.Code != http.StatusOK || repo.updated == nil {
+		t.Fatalf("status = %d (body %s), updated %v", rec.Code, rec.Body.String(), repo.updated != nil)
+	}
+	return repo
+}
+
+// The limit an account reports belongs to the role and group it had when the
+// client read it. Sending that limit while the same request moves the
+// account is an explicit override for the new context, not an echo.
+func TestV1UpdateUserProfileLimitFollowsRoleChange(t *testing.T) {
+	target := userAccount()
+	target.Role = models.RoleAdmin
+	target.MaxProfiles = nil
+	repo := v1UpdateUser(t, target, `{"role":"user","max_profiles":5}`)
+	if !repo.updated.MaxProfiles.Set || repo.updated.MaxProfiles.Value == nil || *repo.updated.MaxProfiles.Value != 5 {
+		t.Errorf("max_profiles = %+v, want an override of 5", repo.updated.MaxProfiles)
+	}
+}
+
+type noRowsRow struct{}
+
+func (noRowsRow) Scan(...any) error { return pgx.ErrNoRows }
+
+// profileLimitTx answers the in-transaction group lookup with no group, so a
+// test can prove the limit resolves through the mutation transaction rather
+// than a second pool connection.
+type profileLimitTx struct {
+	pgx.Tx
+	queried bool
+}
+
+func (tx *profileLimitTx) QueryRow(context.Context, string, ...any) pgx.Row {
+	tx.queried = true
+	return noRowsRow{}
+}
+
+func TestKeepInheritedProfileLimitReadsGroupInTransaction(t *testing.T) {
+	target := userAccount()
+	target.MaxProfiles = nil
+	input := models.UpdateUserInput{MaxProfiles: models.Optional[int]{Set: true, Value: new(5)}}
+	tx := &profileLimitTx{}
+	h := &AdminHandler{}
+	if err := h.keepInheritedProfileLimit(t.Context(), tx, &target, &input); err != nil {
+		t.Fatal(err)
+	}
+	if !tx.queried {
+		t.Error("group was not resolved through the transaction")
+	}
+	if input.MaxProfiles.Set {
+		t.Errorf("max_profiles = %+v, want the re-sent limit dropped", input.MaxProfiles)
+	}
+}
+
+// A v1 client clears an override back to inherit with an explicit null, like
+// every other policy field in the same body.
+func TestV1UpdateUserClearsProfileLimit(t *testing.T) {
+	target := userAccount()
+	target.MaxProfiles = new(3)
+	repo := v1UpdateUser(t, target, `{"max_profiles":null}`)
+	if !repo.updated.MaxProfiles.Set || repo.updated.MaxProfiles.Value != nil {
+		t.Errorf("max_profiles = %+v, want set to inherit (null)", repo.updated.MaxProfiles)
 	}
 }

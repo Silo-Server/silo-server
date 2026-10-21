@@ -126,7 +126,7 @@ describe("SeasonEpisodeGrid", () => {
     // Only episode 3 has no readable version; episode 4 still plays its
     // second file.
     expect(screen.getAllByText("Damaged file")).toHaveLength(1);
-    const card = screen.getByText("Episode title 3").closest(".media-card");
+    const card = screen.getByText("S01E03 · Episode title 3").closest(".media-card");
     expect(card).not.toBeNull();
     expect(card).toHaveTextContent("Damaged file");
   });

@@ -109,7 +109,6 @@ function serverRoutes() {
     "GET /api/v2/auth/signup": { body: { enabled: false } },
     "GET /api/v2/capabilities/password-reset": { body: { revision: "r", state: "disabled" } },
     "GET /api/v2/theme/branding": { body: {} },
-    "GET /api/v2/theme/admin-css": { body: {} },
     "GET /api/v2/account/me": { body: getCurrentUserOk },
     "GET /api/v2/profiles": { body: listProfilesOk },
     "GET /api/v2/settings/contract/capabilities": { body: getSettingsContractCapabilitiesOk },
@@ -132,6 +131,23 @@ async function releaseUntilQuiet(server: FakeServer) {
     server.releaseWave();
   }
   throw new Error(`boot did not settle:\n${describeRequests(server.requests)}`);
+}
+
+function setTabVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+/** Hides the tab for `ms`, shows it again, and answers whatever that sent. */
+async function switchTabAway(server: FakeServer, ms: number) {
+  await act(async () => {
+    setTabVisibility("hidden");
+  });
+  await advanceClock(ms);
+  await act(async () => {
+    setTabVisibility("visible");
+  });
+  await releaseUntilQuiet(server);
 }
 
 async function boot(server: FakeServer) {
@@ -180,6 +196,7 @@ describe("app boot request budget", () => {
   });
 
   afterEach(() => {
+    Reflect.deleteProperty(document, "visibilityState");
     queryClient.clear();
     setAccessToken(null);
     vi.unstubAllGlobals();
@@ -194,12 +211,12 @@ describe("app boot request budget", () => {
     const log = describeRequests(server.requests);
     expect(screen.getByTestId("home"), log).toHaveTextContent("2 sections");
     expect(measureBoot(server.requests), log).toEqual({
-      requestsBeforeHomeLayout: 5,
+      requestsBeforeHomeLayout: 4,
       wavesBeforeHomeLayout: 1,
       unauthorized: 0,
       refreshes: 1,
       duplicateGets: 0,
-      total: 14,
+      total: 13,
     });
     // Home starts loading as soon as the token is back, beside the account read.
     const waveOf = (operation: string) =>
@@ -241,7 +258,7 @@ describe("app boot request budget", () => {
       duplicateGets: 0,
       // Includes the login page's public signup-status and password-reset
       // capability reads.
-      total: 7,
+      total: 6,
     });
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
   });
@@ -416,6 +433,33 @@ describe("app boot request budget", () => {
     ).toHaveLength(2);
   });
 
+  it("sends nothing after a short tab switch and catches up once after a long one", async () => {
+    signInReturningOwner();
+    await boot(server);
+    const bootRequests = server.requests.length;
+    // The bandwidth probe runs on its own timer whatever the tab does.
+    const sinceBoot = () =>
+      server.requests
+        .slice(bootRequests)
+        .filter((request) => request.operation !== "GET /api/v2/playback/bandwidth-probe");
+
+    // A quick switch keeps the events socket open, so the cache is still current.
+    await switchTabAway(server, 5_000);
+    expect(describeRequests(sinceBoot())).toBe("");
+
+    // A long absence closes the socket; the return re-reads the screen once.
+    await switchTabAway(server, 2 * 60_000);
+    const afterAbsence = sinceBoot();
+    const log = describeRequests(afterAbsence);
+    expect(measureBoot(afterAbsence), log).toMatchObject({ unauthorized: 0, duplicateGets: 0 });
+    for (const operation of ["GET /api/v2/home/layout", "POST /api/v2/events/ws-ticket"]) {
+      expect(
+        afterAbsence.filter((request) => request.operation === operation),
+        log,
+      ).toHaveLength(1);
+    }
+  });
+
   it("sends no account reads from the login screen", async () => {
     initialEntry = "/login";
 
@@ -430,7 +474,7 @@ describe("app boot request budget", () => {
       duplicateGets: 0,
       // Includes the login page's public signup-status and password-reset
       // capability reads.
-      total: 6,
+      total: 5,
     });
   });
 });

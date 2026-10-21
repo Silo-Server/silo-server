@@ -241,11 +241,23 @@ type PlexItem struct {
 	Guid                 PlexGuids `json:"Guid"`
 }
 
+func (item PlexItem) retainedSize() int64 {
+	return sizeOf[PlexItem]() + stringBytes(item.RatingKey, item.Key, item.Type, item.Title, item.GrandparentTitle, item.GrandparentRatingKey) + item.Guid.retainedSize()
+}
+
 type PlexGuid struct {
 	ID string `json:"id"`
 }
 
 type PlexGuids []PlexGuid
+
+func (g PlexGuids) retainedSize() int64 {
+	size := int64(len(g)) * sizeOf[PlexGuid]()
+	for _, guid := range g {
+		size += int64(len(guid.ID))
+	}
+	return size
+}
 
 func (g *PlexGuids) UnmarshalJSON(data []byte) error {
 	if string(data) == "null" {
@@ -343,6 +355,9 @@ func (c *PlexClient) fetchSectionItems(ctx context.Context, baseURL, token, sect
 		if err == nil {
 			err = budget.addItems(len(container.items()))
 		}
+		if err == nil {
+			err = retainItems(ctx, container.items())
+		}
 		if err != nil {
 			return nil, fmt.Errorf("fetching Plex section items (section %s, type %d, offset %d): %w", sectionKey, mediaType, offset, err)
 		}
@@ -391,6 +406,9 @@ func (c *PlexClient) FetchWatchlist(ctx context.Context, accountToken string) ([
 		err = c.doJSONWithBudget(req, &container, &budget)
 		if err == nil {
 			err = budget.addItems(len(container.items()))
+		}
+		if err == nil {
+			err = retainItems(ctx, container.items())
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("fetching Plex watchlist (offset %d): %w", offset, err)
@@ -479,6 +497,9 @@ func (c *PlexClient) fetchWatchlistItemMetadata(ctx context.Context, base, accou
 	if len(items) == 0 {
 		return nil, nil
 	}
+	if err := retainItems(ctx, items[:1]); err != nil {
+		return nil, err
+	}
 	return &items[0], nil
 }
 
@@ -514,7 +535,11 @@ func (c *PlexClient) FetchMetadataBatch(ctx context.Context, baseURL, token stri
 	if err := c.doJSON(req, &container); err != nil {
 		return nil, fmt.Errorf("fetching Plex metadata for %s: %w", strings.Join(ratingKeys, ","), err)
 	}
-	return container.items(), nil
+	items := keepRequested(container.items(), ratingKeys, func(item PlexItem) string { return item.RatingKey })
+	if err := retainItems(ctx, items); err != nil {
+		return nil, fmt.Errorf("fetching Plex metadata for %s: %w", strings.Join(ratingKeys, ","), err)
+	}
+	return items, nil
 }
 
 // Authenticate exchanges Plex account credentials for an auth token via plex.tv.
@@ -571,7 +596,7 @@ func (c *PlexClient) doJSONWithBudget(req *http.Request, out any, budget *listin
 		discardUpstreamBody(resp.Body)
 		return nil
 	}
-	return decodeUpstreamJSON(resp.Body, out, budget)
+	return decodeUpstreamJSON(req.Context(), resp.Body, out, budget)
 }
 
 type plexHTTPError struct {
@@ -650,6 +675,10 @@ type PlexHistoryItem struct {
 	Guid                 PlexGuids `json:"Guid"`
 }
 
+func (item PlexHistoryItem) retainedSize() int64 {
+	return sizeOf[PlexHistoryItem]() + stringBytes(item.RatingKey, item.Key, item.Type, item.Title, item.GrandparentTitle, item.GrandparentKey, item.GrandparentRatingKey) + item.Guid.retainedSize()
+}
+
 // FetchUserHistory returns the complete watch history for a specific account on the
 // Plex Media Server. Requires an admin token.
 func (c *PlexClient) FetchUserHistory(ctx context.Context, baseURL, token, accountID string) ([]PlexHistoryItem, error) {
@@ -682,6 +711,9 @@ func (c *PlexClient) FetchUserHistory(ctx context.Context, baseURL, token, accou
 		err = c.doJSONWithBudget(req, &container, &budget)
 		if err == nil {
 			err = budget.addItems(len(container.MediaContainer.Metadata))
+		}
+		if err == nil {
+			err = retainItems(ctx, container.MediaContainer.Metadata)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("fetching Plex user history (account %s, offset %d): %w", accountID, offset, err)

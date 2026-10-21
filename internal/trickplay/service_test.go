@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 type fakeSettings map[string]string
@@ -155,12 +156,13 @@ func TestGenerateChunksUploadsAndPublishes(t *testing.T) {
 	store := &fakeStore{}
 	extractor := &fakeExtractor{}
 	s := testService(q, store, extractor, fakeSettings{IntervalSetting: "10"})
-	// 5 h at 10 s: one geometry sheet, then batches of at most 16 sheets.
+	// 5 h at 10 s: one geometry sheet, then batches of 11 sheets, the most
+	// that fit maxChunkPixels.
 	job := testJob(42, 18000)
 	job.HDR = true
 	s.process(t.Context(), job)
 
-	if len(extractor.requests) != 3 || len(extractor.requests[0].Samples.Seconds) != 80 || len(extractor.requests[1].Samples.Seconds) != 1280 || len(extractor.requests[2].Samples.Seconds) != 440 {
+	if len(extractor.requests) != 3 || len(extractor.requests[0].Samples.Seconds) != 80 || len(extractor.requests[1].Samples.Seconds) != 880 || len(extractor.requests[2].Samples.Seconds) != 840 {
 		t.Fatalf("requests of %d and %d samples", len(extractor.requests[0].Samples.Seconds), len(extractor.requests[len(extractor.requests)-1].Samples.Seconds))
 	}
 	first := extractor.requests[0]
@@ -357,21 +359,6 @@ func TestAttemptPlan(t *testing.T) {
 	}
 }
 
-func TestDisplayAspect(t *testing.T) {
-	for _, tt := range []struct {
-		track models.VideoTrack
-		want  float64
-	}{
-		{models.VideoTrack{Width: 720, Height: 480, AspectRatio: "16:9"}, 16.0 / 9},
-		{models.VideoTrack{Width: 1920, Height: 800, AspectRatio: "0:1"}, 2.4},
-		{models.VideoTrack{}, 0},
-	} {
-		if got := displayAspect(tt.track); got != tt.want {
-			t.Errorf("%+v: %v, want %v", tt.track, got, tt.want)
-		}
-	}
-}
-
 type unreadableSettings struct{}
 
 func (unreadableSettings) Get(context.Context, string) (string, error) {
@@ -542,5 +529,32 @@ func TestPublishAtOldRecipeRequestsReconcile(t *testing.T) {
 	case <-s.reconcile:
 		t.Fatal("a current recipe requested a reconcile")
 	default:
+	}
+}
+
+// TestSheetsToneMapNamesTheSourceSignal hands sheets the base signal playback
+// classifies a file's catalog facts as, and keeps the best-effort chains for
+// facts it cannot classify.
+func TestSheetsToneMapNamesTheSourceSignal(t *testing.T) {
+	profile5 := models.VideoTrack{DVProfile: 5, DVConfigPresent: true, DVBLCompatIDPresent: true, DVBLPresent: true, DVRPUPresent: true, DolbyVision: "Dolby Vision"}
+	tests := map[string]struct {
+		file *models.MediaFile
+		want *mediasample.ToneMap
+	}{
+		"SDR": {&models.MediaFile{VideoTracks: []models.VideoTrack{{ColorTransfer: "bt709"}}}, nil},
+		"HLG": {&models.MediaFile{HDR: true, VideoTracks: []models.VideoTrack{{ColorTransfer: "arib-std-b67", ColorPrimaries: "bt2020", ColorSpace: "bt2020nc", ColorRange: "tv"}}},
+			&mediasample.ToneMap{AllowSoftware: true, Source: tonemap.SourceHLG}},
+		"Dolby Vision profile 5": {&models.MediaFile{HDR: true, VideoTracks: []models.VideoTrack{profile5}},
+			&mediasample.ToneMap{AllowSoftware: true, Source: tonemap.SourceDolbyVision}},
+		"legacy Dolby Vision row": {&models.MediaFile{VideoTracks: []models.VideoTrack{{DolbyVision: "Dolby Vision", DVProfile: 8}}},
+			&mediasample.ToneMap{AllowSoftware: true}},
+		"legacy Dolby Vision profile 5 row": {&models.MediaFile{VideoTracks: []models.VideoTrack{{DolbyVision: "Dolby Vision", DVProfile: 5}}},
+			&mediasample.ToneMap{AllowSoftware: true, Source: tonemap.SourceDolbyVision}},
+	}
+	for name, tt := range tests {
+		got := sheetsToneMap(tt.file)
+		if (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
+			t.Errorf("%s: tone map %+v, want %+v", name, got, tt.want)
+		}
 	}
 }

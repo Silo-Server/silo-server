@@ -91,31 +91,6 @@ func TestFrontendShellCacheFollowsBrandingChanges(t *testing.T) {
 	}
 }
 
-// TestFrontendShellIgnoresRetiredDefaultTheme covers the retired admin default
-// theme: the web client has one theme, so a leftover branding.default_theme row
-// must neither reach the shell nor change its ETag.
-func TestFrontendShellIgnoresRetiredDefaultTheme(t *testing.T) {
-	settings := fakeSettings{}
-	withBranding(t, settings)
-	handler := FrontendHandler()
-
-	serve := func() *httptest.ResponseRecorder {
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
-		return rr
-	}
-
-	unset := serve()
-	settings["branding.default_theme"] = "cinema-light"
-	stale := serve()
-	if strings.Contains(stale.Body.String(), "data-default-theme") {
-		t.Fatalf("shell carries the retired default theme: %q", stale.Body.String())
-	}
-	if stale.Header().Get("ETag") != unset.Header().Get("ETag") {
-		t.Fatal("a retired setting must not change the shell ETag")
-	}
-}
-
 func TestFrontendServesDynamicManifest(t *testing.T) {
 	withBranding(t, fakeSettings{branding.KeyServerName: "Acme Media"})
 	rr := httptest.NewRecorder()

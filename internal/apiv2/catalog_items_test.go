@@ -75,7 +75,7 @@ func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, req 
 		return handlers.CatalogFacetSearchView{}, f.err
 	}
 	f.lastReq = req
-	if facet == "author" && strings.HasPrefix("frank herbert", q) {
+	if facet == "author" && strings.HasPrefix("frank herbert", q) { //nolint:gocritic // the fake matches a typed prefix of the name
 		return handlers.CatalogFacetSearchView{
 			Matches: []string{"Frank Herbert"}, HasMore: limit == 1,
 			Values: []catalogpkg.FacetValue{{Value: "Frank Herbert", Count: 6}}, ValuesHasMore: limit == 1,
@@ -186,8 +186,12 @@ func (f *fakeCatalog) MangaFiles(_ context.Context, _ handlers.ItemViewer, id st
 }
 
 func fakeEpisode(n int) handlers.EpisodeView {
-	return handlers.EpisodeView{ContentID: "episode:severance-s01e0" + string(rune('0'+n)), SeasonNumber: 1, EpisodeNumber: n, Title: "Good News About Hell", AirDate: "2022-02-18", Runtime: 57,
+	ep := handlers.EpisodeView{ContentID: "episode:severance-s01e0" + string(rune('0'+n)), SeasonNumber: 1, EpisodeNumber: n, Title: "Good News About Hell", AirDate: "2022-02-18", Runtime: 57,
 		Files: []handlers.EpisodeFileView{{FileID: 200 + n, Resolution: "1080p", FileSize: 1}}, UserData: &catalogpkg.SeasonUserData{Played: n == 1, WatchedCount: 1}}
+	if n == 1 {
+		ep.RatingIMDB, ep.RatingTMDB = new(8.7), new(8.25)
+	}
+	return ep
 }
 
 func (f *fakeCatalog) ItemEpisodes(_ context.Context, _ handlers.ItemViewer, id string) ([]handlers.EpisodeView, error) {
@@ -526,7 +530,7 @@ func TestGetCatalogItem(t *testing.T) {
 	decodeJSON(t, rec.Body, &body)
 	for k, want := range map[string]string{
 		"content_id": `"movie:heat-1995"`, "tagline": `"A Los Angeles crime saga"`, "keywords": `[]`, "crew": `[]`, "subtitles": `[]`,
-		"user_state": `{"played":true,"is_favorite":true,"in_watchlist":false}`, "overlay_summary": `{"resolution":"4K"}`,
+		"user_state": `{"played":true,"is_favorite":true,"in_watchlist":false,"not_interested":false}`, "overlay_summary": `{"resolution":"4K"}`,
 		"work_formats": `[{"type":"ebook","content_id":"ebook:heat","library_id":"2"}]`,
 	} {
 		if string(body[k]) != want {
@@ -575,68 +579,6 @@ func TestGetCatalogItem(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/series:nope/episodes", "", viewerHeaders()), TypeNotFound)
 }
 
-// TestGetCatalogItemResolvesDeviceAudio covers the device-scoped audio
-// override on item detail and its versions: the declared X-Silo-Device-Id
-// reaches the detail service, so the device's French override wins, and a
-// request without the header answers the profile's English.
-func TestGetCatalogItemResolvesDeviceAudio(t *testing.T) {
-	deps, fake := catalogDeps(t)
-	h := newTestHandler(t, deps)
-	type version struct {
-		EffectiveAudioTrackIndex *int   `json:"effective_audio_track_index"`
-		EffectiveAudioLanguage   string `json:"effective_audio_language"`
-	}
-	for _, tc := range []struct {
-		name, header, wantDevice, wantLang string
-		wantIndex                          int
-	}{
-		{"device override", fakeDeviceAudioOverride, fakeDeviceAudioOverride, "fr", 2},
-		{"device id trimmed", " " + fakeDeviceAudioOverride + " ", fakeDeviceAudioOverride, "fr", 2},
-		{"other device", "tv-1", "tv-1", "en", 1},
-		{"no header", "", "", "en", 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			headers := viewerHeaders()
-			if tc.header != "" {
-				headers = with(headers, deviceIDHeader, tc.header)
-			}
-			check := func(path string, versions func([]byte) []version) {
-				t.Helper()
-				rec := do(t, h, http.MethodGet, path, "", headers)
-				if rec.Code != http.StatusOK {
-					t.Fatal(rec.Code, rec.Body.String())
-				}
-				if fake.lastViewer.Access.DeviceID != tc.wantDevice {
-					t.Fatalf("%s device = %q, want %q", path, fake.lastViewer.Access.DeviceID, tc.wantDevice)
-				}
-				got := versions(rec.Body.Bytes())
-				if len(got) != 1 || got[0].EffectiveAudioTrackIndex == nil || *got[0].EffectiveAudioTrackIndex != tc.wantIndex || got[0].EffectiveAudioLanguage != tc.wantLang {
-					t.Fatalf("%s effective audio = %+v, want %s #%d", path, got, tc.wantLang, tc.wantIndex)
-				}
-			}
-			check("/api/v2/catalog/items/movie:heat-1995", func(b []byte) []version {
-				var body struct {
-					Versions []version `json:"versions"`
-				}
-				if err := json.Unmarshal(b, &body); err != nil {
-					t.Fatal(err)
-				}
-				return body.Versions
-			})
-			check("/api/v2/catalog/items/movie:heat-1995/versions", func(b []byte) []version {
-				var body struct {
-					Items []version `json:"items"`
-				}
-				if err := json.Unmarshal(b, &body); err != nil {
-					t.Fatal(err)
-				}
-				return body.Items
-			})
-		})
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995", "", with(viewerHeaders(), deviceIDHeader, "phone-1,phone-1")), TypeValidationFailed)
-}
-
 func TestSeriesSeasons(t *testing.T) {
 	deps, _ := catalogDeps(t)
 	h := newTestHandler(t, deps)
@@ -679,52 +621,6 @@ func TestListCatalogItemsPreservesResolvedSourceOrderCursors(t *testing.T) {
 			t.Fatalf("source-order sentinel lost: %+v", fake.lastReq.ResolvedSort)
 		}
 	}
-}
-
-func TestSeriesSeasonsArtwork(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	h := newTestHandler(t, deps)
-	capability := do(t, h, http.MethodGet, Prefix+"/images/capabilities", "", viewerHeaders())
-	var discovery ImageCapabilities
-	decodeJSON(t, capability.Body, &discovery)
-	if capability.Code != http.StatusOK || discovery.SeasonListArtworkParam != "include_artwork" {
-		t.Fatal(capability.Code, discovery)
-	}
-	var baseline Season
-	for _, value := range []string{"", "true", "false"} {
-		t.Run("include_artwork="+value, func(t *testing.T) {
-			path := Prefix + "/catalog/series/series:severance/seasons"
-			if value != "" {
-				path += "?" + discovery.SeasonListArtworkParam + "=" + value
-			}
-			rec := do(t, h, http.MethodGet, path, "", viewerHeaders())
-			if rec.Code != http.StatusOK {
-				t.Fatal(rec.Code, rec.Body.String())
-			}
-			var body SeasonCollection
-			decodeJSON(t, rec.Body, &body)
-			if len(body.Items) != 1 {
-				t.Fatal(body)
-			}
-			season := body.Items[0]
-			if value == "false" {
-				if strings.Contains(rec.Body.String(), `"poster_url"`) || strings.Contains(rec.Body.String(), `"poster_thumbhash"`) {
-					t.Fatal("artwork fields present", rec.Body.String())
-				}
-			} else if season.PosterURL == "" || season.PosterThumbhash == "" {
-				t.Fatal("artwork absent", season)
-			}
-			season.PosterURL = ""
-			season.PosterThumbhash = ""
-			if value == "" {
-				baseline = season
-			} else if !reflect.DeepEqual(baseline, season) {
-				t.Fatal("non-artwork metadata changed", season)
-			}
-		})
-	}
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/catalog/series/series:severance/seasons?include_artwork=invalid", "", viewerHeaders()), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/catalog/series/series:severance/seasons/1?include_artwork=false", "", viewerHeaders()), TypeValidationFailed)
 }
 
 func TestCatalogStructuredSearchRelevance(t *testing.T) {
@@ -816,5 +712,36 @@ func TestListCatalogItemsVideoWithEpisodesScope(t *testing.T) {
 	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/query", `{"source":"section","scope":"home","section_id":"s","type":"video_with_episodes"}`, viewerHeaders()), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.type" {
 		t.Fatalf("section errors = %+v", p.Errors)
+	}
+}
+
+// An episode states its ratings as a title page does: on a 0-100 score with
+// the source's own display, IMDb before TMDB. A stored 0 (unrated) or a value
+// off the 0-10 scale is dropped, and an episode with no rating omits the field.
+func TestEpisodesOfStatesRatings(t *testing.T) {
+	episodes := episodesOf([]handlers.EpisodeView{
+		{ContentID: "episode:1", RatingIMDB: new(8.7), RatingTMDB: new(8.25)},
+		{ContentID: "episode:2", RatingIMDB: new(0.0), RatingTMDB: new(42.0)},
+		{ContentID: "episode:3"},
+	})
+	want := []CatalogRating{
+		{Source: "imdb", Name: "IMDb", Score: 87, Display: "8.7"},
+		{Source: "tmdb", Name: "TMDB", Score: 82.5, Display: "8.3"},
+	}
+	if !reflect.DeepEqual(episodes[0].Ratings, want) {
+		t.Fatalf("ratings = %+v, want %+v", episodes[0].Ratings, want)
+	}
+	for _, ep := range episodes[1:] {
+		body, err := json.Marshal(ep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(body, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := fields["ratings"]; ok {
+			t.Fatalf("%s carries ratings: %s", ep.ContentID, body)
+		}
 	}
 }

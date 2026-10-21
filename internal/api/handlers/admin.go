@@ -179,6 +179,9 @@ type AdminHandler struct {
 	WatchlistTitlesSweeper interface {
 		SweepOrphanTitles(ctx context.Context) error
 	}
+	// RecWorker is told when an account update changes its profiles' access
+	// scope, so their recommendations are rebuilt. Optional.
+	RecWorker AccountsScopeNotifier
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -307,7 +310,7 @@ type updateUserRequest struct {
 	MaxTranscodes            optionalField[int]     `json:"max_transcodes,omitempty"`
 	TranscodeAllowed         optionalField[bool]    `json:"transcode_allowed,omitempty"`
 	AudioTranscodeAllowed    optionalField[bool]    `json:"audio_transcode_allowed,omitempty"`
-	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
+	MaxProfiles              optionalField[int]     `json:"max_profiles,omitempty"`
 	DownloadAllowed          optionalField[bool]    `json:"download_allowed,omitempty"`
 	DownloadTranscodeAllowed optionalField[bool]    `json:"download_transcode_allowed,omitempty"`
 	RequestsAllowed          optionalField[bool]    `json:"requests_allowed,omitempty"`
@@ -332,7 +335,9 @@ func (r *updateUserRequest) libraryIDsOptional() models.Optional[[]int] {
 // The policy fields carry the account's stored overrides: null means the
 // field is inherited from the access group. EffectivePolicy is the resolved
 // value the server enforces (override when set, otherwise the group's value,
-// otherwise the permissive no-group default).
+// otherwise the permissive no-group default). MaxProfiles is the exception:
+// the frozen v1 body has no inherit state for it, so it carries the limit that
+// applies, and the v2-only MaxProfilesOverride carries the stored override.
 type AdminUserView struct {
 	ID                         int                 `json:"id"`
 	Username                   string              `json:"username"`
@@ -349,6 +354,7 @@ type AdminUserView struct {
 	TranscodeAllowed           *bool               `json:"transcode_allowed"`
 	AudioTranscodeAllowed      *bool               `json:"audio_transcode_allowed"`
 	MaxProfiles                int                 `json:"max_profiles"`
+	MaxProfilesOverride        *int                `json:"-"`
 	DownloadAllowed            *bool               `json:"download_allowed"`
 	DownloadTranscodeAllowed   *bool               `json:"download_transcode_allowed"`
 	RequestsAllowed            *bool               `json:"requests_allowed"`
@@ -375,6 +381,7 @@ type EffectivePolicyView struct {
 	MaxTranscodes              int      `json:"max_transcodes"`
 	MaxRemoteStreamBitrateKbps int      `json:"-"`
 	MaxLocalStreamBitrateKbps  int      `json:"-"`
+	MaxProfiles                int      `json:"-"`
 	TranscodeAllowed           bool     `json:"transcode_allowed"`
 	AudioTranscodeAllowed      bool     `json:"audio_transcode_allowed"`
 	DownloadAllowed            bool     `json:"download_allowed"`
@@ -445,7 +452,8 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		MaxLocalStreamBitrateKbps:  clonePtr(u.MaxLocalStreamBitrateKbps),
 		TranscodeAllowed:           clonePtr(u.TranscodeAllowed),
 		AudioTranscodeAllowed:      clonePtr(u.AudioTranscodeAllowed),
-		MaxProfiles:                u.MaxProfiles,
+		MaxProfiles:                effective.MaxProfiles,
+		MaxProfilesOverride:        clonePtr(u.MaxProfiles),
 		DownloadAllowed:            clonePtr(u.DownloadAllowed),
 		DownloadTranscodeAllowed:   clonePtr(u.DownloadTranscodeAllowed),
 		RequestsAllowed:            clonePtr(u.RequestsAllowed),
@@ -461,6 +469,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 			MaxTranscodes:              effective.MaxTranscodes,
 			MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
 			MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,
+			MaxProfiles:                effective.MaxProfiles,
 			TranscodeAllowed:           effective.TranscodeAllowed,
 			AudioTranscodeAllowed:      effective.AudioTranscodeAllowed,
 			DownloadAllowed:            effective.DownloadAllowed,
@@ -547,9 +556,9 @@ func checkScopedAPIKeyUpdate(ctx context.Context, target *models.User, input mod
 
 // rejectScopedAPIKeyUpdate applies the shared policy before v1 validation.
 //
-// It returns the target account when it had to load one, so the caller can
-// reuse it as the pre-update snapshot instead of reading the row twice, and
-// reports whether it wrote a response.
+// It returns the target account when it had to load one, so rejectGroupedAdmin
+// can reuse it instead of reading the row twice, and reports whether it wrote
+// a response.
 func (h *AdminHandler) rejectScopedAPIKeyUpdate(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -590,17 +599,18 @@ func (h *AdminHandler) loadTargetUser(w http.ResponseWriter, r *http.Request, id
 // an access group: a group named in the request together with the admin role,
 // or for an account that already holds it. Writes that only change the role
 // are not its concern — the repository clears the group on promote and falls
-// back to the default group on demote. It loads the target when the role is
-// not in the request and returns it for reuse as the pre-update snapshot.
+// back to the default group on demote. It loads the target when neither the
+// request nor current carries the role, and reports whether it wrote a
+// response.
 func (h *AdminHandler) rejectGroupedAdmin(
 	w http.ResponseWriter,
 	r *http.Request,
 	id int,
 	req *updateUserRequest,
 	current *models.User,
-) (*models.User, bool) {
+) bool {
 	if !req.AccessGroupID.Set || req.AccessGroupID.Value == nil {
-		return current, false
+		return false
 	}
 	var role string
 	switch {
@@ -609,18 +619,18 @@ func (h *AdminHandler) rejectGroupedAdmin(
 	case current != nil:
 		role = current.Role
 	default:
-		var blocked bool
-		if current, blocked = h.loadTargetUser(w, r, id); blocked {
-			return nil, true
+		target, blocked := h.loadTargetUser(w, r, id)
+		if blocked {
+			return true
 		}
-		role = current.Role
+		role = target.Role
 	}
 	if role == roleAdmin {
 		writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity",
 			"Admin accounts cannot belong to an access group")
-		return current, true
+		return true
 	}
-	return current, false
+	return false
 }
 
 // clonePtr copies a policy override pointer so a response never aliases the
@@ -973,7 +983,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		}
 		maxPlaybackQuality.Value = &normalized
 	}
-	if req.MaxProfiles != nil && *req.MaxProfiles < 1 {
+	if req.MaxProfiles.Value != nil && *req.MaxProfiles.Value < 1 {
 		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
 		return
 	}
@@ -986,8 +996,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity", "Invalid access_group_id")
 			return
 		}
-		currentUser, blocked = h.rejectGroupedAdmin(w, r, id, &req, currentUser)
-		if blocked {
+		if h.rejectGroupedAdmin(w, r, id, &req, currentUser) {
 			return
 		}
 		if req.AccessGroupID.Value != nil {
@@ -1028,7 +1037,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		MaxTranscodes:            req.MaxTranscodes.Optional(),
 		TranscodeAllowed:         req.TranscodeAllowed.Optional(),
 		AudioTranscodeAllowed:    req.AudioTranscodeAllowed.Optional(),
-		MaxProfiles:              req.MaxProfiles,
+		MaxProfiles:              req.MaxProfiles.Optional(),
 		DownloadAllowed:          req.DownloadAllowed.Optional(),
 		DownloadTranscodeAllowed: req.DownloadTranscodeAllowed.Optional(),
 		RequestsAllowed:          req.RequestsAllowed.Optional(),
@@ -1051,6 +1060,9 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 	}
 	revoked := false
 	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
+		if err := h.keepInheritedProfileLimit(r.Context(), tx, current, &updateInput); err != nil {
+			return false, err
+		}
 		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
 			return false, ownerError(err)
 		}
@@ -1085,6 +1097,9 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 	if revoked && h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(r.Context(), id)
 	}
+	if accountScopeChanged(updateInput) {
+		notifyAccountsScopeChanged(r.Context(), h.RecWorker, id)
+	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)
 	if err != nil {
@@ -1098,6 +1113,51 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, toAdminUserResponse(user, updatedGroupPolicy))
+}
+
+// keepInheritedProfileLimit drops a v1 max_profiles equal to the limit that
+// applies to an account that inherits it. The frozen v1 body reports that
+// limit rather than an inherit state, so a client that sends back what it read
+// would otherwise pin the inherited limit as an override and, for an admin
+// editing its own account, be refused for changing its access policy. The
+// reported limit belongs to the role and group the account had when the
+// client read it, so a request that moves either in the same call is sending
+// an explicit override for the new context, not an echo. The group is read
+// through tx, the transaction that updates the account: a pool read here
+// would take a second connection while that transaction holds its own. A nil
+// tx (test fakes) falls back to the pool.
+func (h *AdminHandler) keepInheritedProfileLimit(ctx context.Context, tx pgx.Tx, current *models.User, input *models.UpdateUserInput) error {
+	if !input.MaxProfiles.Set || input.MaxProfiles.Value == nil || current.MaxProfiles != nil {
+		return nil
+	}
+	if profileLimitContextChanges(current, input) {
+		return nil
+	}
+	var group *access.GroupPolicy
+	var err error
+	if tx != nil {
+		group, err = access.GroupPolicyInTransaction(ctx, tx, current.ID)
+	} else {
+		group, err = h.groupPolicyFor(ctx, current)
+	}
+	if err != nil {
+		return err
+	}
+	if *input.MaxProfiles.Value == access.ApplyGroupPolicy(current, group).MaxProfiles {
+		input.MaxProfiles = models.Optional[int]{}
+	}
+	return nil
+}
+
+func profileLimitContextChanges(current *models.User, input *models.UpdateUserInput) bool {
+	if input.Role != nil && *input.Role != current.Role {
+		return true
+	}
+	if !input.AccessGroupID.Set {
+		return false
+	}
+	next, now := input.AccessGroupID.Value, current.AccessGroupID
+	return (next == nil) != (now == nil) || (next != nil && now != nil && *next != *now)
 }
 
 // HandleDeleteUser handles DELETE /admin/users/{id}.
@@ -2367,7 +2427,6 @@ var adminSettingDependencyGroups = [][]string{
 	{"s3.private_access_key", "s3.private_secret_key"},
 	{"s3.public_url_auth", "s3.public_read_endpoint", "s3.public_token_secret"},
 	{"email.enabled", "email.smtp_host", "email.from_address"},
-	{"watchsync.trakt.client_id", "watchsync.trakt.client_secret"},
 	{"watchsync.simkl.client_id", "watchsync.simkl.client_secret"},
 	{"ratelimit.backend", "redis.url"},
 	{"download.max_per_period", "download.period_duration"},
@@ -2629,6 +2688,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		}
 		normalized[key] = value
 	}
+	checkedRedis, err := h.checkRedisSave(ctx, normalized)
+	if err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
 
 	modelValidation, err := h.prepareAIModelValidation(ctx, normalized)
 	if err != nil {
@@ -2652,17 +2715,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 				}
 			}
 
-			prospective := maps.Clone(stored)
-			for key, value := range normalized {
-				prospective[key] = value
-			}
-			rows := normalized
-			if value, ok := normalized[config.RedisDBSettingKey]; ok {
-				// The same batch can replace redis.url, so the row is decided
-				// against the URL the batch leaves in place.
-				rows = maps.Clone(normalized)
-				rows[config.RedisDBSettingKey] = redisDBRow(h.activeAdminSettings(prospective), value)
-				prospective[config.RedisDBSettingKey] = rows[config.RedisDBSettingKey]
+			prospective, rows := h.prospectiveSettings(stored, normalized)
+			if err := h.confirmRedisSave(stored, prospective, checkedRedis); err != nil {
+				preconditionErr = err
+				return nil, err
 			}
 			if modelValidation != nil {
 				if err := modelValidation.Check(stored, prospective); err != nil {
@@ -2689,7 +2745,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			validationSnapshot := adminSettingsValidationSnapshot(activeProspective, normalized)
 			if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 				validationErr = err
-				validationCode = "invalid_settings"
+				validationCode = adminInvalidSettingsCode
 				return nil, err
 			}
 			writes := make(map[string]string, len(normalized))
@@ -2739,6 +2795,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		if h.OnServerSettingUpdated != nil {
 			h.OnServerSettingUpdated(ctx, key, after[key])
 		}
+		publishAdminDefaultEvent(ctx, h.EventsHub, key)
 		if config.RestartRequired(key) {
 			restartKeys = append(restartKeys, key)
 		}
@@ -3019,6 +3076,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		}
 		req.Value = strconv.FormatBool(enabled)
 	}
+	change := map[string]string{key: req.Value}
+	checkedRedis, err := h.checkRedisSave(ctx, change)
+	if err != nil {
+		return AdminSettingUpdateResult{}, err
+	}
 
 	modelValidation, err := h.prepareAIModelValidation(ctx, map[string]string{key: req.Value})
 	if err != nil {
@@ -3041,12 +3103,12 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				}
 			}
 
-			prospective := maps.Clone(stored)
-			row := req.Value
-			if key == config.RedisDBSettingKey {
-				row = redisDBRow(h.activeAdminSettings(stored), req.Value)
+			prospective, rows := h.prospectiveSettings(stored, change)
+			row := rows[key]
+			if err := h.confirmRedisSave(stored, prospective, checkedRedis); err != nil {
+				preconditionErr = err
+				return nil, err
 			}
-			prospective[key] = row
 			if modelValidation != nil {
 				if err := modelValidation.Check(stored, prospective); err != nil {
 					validationErr, validationCode = err, adminInvalidSettingsCode
@@ -3064,7 +3126,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = adminInvalidSettingsCode
 					return nil, err
 				}
 			}
@@ -3079,7 +3141,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 					h.RedisBootstrapAvailable,
 				); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = adminInvalidSettingsCode
 					return nil, err
 				}
 			}
@@ -3089,7 +3151,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			if key == artworkStorageBackendKey || key == s3PublicBucketKey || key == s3OperationalBucketKey {
 				if err := config.ValidateArtworkStorageSettings(h.effectiveAdminSettings(prospective)); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = adminInvalidSettingsCode
 					return nil, err
 				}
 			}
@@ -3123,6 +3185,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		if h.OnServerSettingUpdated != nil {
 			h.OnServerSettingUpdated(ctx, key, after[key])
 		}
+		publishAdminDefaultEvent(ctx, h.EventsHub, key)
 	}
 	restartRequired := effectiveChanged && config.RestartRequired(key)
 	if restartRequired {

@@ -71,6 +71,7 @@ describe("Recommendations", () => {
     });
     mockUseDiscover.mockReturnValue({ data: undefined, isLoading: true, isError: false });
   });
+
   it("renders carousel rows with enriched items", () => {
     mockUseDiscover.mockReturnValue({
       data: {
@@ -85,7 +86,7 @@ describe("Recommendations", () => {
           },
           {
             type: "genre_sampler",
-            label: "Popular in Action",
+            label: "Top Action",
             section_kind: "genre",
             section_key: "Sci Fi & Action",
             items: [
@@ -108,7 +109,7 @@ describe("Recommendations", () => {
     const markup = renderPage();
 
     expect(markup).toContain("For You");
-    expect(markup).toContain("Popular in Action");
+    expect(markup).toContain("Top Action");
     expect(markup).toContain("Movie A");
     expect(markup).toContain("Movie B");
     expect(markup).toContain('data-title="Custom row" data-href=""');

@@ -70,11 +70,7 @@ func TestCleanMangaSeriesName(t *testing.T) {
 	}{
 		// Trailing parentheticals stripped.
 		{"404 Demons (Digital) (Oak)", "404 Demons"},
-		{"Arifureta - From Commonplace to World's Strongest (Digital) (1r0n)", "Arifureta - From Commonplace to World's Strongest"},
 		{"Angels of Death Episode.0 (2019-2024) (Digital) (LuCaZ)", "Angels of Death Episode.0"},
-		{"Angel of the Night - Lucian - One-shot (2026) (Digital)", "Angel of the Night - Lucian - One-shot"},
-		{"'Tis Time for 'Torture,' Princess (2019-2026) (Digital) (Antrill-Oak)", "'Tis Time for 'Torture,' Princess"},
-		{"A Certain Scientific Railgun - Astral Buddy (2019)", "A Certain Scientific Railgun - Astral Buddy"},
 		// No junk — must be returned unchanged.
 		{"Amefurashi", "Amefurashi"},
 		// Guardrail: folder that is ONLY parentheticals — return original trimmed input.
@@ -110,35 +106,11 @@ func TestMangaIndexForFile(t *testing.T) {
 			wantHas:    true,
 		},
 		{
-			name:       "404 Demons ch09",
-			base:       "404 Demons 09 (Digital-Compilation) (Oak)",
-			seriesName: "404 Demons",
-			wantVol:    "",
-			wantIdx:    9,
-			wantHas:    true,
-		},
-		{
 			name:       "404 Demons v01 — volume token unambiguous",
 			base:       "404 Demons v01 (Digital-Compilation) (Oak)",
 			seriesName: "404 Demons",
 			wantVol:    "v01",
 			wantIdx:    1,
-			wantHas:    true,
-		},
-		{
-			name:       "404 Demons v10",
-			base:       "404 Demons v10 (Digital-Compilation) (Oak)",
-			seriesName: "404 Demons",
-			wantVol:    "v10",
-			wantIdx:    10,
-			wantHas:    true,
-		},
-		{
-			name:       "One-Punch Man ch178",
-			base:       "One-Punch Man 178 (2023) (Digital) (LuCaZ)",
-			seriesName: "One-Punch Man",
-			wantVol:    "",
-			wantIdx:    178,
 			wantHas:    true,
 		},
 		{

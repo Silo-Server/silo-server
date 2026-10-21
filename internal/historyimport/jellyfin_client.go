@@ -72,6 +72,14 @@ type jellyfinUserData struct {
 	IsFavorite            bool       `json:"IsFavorite"`
 }
 
+func (item jellyfinItem) retainedSize() int64 {
+	size := sizeOf[jellyfinItem]() + stringBytes(item.ID, item.Name, item.Type, item.SeriesName, item.SeriesID) + stringMapBytes(item.ProviderIDs)
+	if item.UserData.LastPlayedDate != nil {
+		size += sizeOf[time.Time]()
+	}
+	return size
+}
+
 type jellyfinLocalAuth struct{ BaseURL, UserID, AccessToken string }
 
 // jellyfinBaseURL normalizes a configured server address. Jellyfin answers
@@ -133,13 +141,14 @@ func (c *JellyfinClient) FetchItemsByIDs(ctx context.Context, auth jellyfinLocal
 	var allItems []jellyfinItem
 	for start := 0; start < len(ids); start += jellyfinIDChunkSize {
 		end := min(start+jellyfinIDChunkSize, len(ids))
+		chunk := ids[start:end]
 
 		query := url.Values{}
 		query.Set("UserId", auth.UserID)
 		query.Set("Recursive", "true")
 		query.Set("EnableUserData", "true")
 		query.Set("Fields", jellyfinItemFields)
-		query.Set("Ids", strings.Join(ids[start:end], ","))
+		query.Set("Ids", strings.Join(chunk, ","))
 		if strings.TrimSpace(includeItemTypes) != "" {
 			query.Set("IncludeItemTypes", includeItemTypes)
 		}
@@ -154,7 +163,11 @@ func (c *JellyfinClient) FetchItemsByIDs(ctx context.Context, auth jellyfinLocal
 		if err := c.doJSON(req, &payload); err != nil {
 			return nil, fmt.Errorf("fetching Jellyfin items by ids: %w", err)
 		}
-		allItems = append(allItems, payload.Items...)
+		items := keepRequested(payload.Items, chunk, func(item jellyfinItem) string { return item.ID })
+		if err := retainItems(ctx, items); err != nil {
+			return nil, fmt.Errorf("fetching Jellyfin items by ids: %w", err)
+		}
+		allItems = append(allItems, items...)
 	}
 	return allItems, nil
 }
@@ -213,6 +226,9 @@ func (c *JellyfinClient) fetchPagedItems(ctx context.Context, auth jellyfinLocal
 		if err := budget.addItems(len(payload.Items)); err != nil {
 			return nil, err
 		}
+		if err := retainItems(ctx, payload.Items); err != nil {
+			return nil, err
+		}
 
 		allItems = append(allItems, payload.Items...)
 		startIndex += len(payload.Items)
@@ -242,7 +258,7 @@ func (c *JellyfinClient) doJSONWithBudget(req *http.Request, out any, budget *li
 		body := readUpstreamErrorBody(resp.Body)
 		return &jellyfinHTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
-	return decodeUpstreamJSON(resp.Body, out, budget)
+	return decodeUpstreamJSON(req.Context(), resp.Body, out, budget)
 }
 
 type jellyfinHTTPError struct {

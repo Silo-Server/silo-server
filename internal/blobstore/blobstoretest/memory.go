@@ -122,3 +122,17 @@ func (m *Memory) Probe(context.Context) error { return nil }
 func (m *Memory) Identity() string            { return "memory" }
 
 var _ blobstore.Store = (*Memory)(nil)
+
+// Direct is a Memory whose direct URLs point at Base, like S3-compatible
+// storage on the server's local network.
+type Direct struct {
+	*Memory
+	Base string
+}
+
+// NewDirect returns an empty Direct store serving direct URLs from base.
+func NewDirect(base string) Direct { return Direct{Memory: New(), Base: base} }
+
+func (d Direct) DirectURL(_ context.Context, key string, ttl, _ time.Duration) (string, time.Time, error) {
+	return d.Base + "/" + key + "?X-Amz-Signature=test", time.Now().Add(ttl), nil
+}

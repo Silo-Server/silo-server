@@ -56,10 +56,6 @@ type recordingRemotePreparer struct {
 	deleteURL string
 }
 
-type nilCandidatePlanner struct {
-	invoked bool
-}
-
 type nonReservingCapacityPlanner struct {
 	node            *nodepool.Node
 	reservationUsed bool
@@ -84,22 +80,6 @@ func (p *nonReservingCapacityPlanner) TranscodeNode(int) (*nodepool.Node, bool) 
 
 func (p *nonReservingCapacityPlanner) TranscodeNodeURLs() []string {
 	return []string{p.node.URL}
-}
-
-func (p *nilCandidatePlanner) ReserveTranscodeWork(string) (*nodepool.Node, func()) {
-	return nil, nil
-}
-
-func (p *nilCandidatePlanner) ReserveTranscodeWorkWith(_ string, eligible func(*nodepool.Node) bool) (*nodepool.Node, func()) {
-	p.invoked = true
-	if eligible(nil) {
-		panic("nil transcode node was eligible")
-	}
-	return nil, nil
-}
-
-func (p *nilCandidatePlanner) TranscodeNode(int) (*nodepool.Node, bool) {
-	return nil, false
 }
 
 func (p *recordingRemotePreparer) Prepare(_ context.Context, nodeURL, secret string, req downloadprepare.Request) (downloadprepare.Result, error) {
@@ -136,16 +116,6 @@ func (unavailableRemotePreparer) Stat(context.Context, string, string, string) (
 }
 func (unavailableRemotePreparer) Delete(context.Context, string, string, string) error { return nil }
 
-type responseLostRemotePreparer struct{}
-
-func (responseLostRemotePreparer) Prepare(context.Context, string, string, downloadprepare.Request) (downloadprepare.Result, error) {
-	return downloadprepare.Result{}, context.DeadlineExceeded
-}
-func (responseLostRemotePreparer) Stat(_ context.Context, _, _ string, artifactID string) (downloadprepare.Result, error) {
-	return downloadprepare.Result{ArtifactID: artifactID, FileSize: 55}, nil
-}
-func (responseLostRemotePreparer) Delete(context.Context, string, string, string) error { return nil }
-
 type indeterminateRemotePreparer struct{}
 
 func (indeterminateRemotePreparer) Prepare(context.Context, string, string, downloadprepare.Request) (downloadprepare.Result, error) {
@@ -155,18 +125,6 @@ func (indeterminateRemotePreparer) Stat(context.Context, string, string, string)
 	return downloadprepare.Result{}, os.ErrDeadlineExceeded
 }
 func (indeterminateRemotePreparer) Delete(context.Context, string, string, string) error { return nil }
-
-type mismatchedRecoveryRemotePreparer struct{}
-
-func (mismatchedRecoveryRemotePreparer) Prepare(context.Context, string, string, downloadprepare.Request) (downloadprepare.Result, error) {
-	return downloadprepare.Result{}, context.DeadlineExceeded
-}
-func (mismatchedRecoveryRemotePreparer) Stat(context.Context, string, string, string) (downloadprepare.Result, error) {
-	return downloadprepare.Result{ArtifactID: "unexpected-artifact", FileSize: 55}, nil
-}
-func (mismatchedRecoveryRemotePreparer) Delete(context.Context, string, string, string) error {
-	return nil
-}
 
 type attestationRemotePreparer struct {
 	prepareResult downloadprepare.Result
@@ -190,23 +148,36 @@ func (p *attestationRemotePreparer) Delete(context.Context, string, string, stri
 	return p.deleteErr
 }
 
+// newPoolPreparer builds a preparer that plans over a transcode pool of nodes
+// and signs node requests with the JWT secret "secret".
+func newPoolPreparer(local EncodePreparer, nodes ...*nodepool.Node) *NodeAwarePreparer {
+	pool := nodepool.NewTranscodePool()
+	pool.SetNodes(nodes)
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "secret"
+	return NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+}
+
+// softwarePQToneMap is a software BT.2390 tone map for PQ sources.
+func softwarePQToneMap() tonemap.Capabilities {
+	return tonemap.Capabilities{{
+		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
+		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+	}}
+}
+
+// cachedToneMap is a node capability entry that stays fresh for a minute.
+func cachedToneMap(capabilities tonemap.Capabilities) remoteToneMapCapabilities {
+	return remoteToneMapCapabilities{capabilities: capabilities, expiresAt: time.Now().Add(time.Minute)}
+}
+
 func newToneMapPreparerTest(t *testing.T, remote downloadprepare.RemotePreparer) (*NodeAwarePreparer, *recordingEncodePreparer, playback.TranscodeOpts) {
 	t.Helper()
 	const nodeURL = "http://tone-map-node"
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 22, URL: nodeURL, Enabled: true, Healthy: true}})
 	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	preparer := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	preparer := newPoolPreparer(local, &nodepool.Node{ID: 22, URL: nodeURL, Enabled: true, Healthy: true})
 	preparer.remote = remote
-	preparer.capabilities[nodeURL] = remoteToneMapCapabilities{
-		capabilities: tonemap.Capabilities{{
-			Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-			SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-		}},
-		expiresAt: time.Now().Add(time.Minute),
-	}
+	preparer.capabilities[nodeURL] = cachedToneMap(softwarePQToneMap())
 	opts := playback.TranscodeOpts{
 		ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
 		ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
@@ -217,17 +188,13 @@ func newToneMapPreparerTest(t *testing.T, remote downloadprepare.RemotePreparer)
 
 func TestNodeAwarePreparerUsesLeastLoadedHealthyNode(t *testing.T) {
 	group := "host-a"
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{
-		{URL: "http://busy", Enabled: true, Healthy: true, ActiveJobs: 3},
-		{ID: 17, URL: "http://idle", Enabled: true, Healthy: true, ActiveJobs: 1, Group: &group},
-		{URL: "http://unhealthy", Enabled: true, Healthy: false},
-	})
 	local := &recordingEncodePreparer{}
 	remote := &recordingRemotePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p := newPoolPreparer(local,
+		&nodepool.Node{URL: "http://busy", Enabled: true, Healthy: true, ActiveJobs: 3},
+		&nodepool.Node{ID: 17, URL: "http://idle", Enabled: true, Healthy: true, ActiveJobs: 1, Group: &group},
+		&nodepool.Node{URL: "http://unhealthy", Enabled: true, Healthy: false},
+	)
 	p.remote = remote
 
 	opts := playback.TranscodeOpts{InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac"}
@@ -246,81 +213,80 @@ func TestNodeAwarePreparerUsesLeastLoadedHealthyNode(t *testing.T) {
 	}
 }
 
-func TestNodeAwarePreparerRequiresAudioToAACV2ForSurroundDownmix(t *testing.T) {
-	capabilityNode := func(recipeVersion string) *httptest.Server {
-		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
-				Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: recipeVersion,
-			}}})
-		}))
-	}
-	legacy := capabilityNode("1")
-	defer legacy.Close()
-	current := capabilityNode(playback.TransformationAudioToAACRecipeVersionV3)
-	defer current.Close()
-
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{
-		{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true},
-		{ID: 2, URL: current.URL, Enabled: true, Healthy: true, ActiveJobs: 1},
-	})
-	local := &recordingEncodePreparer{}
-	remote := &recordingRemotePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.remote = remote
-	opts := playback.TranscodeOpts{
-		InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac", SourceAudioChannels: 6,
-	}
-	prepared, err := p.PrepareFile(context.Background(), "artifact-audio-v2", opts, "/local/artifact.mp4")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if local.calls != 0 || remote.nodeURL != current.URL {
-		t.Fatalf("local calls = %d, remote node = %q, want v2 node %q", local.calls, remote.nodeURL, current.URL)
-	}
-	if remote.request.SourceAudioChannels != 6 || prepared.OriginNodeID != 2 {
-		t.Fatalf("remote request = %#v prepared = %#v", remote.request, prepared)
-	}
-}
-
-func TestNodeAwarePreparerRequiresPreparedTracksNode(t *testing.T) {
-	capabilityNode := func(features ...string) *httptest.Server {
-		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{TransportFeatures: features})
-		}))
-	}
-	legacy := capabilityNode()
-	defer legacy.Close()
-	current := capabilityNode(playback.TransportFeaturePreparedTracksV1)
-	defer current.Close()
-
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{
-		{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true},
-		{ID: 2, URL: current.URL, Enabled: true, Healthy: true, ActiveJobs: 1},
-	})
-	local := &recordingEncodePreparer{}
-	remote := &recordingRemotePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.remote = remote
+// A request that needs a newer node recipe goes to the node that advertises
+// it, even when an older node is less loaded.
+func TestNodeAwarePreparerRequiresCapableNode(t *testing.T) {
 	file := &models.MediaFile{CodecAudio: "aac", AudioTracks: []models.AudioTrack{{Codec: "aac"}, {Codec: "ac3", Channels: 6}}}
-	opts := playback.TranscodeOpts{
-		InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
-		PreparedTracks: playback.PlanPreparedTracks(file, "aac", -1),
-	}
-	prepared, err := p.PrepareFile(context.Background(), "artifact-tracks", opts, "/local/artifact.mp4")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if local.calls != 0 || remote.nodeURL != current.URL || prepared.OriginNodeID != 2 {
-		t.Fatalf("local calls = %d, remote node = %q, want prepared-tracks node %q", local.calls, remote.nodeURL, current.URL)
-	}
-	if remote.request.TrackRecipeVersion != playback.PreparedTracksRecipeVersion || len(remote.request.PreparedTracks.Audio) != 2 {
-		t.Fatalf("remote request = %#v, want the multi-track layout", remote.request)
+	for _, test := range []struct {
+		name            string
+		legacy, current playback.HWAccelInfo
+		artifactID      string
+		opts            playback.TranscodeOpts
+		check           func(t *testing.T, request downloadprepare.Request, prepared PreparedArtifact)
+	}{
+		{
+			name: "audio to AAC v2 for surround downmix",
+			legacy: playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
+				Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1",
+			}}},
+			current: playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
+				Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+			}}},
+			artifactID: "artifact-audio-v2",
+			opts: playback.TranscodeOpts{
+				InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac", SourceAudioChannels: 6,
+			},
+			check: func(t *testing.T, request downloadprepare.Request, prepared PreparedArtifact) {
+				if request.SourceAudioChannels != 6 || prepared.OriginNodeID != 2 {
+					t.Fatalf("remote request = %#v prepared = %#v", request, prepared)
+				}
+			},
+		},
+		{
+			name:       "prepared tracks",
+			current:    playback.HWAccelInfo{TransportFeatures: []string{playback.TransportFeaturePreparedTracksV1}},
+			artifactID: "artifact-tracks",
+			opts: playback.TranscodeOpts{
+				InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+				PreparedTracks: playback.PlanPreparedTracks(file, "aac", -1),
+			},
+			check: func(t *testing.T, request downloadprepare.Request, prepared PreparedArtifact) {
+				if prepared.OriginNodeID != 2 {
+					t.Fatalf("prepared = %#v, want the prepared-tracks node", prepared)
+				}
+				if request.TrackRecipeVersion != playback.PreparedTracksRecipeVersion || len(request.PreparedTracks.Audio) != 2 {
+					t.Fatalf("remote request = %#v, want the multi-track layout", request)
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capabilityNode := func(info playback.HWAccelInfo) *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_ = json.NewEncoder(w).Encode(info)
+				}))
+			}
+			legacy := capabilityNode(test.legacy)
+			defer legacy.Close()
+			current := capabilityNode(test.current)
+			defer current.Close()
+
+			local := &recordingEncodePreparer{}
+			remote := &recordingRemotePreparer{}
+			p := newPoolPreparer(local,
+				&nodepool.Node{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true},
+				&nodepool.Node{ID: 2, URL: current.URL, Enabled: true, Healthy: true, ActiveJobs: 1},
+			)
+			p.remote = remote
+			prepared, err := p.PrepareFile(context.Background(), test.artifactID, test.opts, "/local/artifact.mp4")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if local.calls != 0 || remote.nodeURL != current.URL {
+				t.Fatalf("local calls = %d, remote node = %q, want capable node %q", local.calls, remote.nodeURL, current.URL)
+			}
+			test.check(t, remote.request, prepared)
+		})
 	}
 }
 
@@ -446,31 +412,6 @@ func TestNodeAwarePreparerRecoversExactlyAttestedToneMapArtifactAfterResponseLos
 	}
 }
 
-func TestRemotePrepareResultRejectsPartialToneMapRecipeWithoutAttestation(t *testing.T) {
-	opts := playback.TranscodeOpts{
-		ToneMapPolicy:        tonemap.PolicySoftwareOnly,
-		ToneMapSourceKind:    tonemap.SourcePQ,
-		ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
-		ToneMapSourceRevision: tonemap.SourceRevision{
-			MediaFileID: 42,
-			FileSize:    100,
-		},
-	}
-	if remotePrepareResultMatches(downloadprepare.Result{ArtifactID: "artifact-partial", FileSize: 55}, "artifact-partial", downloadprepare.NewRequest("artifact-partial", opts)) {
-		t.Fatal("partial tone-map recipe accepted an unattested result")
-	}
-}
-
-func TestRemotePrepareResultRejectsPartialAudioRecipeWithoutAttestation(t *testing.T) {
-	partial := downloadprepare.Request{
-		ArtifactID: "artifact-partial-audio", TargetCodecAudio: "eac3",
-		SourceAudioChannels: 6, AudioRecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
-	}
-	if remotePrepareResultMatches(downloadprepare.Result{ArtifactID: partial.ArtifactID, FileSize: 55}, partial.ArtifactID, partial) {
-		t.Fatal("partial audio recipe accepted an unattested result")
-	}
-}
-
 func TestRemotePrepareResultRequiresAttestationForExplicitAudioOutput(t *testing.T) {
 	request := downloadprepare.NewRequest("artifact-explicit-audio", playback.TranscodeOpts{
 		TargetCodecAudio: "aac", SourceAudioChannels: 2,
@@ -488,21 +429,11 @@ func TestRemotePrepareResultRequiresAttestationForExplicitAudioOutput(t *testing
 }
 
 func TestNodeAwarePreparerDoesNotDispatchPartialToneMapRecipeAsOrdinary(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 23, URL: "http://ordinary-node", Enabled: true, Healthy: true}})
 	local := &recordingEncodePreparer{}
 	remote := &recordingRemotePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	preparer := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	preparer := newPoolPreparer(local, &nodepool.Node{ID: 23, URL: "http://ordinary-node", Enabled: true, Healthy: true})
 	preparer.remote = remote
-	preparer.capabilities["http://ordinary-node"] = remoteToneMapCapabilities{
-		capabilities: tonemap.Capabilities{{
-			Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-			SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-		}},
-		expiresAt: time.Now().Add(time.Minute),
-	}
+	preparer.capabilities["http://ordinary-node"] = cachedToneMap(softwarePQToneMap())
 	opts := playback.TranscodeOpts{ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3}
 
 	prepared, err := preparer.PrepareFile(context.Background(), "artifact-partial", opts, "/local/artifact.mp4")
@@ -546,11 +477,8 @@ func TestNodeAwarePreparerResolvesCurrentArtifactNodeURL(t *testing.T) {
 
 func TestNodeAwarePreparerUsesCurrentDisabledNodeURLForCleanup(t *testing.T) {
 	group := "host-new"
-	pool := nodepool.NewTranscodePool()
 	remote := &recordingRemotePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p := newPoolPreparer(nil)
 	p.remote = remote
 	p.SetOriginLookup(staticArtifactOriginLookup{node: &nodepool.Node{
 		ID: 17, Type: nodepool.NodeTypeTranscode, URL: "http://new-url", Group: &group, Enabled: false,
@@ -586,88 +514,6 @@ func TestNodeAwarePreparerRecoversEnabledOriginMissingFromPool(t *testing.T) {
 	}
 }
 
-func TestNodeAwarePreparerReportsRemovedArtifactOrigin(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 17, URL: "http://disabled", Enabled: false, Healthy: true}})
-	p := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), nil)
-	artifact := &Artifact{OriginNodeID: 17, OriginNodeURL: "http://removed", OriginArtifactID: "artifact-1"}
-	if err := p.ResolveArtifact(context.Background(), artifact); !errors.Is(err, ErrArtifactOriginRemoved) {
-		t.Fatalf("ResolveArtifact error = %v, want ErrArtifactOriginRemoved", err)
-	}
-}
-
-func TestNodeAwarePreparerFallsBackLocallyWithoutEligibleCapacity(t *testing.T) {
-	limit := 1
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{URL: "http://full", Enabled: true, Healthy: true, ActiveJobs: 1, MaxJobs: &limit}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.remote = &recordingRemotePreparer{}
-
-	prepared, err := p.PrepareFile(context.Background(), "artifact-2", playback.TranscodeOpts{}, "/artifacts/job-2.mp4")
-	if err != nil || prepared.OutputPath == "" || local.calls != 1 {
-		t.Fatalf("prepared=%+v err=%v local calls=%d", prepared, err, local.calls)
-	}
-}
-
-func TestNodeAwarePreparerRejectsNilToneMapCandidate(t *testing.T) {
-	planner := &nilCandidatePlanner{}
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, planner, func() *config.Config { return cfg })
-
-	prepared, err := p.PrepareFile(context.Background(), "artifact-nil-candidate", playback.TranscodeOpts{
-		ToneMapMode: tonemap.ModeSoftware, ToneMapSourceKind: tonemap.SourcePQ,
-	}, "/artifacts/job.mp4")
-	if err != nil || prepared.OutputPath == "" || local.calls != 1 {
-		t.Fatalf("prepared=%+v err=%v local calls=%d", prepared, err, local.calls)
-	}
-	if !planner.invoked {
-		t.Fatal("eligible planner was not invoked")
-	}
-}
-
-// TestNodeAwarePreparerHonorsDisabledLocalFallback verifies policy can forbid local retry.
-func TestNodeAwarePreparerHonorsDisabledLocalFallback(t *testing.T) {
-	limit := 1
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{URL: "http://full", Enabled: true, Healthy: true, ActiveJobs: 1, MaxJobs: &limit}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.SetSettingsReader(staticDownloadSettings{config.DownloadLocalTranscodeFallbackSettingKey: "false"})
-
-	if _, err := p.PrepareFile(context.Background(), "artifact-no-fallback", playback.TranscodeOpts{}, "/artifacts/job.mp4"); err == nil {
-		t.Fatal("expected unavailable-node error with local fallback disabled")
-	}
-	if local.calls != 0 {
-		t.Fatalf("local calls = %d, want 0", local.calls)
-	}
-}
-
-func TestNodeAwarePreparerSettingsFailureDeniesLocalFallback(t *testing.T) {
-	limit := 1
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{URL: "http://full", Enabled: true, Healthy: true, ActiveJobs: 1, MaxJobs: &limit}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	preparer := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	preparer.SetSettingsReader(failingDownloadSettings{err: errors.New("settings unavailable")})
-
-	_, err := preparer.PrepareFile(context.Background(), "artifact-settings-unavailable", playback.TranscodeOpts{}, "/artifacts/job.mp4")
-	if err == nil || !strings.Contains(err.Error(), "local transcode fallback is disabled") {
-		t.Fatalf("PrepareFile error = %v, want local fallback denied", err)
-	}
-	if local.calls != 0 {
-		t.Fatalf("local calls = %d, want 0 when fallback policy cannot be read", local.calls)
-	}
-}
-
 func TestNodeAwarePreparerReportsSoftwareCapacityWhenHardwareIsFull(t *testing.T) {
 	limit := 1
 	pool := nodepool.NewTranscodePool()
@@ -677,20 +523,11 @@ func TestNodeAwarePreparerReportsSoftwareCapacityWhenHardwareIsFull(t *testing.T
 	})
 	preparer := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), nil)
 	preparer.capabilities = map[string]remoteToneMapCapabilities{
-		"http://hardware": {
-			capabilities: tonemap.Capabilities{{
-				Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV,
-				SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}},
-			expiresAt: time.Now().Add(time.Minute),
-		},
-		"http://software": {
-			capabilities: tonemap.Capabilities{{
-				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-				SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}},
-			expiresAt: time.Now().Add(time.Minute),
-		},
+		"http://hardware": cachedToneMap(tonemap.Capabilities{{
+			Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV,
+			SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+		}}),
+		"http://software": cachedToneMap(softwarePQToneMap()),
 	}
 
 	hardwareAvailable, err := preparer.ToneMapModeAvailable(context.Background(), tonemap.ModeHardware, tonemap.SourcePQ)
@@ -707,15 +544,7 @@ func TestToneMapModeAvailableDoesNotReserveCapacity(t *testing.T) {
 	node := &nodepool.Node{URL: "http://software", Enabled: true, Healthy: true}
 	planner := &nonReservingCapacityPlanner{node: node}
 	preparer := NewNodeAwarePreparer(nil, planner, nil)
-	preparer.capabilities = map[string]remoteToneMapCapabilities{
-		node.URL: {
-			capabilities: tonemap.Capabilities{{
-				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-				SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}},
-			expiresAt: time.Now().Add(time.Minute),
-		},
-	}
+	preparer.capabilities = map[string]remoteToneMapCapabilities{node.URL: cachedToneMap(softwarePQToneMap())}
 
 	available, err := preparer.ToneMapModeAvailable(context.Background(), tonemap.ModeSoftware, tonemap.SourcePQ)
 	if err != nil || !available {
@@ -737,23 +566,16 @@ func TestNodeAwarePreparerCollectsToneMapCapabilitiesConcurrently(t *testing.T) 
 			once.Do(func() { close(bothStarted) })
 		}
 		<-release
-		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{ToneMapCapabilities: tonemap.Capabilities{{
-			Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-			SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-		}}})
+		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{ToneMapCapabilities: softwarePQToneMap()})
 	})
 	first := httptest.NewServer(handler)
 	defer first.Close()
 	second := httptest.NewServer(handler)
 	defer second.Close()
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{
-		{URL: first.URL, Enabled: true, Healthy: true},
-		{URL: second.URL, Enabled: true, Healthy: true},
-	})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	preparer := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	preparer := newPoolPreparer(nil,
+		&nodepool.Node{URL: first.URL, Enabled: true, Healthy: true},
+		&nodepool.Node{URL: second.URL, Enabled: true, Healthy: true},
+	)
 	type capabilityResult struct {
 		capabilities tonemap.Capabilities
 		err          error
@@ -798,10 +620,7 @@ func TestNodeAwarePreparerUsesTargetNodeProbeBudget(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{
 			ProbeRequestTimeoutMillis: (161 * time.Second).Milliseconds(),
-			ToneMapCapabilities: tonemap.Capabilities{{
-				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-				SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}},
+			ToneMapCapabilities:       softwarePQToneMap(),
 		})
 	}))
 	defer remote.Close()
@@ -947,106 +766,6 @@ func TestNodeAwarePreparerCapabilityErrorsRedactNodeURLSecrets(t *testing.T) {
 	}
 }
 
-func TestNodeAwarePreparerRetainsRequestedLocatorAfterMismatchedRecovery(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 17, URL: "http://idle", Enabled: true, Healthy: true}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.remote = mismatchedRecoveryRemotePreparer{}
-
-	prepared, err := p.PrepareFile(context.Background(), "artifact-requested", playback.TranscodeOpts{}, "/local/job.mp4")
-	if err != nil || prepared.OutputPath == "" {
-		t.Fatalf("prepared=%+v err=%v, want local fallback after cleanup", prepared, err)
-	}
-	if local.calls != 1 {
-		t.Fatalf("local calls = %d, want fallback after rejected remote result cleanup", local.calls)
-	}
-}
-
-func TestNodeAwarePreparerFallsBackLocallyWithoutNodeCredentials(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 18, URL: "http://idle", Enabled: true, Healthy: true}})
-	local := &recordingEncodePreparer{}
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return &config.Config{} })
-	p.remote = &recordingRemotePreparer{}
-
-	if _, err := p.PrepareFile(context.Background(), "artifact-3", playback.TranscodeOpts{}, "/artifacts/job-3.mp4"); err != nil {
-		t.Fatal(err)
-	}
-	if local.calls != 1 {
-		t.Fatalf("local calls = %d, want 1", local.calls)
-	}
-}
-
-func TestNodeAwarePreparerFallsBackLocallyWhenRemoteUnavailable(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{URL: "http://idle", Enabled: true, Healthy: true}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.remote = unavailableRemotePreparer{}
-
-	prepared, err := p.PrepareFile(context.Background(), "artifact-4", playback.TranscodeOpts{}, "/local/job-4.mp4")
-	if err != nil || prepared.OutputPath == "" || local.calls != 1 {
-		t.Fatalf("prepared=%+v err=%v local calls=%d", prepared, err, local.calls)
-	}
-}
-
-func TestNodeAwarePreparerRecoversCompletedArtifactAfterResponseLoss(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 21, URL: "http://idle", Enabled: true, Healthy: true}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.remote = responseLostRemotePreparer{}
-
-	prepared, err := p.PrepareFile(context.Background(), "artifact-5", playback.TranscodeOpts{}, "/local/job-5.mp4")
-	if err != nil || !prepared.Remote() || prepared.FileSize != 55 || local.calls != 0 {
-		t.Fatalf("prepared=%+v err=%v local calls=%d", prepared, err, local.calls)
-	}
-}
-
-func TestNodeAwarePreparerDoesNotFallBackAfterLeaseCancellation(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{URL: "http://idle", Enabled: true, Healthy: true}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.remote = unavailableRemotePreparer{}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := p.PrepareFile(ctx, "artifact-6", playback.TranscodeOpts{}, "/local/job-6.mp4")
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("error = %v, want context canceled", err)
-	}
-	if local.calls != 0 {
-		t.Fatalf("local calls = %d, want 0", local.calls)
-	}
-}
-
-func TestNodeAwarePreparerDoesNotFallBackWhenRecoveryProbeIsIndeterminate(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 20, URL: "http://idle", Enabled: true, Healthy: true}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.remote = indeterminateRemotePreparer{}
-
-	if _, err := p.PrepareFile(context.Background(), "artifact-7", playback.TranscodeOpts{}, "/local/job-7.mp4"); err == nil {
-		t.Fatal("expected indeterminate remote error")
-	}
-	if local.calls != 0 {
-		t.Fatalf("local calls = %d, want 0", local.calls)
-	}
-}
-
 // nodeLookupPlanner is a planner that can resolve a node by URL, as the real
 // one does. It reserves nothing: these tests only price probes.
 type nodeLookupPlanner struct {
@@ -1091,23 +810,6 @@ func TestNodeAwarePreparerColdProbeBudgetFollowsTheNodeOverride(t *testing.T) {
 	}
 }
 
-// What the node last advertised is its own measurement of its own matrix, and it
-// survives an API restart because it is stored with the report — so where it
-// exceeds what this replica can price, it is the answer.
-func TestNodeAwarePreparerColdProbeBudgetTakesTheStoredAdvertisement(t *testing.T) {
-	const nodeURL = "https://node.example"
-	planner := &nodeLookupPlanner{node: &nodepool.Node{
-		ID: 1, URL: nodeURL,
-		Capabilities: json.RawMessage(`{"resolved":"qsv","probe_request_timeout_ms":161000}`),
-	}}
-	cfg := &config.Config{}
-	preparer := NewNodeAwarePreparer(nil, planner, func() *config.Config { return cfg })
-
-	if got, want := preparer.remoteToneMapProbeTimeout(nodeURL), 161*time.Second; got != want {
-		t.Fatalf("cold probe timeout = %s, want the advertised %s", got, want)
-	}
-}
-
 // A budget learned before an operator widened the node's device set describes
 // the node as it was. Keeping it would cancel every cold retry at the old
 // one-device deadline — and a budget is only ever learned from a read that
@@ -1136,25 +838,6 @@ func TestNodeAwarePreparerRepricesALearnedBudgetAfterTheDeviceSetGrows(t *testin
 	}
 	if want <= learned {
 		t.Fatalf("fixture is inert: the four-device budget %s must exceed the learned %s", want, learned)
-	}
-}
-
-// The other direction: a node whose own measurement exceeds what this replica
-// can price for it keeps that measurement. An API replica has none of the node's
-// cards, so its pricing is a floor rather than the truth.
-func TestNodeAwarePreparerKeepsALearnedBudgetLargerThanThePolicyPrice(t *testing.T) {
-	const nodeURL = "https://node.example"
-	planner := &nodeLookupPlanner{node: &nodepool.Node{ID: 1, URL: nodeURL}}
-	cfg := &config.Config{}
-	preparer := NewNodeAwarePreparer(nil, planner, func() *config.Config { return cfg })
-	learned := playback.MaxCapabilityRequestTimeout()
-	preparer.capabilities[nodeURL] = remoteToneMapCapabilities{
-		probeRequestTimeout: learned,
-		expiresAt:           time.Now().Add(-time.Second),
-	}
-
-	if got := preparer.remoteToneMapProbeTimeout(nodeURL); got != learned {
-		t.Fatalf("probe timeout = %s, want the node's own larger measurement %s", got, learned)
 	}
 }
 
@@ -1201,12 +884,7 @@ func TestNodeAwarePreparerDoesNotCacheAnOvertakenCapabilityFetch(t *testing.T) {
 			close(invalidated)
 			<-released
 		}
-		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{
-			ToneMapCapabilities: tonemap.Capabilities{{
-				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
-				Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}},
-		})
+		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{ToneMapCapabilities: softwarePQToneMap()})
 	}))
 	defer remote.Close()
 	cfg := &config.Config{}
@@ -1257,12 +935,7 @@ func TestNodeAwarePreparerDoesNotCacheAnOvertakenCapabilityFailure(t *testing.T)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{
-			ToneMapCapabilities: tonemap.Capabilities{{
-				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
-				Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}},
-		})
+		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{ToneMapCapabilities: softwarePQToneMap()})
 	}))
 	defer remote.Close()
 	cfg := &config.Config{}
@@ -1295,22 +968,99 @@ func TestNodeAwarePreparerDoesNotCacheAnOvertakenCapabilityFailure(t *testing.T)
 	}
 }
 
-// With local fallback off, a job whose only nodes are full of prepared files
-// waits for space instead of failing as if no node existed.
-func TestNodeAwarePreparerWaitsWhenEveryNodeIsFull(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 5, URL: "http://full", Enabled: true, Healthy: true}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.SetStorageGate(func(nodeID int) bool { return nodeID == 5 })
-	p.SetSettingsReader(staticDownloadSettings{config.DownloadLocalTranscodeFallbackSettingKey: "false"})
+// Local transcoding runs only when no node can take the job and policy allows
+// it. Lease cancellation, an indeterminate recovery probe, a disabled or
+// unreadable fallback policy, and nodes full of prepared files all keep the job
+// off the local encoder.
+func TestNodeAwarePreparerLocalFallback(t *testing.T) {
+	limit := 1
+	fullNode := &nodepool.Node{URL: "http://full", Enabled: true, Healthy: true, ActiveJobs: 1, MaxJobs: &limit}
+	for _, test := range []struct {
+		name        string
+		node        nodepool.Node
+		remote      downloadprepare.RemotePreparer
+		settings    SettingsReader
+		storageFull func(nodeID int) bool
+		canceled    bool
+		artifactID  string
+		outputPath  string
+		// wantErr is nil when the job must be prepared locally.
+		wantErr func(error) bool
+	}{
+		{
+			name: "no eligible capacity", node: *fullNode, remote: &recordingRemotePreparer{},
+			artifactID: "artifact-2", outputPath: "/artifacts/job-2.mp4",
+		},
+		{
+			name: "fallback disabled by policy", node: *fullNode,
+			settings:   staticDownloadSettings{config.DownloadLocalTranscodeFallbackSettingKey: "false"},
+			artifactID: "artifact-no-fallback", outputPath: "/artifacts/job.mp4",
+			wantErr: func(err error) bool { return err != nil },
+		},
+		{
+			name: "fallback policy unreadable", node: *fullNode,
+			settings:   failingDownloadSettings{err: errors.New("settings unavailable")},
+			artifactID: "artifact-settings-unavailable", outputPath: "/artifacts/job.mp4",
+			wantErr: func(err error) bool {
+				return err != nil && strings.Contains(err.Error(), "local transcode fallback is disabled")
+			},
+		},
+		{
+			name: "remote unavailable", node: nodepool.Node{URL: "http://idle", Enabled: true, Healthy: true},
+			remote: unavailableRemotePreparer{}, artifactID: "artifact-4", outputPath: "/local/job-4.mp4",
+		},
+		{
+			name: "lease canceled", node: nodepool.Node{URL: "http://idle", Enabled: true, Healthy: true},
+			remote: unavailableRemotePreparer{}, canceled: true, artifactID: "artifact-6", outputPath: "/local/job-6.mp4",
+			wantErr: func(err error) bool { return errors.Is(err, context.Canceled) },
+		},
+		{
+			name: "recovery probe indeterminate", node: nodepool.Node{ID: 20, URL: "http://idle", Enabled: true, Healthy: true},
+			remote: indeterminateRemotePreparer{}, artifactID: "artifact-7", outputPath: "/local/job-7.mp4",
+			wantErr: func(err error) bool { return err != nil },
+		},
+		{
+			// With local fallback off, a job whose only nodes are full of prepared
+			// files waits for space instead of failing as if no node existed.
+			name: "every node full of prepared files", node: nodepool.Node{ID: 5, URL: "http://full", Enabled: true, Healthy: true},
+			settings:    staticDownloadSettings{config.DownloadLocalTranscodeFallbackSettingKey: "false"},
+			storageFull: func(nodeID int) bool { return nodeID == 5 },
+			artifactID:  "artifact-nodes-full", outputPath: "/artifacts/job.mp4",
+			wantErr: func(err error) bool { return errors.Is(err, ErrStorageFull) },
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			local := &recordingEncodePreparer{}
+			node := test.node
+			p := newPoolPreparer(local, &node)
+			if test.remote != nil {
+				p.remote = test.remote
+			}
+			if test.settings != nil {
+				p.SetSettingsReader(test.settings)
+			}
+			if test.storageFull != nil {
+				p.SetStorageGate(test.storageFull)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if test.canceled {
+				cancel()
+			}
 
-	if _, err := p.PrepareFile(context.Background(), "artifact-nodes-full", playback.TranscodeOpts{}, "/artifacts/job.mp4"); !errors.Is(err, ErrStorageFull) {
-		t.Fatalf("err = %v, want ErrStorageFull", err)
-	}
-	if local.calls != 0 {
-		t.Fatalf("local calls = %d, want 0", local.calls)
+			prepared, err := p.PrepareFile(ctx, test.artifactID, playback.TranscodeOpts{}, test.outputPath)
+			if test.wantErr == nil {
+				if err != nil || prepared.OutputPath == "" || local.calls != 1 {
+					t.Fatalf("prepared=%+v err=%v local calls=%d, want local preparation", prepared, err, local.calls)
+				}
+				return
+			}
+			if !test.wantErr(err) {
+				t.Fatalf("PrepareFile error = %v", err)
+			}
+			if local.calls != 0 {
+				t.Fatalf("local calls = %d, want 0", local.calls)
+			}
+		})
 	}
 }

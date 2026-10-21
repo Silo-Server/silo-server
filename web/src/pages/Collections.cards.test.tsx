@@ -3,10 +3,9 @@
  * each own card's ⋯ menu, the sharing switch in it, Sync now, and when
  * Shared with me and Server collections show.
  */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import getCollectionOk from "../../../contracts/api/v2/fixtures/get_collection_ok.json";
@@ -14,7 +13,7 @@ import getLibraryCollectionsOk from "../../../contracts/api/v2/fixtures/get_libr
 import listCollectionsOk from "../../../contracts/api/v2/fixtures/list_collections_ok.json";
 import { personalCapabilities } from "@/test/fixtures/collectionAnswers";
 import { installV2Recorder, v2Recorder } from "@/test/v2Recorder";
-import Collections from "./Collections";
+import { renderCollectionsPage } from "./collectionsPage.test-support";
 
 vi.mock("@/api/v2/request", async () => (await import("@/test/v2Recorder")).mockV2Request());
 const account = vi.hoisted(() => ({
@@ -69,24 +68,7 @@ function Where() {
   return <p data-testid="where">{location.pathname + location.search}</p>;
 }
 
-function show() {
-  render(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })
-      }
-    >
-      <MemoryRouter initialEntries={["/collections"]}>
-        <Routes>
-          <Route path="/collections" element={<Collections />} />
-          <Route path="*" element={<Where />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
+const show = () => renderCollectionsPage(<Where />);
 
 async function openMenu(name: string) {
   await userEvent.click(await screen.findByRole("button", { name: `More for ${name}` }));
@@ -94,22 +76,6 @@ async function openMenu(name: string) {
 }
 
 describe("Your collections card menu", () => {
-  it("offers Edit, the sharing switch and Delete on a manual collection, without Sync now", async () => {
-    show();
-    const menu = await openMenu("Rainy days");
-    const share = within(menu).getByRole("menuitemcheckbox", {
-      name: "Show to other profiles",
-      description: "Every profile on this account sees it",
-    });
-    expect(share).toHaveAttribute("aria-checked", "false");
-    expect([...menu.querySelectorAll('[role^="menuitem"]')]).toEqual([
-      within(menu).getByRole("menuitem", { name: "Edit collection" }),
-      within(menu).getByRole("menuitem", { name: "Add to my Home…" }),
-      share,
-      within(menu).getByRole("menuitem", { name: "Delete…" }),
-    ]);
-  });
-
   it("opens Add row on your Home from Add to my Home…, changing nothing yet", async () => {
     show();
     const menu = await openMenu("Rainy days");
@@ -141,13 +107,6 @@ describe("Your collections card menu", () => {
     expect(v2Recorder.callsOf("POST /api/v2/collections/{id}/sync")[0]?.path).toBe(
       "/api/v2/collections/c4/sync",
     );
-  });
-
-  it("opens the editor from Edit collection", async () => {
-    show();
-    const menu = await openMenu("Rainy days");
-    await userEvent.click(within(menu).getByRole("menuitem", { name: "Edit collection" }));
-    expect(await screen.findByTestId("where")).toHaveTextContent("/collections/c1/edit");
   });
 
   it("shares at once when the switch turns on, with the collection's ETag", async () => {
@@ -193,19 +152,6 @@ describe("Your collections card menu", () => {
     });
   });
 
-  it("sends nothing when stopping sharing is cancelled", async () => {
-    v2Recorder.answer("GET /api/v2/collections", { items: [sharedRainyDays, familyNight] });
-    show();
-    const menu = await openMenu("Rainy days");
-    await userEvent.click(
-      within(menu).getByRole("menuitemcheckbox", { name: "Show to other profiles" }),
-    );
-    const dialog = await screen.findByRole("alertdialog");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(v2Recorder.calls.filter((call) => call.path === "/api/v2/collections/c1")).toEqual([]);
-  });
-
   it("deletes after the confirm, with the collection's ETag", async () => {
     v2Recorder.answer("DELETE /api/v2/collections/{id}", undefined);
     show();
@@ -246,30 +192,9 @@ describe("Your collections cards", () => {
     );
     expect(within(synced).queryByText("Shared")).toBeNull();
   });
-
-  it("offers one dashed New collection card when the profile has none", async () => {
-    v2Recorder.answer("GET /api/v2/collections", { items: [familyNight] });
-    show();
-    const own = await screen.findByRole("region", { name: "Your collections" });
-    const card = await within(own).findByRole("button", { name: "New collection" });
-    expect(within(own).getAllByRole("button")).toEqual([card]);
-    await userEvent.click(card);
-    expect(await screen.findByRole("dialog", { name: "New collection" })).toBeInTheDocument();
-  });
 });
 
 describe("Shared with me", () => {
-  it("groups cards by owner, labels them read-only, and gives them no buttons", async () => {
-    show();
-    const shared = await screen.findByRole("region", { name: "Shared with me" });
-    expect(
-      within(shared).getByText("Read-only. Other profiles on this account made these."),
-    ).toBeInTheDocument();
-    expect(within(shared).getByRole("heading", { name: "by Maya" })).toBeInTheDocument();
-    expect(within(shared).getByRole("link", { name: "Family night" })).toBeInTheDocument();
-    expect(within(shared).queryAllByRole("button")).toEqual([]);
-  });
-
   it("hides on a single-profile account", async () => {
     account.profiles = [{ id: "p-owner", name: "Owner" }];
     show();

@@ -41,10 +41,13 @@ describe("DetailOverview", () => {
     expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
   });
 
-  it("does not clamp unbounded heroes", () => {
-    mockOverflow(true);
-    render(<DetailOverview overview="Full text" />);
-    expect(screen.getByText("Full text")).not.toHaveClass("line-clamp-3");
-    expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
+  it("labels machine-translated text, but not while a translation is running", () => {
+    mockOverflow(false);
+    const { rerender } = render(<DetailOverview overview="Übersetzt" machineTranslated />);
+    expect(screen.getByText("Translated by AI")).toBeInTheDocument();
+    rerender(<DetailOverview overview="Übersetzt" machineTranslated translating />);
+    expect(screen.queryByText("Translated by AI")).not.toBeInTheDocument();
+    rerender(<DetailOverview overview="Provider text" />);
+    expect(screen.queryByText("Translated by AI")).not.toBeInTheDocument();
   });
 });

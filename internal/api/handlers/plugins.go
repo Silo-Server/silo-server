@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
+
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -200,7 +203,8 @@ type PluginInstallationView struct {
 
 // PluginRuntimeView is one installation's process state. Resident marks a
 // plugin the supervisor keeps running (network access providers); State is
-// the supervisor's machine for those and running/stopped for lazily started
+// the supervisor's machine for those and running, stopped, or failed (the
+// last launch on this host failed, LastError says why) for lazily started
 // plugins.
 type PluginRuntimeView struct {
 	Resident      bool
@@ -247,6 +251,11 @@ type PluginCapabilityView struct {
 	// admin view derives the binding's sign-in URLs from them; the frozen
 	// v1 projection does not carry them.
 	AuthModes []string `json:"-"`
+	// RequestRouter is a request_router.v1 capability's descriptor, nil when
+	// the manifest declares none. The v2 admin view reads which connection
+	// fields the plugin can do without from it; the frozen v1 projection does
+	// not carry it.
+	RequestRouter *pluginv1.RequestRouterDescriptor `json:"-"`
 }
 
 type PluginRouteView struct {
@@ -1426,7 +1435,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	}
 	var runtime *PluginRuntimeView
 	if h.service != nil {
-		state := h.service.RuntimeState(installation.ID)
+		state := h.service.RuntimeStateOf(installation)
 		runtime = &PluginRuntimeView{Resident: state.Resident, State: string(state.State), RestartCount: state.RestartCount, LastError: state.LastError, LastStartedAt: state.LastStartedAt, NextRestartAt: state.NextRestartAt}
 		// Before the supervisor arms (boot) the capability says what will be
 		// resident. Once armed, its entries are the truth: an enabled
@@ -1549,6 +1558,7 @@ func capabilitiesToJSON(descriptors []*pluginv1.CapabilityDescriptor) []PluginCa
 			ConfigSchema:  configSchemasToJSON(descriptor.GetConfigSchema()),
 			Metadata:      structToMap(descriptor.GetMetadata()),
 			AuthModes:     append([]string(nil), descriptor.GetAuthModes()...),
+			RequestRouter: descriptor.GetRequestRouter(),
 		})
 	}
 	return response
@@ -1704,7 +1714,8 @@ func (h *PluginHandler) loadInstallationCapabilities(
 	manifest *pluginv1.PluginManifest,
 ) ([]PluginCapabilityView, error) {
 	if manifest != nil {
-		return capabilitiesToJSON(manifest.GetCapabilities()), nil
+		views := capabilitiesToJSON(manifest.GetCapabilities())
+		return views, h.useStoredRequestRouters(ctx, installation, views)
 	}
 
 	records, err := h.installations.ListCapabilities(ctx, installation.ID)
@@ -1721,6 +1732,44 @@ func (h *PluginHandler) loadInstallationCapabilities(
 		response = append(response, capabilitiesToJSON([]*pluginv1.CapabilityDescriptor{descriptor})...)
 	}
 	return response, nil
+}
+
+// useStoredRequestRouters gives each request_router.v1 capability the
+// descriptor stored when the plugin was installed, which is what the requests
+// service reads. The installed manifest can declare flags that a host built on
+// an older SDK dropped when it stored the capability, and the admin form must
+// not offer a server setup that routing then refuses.
+func (h *PluginHandler) useStoredRequestRouters(ctx context.Context, installation *plugins.Installation, views []PluginCapabilityView) error {
+	if !slices.ContainsFunc(views, func(v PluginCapabilityView) bool { return v.Type == sdkcapability.RequestRouter }) {
+		return nil
+	}
+	records, err := h.installations.ListCapabilities(ctx, installation.ID)
+	if err != nil {
+		return err
+	}
+	return applyStoredRequestRouters(views, records)
+}
+
+// applyStoredRequestRouters sets each request_router.v1 view's descriptor to
+// the stored record's with the same ID, or none when no record has one.
+func applyStoredRequestRouters(views []PluginCapabilityView, records []*plugins.Capability) error {
+	stored := map[string]*pluginv1.RequestRouterDescriptor{}
+	for _, record := range records {
+		if record == nil || record.Type != sdkcapability.RequestRouter {
+			continue
+		}
+		descriptor, err := plugins.DecodeCapability(record)
+		if err != nil {
+			return err
+		}
+		stored[record.ID] = descriptor.GetRequestRouter()
+	}
+	for i := range views {
+		if views[i].Type == sdkcapability.RequestRouter {
+			views[i].RequestRouter = stored[views[i].ID]
+		}
+	}
+	return nil
 }
 
 func loadPluginManifest(installation *plugins.Installation) (*pluginv1.PluginManifest, error) {

@@ -13,7 +13,7 @@ import (
 const compatLoginRateLimitBucket = "login"
 
 // compatRateLimit returns the native authenticated-route limiter with a
-// Jellyfin-style error body. It spends the global and per-IP budgets; the
+// Jellyfin-style error body. It spends the global, per-IP and account budgets; the
 // per-API-key tier budget needs native API-key claims, which compat auth does
 // not set. A nil middleware, used when rate limiting is disabled, leaves routes
 // unlimited.

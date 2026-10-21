@@ -93,7 +93,10 @@ whole run, software attempts included, so an admin re-probe is refused until
 the run ends. Failures use `trickplay.ExtractError` JSON;
 a `422` carries the sampling cause and whether it is `permanent` (a cause in
 the file itself). Nodes advertise the endpoint as the
-`trickplay_extract_v1` transport feature. It has no replay receipt and is
+`trickplay_extract_v1` transport feature, and as `trickplay_extract_v2` once
+they convert HDR with the tone-map source signal a request names
+(`sheets.tone_map.source`), decode on CUDA, and repair missing and repeated
+cells; API servers that send the signal only use v2 nodes. It has no replay receipt and is
 classified `non_retryable`; the API server keeps the work's lease and moves
 it to another node or back to the queue.
 

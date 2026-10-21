@@ -185,7 +185,7 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 		return view, playbackOperationError(http.StatusConflict, "capability_not_configured", "Playback installation identity is not configured")
 	}
 	view.InstallationID = h.InstallationID
-	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1")
+	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1")
 	if h.WatchTogetherAvailable {
 		view.Features = append(view.Features, "watch_party_source_fallback_v1", "watch_party_coordinator_v1")
 	}
@@ -442,11 +442,19 @@ func (h *PlaybackHandler) writeProgressSideEffectsV2(ctx context.Context, record
 	session, err := h.sessionMgr.GetSession(sessionID)
 	if err == nil && session != nil {
 		wasPaused := session.IsPaused
-		if err := h.sessionMgr.UpdateProgress(sessionID, sample.Position, sample.IsPaused); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "failed to update live playback progress", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+		var updateErr error
+		if mgr, ok := h.sessionMgr.(interface {
+			UpdateProgressSample(string, playback.ProgressSampleV3) error
+		}); ok {
+			updateErr = mgr.UpdateProgressSample(sessionID, sample)
+		} else {
+			updateErr = h.sessionMgr.UpdateProgress(sessionID, sample.Position, sample.IsPaused)
 		}
-		h.syncSessionsOnPauseChange(ctx, wasPaused, sample.IsPaused)
+		if updateErr != nil && !errors.Is(updateErr, playback.ErrSessionNotFound) {
+			slog.WarnContext(ctx, "failed to update live playback progress", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", updateErr)
+		}
 		if current, getErr := h.sessionMgr.GetSession(sessionID); getErr == nil && current != nil {
+			h.syncSessionsOnPauseChange(ctx, wasPaused, current.IsPaused)
 			h.persistProgress(ctx, current)
 			h.scrobblePauseTransitionV2(ctx, current, wasPaused)
 			return

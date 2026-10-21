@@ -84,60 +84,6 @@ func raceEditorWrites(t *testing.T, write func() error, wantSuccess int) {
 	}
 }
 
-func TestEditorSettingsAndLimitsDatabase(t *testing.T) {
-	repo := editorTestRepository(t)
-	ctx := t.Context()
-	viewer := Viewer{IsAdmin: true}
-	service := NewService(repo, nil, nil)
-	settings, err := service.GetSettings(ctx, viewer)
-	if err != nil || settings.Revision != 0 || settings.GlobalMaxRequests != 5 || settings.GlobalWindowDays != 7 {
-		t.Fatalf("missing settings: %+v %v", settings, err)
-	}
-	raceEditorWrites(t, func() error { _, err := repo.UpdateSettingsConditional(ctx, settings, 0); return err }, 1)
-	settings, err = repo.GetSettings(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raceEditorWrites(t, func() error { _, err := repo.UpdateSettingsConditional(ctx, settings, settings.Revision); return err }, 1)
-	raceEditorWrites(t, func() error { _, err := repo.UpdateSettingsConditional(ctx, settings, -1); return err }, 12)
-	current, err := repo.GetSettings(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy, err := repo.UpdateSettings(ctx, current)
-	if err != nil || legacy.Revision <= current.Revision {
-		t.Fatalf("legacy revision: %+v %v", legacy, err)
-	}
-	if _, err = repo.UpdateSettingsConditional(ctx, current, current.Revision); !errors.Is(err, ErrStaleRevision) {
-		t.Fatalf("stale legacy: %v", err)
-	}
-	limit, err := service.GetUserLimit(ctx, viewer, 1)
-	if err != nil || limit.Revision != 0 || limit.LimitMode != LimitModeInherit {
-		t.Fatalf("default limit: %+v %v", limit, err)
-	}
-	if _, err = service.GetUserLimit(ctx, viewer, 999); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("unknown account: %v", err)
-	}
-	raceEditorWrites(t, func() error { _, err := repo.UpsertUserLimitConditional(ctx, *limit, 0); return err }, 1)
-	limit, err = repo.GetUserLimit(ctx, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raceEditorWrites(t, func() error { _, err := repo.UpsertUserLimitConditional(ctx, *limit, limit.Revision); return err }, 1)
-	raceEditorWrites(t, func() error { _, err := repo.UpsertUserLimitConditional(ctx, *limit, -1); return err }, 12)
-	currentLimit, err := repo.GetUserLimit(ctx, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacyLimit, err := repo.UpsertUserLimit(ctx, *currentLimit)
-	if err != nil || legacyLimit.Revision <= currentLimit.Revision {
-		t.Fatalf("legacy limit: %+v %v", legacyLimit, err)
-	}
-	if _, err = repo.UpsertUserLimitConditional(ctx, UserLimit{UserID: 999}, 0); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("unknown account write: %v", err)
-	}
-}
-
 func TestEditorIntegrationsDatabase(t *testing.T) {
 	repo := editorTestRepository(t)
 	ctx := t.Context()
@@ -235,36 +181,61 @@ func TestEditorIntegrationsDatabase(t *testing.T) {
 	}
 }
 
-// Validation is external work: a concurrent edit must still win the final CAS.
-type editingValidationRouter struct {
-	*fakeRouterProvider
-	edit func() error
-}
-
-func (r *editingValidationRouter) Validate(context.Context, int, string, ResolvedRouterConnection, []ResolvedRouterConnection) (map[string]string, string, error) {
-	return nil, "", r.edit()
-}
-func TestEditorValidationRaceDatabase(t *testing.T) {
+// A blank key keeps the saved key only for the address it was saved for. The
+// write checks this under the row lock, on both save paths, so a key saved
+// after validation, or an address changed since, never ends up paired with
+// another address.
+func TestIntegrationKeyStaysWithItsAddressDatabase(t *testing.T) {
 	repo := editorTestRepository(t)
 	ctx := t.Context()
-	in := Integration{ID: "validation-race", Name: "Before", CapabilityID: "arr", InstallationID: new(1)}
-	row, err := repo.CreateIntegration(ctx, in)
-	if err != nil {
+	keyed := Integration{ID: "keyed", Name: "Keyed", Enabled: true, BaseURL: "http://radarr.invalid:7878/", APIKeyRef: "secret-key", CapabilityID: "arr", InstallationID: new(1)}
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, keyed, true); err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(repo, nil, nil)
-	service.SetRouterProvider(&editingValidationRouter{fakeRouterProvider: &fakeRouterProvider{}, edit: func() error {
-		concurrent := in
-		concurrent.Name = "Concurrent winner"
-		_, err := repo.UpdateIntegration(ctx, concurrent)
-		return err
-	}})
-	in.Name = "Losing edit"
-	if _, err = service.UpdateIntegrationConditional(ctx, Viewer{IsAdmin: true}, in, row.Revision); !errors.Is(err, ErrStaleRevision) {
-		t.Fatalf("validation race: %v", err)
+	keyless := Integration{ID: "keyless", Name: "Keyless", Enabled: true, CapabilityID: "local", InstallationID: new(2)}
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, keyless, true); err != nil {
+		t.Fatal(err)
 	}
-	current, err := repo.GetIntegration(ctx, in.ID)
-	if err != nil || current.Name != "Concurrent winner" {
-		t.Fatalf("concurrent edit lost: %+v %v", current, err)
+	refused := func(err error) bool {
+		var ve *ValidationError
+		return errors.As(err, &ve) && ve.FieldErrors[fieldAPIKey] == integrationKeyReentry
+	}
+
+	// The same address, written another way, keeps the key.
+	same := keyed
+	same.APIKeyRef, same.BaseURL = "", "radarr.invalid:7878"
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, same, false); err != nil {
+		t.Fatalf("same address: %v", err)
+	}
+	// Another address without the key is refused, and the row is unchanged.
+	moved := keyed
+	moved.APIKeyRef, moved.BaseURL = "", "http://elsewhere.invalid"
+	if _, err := repo.SaveIntegrationWithDefaults(ctx, moved, false); !refused(err) {
+		t.Fatalf("new address without the key: %v, want the re-enter error", err)
+	}
+	current, err := repo.GetIntegration(ctx, keyed.ID)
+	if err != nil || current.BaseURL != same.BaseURL || current.APIKeyRef != keyed.APIKeyRef {
+		t.Fatalf("after the refused save: %+v %v", current, err)
+	}
+	edit := *current
+	edit.APIKeyRef, edit.BaseURL = "", "http://elsewhere.invalid"
+	if _, err = repo.UpdateIntegrationConditional(ctx, edit, current.Revision); !refused(err) {
+		t.Fatalf("conditional save of a new address without the key: %v, want the re-enter error", err)
+	}
+	// Clearing the address is a change of address too.
+	cleared := *current
+	cleared.APIKeyRef, cleared.BaseURL = "", ""
+	if _, err = repo.SaveIntegrationWithDefaults(ctx, cleared, false); !refused(err) {
+		t.Fatalf("cleared address without the key: %v, want the re-enter error", err)
+	}
+	// With the key typed again, the address can change.
+	moved.APIKeyRef = keyed.APIKeyRef
+	if _, err = repo.SaveIntegrationWithDefaults(ctx, moved, false); err != nil {
+		t.Fatalf("new address with the key: %v", err)
+	}
+	// A server saved without a key has none to keep, so its address can change.
+	keyless.BaseURL = "http://local.invalid"
+	if _, err = repo.SaveIntegrationWithDefaults(ctx, keyless, false); err != nil {
+		t.Fatalf("keyless server's new address: %v", err)
 	}
 }

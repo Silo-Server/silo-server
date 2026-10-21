@@ -72,6 +72,11 @@ type Envelope struct {
 	UserID    int             `json:"user_id,omitempty"`
 	ProfileID string          `json:"profile_id,omitempty"`
 	AdminOnly bool            `json:"admin_only,omitempty"`
+	// AllViewers addresses a user_settings event to every connection rather
+	// than to one account or profile. It is honored only on an envelope that
+	// names no account and no profile, and is reserved for server-wide changes
+	// such as an administrator default.
+	AllViewers bool `json:"all_viewers,omitempty"`
 	// TargetPluginID, when non-empty, restricts dispatch to a single installed
 	// plugin (and only if it is already a subscriber). Used by
 	// RuntimeHostServer.PublishEventTo.
@@ -79,10 +84,11 @@ type Envelope struct {
 }
 
 type PublishOptions struct {
-	EventID   string
-	UserID    int
-	ProfileID string
-	AdminOnly bool
+	EventID    string
+	UserID     int
+	ProfileID  string
+	AdminOnly  bool
+	AllViewers bool
 }
 
 type EventsHelloMessage struct {

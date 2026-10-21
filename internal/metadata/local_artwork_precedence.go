@@ -123,11 +123,6 @@ type localArtworkRetention struct {
 	// probes memoizes folder probes, so the episodes of one season folder
 	// cost one probe. Retentions made with atLevel share it.
 	probes map[string]rootcheck.Result
-	// usable, when set, rejects local sources this refresh may not use (an
-	// image URL an NFO names while caching is off, see
-	// MetadataService.localMetadataURLUsable); such a source is never kept.
-	// Searched levels already imply that local artwork is usable at all.
-	usable func(source string) bool
 }
 
 func newLocalArtworkRetention(ctx context.Context, contentID string, level localArtworkLevel) *localArtworkRetention {
@@ -160,7 +155,6 @@ func (r *localArtworkRetention) keep(imageType ImageType, incoming, existingSour
 	}
 	if !r.searched ||
 		!isLocalImageSourcePath(existingSource) ||
-		(r.usable != nil && !r.usable(existingSource)) ||
 		!isRemoteImageSourcePath(incoming) ||
 		gone(existingSource) {
 		return false

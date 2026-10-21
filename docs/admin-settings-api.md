@@ -30,7 +30,19 @@ compatibility does not expose these administrator settings contracts.
 check against the submitted `values` and `dirty_keys`, merged with stored settings.
 Supported kinds are `s3_public`, `s3_operational`, `s3_private`, `redis`,
 `recommendations_embedding`, `ai_chat`, `ai_transcription`, `meilisearch`, and
-`mdblist`. Existing endpoint-change protection for stored AI credentials applies.
+`mdblist`. Stored AI, embedding and Meilisearch credentials are sent only to the
+authority they were saved for (same scheme, host and effective port; hosts are
+compared as the HTTP client dials them, after IDNA conversion, and explicit HTTP
+port 80 and HTTPS port 443 equal their implicit defaults). A draft
+that points `ai_chat`, `ai_transcription`, `recommendations_embedding` or
+`meilisearch` elsewhere is checked with the credential it submits in `values`
+and `dirty_keys`, or none.
+Same-authority path changes retain saved credentials. Explicit empty credentials
+remain clears under each provider's existing fallback rules. Connection checks do
+not persist draft values. Credentialed Meilisearch checks follow redirects only
+within the same scheme, exact host and effective port; any other redirect fails the check with a
+message asking for the final address. Checks without a key retain the HTTP
+client's ordinary redirect behavior.
 Provider failures return `success: false` with a generic message that excludes
 provider error bodies and credentials. Invalid kinds/configuration return `422`.
 
@@ -222,6 +234,35 @@ single-server URL and for a Sentinel URL. A change needs a restart.
   of `redis.url`, so a new URL alone does not move the install to another
   database. That includes a cleared URL, so a URL emptied and typed again keeps
   the number; a save that leaves no URL stores no number.
+
+### Saving the Redis connection
+
+A server that cannot connect to the Redis its stored settings name stops at its
+next start, and a stored value can then no longer be corrected in the admin UI.
+So a write that changes that connection first runs the check that
+`POST /api/v2/admin/settings/check/redis` runs, and stores nothing when it
+fails. The check connects, sends a `PING` and subscribes to the event bus
+channels on the database number, which a starting server needs. It gives up
+after 10 seconds, even for a URL that turns the socket timeouts off.
+
+- The connection changes when the write leaves a different `redis.url`, or a
+  different database number in use, than the stored settings. Both
+  writes and both API versions apply the check. A write that leaves the
+  connection as it is, clears `redis.url`, or runs in a process started with
+  `REDIS_URL` connects to nothing.
+- Connecting selects the database number, so a number the Redis server does
+  not have (16 or more on a Redis with the default 16 databases) fails the
+  same way an unreachable host does. So does a Redis user whose ACL does not
+  grant the channels (the pattern `&silo:*`).
+- A failed connection answers a `422` validation problem on `/api/v2` and
+  `400 invalid_settings` on `/api/v1`. The detail says whether Redis refused
+  the connection, refused the channels, or could not be reached, or that
+  `redis.url` is not a URL the Redis clients can read (a bare `host:port` an
+  older build saved). It does not quote the client error, which can name hosts
+  and addresses; the server logs that error with credentials masked.
+- The connection is made before the settings transaction. If another write
+  changes the stored Redis settings in the meantime, the write is refused the
+  same way and can be sent again.
 
 ### HEVC encoding
 

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -79,7 +80,7 @@ func TestAttachExtraBackdropsListsThePrimaryFirst(t *testing.T) {
 	series := &ItemDetail{ContentID: "series-1", Type: "series"}
 	bare := &ItemDetail{ContentID: "movie-2", Type: "movie"}
 	episode := &ItemDetail{ContentID: "movie-1", Type: "episode", BackdropURL: "https://cdn.example/series-backdrop"}
-	s.attachExtraBackdrops(context.Background(), []*ItemDetail{movie, series, bare, episode, nil}, "", true)
+	s.attachExtraBackdrops(context.Background(), []*ItemDetail{movie, series, bare, episode, nil}, imagesize.Request{}, true)
 
 	if want := []string{
 		"https://cdn.example/primary",
@@ -104,7 +105,7 @@ func TestAttachExtraBackdropsListsThePrimaryFirst(t *testing.T) {
 	// A batch read carries the paths without presigning anything.
 	batch := &ItemDetail{ContentID: "movie-1", Type: "movie", BackdropURL: "https://cdn.example/primary", BannerPath: "local/movies/movie-1/ee/banner/original.r5.webp"}
 	resolver.calls = 0
-	s.attachExtraBackdrops(context.Background(), []*ItemDetail{batch}, "", false)
+	s.attachExtraBackdrops(context.Background(), []*ItemDetail{batch}, imagesize.Request{}, false)
 	if resolver.calls != 0 || batch.BackdropURLs != nil || batch.BannerURL != "" || len(batch.ExtraBackdropPaths) != 2 {
 		t.Fatalf("batch: %d presigns, URLs %q, paths %q", resolver.calls, batch.BackdropURLs, batch.ExtraBackdropPaths)
 	}
@@ -118,4 +119,20 @@ type countingResolver struct {
 func (r *countingResolver) ResolveImageURL(ctx context.Context, path, variant string) string {
 	r.calls++
 	return r.echoImageResolver.ResolveImageURL(ctx, path, variant)
+}
+
+// backdrop_width governs backdrop_urls only; the banner, thumb, clear art and
+// disc art keep the response-wide size.
+func TestAttachExtraBackdropsKeepsExtendedArtOffTheBackdropWidth(t *testing.T) {
+	lister := fakeBackdropLister{"movie-1": {{Ordinal: 1, Path: "local/movies/movie-1/aa-1/backdrop/original.r1.webp"}}}
+	s := &DetailService{imageResolver: &countingResolver{}, backdropRepo: lister}
+	movie := &ItemDetail{ContentID: "movie-1", Type: "movie", BannerPath: "local/movies/movie-1/ee/banner/original.r5.webp"}
+	s.attachExtraBackdrops(context.Background(), []*ItemDetail{movie}, imagesize.Request{Widths: imagesize.Widths{Backdrop: 2688}}, true)
+
+	if want := []string{"https://cdn.example/local/movies/movie-1/aa-1/backdrop/original.r1.webp"}; !slices.Equal(movie.BackdropURLs, want) {
+		t.Fatalf("backdrop URLs = %q, want %q", movie.BackdropURLs, want)
+	}
+	if want := "https://cdn.example/local/movies/movie-1/ee/banner/w500.r5.webp"; movie.BannerURL != want {
+		t.Fatalf("banner URL = %q, want %q", movie.BannerURL, want)
+	}
 }

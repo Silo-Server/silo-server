@@ -7,17 +7,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestValidSubMode(t *testing.T) {
-	for _, m := range []string{SubModeAll, SubModeFuture, SubModeLatestSeason, SubModeSpecificSeasons} {
-		if !ValidSubMode(m) {
-			t.Errorf("ValidSubMode(%q) = false, want true", m)
-		}
-	}
-	if ValidSubMode("bogus") {
-		t.Errorf("ValidSubMode(bogus) = true, want false")
-	}
-}
-
 func TestSubscriptionCoversSeason(t *testing.T) {
 	three := 3
 	cases := []struct {

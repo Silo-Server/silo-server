@@ -2,10 +2,9 @@ import { memo, useMemo } from "react";
 import { ContinueWatchingRowCard } from "@/components/ContinueWatchingCard";
 import MediaCarousel, { type MediaCarouselWindowing } from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
-import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
-import { buildSectionCatalogHref, isSectionBrowseSupported } from "@/pages/catalogSearchParams";
+import { buildSectionCatalogHref } from "@/pages/catalogSearchParams";
 import type { ResolvedSection } from "@/api/types";
 import { Pin, PinOff } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
@@ -54,8 +53,18 @@ function SectionPinButton({
 }
 
 export default memo(function SectionRow({ section, libraryId, priority = false }: SectionRowProps) {
-  const navigate = useViewTransitionNavigate();
-  const browseSupported = isSectionBrowseSupported(section.section_type);
+  const browseHref = useMemo(
+    () =>
+      libraryId
+        ? buildSectionCatalogHref({
+            scope: "library",
+            libraryId,
+            sectionId: section.id,
+            title: section.title,
+          })
+        : buildSectionCatalogHref({ scope: "home", sectionId: section.id, title: section.title }),
+    [libraryId, section.id, section.title],
+  );
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterSize = cardPresentation.poster_size;
@@ -89,40 +98,17 @@ export default memo(function SectionRow({ section, libraryId, priority = false }
   );
   const priorityCount = priority ? visibleCarouselSlideCount(slideSize) : 0;
 
-  const handleViewAll = () => {
-    if (!browseSupported) {
-      return;
-    }
-
-    navigate(
-      libraryId
-        ? buildSectionCatalogHref({
-            scope: "library",
-            libraryId: libraryId,
-            sectionId: section.id,
-            title: section.title,
-          })
-        : buildSectionCatalogHref({
-            scope: "home",
-            sectionId: section.id,
-            title: section.title,
-          }),
-    );
-  };
-
   if (section.items.length === 0) return null;
 
-  const headerActions =
-    libraryId && browseSupported ? (
-      <SectionPinButton sectionId={section.id} sectionTitle={section.title} libraryId={libraryId} />
-    ) : undefined;
+  const headerActions = libraryId ? (
+    <SectionPinButton sectionId={section.id} sectionTitle={section.title} libraryId={libraryId} />
+  ) : undefined;
 
   return (
     <MediaCarousel
       title={section.title}
-      onViewAll={
-        browseSupported && section.total_count > section.item_limit ? handleViewAll : undefined
-      }
+      titleHref={browseHref}
+      viewAllHref={browseHref}
       headerActions={headerActions}
       windowing={windowing}
     >

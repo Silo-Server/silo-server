@@ -150,25 +150,6 @@ type AdminTMDBListImport struct {
 	ManagementKey    string          `json:"management_key,omitempty"`
 }
 
-type AdminTraktImport struct {
-	SortConfig       json.RawMessage `json:"sort_config,omitempty"`
-	LibraryID        ID              `json:"library_id,omitempty"`
-	LibraryIDs       []ID            `json:"library_ids,omitempty" maxItems:"1000"`
-	Title            string          `json:"title" minLength:"1"`
-	Description      string          `json:"description,omitempty"`
-	Preset           string          `json:"preset,omitempty"`
-	MediaType        string          `json:"media_type,omitempty"`
-	ProfileID        ID              `json:"profile_id,omitempty"`
-	ListURL          string          `json:"list_url,omitempty"`
-	Limit            *int            `json:"limit,omitempty" nullable:"false"`
-	Featured         bool            `json:"featured,omitempty"`
-	PosterURL        string          `json:"poster_url,omitempty"`
-	SyncSchedule     string          `json:"sync_schedule,omitempty"`
-	ManagementMode   string          `json:"management_mode,omitempty"`
-	ManagementSource string          `json:"management_source,omitempty"`
-	ManagementKey    string          `json:"management_key,omitempty"`
-}
-
 type AdminTemplateApply struct {
 	LibraryIDs     []ID                   `json:"library_ids" minItems:"1" maxItems:"1000"`
 	DryRun         bool                   `json:"dry_run,omitempty"`
@@ -360,26 +341,6 @@ func (v AdminTMDBListImport) command() (handlers.AdminCollectionImportTMDBList, 
 	}
 	c.LibraryID, c.LibraryIDs, c.Title, c.Description, c.URL = libraryID, ids, v.Title, v.Description, v.URL
 	c.SortConfig, c.Limit, c.Featured, c.SortOrder, c.PosterURL, c.SyncSchedule = v.SortConfig, v.Limit, v.Featured, v.SortOrder, v.PosterURL, v.SyncSchedule
-	c.ManagementMode, c.ManagementSource, c.ManagementKey = v.ManagementMode, v.ManagementSource, v.ManagementKey
-	return c, nil
-}
-func (v AdminTraktImport) command() (handlers.AdminCollectionImportTrakt, *Problem) {
-	var c handlers.AdminCollectionImportTrakt
-	ids, p := intsOfIDs(v.LibraryIDs, "library_ids")
-	if p != nil {
-		return c, p
-	}
-	var libraryID int
-	if v.LibraryID != "" {
-		lowered, p := intsOfIDs([]ID{v.LibraryID}, "library_id")
-		if p != nil {
-			return c, p
-		}
-		libraryID = lowered[0]
-	}
-	c.LibraryID, c.LibraryIDs, c.Title, c.Description = libraryID, ids, v.Title, v.Description
-	c.Preset, c.MediaType, c.ProfileID, c.ListURL, c.Limit = v.Preset, v.MediaType, string(v.ProfileID), v.ListURL, v.Limit
-	c.SortConfig, c.Featured, c.PosterURL, c.SyncSchedule = v.SortConfig, v.Featured, v.PosterURL, v.SyncSchedule
 	c.ManagementMode, c.ManagementSource, c.ManagementKey = v.ManagementMode, v.ManagementSource, v.ManagementKey
 	return c, nil
 }

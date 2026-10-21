@@ -1,11 +1,6 @@
 import { Lock } from "lucide-react";
 
-import {
-  DISCOVER_LOCKED,
-  DISCOVER_STILL_EDITABLE,
-  TRAKT_LOCKED,
-  TRAKT_STILL_EDITABLE,
-} from "@/lib/collections/copy";
+import { DISCOVER_LOCKED, DISCOVER_STILL_EDITABLE } from "@/lib/collections/copy";
 import { SYNCED_SOURCE_LABEL } from "@/lib/collections/types";
 
 const DISCOVER_ORDER: Record<string, string> = {
@@ -32,46 +27,24 @@ function discoverFinds(config: Record<string, unknown>): string {
   return order ? `${media}, ${order}` : media;
 }
 
-/** "Recommended movies", or the Trakt list's link. */
-function traktFinds(config: Record<string, unknown>, sourceUrl: string): string {
-  const link = text(config.list_url) || text(config.url);
-  if (config.mode === "trakt_list") return link || sourceUrl;
-  const preset = text(config.preset) || "trending";
-  const media = config.media_type === "tv" ? "TV shows" : "movies";
-  return `${preset.charAt(0).toUpperCase()}${preset.slice(1)} ${media}`;
-}
-
 /**
- * The list a Discover (starter pack) or legacy Trakt list follows, read-only:
- * the editor can't rebuild either source, so a save never sends it.
+ * The list a Discover (starter pack) list follows, read-only: the editor
+ * can't rebuild its source, so a save never sends it.
  */
-export function LockedSourceSummary({
-  source,
-  config,
-  sourceUrl,
-}: {
-  source: "tmdb_discover" | "trakt";
-  config: Record<string, unknown>;
-  sourceUrl: string;
-}) {
-  const discover = source === "tmdb_discover";
+export function LockedSourceSummary({ config }: { config: Record<string, unknown> }) {
   return (
     <div className="bg-muted/40 grid gap-3 rounded-xl px-4 py-3.5 text-[13.5px]">
       <p className="flex items-center gap-2 font-semibold">
         <Lock aria-hidden className="size-4 shrink-0" />
-        {discover ? DISCOVER_LOCKED : TRAKT_LOCKED}
+        {DISCOVER_LOCKED}
       </p>
       <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
         <dt className="text-muted-foreground">Source</dt>
-        <dd>{SYNCED_SOURCE_LABEL[source]}</dd>
+        <dd>{SYNCED_SOURCE_LABEL.tmdb_discover}</dd>
         <dt className="text-muted-foreground">Finds</dt>
-        <dd className="break-words">
-          {discover ? discoverFinds(config) : traktFinds(config, sourceUrl)}
-        </dd>
+        <dd className="break-words">{discoverFinds(config)}</dd>
       </dl>
-      <p className="text-muted-foreground text-[13px]">
-        {discover ? DISCOVER_STILL_EDITABLE : TRAKT_STILL_EDITABLE}
-      </p>
+      <p className="text-muted-foreground text-[13px]">{DISCOVER_STILL_EDITABLE}</p>
     </div>
   );
 }

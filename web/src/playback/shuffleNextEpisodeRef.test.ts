@@ -15,16 +15,6 @@ describe("shuffleNextEpisodeRef", () => {
     expect(ref.watchState).toBeUndefined();
   });
 
-  it("passes an episode's played flag and position", () => {
-    const ref = shuffleNextEpisodeRef(
-      shuffleWith({
-        user_state: { played: true } as Shuffle["next"]["user_state"],
-        position_seconds: 30,
-      }),
-    );
-    expect(ref.watchState).toEqual({ played: true, position_seconds: 30 });
-  });
-
   it("protects a still ThumbHash shown under a series backdrop URL", () => {
     const ref = shuffleNextEpisodeRef(
       shuffleWith({

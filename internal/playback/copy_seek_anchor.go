@@ -84,7 +84,7 @@ func ResolveCopySeekAnchor(
 		if result.Err != nil {
 			return 0, 0, result.Err
 		}
-		anchor := result.Val.(copySeekAnchor)
+		anchor := result.Val.(copySeekAnchor) //nolint:errcheck,forcetypeassert // copySeekProbeGroup's only DoChan closure returns a copySeekAnchor
 		return anchor.seconds, anchor.segment, nil
 	}
 }

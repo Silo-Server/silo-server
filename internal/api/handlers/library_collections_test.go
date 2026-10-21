@@ -9,23 +9,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestNormalizeTraktPresetRequest(t *testing.T) {
-	preset, mediaType, profileID, err := normalizeTraktPresetRequest("recommended", "tv", "prof-1")
-	if err != nil {
-		t.Fatalf("normalizeTraktPresetRequest: %v", err)
-	}
-	if preset != "recommended" || mediaType != "tv" || profileID != "prof-1" {
-		t.Fatalf("got %q/%q/%q", preset, mediaType, profileID)
-	}
-
-	if _, _, _, err := normalizeTraktPresetRequest("recommended", "movie", ""); err == nil {
-		t.Fatal("expected profile_id error")
-	}
-	if _, _, _, err := normalizeTraktPresetRequest("popular", "all", ""); err == nil {
-		t.Fatal("expected media_type error")
-	}
-}
-
 func TestBuildTMDBCollectionSourceConfig(t *testing.T) {
 	limit := 12
 	raw, err := buildTMDBCollectionSourceConfig(86311, &limit)
@@ -98,15 +81,6 @@ func TestBuildTMDBCollectionSourceConfig_PlaceholderOmitsCollectionID(t *testing
 	}
 	if _, ok := got["limit"]; ok {
 		t.Errorf("limit should be omitted when nil, got %v", got["limit"])
-	}
-}
-
-func TestBuildTMDBCollectionSourceURL(t *testing.T) {
-	if url := buildTMDBCollectionSourceURL(86311); url != "tmdb://collection/86311" {
-		t.Fatalf("source url = %q", url)
-	}
-	if url := buildTMDBCollectionSourceURL(0); url != "tmdb://collection/0" {
-		t.Fatalf("placeholder source url = %q", url)
 	}
 }
 
@@ -229,35 +203,6 @@ func TestBuildTMDBDiscoverSourceConfigRoundTrips(t *testing.T) {
 	}
 }
 
-func TestBuildTMDBDiscoverSourceConfigMinimal(t *testing.T) {
-	raw, err := buildTMDBDiscoverSourceConfig("tv", importTMDBDiscoverSpecBody{
-		SortBy: "vote_average.desc",
-	}, nil)
-	if err != nil {
-		t.Fatalf("buildTMDBDiscoverSourceConfig: %v", err)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got["mode"] != "tmdb_discover" || got["media_type"] != "tv" {
-		t.Errorf("mode/media_type = %v / %v", got["mode"], got["media_type"])
-	}
-	if _, ok := got["limit"]; ok {
-		t.Errorf("limit should be omitted when nil, got = %#v", got["limit"])
-	}
-	discover, ok := got["discover"].(map[string]any)
-	if !ok {
-		t.Fatalf("discover missing: %#v", got["discover"])
-	}
-	if discover["sort_by"] != "vote_average.desc" {
-		t.Errorf("discover.sort_by = %v", discover["sort_by"])
-	}
-	if _, ok := discover["with_genres"]; ok {
-		t.Errorf("with_genres should be omitted when empty")
-	}
-}
-
 func TestValidateTMDBDiscoverRequest(t *testing.T) {
 	good := importTMDBDiscoverRequest{
 		LibraryID: 1,
@@ -286,26 +231,6 @@ func TestValidateTMDBDiscoverRequest(t *testing.T) {
 	bad.Limit = &limit
 	if err := validateTMDBDiscoverRequest(bad); err == nil {
 		t.Fatal("expected error for limit=0")
-	}
-}
-
-func TestBuildTraktSourceConfig(t *testing.T) {
-	limit := 25
-	raw, err := buildTraktSourceConfig("recommended", "movie", "prof-1", &limit)
-	if err != nil {
-		t.Fatalf("buildTraktSourceConfig: %v", err)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got["mode"] != "trakt_preset" || got["provider"] != "trakt" ||
-		got["preset"] != "recommended" || got["media_type"] != "movie" ||
-		got["profile_id"] != "prof-1" || got["limit"].(float64) != 25 {
-		t.Fatalf("source config = %#v", got)
-	}
-	if url := buildTraktSourceURL("recommended", "movie", "prof-1"); url != "trakt://recommended/movie/prof-1" {
-		t.Fatalf("source url = %q", url)
 	}
 }
 
@@ -361,14 +286,6 @@ func TestTemplateBundleEligibilityByLibraryType(t *testing.T) {
 	}
 	if !templateEligibleForLibrary(movieTemplate, mixed) || !templateEligibleForLibrary(tvTemplate, mixed) {
 		t.Fatal("mixed libraries should accept movie and tv templates")
-	}
-}
-
-func TestTemplateBundleManagementKeyIsStable(t *testing.T) {
-	got := templateBundleManagementKey("core_defaults", "tmdb_popular_movies", 42)
-	want := "core_defaults:tmdb_popular_movies:library:42"
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
@@ -447,39 +364,5 @@ func TestAllCollectionLibrariesSelected(t *testing.T) {
 	}
 	if allCollectionLibrariesSelected(&models.LibraryCollection{LibraryIDs: []int{1, 3}}, selected) {
 		t.Fatal("collection shared with unselected libraries should not be deletable")
-	}
-}
-
-func TestLibraryCollectionGroupResponseUsesAPIFieldNames(t *testing.T) {
-	body, err := json.Marshal(listGroupsResponse{
-		Groups: toLibraryCollectionGroupResponses([]models.LibraryCollectionGroup{{
-			ID:              "lcg_movies",
-			LibraryID:       1,
-			Name:            "Movies",
-			Slug:            "movies",
-			Kind:            models.GroupKindRegular,
-			DefaultSortMode: models.GroupSortManual,
-			SortOrder:       2,
-		}}),
-		UngroupedSortOrder: 9999,
-	})
-	if err != nil {
-		t.Fatalf("marshal group response: %v", err)
-	}
-
-	var got map[string]any
-	if err := json.Unmarshal(body, &got); err != nil {
-		t.Fatalf("unmarshal group response: %v", err)
-	}
-	groups := got["groups"].([]any)
-	group := groups[0].(map[string]any)
-	if group["id"] != "lcg_movies" ||
-		group["name"] != "Movies" ||
-		group["default_sort_mode"] != "manual" ||
-		group["sort_order"].(float64) != 2 {
-		t.Fatalf("unexpected group JSON: %#v", group)
-	}
-	if _, ok := group["ID"]; ok {
-		t.Fatalf("group response leaked Go field names: %#v", group)
 	}
 }

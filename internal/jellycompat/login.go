@@ -385,7 +385,8 @@ const (
 )
 
 func mapLoginError(err error) (int, string, string) {
-	if httpErr, ok := err.(*HTTPError); ok {
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
 		switch httpErr.StatusCode {
 		case http.StatusUnauthorized:
 			// mapAuthError words every 401: a sign-in policy refusal names

@@ -160,18 +160,30 @@ func TestScopedAdminKeyCannotRedirectRecoveryDB(t *testing.T) {
 				if stored.Email != originalEmail {
 					t.Errorf("stored recovery email = %q, want %q", stored.Email, originalEmail)
 				}
-				// A metadata-only update remains in scope for the same key.
+				// A metadata-only update remains in scope for the same key. The
+				// profile limit is access policy, so only the Owner's key may
+				// change it on its own admin account.
 				metadata := do(t, router, http.MethodPut, path, `{"max_profiles":6}`, headers)
 				wantStatus := http.StatusNoContent
 				if version == "v1" {
 					wantStatus = http.StatusOK
 				}
-				if metadata.Code != wantStatus {
-					t.Fatalf("metadata update: %d %s", metadata.Code, metadata.Body)
-				}
-				stored, err = users.GetByID(ctx, admin.ID)
-				if err != nil || stored.MaxProfiles != 6 {
-					t.Fatalf("metadata update was not persisted: %+v, %v", stored, err)
+				if owner {
+					if metadata.Code != wantStatus {
+						t.Fatalf("metadata update: %d %s", metadata.Code, metadata.Body)
+					}
+					stored, err = users.GetByID(ctx, admin.ID)
+					if err != nil || stored.MaxProfiles == nil || *stored.MaxProfiles != 6 {
+						t.Fatalf("metadata update was not persisted: %+v, %v", stored, err)
+					}
+				} else {
+					if metadata.Code != http.StatusForbidden {
+						t.Fatalf("metadata update: %d %s, want 403", metadata.Code, metadata.Body)
+					}
+					stored, err = users.GetByID(ctx, admin.ID)
+					if err != nil || stored.MaxProfiles != nil {
+						t.Fatalf("refused metadata update was persisted: %+v, %v", stored, err)
+					}
 				}
 				requested := do(t, router, http.MethodPost, Prefix+"/password-resets", fmt.Sprintf(`{"login":%q}`, name), nil)
 				if requested.Code != http.StatusAccepted {

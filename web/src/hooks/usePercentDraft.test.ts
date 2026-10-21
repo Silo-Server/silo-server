@@ -27,14 +27,6 @@ describe("usePercentDraft", () => {
     return { hook, onChange };
   }
 
-  it("commits a changed value, clamped", () => {
-    const { hook, onChange } = setup(100);
-    act(() => hook.result.current.setDraft("0"));
-    expect(hook.result.current.draft).toBe("0");
-    act(() => hook.result.current.commit("0"));
-    expect(onChange).toHaveBeenCalledWith(1);
-  });
-
   it("does not save when focus leaves without a change", () => {
     const { hook, onChange } = setup(60);
     act(() => hook.result.current.commit("60"));

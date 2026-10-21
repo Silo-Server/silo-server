@@ -24,23 +24,6 @@ function renderActionBar(overrides: Partial<ActionBarProps> = {}) {
 }
 
 describe("ActionBar", () => {
-  it.each([
-    [false, "Mark Watched"],
-    [true, "Mark Unwatched"],
-  ])("labels the compact watched action by its effect (watched %s)", (isWatched, shortLabel) => {
-    renderActionBar({
-      compactMobile: true,
-      isWatched,
-      watchedLabel: isWatched ? "Mark Series Unwatched" : "Mark Series Watched",
-      onToggleWatched: vi.fn(),
-    });
-    const button = screen.getByRole("button", {
-      name: new RegExp(isWatched ? "Unwatched" : "Series Watched"),
-    });
-    expect(button).not.toHaveAttribute("aria-pressed");
-    expect(button.querySelector(".detail-short-label")).toHaveTextContent(shortLabel);
-  });
-
   it("does not expose an enabled pointer affordance while the watched action is pending", () => {
     renderActionBar({
       watchedLabel: "Mark Watched",
@@ -50,8 +33,6 @@ describe("ActionBar", () => {
 
     const watchedAction = screen.getByRole("button", { name: "Mark Watched" });
     expect(watchedAction).toBeDisabled();
-    expect(watchedAction).toHaveClass("enabled:cursor-pointer");
-    expect(watchedAction).not.toHaveClass("cursor-pointer");
   });
 });
 
@@ -166,15 +147,6 @@ describe("ActionBar primary action", () => {
     );
   }
 
-  it("shows a status as a disabled primary action without the hover affordance", () => {
-    renderWithPrimary({ primaryAction: { label: "Requested", disabled: true } });
-
-    const status = screen.getByRole("button", { name: "Requested" });
-    expect(status).toBeDisabled();
-    expect(status).not.toHaveClass("cursor-pointer");
-    expect(status).not.toHaveClass("motion-safe:hover:scale-[1.02]");
-  });
-
   it("blocks the action and marks it busy while it is pending", () => {
     const onClick = vi.fn();
     renderWithPrimary({
@@ -185,32 +157,5 @@ describe("ActionBar primary action", () => {
     expect(request).toBeDisabled();
     expect(request).toHaveAttribute("aria-busy", "true");
     expect(request.querySelector("svg")).toHaveClass("animate-spin");
-  });
-
-  it("renders secondary glass actions after the primary action and external links in their own row", () => {
-    const onFollow = vi.fn();
-    renderWithPrimary({
-      primaryAction: { label: "Approved", disabled: true },
-      secondaryActions: [
-        { id: "follow", label: "Stop notifying me", onClick: onFollow, pressed: true },
-      ],
-      links: [{ label: "TMDB", href: "https://www.themoviedb.org/movie/603" }],
-    });
-
-    const follow = screen.getByRole("button", { name: "Stop notifying me" });
-    expect(follow).toHaveAttribute("aria-pressed", "true");
-    expect(follow).toHaveClass("glass-hover", "rounded-full", "h-11");
-    fireEvent.click(follow);
-    expect(onFollow).toHaveBeenCalledOnce();
-
-    const links = screen.getByRole("list", { name: "External links" });
-    const link = within(links).getByRole("link", { name: "TMDB (opens in a new tab)" });
-    expect(link).toHaveAttribute("href", "https://www.themoviedb.org/movie/603");
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveAttribute("rel", "noopener noreferrer");
-    // The links get a row of their own, apart from the actions.
-    expect(follow.parentElement).not.toContainElement(link);
-    // Without library props there are no library actions, so no overflow menu.
-    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
   });
 });

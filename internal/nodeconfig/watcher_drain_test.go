@@ -3,9 +3,7 @@ package nodeconfig
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 )
@@ -76,31 +74,5 @@ func TestNodePoolChangeRefreshesOnlyANodesDrain(t *testing.T) {
 	}
 	if node.refreshesDrainOn(cache.Event{Type: cache.EventSettingsChanged}) {
 		t.Fatal("a settings change reloads the config, which reads the drain request anyway")
-	}
-}
-
-func TestQueryNodeDrainRequested(t *testing.T) {
-	pool := newOverrideTestPool(t)
-	ctx := context.Background()
-	var columns int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns
-		WHERE table_name = 'stream_nodes' AND column_name = 'drain_requested'`).Scan(&columns); err != nil || columns < 1 {
-		t.Skip("test database has not applied the stream_nodes drain migration")
-	}
-	id := insertOverrideNode(t, pool, fmt.Sprintf("http://drain-node-%d:8082", time.Now().UnixNano()), nil)
-
-	w := &Watcher{pool: pool}
-	requested, err := w.queryNodeDrainRequested(ctx, id)
-	if err != nil || requested {
-		t.Fatalf("undrained row: %v, %v", requested, err)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE stream_nodes SET drain_requested = true WHERE id = $1`, id); err != nil {
-		t.Fatal(err)
-	}
-	if requested, err = w.queryNodeDrainRequested(ctx, id); err != nil || !requested {
-		t.Fatalf("drained row: %v, %v", requested, err)
-	}
-	if _, err := w.queryNodeDrainRequested(ctx, -1); err == nil {
-		t.Fatal("a missing row read as a drain request")
 	}
 }

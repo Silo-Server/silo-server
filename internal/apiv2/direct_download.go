@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -237,3 +238,6 @@ func (w *directDownloadWriter) Unwrap() http.ResponseWriter    { return w.Respon
 func (w *directDownloadWriter) WriteHeader(status int)         { w.transport().WriteHeader(status) }
 func (w *directDownloadWriter) Write(data []byte) (int, error) { return w.transport().Write(data) }
 func (w *directDownloadWriter) FlushError() error              { return w.transport().FlushError() }
+func (w *directDownloadWriter) ReadFrom(src io.Reader) (int64, error) {
+	return w.transport().ReadFrom(src)
+}

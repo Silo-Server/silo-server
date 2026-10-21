@@ -65,7 +65,7 @@ export function AccessTab({
       ) : null}
       <div className="grid items-start gap-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-4">
-          <SignInCard {...props} />
+          <SignInCard {...props} policyLocked={!policyManageable} />
           <LibraryAccessCard {...policy} />
           <DownloadsPolicyCard {...policy} />
         </div>

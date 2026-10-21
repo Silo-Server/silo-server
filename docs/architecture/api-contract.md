@@ -500,9 +500,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
   needs them, and the field is never advertised unimplemented. Inventory answer: all 225
-  tier-1 ported mutation rows (219 distinct operations) are classified (97
+  tier-1 ported mutation rows (219 distinct operations) are classified (101
   `natural_idempotent`, 24 `unique_constraint`, 12 `domain_identity`, 9 `coalescing`, 3
-  `durable_dispatch`, 74 `non_retryable`, 0 `idempotency_key`, counted per distinct
+  `durable_dispatch`, 70 `non_retryable`, 0 `idempotency_key`, counted per distinct
   operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
@@ -539,7 +539,7 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `non_retryable` until their durable identity and cleanup defects are fixed. Library creation,
   settings updates, stale-ID rematch, provider-chain replacement, and taste seeding also remain
   `non_retryable`: their current seams cannot resume dispatch after saving state, or
-  repeat unclaimed provider work. Their ledger notes retain the required durable repair. Forty-three rows (42 distinct operations)
+  repeat unclaimed provider work. Their ledger notes retain the required durable repair. Thirty-nine rows (38 distinct operations)
   carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
   identity implies, or re-runs a side effect a retry should not repeat (task run, collection
@@ -547,8 +547,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   invite-code redemption during signup, playback route events,
   watch-together selection and promotion, metadata-match-queue retry, playback session
   progress, download status, ebook reader progress, and onboarding progress,
-  whose last-write-wins update lets a delayed retry rewind a newer report, favorites,
-  watchlist, and rating add and remove, the taste seed, subtitle download and upload,
+  whose last-write-wins update lets a delayed retry rewind a newer report, rating add
+  and remove, the taste seed, subtitle download and upload,
   whose unique key resolves a retry but whose losing insert deletes the winner's S3
   object, transcode start, which replaces a live session under the same id, and media
   request creation, whose partial unique index stops covering a request once it reaches a
@@ -854,7 +854,8 @@ began in time may run longer.
 
 Household management (creating, editing, and deleting profiles, listing household sessions,
 managing another profile's devices or settings, importing history for another profile, and
-creating a personal API key) belongs to the account's primary profile, verified with
+creating a personal API key, and changing the account-wide Discord notification
+destination or delivery mode) belongs to the account's primary profile, verified with
 `X-Profile-Token` when it has a PIN; v2 also refuses a scope whose PIN check an API key
 skipped. The account's admin role does not widen this, the same way acting-admin routes refuse
 admin powers to a non-primary profile: on an admin account, every other profile is a household
@@ -1387,10 +1388,17 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 `{item_id, rating, rated_at}` entries instead), a membership read that answers the entry
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a bodiless `PUT` add
 (ratings take `{rating}`) answering `204`, and a `DELETE` answering `204` whether or not
-the entry existed. All six mutations are `non_retryable`: the shared seams dispatch provider
-list and rating events and recommendation refresh without change gating, and rating updates
-replace `rated_at` even when unchanged. Their ledger `DEFECT` notes retain the durable-dispatch work
-required before clients can retry automatically. The mutations are not demo-restricted: v1's demo
+the entry existed. The four favorites and watchlist mutations are `natural_idempotent`: each
+store add and remove reports whether it inserted or deleted the row, and the shared v1/v2 seam
+sends the provider list event, the recommendation refresh, and the user-state event only for a
+change, so a repeated add or remove answers `204` and notifies nobody. The notices run detached
+from the request, so a client that disconnects after the write does not cancel them, but they
+are not durable: a crash between the write and the notices loses them, and a retry, which
+changes no row, does not resend them. The scheduled provider export resends an add the provider
+missed; a missed removal has no scheduled repair yet. The two rating mutations remain
+`non_retryable`: the rating seam dispatches provider rating events and recommendation refresh
+without change gating, and rating updates replace `rated_at` even when unchanged. Their ledger
+`DEFECT` notes retain the durable-dispatch work required before clients can retry automatically. The mutations are not demo-restricted: v1's demo
 guard only blocks its listed routes, so these writes pass in demo mode and v2 matches. The three
 lists page by keyset, not offset: the cursor is the (`added_at`, `item_id`) — for ratings
 (`rated_at`, `item_id`) — of the last entry emitted, and the next page resumes strictly after it
@@ -1609,6 +1617,14 @@ retry after an intervening unmark can create another watch; a durable client wat
 is still needed. History removal and unmark choose a fresh cutoff, so a delayed retry can
 hide an intervening watch. Sync accepts an omitted `updated_at`, so a delayed replay can
 overwrite newer progress; every item needs a stable event time before automatic retries are safe.
+Two v2-only operations extend the section without ledger rows: `clearResumePosition`
+(`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
+resume position while keeping its watched state and history, answers `204` (also when there is
+nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for a
+kind `markWatched` does not handle, and is
+`non_retryable` because a delayed retry would also clear a position recorded in between;
+`getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
+`clear_resume_position`. Semantics are in [the progress API](../progress-api.md#clearing-a-resume-position).
 
 **Section catalog-recommendations, stage A (Phase 4).** Seven profile-scoped reads under the
 `recommendations` tag: `listBecauseWatched`, `getDiscover`, `getForYouMain`, `listForYouRows`,
@@ -2323,15 +2339,18 @@ for limits), without volatile metadata. Integration reads include persisted publ
 configuration and check status, all covered by the row revision, and a credential
 presence flag. API credentials are write-only. A blank update preserves the saved
 credential and retains the existing requirement to re-enter it when changing the
-base URL. Plugin validation happens before the storage transaction; an intervening
-edit still fails the final comparison instead of overwriting it. A failed plugin
+base URL, which applies only when a credential is saved; clearing the base URL
+counts as changing it. Plugin validation happens before the storage
+transaction; an intervening edit still fails the final comparison instead of overwriting it. A failed plugin
 validation uses structured v2 problem errors for the web's inline field messages.
 
 A v2 integration's `base_url` is normalized before option loading and before
 create or update: `http://` is assumed when no scheme is given and a trailing
 slash is dropped, so the saved address is the one the options probe used. An
 address with credentials, a query or a fragment, or another scheme, is a
-`validation_failed` problem on `body.base_url`. When `POST
+`validation_failed` problem on `body.base_url`. An options request that leaves
+`base_url` out tests the saved address; one that sends it blank tests a router
+that declares `base_url_optional` without an address. When `POST
 /admin/request-integrations/{id}/options` fails, the host answers with its own
 sentences and never echoes the plugin's upstream text. What the admin must fix
 is a `validation_failed` problem on `body.base_url` (wrong address, missing URL
@@ -2373,10 +2392,26 @@ forget requests, return `404`; successful commands return `204`. Both commands a
 non-retryable because a later retry can remove settings written in the meantime.
 Neither operation revokes login sessions or changes push registrations.
 
+`PATCH /api/v2/devices/{device_id}` (`updateDevice`) updates the same registry entry,
+with the same `profile_id` authorization and `404` for a missing device. Its one
+member, `custom_name`, names the device for that profile: a string sets it, `null`
+removes it, and omission leaves it unchanged. The server removes control characters
+and bidirectional overrides, collapses spaces, and rejects a name with no visible
+character (`422`). Registration never writes the custom name, so it survives the
+device being seen again, and the reported `device_name` is kept. `listDevices`
+returns `custom_name` only when one is set; clients show it in place of
+`device_name`. The operation answers `200` with the entry as `listDevices` renders it
+and is naturally idempotent. A name
+belongs to one profile's entry, so a device two profiles use is named separately for
+each. `supports_device_rename` on `getSettingsContractCapabilities` tells a client
+the operation exists. Administrator device reads and download device views still
+show the reported name.
+
 The web device-settings screen uses these operations. The Apple and Android native
 clients have no callers for this settings-device lifecycle; Apple's push registration
 belongs to the separate notification contract. Jellyfin has no corresponding
-settings-device operation.
+settings-device operation; jellycompat does not serve Jellyfin's device list or its
+custom device names.
 
 ### Administrator collections v2
 

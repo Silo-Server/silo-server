@@ -29,7 +29,6 @@ export function CollectionPicker({
   onPick,
   onPageIds,
   pageLabel,
-  locked = false,
 }: {
   collections: RowCollections;
   /** The collection the row shows now, or "". */
@@ -38,8 +37,6 @@ export function CollectionPicker({
   /** Collections a row on this page already shows. */
   onPageIds: ReadonlySet<string>;
   pageLabel: string;
-  /** A legacy Trakt row: the server refuses a different collection. */
-  locked?: boolean;
 }) {
   const labelId = useId();
   const [query, setQuery] = useState("");
@@ -100,11 +97,7 @@ export function CollectionPicker({
             ))}
           </div>
         </div>
-        {locked ? (
-          <p className="text-muted-foreground border-border border-b px-4 py-2.5 text-[13px]">
-            This row follows a Trakt list, so its collection can't change.
-          </p>
-        ) : missing ? (
+        {missing ? (
           <p
             role="status"
             className="border-warning/40 bg-warning/10 border-b px-4 py-2.5 text-[13px]"
@@ -116,7 +109,6 @@ export function CollectionPicker({
           <RadioGroup
             aria-labelledby={labelId}
             value={value}
-            disabled={locked}
             onValueChange={(id) => {
               const picked = options.find((option) => option.id === id);
               if (picked) onPick(picked);
@@ -171,7 +163,7 @@ function CollectionRadio({
       />
       <span className="min-w-0">
         <span className="block truncate text-sm font-semibold">{option.title}</span>
-        <span aria-hidden className="text-muted-foreground block truncate text-[12.5px]">
+        <span aria-hidden className="text-muted-foreground block truncate text-[13px]">
           {meta}
         </span>
         <span id={metaId} className="sr-only">
@@ -181,7 +173,7 @@ function CollectionRadio({
       {onPage ? (
         <span
           aria-hidden
-          className="bg-background/70 ring-border inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold ring-1 ring-inset"
+          className="bg-background/70 ring-border inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset"
         >
           <Check className="text-success size-3" />
           On {pageLabel}

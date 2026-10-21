@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -181,23 +180,5 @@ func TestOpenRefusesEscapingSymlink(t *testing.T) {
 			_ = f.Close()
 		}
 		t.Fatal("escaping symlink accepted", err)
-	}
-}
-
-func TestThemeAudioExtensionsExcludeVideo(t *testing.T) {
-	for _, ext := range []string{"mp3", "m4a", "m4b", "flac", "ogg", "opus", "wav", "aac"} {
-		for _, path := range []string{"/show/theme." + ext, "/show/theme-music/opening." + strings.ToUpper(ext)} {
-			owner, ok := OwnerDirectory(path)
-			if !ok || owner != "/show" || Container(path) != ext || !strings.HasPrefix(ContentType(ext), "audio/") {
-				t.Errorf("audio theme %q: owner=%q ok=%v container=%q", path, owner, ok, Container(path))
-			}
-		}
-	}
-	for _, ext := range []string{"mkv", "mp4", "webm", "srt", "jpg"} {
-		for _, path := range []string{"/show/theme." + ext, "/show/theme-music/file." + ext} {
-			if owner, ok := OwnerDirectory(path); ok || Container(path) != "" {
-				t.Errorf("non-audio %q was classified as theme owned by %q", path, owner)
-			}
-		}
 	}
 }

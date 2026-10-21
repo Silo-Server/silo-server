@@ -453,7 +453,8 @@ export const NAME_FILLED_HELP =
   "Filled in from the list. Picking another list keeps anything you typed.";
 export const SYNCS_ON_CREATE = "It syncs for the first time when you create it.";
 export const PICK_A_LIST_FIRST = "Pick a list, then create it.";
-export const SYNCED_ORDER_HELP = "Blank takes the whole list, up to 500.";
+export const SYNCED_ORDER_HELP =
+  "Blank takes the whole list: up to 10,000 titles from MDBList, or the first 20 of a TMDB chart.";
 
 /** "Kept your name", "Kept your name and description": what a new pick left alone. */
 export function keptMessage(fields: readonly ("name" | "description")[]): string | null {
@@ -532,11 +533,6 @@ export const FRANCHISE_ID_INVALID = "Use the number from the collection's link, 
 export const DISCOVER_LOCKED = "Made by a starter pack. Its rules can't be changed here.";
 export const DISCOVER_STILL_EDITABLE =
   "You can still change its name, artwork, max titles, schedule and where it shows.";
-export const TRAKT_LOCKED =
-  "New Trakt lists aren't supported. This one keeps its source and libraries.";
-export const TRAKT_STILL_EDITABLE =
-  "You can still change its name, artwork, order, schedule and where it shows.";
-export const TRAKT_SCHEDULE_STOPPED = "A stopped Trakt list can't be scheduled again.";
 export const PERSONAL_SCHEDULE_LOCKED =
   "This server doesn't let profiles change a list's schedule.";
 export const LIST_DECIDES = "The list decides";

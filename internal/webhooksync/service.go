@@ -20,6 +20,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
+// SignalsChangedNotifier records that a profile's recommendation signals
+// changed, so its taste profile and cached recommendations get rebuilt.
+// *recommendations.Worker implements it.
+type SignalsChangedNotifier interface {
+	NotifySignalsChanged(ctx context.Context, userID int, profileID string)
+}
+
 type Service struct {
 	repo      *Repository
 	matcher   *historyimport.Matcher
@@ -29,6 +36,10 @@ type Service struct {
 	// localNetwork decides whether a connection's server address may be on
 	// this server's own network. Nil limits it to the public internet.
 	localNetwork *historyimport.LocalNetworkAccess
+
+	// signals hears about applied events that change a profile's
+	// recommendation signals. Nil reports nothing.
+	signals SignalsChangedNotifier
 }
 
 func NewService(repo *Repository, importRepo *historyimport.Repository, storeProvider userstore.UserStoreProvider) *Service {
@@ -50,6 +61,20 @@ func NewService(repo *Repository, importRepo *historyimport.Repository, storePro
 func (s *Service) SetLocalNetworkAccess(access *historyimport.LocalNetworkAccess) {
 	if s != nil {
 		s.localNetwork = access
+	}
+}
+
+// SetSignalsChangedNotifier installs where applied events that change a
+// profile's recommendation signals are reported.
+func (s *Service) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	if s != nil {
+		s.signals = notifier
+	}
+}
+
+func (s *Service) notifySignalsChanged(ctx context.Context, userID int, profileID string) {
+	if s.signals != nil {
+		s.signals.NotifySignalsChanged(ctx, userID, profileID)
 	}
 }
 
@@ -385,6 +410,7 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 		if err := s.watch.RecordImportedMarkUnplayed(ctx, conn.UserID, profileID, match.MediaItemID, event.OccurredAt); err != nil {
 			return s.failWebhook(ctx, conn.ID, result, err, "Failed to apply mark-unplayed event")
 		}
+		s.notifySignalsChanged(ctx, conn.UserID, profileID)
 		if err := s.repo.UpsertItemState(ctx, ItemState{
 			ConnectionID:       conn.ID,
 			ExternalUserID:     event.UserID,
@@ -403,6 +429,7 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 		if err := s.watch.SetFavorite(ctx, conn.UserID, profileID, match.MediaItemID, true); err != nil {
 			return s.failWebhook(ctx, conn.ID, result, err, "Failed to add favorite from webhook event")
 		}
+		s.notifySignalsChanged(ctx, conn.UserID, profileID)
 		result.Outcome = OutcomeApplied
 		result.Summary = "Applied favorite add event"
 		return result, nil
@@ -410,6 +437,7 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 		if err := s.watch.SetFavorite(ctx, conn.UserID, profileID, match.MediaItemID, false); err != nil {
 			return s.failWebhook(ctx, conn.ID, result, err, "Failed to remove favorite from webhook event")
 		}
+		s.notifySignalsChanged(ctx, conn.UserID, profileID)
 		result.Outcome = OutcomeApplied
 		result.Summary = "Applied favorite removal event"
 		return result, nil
@@ -417,6 +445,7 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 		if _, err := s.watch.ToggleFavorite(ctx, conn.UserID, profileID, match.MediaItemID); err != nil {
 			return s.failWebhook(ctx, conn.ID, result, err, "Failed to toggle favorite from webhook event")
 		}
+		s.notifySignalsChanged(ctx, conn.UserID, profileID)
 		result.Outcome = OutcomeApplied
 		result.Summary = "Applied favorite toggle event"
 		return result, nil
@@ -472,6 +501,10 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 	if err != nil {
 		return s.failWebhook(ctx, conn.ID, result, err, "Failed to apply imported watch progress")
 	}
+	// Only stop-like events reach here (see the providers), and any recorded
+	// stop can move the taste profile: a finish, a stop at half way or more,
+	// or an early abandonment. The native stop path notifies the same way.
+	s.notifySignalsChanged(ctx, conn.UserID, profileID)
 
 	if err := s.repo.UpsertItemState(ctx, applied); err != nil {
 		return s.failWebhook(ctx, conn.ID, result, err, "Failed to persist imported watch progress")

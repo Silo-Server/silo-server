@@ -23,9 +23,12 @@ import {
   MoreVertical,
   Plus,
   RotateCcw,
+  TimerReset,
+  ThumbsDown,
   X,
 } from "lucide-react";
 import { useLocation } from "react-router";
+import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useFinePointer } from "@/hooks/useFinePointer";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
@@ -36,6 +39,8 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
+import { useClearResumePosition } from "@/hooks/queries/progress";
+import { canMarkNotInterested, useToggleNotInterested } from "@/hooks/queries/notInterested";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
@@ -97,6 +102,13 @@ function prefetchMetadataDialogs() {
 
 type MediaItemType = ItemDetail["type"];
 
+// Favorites and the watchlist are kept at the title level. The server rejects
+// season writes, and the lists' default views and Home rows leave episodes
+// out, so neither offers to be added.
+function canAddToPersonalLists(mediaType: MediaItemType) {
+  return mediaType !== "season" && mediaType !== "episode";
+}
+
 function useHasFinePointer() {
   // Reads the observed pointer, not the media query: Chromium on some Windows
   // machines with a touchscreen reports no fine pointer while a mouse is in
@@ -112,8 +124,10 @@ type MediaItemMenuEntry =
       key:
         | "playFromBeginning"
         | "toggleWatched"
+        | "resetProgress"
         | "toggleFavorite"
         | "toggleWatchlist"
+        | "toggleNotInterested"
         | "dismissFromHome"
         | "viewDetails"
         | "viewPlayHistory"
@@ -130,6 +144,11 @@ interface BuildMediaItemMenuModelOptions {
   mediaType: MediaItemType;
   userState?: MediaItemUserState;
   hasPartialProgress?: boolean;
+  /**
+   * Whether the item has a resume position to clear, rewatches included.
+   * Defaults to hasPartialProgress.
+   */
+  hasResumePosition?: boolean;
   isAdmin: boolean;
   canCurateMetadata?: boolean;
   showCollectionActions?: boolean;
@@ -142,12 +161,20 @@ interface MediaItemMenuProps {
   libraryId?: number;
   userState?: MediaItemUserState;
   variant?: "poster" | "wide";
-  /** When false, hides favorites and watchlist actions (e.g. for episodes). Defaults to true. */
+  /**
+   * When false, hides favorites and watchlist actions. Defaults to true. Seasons and episodes
+   * never offer adding to either list; see canAddToPersonalLists.
+   */
   showCollectionActions?: boolean;
   /** Hides only the poster heart shortcut while retaining collection actions in the menu. */
   showFavoriteShortcut?: boolean;
   dismissAction?: DismissHomeItemVariables;
   hasPartialProgress?: boolean;
+  /**
+   * Whether the item has a resume position to clear, rewatches included, for
+   * lists that hide a watched item's progress. Defaults to hasPartialProgress.
+   */
+  hasResumePosition?: boolean;
   /** Enables the watched shortcut on wide cards such as Continue Watching. */
   showWatchedShortcut?: boolean;
   /** Uses smaller poster controls on narrow catalog cards. */
@@ -164,6 +191,7 @@ export function buildMediaItemMenuModel({
   mediaType,
   userState,
   hasPartialProgress = false,
+  hasResumePosition = hasPartialProgress,
   isAdmin,
   canCurateMetadata = isAdmin,
   showCollectionActions = true,
@@ -189,20 +217,36 @@ export function buildMediaItemMenuModel({
     });
   }
 
-  if (userState) {
-    if (showCollectionActions) {
-      entries.push(
-        {
-          kind: "action",
-          key: "toggleFavorite",
-          label: userState.is_favorite ? "Remove from Favorites" : "Add to Favorites",
-        },
-        {
-          kind: "action",
-          key: "toggleWatchlist",
-          label: userState.in_watchlist ? "Remove from Watchlist" : "Add to Watchlist",
-        },
-      );
+  // Clears the resume point without passing through watched (issue #2134).
+  if ((mediaType === "movie" || mediaType === "episode") && hasResumePosition) {
+    entries.push({ kind: "action", key: "resetProgress", label: "Reset Progress" });
+  }
+
+  if (userState && showCollectionActions) {
+    // A season or episode can already be on a list (saved by another client,
+    // imported from another server, or saved by an older web build), so it
+    // keeps the Remove entry.
+    const canAdd = canAddToPersonalLists(mediaType);
+    if (canAdd || userState.is_favorite) {
+      entries.push({
+        kind: "action",
+        key: "toggleFavorite",
+        label: userState.is_favorite ? "Remove from Favorites" : "Add to Favorites",
+      });
+    }
+    if (canAdd || userState.in_watchlist) {
+      entries.push({
+        kind: "action",
+        key: "toggleWatchlist",
+        label: userState.in_watchlist ? "Remove from Watchlist" : "Add to Watchlist",
+      });
+    }
+    if (canMarkNotInterested(mediaType)) {
+      entries.push({
+        kind: "action",
+        key: "toggleNotInterested",
+        label: userState.not_interested ? "Show in Recommendations" : "Not Interested",
+      });
     }
   }
 
@@ -285,6 +329,8 @@ function MediaItemMenuActionIcon({
       ) : (
         <EyeOff aria-hidden="true" className="size-4" />
       );
+    case "resetProgress":
+      return <TimerReset aria-hidden="true" className="size-4" />;
     case "toggleFavorite":
       return (
         <Heart
@@ -297,6 +343,13 @@ function MediaItemMenuActionIcon({
         <Check aria-hidden="true" className="size-4" />
       ) : (
         <Plus aria-hidden="true" className="size-4" />
+      );
+    case "toggleNotInterested":
+      return (
+        <ThumbsDown
+          aria-hidden="true"
+          className={cn("size-4", userState?.not_interested && "fill-current")}
+        />
       );
     case "dismissFromHome":
       return <X aria-hidden="true" className="size-4" />;
@@ -944,16 +997,20 @@ function MediaItemMenuEngine({
   });
   const favoriteMutation = useToggleFavorite(contentId);
   const watchlistMutation = useToggleWatchlist(contentId);
+  const notInterestedMutation = useToggleNotInterested(contentId);
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
+  const clearResumePositionMutation = useClearResumePosition();
   const currentHref = `${location.pathname}${location.search}`;
 
   const isPending =
     watchedMutation.isPending ||
     favoriteMutation.isPending ||
     watchlistMutation.isPending ||
+    notInterestedMutation.isPending ||
     refreshMetadataMutation.isPending ||
-    dismissHomeItemMutation.isPending;
+    dismissHomeItemMutation.isPending ||
+    clearResumePositionMutation.isPending;
   const watchedPending = watchedMutation.isPending;
   const favoritePending = favoriteMutation.isPending;
   const refreshPending = refreshMetadataMutation.isPending;
@@ -1025,6 +1082,10 @@ function MediaItemMenuEngine({
         await handleWatchedToggle();
         return;
       }
+      case "resetProgress": {
+        clearResumePositionMutation.mutate({ contentId });
+        return;
+      }
       case "toggleFavorite": {
         await handleFavoriteToggle();
         return;
@@ -1035,6 +1096,21 @@ function MediaItemMenuEngine({
         setCurrentUserState((prev) =>
           prev ? { ...prev, in_watchlist: !prev.in_watchlist } : prev,
         );
+        return;
+      }
+      case "toggleNotInterested": {
+        if (!currentUserState) return;
+        const marked = currentUserState.not_interested ?? false;
+        const authority = captureProfileRequestContext();
+        setCurrentUserState((prev) => (prev ? { ...prev, not_interested: !marked } : prev));
+        try {
+          await notInterestedMutation.mutateAsync(marked);
+        } catch {
+          // After a profile switch the card shows the new profile's state.
+          if (!authority || isCapturedProfileAuthorityActive(authority)) {
+            setCurrentUserState((prev) => (prev ? { ...prev, not_interested: marked } : prev));
+          }
+        }
         return;
       }
       case "viewDetails": {
@@ -1148,6 +1224,7 @@ export default function MediaItemMenu({
   showFavoriteShortcut = true,
   dismissAction,
   hasPartialProgress = false,
+  hasResumePosition = hasPartialProgress,
   showWatchedShortcut = false,
   narrowPosterActions = false,
   quickActionMode = "none",
@@ -1165,6 +1242,8 @@ export default function MediaItemMenu({
   const hasFinePointer = useHasFinePointer();
   const [currentUserState, setCurrentUserState] = useState(userState);
   const lastSyncedUserStateRef = useRef(userState);
+  const activeProfileId = currentProfile?.id;
+  const lastSyncedProfileRef = useRef(activeProfileId);
   // A card that has never been hovered, focused, or used mounts none of the
   // action machinery — a home page holds hundreds of cards.
   const [engineMounted, setEngineMounted] = useState(false);
@@ -1186,16 +1265,22 @@ export default function MediaItemMenu({
 
   useEffect(() => {
     const lastSynced = lastSyncedUserStateRef.current;
+    // A profile switch always resyncs: the local state may still hold the
+    // earlier profile's optimistic change while the props look unchanged.
+    const sameProfile = lastSyncedProfileRef.current === activeProfileId;
     if (
+      sameProfile &&
       lastSynced?.played === userState?.played &&
       lastSynced?.is_favorite === userState?.is_favorite &&
-      lastSynced?.in_watchlist === userState?.in_watchlist
+      lastSynced?.in_watchlist === userState?.in_watchlist &&
+      lastSynced?.not_interested === userState?.not_interested
     ) {
       return;
     }
     lastSyncedUserStateRef.current = userState;
+    lastSyncedProfileRef.current = activeProfileId;
     setCurrentUserState(userState);
-  }, [userState]);
+  }, [userState, activeProfileId]);
 
   const dismissLabel =
     dismissAction?.surface === "continue_watching"
@@ -1212,6 +1297,7 @@ export default function MediaItemMenu({
     mediaType,
     userState: currentUserState,
     hasPartialProgress,
+    hasResumePosition,
     isAdmin,
     canCurateMetadata,
     showCollectionActions,
@@ -1276,9 +1362,12 @@ export default function MediaItemMenu({
     },
     enabled: model.length > 0,
   });
+  // The model can still hold Remove for a season or episode already on the
+  // list; that stays in the menu rather than a heart that vanishes on click.
   const showPosterFavorite =
     hasFinePointer &&
     variant === "poster" &&
+    canAddToPersonalLists(mediaType) &&
     showFavoriteShortcut &&
     showsFavoriteQuickAction(quickActionMode) &&
     model.some((entry) => entry.kind === "action" && entry.key === "toggleFavorite");

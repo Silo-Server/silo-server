@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
@@ -17,9 +16,6 @@ type BrandingService interface {
 	HasStorage() bool
 	Load(context.Context) branding.Snapshot
 	GetAsset(context.Context, branding.AssetKind) ([]byte, string, string, error)
-}
-type ThemeOverrideService interface {
-	AdminCSS(context.Context) handlers.AdminCSSView
 }
 type BrandingConfiguration struct {
 	ServerName       string `json:"server_name"`
@@ -32,11 +28,6 @@ type BrandingConfiguration struct {
 	StorageAvailable bool   `json:"storage_available"`
 }
 type BrandingOutput struct{ Body BrandingConfiguration }
-type ThemeOverrides struct {
-	Vars   string `json:"vars"`
-	RawCSS string `json:"raw_css"`
-}
-type ThemeOverridesOutput struct{ Body ThemeOverrides }
 type BrandingCapabilitiesOutput struct {
 	Status       int
 	ETag         string `header:"ETag"`
@@ -46,9 +37,8 @@ type BrandingCapabilitiesOutput struct {
 
 type BrandingCapabilitiesOutputBody struct {
 	Capability
-	BrandingAvailable  bool `json:"branding_available"`
-	OverridesAvailable bool `json:"overrides_available"`
-	StorageAvailable   bool `json:"storage_available"`
+	BrandingAvailable bool `json:"branding_available"`
+	StorageAvailable  bool `json:"storage_available"`
 }
 
 func brandingAssetURL(snap branding.Snapshot, kind branding.AssetKind) string {
@@ -65,7 +55,6 @@ func registerBranding(reg *Registry) {
 	Register(reg, op("/theme/capabilities", "getBrandingCapabilities", "Discover public branding and asset storage availability."), func(_ context.Context, _ *CapabilityInput) (*BrandingCapabilitiesOutput, error) {
 		out := new(BrandingCapabilitiesOutput)
 		out.Body.BrandingAvailable = reg.deps.Branding != nil
-		out.Body.OverridesAvailable = reg.deps.ThemeOverrides != nil
 		out.Body.StorageAvailable = reg.deps.Branding != nil && reg.deps.Branding.HasStorage()
 		return out, nil
 	})
@@ -77,13 +66,6 @@ func registerBranding(reg *Registry) {
 			storage = reg.deps.Branding.HasStorage()
 		}
 		return &BrandingOutput{Body: BrandingConfiguration{ServerName: snap.ServerName, LoginSubtitle: snap.LoginSubtitle, AccentColor: snap.AccentColor, WordmarkURL: brandingAssetURL(snap, branding.KindWordmark), MarkURL: brandingAssetURL(snap, branding.KindMark), FaviconURL: brandingAssetURL(snap, branding.KindFavicon), LoginBgURL: brandingAssetURL(snap, branding.KindLoginBg), StorageAvailable: storage}}, nil
-	})
-	Register(reg, op("/theme/admin-css", "getThemeOverrides", "Read public pre-login theme overrides."), func(ctx context.Context, _ *struct{}) (*ThemeOverridesOutput, error) {
-		view := handlers.AdminCSSView{}
-		if reg.deps.ThemeOverrides != nil {
-			view = reg.deps.ThemeOverrides.AdminCSS(ctx)
-		}
-		return &ThemeOverridesOutput{Body: ThemeOverrides{Vars: view.Vars, RawCSS: view.RawCSS}}, nil
 	})
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		id := "getBrandingAsset"

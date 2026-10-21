@@ -123,6 +123,7 @@ type libraryScanQueuer interface {
 }
 
 type libraryMovieMatchQueue interface {
+	EnqueueMovieFile(ctx context.Context, fileID int) error
 	SyncForFolder(ctx context.Context, folderID int) error
 	DeleteByFolder(ctx context.Context, folderID int) (int, error)
 	CountStatesByFolder(ctx context.Context, folderID int) (pending int, parked int, err error)
@@ -132,6 +133,8 @@ type libraryMovieMatchQueue interface {
 }
 
 type librarySeriesMatchQueue interface {
+	EnqueueSeriesRoot(ctx context.Context, folderID int, observedRootPath string) error
+	WakeRoot(ctx context.Context, folderID int, observedRootPath string) error
 	SyncForFolder(ctx context.Context, folderID int) error
 	DeleteByFolder(ctx context.Context, folderID int) (int, error)
 	CountStatesByFolder(ctx context.Context, folderID int) (pending int, parked int, err error)
@@ -1791,6 +1794,9 @@ type unmatchedItemResponse struct {
 	LibraryID   int    `json:"library_id"`
 	LibraryName string `json:"library_name"`
 	Status      string `json:"status"`
+	// IgnoredAt is when an admin marked the item as intentionally unmatched,
+	// for the v2 view; it is not part of the v1 document.
+	IgnoredAt *time.Time `json:"-"`
 }
 
 type unmatchedItemsListResponse struct {
@@ -1799,8 +1805,9 @@ type unmatchedItemsListResponse struct {
 }
 
 // HandleListUnmatchedItems handles GET /libraries/unmatched-items.
-// Returns items that are in unmatched, pending, or ambiguous status, enriched with
-// library context so the admin maintenance page can link to them.
+// Returns items that are in unmatched, pending, or ambiguous status and that
+// no admin ignored, enriched with library context so the admin maintenance
+// page can link to them.
 func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := 100
@@ -1815,7 +1822,7 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 			offset = n
 		}
 	}
-	items, total, err := h.ListUnmatchedItems(r.Context(), q.Get("q"), limit, offset)
+	items, total, err := h.ListUnmatchedItems(r.Context(), q.Get("q"), false, limit, offset)
 	if err != nil {
 		writeAPIError(w, err)
 		return

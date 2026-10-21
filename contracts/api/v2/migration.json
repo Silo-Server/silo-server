@@ -4051,19 +4051,17 @@
       "section": "admin-collections",
       "release_flow": "other_admin",
       "tier": 2,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"Trakt on every v1 route\"); still registered on the bridge surface, answering 410 unsupported_source, retired by the tombstone. No successor: Silo no longer supports Trakt.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "POST",
-        "path": "/api/v2/admin/collections/import/trakt",
-        "operation_id": "importAdminTrakt"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Administrator collection v2 operation uses shared services and typed string IDs. Bundled web consumes v2; legacy routes remain available. No existing Apple or Android administrator collection consumer was found. Jellyfin has no administrator editing surface.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "No durable request identity is provided. Delayed replay can repeat side effects or overwrite a later action; clients must not retry automatically."
+      "notes": "Section admin-collections. The v2 importAdminTrakt operation was removed before the v2 lock when Silo dropped Trakt support; it had refused every request with 410 unsupported_source since Trakt collection creation was turned off. No bundled web, native or Jellyfin consumer calls it. The frozen v1 route keeps answering 410 unsupported_source until the /api/v1 tombstone retires it. Removal ratified 2026-10-16 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -22756,20 +22754,18 @@
       ],
       "section": "personal-collections",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"Trakt on every v1 route\"); still registered on the bridge surface, answering 410 unsupported_source, retired by the tombstone. No successor: Silo no longer supports Trakt.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "POST",
-        "path": "/api/v2/collections/import/trakt",
-        "operation_id": "importTraktCollection"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Personal collection v2 operation uses the shared profile-scoped service. Storage capabilities distinguish unsupported SQLite imports, groups, artwork and reorder. Native Apple and Android adoption remains follow-up; bundled web consumes v2.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "No durable request identity or mutation generation is implemented. Delayed replay can repeat side effects or overwrite a later action; clients must not retry automatically."
+      "notes": "Section personal-collections. The v2 importTraktCollection operation was removed before the v2 lock when Silo dropped Trakt support; it had refused every request with 410 unsupported_source since Trakt collection creation was turned off. No bundled web, native or Jellyfin consumer calls it. The frozen v1 route keeps answering 410 unsupported_source until the /api/v1 tombstone retires it. Removal ratified 2026-10-16 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -26658,8 +26654,8 @@
         "operation_id": "deleteFavorite"
       },
       "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent remove: 204 whether or not the entry existed, with no access check so a profile can drop an item that left its scope. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "DEFECT: the shared v1/v2 seam dispatches watch-provider list events and recommendation refresh even when membership did not change. Automatic retries remain disabled until the personal-lists section dispatches only for changed rows through a durable claim."
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "Provider list, recommendation refresh and user-state events fire only when the write changed the row, detached from the request, so a retry repeats none. A crash between write and events loses them: scheduled export resends a missed add; a missed remove waits on a scheduled-sync fix."
     },
     {
       "listener": "api",
@@ -26798,8 +26794,8 @@
         "operation_id": "addFavorite"
       },
       "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent add: a repeated PUT converges on the item being a favorite. An item the viewer may not see is 404. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "DEFECT: the shared v1/v2 seam dispatches watch-provider list events and recommendation refresh even when membership did not change. Automatic retries remain disabled until the personal-lists section dispatches only for changed rows through a durable claim."
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "Provider list, recommendation refresh and user-state events fire only when the write changed the row, detached from the request, so a retry repeats none. A crash between write and events loses them: scheduled export resends a missed add; a missed remove waits on a scheduled-sync fix."
     },
     {
       "listener": "api",
@@ -41678,18 +41674,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The admin theme overrides route\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client applies only the branding accent color, with no admin token, font or CSS overrides.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "GET",
-        "path": "/api/v2/theme/admin-css",
-        "operation_id": "getThemeOverrides"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented public branding discovery/overrides and image GET/HEAD on reviewed raw foundation. Asset URLs target v2, exact content-version requests cache immutably, stale versions return404, unversioned reads revalidate. Security headers and conditional tags preserved. Bundled web uses v2 discovery/overrides. Capability GET /api/v2/theme/capabilities. Frozen v1 transport unchanged. Independently reviewed and accepted with coordinated Apple and Android public branding consumers; no native CSS caller."
+      "notes": "Section settings-branding. The v2 getThemeOverrides operation and the overrides_available capability field were removed before the v2 lock when the admin token and font overrides and custom CSS were removed from the web client; the accent color stays on getBranding and the web client applies it from there. The bundled web client no longer reads the overrides; no native or Jellyfin consumer exists. The frozen v1 route keeps reporting the stored ui.admin_theme_vars and ui.admin_custom_css values until the /api/v1 tombstone retires it. Removal ratified 2026-10-13 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -43845,8 +43841,8 @@
         "operation_id": "deleteWatchlistEntry"
       },
       "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent remove: 204 whether or not the entry existed, with no access check so a profile can drop an item that left its scope. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "DEFECT: the shared v1/v2 seam dispatches watch-provider list events and recommendation refresh even when membership did not change. Automatic retries remain disabled until the personal-lists section dispatches only for changed rows through a durable claim."
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "Provider list, recommendation refresh and user-state events fire only when the write changed the row, detached from the request, so a retry repeats none. A crash between write and events loses them: scheduled export resends a missed add; a missed remove waits on a scheduled-sync fix."
     },
     {
       "listener": "api",
@@ -43985,8 +43981,8 @@
         "operation_id": "addToWatchlist"
       },
       "notes": "Section personal-lists (profile_scoped). Not demo-restricted: v1's demo guard only blocks its listed routes, so this write passes in demo mode and v2 matches. Media kind resolved from the handler: no request body (request kind none) and a bodiless 204 answer; the inventory's unknown/json is heuristic. Naturally idempotent add: a repeated PUT converges on the item being on the watchlist. An item the viewer may not see is 404. Conditionally registered: authMiddleware != nil; personalDataHandler != nil && itemsHandler != nil. v2 registers the operation unconditionally and reports capability state instead.",
-      "retry_safety": "non_retryable",
-      "retry_safety_note": "DEFECT: the shared v1/v2 seam dispatches watch-provider list events and recommendation refresh even when membership did not change. Automatic retries remain disabled until the personal-lists section dispatches only for changed rows through a durable claim."
+      "retry_safety": "natural_idempotent",
+      "retry_safety_note": "Provider list, recommendation refresh and user-state events fire only when the write changed the row, detached from the request, so a retry repeats none. A crash between write and events loses them: scheduled export resends a missed add; a missed remove waits on a scheduled-sync fix."
     },
     {
       "listener": "api",

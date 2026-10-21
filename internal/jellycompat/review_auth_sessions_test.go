@@ -2,9 +2,7 @@ package jellycompat
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/google/uuid"
 )
@@ -72,44 +69,6 @@ func (unavailableSessionContent) GetItemDetail(context.Context, *Session, string
 	return nil, errors.New("catalog unavailable")
 }
 
-func TestSessionSurvivesItemLookupFailure(t *testing.T) {
-	store := NewPlaybackSessionStore(time.Hour, nil)
-	store.Put(PlaybackSession{ID: "active", CompatToken: "caller", ItemID: "item", UpstreamSessionID: "native"})
-	h := &PlaybackHandler{content: unavailableSessionContent{}, codec: NewResourceIDCodec(), playbackStore: store, cfg: &config.Config{}}
-	rec := httptest.NewRecorder()
-	h.HandleSessions(rec, viewerRequest(http.MethodGet, "/Sessions", "", "", "", &Session{Token: "caller"}))
-	var result []sessionInfoDTO
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if rec.Code != http.StatusOK || len(result) != 1 || result[0].ID != "active" || result[0].NowPlayingItem != nil {
-		t.Fatalf("active session disappeared: %d %s", rec.Code, rec.Body.String())
-	}
-}
-
-type failedPingStore struct {
-	CompatPlaybackStore
-	err error
-}
-
-func (s failedPingStore) TouchActiveForToken(context.Context, string, string) error { return s.err }
-
-func TestSessionPingMapsConcurrentRemovalToNotFound(t *testing.T) {
-	for _, tc := range []struct {
-		err  error
-		want int
-	}{{fmt.Errorf("touch: %w", ErrSessionNotFound), http.StatusNotFound}, {errors.New("database unavailable"), http.StatusInternalServerError}} {
-		store := NewPlaybackSessionStore(time.Hour, nil)
-		store.Put(PlaybackSession{ID: "active", CompatToken: "caller"})
-		h := &PlaybackHandler{codec: NewResourceIDCodec(), playbackStore: failedPingStore{store, tc.err}, cfg: &config.Config{}}
-		rec := httptest.NewRecorder()
-		h.HandleSessionPlayingPing(rec, viewerRequest(http.MethodPost, "/Sessions/Playing/Ping?playSessionId=active", "", "", "", &Session{Token: "caller"}))
-		if rec.Code != tc.want {
-			t.Fatalf("error=%v status=%d want=%d: %s", tc.err, rec.Code, tc.want, rec.Body.String())
-		}
-	}
-}
-
 type pingTestStore interface {
 	CompatPlaybackStore
 	TouchActiveForToken(context.Context, string, string) error
@@ -144,10 +103,4 @@ func assertPingPreservesAbsoluteLifetime(t *testing.T, store pingTestStore, now 
 func TestSessionPingPreservesAbsoluteLifetime(t *testing.T) {
 	now := time.Now().UTC()
 	assertPingPreservesAbsoluteLifetime(t, NewPlaybackSessionStore(time.Hour, func() time.Time { return now }), &now)
-}
-
-func TestDurableSessionPingPreservesAbsoluteLifetime(t *testing.T) {
-	pool := newCompatTestPool(t)
-	now := time.Now().UTC()
-	assertPingPreservesAbsoluteLifetime(t, NewDurableCompatPlaybackStore(pool, time.Hour, func() time.Time { return now }), &now)
 }

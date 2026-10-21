@@ -45,6 +45,15 @@ Existing installations retain their configured marker mode, which accepts `off`,
 
 Both paths honor provider priority, manual edits and deletions, and provider quota limits.
 
+Providers address an episode by its series' TMDB, TVDB, and IMDb IDs and the
+catalog's season and episode numbers; season 0 holds specials. When the catalog
+has them, lookups and contributions also carry the episode's own provider IDs,
+its title, and whose numbering it follows. Episode rows merge metadata
+providers' episodes by number in the order of the library's episode chain, so
+the numbering is that of the first TVDB or TMDB provider in the chain whose ID
+the episode carries. Automatic sharing skips specials; sharing a manually
+edited special's markers is allowed.
+
 A manual deletion removes every occurrence of that kind for the selected file.
 The empty range retains manual provenance: provider lookups, local detection,
 rescans, and file-identity changes cannot restore it. An explicit manual set

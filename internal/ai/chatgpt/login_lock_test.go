@@ -2,8 +2,6 @@ package chatgpt
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"errors"
 	"net/http"
 	"testing"
@@ -55,10 +53,7 @@ func (s *loginAdmissionStore) UpdateValueAndSettingsAtomic(ctx context.Context, 
 }
 
 func TestLoginPersistsAcceptedTokensAfterConcurrentRefresh(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testSigningKey(t)
 	for _, test := range []struct {
 		name                 string
 		timeout, slowCatalog bool

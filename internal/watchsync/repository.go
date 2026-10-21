@@ -36,7 +36,7 @@ type Repository interface {
 	ListLocalWatchEventConnections(ctx context.Context, userID int, profileID string, kind LocalWatchEventKind) ([]Connection, error)
 	ListListEventConnections(ctx context.Context, userID int, profileID string, list ListKind) ([]Connection, error)
 	UpsertHistoryExports(ctx context.Context, exports []HistoryExport) error
-	ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error)
+	ListPendingHistoryExports(ctx context.Context, connectionID string, after HistoryExportCursor, limit int) ([]HistoryExport, error)
 	ListPendingHistoryExportsByHistoryIDs(ctx context.Context, connectionID string, historyIDs []string, limit int) ([]HistoryExport, error)
 	MarkHistoryExportStatus(ctx context.Context, id string, status string, lastError string) error
 	MarkHistoryExportSatisfiedByScrobble(ctx context.Context, connectionID string, historyID string) error
@@ -44,6 +44,7 @@ type Repository interface {
 	ListListItemStates(ctx context.Context, connectionID string, kind ListKind) ([]ListItemState, error)
 	ListPendingListItemExports(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error)
 	ListPendingListItemRemovals(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error)
+	ListListItemsWithSharedKeyHeld(ctx context.Context, connectionID string, kind ListKind, mediaItemIDs []string) (map[string]bool, error)
 	MarkListItemExported(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, exportedAt time.Time) error
 	MarkListItemRemoteRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
 	MarkListItemLocalRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
@@ -111,6 +112,22 @@ const syncRunColumns = `
 	inbound_ratings_found, inbound_ratings_imported,
 	outbound_ratings_found, outbound_ratings_sent,
 	warning, error, started_at, completed_at, created_at`
+
+// listItemKeyHeldElsewhere is true when another library item of the same kind,
+// still on the local list, holds the provider key of the list row aliased item.
+// Removing that key from the provider would take the other item off too.
+const listItemKeyHeldElsewhere = `EXISTS (
+	SELECT 1 FROM watch_provider_list_items other
+	WHERE other.connection_id = item.connection_id
+	  AND other.list_kind = item.list_kind
+	  AND item.provider_item_key <> ''
+	  AND other.provider_item_key <> ''
+	  AND other.provider_item_key = item.provider_item_key
+	  AND other.kind = item.kind
+	  AND other.media_item_id <> item.media_item_id
+	  AND other.local_present = true
+	  AND EXISTS (SELECT 1 FROM media_items m WHERE m.content_id = other.media_item_id)
+)`
 
 // listItemStateColumns is the canonical select column list for
 // watch_provider_list_items, in the exact order scanListItemStates reads.
@@ -1308,9 +1325,18 @@ func (r *PostgresRepository) UpsertHistoryExports(ctx context.Context, exports [
 	return nil
 }
 
-func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 100
+func (r *PostgresRepository) ListPendingHistoryExports(
+	ctx context.Context,
+	connectionID string,
+	after HistoryExportCursor,
+	limit int,
+) ([]HistoryExport, error) {
+	if limit <= 0 || limit > maxHistoryExportPage {
+		limit = maxHistoryExportPage
+	}
+	var afterID any
+	if after.ID != "" {
+		afterID = after.ID
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id::text, connection_id::text, history_id, media_item_id, watched_at,
@@ -1319,9 +1345,12 @@ func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, conn
 		WHERE connection_id = $1::uuid
 		  AND status IN ('pending', 'failed')
 		  AND attempt_count < 5
-		ORDER BY watched_at ASC
+		  AND ($3::uuid IS NULL OR (watched_at, id) > ($4::timestamptz, $3::uuid))
+		-- Qualified: a bare "id" would sort by the id::text output column,
+		-- not the uuid the cursor compares.
+		ORDER BY watched_at ASC, watch_provider_history_exports.id ASC
 		LIMIT $2
-	`, connectionID, limit)
+	`, connectionID, limit, afterID, after.WatchedAt)
 	if err != nil {
 		return nil, fmt.Errorf("list pending history exports: %w", err)
 	}
@@ -1521,12 +1550,13 @@ func (r *PostgresRepository) ListPendingListItemRemovals(ctx context.Context, co
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+listItemStateColumns+`
-		FROM watch_provider_list_items
+		FROM watch_provider_list_items item
 		WHERE connection_id = $1::uuid
 		  AND list_kind = $2
 		  AND local_present = false
 		  AND remote_present = true
 		  AND last_error = ''
+		  AND NOT `+listItemKeyHeldElsewhere+`
 		ORDER BY last_removed_local_at ASC NULLS LAST, updated_at ASC
 		LIMIT $3
 	`, connectionID, string(kind), limit)
@@ -1535,6 +1565,39 @@ func (r *PostgresRepository) ListPendingListItemRemovals(ctx context.Context, co
 	}
 	defer rows.Close()
 	return scanListItemStates(rows)
+}
+
+// ListListItemsWithSharedKeyHeld reports which of the media items' rows share
+// their provider key with another library item of the same kind still on the
+// local list.
+func (r *PostgresRepository) ListListItemsWithSharedKeyHeld(ctx context.Context, connectionID string, kind ListKind, mediaItemIDs []string) (map[string]bool, error) {
+	held := make(map[string]bool)
+	if len(mediaItemIDs) == 0 {
+		return held, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT item.media_item_id
+		FROM watch_provider_list_items item
+		WHERE item.connection_id = $1::uuid
+		  AND item.list_kind = $2
+		  AND item.media_item_id = ANY($3)
+		  AND `+listItemKeyHeldElsewhere+`
+	`, connectionID, string(kind), mediaItemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list list items with shared key held: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan list item with shared key held: %w", err)
+		}
+		held[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate list items with shared key held: %w", err)
+	}
+	return held, nil
 }
 
 func (r *PostgresRepository) MarkListItemExported(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, exportedAt time.Time) error {
@@ -2086,13 +2149,7 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return result
 }
 
-type listItemStateRows interface {
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-}
-
-func scanListItemStates(rows listItemStateRows) ([]ListItemState, error) {
+func scanListItemStates(rows pgx.Rows) ([]ListItemState, error) {
 	var states []ListItemState
 	for rows.Next() {
 		var state ListItemState

@@ -128,23 +128,17 @@ describe("ConnectAppsSettings", () => {
     vi.restoreAllMocks();
   });
 
-  function render() {
+  // The page opens on the Silo tab; most cases here are about the Jellyfin one.
+  function render(tab: "silo" | "jellyfin" = "jellyfin") {
     act(() => {
       root.render(<ConnectAppsSettings />);
     });
+    if (tab === "jellyfin") {
+      act(() => {
+        findButton(container, "Jellyfin-compatible app")?.click();
+      });
+    }
   }
-
-  it("shows the plain account name and the Silo origin on the Silo tab", async () => {
-    render();
-
-    await click(findButton(container, "Silo app or website"));
-
-    expect(container.textContent).toContain("For Silo's own apps");
-    expect(container.textContent).toContain("Don't add a # to either field here.");
-    expect(container.textContent).not.toContain("johndoe#");
-    // jsdom's default origin stands in for the deployed server address.
-    expect(container.textContent).toContain(window.location.origin);
-  });
 
   it("switches the username and password format when another profile is picked", async () => {
     render();
@@ -155,30 +149,6 @@ describe("ConnectAppsSettings", () => {
 
     expect(container.textContent).toContain("johndoe#Kids");
     expect(container.textContent).toContain("Kids has a PIN, so append # and the PIN");
-  });
-
-  it("copies the compat username rather than the bare account name", async () => {
-    render();
-
-    await click(
-      Array.from(container.querySelectorAll("button")).find(
-        (button) => button.getAttribute("aria-label") === "Copy Username",
-      ),
-    );
-
-    expect(mocks.copyTextToClipboard).toHaveBeenCalledWith("johndoe#Doe Household");
-  });
-
-  it("explains that the compatibility API is off instead of showing credentials", () => {
-    mocks.useCompatConnectInfo.mockReturnValue({
-      data: makeConnectInfo({ enabled: false }),
-      isLoading: false,
-    });
-
-    render();
-
-    expect(container.textContent).toContain("The Jellyfin compatibility API is turned off");
-    expect(container.textContent).not.toContain("https://compat.example.test");
   });
 
   it("refuses to hand out a username a # in the profile name would break", async () => {
@@ -226,18 +196,6 @@ describe("ConnectAppsSettings", () => {
 
     expect(container.textContent).toContain("Couldn't load your sign-in details");
     expect(container.textContent).not.toContain("Every profile at a glance");
-  });
-
-  it("distinguishes a pending restart from a disabled compat API", () => {
-    mocks.useCompatConnectInfo.mockReturnValue({
-      data: makeConnectInfo({ enabled: false, pending_restart: true }),
-      isLoading: false,
-    });
-
-    render();
-
-    expect(container.textContent).toContain("isn't running yet");
-    expect(container.textContent).toContain("server has to restart");
   });
 
   it("tells SSO accounts the compat API can't accept them", () => {

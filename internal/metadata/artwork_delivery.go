@@ -32,6 +32,12 @@ func NewArtworkDeliveryStore(pool *pgxpool.Pool, scope string, external bool) *A
 	return &ArtworkDeliveryStore{pool: pool, scope: scope, external: external}
 }
 
+// ExternalDelivery reports whether reads go through an external endpoint that
+// can lag behind a storage write, so every key needs the verified manifest.
+func (s *ArtworkDeliveryStore) ExternalDelivery() bool {
+	return s.external
+}
+
 func (s *ArtworkDeliveryStore) ArtworkAvailability(ctx context.Context, paths []string) (map[string]ArtworkAvailability, error) {
 	// Publication clears delivery_checked_at but keeps the stale verdict's keys.
 	rows, err := s.pool.Query(ctx, `SELECT original_path,

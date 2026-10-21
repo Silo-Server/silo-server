@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"runtime/pprof"
 	"strings"
 	"sync"
@@ -12,7 +13,29 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 )
+
+func TestStartDetachesRequestAttribution(t *testing.T) {
+	t.Setenv("SILO_QUERY_ATTRIBUTION_ENABLED", "true")
+	if !queryattr.Initialize() {
+		t.Fatal("query attribution is disabled")
+	}
+	ctx, request := queryattr.StartRequest(t.Context())
+	workCtx, run := Start(ctx, "scan", time.Time{})
+	defer run.Finish("success")
+	op := queryattr.Begin(workCtx, queryattr.KindQuery, "SELECT 1", nil, 1)
+	op.End(workCtx, nil)
+	var record slog.Record
+	record.Add(request.LogAttrs()...)
+	record.Attrs(func(attr slog.Attr) bool {
+		if attr.Key == "db_queries" {
+			t.Errorf("request db_queries = %v, want field absent after detached work", attr.Value)
+		}
+		return true
+	})
+}
 
 func TestAttemptLifecycleAndBoundedLabels(t *testing.T) {
 	before := testutil.ToFloat64(completed.WithLabelValues("other", "canceled"))

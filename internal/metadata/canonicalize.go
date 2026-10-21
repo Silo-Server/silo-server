@@ -133,11 +133,19 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	if s.dbPool == nil {
 		return fmt.Errorf("rename content id requires database pool")
 	}
-	tx, err := s.dbPool.Begin(ctx)
+	tx, err := s.dbPool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin content_id rename transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// The rename cascades into the item's files.
+	if err := catalog.LockMetadataCurationFiles(ctx, tx, from); err != nil {
+		return err
+	}
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, from); err != nil {
+		return err
+	}
 
 	sources, targets := []string{from}, []string{to}
 	if withSeriesChildren {

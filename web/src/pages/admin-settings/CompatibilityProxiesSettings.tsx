@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -26,9 +26,14 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
-import { SettingField, SettingFieldStatus } from "./SettingField";
+import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
 import { formatDateTime } from "@/lib/datetime";
 
+/**
+ * Rows in the Jellyfin Advanced section. The server ID is among them but is
+ * shown read-only: it is generated on first start, and every Jellyfin app
+ * keys its saved server on it.
+ */
 const JELLYFIN_ADVANCED_KEYS = [
   "jellyfin_compat.server_name",
   "jellyfin_compat.server_id",
@@ -92,6 +97,38 @@ function formatOperationPhase(value?: string): string {
   return statusLabel(value);
 }
 
+/**
+ * Whether an address points back at the server itself (127.0.0.0/8,
+ * localhost, ::1). Silo hands this address to Jellyfin apps, and from any
+ * other device a loopback address is that device, not the server.
+ */
+function isLoopbackAddress(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  let hostname: string;
+  try {
+    hostname = new URL(trimmed.includes("://") ? trimmed : `http://${trimmed}`).hostname;
+  } catch {
+    return false;
+  }
+  hostname = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "::1" ||
+    /^127(\.\d{1,3}){3}$/.test(hostname)
+  );
+}
+
+/** Marks a feature that ships outside the 1.0 support promise. */
+function BetaChip() {
+  return (
+    <span className="border-border text-muted-foreground inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-xs font-medium tracking-wide">
+      Beta
+    </span>
+  );
+}
+
 function clampProgressPercent(value?: number): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.min(100, Math.max(0, Math.round(value)));
@@ -125,7 +162,6 @@ export default function CompatibilityProxiesSettings() {
   const removeWeb = useRemoveJellyfinCompatWeb();
   const updateCompatSettings = useUpdateJellyfinCompatSettings();
   const status = statusQuery.data;
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   if (form.isLoading || statusQuery.isLoading)
     return (
@@ -161,6 +197,8 @@ export default function CompatibilityProxiesSettings() {
   const jellyfinWebServing = jellyfinProxyRunning && status?.web_enabled !== false;
   const installedWebAssetsPresent = Boolean(status?.installed_version);
   const pinnedJellyfinWebInstalled = hasPinnedJellyfinWebInstalled(status);
+  const publicURL = form.getValue("jellyfin_compat.public_url");
+  const serverID = form.getValue("jellyfin_compat.server_id");
 
   const setJellyfinAPIEnabled = (value: string) => {
     form.setValue("jellyfin_compat.enabled", value);
@@ -175,7 +213,7 @@ export default function CompatibilityProxiesSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Compatibility" className="mb-8" />
+      <SettingsPageHeader title="Compatibility" />
 
       <div className="flex-1 space-y-5">
         <FieldGroup label="Jellyfin" restartAll={allRestart(JELLYFIN_KEYS)}>
@@ -191,8 +229,15 @@ export default function CompatibilityProxiesSettings() {
           <SettingField
             label="Address Jellyfin apps should use"
             hint="https://media.example.com"
-            value={form.getValue("jellyfin_compat.public_url")}
+            value={publicURL}
             onChange={(v) => form.setValue("jellyfin_compat.public_url", v)}
+            status={
+              jellyfinEnabledChecked && isLoopbackAddress(publicURL) ? (
+                <SettingFieldStatus tone="warn">
+                  Only this server can reach that address. Use one other devices can reach.
+                </SettingFieldStatus>
+              ) : undefined
+            }
             restartRequired={restartKeys.has("jellyfin_compat.public_url")}
           />
 
@@ -344,46 +389,32 @@ export default function CompatibilityProxiesSettings() {
               ) : null}
             </div>
 
-            <div>
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost"
-                aria-expanded={showDiagnostics}
-                onClick={() => setShowDiagnostics((current) => !current)}
-              >
-                {showDiagnostics ? "Hide download details" : "Show download details"}
-              </Button>
-              {showDiagnostics && (
-                <div className="grid gap-x-8 pt-2 md:grid-cols-2">
-                  <StatusLine
-                    label="API state"
-                    value={status ? statusLabel(status.api_state) : ""}
-                  />
-                  <StatusLine label="Listen address" value={status?.listen} mono />
-                  <StatusLine label="Public URL in use" value={status?.public_url} mono />
-                  <StatusLine
-                    label="Jellyfin version reported"
-                    value={status?.emulated_server_version}
-                  />
-                  <StatusLine label="Version chosen" value={status?.pinned_version} />
-                  <StatusLine
-                    label="Current job"
-                    value={
-                      status?.operation
-                        ? `${statusLabel(status.operation.kind)} ${statusLabel(status.operation.state)}`
-                        : "None"
-                    }
-                  />
-                  <StatusLine label="Downloaded from" value={status?.source_url} mono />
-                  <StatusLine label="Source commit" value={status?.commit_sha} mono />
-                  <StatusLine label="Checksum" value={status?.checksum} mono />
-                  <StatusLine label="Installed at" value={status?.install_path} mono />
-                  <StatusLine label="License file present" value={status?.license_present} />
-                  <StatusLine label="Download record present" value={status?.provenance_present} />
-                </div>
-              )}
-            </div>
+            <AdvancedSection id="compatibility.jellyfin.web-details" title="Download details">
+              <div className="grid gap-x-8 py-2 md:grid-cols-2">
+                <StatusLine label="API state" value={status ? statusLabel(status.api_state) : ""} />
+                <StatusLine label="Listen address" value={status?.listen} mono />
+                <StatusLine label="Public URL in use" value={status?.public_url} mono />
+                <StatusLine
+                  label="Jellyfin version reported"
+                  value={status?.emulated_server_version}
+                />
+                <StatusLine label="Version chosen" value={status?.pinned_version} />
+                <StatusLine
+                  label="Current job"
+                  value={
+                    status?.operation
+                      ? `${statusLabel(status.operation.kind)} ${statusLabel(status.operation.state)}`
+                      : "None"
+                  }
+                />
+                <StatusLine label="Downloaded from" value={status?.source_url} mono />
+                <StatusLine label="Source commit" value={status?.commit_sha} mono />
+                <StatusLine label="Checksum" value={status?.checksum} mono />
+                <StatusLine label="Installed at" value={status?.install_path} mono />
+                <StatusLine label="License file present" value={status?.license_present} />
+                <StatusLine label="Download record present" value={status?.provenance_present} />
+              </div>
+            </AdvancedSection>
           </div>
 
           <AdvancedSection
@@ -393,18 +424,21 @@ export default function CompatibilityProxiesSettings() {
           >
             <SettingField
               label="Name shown to Jellyfin apps"
-              description="Defaults to your Silo server name."
+              // jellycompat reads only its own key, defaulting to "Silo"; the
+              // server name on General never reaches Jellyfin apps.
+              description="Separate from the server name on General."
               value={form.getValue("jellyfin_compat.server_name")}
               onChange={(v) => form.setValue("jellyfin_compat.server_name", v)}
               restartRequired={restartKeys.has("jellyfin_compat.server_name")}
             />
-            <SettingField
+            <SettingFieldRow
               label="Server ID"
-              description="Changing it makes saved clients treat Silo as a new server."
-              value={form.getValue("jellyfin_compat.server_id")}
-              onChange={(v) => form.setValue("jellyfin_compat.server_id", v)}
-              restartRequired={restartKeys.has("jellyfin_compat.server_id")}
-            />
+              description="Read-only. Changing it makes every Jellyfin app see a new server."
+            >
+              <span className="text-muted-foreground font-mono text-xs break-all">
+                {serverID || "Created on the next start"}
+              </span>
+            </SettingFieldRow>
             <SettingField
               label="Jellyfin version to report"
               description="Leave as is unless an app refuses to connect."
@@ -430,14 +464,17 @@ export default function CompatibilityProxiesSettings() {
             />
             <SettingField
               label="Web player version to install"
-              description="Leave blank to match the reported Jellyfin version."
+              // The effective default (DefaultJellyfinWebVersion) refills an
+              // emptied field, and Install sends what the field shows, so
+              // "leave blank to match" could never happen.
+              description="The default pairs with the default reported Jellyfin version; change them together."
               value={form.getValue("jellyfin_compat.web_version")}
               onChange={(v) => form.setValue("jellyfin_compat.web_version", v)}
               restartRequired={restartKeys.has("jellyfin_compat.web_version")}
             />
             <SettingField
               label="Web player install folder"
-              description="Leave blank to use the folder Silo manages."
+              description="The default is the folder Silo manages."
               value={form.getValue("jellyfin_compat.web_install_dir")}
               onChange={(v) => form.setValue("jellyfin_compat.web_install_dir", v)}
               restartRequired={restartKeys.has("jellyfin_compat.web_install_dir")}
@@ -445,7 +482,13 @@ export default function CompatibilityProxiesSettings() {
           </AdvancedSection>
         </FieldGroup>
 
-        <FieldGroup label="Audiobookshelf" restartAll={allRestart(AUDIOBOOKSHELF_KEYS)}>
+        {/* Audiobookshelf compatibility ships as beta, outside the 1.0
+            support promise (docs/architecture/v1-scope.md). */}
+        <FieldGroup
+          label="Audiobookshelf"
+          actions={<BetaChip />}
+          restartAll={allRestart(AUDIOBOOKSHELF_KEYS)}
+        >
           <SettingField
             label="Allow Audiobookshelf apps to connect"
             type="toggle"

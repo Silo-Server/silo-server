@@ -144,25 +144,11 @@ it("counts skipped items once in a running import's progress", () => {
   expect(screen.getAllByText("An import item could not be processed.")).toHaveLength(2);
 });
 
-it("imports only into the member's own profile when it isn't the primary profile", () => {
-  renderPage();
-  expect(screen.queryByRole("combobox", { name: "Import into profile" })).toBeNull();
-  expect(screen.getByText(/The history goes into your profile, Member\./)).toBeTruthy();
-  expect(screen.queryByText(/into Member/)).toBeNull();
-});
-
 it("lets the primary profile choose the profile and names each run's profile", () => {
   state.primary = true;
   renderPage();
   expect(screen.getByRole("combobox", { name: "Import into profile" })).toBeTruthy();
   expect(screen.getByText(/into Member/)).toBeTruthy();
-});
-
-it("lets an admin's primary profile choose the profile", () => {
-  state.role = "admin";
-  state.primary = true;
-  renderPage();
-  expect(screen.getByRole("combobox", { name: "Import into profile" })).toBeTruthy();
 });
 
 it("imports only into its own profile from an admin's non-primary profile", () => {

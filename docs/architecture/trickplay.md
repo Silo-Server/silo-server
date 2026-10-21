@@ -103,18 +103,34 @@ and runs each file at idle CPU and I/O priority:
   `k*interval + interval/2`, the last one a second inside the file, so it
   shows what plays in `[k*interval, (k+1)*interval)`.
 - The first `mediasample` Sheets request covers one sheet to learn actual
-  display geometry. Later requests cover at most 16 sheets and 64 million
+  display geometry. Later requests cover at most 16 sheets and 32 million
   pixels, keeping high-entropy JPEG responses within the bounded node limit; a longer file
-  takes several runs, which bounds each run's memory. Each run seeks to the
+  takes several runs, which bounds each run's memory: a run holds every tile
+  it decodes until its repairs are done. Each run seeks to the
   keyframe before each sample rather than reading the whole file
   (`Samples`); see [media sampling](media-sampling.md#sheets). AVI files,
   whose index seeks poorly, are read in one pass (`ReadThrough`), and
   containers without a keyframe index (MPEG-TS) always are.
-- HDR and Dolby Vision sources are tone mapped (`tonemap.NeedsToneMap`),
-  after scaling, so software tone mapping is always allowed.
+- A list run's missing and repeated cells are read again before the sheets
+  are encoded ([repairs](media-sampling.md#repairs)): samples a container
+  without keyframe flags (VC-1 in Matroska) or an HEVC picture-order
+  collision left without a frame, and samples a GOP longer than the interval
+  gave the previous sample's keyframe. `SheetFrames.Refined` counts them.
+- HDR and Dolby Vision sources are tone mapped (`tonemap.NeedsToneMap`) in
+  software after scaling, on GPU attempts too, so software tone mapping is
+  always allowed. The request names the base signal `tonemap.ResolveSource`
+  classifies the file's catalog facts as (`ToneMap.Source`), and every
+  attempt converts it with the chain playback converts it with in software:
+  a Dolby Vision base (Profile 5, compatibility id 0) only through
+  `tonemapx`, which applies its RPU, HLG with the HLG transfer. A file the
+  facts cannot classify keeps the best-effort chains, except a legacy row
+  whose catalog names Dolby Vision Profile 5, which takes the Dolby Vision
+  signal: no chain without its RPU can show that base.
 - Hardware decode follows `playback.hw_accel` and `playback.hw_device`
-  (QSV, VAAPI, VideoToolbox), with a software attempt after a hardware
-  failure. Attempt timeouts grow with the samples: two minutes plus half a
+  (QSV, VAAPI, VideoToolbox, and NVENC's CUDA decoder), with a software
+  attempt after a hardware failure. A GPU that cannot decode the codec fails
+  its attempt as `unsupported`, logged at debug rather than as the
+  accelerator's first failure. Attempt timeouts grow with the samples: two minutes plus half a
   second a sample on hardware, two seconds a sample in software.
 - A file selected for local extraction that this server cannot read
   (an offline mount) is given back for an hour without counting a failure;
@@ -180,8 +196,9 @@ the lease, and the uploads; a node only decodes and tiles
 [worker protocol](worker-http-protocol.md)).
 
 - A node is eligible while it is enabled, healthy, and advertises the
-  `trickplay_extract_v1` transport feature, so older nodes are never sent
-  work. The API server reserves capacity through the node planner shared
+  `trickplay_extract_v2` transport feature, so nodes that would ignore the
+  tone-map source signal (`trickplay_extract_v1` alone) are never sent
+  work. Nodes keep advertising v1 for older API servers. The API server reserves capacity through the node planner shared
   with playback and downloads and chooses among nodes by available capacity
   and load. Those provisional reservations belong to one API process; a node's
   reported load accounts for work accepted from other replicas.

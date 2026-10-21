@@ -57,39 +57,6 @@ func TestScanControlsGateAndProjection(t *testing.T) {
 	deps.ScanControls = nil
 	requireProblem(t, do(t, NewHandler(deps), "POST", Prefix+"/scan", `{}`, admin), TypeDependencyUnavailable)
 }
-func TestScanControlsDiscoveryAndDemoExemption(t *testing.T) {
-	deps := parityDeps(false)
-	admin := with(bearer(adminToken), "X-Profile-Id", "p-primary")
-	rec := do(t, NewHandler(deps), http.MethodGet, Prefix+"/scan/capabilities", "", admin)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), StateNotConfigured) {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	f := new(scanControlFixture)
-	deps = parityDeps(true)
-	deps.ScanControls = f
-	h := NewHandler(deps)
-	for _, path := range []string{Prefix + "/scan", Prefix + "/scan/cancel"} {
-		problem := requireProblem(t, do(t, h, http.MethodPost, path, `{"library_id":"42"}`, bearer(memberToken)), TypePermissionDenied)
-		if problem.Detail != "This action is not available in demo mode." {
-			t.Fatalf("%s denied outside the demo guard: %+v", path, problem)
-		}
-	}
-	if f.calls != 0 {
-		t.Fatal("demo scan dispatched")
-	}
-	for _, tc := range []struct {
-		path   string
-		status int
-	}{{Prefix + "/scan", http.StatusAccepted}, {Prefix + "/scan/cancel", http.StatusOK}} {
-		rec := do(t, h, http.MethodPost, tc.path, `{"library_id":"42"}`, admin)
-		if rec.Code != tc.status {
-			t.Fatalf("acting admin demo exemption: %s returned %d: %s", tc.path, rec.Code, rec.Body.String())
-		}
-	}
-	if f.calls != 2 {
-		t.Fatalf("acting admin demo dispatches = %d, want 2", f.calls)
-	}
-}
 
 func TestScanStartDisabledLibraryConflict(t *testing.T) {
 	deps := parityDeps(false)

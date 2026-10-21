@@ -11,6 +11,7 @@ import (
 	"time"
 
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/themedelivery"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/danielgtaylor/huma/v2"
@@ -105,7 +106,7 @@ func registerThemeSongs(reg *Registry) {
 		if !capabilityLoginAllowed(ctx) {
 			return nil, NewProblem(TypeAuthenticationRequired, "A current login session is required.")
 		}
-		viewer, p := reg.itemViewer(ctx, "", "", "")
+		viewer, p := reg.itemViewer(ctx, imagesize.Request{}, "", "")
 		if p != nil {
 			return nil, p
 		}

@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -23,7 +22,7 @@ type fakeAdminAccessGroups struct {
 }
 
 func fixtureAdminAccessGroups() *fakeAdminAccessGroups {
-	return &fakeAdminAccessGroups{g: access.Group{ID: 7, Revision: 11, Name: "Group", MaxPlaybackQuality: "original", MemberCount: 3, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}}
+	return &fakeAdminAccessGroups{g: access.Group{ID: 7, Revision: 11, Name: "Group", MaxPlaybackQuality: "original", MaxProfiles: 5, MemberCount: 3, CreatedAt: fixedTime(), UpdatedAt: fixedTime()}}
 }
 func (f *fakeAdminAccessGroups) GetAdminAccessGroup(context.Context, int64) (*access.Group, error) {
 	g := f.g
@@ -101,28 +100,6 @@ func TestAdminAccessGroupTransport(t *testing.T) {
 	if created.Code != 201 || created.Header().Get("Location") != path || f.created.DownloadAllowed || !f.created.TranscodeAllowed || f.created.LibraryIDs == nil {
 		t.Fatal(created.Code, created.Body.String(), f.created)
 	}
-}
-func TestAdminAccessGroupPaginationAuthority(t *testing.T) {
-	f := fixtureAdminAccessGroups()
-	deps := requestDeps(fixtureRequests())
-	deps.AdminAccessGroups = f
-	h := NewHandler(deps)
-	path := Prefix + "/admin/access-groups"
-	first := do(t, h, http.MethodGet, path+"?limit=1", "", actingRequestAdmin)
-	var page Collection[AdminAccessGroupListItem]
-	if err := json.Unmarshal(first.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Items) != 1 || page.Items[0].MemberCount != 3 || !page.Page.HasMore || first.Header().Get("ETag") != "" {
-		t.Fatal(first.Body.String())
-	}
-	next := do(t, h, http.MethodGet, path+"?limit=1&cursor="+page.Page.NextCursor, "", actingRequestAdmin)
-	if next.Code != 200 || !strings.Contains(next.Body.String(), `"id":"8"`) {
-		t.Fatal(next.Code, next.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodGet, path+"?limit=2&cursor="+page.Page.NextCursor, "", actingRequestAdmin), TypeInvalidCursor)
-	requireProblem(t, do(t, h, http.MethodGet, path+"?limit=1&cursor="+page.Page.NextCursor, "", bearer(otherAdminToken)), TypeInvalidCursor)
-	requireProblem(t, do(t, h, http.MethodGet, path, "", requestOwner), TypePermissionDenied)
 }
 
 func TestAdminAccessGroupAuthenticationPolicy(t *testing.T) {

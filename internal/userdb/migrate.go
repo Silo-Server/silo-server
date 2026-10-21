@@ -1,11 +1,12 @@
 package userdb
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
 
-const schemaVersion = 31
+const schemaVersion = 34
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -318,6 +319,40 @@ func runMigrations(db *sql.DB) error {
 			}
 		}
 		if _, err := tx.Exec("PRAGMA user_version = 31"); err != nil {
+			return err
+		}
+	}
+	if version < 32 {
+		// A fresh user_devices table already has the column. The Postgres
+		// store adds the same column in 20261015140728_add_user_devices_custom_name.sql.
+		if !columnExists(tx, "user_devices", "custom_name") {
+			if _, err := tx.Exec(`ALTER TABLE user_devices ADD COLUMN custom_name TEXT`); err != nil {
+				return fmt.Errorf("migration v32 failed: %w", err)
+			}
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 32"); err != nil {
+			return err
+		}
+	}
+	if version < 33 {
+		if err := retireTraktSectionOverrides(tx); err != nil {
+			return fmt.Errorf("migration v33 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 33"); err != nil {
+			return err
+		}
+	}
+	if version < 34 {
+		// A Next Up row a profile added; the Postgres store deletes the same
+		// rows in 20261018213122_retire_next_up_rows.sql. The server inserts
+		// the only Next Up row itself and refuses new ones.
+		if _, err := tx.ExecContext(context.Background(), `
+DELETE FROM profile_section_overrides
+WHERE COALESCE(section_id, '') = ''
+  AND COALESCE(NULLIF(user_section_type, ''), section_type) = 'next_up'`); err != nil {
+			return fmt.Errorf("migration v34 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 34"); err != nil {
 			return err
 		}
 	}

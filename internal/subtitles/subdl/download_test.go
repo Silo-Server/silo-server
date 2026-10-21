@@ -51,16 +51,48 @@ func TestDownloadFetchesWellFormedIDFromDownloadHost(t *testing.T) {
 	}))
 	defer dl.Close()
 
-	p := New(Config{DLBaseURL: dl.URL})
-	data, format, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip?api_key=synthetic")
+	p := New(Config{DLBaseURL: dl.URL, APIKey: "synthetic-server-key"})
+	// An ID issued before result IDs dropped SubDL's signed query: the
+	// client's query is not forwarded, the server signs with its own key.
+	data, format, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip?api_key=client-supplied&x=1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if format != subtitles.FormatSRT || !strings.Contains(string(data), "hello") {
 		t.Fatalf("got %q (%s)", data, format)
 	}
-	if gotPath != "/subtitle/3197651-3213944.zip" || gotQuery != "api_key=synthetic" {
+	if gotPath != "/subtitle/3197651-3213944.zip" || gotQuery != "api_key=synthetic-server-key" {
 		t.Fatalf("requested %s?%s", gotPath, gotQuery)
+	}
+}
+
+func TestSignedSearchRowYieldsKeylessIDThatDownloads(t *testing.T) {
+	const key = "synthetic-subdl-key"
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":true,"subtitles":[{"language":"EN","release_name":"Example.2024.srt","url":"/subtitle/3520378-8443030.zip?api_key=` + key + `"}]}`))
+	}))
+	defer api.Close()
+	var gotQuery string
+	dl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write(subtitleZip(t, "1\n00:00:01,000 --> 00:00:02,000\nhello\n"))
+	}))
+	defer dl.Close()
+
+	p := New(Config{BaseURL: api.URL, DLBaseURL: dl.URL, APIKey: key})
+	results, err := p.Search(t.Context(), subtitles.SearchRequest{IMDbID: "tt0000001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].ID != "/subtitle/3520378-8443030.zip" {
+		t.Fatalf("results = %+v", results)
+	}
+	if _, _, err := p.Download(t.Context(), results[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "api_key="+key {
+		t.Fatalf("download query = %q", gotQuery)
 	}
 }
 
@@ -112,11 +144,27 @@ func TestDownloadRefusesRedirectOffTheDownloadHost(t *testing.T) {
 	}))
 	defer dl.Close()
 
-	if _, _, err := New(Config{DLBaseURL: dl.URL}).Download(t.Context(), "/subtitle/1-2.zip"); err == nil {
+	_, _, err := New(Config{DLBaseURL: dl.URL, APIKey: "synthetic-subdl-key"}).Download(t.Context(), "/subtitle/1-2.zip")
+	if err == nil {
 		t.Fatal("download followed an off-host redirect")
+	}
+	if strings.Contains(err.Error(), "synthetic-subdl-key") {
+		t.Fatalf("download error carries the key: %v", err)
 	}
 	if n := otherHits.Load(); n != 0 {
 		t.Fatalf("off-host server received %d requests", n)
+	}
+}
+
+func TestDownloadTransportErrorOmitsAPIKey(t *testing.T) {
+	dl := httptest.NewServer(http.NotFoundHandler())
+	dl.Close()
+	_, _, err := New(Config{DLBaseURL: dl.URL, APIKey: "synthetic-subdl-key"}).Download(t.Context(), "/subtitle/1-2.zip")
+	if err == nil {
+		t.Fatal("download from a closed server succeeded")
+	}
+	if strings.Contains(err.Error(), "synthetic-subdl-key") {
+		t.Fatalf("download error carries the key: %v", err)
 	}
 }
 

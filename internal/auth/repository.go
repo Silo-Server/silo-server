@@ -174,7 +174,7 @@ func createUser(ctx context.Context, db interface {
 	cols := []string{
 		"email", "username", "password_hash", "local_password_login_enabled", "password_change_required", "role", "permissions",
 		"library_ids", "max_playback_quality", "max_streams", "max_transcodes", "max_remote_stream_bitrate_kbps", "max_local_stream_bitrate_kbps",
-		"transcode_allowed", "audio_transcode_allowed", "download_allowed", "download_transcode_allowed",
+		"transcode_allowed", "audio_transcode_allowed", "max_profiles", "download_allowed", "download_transcode_allowed",
 		"requests_allowed",
 	}
 	args := []any{
@@ -193,16 +193,12 @@ func createUser(ctx context.Context, db interface {
 		input.MaxLocalStreamBitrateKbps,
 		input.TranscodeAllowed,
 		input.AudioTranscodeAllowed,
+		input.MaxProfiles,
 		input.DownloadAllowed,
 		input.DownloadTranscodeAllowed,
 		input.RequestsAllowed,
 	}
 
-	// Optional columns: nil means use DB default.
-	if input.MaxProfiles != nil {
-		cols = append(cols, "max_profiles")
-		args = append(args, *input.MaxProfiles)
-	}
 	accessGroupID := input.AccessGroupID
 	if input.Role == models.RoleAdmin {
 		accessGroupID = nil
@@ -213,9 +209,9 @@ func createUser(ctx context.Context, db interface {
 	}
 
 	// Build placeholders: $1, $2, ..., $N
-	placeholders := make([]string, len(args))
+	placeholders := make([]string, 0, len(args)+1)
 	for i := range args {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
 	}
 	// Admins stay ungrouped: scope/action decisions are role-blind, so the
 	// default group's ceilings would cap the server owner (mirrors the
@@ -418,7 +414,7 @@ func updateUser(ctx context.Context, db interface {
 		{column: "max_local_stream_bitrate_kbps", set: input.MaxLocalStreamBitrateKbps.Set, value: input.MaxLocalStreamBitrateKbps.Value},
 		{column: "transcode_allowed", set: input.TranscodeAllowed.Set, value: input.TranscodeAllowed.Value},
 		{column: "audio_transcode_allowed", set: input.AudioTranscodeAllowed.Set, value: input.AudioTranscodeAllowed.Value},
-		{column: "max_profiles", set: input.MaxProfiles != nil, value: input.MaxProfiles},
+		{column: "max_profiles", set: input.MaxProfiles.Set, value: input.MaxProfiles.Value},
 		{column: "download_allowed", set: input.DownloadAllowed.Set, value: input.DownloadAllowed.Value},
 		{column: "download_transcode_allowed", set: input.DownloadTranscodeAllowed.Set, value: input.DownloadTranscodeAllowed.Value},
 		{column: "requests_allowed", set: input.RequestsAllowed.Set, value: input.RequestsAllowed.Value},

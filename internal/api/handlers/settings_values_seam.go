@@ -549,6 +549,7 @@ func (h *SettingValuesHandler) writeSettingValue(
 	}
 	publishUserSettingsEvent(ctx, h.EventsHub,
 		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
+	notifyScopeSettingChanged(ctx, h.RecWorker, eventUserID, identity.ProfileID, identity.Key)
 	auditSettingsForOther(ctx, settingsAuditRecord{
 		Action:          settingsAuditActionSet,
 		ActorProfileID:  acting,
@@ -641,6 +642,7 @@ func (h *SettingValuesHandler) clearSettingValue(
 	})
 	publishUserSettingsEvent(ctx, h.EventsHub,
 		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
+	notifyScopeSettingChanged(ctx, h.RecWorker, eventUserID, identity.ProfileID, identity.Key)
 	return nil
 }
 

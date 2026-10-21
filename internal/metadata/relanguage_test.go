@@ -43,78 +43,63 @@ func newRelanguageProvider() *capturingMetadataProvider {
 	}
 }
 
-// TestProcess_AdoptLanguageRewritesBaseRowAndRestamps covers the core of
-// issue #211: a refresh carrying AdoptLanguage must treat req.Language as the
-// item's new canonical metadata language — replacing the base-row title and
-// overview and restamping default_metadata_language — instead of pinning to
-// the language stamped at first match.
-func TestProcess_AdoptLanguageRewritesBaseRowAndRestamps(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	seedRelanguageItem(t, h)
+// TestProcess_AdoptLanguage covers the core of issue #211: a refresh carrying
+// AdoptLanguage must treat req.Language as the item's new canonical metadata
+// language — replacing the base-row title and overview and restamping
+// default_metadata_language — instead of pinning to the language stamped at
+// first match. Locked fields stay, and the stamp stays when both language
+// fields are locked.
+func TestProcess_AdoptLanguage(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		adopt                   bool
+		locked                  []MetadataField
+		wantTitle, wantOverview string // wantOverview "" is not checked
+		wantLanguage            string
+	}{
+		{name: "rewrites the base row and restamps", adopt: true, wantTitle: "Ny Dansk Titel", wantOverview: "Dansk oversigt", wantLanguage: "da"},
+		{name: "without AdoptLanguage keeps the canonical pin", wantTitle: "Gammel Kinesisk Titel", wantLanguage: "zh"},
+		{
+			name: "skipped when both language fields are locked", adopt: true, locked: []MetadataField{FieldName, FieldOverview},
+			wantTitle: "Gammel Kinesisk Titel", wantOverview: "Old-language overview", wantLanguage: "zh",
+		},
+		{
+			name: "only the title locked", adopt: true, locked: []MetadataField{FieldName},
+			wantTitle: "Gammel Kinesisk Titel", wantOverview: "Dansk oversigt", wantLanguage: "da",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			seedRelanguageItem(t, h, tc.locked...)
 
-	provider := newRelanguageProvider()
+			result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+				ContentID:     "existing-1",
+				Language:      "da",
+				Mode:          ModeManualRefresh,
+				AdoptLanguage: tc.adopt,
+			}, []Provider{newRelanguageProvider()})
+			if err != nil {
+				t.Fatalf("ProcessWithProviders: %v", err)
+			}
+			if result == nil || !result.Updated {
+				t.Fatalf("result = %#v, want Updated=true", result)
+			}
 
-	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID:     "existing-1",
-		Language:      "da",
-		Mode:          ModeManualRefresh,
-		AdoptLanguage: true,
-	}, []Provider{provider})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if result == nil || !result.Updated {
-		t.Fatalf("result = %#v, want Updated=true", result)
-	}
-
-	item, err := h.itemRepo.GetByID(ctx, "existing-1")
-	if err != nil {
-		t.Fatalf("get item: %v", err)
-	}
-	if item.Title != "Ny Dansk Titel" {
-		t.Errorf("title = %q, want base row rewritten to %q", item.Title, "Ny Dansk Titel")
-	}
-	if item.Overview != "Dansk oversigt" {
-		t.Errorf("overview = %q, want base row rewritten", item.Overview)
-	}
-	if item.DefaultMetadataLanguage != "da" {
-		t.Errorf("default_metadata_language = %q, want restamped to da", item.DefaultMetadataLanguage)
-	}
-}
-
-// TestProcess_WithoutAdoptLanguageKeepsCanonicalPin pins the pre-existing
-// behavior: a refresh in a non-canonical language without AdoptLanguage must
-// NOT rewrite the base row or restamp the item (the fetch routes to the
-// localization tables instead).
-func TestProcess_WithoutAdoptLanguageKeepsCanonicalPin(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	seedRelanguageItem(t, h)
-
-	provider := newRelanguageProvider()
-
-	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "existing-1",
-		Language:  "da",
-		Mode:      ModeManualRefresh,
-	}, []Provider{provider})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if result == nil || !result.Updated {
-		t.Fatalf("result = %#v, want Updated=true", result)
-	}
-
-	item, err := h.itemRepo.GetByID(ctx, "existing-1")
-	if err != nil {
-		t.Fatalf("get item: %v", err)
-	}
-	if item.Title != "Gammel Kinesisk Titel" {
-		t.Errorf("title = %q, want base row untouched", item.Title)
-	}
-	if item.DefaultMetadataLanguage != "zh" {
-		t.Errorf("default_metadata_language = %q, want zh (unchanged)", item.DefaultMetadataLanguage)
+			item, err := h.itemRepo.GetByID(ctx, "existing-1")
+			if err != nil {
+				t.Fatalf("get item: %v", err)
+			}
+			if item.Title != tc.wantTitle {
+				t.Errorf("title = %q, want %q", item.Title, tc.wantTitle)
+			}
+			if tc.wantOverview != "" && item.Overview != tc.wantOverview {
+				t.Errorf("overview = %q, want %q", item.Overview, tc.wantOverview)
+			}
+			if item.DefaultMetadataLanguage != tc.wantLanguage {
+				t.Errorf("default_metadata_language = %q, want %q", item.DefaultMetadataLanguage, tc.wantLanguage)
+			}
+		})
 	}
 }
 
@@ -145,83 +130,6 @@ func TestAdoptableFolderLanguage(t *testing.T) {
 				t.Fatalf("adoptableFolderLanguage(%v, %q, %q) = %v, want %v", tc.mode, tc.stamp, tc.language, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestProcess_AdoptLanguageSkippedWhenBothLanguageFieldsLocked: when both
-// language-bearing fields (title, overview) are locked, adoption must not
-// restamp default_metadata_language — nothing would actually be rewritten,
-// so the restamp would permanently mislabel the old-language text and the
-// quick-refresh language-mismatch predicate would never flag the item again.
-// The refresh behaves like a non-adopting refresh in that language instead.
-func TestProcess_AdoptLanguageSkippedWhenBothLanguageFieldsLocked(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	seedRelanguageItem(t, h, FieldName, FieldOverview)
-
-	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID:     "existing-1",
-		Language:      "da",
-		Mode:          ModeManualRefresh,
-		AdoptLanguage: true,
-	}, []Provider{newRelanguageProvider()})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if result == nil || !result.Updated {
-		t.Fatalf("result = %#v, want Updated=true", result)
-	}
-
-	item, err := h.itemRepo.GetByID(ctx, "existing-1")
-	if err != nil {
-		t.Fatalf("get item: %v", err)
-	}
-	if item.Title != "Gammel Kinesisk Titel" {
-		t.Errorf("title = %q, want locked title untouched", item.Title)
-	}
-	if item.Overview != "Old-language overview" {
-		t.Errorf("overview = %q, want locked overview untouched", item.Overview)
-	}
-	if item.DefaultMetadataLanguage != "zh" {
-		t.Errorf("default_metadata_language = %q, want zh (stamp kept when both language fields are locked)",
-			item.DefaultMetadataLanguage)
-	}
-}
-
-// TestProcess_AdoptLanguageWithOnlyTitleLocked: a single locked language
-// field does not block adoption — the unlocked field is rewritten in the new
-// language and the stamp is adopted, while the locked field keeps its text.
-func TestProcess_AdoptLanguageWithOnlyTitleLocked(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	seedRelanguageItem(t, h, FieldName)
-
-	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID:     "existing-1",
-		Language:      "da",
-		Mode:          ModeManualRefresh,
-		AdoptLanguage: true,
-	}, []Provider{newRelanguageProvider()})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if result == nil || !result.Updated {
-		t.Fatalf("result = %#v, want Updated=true", result)
-	}
-
-	item, err := h.itemRepo.GetByID(ctx, "existing-1")
-	if err != nil {
-		t.Fatalf("get item: %v", err)
-	}
-	if item.Title != "Gammel Kinesisk Titel" {
-		t.Errorf("title = %q, want locked title untouched", item.Title)
-	}
-	if item.Overview != "Dansk oversigt" {
-		t.Errorf("overview = %q, want base row rewritten", item.Overview)
-	}
-	if item.DefaultMetadataLanguage != "da" {
-		t.Errorf("default_metadata_language = %q, want restamped to da (only one field locked)",
-			item.DefaultMetadataLanguage)
 	}
 }
 

@@ -106,77 +106,6 @@ func TestPlaybackV2CapabilitiesAndMissingConfiguration(t *testing.T) {
 	}
 }
 
-func TestPlaybackV2StartUsesTypedServiceAndOpaqueIDs(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	fake := &fakePlaybackService{}
-	deps.Playback = fake
-	data, err := os.ReadFile("../playback/testdata/protocol_v3/decision_response.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &fake.response); err != nil {
-		t.Fatal(err)
-	}
-	input := playbackStartFixture(t)
-	input["allow_alternate_versions"] = false
-	response := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/playback/start", playbackJSON(t, input), viewerHeaders())
-	if response.Code != 201 {
-		t.Fatalf("start: %d %s", response.Code, response.Body.String())
-	}
-	if fake.calls != 1 || fake.request.FileID != 42 || fake.caller.ProfileID != "p-owner" || fake.caller.UserID <= 0 || fake.caller.InstallationID != playbackTestInstallation {
-		t.Fatalf("service caller/request: %+v %+v", fake.caller, fake.request)
-	}
-	if fake.request.AllowsAlternateVersions() {
-		t.Fatal("fixed media file constraint was lost at the API boundary")
-	}
-	var body struct {
-		Plan struct {
-			Requested string `json:"requested_media_file_id"`
-			Effective string `json:"effective_media_file_id"`
-			Source    struct {
-				FileID string `json:"media_file_id"`
-			} `json:"source"`
-		} `json:"playback_plan"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.Plan.Requested == "" || body.Plan.Effective == "" || body.Plan.Source.FileID == "" {
-		t.Fatalf("opaque IDs: %v %s", err, response.Body.String())
-	}
-}
-
-func TestPlaybackV2RejectsInvalidInputBeforeService(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	fake := &fakePlaybackService{}
-	deps.Playback = fake
-	h := newTestHandler(t, deps)
-	for _, variation := range []string{"numeric file", "protocol", "profile", "installation", "unknown field", "null start"} {
-		t.Run(variation, func(t *testing.T) {
-			*fake = fakePlaybackService{}
-			body := playbackStartFixture(t)
-			switch variation {
-			case "numeric file":
-				body["file_id"] = 42
-			case "protocol":
-				body["protocol_version"] = 2
-			case "profile":
-				body["profile_id"] = "other"
-			case "installation":
-				body["installation_id"] = ""
-			case "unknown field":
-				body["unexpected"] = true
-			case "null start":
-				body["start_position"] = nil
-			}
-			response := do(t, h, http.MethodPost, Prefix+"/playback/start", playbackJSON(t, body), viewerHeaders())
-			if response.Code != 422 {
-				t.Fatalf("validation: %d %s", response.Code, response.Body.String())
-			}
-			if fake.calls != 0 {
-				t.Fatal("invalid request reached application")
-			}
-		})
-	}
-}
-
 func TestPlaybackV2ProgressAndStop(t *testing.T) {
 	deps, _ := catalogDeps(t)
 	fake := &fakePlaybackService{mutation: handlers.PlaybackMutationView{Outcome: "applied"}}
@@ -234,46 +163,24 @@ func TestPlaybackV2ProblemMapping(t *testing.T) {
 	}
 }
 
-// The start forwards the declared X-Silo-Device-* headers, which the service
-// records in the profile's device registry; the playback device X-Device-ID
-// names is unaffected.
-func TestPlaybackV2StartForwardsDeclaredDevice(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	fake := &fakePlaybackService{}
-	deps.Playback = fake
-	headers := with(viewerHeaders(), "X-Silo-Device-Id", "phone-1")
-	headers = with(headers, "X-Silo-Device-Name", "Pocket")
-	headers = with(headers, "X-Silo-Device-Platform", "iOS")
-	response := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/playback/start", playbackJSON(t, playbackStartFixture(t)), headers)
-	if response.Code != 201 {
-		t.Fatalf("start: %d %s", response.Code, response.Body.String())
-	}
-	want := handlers.DeviceMetadata{DeviceID: "phone-1", DeviceName: "Pocket", DevicePlatform: "iOS"}
-	if fake.caller.DeclaredDevice != want {
-		t.Fatalf("declared device = %+v, want %+v", fake.caller.DeclaredDevice, want)
-	}
-	if fake.caller.DeviceID != "" {
-		t.Fatalf("playback device id = %q, want it left to X-Device-ID", fake.caller.DeviceID)
-	}
-}
-
-// v2 names every source entry, video or audio-only, without touching other
+// v2 drops the source entry, video or audio-only, without touching other
 // entries or the shared plan that v1 serializes.
-func TestPlaybackQualitiesNamesTheSourceEntry(t *testing.T) {
+func TestPlaybackQualitiesDropsTheSourceEntry(t *testing.T) {
 	plan := []playback.AvailableQualityV3{
 		{Label: playback.QualityOriginalV3, Height: 2160, BitrateKbps: 40_000, PreservesSource: true},
+		{Label: "1080p", DisplayName: "1080p", Height: 1080, BitrateKbps: 8_000},
 		{Label: "1080p-medium", DisplayName: "1080p Medium", Height: 1080, BitrateKbps: 6_000},
 	}
 	got := playbackQualities(plan)
-	if got[0].DisplayName != sourceQualityDisplayName || got[1].DisplayName != "1080p Medium" {
+	if len(got) != 2 || got[0].Label != "1080p" || got[1].Label != "1080p-medium" {
 		t.Fatalf("v2 qualities = %#v", got)
 	}
-	if plan[0].DisplayName != "" {
-		t.Fatalf("shared plan changed: %#v", plan[0])
+	if len(plan) != 3 || plan[0].Label != playback.QualityOriginalV3 {
+		t.Fatalf("shared plan changed: %#v", plan)
 	}
 	audio := playbackQualities([]playback.AvailableQualityV3{{Label: playback.QualityOriginalV3, BitrateKbps: 128, PreservesSource: true}})
-	if audio[0].DisplayName != sourceQualityDisplayName {
-		t.Fatalf("audio-only source entry = %#v", audio[0])
+	if len(audio) != 0 {
+		t.Fatalf("audio-only menu = %#v, want empty", audio)
 	}
 	if playbackQualities(nil) != nil {
 		t.Fatal("an absent menu stays absent")

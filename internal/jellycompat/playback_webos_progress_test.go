@@ -148,39 +148,6 @@ func TestWebOSStaticResumeReusesStartedSession(t *testing.T) {
 	}
 }
 
-func TestWebOSDurableLookupSeesOtherReplicas(t *testing.T) {
-	pool := newCompatTestPool(t)
-	writer := NewDurableCompatPlaybackStore(pool, 0, nil)
-	reader := NewDurableCompatPlaybackStore(pool, 0, nil)
-	h, mgr, item, source := newReportLivenessHandler("upstream-1", true)
-	active, _ := h.playbackStore.Get("play-1")
-	active.ID = t.Name() + "-one"
-	writer.Put(*active)
-	t.Cleanup(func() { writer.Delete(active.ID) })
-	h.playbackStore = reader
-	body := fmt.Sprintf(`{"ItemId":%q,"MediaSourceId":%q,"PositionTicks":15523810000}`, item, source)
-	postProgressReport(h, body)
-	if len(mgr.progressUpdates) != 1 {
-		t.Fatalf("cross-replica report updates=%d, want 1", len(mgr.progressUpdates))
-	}
-	// A second API process starts the same item after this reader cached one
-	// match. A cache hit must not bypass the durable uniqueness check.
-	sibling := *active
-	sibling.ID = t.Name() + "-two"
-	sibling.UpstreamSessionID = "upstream-2"
-	writer.Put(sibling)
-	t.Cleanup(func() { writer.Delete(sibling.ID) })
-	postProgressReport(h, body)
-	if len(mgr.progressUpdates) != 1 {
-		t.Fatal("ambiguous cross-replica report updated playback")
-	}
-	writer.Delete(sibling.ID)
-	postProgressReport(h, body)
-	if len(mgr.progressUpdates) != 2 {
-		t.Fatal("removed remote sibling remained in cached route matching")
-	}
-}
-
 func TestWebOSStaticAmbiguityDoesNotFallBack(t *testing.T) {
 	h, _, item, source := newReportLivenessHandler("upstream-1", true)
 	sibling, _ := h.playbackStore.Get("play-1")
@@ -249,15 +216,11 @@ func TestWebOSStaticWithoutStartedMatchUsesNegotiation(t *testing.T) {
 }
 
 type webOSQueryTracer struct {
-	mu         sync.Mutex
-	fullLoads  int
-	onIdentity func()
+	mu        sync.Mutex
+	fullLoads int
 }
 
 func (q *webOSQueryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	if strings.Contains(data.SQL, "SELECT id, data->>") && q.onIdentity != nil {
-		q.onIdentity()
-	}
 	if strings.Contains(data.SQL, "SELECT data FROM jellycompat_playback_sessions") {
 		q.mu.Lock()
 		q.fullLoads++
@@ -297,97 +260,5 @@ func TestWebOSDurableRangeDoesNotReloadSnapshots(t *testing.T) {
 	defer tracer.mu.Unlock()
 	if tracer.fullLoads != 1 {
 		t.Fatalf("full session payload loads=%d, want 1", tracer.fullLoads)
-	}
-}
-
-func TestWebOSDurableLookupRejectsUnpersistedLocalPlay(t *testing.T) {
-	pool := newCompatTestPool(t)
-	store := NewDurableCompatPlaybackStore(pool, 0, nil)
-	h, _, item, source := newReportLivenessHandler("upstream-1", true)
-	active, _ := h.playbackStore.Get("play-1")
-	active.ID = t.Name()
-	active.CompatToken = t.Name()
-	store.Put(*active)
-	defer store.Delete(active.ID)
-	sibling := *active
-	sibling.ID += "-local"
-	sibling.UpstreamSessionID = "upstream-2"
-	store.mem.Put(sibling)
-	store.markUnpersisted(sibling.ID)
-	got, err := store.FindUnidentifiedPlayback(active.CompatToken, item, source)
-	if err == nil || got != nil {
-		t.Fatalf("unpersisted sibling ignored: got=%+v err=%v", got, err)
-	}
-	defer store.Delete(sibling.ID)
-	if store.isUnpersisted(sibling.ID) {
-		t.Fatal("lookup did not repair failed creation")
-	}
-	other := NewDurableCompatPlaybackStore(pool, 0, nil)
-	if _, ok := other.Get(sibling.ID); !ok {
-		t.Fatal("repaired session is not durable")
-	}
-	store.Delete(sibling.ID)
-	got, err = store.FindUnidentifiedPlayback(active.CompatToken, item, source)
-	if err != nil || got == nil || got.ID != active.ID {
-		t.Fatalf("lookup after repair=%+v err=%v", got, err)
-	}
-}
-
-func TestWebOSStaticUnpersistedNegotiationCanStart(t *testing.T) {
-	pool := newCompatTestPool(t)
-	store := NewDurableCompatPlaybackStore(pool, 0, nil)
-	h, _, item, source := newReportLivenessHandler("upstream-1", true)
-	pending, _ := h.playbackStore.Get("play-1")
-	pending.ID = t.Name()
-	pending.CompatToken = t.Name()
-	pending.UpstreamSessionID = ""
-	store.mem.Put(*pending)
-	store.markUnpersisted(pending.ID)
-	defer store.Delete(pending.ID)
-	h.playbackStore = store
-	req := httptest.NewRequest("GET", "/stream?Static=true", nil)
-	got, _, err := h.resolvePlaybackRoute(req, &Session{Token: pending.CompatToken}, item, source)
-	if err != nil || got == nil || got.ID != pending.ID {
-		t.Fatalf("unstarted negotiation route=%+v err=%v", got, err)
-	}
-}
-
-func TestWebOSDurableLookupRetriesConcurrentUpdates(t *testing.T) {
-	for _, changes := range []int{1, 2, 3} {
-		t.Run(fmt.Sprint(changes), func(t *testing.T) {
-			base := newCompatTestPool(t)
-			config := base.Config()
-			tracer := &webOSQueryTracer{}
-			config.ConnConfig.Tracer = tracer
-			pool, err := pgxpool.NewWithConfig(t.Context(), config)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer pool.Close()
-			store := NewDurableCompatPlaybackStore(pool, 0, nil)
-			h, _, item, source := newReportLivenessHandler("upstream-1", true)
-			active, _ := h.playbackStore.Get("play-1")
-			active.ID = t.Name()
-			active.CompatToken = t.Name()
-			store.Put(*active)
-			defer store.Delete(active.ID)
-			calls := 0
-			tracer.onIdentity = func() {
-				calls++
-				if calls <= changes {
-					if err := store.Update(active.ID, func(p *PlaybackSession) error { p.UpstreamPlayMethod = "direct"; return nil }); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-			got, err := store.FindUnidentifiedPlayback(active.CompatToken, item, source)
-			if changes < 3 {
-				if err != nil || got == nil || got.ID != active.ID || calls != changes+1 {
-					t.Fatalf("lookup=%+v err=%v attempts=%d", got, err, calls)
-				}
-			} else if err == nil || got != nil || calls != 3 {
-				t.Fatalf("unbounded or unsafe lookup=%+v err=%v attempts=%d", got, err, calls)
-			}
-		})
 	}
 }

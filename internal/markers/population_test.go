@@ -3,6 +3,7 @@ package markers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -783,4 +784,31 @@ func TestPopulationHoldsAreCapped(t *testing.T) {
 			t.Fatalf("holds=%d, want %d without the first", len(service.holds), markerMemoryLimit)
 		}
 	})
+}
+
+func TestPopulationIdentityTracksEpisodeIDsButNotTitle(t *testing.T) {
+	file := &models.MediaFile{ID: 7, Duration: 3600}
+	base := ExternalIDs{Kind: ItemKindEpisode, TvdbID: "121361", SeasonNumber: 1, EpisodeNumber: 1}
+	withoutEpisode := populationIdentity(file, base, nil)
+
+	retitled := base
+	retitled.EpisodeTitle = "Winter Is Coming"
+	if got := populationIdentity(file, retitled, nil); got != withoutEpisode {
+		t.Fatal("an episode title changed the lookup identity")
+	}
+	matched := base
+	matched.Episode = EpisodeIDs{TvdbID: "3254641"}
+	if got := populationIdentity(file, matched, nil); got == withoutEpisode {
+		t.Fatal("an episode TVDB ID left the lookup identity unchanged")
+	}
+	// An item without episode IDs, such as a movie, keeps the identity it had
+	// before the field existed, so upgrading does not invalidate its cached
+	// lookups.
+	payload, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), "Episode\"") {
+		t.Fatalf("identity payload %s names an empty episode", payload)
+	}
 }

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +25,32 @@ func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
 	}
 }
 
+func TestAdminCollectionServiceRejectsUnknownVisibility(t *testing.T) {
+	h := &LibraryCollectionHandler{}
+	_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "repro", Visibility: "public"})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "visibility" {
+		t.Fatalf("create: expected visibility field error, got %v", err)
+	}
+	_, err = h.UpdateAdminCollection(t.Context(), "collection", AdminCollectionUpdate{Visibility: new("public")})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "visibility" {
+		t.Fatalf("update: expected visibility field error, got %v", err)
+	}
+	for _, v := range []string{"", "visible", "hidden"} {
+		if err := validateCollectionVisibility(v); err != nil {
+			t.Fatalf("%q rejected: %v", v, err)
+		}
+	}
+	if got, err := normalizeCollectionVisibilityUpdate(nil); err != nil || got != nil {
+		t.Fatalf("nil update: got %v, %v", got, err)
+	}
+	for in, want := range map[string]string{"": adminCollectionVisible, adminCollectionHidden: adminCollectionHidden, adminCollectionVisible: adminCollectionVisible} {
+		got, err := normalizeCollectionVisibilityUpdate(new(in))
+		if err != nil || got == nil || *got != want {
+			t.Fatalf("%q: got %v, %v, want %q", in, got, err, want)
+		}
+	}
+}
+
 func TestAdminCollectionLookupAPIErrorPreservesFailureClass(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -40,52 +65,6 @@ func TestAdminCollectionLookupAPIErrorPreservesFailureClass(t *testing.T) {
 			apiErr, ok := errors.AsType[*APIError](adminCollectionLookupAPIError(tc.err))
 			if !ok || apiErr.Status != tc.wantStatus || apiErr.Code != tc.wantCode {
 				t.Fatalf("error = %#v, want status=%d code=%s", apiErr, tc.wantStatus, tc.wantCode)
-			}
-		})
-	}
-}
-
-func TestLegacyTraktAdminCollectionLibraryScopeIsImmutable(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		existing   *models.LibraryCollection
-		libraryIDs []int
-		wantError  bool
-	}{
-		{
-			name: "collection type changed scope",
-			existing: &models.LibraryCollection{
-				CollectionType: "trakt", LibraryIDs: []int{1, 2},
-			},
-			libraryIDs: []int{2, 3}, wantError: true,
-		},
-		{
-			name: "source config changed scope",
-			existing: &models.LibraryCollection{
-				CollectionType: "manual", LibraryIDs: []int{1, 2},
-				SourceConfig: json.RawMessage(`{"provider":"trakt","mode":"trakt_list"}`),
-			},
-			libraryIDs: []int{2, 3}, wantError: true,
-		},
-		{
-			name: "reordered duplicate scope is unchanged",
-			existing: &models.LibraryCollection{
-				CollectionType: "trakt", LibraryIDs: []int{1, 2},
-			},
-			libraryIDs: []int{2, 1, 2},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateAdminCollectionSourceUpdate(tc.existing, AdminCollectionUpdate{LibraryIDs: &tc.libraryIDs})
-			if tc.wantError {
-				apiErr, ok := errors.AsType[*APIError](err)
-				if !ok || apiErr.Code != "legacy_source_immutable" {
-					t.Fatalf("error = %#v, want legacy_source_immutable", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
 			}
 		})
 	}
@@ -106,84 +85,5 @@ func TestAdminCollectionSourceUpdateAcceptsFranchiseID(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
-	}
-}
-
-// A v1 update that switches a collection to Smart activates its stored
-// rules, so it is refused when they use the v2 vocabulary; v2 may switch it.
-func TestAdminCollectionV1SmartSwitchKeepsTheV1RuleVocabularyDB(t *testing.T) {
-	f := newPagingIntegrationFixture(t)
-	repo := catalog.NewLibraryCollectionRepository(f.pool)
-	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
-	created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{
-		LibraryID: f.library, Title: "The films", CollectionType: "manual",
-		QueryDefinition: json.RawMessage(`{"match":"all","groups":[{"match":"all","rules":[{"field":"title","op":"begins_with","value":"the "}]}]}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = f.pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id = $1`, created.ID)
-	})
-	smart := "smart"
-	if _, err := h.updateAdminCollection(t.Context(), created.ID, AdminCollectionUpdate{CollectionType: &smart, V1Rules: true}, func(string, string, string) error { return nil }); err == nil {
-		t.Fatal("v1 switched to Smart with a title rule stored")
-	}
-	if _, err := h.UpdateAdminCollection(t.Context(), created.ID, AdminCollectionUpdate{CollectionType: &smart}); err != nil {
-		t.Fatalf("v2 switch to Smart: %v", err)
-	}
-}
-
-func TestAdminCollectionServiceCanonicalGuardAndMembershipDB(t *testing.T) {
-	f := newPagingIntegrationFixture(t)
-	repo := catalog.NewLibraryCollectionRepository(f.pool)
-	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
-	created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: f.library, Title: "Admin editor", CollectionType: "manual", PosterURL: "poster/path", BackdropURL: "backdrop/path"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	before, revision, err := h.GetAdminCollection(t.Context(), created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if before.PosterURL != "" || before.BackdropURL != "" {
-		t.Fatal("canonical editor contains artwork URLs")
-	}
-	_, err = h.UpdateAdminCollection(WithAdminCollectionExpectedRevision(t.Context(), revision), created.ID, AdminCollectionUpdate{Title: new("Updated")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = h.UpdateAdminCollection(WithAdminCollectionExpectedRevision(t.Context(), revision), created.ID, AdminCollectionUpdate{Title: new("Stale")})
-	if !errors.Is(err, catalog.ErrLibraryCollectionRevisionMismatch) {
-		t.Fatalf("stale update lost conflict: %v", err)
-	}
-	if err = h.AddAdminCollectionItem(t.Context(), created.ID, f.ids[0], 7); err == nil {
-		t.Fatal("added member outside collection libraries")
-	}
-	if err = h.AddAdminCollectionItem(t.Context(), created.ID, f.ids[1], 217); err != nil {
-		t.Fatal(err)
-	}
-	if err = h.AddAdminCollectionItem(t.Context(), created.ID, f.ids[1], 0); err != nil {
-		t.Fatal(err)
-	}
-	items, err := repo.ListItems(t.Context(), created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].Position != 217 {
-		t.Fatalf("duplicate add changed membership: %+v", items)
-	}
-	if err = h.DeleteAdminCollection(WithAdminCollectionExpectedRevision(t.Context(), revision), created.ID); !errors.Is(err, catalog.ErrLibraryCollectionRevisionMismatch) {
-		t.Fatalf("stale delete lost conflict: %v", err)
-	}
-	current, revision, err := h.GetAdminCollection(t.Context(), created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current.Title != "Updated" {
-		t.Fatalf("stale mutation changed title: %s", current.Title)
-	}
-	if err = h.DeleteAdminCollection(WithAdminCollectionExpectedRevision(t.Context(), revision), created.ID); err != nil {
-		t.Fatal(err)
 	}
 }

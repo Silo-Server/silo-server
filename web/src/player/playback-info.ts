@@ -1,15 +1,19 @@
 import {
+  audioTrackHasAtmos,
+  audioTrackLabel,
   dolbyVisionLabel,
   formatBitrate,
   formatCodecLabel,
   formatFileSize,
   formatMbpsFromKbps,
   formatSampleRate,
+  mentionsAtmos,
 } from "@/lib/mediaFormat";
 import { videoRangeLabel } from "@/lib/videoRange";
-import type { DeliveryV3, EffectiveRecipeV3, PlanV3 } from "./protocol-v3";
+import type { DeliveryV3, PlanV3 } from "./protocol-v3";
 import {
   QUALITY_ORIGINAL_V3,
+  normalizeQualityPreferenceV3,
   TRANSFORMATION_AUDIO_TO_AAC_V3,
   TRANSFORMATION_VIDEO_TO_H264_V3,
 } from "./protocol-v3";
@@ -40,6 +44,8 @@ interface BuildPlaybackInfoSectionsInput {
   currentSourceVersion?: PlayerFileVersion;
   requestedVersion?: PlayerFileVersion;
   runtimeStats: RuntimePlaybackStats;
+  /** True while the browser decode engine plays the stream instead of the media element. */
+  browserEngine?: boolean;
 }
 
 export function buildPlaybackInfoSections({
@@ -48,6 +54,7 @@ export function buildPlaybackInfoSections({
   currentSourceVersion,
   requestedVersion,
   runtimeStats,
+  browserEngine = false,
 }: BuildPlaybackInfoSectionsInput): PlaybackInfoSection[] {
   const videoTrack = currentSourceVersion ? pickVideoTrack(currentSourceVersion) : undefined;
   const audioTrack = currentSourceVersion ? pickAudioTrack(currentSourceVersion) : undefined;
@@ -62,7 +69,7 @@ export function buildPlaybackInfoSections({
     {
       title: "Player",
       rows: [
-        { label: "Player", value: "HTML Video Player" },
+        { label: "Player", value: browserEngine ? "Browser decoder" : "HTML Video Player" },
         { label: "Play method", value: formatDelivery(plan.delivery) },
         { label: "Protocol", value: formatProtocol(streamUrl) },
         { label: "Stream type", value: formatStreamType(plan) },
@@ -161,114 +168,81 @@ export function buildPlaybackInfoSections({
 /**
  * Turns the plan's quality ladder into menu entries.
  *
- * The server owns the ladder: this maps its rungs onto the menu's shape and
- * adds nothing. `id` is the rung's own label, which is what a `quality_change`
- * replan sends back. The `auto` entry is prepended locally because it is a
- * *preference*, not a rung — no server rung names it, and picking it hands the
- * choice back to the planner.
+ * The server owns the ladder: this maps its fixed rungs onto the menu's shape.
+ * `id` is the rung's own label, which is what a `quality_change` replan sends
+ * back. The `auto` entry is prepended locally because it is a *preference*,
+ * not a rung, and it is also how the viewer returns to the source: Auto plays
+ * the original file whenever the device and connection can carry it. Older
+ * servers still list that source as an "original" entry, which is dropped
+ * here.
  */
 export function qualityOptionsFromPlanV3(plan: PlanV3): QualityOption[] {
-  const rungs = plan.available_qualities.map((quality) => ({
-    id: quality.label,
-    label: quality.display_name || qualityRungLabel(quality.label),
-    sublabel: formatQualityBitrate(quality.bitrate_kbps),
-    resolution: quality.height ? `${quality.height}p` : "",
-    bitrateKbps: quality.bitrate_kbps ?? 0,
-    isOriginal: quality.preserves_source,
-  }));
+  const rungs = plan.available_qualities
+    .filter((quality) => quality.label !== QUALITY_ORIGINAL_V3)
+    .map((quality) => ({
+      id: quality.label,
+      label: quality.display_name || quality.label,
+      sublabel: formatQualityBitrate(quality.bitrate_kbps),
+      resolution: quality.height ? `${quality.height}p` : "",
+      bitrateKbps: quality.bitrate_kbps ?? 0,
+    }));
 
-  // A single source-preserving rung is not a choice, so there is no menu to
-  // render — audio-only plans and clients without HLS land here.
-  if (rungs.length <= 1) {
-    return rungs;
+  // Without a fixed rung there is nothing to choose, so there is no menu —
+  // audio-only plans and clients without HLS land here.
+  if (rungs.length === 0) {
+    return [];
   }
 
-  return [
-    { id: "auto", label: "Auto", sublabel: "", resolution: "", bitrateKbps: 0, isOriginal: false },
-    ...rungs,
-  ];
+  return [{ id: "auto", label: "Auto", sublabel: "", resolution: "", bitrateKbps: 0 }, ...rungs];
 }
 
 /**
- * Resolves a stored resolution-only preference onto the explicit bitrate rung
- * that implements the same policy in the current plan. Plain 2160p/1080p/720p
- * preferences use the ladder's Medium bitrate; when that resolution cap is at
- * or above the source, the source-preserving Original rung is the active one,
- * unless the plan's delivered recipe shows a bitrate cap reduced it.
+ * The menu entry the current plan delivers. An auto preference, including the
+ * legacy source labels, lights Auto. Any other preference lights the entry the
+ * server names as the plan's `active_quality`, or none when the plan delivers
+ * no entry on this menu, so Auto stays selectable.
  */
 export function resolveActiveQualityOptionId(
   options: QualityOption[],
   preference: string,
-  delivered?: EffectiveRecipeV3,
+  activeQuality?: string,
 ): string | null {
-  // A sole rung is effective regardless of the saved preference. Keep the
-  // preference unchanged so it applies again when more qualities are available.
-  if (options.length === 1) return options[0]!.id;
-
-  const normalized = preference.trim().toLowerCase();
-  const exact = options.find((option) => option.id.toLowerCase() === normalized);
-  if (exact) return exact.id;
-
-  const aliasHeight = qualityPreferenceHeight(normalized);
-  if (aliasHeight === null) {
-    const originalAlias = ["source", "max"].includes(normalized);
-    return originalAlias ? (options.find((option) => option.isOriginal)?.id ?? null) : null;
-  }
-
-  // The planner preserves a source that fits the cap, even when the ladder
-  // also publishes same-height rungs below the source bitrate. A bitrate cap,
-  // the viewer's or the server's, can still force a transcode the ladder does
-  // not show; the delivered bitrate reveals it.
-  const original = options.find((option) => option.isOriginal);
-  const deliveredKbps = delivered?.bitrate_kbps;
-  const capped = isPositive(deliveredKbps) && deliveredKbps < (original?.bitrateKbps ?? 0);
-  if (original && !capped && resolutionHeight(original.resolution) <= aliasHeight) {
-    return original.id;
-  }
-
-  // Otherwise the planner encodes at the Medium bitrate of a ladder class: the
-  // preferred one, or a lower one a bitrate cap chose. The delivered frame
-  // names the class; without it, assume the preferred one.
-  const classHeight = ladderClassHeight(delivered?.width, delivered?.height) ?? aliasHeight;
-  const rungId = classMediumRungId(classHeight);
-  return options.find((option) => option.id === rungId)?.id ?? null;
+  if (options.length === 0) return null;
+  if (normalizeQualityPreferenceV3(preference) === "auto") return "auto";
+  return options.find((option) => option.id === activeQuality)?.id ?? null;
 }
 
 /**
- * The menu rung that encodes at a ladder class's Medium bitrate. The 540p
- * class, which a low bitrate cap can choose, has no menu rung.
+ * The label for a plain resolution preference ("1080p", "4K") when it plays
+ * the source as-is and no menu row is lit; null for any other preference.
  */
-function classMediumRungId(classHeight: number): string | null {
-  switch (classHeight) {
-    case 480:
-      return "480p";
-    case 540:
-      return null;
-    default:
-      return `${classHeight}p-medium`;
-  }
+export function plainResolutionLabel(preference: string): string | null {
+  const height = qualityPreferenceHeight(normalizeQualityPreferenceV3(preference).toLowerCase());
+  if (height === null) return null;
+  return height === 2160 ? "4K" : `${height}p`;
 }
 
 /**
  * The next quality rung below what the viewer receives now, for a viewer whose
- * connection cannot keep up. An explicit rung steps down from itself; Auto and
- * Original step down from the delivered bitrate, or to the top transcode rung
- * when a copy delivery reports none.
+ * connection cannot keep up. The step is from the lower of the lit rung's
+ * bitrate and the delivered one, since a cap can encode a lit rung below its
+ * listed rate. With neither, a copy delivery steps to the top transcode rung.
  */
 export function lowerQualityOption(
   options: QualityOption[],
   preference: string,
-  delivered?: EffectiveRecipeV3,
+  activeQuality?: string,
+  deliveredBitrateKbps?: number,
 ): QualityOption | null {
   const rungs = options
-    .filter((option) => option.id !== "auto" && !option.isOriginal && option.bitrateKbps > 0)
+    .filter((option) => option.id !== "auto" && option.bitrateKbps > 0)
     .sort((a, b) => b.bitrateKbps - a.bitrateKbps);
-  const activeId = resolveActiveQualityOptionId(options, preference, delivered);
-  const deliveredBitrateKbps = delivered?.bitrate_kbps;
+  const activeId = resolveActiveQualityOptionId(options, preference, activeQuality);
   const active = rungs.find((option) => option.id === activeId);
-  const ceiling =
-    active?.bitrateKbps ??
-    (deliveredBitrateKbps && deliveredBitrateKbps > 0 ? deliveredBitrateKbps : Infinity);
+  const ceiling = Math.min(
+    active?.bitrateKbps ?? Infinity,
+    isPositive(deliveredBitrateKbps) ? deliveredBitrateKbps : Infinity,
+  );
   return rungs.find((option) => option.bitrateKbps < ceiling) ?? null;
 }
 
@@ -290,41 +264,6 @@ function qualityPreferenceHeight(preference: string): number | null {
     default:
       return null;
   }
-}
-
-// The server's bitrate ladder classes (bitrateLadder), smallest first.
-const LADDER_CLASS_BOXES = [
-  { width: 854, height: 480 },
-  { width: 960, height: 540 },
-  { width: 1280, height: 720 },
-  { width: 1920, height: 1080 },
-  { width: 3840, height: 2160 },
-] as const;
-
-/**
- * The ladder class an encoded frame belongs to: the smallest class box that
- * holds it, as the server's ladderClassForSize decides. A 1280x688 encode is
- * 720p and a 1920x800 scope encode is 1080p.
- */
-function ladderClassHeight(width?: number, height?: number): number | null {
-  if (!isPositive(height)) return null;
-  const box = LADDER_CLASS_BOXES.find(
-    (candidate) => height <= candidate.height && (!isPositive(width) || width <= candidate.width),
-  );
-  // A frame larger than every box is in the largest class.
-  return box?.height ?? 2160;
-}
-
-function resolutionHeight(resolution: string): number {
-  const match = resolution
-    .trim()
-    .toLowerCase()
-    .match(/^(\d+)p$/);
-  return match ? Number.parseInt(match[1] ?? "0", 10) : 0;
-}
-
-function qualityRungLabel(label: string): string {
-  return label === QUALITY_ORIGINAL_V3 ? "Original" : label;
 }
 
 // Quality-menu bitrate label: Mbps with collapsed integers ("8 Mbps", not
@@ -467,6 +406,11 @@ export function formatOriginalAudioCodec(
   track?: PlayerAudioTrack,
 ): string {
   const title = track?.title || track?.embedded_title;
+  // An Atmos track whose title does not say so, such as the codec's long
+  // name the scanner gives an untagged track, shows its family label.
+  if (track?.codec && audioTrackHasAtmos(track) && !mentionsAtmos(title)) {
+    return audioTrackLabel(track);
+  }
   if (title) {
     return title;
   }

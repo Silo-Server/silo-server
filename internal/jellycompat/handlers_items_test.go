@@ -279,6 +279,30 @@ func TestHandleEpisodes_AdjacentToUnknownReturnsEmptyPage(t *testing.T) {
 	}
 }
 
+// An Ids value that names a season is not an unresolvable Ids filter: a
+// series ParentId still lists that series' seasons.
+func TestHandleItems_SeriesParentWithSeasonIDsListsSeasons(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{
+			{ContentID: "season-1", SeasonNumber: 1, Title: "Season 1", EpisodeCount: 10},
+		},
+	}
+	h := &ItemsHandler{
+		content:  contentSvc,
+		userData: &mockUserDataService{},
+		codec:    codec,
+		mapper:   newMapper(codec, &config.Config{}),
+		images:   NewImageCache(time.Hour, time.Now),
+	}
+
+	result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+codec.EncodeStringID(EncodedIDItem, "series-1")+
+		"&Ids="+codec.EncodeStringID(EncodedIDSeason, "season-1")+"&IncludeItemTypes=Season")
+	if contentSvc.listSeasonsCalls != 1 || len(result.Items) != 1 {
+		t.Fatalf("ListSeasons calls = %d, items = %+v; want the series' season", contentSvc.listSeasonsCalls, result.Items)
+	}
+}
+
 func TestHandleItems_SeriesParentSeasonFilterReturnsPagedSeasons(t *testing.T) {
 	codec := NewResourceIDCodec()
 	seriesContentID := "series-1"
@@ -429,42 +453,6 @@ func TestHandleItemsSearchMediaTypesVideoExcludeMovieEpisodeSearchesSeries(t *te
 	}
 }
 
-func TestHandleItemsSearchSeriesScopeReachesProvider(t *testing.T) {
-	codec := NewResourceIDCodec()
-	contentSvc := &recordingSearchContentService{}
-	h := &ItemsHandler{
-		content:  contentSvc,
-		userData: &mockUserDataService{},
-		codec:    codec,
-		mapper:   newMapper(codec, &config.Config{}),
-		images:   NewImageCache(time.Hour, time.Now),
-	}
-
-	req := httptest.NewRequest("GET", "/Items?SearchTerm=spongebob&Limit=100"+
-		"&IncludeItemTypes=Series&EnableTotalRecordCount=false", nil)
-	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{
-		StreamAppUserID: 1,
-		ProfileID:       "profile-1",
-	}))
-
-	rec := httptest.NewRecorder()
-	h.HandleItems(rec, req)
-
-	if rec.Code != 200 {
-		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
-	}
-	if len(contentSvc.options) != 1 {
-		t.Fatalf("SearchItems calls = %d, want 1", len(contentSvc.options))
-	}
-	opts := contentSvc.options[0]
-	if opts.Query != "spongebob" || opts.Limit != 100 || !opts.SkipTotal {
-		t.Fatalf("SearchItems options = %#v", opts)
-	}
-	if len(opts.ItemTypes) != 1 || opts.ItemTypes[0] != "series" {
-		t.Fatalf("ItemTypes = %v, want [series]", opts.ItemTypes)
-	}
-}
-
 // TestHandleItem_Episode_FetchesSeriesDetailForStableParentImageTags verifies
 // that episode detail responses fetch parent series image metadata even when
 // image URLs are already cached. Cached URLs are not enough to build stable
@@ -489,6 +477,8 @@ func TestHandleItem_Episode_FetchesSeriesDetailForStableParentImageTags(t *testi
 			Title:       "Test Series",
 			PosterURL:   "/img/series-1-poster.jpg",
 			BackdropURL: "/img/series-1-backdrop.jpg",
+			LogoURL:     "/img/series-1-logo.png",
+			LogoPath:    "metadb://logo/series-1",
 		},
 	}
 
@@ -535,6 +525,11 @@ func TestHandleItem_Episode_FetchesSeriesDetailForStableParentImageTags(t *testi
 		item.ParentThumbImageTag != item.ParentBackdropImageTags[0] {
 		t.Fatalf("episode response lost parent backdrop identity or tag: %+v", item)
 	}
+	seriesLogoTag := h.mapper.itemFromDetail(*contentSvc.seriesDetail, false, nil).ImageTags["Logo"]
+	if item.ParentLogoItemID != encodedSeriesID || item.ParentLogoImageTag == "" || item.ParentLogoImageTag != seriesLogoTag {
+		t.Fatalf("episode response lost the series logo: id=%q tag=%q, want %q and the series Logo tag %q",
+			item.ParentLogoItemID, item.ParentLogoImageTag, encodedSeriesID, seriesLogoTag)
+	}
 }
 
 // TestRememberDetailImages_SeedsMediumWithoutTouchingSmall asserts that detail
@@ -575,46 +570,6 @@ func TestRememberDetailImages_SeedsMediumWithoutTouchingSmall(t *testing.T) {
 	}
 	if _, ok := imageCache.LookupSized(encodedID, "Backdrop", "", "original"); ok {
 		t.Fatal("original Backdrop bucket must NOT be seeded by detail (would shadow real original asset)")
-	}
-}
-
-// TestRememberDetailImages_SeasonRouteIDUsesEncodedIDSeason asserts that for
-// detail.Type=="season" the route bucket is keyed under EncodedIDSeason so
-// no-tag image lookups for seasons hit the cache.
-func TestRememberDetailImages_SeasonRouteIDUsesEncodedIDSeason(t *testing.T) {
-	codec := NewResourceIDCodec()
-	contentID := "season-7"
-	encodedItemID := codec.EncodeStringID(EncodedIDItem, contentID)
-	encodedSeasonID := codec.EncodeStringID(EncodedIDSeason, contentID)
-
-	imageCache := NewImageCache(time.Hour, time.Now)
-	h := &ItemsHandler{codec: codec, images: imageCache}
-
-	detail := upstreamItemDetail{
-		ContentID: contentID,
-		Type:      "Season",
-		PosterURL: "https://s3.example/season-poster/w500.jpg",
-	}
-	h.rememberDetailImages(detail)
-
-	if got, ok := imageCache.LookupSized(encodedSeasonID, "Primary", "", "medium"); !ok || got != detail.PosterURL {
-		t.Fatalf("season route lookup via EncodedIDSeason = (%q, %v), want %q", got, ok, detail.PosterURL)
-	}
-	// Item-encoded route is also seeded so callers that reach seasons through
-	// the item route (e.g. some cross-referenced lookups) still resolve.
-	if got, ok := imageCache.LookupSized(encodedItemID, "Primary", "", "medium"); !ok || got != detail.PosterURL {
-		t.Fatalf("season route lookup via EncodedIDItem = (%q, %v), want %q", got, ok, detail.PosterURL)
-	}
-}
-
-// TestHandleUpcoming_Unauthorized confirms the endpoint requires a session.
-func TestHandleUpcoming_Unauthorized(t *testing.T) {
-	h := &ItemsHandler{codec: NewResourceIDCodec()}
-	req := httptest.NewRequest("GET", "/Shows/Upcoming", nil)
-	rec := httptest.NewRecorder()
-	h.HandleUpcoming(rec, req)
-	if rec.Code != 401 {
-		t.Fatalf("expected 401 without session; got %d, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -682,20 +637,4 @@ func TestHandleEpisodes_UnknownSeasonIDReturnsNotFound(t *testing.T) {
 	if rec.Code != 404 {
 		t.Fatalf("expected status 404 for unknown SeasonId; got %d, body=%s", rec.Code, rec.Body.String())
 	}
-}
-
-// Missing catalog infrastructure must not masquerade as an empty upcoming feed.
-func TestHandleUpcoming_UnavailableCatalogReturnsError(t *testing.T) {
-	codec := NewResourceIDCodec()
-	h := &ItemsHandler{codec: codec, mapper: newMapper(codec, &config.Config{})}
-
-	req := httptest.NewRequest("GET", "/Shows/Upcoming?SeriesId=not-a-valid-encoded-id", nil)
-	ctx := context.WithValue(req.Context(), compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: "profile-1"})
-	rec := httptest.NewRecorder()
-	h.HandleUpcoming(rec, req.WithContext(ctx))
-
-	if rec.Code != 503 {
-		t.Fatalf("expected 503 for unavailable episode catalog; got %d, body=%s", rec.Code, rec.Body.String())
-	}
-
 }

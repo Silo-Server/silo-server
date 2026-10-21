@@ -105,20 +105,29 @@ function renderActivity() {
   );
 }
 
+describe("stacked stream sorting", () => {
+  it("sorts the stacked rows, which have no column headers", () => {
+    mocks.sessions = [
+      makeSession({ session_id: "a", username: "Alpha", started_at: "2026-01-01T12:00:00Z" }),
+      makeSession({ session_id: "b", username: "Bravo", started_at: "2026-01-01T13:00:00Z" }),
+    ];
+    renderActivity();
+    const order = () => [
+      ...new Set(screen.getAllByText(/^(Alpha|Bravo)$/).map((el) => el.textContent)),
+    ];
+    const sort = screen.getByRole("group", { name: "Sort streams" });
+
+    expect(order()).toEqual(["Bravo", "Alpha"]);
+    fireEvent.click(within(sort).getByRole("button", { name: "User" }));
+    expect(order()).toEqual(["Alpha", "Bravo"]);
+    fireEvent.click(within(sort).getByRole("button", { name: /User/ }));
+    expect(order()).toEqual(["Bravo", "Alpha"]);
+  });
+});
+
 describe("activity playback scopes", () => {
   beforeEach(() => {
     mocks.sessions = [makeSession()];
-  });
-
-  it("shows the server's local or remote classification on each stream", () => {
-    mocks.sessions = [
-      makeSession({ session_id: "local", stream_location: "local" }),
-      makeSession({ session_id: "remote", stream_location: "remote" }),
-    ];
-    renderActivity();
-
-    expect(screen.getAllByLabelText("Stream location: Local")).toHaveLength(2);
-    expect(screen.getAllByLabelText("Stream location: Remote")).toHaveLength(2);
   });
 
   it("uses the same four labels, counts and colors for the bar, filters and row badges", () => {

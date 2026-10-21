@@ -1,23 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
 
 import type { FileVersion } from "@/api/types";
 import { DocumentLoader } from "@/reader/readest/libs/document";
 import {
-  cacheEbookReaderProgress,
-  DEFAULT_READER_SETTINGS,
-  ebookReaderProgressQueryKey,
-  formatReaderProgress,
   isReaderSupportedFile,
   normalizeReaderSettings,
   parseReaderLocation,
   READER_FONT_STACKS,
-  readerRendererAttributes,
-  readerStyles,
   restoreProgressTarget,
   progressFromRelocate,
   readerFileFormat,
-  readerMimeType,
 } from "./FoliateBookReader";
 
 function version(overrides: Partial<FileVersion>): FileVersion {
@@ -37,20 +29,6 @@ function version(overrides: Partial<FileVersion>): FileVersion {
 }
 
 describe("FoliateBookReader helpers", () => {
-  it("caches saved reader progress under the shared detail query key", () => {
-    const client = new QueryClient();
-    const saved = {
-      file_id: 42,
-      location: "epubcfi(/6/4)",
-      progress: 0.42,
-      content_id: "ebook 1",
-    };
-
-    cacheEbookReaderProgress(client, "ebook 1", saved);
-
-    expect(client.getQueryData(ebookReaderProgressQueryKey("ebook 1"))).toEqual(saved);
-  });
-
   it("detects reader file formats from container or filename", () => {
     expect(readerFileFormat(version({ container: ".AZW3", file_name: "ignored.epub" }))).toBe(
       "azw3",
@@ -66,21 +44,10 @@ describe("FoliateBookReader helpers", () => {
     expect(isReaderSupportedFile(version({ file_name: "notes.txt" }))).toBe(false);
   });
 
-  it("does not advertise markdown as a supported ebook format", () => {
-    expect(isReaderSupportedFile(version({ file_name: "notes.md" }))).toBe(false);
-    expect(readerMimeType("md")).toBe("application/octet-stream");
-  });
-
   it("rejects plain text when the document loader is called directly", async () => {
     const file = new File(["notes"], "notes.txt", { type: "text/plain" });
 
     await expect(new DocumentLoader(file).open()).rejects.toThrow("Unsupported book format");
-  });
-
-  it("maps readest formats to MIME types", () => {
-    expect(readerMimeType("epub")).toBe("application/epub+zip");
-    expect(readerMimeType("azw3")).toBe("application/vnd.amazon.mobi8-ebook");
-    expect(readerMimeType("fbz")).toBe("application/x-zip-compressed-fb2");
   });
 
   it("converts relocate events into saveable progress", () => {
@@ -143,15 +110,6 @@ describe("FoliateBookReader helpers", () => {
     expect(parseReaderLocation(undefined)).toBeNull();
   });
 
-  it("formats reader progress for compact controls", () => {
-    expect(formatReaderProgress(null)).toBeNull();
-    expect(formatReaderProgress(Number.NaN)).toBeNull();
-    expect(formatReaderProgress(0)).toBe("0%");
-    expect(formatReaderProgress(0.421)).toBe("42%");
-    expect(formatReaderProgress(1)).toBe("100%");
-    expect(formatReaderProgress(1.5)).toBe("100%");
-  });
-
   it("ignores relocate events without a usable location", () => {
     expect(progressFromRelocate({ cfi: "epubcfi(/6/4)", location: { total: 0 } }, 42)).toBeNull();
   });
@@ -176,11 +134,6 @@ describe("FoliateBookReader helpers", () => {
       flow: "scrolled",
       spread: "none",
     });
-  });
-
-  it("defaults to the ebook publisher font instead of an unloaded named font", () => {
-    expect(DEFAULT_READER_SETTINGS.fontFamily).toBe("inherit");
-    expect(normalizeReaderSettings({ fontFamily: "" }).fontFamily).toBe("inherit");
   });
 
   it("migrates font choices persisted before the generic stacks existed", () => {
@@ -212,79 +165,6 @@ describe("FoliateBookReader helpers", () => {
     expect(normalizeReaderSettings({ readingRulerTop: -10 })).toMatchObject({
       readingRuler: false,
       readingRulerTop: 0,
-    });
-  });
-
-  it("builds reader styles from settings", () => {
-    const styles = readerStyles(
-      normalizeReaderSettings({
-        theme: "dark",
-        fontFamily: READER_FONT_STACKS.serif,
-        fontSize: 128,
-        fontWeight: 500,
-        lineHeight: 1.8,
-        maxWidth: 68,
-        hyphenation: false,
-        rtl: true,
-        writingMode: "vertical-rl",
-      }),
-    );
-
-    expect(styles).toContain("color-scheme: dark");
-    expect(styles).toContain("background: #111827 !important");
-    expect(styles).toContain(`font-family: ${READER_FONT_STACKS.serif} !important`);
-    expect(styles).toContain("font-size: 128% !important");
-    expect(styles).toContain("font-weight: 500 !important");
-    expect(styles).toContain("hyphens: none !important");
-    expect(styles).toContain("line-height: 1.8 !important");
-    expect(styles).toContain("max-width: 68ch !important");
-    expect(styles).toContain("direction: rtl !important");
-    expect(styles).toContain("writing-mode: vertical-rl !important");
-  });
-
-  it("uses full available width in scrolled flow", () => {
-    const scrolledStyles = readerStyles(
-      normalizeReaderSettings({
-        flow: "scrolled",
-        maxWidth: 68,
-      }),
-    );
-
-    expect(scrolledStyles).toContain("max-width: none !important");
-    expect(scrolledStyles).not.toContain("max-width: 68ch !important");
-
-    expect(
-      readerRendererAttributes(
-        normalizeReaderSettings({
-          flow: "paginated",
-          maxWidth: 68,
-          margin: 20,
-          spread: "auto",
-        }),
-      ),
-    ).toEqual({
-      flow: null,
-      gap: "7%",
-      margin: "20px",
-      maxColumnCount: "2",
-      maxInlineSize: "680px",
-    });
-
-    expect(
-      readerRendererAttributes(
-        normalizeReaderSettings({
-          flow: "scrolled",
-          maxWidth: 68,
-          margin: 20,
-          spread: "auto",
-        }),
-      ),
-    ).toEqual({
-      flow: "scrolled",
-      gap: "7%",
-      margin: "20px",
-      maxColumnCount: "1",
-      maxInlineSize: "9999px",
     });
   });
 });

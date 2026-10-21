@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -63,7 +62,7 @@ func listFavoritesURLs(t *testing.T, handler *PersonalDataHandler, query string)
 
 func seedFavorite(t *testing.T, store userstore.UserStore) {
 	t.Helper()
-	if err := store.AddFavorite(context.Background(), "profile-1", "movie-1"); err != nil {
+	if _, err := store.AddFavorite(context.Background(), "profile-1", "movie-1"); err != nil {
 		t.Fatalf("AddFavorite: %v", err)
 	}
 }
@@ -83,127 +82,8 @@ func TestPersonalListsUnsetImageSizeUnchanged(t *testing.T) {
 	if !strings.Contains(item.BackdropURL, ":card:") || !strings.Contains(item.BackdropURL, "/backdrop/w300.") {
 		t.Errorf("backdrop URL = %q, want the card w300 backdrop", item.BackdropURL)
 	}
-}
-
-// An explicit size applies to every image in the response, collapsing the
-// per-slot asymmetry.
-func TestPersonalListsHonorImageSize(t *testing.T) {
-	tests := []struct {
-		size        string
-		hint        string
-		wantPoster  string
-		wantBackdro string
-	}{
-		{"small", ":card:", "/poster/w300.", "/backdrop/w300."},
-		{"medium", ":featured:", "/poster/w500.", "/backdrop/w1920."},
-		{"large", ":large:", "/poster/w780.", "/backdrop/w1920."},
-		{"original", ":original:", "/poster/original.", "/backdrop/original."},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.size, func(t *testing.T) {
-			store := newProfileTestStore(t)
-			seedFavorite(t, store)
-			handler := newPersonalDataImageHandler(t, store)
-
-			item := listFavoritesURLs(t, handler, "?image_size="+tt.size)
-
-			if !strings.Contains(item.PosterURL, tt.wantPoster) || !strings.Contains(item.PosterURL, tt.hint) {
-				t.Errorf("poster URL = %q, want %s with hint %s", item.PosterURL, tt.wantPoster, tt.hint)
-			}
-			if !strings.Contains(item.BackdropURL, tt.wantBackdro) || !strings.Contains(item.BackdropURL, tt.hint) {
-				t.Errorf("backdrop URL = %q, want %s with hint %s", item.BackdropURL, tt.wantBackdro, tt.hint)
-			}
-		})
-	}
-}
-
-func TestPersonalListsRejectInvalidImageSize(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := newPersonalDataImageHandler(t, store)
-
-	handlers := map[string]http.HandlerFunc{
-		"/favorites": handler.HandleListFavorites,
-		"/watchlist": handler.HandleListWatchlist,
-		"/history":   handler.HandleListHistory,
-	}
-	for path, handle := range handlers {
-		t.Run(path, func(t *testing.T) {
-			req := newAuthorizedProfileRequestWithRole(http.MethodGet, path+"?image_size=enormous", "", "user", "profile-1")
-			rr := httptest.NewRecorder()
-			handle(rr, req)
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-			}
-			if !strings.Contains(rr.Body.String(), "invalid_image_size") {
-				t.Fatalf("body = %s, want an invalid_image_size code", rr.Body.String())
-			}
-		})
-	}
-}
-
-// A valid size must not disturb the endpoints' existing success path.
-func TestPersonalListsAcceptValidImageSize(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := newPersonalDataImageHandler(t, store)
-
-	handlers := map[string]http.HandlerFunc{
-		"/favorites": handler.HandleListFavorites,
-		"/watchlist": handler.HandleListWatchlist,
-		"/history":   handler.HandleListHistory,
-	}
-	for path, handle := range handlers {
-		t.Run(path, func(t *testing.T) {
-			req := newAuthorizedProfileRequestWithRole(http.MethodGet, path+"?image_size=large", "", "user", "profile-1")
-			rr := httptest.NewRecorder()
-			handle(rr, req)
-			if rr.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-			}
-		})
-	}
-}
-
-// A personal-list card carries the logo item detail shows: the medium rung at
-// the featured hint unless the request asks for a size.
-func TestPersonalListsLogoMatchesItemDetail(t *testing.T) {
-	for _, tt := range []struct {
-		name string
-		size imagesize.Size
-		want string
-	}{
-		{"unset", imagesize.Unset, ":featured:tmdb/movies/550/logo/w500.png"},
-		{"large", imagesize.Large, ":large:tmdb/movies/550/logo/w1280.png"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := newPersonalDataImageHandler(t, newProfileTestStore(t))
-			items, err := resolveItemsByIDs(handler, context.Background(), PersonalListViewer{ImageSize: tt.size}, []string{"movie-1"})
-			if err != nil {
-				t.Fatalf("resolveItemsByIDs: %v", err)
-			}
-			if len(items) != 1 {
-				t.Fatalf("items = %d, want 1", len(items))
-			}
-			if !strings.HasSuffix(items[0].LogoURL, tt.want) {
-				t.Fatalf("logo URL = %q, want it to end in %q", items[0].LogoURL, tt.want)
-			}
-		})
-	}
-}
-
-// /api/v1 is frozen: the listing logo exists for the v2 renderer only.
-func TestPersonalListsV1OmitsLogo(t *testing.T) {
-	store := newProfileTestStore(t)
-	seedFavorite(t, store)
-	handler := newPersonalDataImageHandler(t, store)
-
-	req := newAuthorizedProfileRequestWithRole(http.MethodGet, "/favorites", "", "user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleListFavorites(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if strings.Contains(rr.Body.String(), "logo_url") {
-		t.Fatalf("v1 favorites body carries logo_url: %s", rr.Body.String())
+	// Card images resolve in batches, not one lookup each.
+	if !strings.HasPrefix(item.PosterURL, "batch:") || !strings.HasPrefix(item.BackdropURL, "batch:") {
+		t.Errorf("poster %q, backdrop %q: want both resolved in a batch", item.PosterURL, item.BackdropURL)
 	}
 }

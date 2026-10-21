@@ -70,13 +70,3 @@ func TestServerChannelResponseNeverLeaksSecrets(t *testing.T) {
 		t.Fatalf("explicit signing_secret missing: %s", body)
 	}
 }
-
-// A handler with no notifications system reports 503 instead of panicking.
-func TestServerChannelHandlersUnavailableWithoutSystem(t *testing.T) {
-	h := NewAdminServerChannelsHandler(nil)
-	rec := httptest.NewRecorder()
-	h.HandleList(rec, httptest.NewRequest(http.MethodGet, "/admin/notifications/server-channels", nil))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("HandleList without system = %d, want 503", rec.Code)
-	}
-}

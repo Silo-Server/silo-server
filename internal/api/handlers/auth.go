@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+const setupMediaTypeJSON = "application/json"
 
 // AuthHandler handles authentication-related HTTP endpoints.
 type AuthHandler struct {
@@ -369,6 +372,14 @@ func (h *AuthHandler) HandleSetupStatus(w http.ResponseWriter, r *http.Request) 
 
 // HandleSetup handles POST /auth/setup.
 func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
+	// A browser cannot send JSON cross-origin without a CORS preflight.
+	// Do not decode safelisted form or text bodies as setup credentials.
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != setupMediaTypeJSON {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Initial setup requires application/json")
+		return
+	}
+
 	var req setupRequest
 	if !decodeAuthRequestBody(w, r, &req, false) {
 		return

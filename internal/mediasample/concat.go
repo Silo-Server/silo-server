@@ -21,8 +21,9 @@ import (
 // Inpoints are container timestamps, while sample times, like window starts,
 // count from the start of the file, so each inpoint is the sample time plus
 // the input's start time (see probe.go). Only containers whose index lets
-// the demuxer seek to a keyframe are read this way; see runSamples for the
-// others.
+// the demuxer seek to a keyframe are read this way; see attemptRun.samples
+// for the others. A Sheets list over a Matroska input starts its entries at
+// the samples' keyframes instead (see keyframes.go).
 //
 // The list is read from pipe:0, so relative entries would resolve against
 // the pipe URL: each entry names the input as an explicit file: URL, and the
@@ -37,8 +38,15 @@ const sampleSpanSeconds = 0.04
 // sampleMetadataKey is the packet metadata entry naming a sample's time.
 const sampleMetadataKey = "sample"
 
-// concatInputArgs are the input options of a Samples request, before -i.
-var concatInputArgs = []string{"-skip_frame:v", "nokey", "-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "0"}
+// skipFrameOption sets which video frames the decoder skips.
+const skipFrameOption = "-skip_frame:v"
+
+// concatDemuxerArgs open a list input; concatInputArgs are the input options
+// of a Samples request, before -i.
+var (
+	concatDemuxerArgs = []string{"-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "0"}
+	concatInputArgs   = append([]string{skipFrameOption, keyframeSkipFrame}, concatDemuxerArgs...)
+)
 
 // concatListInput is the input a Samples request reads its list from.
 const concatListInput = "pipe:0"
@@ -52,29 +60,46 @@ const concatListInput = "pipe:0"
 // wins. Stats keep the span their cached analyses were computed with.
 const sheetSampleSpanSeconds = 0.5
 
+// listEntry is one entry of a list: the sample time its packets are tagged
+// with, and its inpoint in the container.
+type listEntry struct {
+	sample  float64
+	inpoint float64
+}
+
+// sampleEntries starts each sample's entry at its own time, offset by
+// inputStart, the input's container start time. A slightly negative start, as
+// some MP4 edit lists give, would put the first inpoints before the file;
+// they seek to its start anyway.
+func sampleEntries(seconds []float64, inputStart float64) []listEntry {
+	entries := make([]listEntry, len(seconds))
+	for i, at := range seconds {
+		entries[i] = listEntry{sample: at, inpoint: math.Max(0, at+inputStart)}
+	}
+	return entries
+}
+
 // buildConcatList returns the ffconcat list sampling input, whose container
 // timestamps start at inputStart, at each time, each entry lasting
 // sampleSpanSeconds.
 func buildConcatList(input string, seconds []float64, inputStart float64) ([]byte, error) {
-	return buildConcatListSpan(input, seconds, inputStart, sampleSpanSeconds)
+	return buildConcatListSpan(input, sampleEntries(seconds, inputStart), sampleSpanSeconds)
 }
 
-// buildConcatListSpan is buildConcatList with entries lasting span seconds.
-func buildConcatListSpan(input string, seconds []float64, inputStart, span float64) ([]byte, error) {
+// buildConcatListSpan returns the ffconcat list reading input's entries, each
+// lasting span seconds.
+func buildConcatListSpan(input string, entries []listEntry, span float64) ([]byte, error) {
 	quoted, err := concatPath(input)
 	if err != nil {
 		return nil, err
 	}
 	var list bytes.Buffer
 	list.WriteString("ffconcat version 1.0\n")
-	for _, at := range seconds {
-		// A slightly negative start, as some MP4 edit lists give, would put
-		// the first inpoints before the file; they seek to its start anyway.
-		inpoint := math.Max(0, at+inputStart)
+	for _, entry := range entries {
 		list.WriteString("file " + quoted + "\n")
-		list.WriteString("file_packet_meta " + sampleMetadataKey + " " + formatSampleSeconds(at) + "\n")
-		list.WriteString("inpoint " + formatSampleSeconds(inpoint) + "\n")
-		list.WriteString("outpoint " + formatSampleSeconds(inpoint+span) + "\n")
+		list.WriteString("file_packet_meta " + sampleMetadataKey + " " + formatSampleSeconds(entry.sample) + "\n")
+		list.WriteString("inpoint " + formatSampleSeconds(entry.inpoint) + "\n")
+		list.WriteString("outpoint " + formatSampleSeconds(entry.inpoint+span) + "\n")
 	}
 	return list.Bytes(), nil
 }

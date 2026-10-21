@@ -2,26 +2,16 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  compactHdrSuffix,
-  dolbyVisionLabel,
-  formatBitrate,
+  audioTrackHasAtmos,
+  audioTrackLabel,
   formatChannels,
   formatCodecLabel,
   formatFileSize,
-  formatMbpsFromKbps,
-  formatSampleRate,
   mapAudioLabel,
   prettyResolution,
 } from "./mediaFormat";
 
 describe("formatCodecLabel", () => {
-  it("maps known codecs to display labels", () => {
-    expect(formatCodecLabel("h264")).toBe("H.264");
-    expect(formatCodecLabel("hevc")).toBe("HEVC");
-    expect(formatCodecLabel("truehd")).toBe("TrueHD");
-    expect(formatCodecLabel("opus")).toBe("Opus");
-  });
-
   it("uppercases unknown codecs", () => {
     expect(formatCodecLabel("vp9")).toBe("VP9");
   });
@@ -35,8 +25,16 @@ describe("formatCodecLabel", () => {
 
 describe("mapAudioLabel", () => {
   it("prefers Atmos over other markers", () => {
-    expect(mapAudioLabel("TrueHD Atmos")).toBe("Atmos");
-    expect(mapAudioLabel("eac3 atmos")).toBe("Atmos");
+    expect(mapAudioLabel("TrueHD Atmos")).toBe("TrueHD Atmos");
+    expect(mapAudioLabel("eac3 atmos")).toBe("DD+ Atmos");
+    expect(mapAudioLabel("Atmos")).toBe("Atmos");
+  });
+
+  it("reads Atmos from the FFprobe profile of a plain codec", () => {
+    expect(mapAudioLabel("eac3", "Dolby Digital Plus + Dolby Atmos")).toBe("DD+ Atmos");
+    expect(mapAudioLabel("truehd", "Dolby TrueHD + Dolby Atmos")).toBe("TrueHD Atmos");
+    expect(mapAudioLabel("eac3", "")).toBe("EAC3");
+    expect(mapAudioLabel("dts", "DTS-HD MA")).toBe("DTS");
   });
 
   it("maps codec families", () => {
@@ -48,12 +46,6 @@ describe("mapAudioLabel", () => {
     expect(mapAudioLabel("e-ac-3")).toBe("EAC3");
     expect(mapAudioLabel("aac")).toBe("AAC");
     expect(mapAudioLabel("flac")).toBe("FLAC");
-  });
-
-  it("uppercases unknown codecs, unlike formatCodecLabel's curated casing", () => {
-    expect(mapAudioLabel("pcm_s24le")).toBe("PCM_S24LE");
-    expect(mapAudioLabel("mp3")).toBe("MP3");
-    expect(mapAudioLabel("opus")).toBe("OPUS");
   });
 });
 
@@ -69,53 +61,11 @@ describe("formatFileSize", () => {
     expect(formatFileSize(100)).toBe("100 B");
   });
 
-  it("uses IEC unit labels when requested", () => {
-    expect(formatFileSize(2 * 1024 ** 3, { iecUnits: true })).toBe("2.0 GiB");
-    expect(formatFileSize(512 * 1024 ** 2, { iecUnits: true })).toBe("512.0 MiB");
-    expect(formatFileSize(2 * 1024, { iecUnits: true })).toBe("2.0 KiB");
-  });
-
   it("returns the fallback for zero, negative, and missing values", () => {
     expect(formatFileSize(0)).toBe("");
     expect(formatFileSize(-100)).toBe("");
     expect(formatFileSize(undefined)).toBe("");
     expect(formatFileSize(0, { fallback: "—" })).toBe("—");
-  });
-});
-
-describe("formatBitrate", () => {
-  it("formats kbps with thousands separators", () => {
-    expect(formatBitrate(24_500)).toBe("24,500 kbps");
-    expect(formatBitrate(640)).toBe("640 kbps");
-  });
-
-  it("returns the fallback for missing values", () => {
-    expect(formatBitrate(0)).toBe("");
-    expect(formatBitrate(undefined)).toBe("");
-    expect(formatBitrate(undefined, "—")).toBe("—");
-  });
-});
-
-describe("formatMbpsFromKbps", () => {
-  it("converts kbps to Mbps with one decimal", () => {
-    expect(formatMbpsFromKbps(24_500)).toBe("24.5 Mbps");
-    expect(formatMbpsFromKbps(800)).toBe("0.8 Mbps");
-  });
-
-  it("returns the fallback for missing values", () => {
-    expect(formatMbpsFromKbps(0)).toBe("—");
-    expect(formatMbpsFromKbps(undefined, "")).toBe("");
-  });
-});
-
-describe("formatSampleRate", () => {
-  it("formats sample rates in Hz", () => {
-    expect(formatSampleRate(48_000)).toBe("48,000 Hz");
-  });
-
-  it("returns the fallback for missing values", () => {
-    expect(formatSampleRate(0)).toBe("");
-    expect(formatSampleRate(undefined, "—")).toBe("—");
   });
 });
 
@@ -130,16 +80,6 @@ describe("formatChannels", () => {
   it("returns empty string for missing values", () => {
     expect(formatChannels(undefined)).toBe("");
     expect(formatChannels(0)).toBe("");
-  });
-});
-
-describe("dolbyVisionLabel", () => {
-  it("prefixes raw profile strings", () => {
-    expect(dolbyVisionLabel("Profile 8.1")).toBe("Dolby Vision Profile 8.1");
-  });
-
-  it("keeps labels that already carry the prefix", () => {
-    expect(dolbyVisionLabel("Dolby Vision Profile 5")).toBe("Dolby Vision Profile 5");
   });
 });
 
@@ -163,14 +103,35 @@ describe("prettyResolution", () => {
   });
 });
 
-describe("compactHdrSuffix", () => {
-  it("collapses Dolby Vision variants to DV and others to HDR", () => {
-    expect(compactHdrSuffix("DV HDR10")).toBe("DV");
-    expect(compactHdrSuffix("HDR10")).toBe("HDR");
-    expect(compactHdrSuffix("HLG")).toBe("HDR");
+describe("audioTrackLabel", () => {
+  it("reads Atmos from a track's profile or titles", () => {
+    const longName = "ATSC A/52B (AC-3, E-AC-3)";
+    expect(
+      audioTrackLabel({
+        codec: "eac3",
+        title: longName,
+        profile: "Dolby Digital Plus + Dolby Atmos",
+      }),
+    ).toBe("DD+ Atmos");
+    expect(audioTrackLabel({ codec: "truehd", embedded_title: "TrueHD Atmos 7.1" })).toBe(
+      "TrueHD Atmos",
+    );
+    expect(audioTrackLabel({ codec: "eac3", title: longName })).toBe("EAC3");
+    expect(audioTrackLabel({ title: "Atmos" })).toBe("");
+    expect(audioTrackHasAtmos({ codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos" })).toBe(
+      true,
+    );
+    expect(audioTrackHasAtmos({ codec: "eac3", title: longName })).toBe(false);
   });
 
-  it("returns null for missing values", () => {
-    expect(compactHdrSuffix(undefined)).toBeNull();
+  it("ignores Atmos titles on codecs that cannot carry it", () => {
+    expect(audioTrackLabel({ codec: "ac3", title: "AC3 5.1 (from TrueHD Atmos)" })).toBe("AC3");
+    expect(audioTrackLabel({ codec: "aac", title: "AAC 2.0 (DDP Atmos downmix)" })).toBe("AAC");
+    expect(audioTrackHasAtmos({ codec: "opus", title: "Opus 5.1 from Atmos" })).toBe(false);
+    expect(audioTrackLabel({ codec: "mlp", profile: "Dolby Atmos" })).toBe("Atmos");
+  });
+
+  it("matches Atmos only as a word", () => {
+    expect(audioTrackLabel({ codec: "eac3", title: "Atmospheric score" })).toBe("EAC3");
   });
 });

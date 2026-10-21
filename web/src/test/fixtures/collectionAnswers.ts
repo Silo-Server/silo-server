@@ -66,7 +66,7 @@ export function personalSmartCollection(queryDefinition: Record<string, unknown>
 
 /** The admin collection fixture as a synced collection of `type` with `source`. */
 export function adminSyncedCollection(
-  type: "mdblist" | "tmdb" | "trakt",
+  type: "mdblist" | "tmdb",
   source: { source_url: string; source_config: Record<string, unknown> },
 ) {
   return { ...adminCollection, collection_type: type, ...source };
@@ -74,7 +74,7 @@ export function adminSyncedCollection(
 
 /** The personal collection fixture as a synced collection of `type` with `source`. */
 export function personalSyncedCollection(
-  type: "mdblist" | "tmdb" | "trakt",
+  type: "mdblist" | "tmdb",
   source: { source_url: string; source_config: Record<string, unknown> },
 ) {
   return { ...getCollectionOk, collection_type: type, ...source };

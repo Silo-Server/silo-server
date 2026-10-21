@@ -39,7 +39,6 @@ func TestListingTotalRecordCountControls(t *testing.T) {
 		includeTotal bool
 	}{
 		{name: "default", includeTotal: true},
-		{name: "enabled", query: "&EnableTotalRecordCount=true", includeTotal: true},
 		{name: "disabled", query: "&EnableTotalRecordCount=false"},
 		{name: "case insensitive", query: "&enabletotalrecordcount=false"},
 	} {

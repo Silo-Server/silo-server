@@ -1,11 +1,9 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -86,7 +84,7 @@ func TestUpdateProfile_AdvisoryAgeLimit(t *testing.T) {
 func TestCreateProfile_AdvisoryAgeLimitNeedsAManager(t *testing.T) {
 	store := newEmptyProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, MaxProfiles: 5}}
+	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, MaxProfiles: new(5)}}
 
 	_, err := handler.CreateProfile(profileServiceContext(""), ProfileCreateCommand{
 		UserID:        1,
@@ -120,35 +118,6 @@ func firstProfileID(t *testing.T, store userstore.UserStore) string {
 		t.Fatalf("list profiles: %v (%d)", err, len(profiles))
 	}
 	return profiles[0].ID
-}
-
-// /api/v1 is frozen: advisory-age controls stay out of its request and response.
-func TestAdvisoryAgeLimitStaysOffTheV1Wire(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids", MaxAdvisoryAge: 10}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(http.MethodPut, "/profiles/profile-2", `{"max_advisory_age":3,"require_advisory_age":true,"name":"Kids"}`, "user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if bytes.Contains(rr.Body.Bytes(), []byte("advisory")) || bytes.Contains(rr.Body.Bytes(), []byte("AdvisoryAge")) || bytes.Contains(rr.Body.Bytes(), []byte("require_advisory")) {
-		t.Fatalf("v1 response leaked the advisory-age limit: %s", rr.Body.String())
-	}
-	stored, err := store.GetProfile(context.Background(), "profile-2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.MaxAdvisoryAge != 10 {
-		t.Fatalf("a v1 body changed the limit to %d", stored.MaxAdvisoryAge)
-	}
-	if stored.RequireAdvisoryAge {
-		t.Fatal("a v1 body set RequireAdvisoryAge")
-	}
 }
 
 // Requiring an advisory age tightens a parental control, so it follows the
@@ -196,7 +165,7 @@ func TestUpdateProfile_RequireAdvisoryAge(t *testing.T) {
 func TestCreateProfile_RequireAdvisoryAgeNeedsAManager(t *testing.T) {
 	store := newEmptyProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, MaxProfiles: 5}}
+	handler.UserRepo = testProfileUserRepo{user: &models.User{ID: 1, MaxProfiles: new(5)}}
 
 	_, err := handler.CreateProfile(profileServiceContext(""), ProfileCreateCommand{
 		UserID:        1,

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalog/filesplit"
@@ -47,6 +48,15 @@ type AdminSplitHandler struct {
 	scanner      *scanner.Scanner
 	folderRepo   *catalog.FolderRepository
 	overrideRepo *scanner.MediaIdentityOverrideRepository
+	recsStaler   metadata.RecommendationStaler // may be nil
+}
+
+// SetRecommendationStaler installs what marks recommendations stale after a
+// split moves user state onto its target.
+func (h *AdminSplitHandler) SetRecommendationStaler(staler metadata.RecommendationStaler) {
+	if h != nil {
+		h.recsStaler = staler
+	}
 }
 
 // NewAdminSplitHandler wires the split/merge endpoints. metadataSvc, merger,
@@ -231,18 +241,49 @@ func (h *AdminSplitHandler) SplitAdminItem(ctx context.Context, sourceID string,
 	}
 
 	// Everything transactional happens here; a dry run rolls back at the end.
-	tx, err := h.pool.Begin(ctx)
+	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		slog.ErrorContext(ctx, "admin split: begin transaction", "component", "api", "error", err)
 		return AdminSplitResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to start split")
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if target.created {
-		if err := insertSkeletonItem(ctx, tx, target, sourceItem); err != nil {
-			slog.ErrorContext(ctx, "admin split: creating target item", "component", "api", "target", target.contentID, "error", err)
-			return AdminSplitResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to create target item")
-		}
+	// Reload under file locks: scanner upserts may change folders without
+	// changing content_id. Every later scope decision and write uses these rows.
+	// Files lock before their parent items, the order scanner writers use
+	// (episode linking updates a series' files, then the series row); the
+	// reverse order deadlocks with them.
+	moved, err = loadSelectedSplitFiles(ctx, tx, sourceID, req.FileIDs)
+	if err != nil {
+		return AdminSplitResult{}, splitTransactionError(ctx, err)
+	}
+	itemTypes, err := catalog.LockMetadataCurationItems(ctx, tx, sourceID, target.contentID)
+	if err != nil {
+		return AdminSplitResult{}, splitTransactionError(ctx, err)
+	}
+	if itemTypes[sourceID] != sourceItem.Type {
+		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Source item changed; retry the split")
+	}
+	if len(moved) != len(seen) {
+		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Selected files changed; retry the split")
+	}
+	var total int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM media_files WHERE content_id = $1`, sourceID).Scan(&total); err != nil {
+		return AdminSplitResult{}, splitTransactionError(ctx, err)
+	}
+	if len(moved) == total {
+		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request",
+			"Selection covers every file; use match/apply to re-identify the whole item instead of splitting it")
+	}
+	if err := access.AuthorizeMetadataCurationLibraries(ctx, distinctFolderIDs(moved)); err != nil {
+		return AdminSplitResult{}, splitTransactionError(ctx, err)
+	}
+	if req.Target.Unmatched && strings.TrimSpace(req.Target.ContentID) == "" && len(normalizeMatchProviderIDs(req.Target.ProviderIDs)) == 0 && target.contentID != contentid.ForLocal(moved[0].FilePath) {
+		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Selected file path changed; retry the split")
+	}
+	target.created, err = ensureSplitTarget(ctx, tx, target, sourceItem, itemTypes)
+	if err != nil {
+		return AdminSplitResult{}, splitTransactionError(ctx, err)
 	}
 	moveResult, err := filesplit.Move(ctx, tx, filesplit.Options{
 		FromContentID: sourceID,
@@ -285,7 +326,8 @@ func (h *AdminSplitHandler) SplitAdminItem(ctx context.Context, sourceID string,
 			"history_ambiguous", report.HistoryAmbiguous,
 			"progress_moved", report.ProgressMoved,
 		)
-		h.runPostSplitFollowUps(sourceID, target, moved)
+		metadata.MarkRecommendationsStale(ctx, h.recsStaler, metadata.MovedStateTargets(report, target.contentID, episodePairs)...)
+		h.runPostSplitFollowUps(ctx, sourceID, target, moved)
 	}
 
 	return AdminSplitResult{
@@ -334,6 +376,9 @@ func (h *AdminSplitHandler) MergeAdminItem(ctx context.Context, sourceID, into s
 	}
 
 	if err := h.merger.MergeItems(ctx, sourceID, into); err != nil {
+		if errors.Is(err, access.ErrMetadataCurationScope) {
+			return "", metadataCurationForbidden()
+		}
 		if errors.Is(err, catalog.ErrItemNotFound) {
 			return "", apiError(http.StatusNotFound, "not_found", "Item not found")
 		}
@@ -361,7 +406,6 @@ type splitTarget struct {
 	title       string
 	year        int
 	providerIDs map[string]string // normalized; empty for unmatched targets
-	folderIDs   []int             // folders of the moved files (library membership)
 }
 
 func (t splitTarget) hasForcedIdentity() bool {
@@ -379,7 +423,6 @@ func (h *AdminSplitHandler) resolveSplitTarget(
 		title:       strings.TrimSpace(req.Title),
 		year:        req.Year,
 		providerIDs: normalizeMatchProviderIDs(req.ProviderIDs),
-		folderIDs:   distinctFolderIDs(moved),
 	}
 
 	switch {
@@ -469,8 +512,39 @@ func (h *AdminSplitHandler) loadItemFiles(ctx context.Context, contentID string)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	return scanSplitFiles(rows)
+}
 
+func loadSelectedSplitFiles(ctx context.Context, tx pgx.Tx, sourceID string, ids []int) ([]splitFile, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id, COALESCE(content_id, ''), media_folder_id, file_path,
+		       COALESCE(canonical_root_path, ''), COALESCE(observed_root_path, ''),
+		       COALESCE(group_key_version, 1), COALESCE(content_group_key, ''),
+		       COALESCE(base_type, ''), COALESCE(season_number, 0),
+		       COALESCE(episode_number, 0), COALESCE(episode_id, '')
+		FROM media_files WHERE content_id = $1 AND id = ANY($2::bigint[])
+		ORDER BY id FOR UPDATE`, sourceID, ids)
+	if err != nil {
+		return nil, err
+	}
+	files, err := scanSplitFiles(rows)
+	if err != nil {
+		return nil, err
+	}
+	// Lock order is independent of the caller's selection order, which picks
+	// the path anchor for an unmatched target.
+	order := make(map[int]int, len(ids))
+	for i, id := range ids {
+		if _, seen := order[id]; !seen {
+			order[id] = i
+		}
+	}
+	sort.Slice(files, func(i, j int) bool { return order[files[i].ID] < order[files[j].ID] })
+	return files, nil
+}
+
+func scanSplitFiles(rows pgx.Rows) ([]splitFile, error) {
+	defer rows.Close()
 	var files []splitFile
 	for rows.Next() {
 		var f splitFile
@@ -498,7 +572,35 @@ func (h *AdminSplitHandler) loadItemFiles(ctx context.Context, contentID string)
 	return files, rows.Err()
 }
 
-func insertSkeletonItem(ctx context.Context, tx pgx.Tx, target splitTarget, sourceItem *models.MediaItem) error {
+// ensureSplitTarget distinguishes this transaction's insert from an existing
+// destination, including one inserted after the initial parent-lock statement.
+func ensureSplitTarget(ctx context.Context, tx pgx.Tx, target splitTarget, source *models.MediaItem, itemTypes map[string]string) (bool, error) {
+	if itemType, exists := itemTypes[target.contentID]; exists {
+		if itemType != source.Type {
+			return false, apiError(http.StatusBadRequest, "bad_request", "Source and target item types must match")
+		}
+		return false, nil
+	}
+	if !target.created {
+		return false, apiError(http.StatusNotFound, "not_found", "Target item not found")
+	}
+	created, err := insertSkeletonItem(ctx, tx, target, source)
+	if err != nil || created {
+		return created, err
+	}
+	// INSERT lost to a concurrent creator. Authorize the actual existing row
+	// before adding libraries or moving any state onto it.
+	itemTypes, err = catalog.LockMetadataCurationItems(ctx, tx, target.contentID)
+	if err != nil {
+		return false, err
+	}
+	if itemTypes[target.contentID] != source.Type {
+		return false, apiError(http.StatusBadRequest, "bad_request", "Source and target item types must match")
+	}
+	return false, nil
+}
+
+func insertSkeletonItem(ctx context.Context, tx pgx.Tx, target splitTarget, sourceItem *models.MediaItem) (bool, error) {
 	year := target.year
 	if year == 0 && target.providerIDs == nil {
 		// Unmatched local target: keep the source year so the shell is legible.
@@ -508,24 +610,16 @@ func insertSkeletonItem(ctx context.Context, tx pgx.Tx, target splitTarget, sour
 	if target.providerIDs == nil {
 		status = "unmatched"
 	}
-	if _, err := tx.Exec(ctx, `
+	result, err := tx.Exec(ctx, `
 		INSERT INTO media_items (content_id, type, title, year, status, tmdb_id, imdb_id, tvdb_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (content_id) DO NOTHING
 	`, target.contentID, target.itemType, target.title, year, status,
-		target.providerIDs["tmdb"], target.providerIDs["imdb"], target.providerIDs["tvdb"]); err != nil {
-		return err
+		target.providerIDs["tmdb"], target.providerIDs["imdb"], target.providerIDs["tvdb"])
+	if err != nil {
+		return false, err
 	}
-	for _, folderID := range target.folderIDs {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO media_item_libraries (content_id, media_folder_id)
-			VALUES ($1, $2)
-			ON CONFLICT DO NOTHING
-		`, target.contentID, folderID); err != nil {
-			return err
-		}
-	}
-	return nil
+	return result.RowsAffected() == 1, nil
 }
 
 // persistOverrides writes the durable path-scoped identity overrides: one
@@ -609,7 +703,7 @@ func (h *AdminSplitHandler) persistOverrides(
 // identify the target against its providers, refresh the source's aggregates,
 // and rescan the affected subtrees so scanner snapshots converge now instead
 // of at the next scheduled scan.
-func (h *AdminSplitHandler) runPostSplitFollowUps(sourceID string, target splitTarget, moved []splitFile) {
+func (h *AdminSplitHandler) runPostSplitFollowUps(origin context.Context, sourceID string, target splitTarget, moved []splitFile) {
 	folderIDs := distinctFolderIDs(moved)
 	roots := map[int]map[string]bool{}
 	for _, f := range moved {
@@ -620,7 +714,7 @@ func (h *AdminSplitHandler) runPostSplitFollowUps(sourceID string, target splitT
 	}
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(origin), 10*time.Minute)
 		defer cancel()
 
 		if h.metadata != nil && len(target.providerIDs) > 0 {
@@ -672,4 +766,19 @@ func distinctFolderIDs(files []splitFile) []int {
 	}
 	sort.Ints(ids)
 	return ids
+}
+
+func metadataCurationForbidden() error {
+	return apiError(http.StatusForbidden, "forbidden", "Item is outside your assigned libraries")
+}
+
+func splitTransactionError(ctx context.Context, err error) error {
+	if api, ok := errors.AsType[*APIError](err); ok {
+		return api
+	}
+	if errors.Is(err, access.ErrMetadataCurationScope) {
+		return metadataCurationForbidden()
+	}
+	slog.ErrorContext(ctx, "admin split: preparing split", "component", "api", "error", err)
+	return apiError(http.StatusInternalServerError, "internal_error", "Failed to prepare split")
 }

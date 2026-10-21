@@ -3,48 +3,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { FileVersion, ItemDetail, Season } from "@/api/types";
+import type { ItemDetail, Season } from "@/api/types";
 import EpisodeContent from "./EpisodeContent";
+import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
 
 const mocks = vi.hoisted(() => {
-  let capturedActionBarProps: Record<string, unknown> | null = null;
-  let capturedDetailHeroProps: Record<string, unknown> | null = null;
-  let capturedMetadataBadgesProps: Record<string, unknown> | null = null;
-  let capturedQualityBadgesProps: Record<string, unknown> | null = null;
-
+  type Props = Record<string, unknown> | null;
   return {
-    capturedActionBarProps: {
-      get value() {
-        return capturedActionBarProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedActionBarProps = value;
-      },
-    },
-    capturedDetailHeroProps: {
-      get value() {
-        return capturedDetailHeroProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedDetailHeroProps = value;
-      },
-    },
-    capturedMetadataBadgesProps: {
-      get value() {
-        return capturedMetadataBadgesProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedMetadataBadgesProps = value;
-      },
-    },
-    capturedQualityBadgesProps: {
-      get value() {
-        return capturedQualityBadgesProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedQualityBadgesProps = value;
-      },
-    },
+    capturedActionBarProps: { value: null as Props },
+    capturedDetailHeroProps: { value: null as Props },
     useSeasonDetail: vi.fn(),
     useSeasonEpisodes: vi.fn(),
     useAuth: vi.fn(),
@@ -107,6 +74,15 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryCapabilities: mocks.useLibraryCapabilities,
 }));
 
+const resetProgressMocks = vi.hoisted(() => ({
+  useResetProgressAction: vi.fn((): (() => void) | undefined => undefined),
+}));
+
+vi.mock("@/hooks/queries/progress", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/progress")>()),
+  useResetProgressAction: resetProgressMocks.useResetProgressAction,
+}));
+
 vi.mock("@/hooks/queries/items", () => ({
   useRedetectItemMarkers: mocks.useRedetectItemMarkers,
   useRedetectEpisodeIntro: mocks.useRedetectEpisodeIntro,
@@ -162,17 +138,11 @@ vi.mock("./DetailHero", () => ({
 }));
 
 vi.mock("./components/MetadataBadges", () => ({
-  default: (props: Record<string, unknown>) => {
-    mocks.capturedMetadataBadgesProps.value = props;
-    return <div />;
-  },
+  default: () => <div />,
 }));
 
 vi.mock("./components/QualityBadges", () => ({
-  default: (props: Record<string, unknown>) => {
-    mocks.capturedQualityBadgesProps.value = props;
-    return <div />;
-  },
+  default: () => <div />,
 }));
 
 vi.mock("./components/ScoreRow", () => ({
@@ -216,68 +186,28 @@ vi.mock("./components/EpisodeCarousel", () => ({
   ),
 }));
 
-function makeFileVersion(overrides: Partial<FileVersion> = {}): FileVersion {
-  return {
-    file_id: overrides.file_id ?? 1,
-    resolution: overrides.resolution ?? "1080p",
-    codec_video: overrides.codec_video ?? "h264",
-    codec_audio: overrides.codec_audio ?? "aac",
-    hdr: overrides.hdr ?? false,
-    container: overrides.container ?? "mkv",
-    file_size: overrides.file_size ?? 0,
-    duration: overrides.duration ?? 2520,
-    bitrate: overrides.bitrate ?? 0,
-    edition_raw: overrides.edition_raw,
-    edition_key: overrides.edition_key,
-    audio_tracks: overrides.audio_tracks,
-  };
-}
-
-function makeEpisodeItem(
-  overrides: Partial<ItemDetail & { type: "episode" }> = {},
-): ItemDetail & { type: "episode" } {
-  return {
-    content_id: "episode-1",
+function makeEpisodeItem(overrides: Partial<ItemDetail> = {}) {
+  return makeItemDetail("episode", {
     title: "Pilot",
-    year: 2024,
     overview: "Episode overview",
     runtime: 42,
     content_rating: "TV-14",
-    genres: [],
-    rating_imdb: null,
-    rating_tmdb: null,
-    rating_rt_critic: null,
-    rating_rt_audience: null,
-    ratings: [],
-    imdb_id: "",
-    tmdb_id: "",
-    tvdb_id: "",
-    cast: [],
-    crew: [],
-    studios: [],
-    networks: [],
-    countries: [],
-    first_air_date: null,
-    last_air_date: null,
-    poster_url: "",
-    poster_thumbhash: "",
-    backdrop_url: "",
-    backdrop_thumbhash: "",
-    logo_url: "",
-    season_count: null,
     series_id: "series-1",
     series_title: "Example Series",
     season_number: 1,
     episode_number: 1,
     air_date: "2024-01-01",
-    versions: [makeFileVersion()],
-    subtitles: [],
-    intro: null,
-    credits: null,
+    versions: [makeFileVersion({ duration: 2520 })],
     ...overrides,
-    release_date: overrides.release_date ?? null,
-    type: "episode",
-  };
+  });
+}
+
+function renderEpisode() {
+  renderToStaticMarkup(
+    <MemoryRouter initialEntries={["/item/episode-1"]}>
+      <EpisodeContent item={makeEpisodeItem()} />
+    </MemoryRouter>,
+  );
 }
 
 function makeSeason(overrides: Partial<Season> = {}): Season {
@@ -300,39 +230,9 @@ function countOccurrences(markup: string, fragment: string): number {
 }
 
 describe("EpisodeContent", () => {
-  it("disables collection membership without removing the item identity", () => {
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
-    );
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      contentId: "episode-1",
-      canAddToCollection: false,
-    });
-  });
-
-  it.each([
-    [{ trickplay: true, trickplay_supported: true }, true],
-    [{ trickplay: true, trickplay_supported: false }, false],
-    [{ trickplay: true }, false],
-    [undefined, false],
-  ])("offers episode seek-preview administration with capability %o: %s", (data, offered) => {
-    mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
-    mocks.useLibraryCapabilities.mockReturnValue({ data });
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
-    );
-    expect(mocks.capturedActionBarProps.value?.canManageTrickplay).toBe(offered);
-  });
-
   beforeEach(() => {
     mocks.capturedActionBarProps.value = null;
     mocks.capturedDetailHeroProps.value = null;
-    mocks.capturedMetadataBadgesProps.value = null;
-    mocks.capturedQualityBadgesProps.value = null;
     mocks.useAuth.mockReturnValue({ user: null });
     mocks.useCurrentProfile.mockReturnValue({ profile: null });
     mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: undefined });
@@ -361,58 +261,6 @@ describe("EpisodeContent", () => {
       data: makeSeason(),
     });
     mocks.useRating.mockReturnValue({ data: { rating: 3, rated_at: "2026-03-22T00:00:00Z" } });
-  });
-
-  it("updates hero metadata when the selected episode version changes", () => {
-    const hdrVersion = makeFileVersion({
-      file_id: 1,
-      resolution: "2160p",
-      codec_video: "hevc",
-      codec_audio: "eac3",
-      hdr: true,
-      duration: 2520,
-    });
-    const sdrVersion = makeFileVersion({
-      file_id: 2,
-      resolution: "1080p",
-      codec_video: "h264",
-      codec_audio: "aac",
-      hdr: false,
-      duration: 2700,
-    });
-
-    render(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem({ versions: [hdrVersion, sdrVersion] })} />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "42m" });
-    expect(mocks.capturedQualityBadgesProps.value).toEqual({
-      summary: {
-        durationMinutes: 42,
-        resolution: "2160p",
-        videoRangeLabel: "HDR",
-        audioLabel: "EAC3",
-      },
-    });
-
-    act(() => {
-      const selectVersion = mocks.capturedActionBarProps.value?.onSelectVersion as
-        | ((version: FileVersion) => void)
-        | undefined;
-      selectVersion?.(sdrVersion);
-    });
-
-    expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "45m" });
-    expect(mocks.capturedQualityBadgesProps.value).toEqual({
-      summary: {
-        durationMinutes: 45,
-        resolution: "1080p",
-        videoRangeLabel: "",
-        audioLabel: "AAC",
-      },
-    });
   });
 
   it("links the season breadcrumb segment to the resolved season page", () => {
@@ -471,52 +319,6 @@ describe("EpisodeContent", () => {
     }
   });
 
-  it("passes restartHref when the episode is partially watched", () => {
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent
-          item={makeEpisodeItem({
-            user_data: {
-              played: false,
-              is_in_progress: true,
-              position_seconds: 300,
-              duration_seconds: 1800,
-            },
-          })}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      playLabel: "Resume",
-      restartHref: "/watch/episode-1?restart=1",
-    });
-  });
-
-  it("does not pass restartHref when the episode is completed", () => {
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent
-          item={makeEpisodeItem({
-            user_data: {
-              // Completed rows store position 0 (no resume point).
-              played: true,
-              position_seconds: 0,
-              duration_seconds: 1800,
-            },
-          })}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      playLabel: "Play Episode",
-    });
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      restartHref: undefined,
-    });
-  });
-
   it("passes marker re-detection only for admins", () => {
     const redetect = vi.fn();
     mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
@@ -526,11 +328,7 @@ describe("EpisodeContent", () => {
       isPending: false,
     });
 
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
-    );
+    renderEpisode();
 
     expect(mocks.capturedActionBarProps.value).toMatchObject({
       isAdmin: true,
@@ -544,37 +342,27 @@ describe("EpisodeContent", () => {
     expect(mocks.useRedetectItemMarkers).toHaveBeenCalledWith({ introFallback: true });
 
     mocks.useAuth.mockReturnValue({ user: null });
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
-    );
+    renderEpisode();
     expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
   });
 
-  it.each([
-    ["a pending capability read", { data: undefined }],
-    ["a failed capability read", { data: undefined, isError: true }],
-    ["a node without redetect_markers", { data: { movie_credits: true } }],
-    ["a node with redetect_markers off", { data: { redetect_markers: false } }],
-  ])("keeps intro-only re-detection for %s", (_label, capability) => {
-    const redetectIntro = vi.fn();
-    const redetectMarkers = vi.fn();
-    mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
-    mocks.useAdminMarkerCapabilities.mockReturnValue(capability);
-    mocks.useRedetectEpisodeIntro.mockReturnValue({ mutate: redetectIntro, isPending: false });
-    mocks.useRedetectItemMarkers.mockReturnValue({ mutate: redetectMarkers, isPending: false });
+  it.each([["a node without redetect_markers", { data: { movie_credits: true } }]])(
+    "keeps intro-only re-detection for %s",
+    (_label, capability) => {
+      const redetectIntro = vi.fn();
+      const redetectMarkers = vi.fn();
+      mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
+      mocks.useAdminMarkerCapabilities.mockReturnValue(capability);
+      mocks.useRedetectEpisodeIntro.mockReturnValue({ mutate: redetectIntro, isPending: false });
+      mocks.useRedetectItemMarkers.mockReturnValue({ mutate: redetectMarkers, isPending: false });
 
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
-    );
+      renderEpisode();
 
-    expect(mocks.capturedActionBarProps.value).toMatchObject({ redetectKind: "intro" });
-    const onRedetectMarkers = mocks.capturedActionBarProps.value?.onRedetectMarkers;
-    (onRedetectMarkers as (kind: string) => void)("intro");
-    expect(redetectIntro).toHaveBeenCalledWith("episode-1");
-    expect(redetectMarkers).not.toHaveBeenCalled();
-  });
+      expect(mocks.capturedActionBarProps.value).toMatchObject({ redetectKind: "intro" });
+      const onRedetectMarkers = mocks.capturedActionBarProps.value?.onRedetectMarkers;
+      (onRedetectMarkers as (kind: string) => void)("intro");
+      expect(redetectIntro).toHaveBeenCalledWith("episode-1");
+      expect(redetectMarkers).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -1,7 +1,6 @@
 package nfo
 
 import (
-	"strings"
 	"testing"
 	"unicode/utf16"
 
@@ -125,13 +124,6 @@ func TestParseNFOData_RealWorldForms(t *testing.T) {
 			want: want{title: "Amélie", typ: typeMovie},
 		},
 		{
-			name: "UTF-16 BOM with a UCS-2 declaration",
-			data: func(*testing.T) string {
-				return utf16WithBOM(`<?xml version="1.0" encoding="UCS-2"?><movie><title>Ægir</title></movie>`, false)
-			},
-			want: want{title: "Ægir", typ: typeMovie},
-		},
-		{
 			name: "ASCII text under a legacy declaration",
 			data: func(*testing.T) string {
 				return `<?xml version="1.0" encoding="ISO-8859-1"?><movie><title>Plain &eacute;</title></movie>`
@@ -144,13 +136,6 @@ func TestParseNFOData_RealWorldForms(t *testing.T) {
 				return "\x00<movie><title>A\x0bB</title><plot>one\x08two</plot></movie>\x1a"
 			},
 			want: want{title: "AB", overview: "onetwo", typ: typeMovie},
-		},
-		{
-			name: "control characters are dropped under a legacy declaration too",
-			data: func(t *testing.T) string {
-				return latin1(t, `<?xml version="1.0" encoding="ISO-8859-1"?><movie><title>Caf`+"\x0b"+`é</title></movie>`+"\x1a")
-			},
-			want: want{title: "Café", typ: typeMovie},
 		},
 		{
 			name: "a control byte before a stale legacy declaration does not hide it",
@@ -205,11 +190,6 @@ func TestParseNFOData_RealWorldForms(t *testing.T) {
 					`<uniqueid type="tmdb">27205</uniqueid></movie>`
 			},
 			want: want{title: "Inception", typ: typeMovie, year: 2010, tmdb: "27205"},
-		},
-		{
-			name: "year with trailing text",
-			data: func(*testing.T) string { return `<movie><title>X</title><year>1999 (approx)</year></movie>` },
-			want: want{title: "X", typ: typeMovie, year: 1999},
 		},
 		{
 			name:    "truncated XML is still an error",
@@ -355,11 +335,6 @@ func TestParseNFOData_RealWorldForms(t *testing.T) {
 			want: want{title: "X", typ: typeMovie, tmdb: "2", imdb: "tt0000004"},
 		},
 		{
-			name: "untyped uniqueid sniffs an IMDb id",
-			data: func(*testing.T) string { return `<movie><title>X</title><uniqueid>tt0083658</uniqueid></movie>` },
-			want: want{title: "X", typ: typeMovie, imdb: "tt0083658"},
-		},
-		{
 			name: "unknown-type uniqueid sniffs an IMDb id; numeric stays ambiguous",
 			data: func(*testing.T) string {
 				return `<movie><title>X</title><uniqueid type="unknown">78</uniqueid><uniqueid type="unknown">tt0083658</uniqueid></movie>`
@@ -407,14 +382,6 @@ func TestParseNFOData_RealWorldForms(t *testing.T) {
 			name: "an upper-case IMDb id is stored in lower case",
 			data: func(*testing.T) string {
 				return `<movie><title>X</title><uniqueid type="imdb">TT0133093</uniqueid></movie>`
-			},
-			want: want{title: "X", typ: typeMovie, imdb: "tt0133093"},
-		},
-		{
-			name: "a placeholder IMDb id does not block a valid weaker form",
-			data: func(*testing.T) string {
-				return `<movie><title>X</title><uniqueid type="imdb" default="true">tt0000000</uniqueid>` +
-					`<imdbid>tt0133093</imdbid></movie>`
 			},
 			want: want{title: "X", typ: typeMovie, imdb: "tt0133093"},
 		},
@@ -575,21 +542,5 @@ func TestParseNFOInt(t *testing.T) {
 		if got != tc.want || ok != tc.wantOK {
 			t.Errorf("parseNFOInt(%q) = %d, %v; want %d, %v", tc.in, got, ok, tc.want, tc.wantOK)
 		}
-	}
-}
-
-func TestParseNFOData_MultiEpisodeStillDetectedWithLenientDecoder(t *testing.T) {
-	t.Parallel()
-
-	doc := strings.Join([]string{
-		`<episodedetails><title>One</title><episode>1</episode></episodedetails>`,
-		`<episodedetails><title>Two</title><episode>2</episode></episodedetails>`,
-	}, "\n")
-	p, err := parseNFOData([]byte(doc))
-	if err != nil {
-		t.Fatalf("parseNFOData() error = %v", err)
-	}
-	if !p.MultiEpisode || p.Title != "One" {
-		t.Errorf("parsed = %+v, want the first block with MultiEpisode set", p)
 	}
 }

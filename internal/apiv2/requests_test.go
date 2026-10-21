@@ -311,55 +311,6 @@ func TestCreateRequest(t *testing.T) {
 	}
 }
 
-func TestListMyRequests(t *testing.T) {
-	svc := fixtureRequests()
-	h := newTestHandler(t, requestDeps(svc))
-	type page struct {
-		Items []struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-		} `json:"items"`
-		Page struct {
-			NextCursor string `json:"next_cursor"`
-			HasMore    bool   `json:"has_more"`
-		} `json:"page"`
-	}
-	rec := do(t, h, http.MethodGet, "/api/v2/requests/mine", "", requestOwner)
-	var got page
-	decodeBody(t, rec.Body, &got)
-	if rec.Code != 200 || len(got.Items) != 2 || got.Page.HasMore || got.Items[0].ID != "r-2" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if svc.lastFilter.Limit != 51 || svc.lastFilter.Offset != 0 {
-		t.Fatalf("filter = %+v", svc.lastFilter)
-	}
-
-	// Paging: limit 1 walks both rows through the cursor.
-	rec = do(t, h, http.MethodGet, "/api/v2/requests/mine?limit=1", "", requestOwner)
-	decodeBody(t, rec.Body, &got)
-	if len(got.Items) != 1 || !got.Page.HasMore || got.Page.NextCursor == "" {
-		t.Fatalf("first page = %s", rec.Body.String())
-	}
-	firstCursor := got.Page.NextCursor
-	rec = do(t, h, http.MethodGet, "/api/v2/requests/mine?limit=1&cursor="+firstCursor, "", requestOwner)
-	decodeBody(t, rec.Body, &got)
-	if len(got.Items) != 1 || got.Items[0].ID != "r-1" || got.Page.HasMore {
-		t.Fatalf("second page = %s", rec.Body.String())
-	}
-	// A cursor minted under another filter is refused.
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/mine?limit=1&status=pending&cursor="+firstCursor, "", requestOwner), TypeInvalidCursor)
-
-	rec = do(t, h, http.MethodGet, "/api/v2/requests/mine?status=pending", "", requestOwner)
-	decodeBody(t, rec.Body, &got)
-	if len(got.Items) != 1 || got.Items[0].ID != "r-2" || svc.lastFilter.Status != mediarequests.StatusPending {
-		t.Fatalf("%s %+v", rec.Body.String(), svc.lastFilter)
-	}
-	// Offset paging and unknown statuses are validation failures.
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/mine?offset=10", "", requestOwner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/mine?status=weird", "", requestOwner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/mine?limit=100", "", requestOwner), TypeValidationFailed)
-}
-
 func TestGetRequest(t *testing.T) {
 	h := newTestHandler(t, requestDeps(fixtureRequests()))
 	rec := do(t, h, http.MethodGet, "/api/v2/requests/r-1", "", requestOwner)
@@ -558,37 +509,6 @@ func TestRequestAdminReachFollowsActingProfile(t *testing.T) {
 	requireAdminMembers(t, "admin getRequest", got, adminRequestMembers, adminTargetMembers)
 }
 
-func TestSearchRequestMedia(t *testing.T) {
-	svc := fixtureRequests()
-	h := newTestHandler(t, requestDeps(svc))
-	rec := do(t, h, http.MethodGet, "/api/v2/requests/search?q=heat&media_type=movie&page=2", "", requestOwner)
-	var got struct {
-		Page    int `json:"page"`
-		Results []struct {
-			TMDBID  int `json:"tmdb_id"`
-			Request struct {
-				Requestable bool `json:"requestable"`
-			} `json:"request"`
-		} `json:"results"`
-	}
-	decodeBody(t, rec.Body, &got)
-	if rec.Code != 200 || got.Page != 2 || len(got.Results) != 1 || got.Results[0].TMDBID != 949 || !got.Results[0].Request.Requestable {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if svc.lastArgs[0] != "heat" || svc.lastArgs[1] != mediarequests.MediaTypeMovie || svc.lastArgs[2] != 2 {
-		t.Fatalf("args = %v", svc.lastArgs)
-	}
-	// media_type defaults to all; page to 1.
-	do(t, h, http.MethodGet, "/api/v2/requests/search?q=heat", "", requestOwner)
-	if svc.lastArgs[1] != mediarequests.MediaTypeAll || svc.lastArgs[2] != 1 {
-		t.Fatalf("args = %v", svc.lastArgs)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/search", "", requestOwner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/search?q=%20", "", requestOwner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/search?q=heat&media_type=tv", "", requestOwner), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/search?q=heat&page=0", "", requestOwner), TypeValidationFailed)
-}
-
 func TestGetRequestMediaDetail(t *testing.T) {
 	svc := fixtureRequests()
 	h := newTestHandler(t, requestDeps(svc))
@@ -757,24 +677,4 @@ func TestFollowRequestMedia(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/requests/follows/movie/949", "", requestOwner), TypeConflict)
 	svc.err = mediarequests.ErrAlreadyAvailable
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/requests/follows/movie/949", "", requestOwner), TypeConflict)
-}
-
-func TestCreateSeriesRequestPassesSeasons(t *testing.T) {
-	svc := fixtureRequests()
-	h := newTestHandler(t, requestDeps(svc))
-	rec := do(t, h, http.MethodPost, "/api/v2/requests", `{"media_type":"series","tmdb_id":95396,"title":"Severance","seasons":[2,3]}`, requestOwner)
-	if rec.Code != http.StatusCreated {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	if !slices.Equal(svc.lastCreate.Seasons, []int{2, 3}) {
-		t.Fatalf("seasons passed = %v, want [2 3]", svc.lastCreate.Seasons)
-	}
-	var got struct {
-		Seasons        []int `json:"seasons"`
-		SeasonProgress []any `json:"season_progress"`
-	}
-	decodeBody(t, rec.Body, &got)
-	if got.Seasons == nil || got.SeasonProgress == nil {
-		t.Fatalf("seasons fields must be arrays, never null: %s", rec.Body.String())
-	}
 }

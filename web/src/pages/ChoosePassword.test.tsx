@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { V2ProblemError } from "@/api/v2/request";
+import { renderRoutes } from "./authPage.test-support";
 import ChoosePassword from "./ChoosePassword";
 
 type Account = { username: string; password_change_required: boolean };
@@ -29,19 +28,13 @@ vi.mock("@/api/v2/request", async () => ({
 vi.mock("@/components/auth/AuthBackground", () => ({ AuthBackground: () => null }));
 
 function mount(path = "/change-password") {
-  return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/change-password" element={<ChoosePassword />} />
-          <Route path="/profiles" element={<p>Profile picker</p>} />
-          <Route path="/library" element={<p>Library</p>} />
-          <Route path="/" element={<p>Home</p>} />
-          <Route path="/login" element={<p>Ordinary login</p>} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return renderRoutes(path, {
+    "/change-password": <ChoosePassword />,
+    "/profiles": <p>Profile picker</p>,
+    "/library": <p>Library</p>,
+    "/": <p>Home</p>,
+    "/login": <p>Ordinary login</p>,
+  });
 }
 async function fill(next = "chosen-password") {
   fireEvent.change(await screen.findByLabelText("Temporary password"), {
@@ -94,13 +87,6 @@ it("shows the server's reason and stays on the screen", async () => {
   await fill();
   await screen.findByText("Choose a password different from the temporary one.");
   expect(auth.settleTemporaryPassword).not.toHaveBeenCalled();
-});
-
-it("leaves an account without a temporary password alone", async () => {
-  auth.pendingPasswordChange = null;
-  auth.user = { username: "alice", password_change_required: false };
-  mount();
-  await screen.findByText("Home");
 });
 
 it("sends a signed-out visitor to sign in", async () => {

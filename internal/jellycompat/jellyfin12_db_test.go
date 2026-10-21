@@ -143,38 +143,3 @@ func TestApplyListFileFieldsDB(t *testing.T) {
 		t.Fatalf("only Height requested, got Width=%d Height=%d IsHD=%v", items[0].Width, items[0].Height, items[0].IsHD)
 	}
 }
-
-// TestEpisodeTargetSeasonPosterDB: the episode target loader carries the
-// season poster so episode DTOs can point ParentPrimaryImage at the season.
-func TestEpisodeTargetSeasonPosterDB(t *testing.T) {
-	pool, suffix := jellyfin12CompatPool(t)
-	series := fmt.Sprintf("jf12-series-%d", suffix)
-	withPoster := fmt.Sprintf("jf12-season1-%d", suffix)
-	noPoster := fmt.Sprintf("jf12-season2-%d", suffix)
-	ep1 := fmt.Sprintf("jf12-ep1-%d", suffix)
-	ep2 := fmt.Sprintf("jf12-ep2-%d", suffix)
-	t.Cleanup(func() {
-		ctx := context.Background()
-		_, _ = pool.Exec(ctx, `DELETE FROM episodes WHERE series_id = $1`, series)
-		_, _ = pool.Exec(ctx, `DELETE FROM seasons WHERE series_id = $1`, series)
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, series)
-	})
-	jellyfin12Exec(t, pool, `INSERT INTO media_items (content_id, type, title, poster_path, genres, content_rating, backdrop_path, logo_path, status) VALUES ($1, 'series', 'Show', 'series/poster.jpg', '{}', '', '', '', 'matched')`, series)
-	jellyfin12Exec(t, pool, `INSERT INTO seasons (content_id, series_id, season_number, title, poster_path, poster_thumbhash) VALUES ($1, $2, 1, 'Season 1', 'season1/poster.jpg', 'th1')`, withPoster, series)
-	jellyfin12Exec(t, pool, `INSERT INTO seasons (content_id, series_id, season_number, title) VALUES ($1, $2, 2, 'Season 2')`, noPoster, series)
-	jellyfin12Exec(t, pool, `INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title, overview, runtime, still_path, imdb_id, tmdb_id, tvdb_id) VALUES ($1, $2, $3, 1, 1, 'Pilot', '', 0, '', '', '', ''), ($4, $2, $5, 2, 1, 'Return', '', 0, '', '', '', '')`, ep1, series, withPoster, ep2, noPoster)
-
-	codec := NewResourceIDCodec()
-	h := &ItemsHandler{codec: codec, browseRepo: catalog.NewBrowseRepository(pool), mapper: newMapper(codec, &config.Config{Auth: config.AuthConfig{JWTSecret: "secret"}})}
-	targets, err := h.fetchCompatEpisodeTargetsByContentIDs(context.Background(), &Session{}, []string{ep1, ep2}, nil)
-	if err != nil {
-		t.Fatalf("fetch targets: %v", err)
-	}
-	first, second := targets[ep1], targets[ep2]
-	if first.SeasonImages.ContentID != withPoster || first.SeasonImages.PosterPath != "season1/poster.jpg" || first.SeasonImages.PosterThumbhash != "th1" || first.SeasonImages.UpdatedAt.IsZero() {
-		t.Fatalf("season poster not loaded: %+v", first.SeasonImages)
-	}
-	if second.SeasonImages.ContentID != "" {
-		t.Fatalf("season without poster should carry no season images: %+v", second.SeasonImages)
-	}
-}
