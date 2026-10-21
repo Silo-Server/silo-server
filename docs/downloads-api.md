@@ -2044,9 +2044,12 @@ With Redis configured, every API process and proxy node charges capped
 downloads to shared Redis buckets: one global bucket and one per account,
 debited atomically, each with a burst of `max(rate/4, 32768)` bytes across the
 installation. Without Redis, each process keeps in-process limiters, which is
-exact only for a single API process. Each forward read exposes at most one
-charged chunk: about 25 ms of the strictest active rate, between 32 KiB and
-1 MiB, so a fast cap is not bounded by one Redis round trip per 32 KiB. For any
+exact only for a single API process. A transfer pays for one chunk before
+sending it: about 25 ms of the strictest active rate, between 32 KiB and 1 MiB,
+so a fast cap is not bounded by one Redis round trip per 32 KiB. A charge
+reserves its bytes even when the bucket is short and waits until they are paid
+for, so contending transfers are served in order. A process whose settings are
+not yet refreshed leaves a bucket it sees as unlimited untouched. For any
 interval of length T, charged bytes are bounded by `rate*T + burst`; HTTP and
 socket buffering may shift the observed arrival times of charged chunks. Redis
 time and retained balances keep API or proxy restarts from granting new
