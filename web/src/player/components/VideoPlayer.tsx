@@ -29,7 +29,7 @@ import { useWatchProgress } from "../hooks/useWatchProgress";
 import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { usePlayerFullscreenRoot } from "../context/PlayerFullscreenContext";
-import { isPlayerFullscreen, toggleFullscreen } from "../utils/fullscreen";
+import { isNativeVideoFullscreen, isPlayerFullscreen, toggleFullscreen } from "../utils/fullscreen";
 import { useIntroSkipPrompt } from "../hooks/useIntroSkipPrompt";
 import { useRemuxSeeking } from "../hooks/useRemuxSeeking";
 import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
@@ -719,6 +719,7 @@ export function VideoPlayer({
   const [pageHidden, setPageHidden] = useState(
     () => typeof document !== "undefined" && document.visibilityState === "hidden",
   );
+  const playerUnseen = isDetached || pageHidden || nativeVideoFullscreen;
   // A buffering notice that arrived while another notice held the slot.
   const [queuedBufferingNotice, setQueuedBufferingNotice] = useState<PlaybackNoticeState | null>(
     null,
@@ -1214,7 +1215,7 @@ export function VideoPlayer({
   // identical notice renders again. A minimized player keeps it until the
   // viewer can see it, and the reconnect warning stays for the whole outage.
   useEffect(() => {
-    if (!notice || isDetached || pageHidden || nativeVideoFullscreen) return;
+    if (!notice || playerUnseen) return;
     if (holdReconnectNotice) return;
     const timer = setTimeout(
       () =>
@@ -1227,7 +1228,7 @@ export function VideoPlayer({
       notice.visibleMs ?? PLAYBACK_NOTICE_VISIBLE_MS,
     );
     return () => clearTimeout(timer);
-  }, [holdReconnectNotice, isDetached, nativeVideoFullscreen, notice, pageHidden]);
+  }, [holdReconnectNotice, notice, playerUnseen]);
 
   // A queued buffering notice takes the slot once it is free.
   useEffect(() => {
@@ -3381,10 +3382,7 @@ export function VideoPlayer({
     const video = videoRef.current;
     const onChange = () => {
       setIsFullscreen(isPlayerFullscreen(video));
-      setNativeVideoFullscreen(
-        !!(video as (HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }) | null)
-          ?.webkitDisplayingFullscreen,
-      );
+      setNativeVideoFullscreen(isNativeVideoFullscreen(video));
     };
 
     // A player mounted for the next episode can start inside a fullscreen
@@ -4454,7 +4452,7 @@ export function VideoPlayer({
     plan: bufferingPlan,
     // Pills also wait while nobody can see them: a minimized player, a hidden
     // tab, or iPhone's native fullscreen view.
-    obscured: higherPriorityPillActive || isDetached || pageHidden || nativeVideoFullscreen,
+    obscured: higherPriorityPillActive || playerUnseen,
     playIntent: () =>
       shouldAutoPlay && !connectionReplacedRef.current && !roomPlaybackActiveRef.current,
     transportTrouble: () =>
@@ -4493,8 +4491,7 @@ export function VideoPlayer({
     },
     onKeptEstimate,
   });
-  const bufferingPill =
-    isDetached || pageHidden || nativeVideoFullscreen ? null : bufferingQuality.pill;
+  const bufferingPill = bufferingQuality.pill;
   const { answer: answerBufferingPill } = bufferingQuality;
   // A new cap on the session's replans is a quality change (see the prop).
   const capForBuffering = bandwidthCapKbps ?? null;
