@@ -19,6 +19,11 @@ probes. `/Branding/Css` and `/Branding/Css.css` return 200 with an empty
 Jellyfin Web custom CSS: its own custom CSS styles Silo's web client, so it is
 not served here.
 
+Authenticated `GET /System/Configuration/encoding` returns
+`{"EnableFallbackFont":false}`. Jellyfin Web loads it before drawing ASS/SSA
+subtitles and draws nothing when the request fails. Silo serves no fallback
+fonts. The key matches case-insensitively; any other key returns 404.
+
 The route inventory is maintained in
 `internal/jellycompat/testdata/media_routes.txt`. `internal/jellycompat/router.go`
 owns registration; the native `/api/v1` contract is separate.

@@ -307,6 +307,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Post("/Users/Configuration", authHandler.HandleUpdateConfiguration)
 			r.Post("/Users/{userId}/Configuration", authHandler.HandleUpdateConfiguration)
 			r.Get("/Localization/Cultures", authHandler.HandleCultures)
+			r.Get("/System/Configuration/{key}", systemHandler.HandleNamedConfiguration)
 			// Clients probe group discovery even when SyncPlayAccess is None.
 			r.Get("/SyncPlay/List", func(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, []struct{}{})

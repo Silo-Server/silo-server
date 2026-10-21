@@ -67,6 +67,7 @@ GET /Shows/{id}/Seasons	non-media
 GET /Shows/{id}/Similar	non-media
 GET /Studios	non-media
 GET /SyncPlay/List	non-media
+GET /System/Configuration/{key}	non-media
 GET /System/Endpoint	non-media
 GET /System/Info	non-media
 GET /System/Info/Public	non-media
@@ -230,6 +231,7 @@ GET /Shows/{id}/Seasons	non-media
 GET /Shows/{id}/Similar	non-media
 GET /Studios	non-media
 GET /SyncPlay/List	non-media
+GET /System/Configuration/{key}	non-media
 GET /System/Endpoint	non-media
 GET /System/Info	non-media
 GET /System/Info/Public	non-media
