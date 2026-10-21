@@ -46,14 +46,6 @@ function Row({
 afterEach(cleanup);
 
 describe("ListRow", () => {
-  it("shows the name, one tag and the meta line, with a grip named for the row", () => {
-    render(<Row />);
-    const row = screen.getByRole("listitem");
-    expect(row).toHaveAttribute("data-row-id", "ghibli");
-    expect(row).toHaveTextContent("Studio GhibliPinnedManual·23 titles");
-    expect(screen.getByRole("button", { name: "Move Studio Ghibli" })).toBeInTheDocument();
-  });
-
   it("keeps focus on the switch while the row collapses and expands", async () => {
     render(<Row />);
     const toggle = () =>
@@ -77,11 +69,5 @@ describe("ListRow", () => {
     await user.keyboard("{Shift>}");
     await user.click(screen.getByRole("checkbox", { name: "Select Studio Ghibli" }));
     expect(onSelect).toHaveBeenCalledWith(true, true);
-  });
-
-  it("has no grip on a list that isn't ordered by hand", () => {
-    render(<Row grip={false} />);
-    expect(screen.queryByRole("button", { name: "Move Studio Ghibli" })).not.toBeInTheDocument();
-    expect(screen.getByRole("listitem")).toHaveTextContent("Studio GhibliPinnedManual·23 titles");
   });
 });

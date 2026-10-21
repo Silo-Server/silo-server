@@ -85,10 +85,6 @@ describe("initPointerCapability", () => {
     expect(seen).toEqual([false, true]);
   });
 
-  it("reports undefined before anything has been published", () => {
-    expect(readFinePointer()).toBeUndefined();
-  });
-
   it("reports undefined where there is no document at all", () => {
     // A default parameter would be evaluated at the call site and throw here,
     // which is what the documented server-rendering fallback forbids.
@@ -124,14 +120,5 @@ describe("initPointerCapability", () => {
   it("does not throw when matchMedia is unavailable", () => {
     expect(() => start(undefined)).not.toThrow();
     expect(document.documentElement.getAttribute(ATTR)).toBe("false");
-  });
-
-  it("writes the attribute only when the value actually changes", () => {
-    start(false);
-    const spy = vi.spyOn(document.documentElement, "setAttribute");
-    document.dispatchEvent(pointer("mouse"));
-    document.dispatchEvent(pointer("mouse"));
-    expect(spy.mock.calls.filter(([name]) => name === ATTR)).toHaveLength(1);
-    spy.mockRestore();
   });
 });

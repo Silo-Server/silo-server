@@ -38,6 +38,13 @@ func TestDiscordV2HouseholdAdmission(t *testing.T) {
 		{"profileless locked admin", locked, bearer(adminToken), TypePermissionDenied},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			channels := new(fakeNotificationChannels)
+			links := new(fakeNotificationDiscordLinks)
+			deps := pilotDeps(nil, nil)
+			deps.NotificationChannels = channels
+			deps.NotificationDiscordLinks = links
+			deps.NotificationDiscordManagement = discordManagement(tc.profiles)
+			h := NewHandler(deps)
 			for _, op := range []struct {
 				method, path, body string
 				status             int
@@ -46,13 +53,9 @@ func TestDiscordV2HouseholdAdmission(t *testing.T) {
 				{http.MethodPut, "/discord-preferences", `{"mode":"off"}`, 200},
 				{http.MethodDelete, "/discord-link", "", 204},
 			} {
-				channels := new(fakeNotificationChannels)
-				links := new(fakeNotificationDiscordLinks)
-				deps := pilotDeps(nil, nil)
-				deps.NotificationChannels = channels
-				deps.NotificationDiscordLinks = links
-				deps.NotificationDiscordManagement = discordManagement(tc.profiles)
-				rec := do(t, NewHandler(deps), op.method, Prefix+"/notifications"+op.path, op.body, tc.headers)
+				*channels = fakeNotificationChannels{}
+				*links = fakeNotificationDiscordLinks{}
+				rec := do(t, h, op.method, Prefix+"/notifications"+op.path, op.body, tc.headers)
 				if tc.want != (ProblemType{}) {
 					requireProblem(t, rec, tc.want)
 					if channels.writes != 0 || links.calls != 0 {

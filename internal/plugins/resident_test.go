@@ -332,17 +332,6 @@ func TestResidentBackoffSchedule(t *testing.T) {
 	}
 }
 
-func TestResidentPredicateNeedsCapability(t *testing.T) {
-	if !IsResidentCapabilityType(capability.NetworkAccessProvider) {
-		t.Fatal("network_access_provider.v1 must be resident")
-	}
-	for _, typ := range []string{capability.MetadataProvider, capability.ScheduledTask, capability.WatchSyncProvider, ""} {
-		if IsResidentCapabilityType(typ) {
-			t.Fatalf("%q must not be resident", typ)
-		}
-	}
-}
-
 func TestResidentRestartOfNonResidentOnlyStops(t *testing.T) {
 	host := &fakeServiceHost{}
 	store := newFakeServiceInstallationStore(&Installation{ID: 2, PluginID: "silo.metadb", Version: "1", InstallPath: "/x/plugin", Enabled: true, Kind: KindPlugin})

@@ -3893,15 +3893,29 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 // season/episode hints remain unlinked for the slower fallback path.
 func (r *FileRepository) BulkLinkEpisodesBySeries(ctx context.Context, seriesContentID string) (int, error) {
 	var linked int
+	// Lock the candidates in id order first, the order curated rebind,
+	// rename and split lock a series' files; the UPDATE alone locks them in
+	// plan order and can deadlock with those.
 	err := r.pool.QueryRow(ctx, `
-		WITH updated AS (
+		WITH locked AS (
+			SELECT id FROM media_files
+			WHERE content_id = $1
+			  AND episode_id IS NULL
+			  AND missing_since IS NULL
+			  AND season_number IS NOT NULL
+			  AND episode_number IS NOT NULL
+			ORDER BY id
+			FOR UPDATE
+		),
+		updated AS (
 			UPDATE media_files mf
 			SET episode_id = e.content_id,
 				season_number = e.season_number,
 				episode_number = e.episode_number,
 				updated_at = NOW()
 			FROM episodes e
-			WHERE mf.content_id = $1
+			WHERE mf.id IN (SELECT id FROM locked)
+			  AND mf.content_id = $1
 			  AND mf.episode_id IS NULL
 			  AND mf.missing_since IS NULL
 			  AND mf.season_number IS NOT NULL

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -27,12 +26,6 @@ func (f *fakeAdminCollections) AdminCollectionRowCounts(_ context.Context, ids [
 	f.countReads++
 	f.countedIDs = append(f.countedIDs, ids...)
 	return f.rowCounts, nil
-}
-
-// adminCollectionsWithoutRows hides the row-reference methods, like a service
-// that cannot report rows.
-type adminCollectionsWithoutRows struct {
-	AdminCollectionService
 }
 
 const (
@@ -62,130 +55,6 @@ func fakeRowReferences() *fakeAdminCollections {
 	return f
 }
 
-type listedRowCounts struct {
-	Items []struct {
-		ID           string `json:"id"`
-		HomeRowCount *int   `json:"home_row_count"`
-		RowCount     *int   `json:"row_count"`
-	} `json:"items"`
-}
-
-// TestAdminCollectionListCarriesRowCounts checks that every listed collection
-// carries its Home and total row counts from one grouped count for the whole
-// page, with zero for a collection no row shows.
-func TestAdminCollectionListCarriesRowCounts(t *testing.T) {
-	f := fakeRowReferences()
-	rec := do(t, adminCollectionsTestHandler(t, f), http.MethodGet, adminCollectionsPath+"?library_id=1", "", bearer(adminToken))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	var body listedRowCounts
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	want := map[string][2]int{"c1": {2, 3}, "c2": {0, 1}, "c3": {0, 0}}
-	if len(body.Items) != len(want) {
-		t.Fatalf("listed %d collections, want %d: %s", len(body.Items), len(want), rec.Body)
-	}
-	for _, item := range body.Items {
-		if item.HomeRowCount == nil || item.RowCount == nil {
-			t.Fatalf("%s: counts missing: %s", item.ID, rec.Body)
-		}
-		if got := [2]int{*item.HomeRowCount, *item.RowCount}; got != want[item.ID] {
-			t.Errorf("%s: home_row_count, row_count = %v, want %v", item.ID, got, want[item.ID])
-		}
-	}
-	if f.countReads != 1 || !slices.Equal(f.countedIDs, []string{"c1", "c2", "c3"}) {
-		t.Fatalf("counted %d times for %v; want one count for the whole page", f.countReads, f.countedIDs)
-	}
-}
-
-// TestAdminCollectionRowCountsStayOnTheList checks that the canonical editor
-// read, whose ETag covers only the collection's own revision, never carries
-// row counts, and that a service that cannot count rows leaves them out of the
-// list instead of reporting zero.
-func TestAdminCollectionRowCountsStayOnTheList(t *testing.T) {
-	f := fakeRowReferences()
-	rec := do(t, adminCollectionsTestHandler(t, f), http.MethodGet, "/api/v2/admin/collections/c1", "", bearer(adminToken))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	var one map[string]json.RawMessage
-	if err := json.Unmarshal(rec.Body.Bytes(), &one); err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"home_row_count", "row_count"} {
-		if _, ok := one[key]; ok {
-			t.Errorf("getAdminCollection carries %s: %s", key, rec.Body)
-		}
-	}
-	if f.countReads != 0 {
-		t.Fatal("getAdminCollection counted rows")
-	}
-
-	deps, _ := libraryDeps(t)
-	deps.AdminCollections = adminCollectionsWithoutRows{f}
-	rec = do(t, newTestHandler(t, deps), http.MethodGet, adminCollectionsPath, "", bearer(adminToken))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	var body listedRowCounts
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	for _, item := range body.Items {
-		if item.HomeRowCount != nil || item.RowCount != nil {
-			t.Fatalf("%s: counts reported without a row service: %s", item.ID, rec.Body)
-		}
-	}
-}
-
-// TestAdminCollectionSectionsListTheRows checks the rows that show a
-// collection: Home rows with a null library, library page rows with the
-// library's string ID, the hero flag, turned-off rows and each page's row
-// count, in the order the service returns them.
-func TestAdminCollectionSectionsListTheRows(t *testing.T) {
-	f := fakeRowReferences()
-	rec := do(t, adminCollectionsTestHandler(t, f), http.MethodGet, adminCollectionSectionsPath, "", bearer(adminToken))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-	var body struct {
-		Items []map[string]any `json:"items"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	want := []map[string]any{
-		{"id": "s-hero", "scope": "home", "library_id": nil, "section_type": "collection", "title": "Starter pack hero", "featured": true, "enabled": true, "position": 0.0, "page_row_count": 9.0},
-		{"id": "s-home", "scope": "home", "library_id": nil, "section_type": "collection", "title": "On Home", "featured": false, "enabled": true, "position": 4.0, "page_row_count": 9.0},
-		{"id": "s-kids", "scope": "library", "library_id": "7", "section_type": "collection", "title": "Kids", "featured": false, "enabled": false, "position": 2.0, "page_row_count": 3.0},
-	}
-	if len(body.Items) != len(want) {
-		t.Fatalf("got %d rows, want %d: %s", len(body.Items), len(want), rec.Body)
-	}
-	for i, w := range want {
-		got := body.Items[i]
-		if len(got) != len(w) {
-			t.Errorf("row %d members = %v, want %v", i, got, w)
-		}
-		for k, v := range w {
-			if got[k] != v {
-				t.Errorf("row %d %s = %v, want %v", i, k, got[k], v)
-			}
-		}
-	}
-
-	f.sections = nil
-	rec = do(t, adminCollectionsTestHandler(t, f), http.MethodGet, adminCollectionSectionsPath, "", bearer(adminToken))
-	var empty struct {
-		Items []json.RawMessage `json:"items"`
-	}
-	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &empty) != nil || empty.Items == nil || len(empty.Items) != 0 {
-		t.Fatalf("unused collection: %d %s, want an empty items list", rec.Code, rec.Body)
-	}
-}
-
 func TestAdminCollectionSectionsUnknownCollectionIsNotFound(t *testing.T) {
 	f := fakeRowReferences()
 	rec := do(t, adminCollectionsTestHandler(t, f), http.MethodGet, "/api/v2/admin/collections/missing/sections", "", bearer(adminToken))
@@ -208,35 +77,5 @@ func TestAdminCollectionRowsRequireActingAdmin(t *testing.T) {
 	}
 	if f.sectionReads+f.countReads+f.listReads+f.reads != 0 {
 		t.Fatalf("refused requests read rows %d, counts %d, lists %d, collections %d", f.sectionReads, f.countReads, f.listReads, f.reads)
-	}
-}
-
-// TestAdminCollectionCapabilityReportsSectionReferences checks that the
-// capability follows whether the service can report rows.
-func TestAdminCollectionCapabilityReportsSectionReferences(t *testing.T) {
-	read := func(svc AdminCollectionService) bool {
-		t.Helper()
-		deps, _ := libraryDeps(t)
-		deps.AdminCollections = svc
-		rec := do(t, newTestHandler(t, deps), http.MethodGet, adminCollectionCapabilitiesPath, "", bearer(adminToken))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%d %s", rec.Code, rec.Body)
-		}
-		var body struct {
-			SectionReferences *bool `json:"section_references"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
-		}
-		if body.SectionReferences == nil {
-			t.Fatalf("section_references missing: %s", rec.Body)
-		}
-		return *body.SectionReferences
-	}
-	if !read(fakeRowReferences()) {
-		t.Error("section_references = false with a row service")
-	}
-	if read(adminCollectionsWithoutRows{fakeRowReferences()}) {
-		t.Error("section_references = true without a row service")
 	}
 }

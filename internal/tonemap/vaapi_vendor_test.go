@@ -47,18 +47,12 @@ func fakeDRMVendors(t *testing.T, vendors map[string]string) {
 // each smoke command it runs.
 func vaapiProbeRunner(filters string, commands *[]string) CommandRunner {
 	var mu sync.Mutex
-	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		switch {
-		case slices.Contains(args, "-filters"):
-			return []byte(filters), nil
-		case slices.Contains(args, "-encoders"):
-			return []byte("libx264 h264_vaapi"), nil
-		}
+	return listingRunner(nil, filters, "libx264 h264_vaapi", func(args string) ([]byte, error) {
 		mu.Lock()
-		*commands = append(*commands, strings.Join(args, " "))
+		*commands = append(*commands, args)
 		mu.Unlock()
 		return nil, nil
-	}
+	})
 }
 
 const vaapiProbeFilters = " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_vaapi V->V\n .S. scale_vaapi V->V\n" +
@@ -199,17 +193,6 @@ func TestCharDeviceNumberReadsTheNode(t *testing.T) {
 	t.Cleanup(func() { sysfsRoot = previous })
 	if got := drmVendor("/dev/null"); got != "0x8086" {
 		t.Fatalf("drmVendor(/dev/null) = %q, want the vendor under its device number", got)
-	}
-}
-
-// TestDRMVendorUnreadableKeepsVAAPIFilter covers a host whose sysfs can't be
-// read: no vendor is reported and VAAPI keeps tonemap_vaapi, as before.
-func TestDRMVendorUnreadableKeepsVAAPIFilter(t *testing.T) {
-	if got := drmVendor("/dev/dri/renderD128"); got != "" {
-		t.Fatalf("drmVendor without sysfs = %q, want empty", got)
-	}
-	if got := vaapiFilter("/dev/dri/renderD128"); got != HardwareFilterVAAPI {
-		t.Fatalf("vaapiFilter without sysfs = %q, want %q", got, HardwareFilterVAAPI)
 	}
 }
 

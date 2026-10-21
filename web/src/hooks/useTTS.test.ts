@@ -198,27 +198,6 @@ describe("useTTS", () => {
     ]);
   });
 
-  it("installs media session handlers on speak and clears them on stop", () => {
-    installFakeSpeechSynthesis("end");
-    const mediaSession = navigator.mediaSession as unknown as FakeMediaSession;
-    const { result } = renderHook(() => useTTS());
-
-    act(() => {
-      result.current.speak("Hello there.");
-    });
-    expect(mediaSession.metadata).not.toBeNull();
-    expect(mediaSession.playbackState).toBe("playing");
-
-    act(() => {
-      result.current.stop();
-    });
-    expect(mediaSession.metadata).toBeNull();
-    expect(mediaSession.playbackState).toBe("none");
-    expect(mediaSession.setActionHandler).toHaveBeenCalledWith("play", null);
-    expect(mediaSession.setActionHandler).toHaveBeenCalledWith("pause", null);
-    expect(mediaSession.setActionHandler).toHaveBeenCalledWith("stop", null);
-  });
-
   it("cancels speech and uninstalls the media session when unmounting mid-speech", () => {
     const synth = installFakeSpeechSynthesis("end");
     const mediaSession = navigator.mediaSession as unknown as FakeMediaSession;

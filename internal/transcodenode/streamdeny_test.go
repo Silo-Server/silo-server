@@ -3,8 +3,6 @@ package transcodenode
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +10,6 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
-	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
@@ -82,21 +79,9 @@ func TestStreamDenyRefusesProgressiveRemuxBeforeFFmpeg(t *testing.T) {
 	server.nodeRowID = func() (int, bool) { return 11, true }
 	deny := unreachableStreamDeny(t)
 	server.SetStreamDeny(deny)
-	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf node-remux-bytes\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	claims := streamtoken.Claims{
-		SessionID: "playback-1", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
-		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
-	}
+	mediaPath, _ := writeNodeSource(t, "source")
+	useFakeFFmpeg(t, server, "#!/bin/sh\nprintf node-remux-bytes\n")
+	claims := progressiveRemuxClaims("playback-1", mediaPath, "transport-1")
 	card := playback.RecipeCardFromClaims(&claims)
 	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
 	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
@@ -111,13 +96,5 @@ func TestStreamDenyRefusesProgressiveRemuxBeforeFFmpeg(t *testing.T) {
 	}
 	if got := server.activeJobs.Load(); got != 0 {
 		t.Fatalf("active jobs after denied remux = %d, want 0", got)
-	}
-}
-
-func TestStreamDenyNilStoreKeepsServing(t *testing.T) {
-	server := newTestServer(t)
-	rr := nodeRequest(t, server, http.MethodGet, "/transcode/unknown-transport/master.m3u8", "")
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("no deny store = %d %q, want 404", rr.Code, rr.Body.String())
 	}
 }

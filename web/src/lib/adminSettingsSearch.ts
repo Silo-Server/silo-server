@@ -289,7 +289,7 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "Enable rate limiting",
       "Where counters are kept",
       "Whole-server limit",
-      "Per client address",
+      "Per address and account",
       "API key tiers",
       "Standard API keys",
       "Elevated API keys",

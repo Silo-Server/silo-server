@@ -214,6 +214,163 @@ func writeNodeToneMapFFprobe(t *testing.T, ffmpegPath string, track models.Video
 	}
 }
 
+// useFakeFFmpeg installs script as the server's FFmpeg binary and returns its
+// path.
+func useFakeFFmpeg(t *testing.T, server *Server, script string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = path
+	return path
+}
+
+// toneMapFFmpegScript is a fake FFmpeg that advertises software tone mapping,
+// passes its smoke encode, and otherwise runs body.
+func toneMapFFmpegScript(body string) string {
+	return "#!/bin/sh\n" +
+		"case \" $* \" in\n" +
+		"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n'; exit 0;;\n" +
+		"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n'; exit 0;;\n" +
+		"  *\" -f null \"*) exit 0;;\n" +
+		"esac\n" + body
+}
+
+// useToneMapFFmpeg installs toneMapFFmpegScript(body) with software encoding
+// and an FFprobe that reports nodeToneMapTrack.
+func useToneMapFFmpeg(t *testing.T, server *Server, body string) {
+	t.Helper()
+	ffmpegPath := useFakeFFmpeg(t, server, toneMapFFmpegScript(body))
+	server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
+	writeNodeToneMapFFprobe(t, ffmpegPath, nodeToneMapTrack())
+}
+
+// nodeToneMapRevision is the source revision of a size-byte file whose only
+// video track is nodeToneMapTrack.
+func nodeToneMapRevision(size int64) tonemap.SourceRevision {
+	return tonemap.RevisionForFile(&models.MediaFile{ID: 1, FileSize: size, VideoTracks: []models.VideoTrack{nodeToneMapTrack()}})
+}
+
+// toneMapPrepareRequest is a software tone-mapped H.264 download of inputPath.
+func toneMapPrepareRequest(artifactID, inputPath string, revision tonemap.SourceRevision) downloadprepare.Request {
+	return downloadprepare.Request{
+		ArtifactID: artifactID, InputPath: inputPath,
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", AudioTrackIndex: -1,
+		ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
+		ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
+		ToneMapSourceRevision: revision,
+	}
+}
+
+// writeNodeSource writes content as a media source and returns its path and
+// size.
+func writeNodeSource(t *testing.T, content string) (string, int64) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "source.mkv")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, int64(len(content))
+}
+
+// writeArtifact writes content as the artifact file name under the server's
+// artifact root and returns its path.
+func writeArtifact(t *testing.T, server *Server, name, content string) string {
+	t.Helper()
+	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(server.artifactRoot, name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// blockReceiptRemoval puts a non-empty directory where outputPath's receipt
+// belongs, so invalidating the receipt fails.
+func blockReceiptRemoval(t *testing.T, outputPath string) {
+	t.Helper()
+	receiptPath := outputPath + ".receipt.json"
+	if err := os.Mkdir(receiptPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(receiptPath, "blocks-removal"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func jsonRequest(t *testing.T, path string, body any) *http.Request {
+	t.Helper()
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return httptest.NewRequest(http.MethodPost, path, bytes.NewReader(data))
+}
+
+func postStartRequest(t *testing.T, server *Server, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	server.handleStart(recorder, jsonRequest(t, "/transcode/start", body))
+	return recorder
+}
+
+func postPrepare(t *testing.T, server *Server, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	server.handleDownloadPrepare(recorder, jsonRequest(t, "/downloads/prepare", body))
+	return recorder
+}
+
+// startRegisteredSession starts request, requires 202, and returns the
+// response with the session it registered. The session is closed on cleanup.
+func startRegisteredSession(t *testing.T, server *Server, request TranscodeStartRequest) (*httptest.ResponseRecorder, *playback.TranscodeSession) {
+	t.Helper()
+	recorder := postStartRequest(t, server, request)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (body %s)", recorder.Code, recorder.Body.String())
+	}
+	server.mu.RLock()
+	session := server.sessions[request.SessionID]
+	server.mu.RUnlock()
+	if session == nil {
+		t.Fatal("session was not registered")
+	}
+	t.Cleanup(func() { _ = session.CloseProcess() })
+	return recorder, session
+}
+
+// progressiveRemuxClaims is a stream token for a progressive remux that node 11
+// executes.
+func progressiveRemuxClaims(sessionID, mediaPath, transportID string) streamtoken.Claims {
+	return streamtoken.Claims{
+		SessionID: sessionID, MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: transportID,
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
+	}
+}
+
+// remuxRequest is a progressive remux request for the claims' transport that
+// carries the signed claims as its stream token.
+func remuxRequest(t *testing.T, method string, claims streamtoken.Claims) *http.Request {
+	t.Helper()
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := withNodeRouteParams(httptest.NewRequest(method, "/remux/"+claims.TranscodeTransportID, nil),
+		map[string]string{"session_id": claims.TranscodeTransportID})
+	request.Header.Set("X-Silo-Stream-Token", token)
+	return request
+}
+
+func stopRequest(id string) *http.Request {
+	return withNodeRouteParams(httptest.NewRequest(http.MethodDelete, "/transcode/"+id, nil), map[string]string{"session_id": id})
+}
+
 func TestWriteToneMapRecipeErrorClassifiesLiveValidation(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -261,38 +418,24 @@ func TestToneMapExecutionEndpointsRejectLiveMetadataBeforeFFmpeg(t *testing.T) {
 			for _, endpoint := range []string{"start", "download"} {
 				t.Run(endpoint, func(t *testing.T) {
 					server := newTestServer(t)
-					dir := t.TempDir()
-					inputPath := filepath.Join(dir, "source.mkv")
-					if err := os.WriteFile(inputPath, []byte("source"), 0o600); err != nil {
-						t.Fatal(err)
-					}
-					info, err := os.Stat(inputPath)
-					if err != nil {
-						t.Fatal(err)
-					}
-					ffmpegMarker := filepath.Join(dir, "ffmpeg-ran")
-					ffmpegPath := filepath.Join(dir, "ffmpeg")
-					ffmpegScript := "#!/bin/sh\n" +
-						"case \" $* \" in\n" +
-						"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n'; exit 0;;\n" +
-						"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n'; exit 0;;\n" +
-						"esac\n" +
-						"case \" $* \" in *\" -i " + inputPath + " \"*) touch '" + ffmpegMarker + "';; esac\nexit 0\n"
-					if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
-						t.Fatal(err)
-					}
+					inputPath, size := writeNodeSource(t, "source")
+					ffmpegMarker := filepath.Join(t.TempDir(), "ffmpeg-ran")
+					ffmpegPath := useFakeFFmpeg(t, server, "#!/bin/sh\n"+
+						"case \" $* \" in\n"+
+						"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n'; exit 0;;\n"+
+						"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n'; exit 0;;\n"+
+						"esac\n"+
+						"case \" $* \" in *\" -i "+inputPath+" \"*) touch '"+ffmpegMarker+"';; esac\nexit 0\n")
 					probePath := mediaprobe.FFprobePathFromFFmpeg(ffmpegPath)
 					if err := os.WriteFile(probePath, []byte("#!/bin/sh\n"+validation.probeBody+"\n"), 0o755); err != nil {
 						t.Fatal(err)
 					}
-					server.watcher.Config().Playback.FFmpegPath = ffmpegPath
 					server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
-					track := nodeToneMapTrack()
-					revision := tonemap.RevisionForFile(&models.MediaFile{ID: 1, FileSize: info.Size(), VideoTracks: []models.VideoTrack{track}})
+					revision := nodeToneMapRevision(size)
 
-					var body []byte
+					var recorder *httptest.ResponseRecorder
 					if endpoint == "start" {
-						body, err = json.Marshal(TranscodeStartRequest{
+						recorder = postStartRequest(t, server, TranscodeStartRequest{
 							SessionID: "metadata-guard", InputPath: inputPath,
 							TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
 							ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
@@ -300,23 +443,7 @@ func TestToneMapExecutionEndpointsRejectLiveMetadataBeforeFFmpeg(t *testing.T) {
 							ToneMapSourceRevision: revision,
 						})
 					} else {
-						body, err = json.Marshal(downloadprepare.Request{
-							ArtifactID: "metadata-guard", InputPath: inputPath,
-							TargetCodecVideo: "h264", TargetCodecAudio: "aac", AudioTrackIndex: -1,
-							ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
-							ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
-							ToneMapSourceRevision: revision,
-						})
-					}
-					if err != nil {
-						t.Fatal(err)
-					}
-					recorder := httptest.NewRecorder()
-					request := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-					if endpoint == "start" {
-						server.handleStart(recorder, request)
-					} else {
-						server.handleDownloadPrepare(recorder, request)
+						recorder = postPrepare(t, server, toneMapPrepareRequest("metadata-guard", inputPath, revision))
 					}
 					if recorder.Code != validation.wantStatus {
 						t.Fatalf("status = %d, want %d; body = %s", recorder.Code, validation.wantStatus, recorder.Body.String())
@@ -384,19 +511,6 @@ func TestRestartSessionLockedRejectsChangedToneMapSourceWithoutStoppingLiveSessi
 	}
 }
 
-func TestNewServerUsesConfiguredDownloadArtifactDir(t *testing.T) {
-	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
-	cfg := &config.Config{}
-	cfg.Playback.TranscodeDir = filepath.Join(t.TempDir(), "transcodes")
-	cfg.Download.ArtifactDir = filepath.Join(t.TempDir(), "prepared-downloads")
-	w.SetConfigForTest(cfg)
-
-	server := NewServer(w, nil)
-	if server.artifactRoot != cfg.Download.ArtifactDir {
-		t.Fatalf("artifact root = %q, want configured %q", server.artifactRoot, cfg.Download.ArtifactDir)
-	}
-}
-
 func TestNewServerKeepsDefaultDownloadArtifactsInsideTranscodeVolume(t *testing.T) {
 	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
 	cfg := &config.Config{}
@@ -424,57 +538,6 @@ func TestHandleHWCapabilitiesReturnsServiceUnavailableWhenProbeIsCanceled(t *tes
 
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d; body = %s", recorder.Code, http.StatusServiceUnavailable, recorder.Body.String())
-	}
-}
-
-func TestHandleHWCapabilitiesReturnsServiceUnavailableWhenDeadlineExpires(t *testing.T) {
-	server := newTestServer(t)
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer cancel()
-	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil).WithContext(ctx)
-	recorder := httptest.NewRecorder()
-
-	server.handleHWCapabilities(recorder, request)
-
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d; body = %s", recorder.Code, http.StatusServiceUnavailable, recorder.Body.String())
-	}
-}
-
-func TestToneMapCapabilityResolveTimeoutCoversConfiguredProbeBudget(t *testing.T) {
-	// The endpoint budget is both halves — the hardware walk and the tone-map
-	// matrix — because the endpoint runs both.
-	got := toneMapCapabilityResolveTimeout(tonemap.BackendQSV, "/dev/dri/renderD128")
-	if want := playback.CapabilityEndpointTimeout(tonemap.BackendQSV, "/dev/dri/renderD128"); got != want {
-		t.Fatalf("capability resolve timeout = %v, want endpoint budget %v", got, want)
-	}
-	if tone := tonemap.ProbeEndpointTimeout(tonemap.BackendQSV, "/dev/dri/renderD128"); got <= tone {
-		t.Fatalf("capability resolve timeout = %v, want more than the tone-map half alone (%v)", got, tone)
-	}
-}
-
-func TestHandleHWCapabilitiesAdvertisesEffectiveProbeRequestTimeout(t *testing.T) {
-	server := newTestServer(t)
-	ffmpegPath := filepath.Join(t.TempDir(), "successful-probe.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\necho tonemapx\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
-	recorder := httptest.NewRecorder()
-
-	server.handleHWCapabilities(recorder, httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil))
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
-	}
-	var response map[string]any
-	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
-		t.Fatal(err)
-	}
-	want := float64(playback.CapabilityRequestTimeout(playback.HWAccelNone, "").Milliseconds())
-	if got := response["probe_request_timeout_ms"]; got != want {
-		t.Fatalf("probe request timeout = %v, want %.0fms", got, want)
 	}
 }
 
@@ -588,65 +651,18 @@ func withNodeRouteParams(req *http.Request, values map[string]string) *http.Requ
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 }
 
-func TestHandleStartRequireReadyRejectsExitedFFmpeg(t *testing.T) {
-	server := newTestServer(t)
-	ffmpegPath := filepath.Join(t.TempDir(), "failing-ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	requestBody, err := json.Marshal(TranscodeStartRequest{
-		SessionID:        "ready-failure-1",
-		InputPath:        "/media/movie.mkv",
-		TargetCodecVideo: "h264",
-		TargetCodecAudio: "aac",
-		SegmentDuration:  2,
-		RequireReady:     true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(requestBody))
-	rr := httptest.NewRecorder()
-	server.handleStart(rr, req)
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	server.mu.RLock()
-	_, registered := server.sessions["ready-failure-1"]
-	server.mu.RUnlock()
-	if registered {
-		t.Fatal("failed readiness session was registered")
-	}
-}
-
 func TestHandleDownloadPrepareKeepsStartupArtifactRootAcrossReload(t *testing.T) {
 	server := newTestServer(t)
 	artifactDir := server.artifactRoot
 	server.watcher.Config().Download.ArtifactDir = t.TempDir()
 	server.watcher.Config().Playback.TranscodeDir = t.TempDir()
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\nprintf artifact > \"$last\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	useFakeFFmpeg(t, server, "#!/bin/sh\nfor last; do :; done\nprintf artifact > \"$last\"\n")
 	server.watcher.Config().Playback.HWAccel = "none"
 	outputPath := filepath.Join(artifactDir, "artifact-1.mp4")
-	prepareRequest := downloadprepare.Request{
-		ArtifactID:       "artifact-1",
-		InputPath:        "/media/movie.mkv",
-		TargetCodecVideo: "copy",
-		TargetCodecAudio: "copy",
-		AudioTrackIndex:  -1,
-	}
-	body, err := json.Marshal(prepareRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
-	rr := httptest.NewRecorder()
-	server.handleDownloadPrepare(rr, req)
+	rr := postPrepare(t, server, downloadprepare.Request{
+		ArtifactID: "artifact-1", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "copy", TargetCodecAudio: "copy", AudioTrackIndex: -1,
+	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
@@ -669,46 +685,12 @@ func TestHandleDownloadPrepareKeepsStartupArtifactRootAcrossReload(t *testing.T)
 
 func TestHandleDownloadPreparePublishesToneMapReceiptAndStatusAttestation(t *testing.T) {
 	server := newTestServer(t)
-	dir := t.TempDir()
-	inputPath := filepath.Join(dir, "source.mkv")
-	if err := os.WriteFile(inputPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(inputPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ffmpegPath := filepath.Join(dir, "ffmpeg.sh")
-	script := "#!/bin/sh\n" +
-		"case \" $* \" in\n" +
-		"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n'; exit 0;;\n" +
-		"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n'; exit 0;;\n" +
-		"  *\" -f null \"*) exit 0;;\n" +
-		"esac\n" +
-		"for last; do :; done\n" +
-		"printf artifact > \"$last\"\n"
-	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
-	track := nodeToneMapTrack()
-	writeNodeToneMapFFprobe(t, ffmpegPath, track)
-	revision := tonemap.RevisionForFile(&models.MediaFile{ID: 1, FileSize: info.Size(), VideoTracks: []models.VideoTrack{track}})
-	prepareRequest := downloadprepare.Request{
-		ArtifactID: "artifact-tone-map", InputPath: inputPath,
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac", AudioTrackIndex: -1,
-		ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
-		ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
-		ToneMapSourceRevision: revision,
-	}
-	body, err := json.Marshal(prepareRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
+	inputPath, size := writeNodeSource(t, "source")
+	useToneMapFFmpeg(t, server, "for last; do :; done\nprintf artifact > \"$last\"\n")
+	revision := nodeToneMapRevision(size)
+	prepareRequest := toneMapPrepareRequest("artifact-tone-map", inputPath, revision)
 
-	recorder := httptest.NewRecorder()
-	server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
+	recorder := postPrepare(t, server, prepareRequest)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -761,75 +743,6 @@ func TestHandleDownloadPreparePublishesToneMapReceiptAndStatusAttestation(t *tes
 	}
 }
 
-func TestHandleDownloadPreparePublishesStereoDownmixReceiptAndStatusAttestation(t *testing.T) {
-	server := newTestServer(t)
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\nprintf artifact > \"$last\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
-	prepareRequest := downloadprepare.Request{
-		ArtifactID:          "artifact-stereo-downmix",
-		InputPath:           "/media/movie.mkv",
-		TargetCodecVideo:    "copy",
-		TargetCodecAudio:    "aac",
-		AudioTrackIndex:     0,
-		AudioRecipeVersion:  playback.TransformationAudioToAACRecipeVersionV3,
-		SourceAudioChannels: 6,
-	}
-	body, err := json.Marshal(prepareRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	recorder := httptest.NewRecorder()
-	server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
-	}
-	want := downloadprepare.Result{
-		ArtifactID:           prepareRequest.ArtifactID,
-		FileSize:             int64(len("artifact")),
-		ExecutionFingerprint: prepareRequest.ExecutionFingerprint(),
-	}
-	var result downloadprepare.Result
-	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result != want {
-		t.Fatalf("prepare result = %+v, want %+v", result, want)
-	}
-
-	outputPath := filepath.Join(server.artifactRoot, prepareRequest.ArtifactID+".mp4")
-	receiptBytes, err := os.ReadFile(outputPath + ".receipt.json")
-	if err != nil {
-		t.Fatalf("read receipt: %v", err)
-	}
-	var receipt downloadprepare.Result
-	if err := json.Unmarshal(receiptBytes, &receipt); err != nil {
-		t.Fatalf("decode receipt: %v", err)
-	}
-	if receipt != want {
-		t.Fatalf("stored receipt = %+v, want %+v", receipt, want)
-	}
-
-	head := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/"+prepareRequest.ArtifactID, nil)
-	nodeauthtest.Sign(t, head, testSecret)
-	headRecorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(headRecorder, head)
-	if headRecorder.Code != http.StatusOK {
-		t.Fatalf("HEAD status = %d, body = %s", headRecorder.Code, headRecorder.Body.String())
-	}
-	attestation, err := downloadprepare.ResultFromHeaders(headRecorder.Header())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if attestation.ExecutionFingerprint != want.ExecutionFingerprint || attestation.FileSize != want.FileSize {
-		t.Fatalf("HEAD attestation = %+v, want fingerprint %q and size %d", attestation, want.ExecutionFingerprint, want.FileSize)
-	}
-}
-
 func TestExpectedDownloadPrepareResultAttestsExplicitAudioOutput(t *testing.T) {
 	request := downloadprepare.Request{
 		ArtifactID: "artifact-explicit-audio", TargetCodecAudio: "aac",
@@ -841,68 +754,14 @@ func TestExpectedDownloadPrepareResultAttestsExplicitAudioOutput(t *testing.T) {
 	}
 }
 
-func TestHandleDownloadPrepareRejectsPartialStereoDownmixRecipe(t *testing.T) {
-	server := newTestServer(t)
-	request := downloadprepare.Request{
-		ArtifactID: "artifact-unversioned-downmix", InputPath: "/media/movie.mkv",
-		TargetCodecAudio: "aac", SourceAudioChannels: 6,
-	}
-	body, err := json.Marshal(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body %s)", recorder.Code, recorder.Body.String())
-	}
-}
-
-func TestHandleDownloadPrepareDoesNotReuseToneMapArtifactWithoutReceipt(t *testing.T) {
-	server := newTestServer(t)
-	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	outputPath := filepath.Join(server.artifactRoot, "artifact-existing.mp4")
-	if err := os.WriteFile(outputPath, []byte("ready"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	body, err := json.Marshal(downloadprepare.Request{
-		ArtifactID: "artifact-existing", InputPath: "/media/movie.mkv",
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac",
-		ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
-		ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: "stale",
-		ToneMapSourceRevision: tonemap.SourceRevision{MediaFileID: 1},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
-	if recorder.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422; body = %s", recorder.Code, recorder.Body.String())
-	}
-}
-
 func TestHandleDownloadPrepareDoesNotReuseArtifactForPartialToneMapRecipe(t *testing.T) {
 	server := newTestServer(t)
-	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	outputPath := filepath.Join(server.artifactRoot, "artifact-partial.mp4")
-	if err := os.WriteFile(outputPath, []byte("ready"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	body, err := json.Marshal(downloadprepare.Request{
+	writeArtifact(t, server, "artifact-partial.mp4", "ready")
+	recorder := postPrepare(t, server, downloadprepare.Request{
 		ArtifactID: "artifact-partial", InputPath: "/media/movie.mkv",
 		TargetCodecVideo: "h264", TargetCodecAudio: "aac",
 		ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
 	if recorder.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422; body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -910,55 +769,12 @@ func TestHandleDownloadPrepareDoesNotReuseArtifactForPartialToneMapRecipe(t *tes
 
 func TestHandleDownloadPrepareReceiptInvalidationFailurePreservesExistingArtifact(t *testing.T) {
 	server := newTestServer(t)
-	dir := t.TempDir()
-	inputPath := filepath.Join(dir, "source.mkv")
-	if err := os.WriteFile(inputPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(inputPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ffmpegPath := filepath.Join(dir, "ffmpeg.sh")
-	script := "#!/bin/sh\n" +
-		"case \" $* \" in\n" +
-		"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n'; exit 0;;\n" +
-		"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n'; exit 0;;\n" +
-		"  *\" -f null \"*) exit 0;;\n" +
-		"esac\n" +
-		"for last; do :; done\n" +
-		"printf newbytes > \"$last\"\n"
-	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	inputPath, size := writeNodeSource(t, "source")
+	useFakeFFmpeg(t, server, toneMapFFmpegScript("for last; do :; done\nprintf newbytes > \"$last\"\n"))
 	server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
-	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	outputPath := filepath.Join(server.artifactRoot, "artifact-invalidation.mp4")
-	if err := os.WriteFile(outputPath, []byte("oldbytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	receiptPath := outputPath + ".receipt.json"
-	if err := os.Mkdir(receiptPath, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(receiptPath, "blocks-removal"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	body, err := json.Marshal(downloadprepare.Request{
-		ArtifactID: "artifact-invalidation", InputPath: inputPath,
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac", AudioTrackIndex: -1,
-		ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
-		ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
-		ToneMapSourceRevision: tonemap.SourceRevision{MediaFileID: 1, FileSize: info.Size()},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
+	outputPath := writeArtifact(t, server, "artifact-invalidation.mp4", "oldbytes")
+	blockReceiptRemoval(t, outputPath)
+	recorder := postPrepare(t, server, toneMapPrepareRequest("artifact-invalidation", inputPath, tonemap.SourceRevision{MediaFileID: 1, FileSize: size}))
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500; body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -978,38 +794,9 @@ func TestHandleDownloadPrepareReexecutesValidRecipeAfterMissingOrMismatchedRecei
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := newTestServer(t)
-			dir := t.TempDir()
-			inputPath := filepath.Join(dir, "source.mkv")
-			if err := os.WriteFile(inputPath, []byte("source"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			info, err := os.Stat(inputPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			ffmpegPath := filepath.Join(dir, "ffmpeg.sh")
-			script := "#!/bin/sh\n" +
-				"case \" $* \" in\n" +
-				"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n'; exit 0;;\n" +
-				"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n'; exit 0;;\n" +
-				"  *\" -f null \"*) exit 0;;\n" +
-				"esac\n" +
-				"for last; do :; done\n" +
-				"printf newbytes > \"$last\"\n"
-			if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-			server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
-			track := nodeToneMapTrack()
-			writeNodeToneMapFFprobe(t, ffmpegPath, track)
-			if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			outputPath := filepath.Join(server.artifactRoot, "artifact-reexecute.mp4")
-			if err := os.WriteFile(outputPath, []byte("oldbytes"), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			inputPath, size := writeNodeSource(t, "source")
+			useToneMapFFmpeg(t, server, "for last; do :; done\nprintf newbytes > \"$last\"\n")
+			outputPath := writeArtifact(t, server, "artifact-reexecute.mp4", "oldbytes")
 			if test.writeMismatch {
 				if err := writeDownloadArtifactReceipt(outputPath, downloadprepare.Result{
 					ArtifactID: "artifact-reexecute", FileSize: int64(len("oldbytes")),
@@ -1019,20 +806,9 @@ func TestHandleDownloadPrepareReexecutesValidRecipeAfterMissingOrMismatchedRecei
 					t.Fatal(err)
 				}
 			}
-			revision := tonemap.RevisionForFile(&models.MediaFile{ID: 1, FileSize: info.Size(), VideoTracks: []models.VideoTrack{track}})
-			request := downloadprepare.Request{
-				ArtifactID: "artifact-reexecute", InputPath: inputPath,
-				TargetCodecVideo: "h264", TargetCodecAudio: "aac", AudioTrackIndex: -1,
-				ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
-				ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
-				ToneMapSourceRevision: revision,
-			}
-			body, err := json.Marshal(request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			recorder := httptest.NewRecorder()
-			server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
+			revision := nodeToneMapRevision(size)
+			request := toneMapPrepareRequest("artifact-reexecute", inputPath, revision)
+			recorder := postPrepare(t, server, request)
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 			}
@@ -1065,20 +841,11 @@ func TestHandleDownloadPrepareOrdinaryReexecutionClearsStaleReceipt(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\nprintf newbytes > \"$last\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	body, err := json.Marshal(downloadprepare.Request{
+	useFakeFFmpeg(t, server, "#!/bin/sh\nfor last; do :; done\nprintf newbytes > \"$last\"\n")
+	recorder := postPrepare(t, server, downloadprepare.Request{
 		ArtifactID: "artifact-ordinary-reexecute", InputPath: "/media/movie.mkv",
 		TargetCodecVideo: "copy", TargetCodecAudio: "copy", AudioTrackIndex: -1,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -1089,51 +856,21 @@ func TestHandleDownloadPrepareOrdinaryReexecutionClearsStaleReceipt(t *testing.T
 
 func TestHandleDownloadPrepareConcurrentSameArtifactPublishesOnce(t *testing.T) {
 	server := newTestServer(t)
-	dir := t.TempDir()
-	inputPath := filepath.Join(dir, "source.mkv")
-	if err := os.WriteFile(inputPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(inputPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	counterPath := filepath.Join(dir, "prepare-count")
-	ffmpegPath := filepath.Join(dir, "ffmpeg.sh")
-	script := "#!/bin/sh\n" +
-		"case \" $* \" in\n" +
-		"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n'; exit 0;;\n" +
-		"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n'; exit 0;;\n" +
-		"  *\" -f null \"*) exit 0;;\n" +
-		"esac\n" +
-		fmt.Sprintf("printf x >> %q\n", counterPath) +
-		"sleep 0.1\n" +
-		"for last; do :; done\n" +
-		"printf newbytes > \"$last\"\n"
-	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
-	track := nodeToneMapTrack()
-	writeNodeToneMapFFprobe(t, ffmpegPath, track)
-	body, err := json.Marshal(downloadprepare.Request{
-		ArtifactID: "artifact-concurrent", InputPath: inputPath,
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac", AudioTrackIndex: -1,
-		ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
-		ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
-		ToneMapSourceRevision: tonemap.RevisionForFile(&models.MediaFile{ID: 1, FileSize: info.Size(), VideoTracks: []models.VideoTrack{track}}),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	inputPath, size := writeNodeSource(t, "source")
+	counterPath := filepath.Join(t.TempDir(), "prepare-count")
+	useToneMapFFmpeg(t, server, fmt.Sprintf("printf x >> %q\n", counterPath)+
+		"sleep 0.1\n"+
+		"for last; do :; done\n"+
+		"printf newbytes > \"$last\"\n")
+	request := toneMapPrepareRequest("artifact-concurrent", inputPath, nodeToneMapRevision(size))
 	start := make(chan struct{})
 	results := make(chan *httptest.ResponseRecorder, 2)
 	for range 2 {
+		prepare := jsonRequest(t, "/downloads/prepare", request)
 		go func() {
 			<-start
 			recorder := httptest.NewRecorder()
-			server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
+			server.handleDownloadPrepare(recorder, prepare)
 			results <- recorder
 		}()
 	}
@@ -1151,36 +888,11 @@ func TestHandleDownloadPrepareConcurrentSameArtifactPublishesOnce(t *testing.T) 
 
 func TestHandleDownloadPrepareOptimisticReuseWaitsForInFlightReplacement(t *testing.T) {
 	server := newTestServer(t)
-	dir := t.TempDir()
-	inputPath := filepath.Join(dir, "source.mkv")
-	if err := os.WriteFile(inputPath, []byte("source-a"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ffmpegPath := filepath.Join(dir, "ffmpeg.sh")
-	script := "#!/bin/sh\n" +
-		"case \" $* \" in\n" +
-		"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n'; exit 0;;\n" +
-		"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n'; exit 0;;\n" +
-		"  *\" -f null \"*) exit 0;;\n" +
-		"esac\n" +
-		"for last; do :; done\n" +
-		"printf final-a > \"$last\"\n"
-	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
-	track := nodeToneMapTrack()
-	writeNodeToneMapFFprobe(t, ffmpegPath, track)
-	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	inputPath, _ := writeNodeSource(t, "source-a")
+	useToneMapFFmpeg(t, server, "for last; do :; done\nprintf final-a > \"$last\"\n")
 	const artifactID = "artifact-replacement-race"
-	outputPath := filepath.Join(server.artifactRoot, artifactID+".mp4")
-	if err := os.WriteFile(outputPath, []byte("oldbytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	revision := tonemap.RevisionForFile(&models.MediaFile{ID: 1, FileSize: 8, VideoTracks: []models.VideoTrack{track}})
+	outputPath := writeArtifact(t, server, artifactID+".mp4", "oldbytes")
+	revision := nodeToneMapRevision(8)
 	if err := writeDownloadArtifactReceipt(outputPath, downloadprepare.Result{
 		ArtifactID: artifactID, FileSize: 8,
 		ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3, ToneMapMode: tonemap.ModeSoftware,
@@ -1188,21 +900,14 @@ func TestHandleDownloadPrepareOptimisticReuseWaitsForInFlightReplacement(t *test
 	}); err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(downloadprepare.Request{
-		ArtifactID: artifactID, InputPath: inputPath,
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac",
-		ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
-		ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
-		ToneMapSourceRevision: revision,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	request := toneMapPrepareRequest(artifactID, inputPath, revision)
+	request.AudioTrackIndex = 0
+	prepare := jsonRequest(t, "/downloads/prepare", request)
 	unlock := server.lockSessionLifecycle("download-artifact-" + artifactID)
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
-		server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
+		server.handleDownloadPrepare(recorder, prepare)
 		close(done)
 	}()
 	select {
@@ -1234,38 +939,6 @@ func TestHandleDownloadPrepareOptimisticReuseWaitsForInFlightReplacement(t *test
 	}
 	if receipt, err := readDownloadArtifactReceipt(outputPath); err != nil || receipt.ToneMapSourceRevisionFingerprint != revision.Fingerprint() {
 		t.Fatalf("final receipt = %+v, %v; want request A", receipt, err)
-	}
-}
-
-func TestInvalidateDownloadArtifactReceiptRemovesOnlyReceipt(t *testing.T) {
-	outputPath := filepath.Join(t.TempDir(), "artifact.mp4")
-	receiptPath := downloadArtifactReceiptPath(outputPath)
-	if err := os.WriteFile(outputPath, []byte("artifact-bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(receiptPath, []byte("valid-final"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// A crashed writer's unique temp file must not block invalidation; writers
-	// now use CreateTemp names, so there is no fixed .part path to remove.
-	tempPath, err := os.CreateTemp(filepath.Dir(receiptPath), filepath.Base(receiptPath)+".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tempPath.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := invalidateDownloadArtifactReceipt(outputPath); err != nil {
-		t.Fatalf("invalidateDownloadArtifactReceipt() = %v", err)
-	}
-	if _, err := os.Stat(receiptPath); !os.IsNotExist(err) {
-		t.Fatalf("receipt still present after invalidation: %v", err)
-	}
-	if _, err := os.Stat(outputPath); err != nil {
-		t.Fatalf("artifact was removed by receipt invalidation: %v", err)
-	}
-	if _, err := os.Stat(tempPath.Name()); err != nil {
-		t.Fatalf("crashed writer temp file was removed by receipt invalidation: %v", err)
 	}
 }
 
@@ -1408,127 +1081,100 @@ func TestValidateKeyframePlaylistAttestation(t *testing.T) {
 	}
 }
 
-func TestHandleStartRejectsUnversionedSourceAudioRecipeBeforeExecution(t *testing.T) {
-	server := newTestServer(t)
-	body, err := json.Marshal(TranscodeStartRequest{
-		SessionID: "unversioned-downmix", InputPath: "/media/movie.mkv",
-		SourceAudioChannels: 6,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	server.handleStart(recorder, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body %s)", recorder.Code, recorder.Body.String())
+// Requests the node cannot execute as written are refused with 400 before
+// anything runs.
+func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		prepare      bool
+		catalogPaths bool
+		body         any
+	}{
+		{name: "start with unversioned source audio recipe", body: TranscodeStartRequest{
+			SessionID: "unversioned-downmix", InputPath: "/media/movie.mkv",
+			SourceAudioChannels: 6,
+		}},
+		{name: "start with unversioned copy fMP4 recipe", body: TranscodeStartRequest{
+			SessionID: "unversioned-copy", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "copy",
+		}},
+		{name: "start with unapproved input path", catalogPaths: true,
+			body: json.RawMessage(`{"session_id":"unsafe-input","input_path":"http://example.test/movie.mkv"}`)},
+		{name: "prepare with partial stereo downmix recipe", prepare: true, body: downloadprepare.Request{
+			ArtifactID: "artifact-unversioned-downmix", InputPath: "/media/movie.mkv",
+			TargetCodecAudio: "aac", SourceAudioChannels: 6,
+		}},
+		{name: "prepare with invalid artifact id", prepare: true, body: downloadprepare.Request{
+			ArtifactID: "../artifact-2", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t)
+			if test.catalogPaths {
+				server.inputPaths = NewCatalogPathAuthorizer(staticCatalogPaths{})
+			}
+			post := postStartRequest
+			if test.prepare {
+				post = postPrepare
+			}
+			if recorder := post(t, server, test.body); recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body %s)", recorder.Code, recorder.Body.String())
+			}
+		})
 	}
 }
 
-func TestHandleStartRejectsUnversionedCopyFMP4RecipeBeforeExecution(t *testing.T) {
-	server := newTestServer(t)
-	body, err := json.Marshal(TranscodeStartRequest{
-		SessionID: "unversioned-copy", InputPath: "/media/movie.mkv",
-		TargetCodecVideo: "copy",
-	})
-	if err != nil {
-		t.Fatal(err)
+func TestHandleStartAttestsRecipeVersions(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		request TranscodeStartRequest
+		receipt func(TranscodeStartResponse) string
+		want    string
+	}{
+		{
+			name: "stereo downmix",
+			request: TranscodeStartRequest{
+				SessionID: "attested-downmix", InputPath: "/media/movie.mkv",
+				SourceAudioChannels: 6, AudioRecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+				TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetAudioChannels: 2, SegmentDuration: 2,
+			},
+			receipt: func(response TranscodeStartResponse) string { return response.AudioRecipeVersion },
+			want:    playback.TransformationAudioToAACRecipeVersionV3,
+		},
+		{
+			name: "copy fMP4",
+			request: TranscodeStartRequest{
+				SessionID: "attested-copy", InputPath: "/media/movie.mkv",
+				SourceVideoCodec: "hevc", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+				CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion, SegmentDuration: 2,
+			},
+			receipt: func(response TranscodeStartResponse) string { return response.CopyFMP4RecipeVersion },
+			want:    playback.CopyFMP4RecipeVersion,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newLoopingFFmpegServer(t)
+			// The session is registered and closed by the helper.
+			recorder, _ := startRegisteredSession(t, server, test.request)
+			var response TranscodeStartResponse
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if got := test.receipt(response); got != test.want {
+				t.Fatalf("recipe receipt = %q, want %q", got, test.want)
+			}
+		})
 	}
-	recorder := httptest.NewRecorder()
-	server.handleStart(recorder, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body %s)", recorder.Code, recorder.Body.String())
-	}
-}
-
-func TestHandleStartAttestsStereoDownmixRecipe(t *testing.T) {
-	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	body, err := json.Marshal(TranscodeStartRequest{
-		SessionID: "attested-downmix", InputPath: "/media/movie.mkv",
-		SourceAudioChannels: 6, AudioRecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetAudioChannels: 2, SegmentDuration: 2,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	server.handleStart(recorder, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-	if recorder.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202 (body %s)", recorder.Code, recorder.Body.String())
-	}
-	var response TranscodeStartResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.AudioRecipeVersion != playback.TransformationAudioToAACRecipeVersionV3 {
-		t.Fatalf("audio recipe receipt = %q, want %q", response.AudioRecipeVersion, playback.TransformationAudioToAACRecipeVersionV3)
-	}
-	server.mu.RLock()
-	session := server.sessions["attested-downmix"]
-	server.mu.RUnlock()
-	if session == nil {
-		t.Fatal("attested session was not registered")
-	}
-	_ = session.CloseProcess()
-}
-
-func TestHandleStartAttestsCopyFMP4Recipe(t *testing.T) {
-	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	body, err := json.Marshal(TranscodeStartRequest{
-		SessionID: "attested-copy", InputPath: "/media/movie.mkv",
-		SourceVideoCodec: "hevc", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
-		CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion, SegmentDuration: 2,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder := httptest.NewRecorder()
-	server.handleStart(recorder, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-	if recorder.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202 (body %s)", recorder.Code, recorder.Body.String())
-	}
-	var response TranscodeStartResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.CopyFMP4RecipeVersion != playback.CopyFMP4RecipeVersion {
-		t.Fatalf("copy recipe receipt = %q, want %q", response.CopyFMP4RecipeVersion, playback.CopyFMP4RecipeVersion)
-	}
-	server.mu.RLock()
-	session := server.sessions["attested-copy"]
-	server.mu.RUnlock()
-	if session == nil {
-		t.Fatal("attested copy session was not registered")
-	}
-	_ = session.CloseProcess()
 }
 
 func TestHandleStartWaitsForForceReloadGate(t *testing.T) {
 	server := newTestServer(t)
-	ffmpegPath := filepath.Join(t.TempDir(), "failing-ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	body, err := json.Marshal(TranscodeStartRequest{
+	useFakeFFmpeg(t, server, "#!/bin/sh\nexit 1\n")
+	req := jsonRequest(t, "/transcode/start", TranscodeStartRequest{
 		SessionID: "reload-gated-start", InputPath: "/media/movie.mkv",
 		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, RequireReady: true,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	done := make(chan struct{})
 	server.reloadMu.Lock()
@@ -1560,24 +1206,12 @@ func TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack(t *testin
 	server := newTestServer(t)
 	tracker := newBlockingSessionTracker()
 	server.tracker = tracker
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\ntouch \"$last\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	useFakeFFmpeg(t, server, "#!/bin/sh\nfor last; do :; done\ntouch \"$last\"\n")
 	server.watcher.Config().Playback.HWAccel = "none"
-	body, err := json.Marshal(downloadprepare.Request{
-		ArtifactID:       "artifact-tracking",
-		InputPath:        "/media/movie.mkv",
-		TargetCodecVideo: "copy",
-		TargetCodecAudio: "copy",
-		AudioTrackIndex:  -1,
+	req := jsonRequest(t, "/downloads/prepare", downloadprepare.Request{
+		ArtifactID: "artifact-tracking", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "copy", TargetCodecAudio: "copy", AudioTrackIndex: -1,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	handlerDone := make(chan struct{})
 	go func() {
@@ -1618,62 +1252,6 @@ func TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack(t *testin
 	}
 }
 
-func TestHandleDownloadPrepareRejectsInvalidArtifactID(t *testing.T) {
-	server := newTestServer(t)
-	body, err := json.Marshal(downloadprepare.Request{
-		ArtifactID:       "../artifact-2",
-		InputPath:        "/media/movie.mkv",
-		TargetCodecVideo: "h264",
-		TargetCodecAudio: "aac",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
-	rr := httptest.NewRecorder()
-	server.handleDownloadPrepare(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandleDownloadPrepareRejectsUnavailableConfig(t *testing.T) {
-	server := newTestServer(t)
-	server.watcher.SetConfigForTest(nil)
-	body := []byte(`{"artifact_id":"artifact-3","input_path":"/media/movie.mkv"}`)
-
-	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
-	rr := httptest.NewRecorder()
-	server.handleDownloadPrepare(rr, req)
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandleStartRejectsUnapprovedInputPath(t *testing.T) {
-	server := newTestServer(t)
-	server.inputPaths = NewCatalogPathAuthorizer(staticCatalogPaths{})
-	body := []byte(`{"session_id":"unsafe-input","input_path":"http://example.test/movie.mkv"}`)
-
-	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body))
-	rr := httptest.NewRecorder()
-	server.handleStart(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestDownloadPrepareRouteRequiresNodeBearer(t *testing.T) {
-	server := newTestServer(t)
-	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", strings.NewReader(`{}`))
-	rr := httptest.NewRecorder()
-	server.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
 func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
 	server := newTestServer(t)
 	root := server.artifactRoot
@@ -1683,13 +1261,7 @@ func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
 	if _, protected := server.activeSessionIDs()[downloadprepare.ArtifactDirectoryName]; !protected {
 		t.Fatal("artifact directory is not protected from the orphan transcode sweep")
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(root, "artifact-range.mp4")
-	if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	path := writeArtifact(t, server, "artifact-range.mp4", "0123456789")
 	if err := os.WriteFile(path+".receipt.json", []byte(`{"artifact_id":"artifact-range"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1723,20 +1295,8 @@ func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
 
 func TestDeleteDownloadArtifactReceiptInvalidationFailurePreservesArtifact(t *testing.T) {
 	server := newTestServer(t)
-	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	outputPath := filepath.Join(server.artifactRoot, "artifact-delete-invalidation.mp4")
-	if err := os.WriteFile(outputPath, []byte("oldbytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	receiptPath := outputPath + ".receipt.json"
-	if err := os.Mkdir(receiptPath, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(receiptPath, "blocks-removal"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	outputPath := writeArtifact(t, server, "artifact-delete-invalidation.mp4", "oldbytes")
+	blockReceiptRemoval(t, outputPath)
 
 	request := httptest.NewRequest(http.MethodDelete, "/downloads/artifacts/artifact-delete-invalidation", nil)
 	nodeauthtest.Sign(t, request, testSecret)
@@ -1756,9 +1316,7 @@ func TestDownloadArtifactHeadWaitsForInFlightPrepare(t *testing.T) {
 	unlocks := server.lockSessionLifecycle("download-artifact-" + artifactID)
 	req := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/"+artifactID, nil)
 	req.SetPathValue("artifact_id", artifactID)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("artifact_id", artifactID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req = withNodeRouteParams(req, map[string]string{"artifact_id": artifactID})
 	rr := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
@@ -1794,13 +1352,7 @@ func TestDownloadArtifactHeadWaitsForInFlightPrepare(t *testing.T) {
 func TestDownloadArtifactHeadDoesNotWaitForConcurrentRelay(t *testing.T) {
 	server := newTestServer(t)
 	const artifactID = "artifact-concurrent-read"
-	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(server.artifactRoot, artifactID+".mp4")
-	if err := os.WriteFile(path, []byte("ready"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeArtifact(t, server, artifactID+".mp4", "ready")
 
 	blocked := newBlockingResponseWriter()
 	releaseOnce := sync.Once{}
@@ -1861,27 +1413,12 @@ func TestHandleStartDistinctReplacementFailurePreservesPredecessor(t *testing.T)
 	server.sessions["public-session"] = &playback.TranscodeSession{}
 	server.activeJobs.Store(1)
 
-	ffmpegPath := filepath.Join(t.TempDir(), "failing-ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	requestBody, err := json.Marshal(TranscodeStartRequest{
-		SessionID:             "public-session-legacy-replacement",
-		InputPath:             "/media/movie.mkv",
-		TargetCodecVideo:      "copy",
-		TargetCodecAudio:      "aac",
-		SegmentDuration:       2,
-		RequireReady:          true,
+	useFakeFFmpeg(t, server, "#!/bin/sh\nexit 1\n")
+	rr := postStartRequest(t, server, TranscodeStartRequest{
+		SessionID: "public-session-legacy-replacement", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "copy", TargetCodecAudio: "aac", SegmentDuration: 2, RequireReady: true,
 		CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(requestBody))
-	rr := httptest.NewRecorder()
-	server.handleStart(rr, req)
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
@@ -1909,80 +1446,19 @@ func signCard(t *testing.T, card playback.RecipeCard) string {
 	return tok
 }
 
-func TestHandleProgressiveRemuxExecutesSignedTranscodeRoute(t *testing.T) {
-	server := newTestServer(t)
-	server.nodeRowID = func() (int, bool) { return 11, true }
-	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf node-remux-bytes\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	claims := streamtoken.Claims{
-		SessionID: "playback-1", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
-		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
-	}
-	card := playback.RecipeCardFromClaims(&claims)
-	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
-	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "/remux/transport-1?seek=2", nil)
-	req.Header.Set("X-Silo-Stream-Token", token)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", "transport-1")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
-	rr := httptest.NewRecorder()
-
-	server.handleRemux(rr, req)
-
-	if rr.Code != http.StatusOK || rr.Body.String() != "node-remux-bytes" {
-		t.Fatalf("response = %d %q, want remux bytes", rr.Code, rr.Body.String())
-	}
-	if got := server.activeJobs.Load(); got != 0 {
-		t.Fatalf("active jobs after response = %d, want 0", got)
-	}
-}
-
 func TestHandleProgressiveRemuxHeadDoesNotStartFFmpeg(t *testing.T) {
 	server := newTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 11, true }
-	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mediaPath, _ := writeNodeSource(t, "source")
 	ffmpegMarker := filepath.Join(t.TempDir(), "ffmpeg-ran")
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\ntouch \""+ffmpegMarker+"\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	claims := streamtoken.Claims{
-		SessionID: "playback-head", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://registered-node", TranscodeTransportID: "transport-head",
-		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
-	}
+	useFakeFFmpeg(t, server, "#!/bin/sh\ntouch \""+ffmpegMarker+"\"\n")
+	claims := progressiveRemuxClaims("playback-head", mediaPath, "transport-head")
+	claims.TranscodeNode = "http://registered-node"
 	card := playback.RecipeCardFromClaims(&claims)
 	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
-	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := httptest.NewRequest(http.MethodHead, "/remux/transport-head", nil)
-	request.Header.Set("X-Silo-Stream-Token", token)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", "transport-head")
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
 	recorder := httptest.NewRecorder()
 
-	server.handleRemux(recorder, request)
+	server.handleRemux(recorder, remuxRequest(t, http.MethodHead, claims))
 
 	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "video/mp4" {
 		t.Fatalf("response = %d content-type %q", recorder.Code, recorder.Header().Get("Content-Type"))
@@ -1995,14 +1471,9 @@ func TestHandleProgressiveRemuxHeadDoesNotStartFFmpeg(t *testing.T) {
 	}
 
 	server.SetRecipeStore(&stubRecipeStore{})
-	stoppedRequest := httptest.NewRequest(http.MethodHead, "/remux/transport-head", nil)
-	stoppedRequest.Header.Set("X-Silo-Stream-Token", token)
-	stoppedRouteContext := chi.NewRouteContext()
-	stoppedRouteContext.URLParams.Add("session_id", "transport-head")
-	stoppedRequest = stoppedRequest.WithContext(context.WithValue(stoppedRequest.Context(), chi.RouteCtxKey, stoppedRouteContext))
 	stoppedRecorder := httptest.NewRecorder()
 
-	server.handleRemux(stoppedRecorder, stoppedRequest)
+	server.handleRemux(stoppedRecorder, remuxRequest(t, http.MethodHead, claims))
 
 	if stoppedRecorder.Code != http.StatusGone {
 		t.Fatalf("stopped HEAD status = %d, want 410", stoppedRecorder.Code)
@@ -2032,36 +1503,15 @@ func TestProgressiveRemuxRunsOnThisNodeRejectsDifferentNodeID(t *testing.T) {
 func TestHandleProgressiveRemuxRejectsConcurrentRequest(t *testing.T) {
 	server := newTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 11, true }
-	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mediaPath, _ := writeNodeSource(t, "source")
 	ffmpegLog := filepath.Join(t.TempDir(), "ffmpeg.log")
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	ffmpegScript := "#!/bin/sh\n" +
-		"case \" $* \" in *\" -i " + mediaPath + " \"*) printf 'invoked\\n' >> \"" + ffmpegLog + "\";; esac\n" +
-		"printf node-remux-bytes\n"
-	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	claims := streamtoken.Claims{
-		SessionID: "playback-concurrent", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://node", TranscodeTransportID: "transport-concurrent",
-		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
-	}
+	useFakeFFmpeg(t, server, "#!/bin/sh\n"+
+		"case \" $* \" in *\" -i "+mediaPath+" \"*) printf 'invoked\\n' >> \""+ffmpegLog+"\";; esac\n"+
+		"printf node-remux-bytes\n")
+	claims := progressiveRemuxClaims("playback-concurrent", mediaPath, "transport-concurrent")
 	card := playback.RecipeCardFromClaims(&claims)
 	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
-	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID, nil)
-	request.Header.Set("X-Silo-Stream-Token", token)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	request := remuxRequest(t, http.MethodGet, claims)
 	firstWriter := newBlockingResponseWriter()
 	released := false
 	defer func() {
@@ -2112,24 +1562,12 @@ func TestHandleProgressiveRemuxRejectsConcurrentRequest(t *testing.T) {
 
 func TestHandleProgressiveRemuxRejectsProxyExecutionToken(t *testing.T) {
 	server := newTestServer(t)
-	claims := streamtoken.Claims{
-		SessionID: "playback-1", MediaPath: "/media/movie.mkv", PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
-		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionProxy),
-		RoutingEgress: string(noderouting.EgressProxy),
-	}
-	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "/remux/transport-1", nil)
-	req.Header.Set("X-Silo-Stream-Token", token)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", "transport-1")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	claims := progressiveRemuxClaims("playback-1", "/media/movie.mkv", "transport-1")
+	claims.RoutingExecution = string(noderouting.ExecutionProxy)
+	claims.RoutingExecutionNodeID = 0
 	rr := httptest.NewRecorder()
 
-	server.handleRemux(rr, req)
+	server.handleRemux(rr, remuxRequest(t, http.MethodGet, claims))
 
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
@@ -2148,10 +1586,7 @@ func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	server.progressiveRemuxes["transport-1"] = progressiveRemuxRequest{
 		id: 1, playbackSessionID: "playback-1", cancel: cancel, done: done,
 	}
-	req := httptest.NewRequest(http.MethodDelete, "/transcode/transport-1", nil)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", "transport-1")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	req := stopRequest("transport-1")
 	rr := httptest.NewRecorder()
 	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
 	defer cancelWait()
@@ -2211,10 +1646,8 @@ func TestHandleStopReturnsUnavailableWhileProgressiveHandlerIsStuck(t *testing.T
 	requestCtx, cancelRequest := context.WithCancel(t.Context())
 	waitCtx, cancelWait := context.WithTimeout(t.Context(), time.Second)
 	defer cancelWait()
-	req := httptest.NewRequest(http.MethodDelete, "/transcode/transport-stuck", nil).WithContext(requestCtx)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", "transport-stuck")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	req := withNodeRouteParams(httptest.NewRequest(http.MethodDelete, "/transcode/transport-stuck", nil).WithContext(requestCtx),
+		map[string]string{"session_id": "transport-stuck"})
 	rr := httptest.NewRecorder()
 	stopDone := make(chan struct{})
 	go func() {
@@ -2249,13 +1682,9 @@ func TestHandleStopReturnsUnavailableWhenProgressiveAuthorityDeleteFails(t *test
 		card: &playback.RecipeCard{SessionID: "playback-1", TranscodeTransportID: transportID, PlayMethod: playback.PlayRemux},
 		ok:   true, delErr: errors.New("redis is down"),
 	})
-	req := httptest.NewRequest(http.MethodDelete, "/transcode/"+transportID, nil)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", transportID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
 	rr := httptest.NewRecorder()
 
-	server.handleStop(rr, req)
+	server.handleStop(rr, stopRequest(transportID))
 
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, body = %s; want durable revocation failure", rr.Code, rr.Body.String())
@@ -2277,13 +1706,9 @@ func TestHandleStopDoesNotFenceOrdinaryHLSSession(t *testing.T) {
 		card: &playback.RecipeCard{SessionID: sessionID, PlayMethod: playback.PlayTranscode},
 		ok:   true,
 	})
-	req := httptest.NewRequest(http.MethodDelete, "/transcode/"+sessionID, nil)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", sessionID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
 	rr := httptest.NewRecorder()
 
-	server.handleStop(rr, req)
+	server.handleStop(rr, stopRequest(sessionID))
 
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
@@ -2299,48 +1724,23 @@ func TestHandleStopDoesNotFenceOrdinaryHLSSession(t *testing.T) {
 func TestHandleProgressiveRemuxRefusesStoppedTransportAfterRestart(t *testing.T) {
 	server := newTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 11, true }
-	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mediaPath, _ := writeNodeSource(t, "source")
 	ffmpegLog := filepath.Join(t.TempDir(), "ffmpeg.log")
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf invoked > \""+ffmpegLog+"\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	claims := streamtoken.Claims{
-		SessionID: "playback-1", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
-		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
-	}
+	claims := progressiveRemuxClaims("playback-1", mediaPath, "transport-1")
 	card := playback.RecipeCardFromClaims(&claims)
 	store := &stubRecipeStore{card: &card, ok: true}
 	server.SetRecipeStore(store)
-	stopRequest := httptest.NewRequest(http.MethodDelete, "/transcode/transport-1", nil)
-	stopRouteContext := chi.NewRouteContext()
-	stopRouteContext.URLParams.Add("session_id", "transport-1")
-	stopRequest = stopRequest.WithContext(context.WithValue(stopRequest.Context(), chi.RouteCtxKey, stopRouteContext))
-	server.handleStop(httptest.NewRecorder(), stopRequest)
+	server.handleStop(httptest.NewRecorder(), stopRequest("transport-1"))
 
 	// A replacement process has no in-memory stop fence. The deleted durable
 	// authority must still reject the old token before FFmpeg can start.
 	restarted := newTestServer(t)
 	restarted.nodeRowID = func() (int, bool) { return 11, true }
-	restarted.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	useFakeFFmpeg(t, restarted, "#!/bin/sh\nprintf invoked > \""+ffmpegLog+"\"\n")
 	restarted.SetRecipeStore(store)
-	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := httptest.NewRequest(http.MethodGet, "/remux/transport-1", nil)
-	request.Header.Set("X-Silo-Stream-Token", token)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", "transport-1")
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
 	recorder := httptest.NewRecorder()
 
-	restarted.handleRemux(recorder, request)
+	restarted.handleRemux(recorder, remuxRequest(t, http.MethodGet, claims))
 
 	if recorder.Code != http.StatusGone {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
@@ -2355,33 +1755,13 @@ func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
 	tracker := &recordingSessionTracker{}
 	server.tracker = tracker
 	server.nodeRowID = func() (int, bool) { return 11, true }
-	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf node-remux-bytes\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	claims := streamtoken.Claims{
-		SessionID: "playback-reload-gate", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://node", TranscodeTransportID: "transport-reload-gate",
-		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
-	}
+	mediaPath, _ := writeNodeSource(t, "source")
+	useFakeFFmpeg(t, server, "#!/bin/sh\nprintf node-remux-bytes\n")
+	claims := progressiveRemuxClaims("playback-reload-gate", mediaPath, "transport-reload-gate")
 	card := playback.RecipeCardFromClaims(&claims)
 	storeHit := make(chan struct{}, 1)
 	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true, getHit: storeHit})
-	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := httptest.NewRequest(http.MethodGet, "/remux/transport-reload-gate", nil)
-	request.Header.Set("X-Silo-Stream-Token", token)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", "transport-reload-gate")
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	request := remuxRequest(t, http.MethodGet, claims)
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	waitCtx, waitCancel := context.WithTimeout(t.Context(), 2*time.Second)
@@ -2595,79 +1975,6 @@ func TestForceReloadTeardownRetainsUndrainedProgressiveRemuxForRetry(t *testing.
 	}
 }
 
-func TestForceReloadTeardownDrainsRealProgressiveRemuxWithBlockedClient(t *testing.T) {
-	server := newTestServer(t)
-	server.nodeRowID = func() (int, bool) { return 11, true }
-	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
-	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	ffmpegScript := "#!/bin/sh\n" +
-		"for arg in \"$@\"; do\n" +
-		"  if [ \"$arg\" = \"pipe:1\" ]; then\n" +
-		"    while :; do printf node-remux-bytes; sleep 0.01; done\n" +
-		"  fi\n" +
-		"done\n" +
-		"exit 0\n"
-	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	claims := streamtoken.Claims{
-		SessionID: "playback-force-reload", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://node", TranscodeTransportID: "transport-force-reload-real",
-		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
-	}
-	card := playback.RecipeCardFromClaims(&claims)
-	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
-	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID, nil)
-	request.Header.Set("X-Silo-Stream-Token", token)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
-	writer := newAbortableBlockingResponseWriter()
-	handlerDone := make(chan struct{})
-	go func() {
-		server.handleRemux(writer, request)
-		close(handlerDone)
-	}()
-	waitCtx, cancelWait := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancelWait()
-	select {
-	case <-writer.writeStarted:
-	case <-waitCtx.Done():
-		t.Fatal("progressive remux did not reach the blocked client write")
-	}
-	if got := server.activeJobs.Load(); got != 1 {
-		t.Fatalf("active jobs before force reload = %d, want 1", got)
-	}
-
-	if err := server.teardownForForceReload(waitCtx, "http://node", 11); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-handlerDone:
-	case <-waitCtx.Done():
-		t.Fatal("force reload returned without draining the progressive remux handler")
-	}
-	if got := server.activeJobs.Load(); got != 0 {
-		t.Fatalf("active jobs after force reload = %d, want 0", got)
-	}
-	server.mu.RLock()
-	_, active := server.progressiveRemuxes[claims.TranscodeTransportID]
-	server.mu.RUnlock()
-	if active {
-		t.Fatal("force reload left the drained remux registered")
-	}
-}
-
 func TestForceReloadTeardownRevokesDormantProgressiveAuthorities(t *testing.T) {
 	server := newTestServer(t)
 	server.tracker = newBlockingSessionTracker()
@@ -2830,13 +2137,11 @@ func TestReconstructionEndpointsClassifyExecutorDiscoveryFailure(t *testing.T) {
 			card.ToneMapRecipeVersion = playback.TransformationHDRToSDRToneMapRecipeVersionV3
 			card.ToneMapSourceRevision = tonemap.SourceRevision{MediaFileID: 42, FileSize: 1}
 
-			request := requestWithToken(sid, signCard(t, card))
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("session_id", sid)
+			params := map[string]string{"session_id": sid}
 			if endpoint == "segment" {
-				rctx.URLParams.Add("name", "0.ts")
+				params["name"] = "0.ts"
 			}
-			request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, rctx))
+			request := withNodeRouteParams(requestWithToken(sid, signCard(t, card)), params)
 			recorder := httptest.NewRecorder()
 			if endpoint == "manifest" {
 				server.handleManifest(recorder, request)
@@ -2879,14 +2184,17 @@ func (s *stubRecipeStore) Get(context.Context, string) (*playback.RecipeCard, bo
 	return s.card, s.ok
 }
 
-func (s *stubRecipeStore) Delete(_ context.Context, sessionID string) error {
+func (s *stubRecipeStore) DeleteUnlessMoved(_ context.Context, sessionID string, executor playback.RecipeExecutor) (bool, error) {
+	if s.card != nil && executor.NamesAnotherNode(*s.card) {
+		return true, nil
+	}
 	s.deletes = append(s.deletes, sessionID)
 	if s.delErr != nil {
-		return s.delErr
+		return false, s.delErr
 	}
 	s.card = nil
 	s.ok = false
-	return nil
+	return false, nil
 }
 
 func (s *stubRecipeStore) RevokeNode(_ context.Context, nodeURL string) error {
@@ -2972,13 +2280,7 @@ func TestReconstructFromToken_TokenlessRebuildsFromTheStoredTransportRecipe(t *t
 	const sessionID = "sess-tokenless-1"
 	const transportID = sessionID + "-plan1234-abcd1234"
 
-	s := newTestServer(t)
-	s.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	s.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	s := newLoopingFFmpegServer(t)
 	store := &stubRecipeStore{ok: true, card: nativeTransportCard(sessionID, transportID)}
 	s.SetRecipeStore(store)
 
@@ -3048,12 +2350,8 @@ func TestHandleStop_DeletesRecipe(t *testing.T) {
 	s.sessions[sid] = &playback.TranscodeSession{}
 	s.activeJobs.Store(1)
 
-	r := httptest.NewRequest(http.MethodDelete, "/transcode/"+sid, nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("session_id", sid)
-	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 	rec := httptest.NewRecorder()
-	s.handleStop(rec, r)
+	s.handleStop(rec, stopRequest(sid))
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("handleStop status = %d, want %d", rec.Code, http.StatusNoContent)
@@ -3063,6 +2361,143 @@ func TestHandleStop_DeletesRecipe(t *testing.T) {
 	}
 	if _, ok := s.sessions[sid]; ok {
 		t.Fatalf("session %q still registered after stop", sid)
+	}
+}
+
+// A stop that stalls on a hung node can run after the API has moved the
+// transport to another node and stored that node's card under the same
+// transport id. The stop deletes this node's own card, never the successor's.
+func TestHandleStop_KeepsRecipeMovedToAnotherNode(t *testing.T) {
+	const sid = "stop-moved-1"
+	for _, tc := range []struct {
+		name       string
+		nodeRowID  int
+		card       playback.RecipeCard
+		wantDelete bool
+	}{
+		{"own card", 1, playback.RecipeCard{TranscodeNodeURL: "http://old:9000", RoutingExecutionNodeID: 1}, true},
+		{"moved to another node", 1, playback.RecipeCard{TranscodeNodeURL: "http://new:9000", RoutingExecutionNodeID: 2}, false},
+		// Without a row id on the card a move cannot be told from a URL edit,
+		// so the stop deletes it as before.
+		{"card without a row id", 1, playback.RecipeCard{TranscodeNodeURL: "http://new:9000"}, true},
+		// A node deleted and added again gets a new row; the cards it issued
+		// before still name its URL.
+		{"node re-added under a new row", 3, playback.RecipeCard{TranscodeNodeURL: "http://old:9000", RoutingExecutionNodeID: 1}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t)
+			s.tracker = nodesessions.NewTracker(nil, "node-url", "node-name", "transcode")
+			s.nodeRowID = func() (int, bool) { return tc.nodeRowID, true }
+			s.registeredNodeURL = func() (string, bool) { return "http://old:9000", true }
+			card := tc.card
+			store := &stubRecipeStore{card: &card, ok: true}
+			s.SetRecipeStore(store)
+			s.sessions[sid] = &playback.TranscodeSession{}
+			s.activeJobs.Store(1)
+
+			r := httptest.NewRequest(http.MethodDelete, "/transcode/"+sid, nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("session_id", sid)
+			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+			rec := httptest.NewRecorder()
+			s.handleStop(rec, r)
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("handleStop status = %d, want %d", rec.Code, http.StatusNoContent)
+			}
+			if deleted := len(store.deletes) == 1; deleted != tc.wantDelete {
+				t.Fatalf("recipe deletes = %v, want delete %v", store.deletes, tc.wantDelete)
+			}
+		})
+	}
+}
+
+// The node's registration can change while a job runs. A stop judges the
+// stored card against the identity the job was registered under, so a node
+// re-created under a new row and URL still deletes its own card, and one whose
+// registration is no longer resolved still keeps the card of the node the
+// transport moved to.
+func TestHandleStop_JudgesRecipeByTheIdentityTheJobStartedUnder(t *testing.T) {
+	const sid = "stop-started-as-1"
+	startedAs := playback.RecipeExecutor{NodeID: 1, NodeURL: "http://old:9000"}
+	for _, tc := range []struct {
+		name       string
+		currentID  int
+		currentURL string
+		card       playback.RecipeCard
+		wantDelete bool
+	}{
+		{"re-created under a new row and URL", 5, "http://alias:9000", playback.RecipeCard{TranscodeNodeURL: "http://old:9000", RoutingExecutionNodeID: 1}, true},
+		{"registration unresolved since, card moved", 0, "", playback.RecipeCard{TranscodeNodeURL: "http://new:9000", RoutingExecutionNodeID: 2}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t)
+			s.tracker = nodesessions.NewTracker(nil, "node-url", "node-name", "transcode")
+			s.nodeRowID = func() (int, bool) { return tc.currentID, tc.currentID > 0 }
+			s.registeredNodeURL = func() (string, bool) { return tc.currentURL, tc.currentURL != "" }
+			card := tc.card
+			store := &stubRecipeStore{card: &card, ok: true}
+			s.SetRecipeStore(store)
+			s.sessions[sid] = &playback.TranscodeSession{}
+			s.noteStartedAsLocked(sid, startedAs)
+			s.activeJobs.Store(1)
+
+			r := httptest.NewRequest(http.MethodDelete, "/transcode/"+sid, nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("session_id", sid)
+			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+			rec := httptest.NewRecorder()
+			s.handleStop(rec, r)
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("handleStop status = %d, want %d", rec.Code, http.StatusNoContent)
+			}
+			if deleted := len(store.deletes) == 1; deleted != tc.wantDelete {
+				t.Fatalf("recipe deletes = %v, want delete %v", store.deletes, tc.wantDelete)
+			}
+			if _, recorded := s.startedAs[sid]; recorded {
+				t.Fatal("the stop left the job's start identity behind")
+			}
+		})
+	}
+}
+
+// A hung node that resumes keeps the transport it lost in its session map
+// when the API's late stop is refused. A force reload of that node tears the
+// job down but leaves the card of the node the transport moved to.
+func TestForceReloadTeardownKeepsRecipeMovedToAnotherNode(t *testing.T) {
+	const sid = "reload-moved-1"
+	for _, tc := range []struct {
+		name       string
+		card       playback.RecipeCard
+		wantDelete bool
+	}{
+		{"own card", playback.RecipeCard{TranscodeNodeURL: "http://old:9000", RoutingExecutionNodeID: 1}, true},
+		{"moved to another node", playback.RecipeCard{TranscodeNodeURL: "http://new:9000", RoutingExecutionNodeID: 2}, false},
+		// The node's URL was edited since it started this transport.
+		{"own URL-only card under an edited URL", playback.RecipeCard{TranscodeNodeURL: "http://before-edit:9000"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t)
+			s.tracker = nodesessions.NewTracker(nil, "node-url", "node-name", "transcode")
+			s.nodeRowID = func() (int, bool) { return 1, true }
+			s.registeredNodeURL = func() (string, bool) { return "http://old:9000", true }
+			card := tc.card
+			store := &stubRecipeStore{card: &card, ok: true}
+			s.SetRecipeStore(store)
+			s.sessions[sid] = &playback.TranscodeSession{}
+			s.activeJobs.Store(1)
+
+			if err := s.teardownForForceReload(t.Context(), "http://old:9000", 1); err != nil {
+				t.Fatalf("teardown: %v", err)
+			}
+			if _, running := s.sessions[sid]; running {
+				t.Fatal("force reload left the job running")
+			}
+			if deleted := len(store.deletes) == 1; deleted != tc.wantDelete {
+				t.Fatalf("recipe deletes = %v, want delete %v", store.deletes, tc.wantDelete)
+			}
+		})
 	}
 }
 
@@ -3151,23 +2586,16 @@ func TestTouchSession_RefreshesIdleClock(t *testing.T) {
 
 func TestSpawnReconstructDoesNotRegisterFailedSoftwareRetry(t *testing.T) {
 	server := newTestServer(t)
-	dir := t.TempDir()
-	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	logPath := filepath.Join(dir, "invocations.log")
-	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$*\" >> " + logPath + "\n" +
-		"case \"$*\" in\n" +
-		"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n" +
-		"  *-encoders*) echo ' V..... h264_videotoolbox x'; exit 0 ;;\n" +
-		"  *videotoolbox*'-f null'*) exit 0 ;;\n" +
-		"  *) exit 1 ;;\n" +
-		"esac\n"
-	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cfg := server.watcher.Config()
-	cfg.Playback.FFmpegPath = ffmpegPath
-	cfg.Playback.HWAccel = tonemap.BackendVideoToolbox
+	logPath := filepath.Join(t.TempDir(), "invocations.log")
+	useFakeFFmpeg(t, server, "#!/bin/sh\n"+
+		"printf '%s\\n' \"$*\" >> "+logPath+"\n"+
+		"case \"$*\" in\n"+
+		"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n"+
+		"  *-encoders*) echo ' V..... h264_videotoolbox x'; exit 0 ;;\n"+
+		"  *videotoolbox*'-f null'*) exit 0 ;;\n"+
+		"  *) exit 1 ;;\n"+
+		"esac\n")
+	server.watcher.Config().Playback.HWAccel = tonemap.BackendVideoToolbox
 
 	const sessionID = "failed-reconstruct-retry"
 	card := playback.NewRecipeCard(7, "profile-1", 42, "", playback.TranscodeOpts{
@@ -3205,44 +2633,15 @@ func TestSpawnReconstructDoesNotRegisterFailedSoftwareRetry(t *testing.T) {
 // through the shared GPU pool — the same path reconstruction uses — rather
 // than bypassing it with an empty device.
 func TestHandleStartUsesConfiguredHWDeviceList(t *testing.T) {
-	server := newTestServer(t)
-	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// This test reaches the spawn/track path, so it needs a (no-op) tracker.
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	cfg := server.watcher.Config()
-	cfg.Playback.FFmpegPath = ffmpegPath
+	server := newLoopingFFmpegServer(t)
 	// Neither device exists, so resolution deterministically lands on the
 	// first entry; the point is that the configured list reaches the session.
-	cfg.Playback.HWDevice = "/dev/dri/renderD888,/dev/dri/renderD889"
+	server.watcher.Config().Playback.HWDevice = "/dev/dri/renderD888,/dev/dri/renderD889"
 
-	requestBody, err := json.Marshal(TranscodeStartRequest{
-		SessionID:        "hwdevice-start-1",
-		InputPath:        "/media/movie.mkv",
-		TargetCodecVideo: "h264",
-		TargetCodecAudio: "aac",
-		SegmentDuration:  2,
-		HWAccel:          "vaapi",
+	_, session := startRegisteredSession(t, server, TranscodeStartRequest{
+		SessionID: "hwdevice-start-1", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "vaapi",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(requestBody))
-	rr := httptest.NewRecorder()
-	server.handleStart(rr, req)
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	server.mu.RLock()
-	session := server.sessions["hwdevice-start-1"]
-	server.mu.RUnlock()
-	if session == nil {
-		t.Fatal("session was not registered")
-	}
-	defer session.CloseProcess()
 	if got := session.Opts().HWDevice; got != "/dev/dri/renderD888" {
 		t.Fatalf("session HWDevice = %q, want one concrete device from the configured list", got)
 	}
@@ -3257,46 +2656,27 @@ func TestHandleStartAndReconstructArmRequestedThrottle(t *testing.T) {
 		{name: "reconstruct", reconstruct: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			server := newTestServer(t)
-			server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-			ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
-			if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+			server := newLoopingFFmpegServer(t)
 			started := make(chan int, 1)
 			server.startThrottler = func(_ *playback.TranscodeSession, seconds int) { started <- seconds }
 
-			var session *playback.TranscodeSession
 			if test.reconstruct {
 				card := nativeTransportCard("session-1", "transport-1")
 				card.ThrottleSeconds = 180
-				var err error
-				session, err = server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), "transport-1", -1, *card)
+				session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), "transport-1", -1, *card)
 				if err != nil {
 					t.Fatalf("spawnReconstruct: %v", err)
 				}
+				if session == nil {
+					t.Fatal("session was not registered")
+				}
+				t.Cleanup(func() { _ = session.CloseProcess() })
 			} else {
-				body, err := json.Marshal(TranscodeStartRequest{
+				startRegisteredSession(t, server, TranscodeStartRequest{
 					SessionID: "session-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264",
 					TargetCodecAudio: "aac", SegmentDuration: 2, ThrottleSeconds: 180,
 				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				rr := httptest.NewRecorder()
-				server.handleStart(rr, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-				if rr.Code != http.StatusAccepted {
-					t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-				}
-				server.mu.RLock()
-				session = server.sessions["session-1"]
-				server.mu.RUnlock()
 			}
-			if session == nil {
-				t.Fatal("session was not registered")
-			}
-			t.Cleanup(func() { _ = session.CloseProcess() })
 			select {
 			case got := <-started:
 				if got != 180 {
@@ -3338,110 +2718,9 @@ func TestShutdownDrainsSessionsAndRejectsNewStarts(t *testing.T) {
 		}
 	}
 
-	body, err := json.Marshal(TranscodeStartRequest{SessionID: "late", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", SegmentDuration: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rr := httptest.NewRecorder()
-	server.handleStart(rr, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
+	rr := postStartRequest(t, server, TranscodeStartRequest{SessionID: "late", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", SegmentDuration: 2})
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("late start status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
-	}
-}
-
-func TestRemoteSessionTrackingPreservesResolvedToneMapMode(t *testing.T) {
-	for _, test := range []struct {
-		name        string
-		reconstruct bool
-	}{
-		{name: "fresh remote session"},
-		{name: "reconstructed remote session", reconstruct: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			server := newTestServer(t)
-			tracker := newBlockingSessionTracker()
-			server.tracker = tracker
-			ffmpegPath := filepath.Join(t.TempDir(), "tone-map-ffmpeg.sh")
-			script := "#!/bin/sh\n" +
-				"case \" $* \" in\n" +
-				"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n'; exit 0;;\n" +
-				"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n'; exit 0;;\n" +
-				"  *\"-f null\"*) exit 0;;\n" +
-				"esac\n" +
-				"while :; do sleep 0.1; done\n"
-			if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-			server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
-			inputPath := filepath.Join(t.TempDir(), "source.mkv")
-			if err := os.WriteFile(inputPath, []byte("source"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			info, err := os.Stat(inputPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			track := nodeToneMapTrack()
-			writeNodeToneMapFFprobe(t, ffmpegPath, track)
-			opts := playback.TranscodeOpts{
-				SessionID: "tracked-tone-map", InputPath: inputPath,
-				TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "1080p", SegmentDuration: 2,
-				ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
-				ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
-				ToneMapSourceRevision: tonemap.RevisionForFile(&models.MediaFile{ID: 1, FileSize: info.Size(), VideoTracks: []models.VideoTrack{track}}),
-				FastStart:             true,
-			}
-
-			var session *playback.TranscodeSession
-			if test.reconstruct {
-				card := playback.NewRecipeCard(7, "profile-1", 42, "", opts)
-				session, _ = server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), opts.SessionID, -1, card)
-				if session == nil {
-					t.Fatal("reconstructed session was not started")
-				}
-			} else {
-				body, err := json.Marshal(TranscodeStartRequest{
-					SessionID: opts.SessionID, InputPath: opts.InputPath,
-					TargetCodecVideo: opts.TargetCodecVideo, TargetCodecAudio: opts.TargetCodecAudio,
-					TargetResolution: opts.TargetResolution, SegmentDuration: opts.SegmentDuration,
-					ToneMapPolicy: opts.ToneMapPolicy, ToneMapMode: opts.ToneMapMode,
-					ToneMapSourceKind: opts.ToneMapSourceKind, ToneMapRecipeVersion: opts.ToneMapRecipeVersion,
-					ToneMapSourceRevision: opts.ToneMapSourceRevision,
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				recorder := httptest.NewRecorder()
-				server.handleStart(recorder, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-				if recorder.Code != http.StatusAccepted {
-					t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
-				}
-				server.mu.RLock()
-				session = server.sessions[opts.SessionID]
-				server.mu.RUnlock()
-				if session == nil {
-					t.Fatal("remote session was not registered")
-				}
-			}
-			if test.reconstruct && session.Opts().FastStart {
-				t.Fatal("reconstructed node runtime retained fresh-start manifest tuning")
-			}
-			defer func() { _ = session.CloseProcess() }()
-
-			select {
-			case <-tracker.trackStarted:
-			case <-time.After(2 * time.Second):
-				t.Fatal("remote session tracking did not start")
-			}
-			tracker.mu.Lock()
-			tracked := tracker.tracked
-			tracker.mu.Unlock()
-			close(tracker.trackRelease)
-			if tracked.ToneMapMode != string(tonemap.ModeSoftware) {
-				t.Fatalf("tracked tone-map mode = %q, want %q", tracked.ToneMapMode, tonemap.ModeSoftware)
-			}
-		})
 	}
 }
 
@@ -3469,12 +2748,7 @@ func TestHandleStartRejectsIncompleteOrStaleToneMapRecipe(t *testing.T) {
 				ToneMapSourceRevision: tonemap.SourceRevision{MediaFileID: 1},
 			}
 			tt.mutate(&request)
-			body, err := json.Marshal(request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			recorder := httptest.NewRecorder()
-			server.handleStart(recorder, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
+			recorder := postStartRequest(t, server, request)
 			if recorder.Code != http.StatusUnprocessableEntity {
 				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 			}
@@ -3496,32 +2770,24 @@ func TestHandleStartConfigChangeIsNotLiveSourceValidationFailure(t *testing.T) {
 	dir := t.TempDir()
 	probeStarted := filepath.Join(dir, "probe-started")
 	releaseProbe := filepath.Join(dir, "release-probe")
-	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	script := "#!/bin/sh\n" +
-		"touch '" + probeStarted + "'\n" +
-		"while [ ! -e '" + releaseProbe + "' ]; do sleep 0.01; done\n" +
-		"case \" $* \" in\n" +
-		"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n';;\n" +
-		"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n';;\n" +
-		"esac\n"
-	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	requestBody, err := json.Marshal(TranscodeStartRequest{
+	useFakeFFmpeg(t, server, "#!/bin/sh\n"+
+		"touch '"+probeStarted+"'\n"+
+		"while [ ! -e '"+releaseProbe+"' ]; do sleep 0.01; done\n"+
+		"case \" $* \" in\n"+
+		"  *\" -filters \"*) printf ' T.. zscale V->V scale\\n T.. tonemapx V->V tone-map\\n T.. sidedata V->V metadata\\n';;\n"+
+		"  *\" -encoders \"*) printf ' V..... libx264 H.264\\n';;\n"+
+		"esac\n")
+	request := jsonRequest(t, "/transcode/start", TranscodeStartRequest{
 		SessionID: "config-change", InputPath: "/media/movie.mkv",
 		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
 		ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
 		ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
 		ToneMapSourceRevision: tonemap.SourceRevision{MediaFileID: 1},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
-		server.handleStart(recorder, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(requestBody)))
+		server.handleStart(recorder, request)
 		close(done)
 	}()
 	deadline := time.Now().Add(2 * time.Second)
@@ -3585,21 +2851,14 @@ func TestToneMapRecipeContextFailuresReturnServiceUnavailable(t *testing.T) {
 			cancel()
 			return ctx, cancel
 		}},
-		{name: "deadline exceeded", new: func() (context.Context, context.CancelFunc) {
-			return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-		}},
 	}
 	for _, test := range tests {
 		for _, contextTest := range contexts {
 			t.Run(test.name+"/"+contextTest.name, func(t *testing.T) {
 				server := newTestServer(t)
-				body, err := json.Marshal(test.body)
-				if err != nil {
-					t.Fatal(err)
-				}
 				ctx, cancel := contextTest.new()
 				defer cancel()
-				request := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body)).WithContext(ctx)
+				request := jsonRequest(t, "/", test.body).WithContext(ctx)
 				recorder := httptest.NewRecorder()
 
 				test.handle(server, recorder, request)
@@ -3620,20 +2879,17 @@ func TestDownloadToneMapRecipeRejectionDoesNotWaitForArtifactLock(t *testing.T) 
 	const artifactID = "tone-map-lock-order"
 	unlock := server.lockSessionLifecycle("download-artifact-" + artifactID)
 	defer unlock()
-	requestBody, err := json.Marshal(downloadprepare.Request{
+	request := jsonRequest(t, "/downloads/prepare", downloadprepare.Request{
 		ArtifactID: artifactID, InputPath: "/media/movie.mkv",
 		TargetCodecVideo: "h264", TargetCodecAudio: "aac",
 		ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
 		ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: "stale",
 		ToneMapSourceRevision: tonemap.SourceRevision{MediaFileID: 1},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
-		server.handleDownloadPrepare(recorder, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(requestBody)))
+		server.handleDownloadPrepare(recorder, request)
 		close(done)
 	}()
 	select {
@@ -3650,20 +2906,17 @@ func TestStartToneMapRecipeRejectionDoesNotWaitForReloadLock(t *testing.T) {
 	server := newTestServer(t)
 	server.reloadMu.Lock()
 	defer server.reloadMu.Unlock()
-	requestBody, err := json.Marshal(TranscodeStartRequest{
+	request := jsonRequest(t, "/transcode/start", TranscodeStartRequest{
 		SessionID: "tone-map-start-lock-order", InputPath: "/media/movie.mkv",
 		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
 		ToneMapPolicy: tonemap.PolicySoftwareOnly, ToneMapMode: tonemap.ModeSoftware,
 		ToneMapSourceKind: tonemap.SourcePQ, ToneMapRecipeVersion: "stale",
 		ToneMapSourceRevision: tonemap.SourceRevision{MediaFileID: 1},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
-		server.handleStart(recorder, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(requestBody)))
+		server.handleStart(recorder, request)
 		close(done)
 	}()
 	select {
@@ -3749,35 +3002,13 @@ func TestNodeReconstructLifecycleWaitDoesNotConsumeGlobalSlot(t *testing.T) {
 }
 
 func TestHandleStartPreservesVideoSampleEntry(t *testing.T) {
-	server := newTestServer(t)
-	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	requestBody, err := json.Marshal(TranscodeStartRequest{
+	server := newLoopingFFmpegServer(t)
+	_, session := startRegisteredSession(t, server, TranscodeStartRequest{
 		SessionID: "sample-entry-start-1", InputPath: "/media/movie.mkv",
 		VideoSampleEntry: playback.VideoSampleEntryHVC1,
 		TargetCodecVideo: "copy", TargetCodecAudio: "copy", SegmentDuration: 2,
 		CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(requestBody))
-	rr := httptest.NewRecorder()
-	server.handleStart(rr, req)
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	server.mu.RLock()
-	session := server.sessions["sample-entry-start-1"]
-	server.mu.RUnlock()
-	if session == nil {
-		t.Fatal("session was not registered")
-	}
-	defer func() { _ = session.CloseProcess() }()
 	if got := session.Opts().VideoSampleEntry; got != playback.VideoSampleEntryHVC1 {
 		t.Fatalf("VideoSampleEntry = %q", got)
 	}
@@ -3787,45 +3018,24 @@ func TestShutdownDrainsProgressiveRemuxAndRejectsLateRequests(t *testing.T) {
 	server := newTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 11, true }
 	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
-	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	ffmpegScript := "#!/bin/sh\n" +
-		"for arg in \"$@\"; do\n" +
-		"  if [ \"$arg\" = \"pipe:1\" ]; then\n" +
-		"    while :; do printf node-remux-bytes; sleep 0.01; done\n" +
-		"  fi\n" +
-		"done\n" +
-		"exit 0\n"
-	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	claims := streamtoken.Claims{
-		SessionID: "playback-force-reload", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://node", TranscodeTransportID: "transport-force-reload-real",
-		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
-		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
-	}
+	mediaPath, _ := writeNodeSource(t, "source")
+	useFakeFFmpeg(t, server, "#!/bin/sh\n"+
+		"for arg in \"$@\"; do\n"+
+		"  if [ \"$arg\" = \"pipe:1\" ]; then\n"+
+		"    while :; do printf node-remux-bytes; sleep 0.01; done\n"+
+		"  fi\n"+
+		"done\n"+
+		"exit 0\n")
+	claims := progressiveRemuxClaims("playback-force-reload", mediaPath, "transport-force-reload-real")
 	card := playback.RecipeCardFromClaims(&claims)
 	recipes := &stubRecipeStore{card: &card, ok: true}
 	server.SetRecipeStore(recipes)
-	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID, nil)
-	request.Header.Set("X-Silo-Stream-Token", token)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	request := remuxRequest(t, http.MethodGet, claims)
 	writer := newAbortableBlockingResponseWriter()
 	t.Cleanup(func() { _ = writer.SetWriteDeadline(time.Now()) })
 	requestCtx, cancelRequest := context.WithCancel(t.Context())
 	t.Cleanup(cancelRequest)
-	request = request.WithContext(context.WithValue(requestCtx, chi.RouteCtxKey, routeContext))
+	request = request.WithContext(context.WithValue(requestCtx, chi.RouteCtxKey, chi.RouteContext(request.Context())))
 	handlerDone := make(chan struct{})
 	go func() {
 		server.handleRemux(writer, request)

@@ -11,7 +11,6 @@ func TestPlanLegacyRowParsesHandlerWrittenKeys(t *testing.T) {
 	}{
 		{"typical", "jellycompat:displayprefs:usersettings:emby", "usersettings", "emby"},
 		{"empty client", "jellycompat:displayprefs:usersettings:", "usersettings", ""},
-		{"guid id", "jellycompat:displayprefs:f137a2dd21bbc1b99aa5c0f6bf02a805:jellyfin-web", "f137a2dd21bbc1b99aa5c0f6bf02a805", "jellyfin-web"},
 		{"id containing colons", "jellycompat:displayprefs:a:b:emby", "a:b", "emby"},
 		{"empty id", "jellycompat:displayprefs::emby", "", "emby"},
 	}

@@ -593,6 +593,12 @@ export interface PlanV3 {
   applied_quirks: AppliedQuirkV3[];
   runtime_corrections: string[];
   available_qualities: AvailableQualityV3[];
+  /**
+   * The `available_qualities` label this plan delivers, which the quality
+   * menu marks. Absent when the plan delivers no listed entry, such as the
+   * source played unchanged or an encode between two rungs.
+   */
+  active_quality?: string;
   degradation_warnings: DegradationWarningV3[];
   decision_reason: string;
   requested_media_file_id: number;

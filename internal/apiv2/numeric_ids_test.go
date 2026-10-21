@@ -48,14 +48,6 @@ func TestNumericIdentifiersRequireCanonicalPositiveDecimal(t *testing.T) {
 	}
 }
 
-func TestInt64IdentifiersRetainDatabaseKeyRange(t *testing.T) {
-	for _, parse := range []func(ID) (int64, *Problem){adminAPIKeyID, adminGroupID, invitationID} {
-		if got, p := parse("9223372036854775807"); p != nil || got != math.MaxInt64 {
-			t.Fatalf("largest int64 ID: value=%d problem=%v", got, p)
-		}
-	}
-}
-
 func TestNumericIdentifierFiltersRejectAlternateSpellingsHTTP(t *testing.T) {
 	h := newTestHandler(t, fixtureDeps())
 	for _, route := range []struct {

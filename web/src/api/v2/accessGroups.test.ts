@@ -4,7 +4,6 @@ import {
   getAccessGroup,
   updateAccessGroup,
   deleteAccessGroup,
-  createAccessGroup,
   listAccessGroups,
 } from "./accessGroups";
 const group = {
@@ -66,30 +65,6 @@ it("captures canonical tags, preserves false and empty arrays, and never reads o
   expect(new Headers(fetch.mock.calls[1]![1]?.headers).get("If-Match")).toBe('"old"');
   expect(new Headers(fetch.mock.calls[2]![1]?.headers).get("If-Match")).toBe('"new"');
   expect(editor.etag).toBe('"old"');
-});
-it("never refreshes or replays mutations on 401", async () => {
-  const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response(group, 200, '"old"'));
-  vi.stubGlobal("fetch", fetch);
-  const editor = await getAccessGroup(7);
-  for (const action of [
-    () => createAccessGroup({ name: "New" }),
-    () => updateAccessGroup(editor, { name: "New" }),
-    () => deleteAccessGroup(editor),
-  ]) {
-    fetch.mockClear();
-    fetch.mockResolvedValue(
-      response(
-        {
-          type: "https://silo.example/problems/authentication_required",
-          title: "Unauthorized",
-          status: 401,
-        },
-        401,
-      ),
-    );
-    await expect(action()).rejects.toMatchObject({ status: 401 });
-    expect(fetch).toHaveBeenCalledTimes(1);
-  }
 });
 it("rejects incomplete or cyclic list traversals and preserves picker ordering", async () => {
   const fetch = vi

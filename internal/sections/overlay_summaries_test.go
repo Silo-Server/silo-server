@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"slices"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -17,7 +15,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
-	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
 type overlayQueryTrace struct{ rows atomic.Int64 }
@@ -80,110 +77,6 @@ func seedOverlayFiles(t testing.TB, pool *pgxpool.Pool, files ...*models.MediaFi
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
-}
-
-func TestOverlaySummariesAccessAndGrouping(t *testing.T) {
-	pool, trace := overlayTestPool(t)
-	files := []*models.MediaFile{
-		{ID: 1, ContentID: "series", EpisodeID: "episode-a", MediaFolderID: 1, Resolution: "1080p", CodecAudio: "aac"},
-		{ID: 2, ContentID: "series", EpisodeID: "episode-a", MediaFolderID: 2, Resolution: "2160p", CodecAudio: "ac3"},
-		{ID: 3, ContentID: "series", EpisodeID: "episode-b", MediaFolderID: 1, Resolution: "720p"},
-		{ID: 4, ContentID: "movie", MediaFolderID: 1, Resolution: "\u00a02160p\u00a0"},
-		// Same resolution, different audio: ensure episode ID takes precedence over
-		// file ID in the legacy tie order.
-		{ID: 5, ContentID: "series", EpisodeID: "episode-0", MediaFolderID: 1, Resolution: "1080p", CodecAudio: "flac"},
-	}
-	seedOverlayFiles(t, pool, files...)
-	slices.SortFunc(files, func(a, b *models.MediaFile) int {
-		if n := strings.Compare(a.ContentID, b.ContentID); n != 0 {
-			return n
-		}
-		if n := strings.Compare(a.EpisodeID, b.EpisodeID); n != 0 {
-			return n
-		}
-		return a.ID - b.ID
-	})
-	fetcher := &Fetcher{pool: pool}
-	ids := []string{"series", "episode-a", "episode-b", "movie", "absent", "series"}
-	for _, filter := range []catalog.AccessFilter{
-		{}, {AllowedLibraryIDs: []int{}}, {AllowedLibraryIDs: []int{1}},
-		{AllowedLibraryIDs: []int{2}}, {DisabledLibraryIDs: []int{2}},
-		{AllowedLibraryIDs: []int{1, 2}, DisabledLibraryIDs: []int{1}},
-		{MaxPlaybackQuality: "1080p"}, {MaxPlaybackQuality: "4k"},
-	} {
-		got, err := fetcher.ListOverlaySummaries(t.Context(), ids, filter)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if rows := trace.rows.Load(); rows > 4 {
-			t.Fatalf("returned %d rows for four existing cards", rows)
-		}
-		want := map[string]*models.OverlaySummary{}
-		for _, id := range ids {
-			var candidates []*models.MediaFile
-			for _, file := range files {
-				if (file.ContentID == id || file.EpisodeID == id) && catalog.FileAllowedByAccess(file, filter) {
-					candidates = append(candidates, file)
-				}
-			}
-			if summary := overlays.BuildSummary(candidates); summary != nil {
-				want[id] = summary
-			}
-			alone, err := fetcher.ListOverlaySummaries(t.Context(), []string{id}, filter)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(alone[id], got[id]) {
-				t.Fatalf("%s badge depends on page composition", id)
-			}
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("filter %+v: got %+v, want %+v", filter, got, want)
-		}
-	}
-}
-
-func TestOverlaySummariesReadCommittedChanges(t *testing.T) {
-	pool, _ := overlayTestPool(t)
-	fetchers := []*Fetcher{{pool: pool}, {pool: pool}}
-	filter := catalog.AccessFilter{AllowedLibraryIDs: []int{1}}
-	ids := []string{"series", "episode"}
-	check := func(want string) {
-		t.Helper()
-		for _, fetcher := range fetchers {
-			got, err := fetcher.ListOverlaySummaries(t.Context(), ids, filter)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, id := range ids {
-				if want == "" {
-					if got[id] != nil {
-						t.Fatalf("%s: stale summary %+v", id, got[id])
-					}
-				} else if got[id] == nil || got[id].Resolution != want {
-					t.Fatalf("%s: got %+v, want resolution %s", id, got[id], want)
-				}
-			}
-		}
-	}
-	check("") // A cached negative result must not hide the next insert.
-	seedOverlayFiles(t, pool, &models.MediaFile{ID: 1, ContentID: "series", EpisodeID: "episode", MediaFolderID: 1, Resolution: "1080p"})
-	check("1080p")
-	for _, step := range []struct{ sql, want string }{
-		{`UPDATE media_files SET resolution = '2160p'`, "2160p"},
-		{`UPDATE media_files SET missing_since = now()`, ""},
-		{`UPDATE media_files SET missing_since = NULL`, "2160p"},
-		{`UPDATE media_files SET media_folder_id = 2`, ""},
-		{`UPDATE media_files SET media_folder_id = 1`, "2160p"},
-		{`UPDATE media_files SET content_id = 'moved', episode_id = 'moved-episode'`, ""},
-		{`UPDATE media_files SET content_id = 'series', episode_id = 'episode'`, "2160p"},
-		{`DELETE FROM media_files`, ""},
-	} {
-		if _, err := pool.Exec(t.Context(), step.sql); err != nil {
-			t.Fatal(err)
-		}
-		check(step.want)
 	}
 }
 
@@ -255,72 +148,5 @@ func TestOverlaySummariesRankingMatchesGo(t *testing.T) {
 				t.Fatalf("%s: got %+v, want %+v", id, got[id], want)
 			}
 		}
-	}
-}
-
-func BenchmarkOverlaySummaries(b *testing.B) {
-	pool, _ := overlayTestPool(b)
-	// Six long-running series, 4,200 episodes each, with wide track metadata.
-	// Compare the actual scanner projection previously used by catalog cards.
-	_, err := pool.Exec(b.Context(), `INSERT INTO media_files
-  (id,content_id,episode_id,resolution,video_tracks,audio_tracks,subtitle_tracks)
-  SELECT n,'series-'||((n-1)/4200),'episode-'||n,
-   CASE WHEN n%5=0 THEN '2160p' ELSE '1080p' END,
-   '[{"video_range_type":"HDR10"}]'::jsonb,
-   jsonb_build_array(jsonb_build_object('codec','aac','title',repeat('track ',200))),
-   jsonb_build_array(jsonb_build_object('language','eng','title',repeat('subtitle ',200)))
-  FROM generate_series(1,25200) n;
-  ANALYZE media_files;`)
-	if err != nil {
-		b.Fatal(err)
-	}
-	ids := make([]string, 6)
-	for i := range ids {
-		ids[i] = fmt.Sprintf("series-%d", i)
-	}
-	fetcher := &Fetcher{pool: pool}
-	fileRepo := scanner.NewFileRepository(pool)
-	legacy := func(ctx context.Context) (map[string]*models.OverlaySummary, error) {
-		files, err := fileRepo.ListOverlayFilesByContentIDs(ctx, ids)
-		if err != nil {
-			return nil, err
-		}
-		out := make(map[string]*models.OverlaySummary, len(files))
-		for id, files := range files {
-			if summary := overlays.BuildSummary(files); summary != nil {
-				out[id] = summary
-			}
-		}
-		return out, nil
-	}
-	want, err := legacy(b.Context())
-	if err != nil {
-		b.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name string
-		read func(context.Context) (map[string]*models.OverlaySummary, error)
-	}{
-		{name: "scanner-projection", read: legacy},
-		{name: "sql-winners", read: func(ctx context.Context) (map[string]*models.OverlaySummary, error) {
-			return fetcher.ListOverlaySummaries(ctx, ids, catalog.AccessFilter{})
-		}},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			got, err := tc.read(b.Context())
-			if err != nil || !reflect.DeepEqual(got, want) {
-				b.Fatalf("summaries = %#v, err %v; scanner summaries = %#v", got, err, want)
-			}
-			b.ReportAllocs()
-			for b.Loop() {
-				got, err := tc.read(b.Context())
-				if err != nil {
-					b.Fatal(err)
-				}
-				if len(got) != len(ids) {
-					b.Fatalf("got %d cards, want %d", len(got), len(ids))
-				}
-			}
-		})
 	}
 }

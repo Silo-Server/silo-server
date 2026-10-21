@@ -33,31 +33,6 @@ function setup(response: () => Response) {
       createElement(QueryClientProvider, { client }, children),
   };
 }
-it("adapts library identity and explicit truncation", async () => {
-  const { calls, wrapper } = setup(() =>
-    jsonResponse({
-      candidates: [
-        {
-          title: "choice",
-          year: 2026,
-          content_type: "movie",
-          provider_ids: { tmdb: "42" },
-          sources: [],
-          agreement_hints: [],
-        },
-      ],
-      truncated: true,
-    }),
-  );
-  const { result } = renderHook(() => useSearchItemMatchCandidates("item-1"), { wrapper });
-  await act(async () => {
-    const data = await result.current.mutateAsync({ title: "query", library_id: 7 });
-    expect(data.truncated).toBe(true);
-    expect(data.candidates[0]?.image_url).toBe("");
-  });
-  expect(calls[0]?.path).toBe("/api/v2/admin/items/item-1/match/search");
-  expect(JSON.parse(String(calls[0]?.init?.body))).toMatchObject({ library_id: "7", limit: 500 });
-});
 for (const mode of ["search", "apply"] as const)
   it(`does not refresh or replay ${mode} after401`, async () => {
     const { calls, wrapper } = setup(

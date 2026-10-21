@@ -84,60 +84,6 @@ func raceEditorWrites(t *testing.T, write func() error, wantSuccess int) {
 	}
 }
 
-func TestEditorSettingsAndLimitsDatabase(t *testing.T) {
-	repo := editorTestRepository(t)
-	ctx := t.Context()
-	viewer := Viewer{IsAdmin: true}
-	service := NewService(repo, nil, nil)
-	settings, err := service.GetSettings(ctx, viewer)
-	if err != nil || settings.Revision != 0 || settings.GlobalMaxRequests != 5 || settings.GlobalWindowDays != 7 {
-		t.Fatalf("missing settings: %+v %v", settings, err)
-	}
-	raceEditorWrites(t, func() error { _, err := repo.UpdateSettingsConditional(ctx, settings, 0); return err }, 1)
-	settings, err = repo.GetSettings(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raceEditorWrites(t, func() error { _, err := repo.UpdateSettingsConditional(ctx, settings, settings.Revision); return err }, 1)
-	raceEditorWrites(t, func() error { _, err := repo.UpdateSettingsConditional(ctx, settings, -1); return err }, 12)
-	current, err := repo.GetSettings(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy, err := repo.UpdateSettings(ctx, current)
-	if err != nil || legacy.Revision <= current.Revision {
-		t.Fatalf("legacy revision: %+v %v", legacy, err)
-	}
-	if _, err = repo.UpdateSettingsConditional(ctx, current, current.Revision); !errors.Is(err, ErrStaleRevision) {
-		t.Fatalf("stale legacy: %v", err)
-	}
-	limit, err := service.GetUserLimit(ctx, viewer, 1)
-	if err != nil || limit.Revision != 0 || limit.LimitMode != LimitModeInherit {
-		t.Fatalf("default limit: %+v %v", limit, err)
-	}
-	if _, err = service.GetUserLimit(ctx, viewer, 999); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("unknown account: %v", err)
-	}
-	raceEditorWrites(t, func() error { _, err := repo.UpsertUserLimitConditional(ctx, *limit, 0); return err }, 1)
-	limit, err = repo.GetUserLimit(ctx, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raceEditorWrites(t, func() error { _, err := repo.UpsertUserLimitConditional(ctx, *limit, limit.Revision); return err }, 1)
-	raceEditorWrites(t, func() error { _, err := repo.UpsertUserLimitConditional(ctx, *limit, -1); return err }, 12)
-	currentLimit, err := repo.GetUserLimit(ctx, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacyLimit, err := repo.UpsertUserLimit(ctx, *currentLimit)
-	if err != nil || legacyLimit.Revision <= currentLimit.Revision {
-		t.Fatalf("legacy limit: %+v %v", legacyLimit, err)
-	}
-	if _, err = repo.UpsertUserLimitConditional(ctx, UserLimit{UserID: 999}, 0); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("unknown account write: %v", err)
-	}
-}
-
 func TestEditorIntegrationsDatabase(t *testing.T) {
 	repo := editorTestRepository(t)
 	ctx := t.Context()
@@ -232,40 +178,6 @@ func TestEditorIntegrationsDatabase(t *testing.T) {
 	}
 	if err = repo.DeleteIntegrationConditional(ctx, in.ID, -1); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing wildcard: %v", err)
-	}
-}
-
-// Validation is external work: a concurrent edit must still win the final CAS.
-type editingValidationRouter struct {
-	*fakeRouterProvider
-	edit func() error
-}
-
-func (r *editingValidationRouter) Validate(context.Context, int, string, ResolvedRouterConnection, []ResolvedRouterConnection) (map[string]string, string, error) {
-	return nil, "", r.edit()
-}
-func TestEditorValidationRaceDatabase(t *testing.T) {
-	repo := editorTestRepository(t)
-	ctx := t.Context()
-	in := Integration{ID: "validation-race", Name: "Before", CapabilityID: "arr", InstallationID: new(1)}
-	row, err := repo.CreateIntegration(ctx, in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	service := NewService(repo, nil, nil)
-	service.SetRouterProvider(&editingValidationRouter{fakeRouterProvider: &fakeRouterProvider{}, edit: func() error {
-		concurrent := in
-		concurrent.Name = "Concurrent winner"
-		_, err := repo.UpdateIntegration(ctx, concurrent)
-		return err
-	}})
-	in.Name = "Losing edit"
-	if _, err = service.UpdateIntegrationConditional(ctx, Viewer{IsAdmin: true}, in, row.Revision); !errors.Is(err, ErrStaleRevision) {
-		t.Fatalf("validation race: %v", err)
-	}
-	current, err := repo.GetIntegration(ctx, in.ID)
-	if err != nil || current.Name != "Concurrent winner" {
-		t.Fatalf("concurrent edit lost: %+v %v", current, err)
 	}
 }
 

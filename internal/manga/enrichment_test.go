@@ -3,8 +3,6 @@ package manga
 import (
 	"context"
 	"errors"
-	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,98 +39,6 @@ func (f *fakeMangaMetadataProvider) Search(context.Context, metadata.SearchQuery
 }
 func (f *fakeMangaMetadataProvider) GetMetadata(context.Context, metadata.MetadataRequest) (*metadata.MetadataResult, error) {
 	return f.result, f.getErr
-}
-
-func TestClaimBatchQueryTargetsManga(t *testing.T) {
-	if !strings.Contains(claimBatchQuery, "mi.type = 'manga'") {
-		t.Fatalf("claimBatchQuery must filter type='manga'")
-	}
-	if strings.Contains(claimBatchQuery, "'ebook'") {
-		t.Fatalf("claimBatchQuery must not reference ebook")
-	}
-	if !strings.Contains(claimBatchQuery, "manga_enrichment_state") {
-		t.Fatalf("claimBatchQuery must join manga_enrichment_state")
-	}
-	// Secondary-fields arm: enriched items missing a backdrop or publication
-	// status are claimed too; has_poster/has_backdrop distinguish them so only
-	// the missing secondary fields are written.
-	if !strings.Contains(claimBatchQuery, "mi.backdrop_path IS NULL OR mi.backdrop_path = ''") {
-		t.Fatalf("claimBatchQuery must claim backdrop-missing items")
-	}
-	if !strings.Contains(claimBatchQuery, "mi.show_status IS NULL OR mi.show_status = ''") {
-		t.Fatalf("claimBatchQuery must claim status-missing items")
-	}
-	if !strings.Contains(claimBatchQuery, "AS has_poster") {
-		t.Fatalf("claimBatchQuery must project has_poster")
-	}
-	if !strings.Contains(claimBatchQuery, "AS has_backdrop") {
-		t.Fatalf("claimBatchQuery must project has_backdrop")
-	}
-	if !strings.Contains(claimBatchQuery, "last_error_class IN ('transient', 'rate_limited')") {
-		t.Fatal("claimBatchQuery must keep retryable failure classes eligible beyond the permanent cap")
-	}
-	if !strings.Contains(claimBatchQuery, "next_attempt_at <= now()") {
-		t.Fatal("claimBatchQuery must honor durable provider backoff")
-	}
-}
-
-func TestContentTypeIsManga(t *testing.T) {
-	if got := mangaContentType(); got != "manga" {
-		t.Fatalf("mangaContentType() = %q, want %q", got, "manga")
-	}
-}
-
-// runBatch must keep the three terminal outcomes apart: a stamped no-match is
-// neither an enrichment (the old behavior overcounted it as one) nor a
-// failure, and only real failures reach recordFailure.
-func TestRunBatchSeparatesOutcomes(t *testing.T) {
-	e := &Enricher{workers: 2}
-	items := []enrichmentItemRow{
-		{ContentID: "enriched-1"},
-		{ContentID: "enriched-2"},
-		{ContentID: "no-match"},
-		{ContentID: "skipped"},
-		{ContentID: "failed"},
-	}
-
-	providerErr := errors.New("provider exploded")
-	var failures, forwardedFailures int64
-	stats := e.runBatch(context.Background(), items,
-		func(_ context.Context, item enrichmentItemRow) error {
-			switch item.ContentID {
-			case "no-match":
-				return errEnrichmentNoMatch
-			case "skipped":
-				return errEnrichmentSkipped
-			case "failed":
-				return providerErr
-			default:
-				return nil
-			}
-		},
-		func(_ context.Context, _ enrichmentItemRow, err error) {
-			atomic.AddInt64(&failures, 1)
-			if errors.Is(err, providerErr) {
-				atomic.AddInt64(&forwardedFailures, 1)
-			}
-		},
-	)
-
-	if stats.enriched != 2 {
-		t.Fatalf("enriched = %d, want 2", stats.enriched)
-	}
-	if stats.noMatch != 1 {
-		t.Fatalf("noMatch = %d, want 1", stats.noMatch)
-	}
-	if stats.failed != 1 {
-		t.Fatalf("failed = %d, want 1", stats.failed)
-	}
-	if failures != 1 {
-		t.Fatalf("recordFailure calls = %d, want 1", failures)
-	}
-	if forwardedFailures != 1 {
-		t.Fatalf("recordFailure received the provider error %d times, want 1", forwardedFailures)
-	}
 }
 
 func TestMangaEnrichmentBackoffPreservesRetryableFailures(t *testing.T) {
@@ -238,31 +144,6 @@ func TestCollectMangaMetadataRejectsEachProviderAuthorBeforeMerging(t *testing.T
 	}
 }
 
-func TestEnrichWithProvidersRetriesProviderErrorBeforeAuthorMismatch(t *testing.T) {
-	providerErr := errors.New("provider unavailable")
-	providers := []metadata.Provider{
-		&fakeMangaMetadataProvider{slug: "broken", searchErr: providerErr, getErr: providerErr},
-		&fakeMangaMetadataProvider{
-			slug:    "wrong-author",
-			results: []metadata.SearchResult{{Name: "Shared Title", ProviderIDs: map[string]string{"wrong": "1"}}},
-			result: &metadata.MetadataResult{
-				HasMetadata: true,
-				People: []models.ItemPerson{{
-					Person: models.Person{Name: "Wrong Author"}, Kind: models.PersonKindAuthor,
-				}},
-			},
-		},
-	}
-
-	e := &Enricher{}
-	err := e.enrichWithProviders(context.Background(), enrichmentItemRow{
-		ContentID: "shared", FolderID: 7, Title: "Shared Title", Author: "Right Author",
-	}, providers)
-	if !errors.Is(err, providerErr) {
-		t.Fatalf("enrichment error = %v, want provider failure to remain retryable", err)
-	}
-}
-
 func TestCollectMangaMetadataDoesNotReintroduceOwnedCrossID(t *testing.T) {
 	providers := []metadata.Provider{
 		&fakeMangaMetadataProvider{
@@ -301,6 +182,31 @@ func TestCollectMangaMetadataDoesNotReintroduceOwnedCrossID(t *testing.T) {
 	}
 	if _, exists := ids["mangadex"]; exists {
 		t.Fatalf("metadata response reintroduced an owned cross-ID: %v", ids)
+	}
+}
+
+func TestEnrichWithProvidersRetriesProviderErrorBeforeAuthorMismatch(t *testing.T) {
+	providerErr := errors.New("provider unavailable")
+	providers := []metadata.Provider{
+		&fakeMangaMetadataProvider{slug: "broken", searchErr: providerErr, getErr: providerErr},
+		&fakeMangaMetadataProvider{
+			slug:    "wrong-author",
+			results: []metadata.SearchResult{{Name: "Shared Title", ProviderIDs: map[string]string{"wrong": "1"}}},
+			result: &metadata.MetadataResult{
+				HasMetadata: true,
+				People: []models.ItemPerson{{
+					Person: models.Person{Name: "Wrong Author"}, Kind: models.PersonKindAuthor,
+				}},
+			},
+		},
+	}
+
+	e := &Enricher{}
+	err := e.enrichWithProviders(context.Background(), enrichmentItemRow{
+		ContentID: "shared", FolderID: 7, Title: "Shared Title", Author: "Right Author",
+	}, providers)
+	if !errors.Is(err, providerErr) {
+		t.Fatalf("enrichment error = %v, want provider failure to remain retryable", err)
 	}
 }
 

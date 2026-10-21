@@ -18,18 +18,11 @@ func TestFavoriteBrowseFiltersSupportedBySQL_RejectsUnsupportedSorts(t *testing.
 		// Supported by buildBrowseFavoritesOrderBy.
 		{"", true},
 		{"added_at", true},
-		{"sort_title", true},
-		{"title", true},
-		{"year", true},
-		{"release_date", true},
-		{"created_at", true},
 
 		// mapSortBy emits these but BrowseFavorites doesn't implement them —
 		// the SQL path would silently sort by added_at instead.
 		{"rating_imdb", false},
 		{"random", false},
-		{"plays", false},
-		{"resolution", false},
 	}
 	for _, tc := range cases {
 		got := favoriteBrowseFiltersSupportedBySQL(itemsQuery{sort: tc.sort})

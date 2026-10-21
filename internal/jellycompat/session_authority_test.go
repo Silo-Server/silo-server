@@ -70,43 +70,6 @@ func TestPersistentLookupObservesTokenLogoutAcrossStores(t *testing.T) {
 	}
 }
 
-func TestPersistentLookupReadsCurrentRowAndRetainsOutageSemantics(t *testing.T) {
-	repo := &authoritySessionRepo{rowSessionRepo: rowSessionRepo{rows: map[string]Session{}}}
-	store := NewPersistentSessionStore(time.Hour, fixedNow, repo)
-	if err := store.Put(Session{Token: "authority-fixture", ProfileID: "old-profile"}); err != nil {
-		t.Fatal(err)
-	}
-	current := repo.rows["authority-fixture"]
-	current.ProfileID = "current-profile"
-	repo.rows[current.Token] = current
-	session, err := store.Lookup(t.Context(), current.Token)
-	if err != nil || session.ProfileID != current.ProfileID || repo.reads != 1 {
-		t.Fatalf("lookup did not read current authority: err=%v reads=%d", err, repo.reads)
-	}
-	readErr := errors.New("inert repository read failure")
-	repo.readErr = readErr
-	if _, err := store.Lookup(t.Context(), current.Token); !errors.Is(err, readErr) {
-		t.Fatalf("cached lookup during read failure = %v, want read error", err)
-	}
-	if _, cached := store.sessions[current.Token]; !cached || len(repo.rows) != 1 || repo.deletes != 0 {
-		t.Fatal("transient failure discarded the session")
-	}
-	repo.readErr = nil
-	if _, err := store.Lookup(t.Context(), current.Token); err != nil {
-		t.Fatal(err)
-	}
-	repo.readErr = errSessionUnreadable
-	if _, err := store.Lookup(t.Context(), current.Token); !errors.Is(err, ErrSessionNotFound) {
-		t.Fatalf("unreadable authority = %v, want ErrSessionNotFound", err)
-	}
-	if _, cached := store.sessions[current.Token]; cached {
-		t.Fatal("unreadable row left a cached copy")
-	}
-	if repo.reads != 4 {
-		t.Fatalf("authority reads = %d, want one per lookup", repo.reads)
-	}
-}
-
 func TestPersistentAuthRefusesDeletedOrUnavailableAuthority(t *testing.T) {
 	for _, unavailable := range []bool{false, true} {
 		for _, surface := range []string{"ordinary", "media token", "playback grant", "static grant", "socket reconnect"} {

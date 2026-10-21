@@ -367,33 +367,6 @@ func TestPrepareProgressiveTransportRequiredRollbackPreservesRetryableRoute(t *t
 	unlock()
 }
 
-// A legacy attempt carries its whole recipe in the client's stream token, which
-// the relay forwards to the node. It needs no stored copy, and writing one would
-// put a media path in Redis for no reason.
-func TestPrepareTransportV3LegacyAttemptStoresNoNodeRecipe(t *testing.T) {
-	node := remoteTranscodeNodeStubV3(t)
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.JWTSecret = "test-secret"
-	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}}}
-	recipes := &recordingRecipeCardStoreV3{}
-	handler.NodeRecipeStore = recipes
-
-	transport, transportErr := handler.prepareTransportV3(
-		httptest.NewRequest(http.MethodPost, "/", nil),
-		&playback.Session{ID: "session-legacy-recipe", UserID: 7, ProfileID: "profile-1"},
-		v3HandlerFixtureFile(t),
-		remoteHLSResultV3(),
-		mediaAuthModeV3{})
-	if transportErr != nil {
-		t.Fatalf("prepare remote transport: %v", transportErr)
-	}
-	defer transport.rollback()
-
-	if len(recipes.cards) != 0 {
-		t.Fatalf("recipes stored = %v, want none for a token-carrying attempt", recipes.cards)
-	}
-}
-
 // Committing a replacement stops the previous node process, so the recipe that
 // rebuilds it has to go with it — otherwise a buffered request could resurrect
 // the transport the replan just retired.

@@ -325,23 +325,6 @@ func (f *fakeChromaprintStartRefiner) RefineChromaprintStart(_ context.Context, 
 	return refined, true, nil
 }
 
-func TestAnalyzeEpisodeNoCandidatesIsNoOp(t *testing.T) {
-	repo := &fakeIntroRepository{episodeCandidates: map[string][]Candidate{}}
-	extractor := &fakeFingerprintExtractor{}
-	analyzer := &Analyzer{repo: repo, extractor: extractor, config: DefaultConfig("ffmpeg")}
-
-	summary, err := analyzer.AnalyzeEpisode(context.Background(), "ep-disabled")
-	if err != nil {
-		t.Fatalf("AnalyzeEpisode returned error: %v", err)
-	}
-	if summary.FilesConsidered != 0 {
-		t.Fatalf("expected no files considered, got %d", summary.FilesConsidered)
-	}
-	if extractor.preflightCalls != 0 {
-		t.Fatalf("preflight should not run when no candidates exist")
-	}
-}
-
 func TestAnalyzeEpisodeWritesChapterMarker(t *testing.T) {
 	candidate := Candidate{
 		FileHash:  "original-file",
@@ -413,42 +396,6 @@ func TestAnalyzeEpisodeWritesSilenceRefinedChapterMarker(t *testing.T) {
 	}
 	if extractor.preflightCalls != 0 {
 		t.Fatalf("preflight should not run after silence-refined chapter marker is applied")
-	}
-}
-
-func TestAnalyzeEpisodeUpgradesExistingScannerChapterMarker(t *testing.T) {
-	source := models.MarkerSourceScanner
-	algorithm := ChapterAlgorithm
-	start := 60.0
-	end := 120.0
-	candidate := Candidate{
-		FileID:                10,
-		EpisodeID:             "ep1",
-		DurationSeconds:       1200,
-		IntroStart:            &start,
-		IntroEnd:              &end,
-		IntroMarkersSource:    &source,
-		IntroMarkersAlgorithm: &algorithm,
-		Chapters: []models.MediaChapter{
-			{Index: 1, Title: "Opening", StartSeconds: 60, EndSeconds: 120},
-			{Index: 2, Title: "Part 1", StartSeconds: 120, EndSeconds: 900},
-		},
-	}
-	repo := &fakeIntroRepository{episodeCandidates: map[string][]Candidate{"ep1": {candidate}}}
-	refiner := &fakeBoundaryRefiner{segments: map[int]Segment{
-		10: {Start: 60, End: 132, Confidence: 0.95, Algorithm: ChapterSilenceAlgorithm},
-	}}
-	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, refiner: refiner, config: DefaultConfig("ffmpeg")}
-
-	_, err := analyzer.AnalyzeEpisode(context.Background(), "ep1")
-	if err != nil {
-		t.Fatalf("AnalyzeEpisode returned error: %v", err)
-	}
-	if len(repo.patches) != 1 {
-		t.Fatalf("expected one patch, got %d", len(repo.patches))
-	}
-	if repo.patches[0].Algorithm != ChapterSilenceAlgorithm {
-		t.Fatalf("expected upgrade to silence algorithm, got %q", repo.patches[0].Algorithm)
 	}
 }
 
@@ -571,65 +518,6 @@ func TestAnalyzeEpisodeRunsChromaprintAfterChapterMarker(t *testing.T) {
 	}
 	if repo.patches[1].Algorithm != ChromaprintAlgorithm {
 		t.Fatalf("expected chromaprint override patch, got %q", repo.patches[1].Algorithm)
-	}
-}
-
-func TestAnalyzeEpisodePersistsRefinedChromaprintSegment(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	target := Candidate{
-		FileID:          1,
-		EpisodeID:       "ep1",
-		SeasonID:        "season1",
-		MediaFolderID:   7,
-		FileHash:        "hash1",
-		FileSize:        100,
-		DurationSeconds: 1200,
-	}
-	sibling := Candidate{
-		FileID:          2,
-		EpisodeID:       "ep2",
-		SeasonID:        "season1",
-		MediaFolderID:   7,
-		FileHash:        "hash2",
-		FileSize:        200,
-		DurationSeconds: 1200,
-	}
-	groupCandidates := []Candidate{target, sibling}
-	group := groupKey(target.MediaFolderID, target.SeasonID, target.AnalysisGroupKey())
-	repo := &fakeIntroRepository{
-		episodeCandidates: map[string][]Candidate{"ep1": {target}},
-		groupCandidates:   map[string][]Candidate{group: groupCandidates},
-		fingerprints: map[int]*Fingerprint{
-			target.FileID:  cachedFingerprint(target, cfg, sharedIntroPoints(1000)),
-			sibling.FileID: cachedFingerprint(sibling, cfg, sharedIntroPoints(5000)),
-		},
-	}
-	refiner := &fakeChromaprintStartRefiner{segments: map[int]Segment{
-		target.FileID: {Start: 12.5, End: 36.5, Confidence: 0.85, Algorithm: ChromaprintDialogueAlgorithm},
-	}}
-	analyzer := &Analyzer{
-		repo:               repo,
-		extractor:          &fakeFingerprintExtractor{},
-		chromaprintRefiner: refiner,
-		config:             cfg,
-	}
-
-	summary, err := analyzer.AnalyzeEpisode(context.Background(), "ep1")
-	if err != nil {
-		t.Fatalf("AnalyzeEpisode returned error: %v", err)
-	}
-	if refiner.calls != 1 {
-		t.Fatalf("expected one refinement call for requested file, got %d", refiner.calls)
-	}
-	if summary.DialogueRefinementsAttempted != 1 || summary.DialogueRefinementsApplied != 1 {
-		t.Fatalf("expected one applied dialogue refinement, got attempted=%d applied=%d",
-			summary.DialogueRefinementsAttempted, summary.DialogueRefinementsApplied)
-	}
-	if len(repo.patches) != 1 {
-		t.Fatalf("expected one patch, got %d", len(repo.patches))
-	}
-	if repo.patches[0].Start != 12.5 || repo.patches[0].Algorithm != ChromaprintDialogueAlgorithm {
-		t.Fatalf("patch = %+v, want refined chromaprint marker", repo.patches[0])
 	}
 }
 

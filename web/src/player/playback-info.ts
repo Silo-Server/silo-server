@@ -10,7 +10,7 @@ import {
   mentionsAtmos,
 } from "@/lib/mediaFormat";
 import { videoRangeLabel } from "@/lib/videoRange";
-import type { DeliveryV3, EffectiveRecipeV3, PlanV3, SourceDescriptorV3 } from "./protocol-v3";
+import type { DeliveryV3, PlanV3 } from "./protocol-v3";
 import {
   QUALITY_ORIGINAL_V3,
   normalizeQualityPreferenceV3,
@@ -197,66 +197,19 @@ export function qualityOptionsFromPlanV3(plan: PlanV3): QualityOption[] {
 }
 
 /**
- * Resolves a stored preference onto the menu entry that implements it in the
- * current plan. Auto and the legacy source labels light Auto. Plain
- * 2160p/1080p/720p preferences use the ladder's Medium bitrate; when that
- * resolution cap is at or above the source, the source plays as-is and no row
- * is lit, unless the plan's delivered recipe shows a bitrate cap reduced it.
- * Auto stays unlit so the viewer can still switch to it.
+ * The menu entry the current plan delivers. An auto preference, including the
+ * legacy source labels, lights Auto. Any other preference lights the entry the
+ * server names as the plan's `active_quality`, or none when the plan delivers
+ * no entry on this menu, so Auto stays selectable.
  */
 export function resolveActiveQualityOptionId(
   options: QualityOption[],
   preference: string,
-  delivered?: EffectiveRecipeV3,
-  source?: Pick<SourceDescriptorV3, "height" | "bitrate_kbps">,
+  activeQuality?: string,
 ): string | null {
   if (options.length === 0) return null;
-
-  const normalized = normalizeQualityPreferenceV3(preference).toLowerCase();
-  const exact = options.find((option) => option.id.toLowerCase() === normalized);
-  if (exact) return exact.id;
-
-  const aliasHeight = qualityPreferenceHeight(normalized);
-  if (aliasHeight === null) return null;
-
-  // The planner preserves a source that fits the cap, even when the ladder
-  // also publishes same-height rungs below the source bitrate. A bitrate cap,
-  // the viewer's or the server's, can still force a transcode the ladder does
-  // not show; the delivered bitrate reveals it.
-  const sourceHeight = source?.height;
-  const sourceKbps = source?.bitrate_kbps;
-  const deliveredKbps = delivered?.bitrate_kbps;
-  const deliveredHeight = delivered?.height;
-  // A smaller delivered frame shows a reduction even when the source bitrate
-  // is unknown.
-  const capped =
-    (isPositive(deliveredKbps) && isPositive(sourceKbps) && deliveredKbps < sourceKbps) ||
-    (isPositive(deliveredHeight) && isPositive(sourceHeight) && deliveredHeight < sourceHeight);
-  if (isPositive(sourceHeight) && !capped && sourceHeight <= aliasHeight) {
-    return null;
-  }
-
-  // Otherwise the planner encodes at the Medium bitrate of a ladder class: the
-  // preferred one, or a lower one a bitrate cap chose. The delivered frame
-  // names the class; without it, assume the preferred one.
-  const classHeight = ladderClassHeight(delivered?.width, delivered?.height) ?? aliasHeight;
-  const rungId = classMediumRungId(classHeight);
-  return options.find((option) => option.id === rungId)?.id ?? null;
-}
-
-/**
- * The menu rung that encodes at a ladder class's Medium bitrate. The 540p
- * class, which a low bitrate cap can choose, has no menu rung.
- */
-function classMediumRungId(classHeight: number): string | null {
-  switch (classHeight) {
-    case 480:
-      return "480p";
-    case 540:
-      return null;
-    default:
-      return `${classHeight}p-medium`;
-  }
+  if (normalizeQualityPreferenceV3(preference) === "auto") return "auto";
+  return options.find((option) => option.id === activeQuality)?.id ?? null;
 }
 
 /**
@@ -271,25 +224,25 @@ export function plainResolutionLabel(preference: string): string | null {
 
 /**
  * The next quality rung below what the viewer receives now, for a viewer whose
- * connection cannot keep up. An explicit rung steps down from itself; Auto
- * steps down from the delivered bitrate, or to the top transcode rung when a
- * copy delivery reports none.
+ * connection cannot keep up. The step is from the lower of the lit rung's
+ * bitrate and the delivered one, since a cap can encode a lit rung below its
+ * listed rate. With neither, a copy delivery steps to the top transcode rung.
  */
 export function lowerQualityOption(
   options: QualityOption[],
   preference: string,
-  delivered?: EffectiveRecipeV3,
-  source?: Pick<SourceDescriptorV3, "height" | "bitrate_kbps">,
+  activeQuality?: string,
+  deliveredBitrateKbps?: number,
 ): QualityOption | null {
   const rungs = options
     .filter((option) => option.id !== "auto" && option.bitrateKbps > 0)
     .sort((a, b) => b.bitrateKbps - a.bitrateKbps);
-  const activeId = resolveActiveQualityOptionId(options, preference, delivered, source);
-  const deliveredBitrateKbps = delivered?.bitrate_kbps;
+  const activeId = resolveActiveQualityOptionId(options, preference, activeQuality);
   const active = rungs.find((option) => option.id === activeId);
-  const ceiling =
-    active?.bitrateKbps ??
-    (deliveredBitrateKbps && deliveredBitrateKbps > 0 ? deliveredBitrateKbps : Infinity);
+  const ceiling = Math.min(
+    active?.bitrateKbps ?? Infinity,
+    isPositive(deliveredBitrateKbps) ? deliveredBitrateKbps : Infinity,
+  );
   return rungs.find((option) => option.bitrateKbps < ceiling) ?? null;
 }
 
@@ -311,29 +264,6 @@ function qualityPreferenceHeight(preference: string): number | null {
     default:
       return null;
   }
-}
-
-// The server's bitrate ladder classes (bitrateLadder), smallest first.
-const LADDER_CLASS_BOXES = [
-  { width: 854, height: 480 },
-  { width: 960, height: 540 },
-  { width: 1280, height: 720 },
-  { width: 1920, height: 1080 },
-  { width: 3840, height: 2160 },
-] as const;
-
-/**
- * The ladder class an encoded frame belongs to: the smallest class box that
- * holds it, as the server's ladderClassForSize decides. A 1280x688 encode is
- * 720p and a 1920x800 scope encode is 1080p.
- */
-function ladderClassHeight(width?: number, height?: number): number | null {
-  if (!isPositive(height)) return null;
-  const box = LADDER_CLASS_BOXES.find(
-    (candidate) => height <= candidate.height && (!isPositive(width) || width <= candidate.width),
-  );
-  // A frame larger than every box is in the largest class.
-  return box?.height ?? 2160;
 }
 
 // Quality-menu bitrate label: Mbps with collapsed integers ("8 Mbps", not

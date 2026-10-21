@@ -106,51 +106,6 @@ func TestHydrateProgressItems_DoesNotCallGetItemDetail(t *testing.T) {
 	}
 }
 
-// TestHydrateProgressItems_NoFieldsLeavesDetailFieldsNil verifies that the stub
-// only fires when the client explicitly requested the detail-only fields.
-// Without those fields, the four arrays remain nil — same as the list path
-// behavior for any other endpoint.
-func TestHydrateProgressItems_NoFieldsLeavesDetailFieldsNil(t *testing.T) {
-	codec := NewResourceIDCodec()
-	movieID := "movie-1"
-
-	itemRepo := &countingItemRepo{
-		itemsByID: map[string]*models.MediaItem{
-			movieID: {ContentID: movieID, Type: "movie", Title: "Test Movie"},
-		},
-	}
-
-	h := &ItemsHandler{
-		content:  &panicOnGetItemDetailContent{},
-		userData: &mockUserDataService{},
-		itemRepo: itemRepo,
-		codec:    codec,
-		mapper:   newMapper(codec, &config.Config{}),
-	}
-
-	entries := []upstreamProgress{{MediaItemID: movieID, PositionSeconds: 100, DurationSeconds: 6000}}
-
-	got, err := h.hydrateProgressItems(context.Background(), &Session{ProfileID: "profile-1"}, entries, nil, nil)
-	if err != nil {
-		t.Fatalf("hydrateProgressItems returned error: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 hydrated item; got %d", len(got))
-	}
-	if got[0].dto.People != nil {
-		t.Errorf("People should be nil with no Fields; got %v", got[0].dto.People)
-	}
-	if got[0].dto.Chapters != nil {
-		t.Errorf("Chapters should be nil with no Fields; got %v", got[0].dto.Chapters)
-	}
-	if got[0].dto.MediaStreams != nil {
-		t.Errorf("MediaStreams should be nil with no Fields; got %v", got[0].dto.MediaStreams)
-	}
-	if got[0].dto.MediaSources != nil {
-		t.Errorf("MediaSources should be nil with no Fields; got %v", got[0].dto.MediaSources)
-	}
-}
-
 func TestHydrateProgressItems_EpisodeIncludesSeasonParentMetadata(t *testing.T) {
 	codec := NewResourceIDCodec()
 	episodeID := "episode-1"

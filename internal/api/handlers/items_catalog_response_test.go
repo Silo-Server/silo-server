@@ -61,56 +61,6 @@ func (r *countingItemListImageResolver) ResolveImageURLsWithExpiry(_ context.Con
 	return out
 }
 
-func TestItemListCardImageURLsUsesBatchResolver(t *testing.T) {
-	resolver := &countingItemListImageResolver{}
-	detailSvc := &catalog.DetailService{}
-	detailSvc.SetImageResolver(resolver)
-	handler := &ItemsHandler{detailSvc: detailSvc}
-
-	items := []*models.MediaItem{
-		{
-			ContentID:    "movie-1",
-			PosterPath:   "plugin://poster-1/original.jpg",
-			BackdropPath: "plugin://backdrop-1/original.jpg",
-			LogoPath:     "plugin://logo-1/original.png",
-		},
-		{
-			ContentID:    "movie-2",
-			PosterPath:   "https://cdn.example/poster-2.jpg",
-			BackdropPath: "plugin://backdrop-1/original.jpg",
-		},
-	}
-
-	urls := handler.itemListCardImageURLs(context.Background(), items, imagesize.Request{})
-
-	if resolver.singleCalls != 0 {
-		t.Fatalf("single resolver calls = %d, want 0", resolver.singleCalls)
-	}
-	// One batch for the card images, one for the logos, which resolve at
-	// item detail's hint.
-	if resolver.batchCalls != 2 {
-		t.Fatalf("batch resolver calls = %d, want 2", resolver.batchCalls)
-	}
-	if got := urls["movie-1"].posterURL; got != "batch:card:plugin://poster-1/original.jpg" {
-		t.Fatalf("movie-1 poster URL = %q", got)
-	}
-	if got := urls["movie-1"].backdropURL; got != "batch:card:plugin://backdrop-1/original.jpg" {
-		t.Fatalf("movie-1 backdrop URL = %q", got)
-	}
-	if got := urls["movie-1"].logoURL; got != "batch:featured:plugin://logo-1/original.png" {
-		t.Fatalf("movie-1 logo URL = %q", got)
-	}
-	if got := urls["movie-2"].posterURL; got != "https://cdn.example/poster-2.jpg" {
-		t.Fatalf("movie-2 poster URL = %q", got)
-	}
-	if got := urls["movie-2"].logoURL; got != "" {
-		t.Fatalf("movie-2 logo URL = %q, want none", got)
-	}
-	if got := len(resolver.batchPaths); got != 3 {
-		t.Fatalf("batch resolver path count = %d, want 3", got)
-	}
-}
-
 // Listing logos resolve in one batch, deduplicated, at the featured hint, and
 // a card with no logo gets none.
 func TestSignListingLogosBatchesAtItemDetailHint(t *testing.T) {

@@ -130,7 +130,7 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 			return
 		}
 
-		// The narrower per-IP and per-key budgets run before the shared
+		// The narrower per-IP, per-key and account budgets run before the shared
 		// global one, as in AuthEndpointHandler, so a client over its own
 		// limit cannot spend server-wide capacity and get unrelated clients
 		// rejected. A request the global check then rejects keeps the
@@ -183,6 +183,10 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 				writeRateLimitResponse(w, result, reject)
 				return
 			}
+		}
+
+		if !mw.allowAccount(w, r, cfg, reject) {
+			return
 		}
 
 		// Check global limiter (per-second only — spec says no per-minute global limit).
@@ -271,6 +275,10 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 				}
 			}
 
+			if !mw.allowAccount(w, r, cfg, reject) {
+				return
+			}
+
 			globalRate := globalRateFor(cfg)
 			globalResult := mw.global.Allow(r.Context(), "global", globalRate)
 			if !globalResult.Allowed {
@@ -281,6 +289,22 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// allowAccount uses an authenticated account identity, independent of forwarding
+// headers, profiles and credentials. Distinct accounts behind a proxy keep
+// independent account budgets. With no authenticated identity, the existing
+// source/global checks still run.
+func (mw *Middleware) allowAccount(w http.ResponseWriter, r *http.Request, cfg Config, reject RejectBodyWriter) bool {
+	accountID := accountFromContext(r.Context())
+	if accountID <= 0 {
+		return true
+	}
+	result := mw.perKey.Allow(r.Context(), fmt.Sprintf("account:%d", accountID), accountRate(cfg))
+	if !result.Allowed {
+		writeRateLimitResponse(w, result, reject)
+	}
+	return result.Allowed
 }
 
 // authPeerBudgetMultiplier sizes the budget that every forwarded client behind
@@ -294,6 +318,22 @@ func authPeerRate(endpointRate Rate) Rate {
 		RequestsPerSecond: min(endpointRate.RequestsPerSecond*authPeerBudgetMultiplier, MaxRequestsPerWindow),
 		RequestsPerMinute: min(endpointRate.RequestsPerMinute*authPeerBudgetMultiplier, MaxRequestsPerWindow),
 		Burst:             min(endpointRate.Burst, MaxBurst/authPeerBudgetMultiplier) * authPeerBudgetMultiplier,
+	}
+}
+
+// accountBudgetMultiplier sizes the allowance every device, profile and key of
+// one account shares, in per-address budgets. One login commonly spans several
+// networks (a home, a phone on cellular, family elsewhere), and every address is
+// already capped at one per-address budget, so a single busy address or
+// integration can spend at most a quarter of its account. A client rotating
+// forwarding headers gets no more than this.
+const accountBudgetMultiplier = 4
+
+func accountRate(cfg Config) Rate {
+	return Rate{
+		RequestsPerSecond: min(cfg.IPReqPerSecond*accountBudgetMultiplier, MaxRequestsPerWindow),
+		RequestsPerMinute: min(cfg.IPReqPerMinute*accountBudgetMultiplier, MaxRequestsPerWindow),
+		Burst:             min(cfg.IPBurst, MaxBurst/accountBudgetMultiplier) * accountBudgetMultiplier,
 	}
 }
 

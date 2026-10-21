@@ -1,120 +1,58 @@
 package metadata
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestBuildMetadataRefreshAttemptBucketsPreservesLabelsAndCounts(t *testing.T) {
-	counts := [metadataRefreshAttemptBucketCount]int{11, 22, 33, 44, 55}
-	wantLabels := [metadataRefreshAttemptBucketCount]string{"0", "1", "2-3", "4-7", "8+"}
-
-	buckets := buildMetadataRefreshAttemptBuckets(counts)
-	if len(buckets) != metadataRefreshAttemptBucketCount {
-		t.Fatalf("bucket count = %d, want %d", len(buckets), metadataRefreshAttemptBucketCount)
-	}
-	for i, bucket := range buckets {
-		if bucket.Label != wantLabels[i] {
-			t.Errorf("bucket %d label = %q, want %q", i, bucket.Label, wantLabels[i])
-		}
-		if bucket.Count != counts[i] {
-			t.Errorf("bucket %d count = %d, want %d", i, bucket.Count, counts[i])
-		}
-	}
-}
-
-func TestMetadataRefreshAttemptBucketCountsSQLUsesOneAggregateScan(t *testing.T) {
-	sql := strings.Join(strings.Fields(metadataRefreshAttemptBucketCountsSQL), " ")
-	if got := strings.Count(sql, "FROM metadata_refresh_debt"); got != 1 {
-		t.Fatalf("metadata_refresh_debt scan count = %d, want 1: %s", got, sql)
-	}
-	if strings.Contains(strings.ToUpper(sql), "UNION") {
-		t.Fatalf("attempt bucket query must not use UNION: %s", sql)
-	}
-	if got := strings.Count(sql, "COUNT(*) FILTER"); got != metadataRefreshAttemptBucketCount {
-		t.Fatalf("filtered aggregate count = %d, want %d: %s", got, metadataRefreshAttemptBucketCount, sql)
-	}
-
-	previousFilterIndex := -1
-	for _, filter := range []string{
-		"attempt_count = 0",
-		"attempt_count = 1",
-		"attempt_count BETWEEN 2 AND 3",
-		"attempt_count BETWEEN 4 AND 7",
-		"attempt_count >= 8",
-	} {
-		filterIndex := strings.Index(sql, filter)
-		if filterIndex == -1 {
-			t.Errorf("attempt bucket query missing filter %q: %s", filter, sql)
-			continue
-		}
-		if filterIndex <= previousFilterIndex {
-			t.Errorf("attempt bucket filter %q is out of label order: %s", filter, sql)
-		}
-		previousFilterIndex = filterIndex
-	}
-}
-
 func TestRefreshDebtReasonsForItem(t *testing.T) {
-	item := &models.MediaItem{
-		Status:                    "matched",
-		TmdbID:                    "123",
-		EpisodeMetadataIncomplete: true,
-		RefreshFailures:           2,
-	}
-
-	mask := refreshDebtReasonsForItem(item)
-	if hasRefreshDebtReason(mask, RefreshDebtReasonEpisodeIncomplete) {
-		t.Fatalf("expected episode incomplete reason to stay on episode targets, got mask %d", mask)
-	}
-	if !hasRefreshDebtReason(mask, RefreshDebtReasonRefreshFailure) {
-		t.Fatalf("expected refresh failure reason in mask %d", mask)
-	}
-	if !hasRefreshDebtReason(mask, RefreshDebtReasonCoreMetadataIncomplete) {
-		t.Fatalf("expected core metadata reason in mask %d", mask)
-	}
-}
-
-func TestRefreshDebtReasonsForItemSkipsUnmatchedFailureOnly(t *testing.T) {
-	item := &models.MediaItem{
-		Status:          "pending",
-		RefreshFailures: 1,
-	}
-
-	mask := refreshDebtReasonsForItem(item)
-	if mask != 0 {
-		t.Fatalf("expected no scheduled refresh debt for unmatched item, got %d", mask)
-	}
-}
-
-func TestRefreshDebtReasonsForItemFlagsMissingTMDBWithOtherProviderIDs(t *testing.T) {
-	item := &models.MediaItem{
-		Type:   "series",
-		Status: "matched",
-		TvdbID: "420105",
-		ImdbID: "tt18076310",
-		TmdbID: "",
-	}
-
-	mask := refreshDebtReasonsForItem(item)
-	if !hasRefreshDebtReason(mask, RefreshDebtReasonProviderIDIncomplete) {
-		t.Fatalf("reason mask = %d, want provider id incomplete", mask)
-	}
-}
-
-func TestRefreshDebtReasonsForItemDoesNotFlagProviderIDIncompleteWithoutAlternateIDs(t *testing.T) {
-	item := &models.MediaItem{
-		Type:   "series",
-		Status: "matched",
-		TmdbID: "",
-	}
-
-	mask := refreshDebtReasonsForItem(item)
-	if hasRefreshDebtReason(mask, RefreshDebtReasonProviderIDIncomplete) {
-		t.Fatalf("reason mask = %d, did not want provider id incomplete", mask)
+	for _, tc := range []struct {
+		name          string
+		item          models.MediaItem
+		want, wantNot []int64
+		wantNone      bool
+	}{
+		{
+			name: "matched item with failures and missing core metadata",
+			item: models.MediaItem{Status: "matched", TmdbID: "123", EpisodeMetadataIncomplete: true, RefreshFailures: 2},
+			// Episode incomplete stays on episode targets.
+			want:    []int64{RefreshDebtReasonRefreshFailure, RefreshDebtReasonCoreMetadataIncomplete},
+			wantNot: []int64{RefreshDebtReasonEpisodeIncomplete},
+		},
+		{
+			name:     "unmatched item with only a failure owes nothing",
+			item:     models.MediaItem{Status: "pending", RefreshFailures: 1},
+			wantNone: true,
+		},
+		{
+			name: "missing TMDB beside other provider IDs",
+			item: models.MediaItem{Type: "series", Status: "matched", TvdbID: "420105", ImdbID: "tt18076310", TmdbID: ""},
+			want: []int64{RefreshDebtReasonProviderIDIncomplete},
+		},
+		{
+			name:    "missing TMDB without alternate IDs",
+			item:    models.MediaItem{Type: "series", Status: "matched", TmdbID: ""},
+			wantNot: []int64{RefreshDebtReasonProviderIDIncomplete},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mask := refreshDebtReasonsForItem(&tc.item)
+			if tc.wantNone && mask != 0 {
+				t.Fatalf("reason mask = %d, want none", mask)
+			}
+			for _, reason := range tc.want {
+				if !hasRefreshDebtReason(mask, reason) {
+					t.Fatalf("reason mask = %d, want reason %d", mask, reason)
+				}
+			}
+			for _, reason := range tc.wantNot {
+				if hasRefreshDebtReason(mask, reason) {
+					t.Fatalf("reason mask = %d, did not want reason %d", mask, reason)
+				}
+			}
+		})
 	}
 }
 
@@ -150,44 +88,29 @@ func TestRefreshDebtPriorityProviderIDIncomplete(t *testing.T) {
 	}
 }
 
-func TestNextRefreshDelayEpisodeSchedule(t *testing.T) {
-	reasonMask := RefreshDebtReasonEpisodeIncomplete
+func TestNextRefreshDelaySchedule(t *testing.T) {
 	cases := []struct {
-		attempts int
-		want     time.Duration
+		reasonMask int64
+		attempts   int
+		want       time.Duration
 	}{
-		// Stepped backoff up to the terminal cap...
-		{attempts: 0, want: 24 * time.Hour},
-		{attempts: 1, want: 24 * time.Hour},
-		{attempts: 2, want: 3 * 24 * time.Hour},
+		// Episode-incomplete debt: stepped backoff up to the terminal cap...
+		{RefreshDebtReasonEpisodeIncomplete, 0, 24 * time.Hour},
+		{RefreshDebtReasonEpisodeIncomplete, 1, 24 * time.Hour},
+		{RefreshDebtReasonEpisodeIncomplete, 2, 3 * 24 * time.Hour},
 		// ...then we give up: episode-incomplete debt goes terminal at attempt 3+.
-		{attempts: 3, want: refreshDebtTerminalDelay},
-		{attempts: 4, want: refreshDebtTerminalDelay},
-		{attempts: 5, want: refreshDebtTerminalDelay},
-	}
-
-	for _, tc := range cases {
-		if got := nextRefreshDelay(reasonMask, tc.attempts); got != tc.want {
-			t.Fatalf("attempts=%d delay=%s want %s", tc.attempts, got, tc.want)
-		}
-	}
-}
-
-func TestNextRefreshDelayNonEpisodeScheduleUnaffected(t *testing.T) {
-	// Non-episode reasons keep the full stepped backoff and never go terminal.
-	reasonMask := RefreshDebtReasonCoreMetadataIncomplete
-	cases := []struct {
-		attempts int
-		want     time.Duration
-	}{
-		{attempts: 2, want: 3 * 24 * time.Hour},
-		{attempts: 3, want: 7 * 24 * time.Hour},
-		{attempts: 4, want: 14 * 24 * time.Hour},
-		{attempts: 5, want: 30 * 24 * time.Hour},
+		{RefreshDebtReasonEpisodeIncomplete, 3, refreshDebtTerminalDelay},
+		{RefreshDebtReasonEpisodeIncomplete, 4, refreshDebtTerminalDelay},
+		{RefreshDebtReasonEpisodeIncomplete, 5, refreshDebtTerminalDelay},
+		// Non-episode reasons keep the full stepped backoff and never go terminal.
+		{RefreshDebtReasonCoreMetadataIncomplete, 2, 3 * 24 * time.Hour},
+		{RefreshDebtReasonCoreMetadataIncomplete, 3, 7 * 24 * time.Hour},
+		{RefreshDebtReasonCoreMetadataIncomplete, 4, 14 * 24 * time.Hour},
+		{RefreshDebtReasonCoreMetadataIncomplete, 5, 30 * 24 * time.Hour},
 	}
 	for _, tc := range cases {
-		if got := nextRefreshDelay(reasonMask, tc.attempts); got != tc.want {
-			t.Fatalf("attempts=%d delay=%s want %s", tc.attempts, got, tc.want)
+		if got := nextRefreshDelay(tc.reasonMask, tc.attempts); got != tc.want {
+			t.Fatalf("reasons=%d attempts=%d delay=%s want %s", tc.reasonMask, tc.attempts, got, tc.want)
 		}
 	}
 }

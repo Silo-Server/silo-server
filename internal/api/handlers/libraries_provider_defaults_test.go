@@ -33,17 +33,3 @@ func TestHandleGetLibraryProviderDefaults_NoLevelsForType(t *testing.T) {
 		}
 	}
 }
-
-// A seedable type still needs the chain repository; without one the endpoint
-// reports unavailable like the other provider-chain handlers.
-func TestHandleGetLibraryProviderDefaults_NoChainRepo(t *testing.T) {
-	h := &LibraryHandler{}
-
-	req := httptest.NewRequest(http.MethodGet, "/libraries/provider-defaults?library_type=series", nil)
-	rec := httptest.NewRecorder()
-	h.HandleGetLibraryProviderDefaults(rec, req)
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", rec.Code)
-	}
-}

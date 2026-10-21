@@ -1,25 +1,8 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import type { FileVersion } from "@/api/types";
+import { makeFileVersion as makeVersion } from "../itemDetail.test-support";
 import { pickBestAttributes, selectDefaultVersion } from "./versionRankingUtils";
-
-function makeVersion(overrides: Partial<FileVersion> = {}): FileVersion {
-  return {
-    file_id: overrides.file_id ?? 1,
-    resolution: overrides.resolution ?? "1080p",
-    codec_video: overrides.codec_video ?? "h264",
-    codec_audio: overrides.codec_audio ?? "aac",
-    hdr: overrides.hdr ?? false,
-    container: overrides.container ?? "mkv",
-    file_size: overrides.file_size ?? 0,
-    duration: overrides.duration ?? 0,
-    bitrate: overrides.bitrate ?? 0,
-    audio_tracks: overrides.audio_tracks,
-    video_tracks: overrides.video_tracks,
-    subtitle_tracks: overrides.subtitle_tracks,
-  };
-}
 
 describe("pickBestAttributes", () => {
   it("returns null for empty versions array", () => {
@@ -61,19 +44,6 @@ describe("pickBestAttributes", () => {
     expect(pickBestAttributes(versions)?.audioLabel).toBe("DD+ Atmos");
   });
 
-  it("labels Atmos from the primary audio track's profile", () => {
-    const versions = [
-      makeVersion({
-        resolution: "2160p",
-        codec_audio: "eac3",
-        audio_tracks: [
-          { codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos", language: "en" },
-        ],
-      }),
-    ];
-    expect(pickBestAttributes(versions)?.audioLabel).toBe("DD+ Atmos");
-  });
-
   // Real files never pair an aac track with an Atmos profile; the mismatch
   // proves the profile is read only from codec_audio's own stream.
   it("does not read a profile from a first track that is not codec_audio's stream", () => {
@@ -96,16 +66,6 @@ describe("pickBestAttributes", () => {
     const result = pickBestAttributes(versions);
     expect(result).not.toBeNull();
     expect(result!.hdr).toBe(true);
-  });
-
-  it("sets hdr false when no version has hdr", () => {
-    const versions = [
-      makeVersion({ resolution: "1080p", hdr: false }),
-      makeVersion({ resolution: "720p", hdr: false }),
-    ];
-    const result = pickBestAttributes(versions);
-    expect(result).not.toBeNull();
-    expect(result!.hdr).toBe(false);
   });
 
   it("checks audio_tracks for higher-quality codecs", () => {

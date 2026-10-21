@@ -13,6 +13,7 @@ import {
   playbackControlSocketURL,
   PLAYBACK_CONTROL_SOCKET_PROTOCOL,
 } from "./playbackControlSocket";
+import { stubPendingFetch } from "./pendingFetch.test-support";
 
 const ticket = "b".repeat(43);
 function response(body: unknown, status = 200) {
@@ -107,16 +108,7 @@ it("throws the server's refusal without retrying and surfaces stale authority fi
 });
 
 it("refuses a delayed credential after the profile changes underneath the mint", async () => {
-  let finish!: (r: Response) => void;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn<typeof globalThis.fetch>().mockImplementation(
-      () =>
-        new Promise<Response>((resolve) => {
-          finish = resolve;
-        }),
-    ),
-  );
+  const { finish } = stubPendingFetch();
   const pending = mintPlaybackControlSocketTicket("s-1", "inst-1");
   setProfileId("someone-else");
   finish(response(okTicket));

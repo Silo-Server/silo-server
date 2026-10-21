@@ -1,17 +1,13 @@
 package transcodenode
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -27,25 +23,16 @@ func TestHEVCNodeReportsCPUEncoderWithHardwareToneMapping(t *testing.T) {
 			tracker := newBlockingSessionTracker()
 			server.tracker = tracker
 			defer close(tracker.trackRelease)
-			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-			script := "#!/bin/sh\ncase \" $* \" in\n*' -c:v hevc_vaapi '*) exit 1 ;;\n*' -f null '*) exit 0 ;;\nesac\nexec sleep 30\n"
-			if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			server.watcher.Config().Playback.FFmpegPath = ffmpeg
+			ffmpeg := useFakeFFmpeg(t, server, "#!/bin/sh\ncase \" $* \" in\n*' -c:v hevc_vaapi '*) exit 1 ;;\n*' -f null '*) exit 0 ;;\nesac\nexec sleep 30\n")
 			server.watcher.Config().Playback.HWAccel = tonemap.BackendVAAPI
 			server.resolveToneMapRecipeFn = func(_ context.Context, opts *playback.TranscodeOpts) error {
 				opts.HWAccel = tonemap.BackendVAAPI
 				opts.ToneMapFilter = tonemap.HardwareFilterVAAPI
 				return nil
 			}
-			input := filepath.Join(t.TempDir(), "source.mkv")
-			if err := os.WriteFile(input, []byte("source"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			track := nodeToneMapTrack()
-			writeNodeToneMapFFprobe(t, ffmpeg, track)
-			revision := tonemap.RevisionForFile(&models.MediaFile{ID: 1, FileSize: 6, VideoTracks: []models.VideoTrack{track}})
+			input, size := writeNodeSource(t, "source")
+			writeNodeToneMapFFprobe(t, ffmpeg, nodeToneMapTrack())
+			revision := nodeToneMapRevision(size)
 			request := TranscodeStartRequest{
 				SessionID: "encoder-report", InputPath: input, TargetCodecVideo: "hevc", TargetCodecAudio: "aac", SegmentDuration: 2,
 				HWAccel: tonemap.BackendVAAPI, ToneMapPolicy: tonemap.PolicyHardwareOnly, ToneMapMode: tonemap.ModeHardware,
@@ -57,18 +44,17 @@ func TestHEVCNodeReportsCPUEncoderWithHardwareToneMapping(t *testing.T) {
 					SessionID: request.SessionID, InputPath: input, TargetCodecVideo: "hevc", TargetCodecAudio: "aac", SegmentDuration: 2,
 					HWAccel: tonemap.BackendVAAPI, ToneMapPolicy: request.ToneMapPolicy, ToneMapMode: request.ToneMapMode,
 					ToneMapSourceKind: request.ToneMapSourceKind, ToneMapRecipeVersion: request.ToneMapRecipeVersion, ToneMapSourceRevision: revision,
+					FastStart: true,
 				})
 				session, _ = server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), request.SessionID, -1, card)
 				if session == nil {
 					t.Fatal("reconstruction failed")
 				}
-			} else {
-				body, err := json.Marshal(request)
-				if err != nil {
-					t.Fatal(err)
+				if session.Opts().FastStart {
+					t.Fatal("reconstructed node runtime retained fresh-start manifest tuning")
 				}
-				recorder := httptest.NewRecorder()
-				server.handleStart(recorder, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
+			} else {
+				recorder := postStartRequest(t, server, request)
 				if recorder.Code != http.StatusAccepted {
 					t.Fatalf("start failed: %d %s", recorder.Code, recorder.Body.String())
 				}

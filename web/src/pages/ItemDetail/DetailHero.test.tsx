@@ -43,43 +43,20 @@ describe("DetailHero title", () => {
 });
 
 describe("DetailHero artwork revisions", () => {
-  it("treats a changed poster URL as unloaded until that revision finishes loading", () => {
-    const { rerender } = render(<DetailHero title="Blade Runner" posterUrl="/poster.rev-a.webp" />);
-
-    const first = screen.getByRole("img", { name: "Blade Runner" });
-    const firstPlaceholder = screen.getByTestId("detail-hero-poster-placeholder");
-    expect(first).toHaveClass("opacity-0");
-    expect(first).not.toHaveClass("transition-opacity");
-    expect(firstPlaceholder).toHaveClass("opacity-100", "transition-opacity");
-    fireEvent.load(first);
-    expect(first).toHaveClass("opacity-100");
-    expect(firstPlaceholder).toHaveClass("opacity-0");
-
-    rerender(<DetailHero title="Blade Runner" posterUrl="/poster.rev-b.webp" />);
-
-    const replacement = screen.getByRole("img", { name: "Blade Runner" });
-    const replacementPlaceholder = screen.getByTestId("detail-hero-poster-placeholder");
-    expect(replacement).toHaveAttribute("src", "/poster.rev-b.webp");
-    expect(replacement).toHaveClass("opacity-0");
-    expect(replacementPlaceholder).toHaveClass("opacity-100");
-    fireEvent.load(replacement);
-    expect(replacement).toHaveClass("opacity-100");
-    expect(replacementPlaceholder).toHaveClass("opacity-0");
-  });
+  const rev = "3f9a".repeat(16);
+  const signed = (image: string, exp: number, sig: string) =>
+    `/api/v2/artwork/tmdb/movies/78/${image}/w780.${rev}.webp?exp=${exp}&sig=${sig}`;
+  const hero = (exp: number, sig: string) => (
+    <DetailHero
+      title="Blade Runner"
+      posterUrl={signed("poster", exp, sig)}
+      posterThumbhash="poster"
+      backdropUrl={signed("backdrop", exp, sig)}
+      backdropThumbhash="backdrop"
+    />
+  );
 
   it("keeps loaded artwork on screen when only its signature changes", () => {
-    const rev = "3f9a".repeat(16);
-    const signed = (image: string, exp: number, sig: string) =>
-      `/api/v2/artwork/tmdb/movies/78/${image}/w780.${rev}.webp?exp=${exp}&sig=${sig}`;
-    const hero = (exp: number, sig: string) => (
-      <DetailHero
-        title="Blade Runner"
-        posterUrl={signed("poster", exp, sig)}
-        posterThumbhash="poster"
-        backdropUrl={signed("backdrop", exp, sig)}
-        backdropThumbhash="backdrop"
-      />
-    );
     const { container, rerender } = render(hero(1758621600, "aaaa"));
     const poster = screen.getByRole("img", { name: "Blade Runner" });
     const backdrop = container.querySelector<HTMLImageElement>(".hero-backdrop-artwork img")!;
@@ -103,18 +80,6 @@ describe("DetailHero artwork revisions", () => {
   });
 
   it("falls back to the placeholders when a re-signed request fails", () => {
-    const rev = "3f9a".repeat(16);
-    const signed = (image: string, exp: number, sig: string) =>
-      `/api/v2/artwork/tmdb/movies/78/${image}/w780.${rev}.webp?exp=${exp}&sig=${sig}`;
-    const hero = (exp: number, sig: string) => (
-      <DetailHero
-        title="Blade Runner"
-        posterUrl={signed("poster", exp, sig)}
-        posterThumbhash="poster"
-        backdropUrl={signed("backdrop", exp, sig)}
-        backdropThumbhash="backdrop"
-      />
-    );
     const { container, rerender } = render(hero(1758621600, "aaaa"));
     fireEvent.load(screen.getByRole("img", { name: "Blade Runner" }));
     fireEvent.load(container.querySelector<HTMLImageElement>(".hero-backdrop-artwork img")!);

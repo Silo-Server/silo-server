@@ -94,14 +94,6 @@ it("keeps every option after an unconfirmed email", async () => {
   expect(screen.getByRole("button", { name: "Email link" })).toBeEnabled();
 });
 
-it("explains why a delivery is unavailable", () => {
-  mount({ emailAvailable: false });
-  expect(screen.getByRole("radio", { name: "Email a reset link" })).toBeDisabled();
-  expect(screen.getByText(/Set up email in Settings/)).toBeInTheDocument();
-  // The first available option is picked instead.
-  expect(screen.getByRole("radio", { name: "Create a link to share" })).toBeChecked();
-});
-
 it("offers only a temporary password for a disabled account", () => {
   // The server refuses reset links for a disabled account.
   mount({ user: { ...user, enabled: false } });

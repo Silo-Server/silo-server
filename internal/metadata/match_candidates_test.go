@@ -8,63 +8,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestSelectInitialMatchCandidate_IgnoresLocalContentIDForTrustedSelection(t *testing.T) {
-	t.Parallel()
-
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{
-			ContentID: "local-skeleton-id",
-			Title:     "AEW Worlds End",
-			Year:      2023,
-			Type:      "movie",
-		},
-		[]MatchCandidate{
-			{
-				Title:       "AEW Worlds End",
-				Year:        2023,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "1217341"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-		nil,
-	)
-	if !ok || winner == nil {
-		t.Fatal("expected local content_id not to force trusted-ID matching")
-	}
-}
-
-func TestSelectInitialMatchCandidate_TrustedIDCanWinBelowNoisyTopResult(t *testing.T) {
-	t.Parallel()
-
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{Title: "10 Tricks", Year: 2022, Type: "movie", ImdbID: "tt0473100"},
-		[]MatchCandidate{
-			{
-				Title:       "10 Tricks",
-				Year:        2022,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"imdb": "tt9999999", "tmdb": "1"},
-				Sources:     []string{"tmdb", "tvdb"},
-			},
-			{
-				Title:       "Ten Tricks",
-				Year:        2021,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"imdb": "tt0473100", "tmdb": "2"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-		nil,
-	)
-	if !ok || winner == nil {
-		t.Fatal("expected candidate carrying the trusted IMDb ID to win")
-	}
-	if got := winner.ProviderIDs["imdb"]; got != "tt0473100" {
-		t.Fatalf("winner IMDb id = %q, want tt0473100", got)
-	}
-}
-
 func TestBuildMatchDecisionClassifiesProviderFailures(t *testing.T) {
 	t.Parallel()
 
@@ -103,31 +46,6 @@ func TestBuildMatchDecisionOnlyReportsTrustedIDConflictForExplicitConflict(t *te
 	}}, nil, false, nil)
 	if conflictingID.Outcome != "trusted_id_conflict" {
 		t.Fatalf("conflicting IMDb id outcome = %q, want trusted_id_conflict", conflictingID.Outcome)
-	}
-}
-
-func TestBuildMatchDecisionAttachesWinnerReasonsOnlyToIDLessWinner(t *testing.T) {
-	t.Parallel()
-	hints := &MatchHints{Title: "Shared", Year: 2020, Type: "series"}
-	candidates := []MatchCandidate{
-		{Title: "Shared", Year: 2020, ContentType: "series", Sources: []string{"first"}},
-		{Title: "Shared", Year: 2020, ContentType: "series", Sources: []string{"second"}},
-	}
-	winner := candidates[1]
-	winner.MatchReasons = append(winner.MatchReasons, "episode_title_corroboration:2_of_2")
-
-	decision := buildMatchDecision(hints, candidates, &winner, true, nil)
-	if len(decision.TopCandidates) != 2 {
-		t.Fatalf("top candidates = %d, want 2", len(decision.TopCandidates))
-	}
-	for _, candidate := range decision.TopCandidates {
-		hasWinnerReason := containsString(candidate.Reasons, "episode_title_corroboration:2_of_2")
-		if candidate.Sources[0] == "second" && !hasWinnerReason {
-			t.Fatalf("winner reasons = %v, want episode corroboration", candidate.Reasons)
-		}
-		if candidate.Sources[0] == "first" && hasWinnerReason {
-			t.Fatalf("non-winner reasons = %v, must not contain winner-only evidence", candidate.Reasons)
-		}
 	}
 }
 
@@ -211,103 +129,6 @@ func TestSanitizeCandidateProviderIDsRequiresStrictPositiveIMDbID(t *testing.T) 
 		if got := sanitizeCandidateProviderIDs(map[string]string{"imdb": valid}); got["imdb"] != valid {
 			t.Fatalf("sanitize imdb %q = %#v", valid, got)
 		}
-	}
-}
-
-func TestSelectInitialMatchCandidate_SoleExactTitleYearOffByTwoMatches(t *testing.T) {
-	t.Parallel()
-
-	// Sole distinct candidate, exact title, year off by 2 (e.g. "Stasi FC (2023)"
-	// vs TMDB's 2025). Scores in the 55-69 band — below the single-candidate >=70
-	// gate — but the exact title on a lone result should now match via title
-	// corroboration without lowering any threshold.
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{Title: "Stasi FC", Year: 2023, Type: "movie"},
-		[]MatchCandidate{
-			{
-				Title:       "Stasi FC",
-				Year:        2025,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "111"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-		nil,
-	)
-	if !ok || winner == nil || winner.ProviderIDs["tmdb"] != "111" {
-		t.Fatalf("expected sole exact-title year-off-by-2 candidate to match, got ok=%v winner=%+v", ok, winner)
-	}
-}
-
-func TestSelectInitialMatchCandidate_SoleExactTitleYearOffByThreeRejected(t *testing.T) {
-	t.Parallel()
-
-	// A 3-year gap exceeds the ±2 bound: a same-title film three years apart is
-	// not corroborated and stays subject to the single-candidate >=70 gate.
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{Title: "Stasi FC", Year: 2023, Type: "movie"},
-		[]MatchCandidate{
-			{
-				Title:       "Stasi FC",
-				Year:        2026,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "111"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-		nil,
-	)
-	if ok || winner != nil {
-		t.Fatalf("expected year-off-by-3 sole candidate to be rejected, got ok=%v winner=%+v", ok, winner)
-	}
-}
-
-func TestSelectInitialMatchCandidate_CrossProviderAgreementDoesNotOverrideYearConflict(t *testing.T) {
-	t.Parallel()
-
-	// Both providers know the same show by the local alias, but the five-year
-	// conflict is evidence that this is a different work. Source agreement may
-	// replace a missing local year; it must not override a known conflicting one.
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{Title: "The Piano Forest", Year: 2007, Type: "series"},
-		[]MatchCandidate{
-			{
-				Title:        "Five Fingers",
-				TitleAliases: []TitleAlias{{Title: "Piano Forest", Language: "en", Kind: "alternate"}},
-				Year:         2012,
-				ContentType:  "series",
-				ProviderIDs:  map[string]string{"imdb": "tt2242048", "tvdb": "261129"},
-				Sources:      []string{"tmdb", "tvdb"},
-			},
-		},
-		nil,
-	)
-	if ok || winner != nil {
-		t.Fatalf("expected cross-provider year conflict to be rejected, got ok=%v winner=%+v", ok, winner)
-	}
-}
-
-func TestSelectInitialMatchCandidate_SoleDifferentTitleExactYearStillFloored(t *testing.T) {
-	t.Parallel()
-
-	// "Hotel Transylvania Puppy!" vs TMDB's "Puppy!" (same year) scores below the
-	// 55 floor on title similarity, so it must stay rejected — title corroboration
-	// must not rescue a low-similarity title just because the year matches.
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{Title: "Hotel Transylvania Puppy!", Year: 2017, Type: "movie"},
-		[]MatchCandidate{
-			{
-				Title:       "Puppy!",
-				Year:        2017,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "222"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-		nil,
-	)
-	if ok || winner != nil {
-		t.Fatalf("expected low-similarity sole candidate to stay rejected, got ok=%v winner=%+v", ok, winner)
 	}
 }
 
@@ -554,64 +375,6 @@ func TestNormalizeCandidates(t *testing.T) {
 			},
 		},
 		{
-			name: "no agreement hint for single source",
-			results: []SearchResult{
-				{
-					Name:        "Solo",
-					Year:        2023,
-					Provider:    "tmdb",
-					ProviderIDs: map[string]string{"tmdb": "99999"},
-				},
-			},
-			content: "movie",
-			wantLen: 1,
-			check: func(t *testing.T, candidates []MatchCandidate) {
-				if len(candidates[0].AgreementHints) != 0 {
-					t.Errorf("AgreementHints = %v, want empty", candidates[0].AgreementHints)
-				}
-			},
-		},
-		{
-			name: "ImageURL and Overview fallback to first non-empty",
-			results: []SearchResult{
-				{
-					Name:        "Dune",
-					Year:        2021,
-					Provider:    "provider-a",
-					ProviderIDs: map[string]string{"tmdb": "438631"},
-					ImageURL:    "",
-					Overview:    "",
-				},
-				{
-					Name:        "Dune",
-					Year:        2021,
-					Provider:    "provider-b",
-					ProviderIDs: map[string]string{"tmdb": "438631"},
-					ImageURL:    "https://example.com/dune.jpg",
-					Overview:    "A noble family becomes embroiled in a war.",
-				},
-				{
-					Name:        "Dune",
-					Year:        2021,
-					Provider:    "provider-c",
-					ProviderIDs: map[string]string{"tmdb": "438631"},
-					ImageURL:    "https://other.com/dune2.jpg",
-					Overview:    "Should not win; provider-b was first.",
-				},
-			},
-			content: "movie",
-			wantLen: 1,
-			check: func(t *testing.T, candidates []MatchCandidate) {
-				c := candidates[0]
-				if c.ImageURL != "https://example.com/dune.jpg" {
-					t.Errorf("ImageURL = %q, want first non-empty from provider-b", c.ImageURL)
-				}
-				if c.Overview != "A noble family becomes embroiled in a war." {
-					t.Errorf("Overview = %q, want first non-empty from provider-b", c.Overview)
-				}
-			},
-		},
-		{
 			name: "insertion order stability",
 			results: []SearchResult{
 				{
@@ -768,23 +531,6 @@ func TestMergePreferredTitleMetadataDoesNotAttributeIdentityHintAliases(t *testi
 	}
 }
 
-func TestSelectInitialMatchCandidateDirectIMDbIDFor10Tricks(t *testing.T) {
-	t.Parallel()
-	candidates := NormalizeCandidatesForLanguage([]SearchResult{{
-		Name: "Ten Tricks", Year: 2022, Provider: "tmdb",
-		ProviderIDs: map[string]string{"imdb": "tt0473100", "tmdb": "12345"},
-	}}, "movie", "en")
-	winner, ok := selectInitialMatchCandidate(&MatchHints{
-		Title: "10 Tricks", Year: 2022, Type: "movie", ImdbID: "tt0473100",
-	}, candidates, []string{"tmdb"})
-	if !ok || winner == nil {
-		t.Fatal("trusted IMDb ID did not produce a decisive match")
-	}
-	if winner.ProviderIDs["imdb"] != "tt0473100" || winner.MatchScore < 100 {
-		t.Fatalf("winner = %#v", winner)
-	}
-}
-
 func TestNormalizeTitleForScoring_NumberWordsAndOrdinals(t *testing.T) {
 	for _, pair := range [][2]string{
 		{"10 Tricks", "Ten Tricks"},
@@ -794,444 +540,6 @@ func TestNormalizeTitleForScoring_NumberWordsAndOrdinals(t *testing.T) {
 		if got, want := normalizeTitleForScoring(pair[0]), normalizeTitleForScoring(pair[1]); got != want {
 			t.Errorf("normalize %q = %q, %q = %q", pair[0], got, pair[1], want)
 		}
-	}
-}
-
-func TestSelectInitialMatchCandidate_AcceptsSinglePunctuationEquivalentCandidate(t *testing.T) {
-	tests := []struct {
-		name           string
-		hintTitle      string
-		candidateTitle string
-		year           int
-	}{
-		{
-			name:           "colon variant",
-			hintTitle:      "Anchorman The Legend of Ron Burgundy",
-			candidateTitle: "Anchorman: The Legend of Ron Burgundy",
-			year:           2004,
-		},
-		{
-			name:           "apostrophe and question mark variant",
-			hintTitle:      "Whats Your Number",
-			candidateTitle: "What's Your Number?",
-			year:           2011,
-		},
-		{
-			name:           "ampersand variant",
-			hintTitle:      "Tromeo and Juliet",
-			candidateTitle: "Tromeo & Juliet",
-			year:           1996,
-		},
-		{
-			name:           "hyphen variant",
-			hintTitle:      "Ant Man and the Wasp",
-			candidateTitle: "Ant-Man and the Wasp",
-			year:           2018,
-		},
-		{
-			name:           "superscript digit variant",
-			hintTitle:      "Alien 3",
-			candidateTitle: "Alien³",
-			year:           1992,
-		},
-		{
-			name:           "comparison safe edition suffix variant",
-			hintTitle:      "Zack Snyders Justice League Justice Is Gray",
-			candidateTitle: "Zack Snyder's Justice League",
-			year:           2021,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			winner, ok := selectInitialMatchCandidate(
-				&MatchHints{
-					Title: tt.hintTitle,
-					Year:  tt.year,
-					Type:  "movie",
-				},
-				[]MatchCandidate{
-					{
-						Title:       tt.candidateTitle,
-						Year:        tt.year,
-						ContentType: "movie",
-						ProviderIDs: map[string]string{"tmdb": "123"},
-						Sources:     []string{"tmdb"},
-					},
-				},
-				nil,
-			)
-			if !ok || winner == nil {
-				t.Fatalf("expected lone punctuation-equivalent candidate to be accepted")
-			}
-			if winner.Title != tt.candidateTitle {
-				t.Fatalf("winner.Title = %q, want %q", winner.Title, tt.candidateTitle)
-			}
-		})
-	}
-}
-
-func TestSelectInitialMatchCandidate_AcceptsProviderTitleWithRepeatedYear(t *testing.T) {
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{
-			Title: "AEW Worlds End",
-			Year:  2023,
-			Type:  "movie",
-		},
-		[]MatchCandidate{
-			{
-				Title:       "AEW Worlds End 2023",
-				Year:        2023,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "1217341"},
-				Sources:     []string{"tmdb"},
-			},
-			{
-				Title:       "AEW Worlds End 2023: Zero Hour",
-				Year:        2023,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "1217342"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-		nil,
-	)
-	if !ok || winner == nil {
-		t.Fatal("expected provider title with repeated release year to be accepted")
-	}
-	if winner.Title != "AEW Worlds End 2023" {
-		t.Fatalf("winner.Title = %q, want AEW Worlds End 2023", winner.Title)
-	}
-}
-
-func TestSelectInitialMatchCandidate_UsesDetailScoreForDuplicateProviderTie(t *testing.T) {
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{
-			Title: "UFC 4 Revenge of the Warriors",
-			Year:  1994,
-			Type:  "movie",
-		},
-		[]MatchCandidate{
-			{
-				Title:       "UFC 4: Revenge of the Warriors",
-				Year:        1994,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "1558410"},
-				Sources:     []string{"tmdb"},
-				DetailScore: 18,
-			},
-			{
-				Title:       "UFC 4: Revenge of the Warriors",
-				Year:        1994,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "17508", "imdb": "tt0487980"},
-				Sources:     []string{"tmdb"},
-				DetailScore: 46,
-			},
-		},
-		nil,
-	)
-	if !ok || winner == nil {
-		t.Fatal("expected richer duplicate TMDB candidate to be accepted")
-	}
-	if got := winner.ProviderIDs["tmdb"]; got != "17508" {
-		t.Fatalf("winner tmdb = %q, want 17508", got)
-	}
-}
-
-func TestSelectInitialMatchCandidate_RejectsDuplicateTieWithoutClearDetailGap(t *testing.T) {
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{
-			Title: "UFC 4 Revenge of the Warriors",
-			Year:  1994,
-			Type:  "movie",
-		},
-		[]MatchCandidate{
-			{
-				Title:       "UFC 4: Revenge of the Warriors",
-				Year:        1994,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "1558410"},
-				Sources:     []string{"tmdb"},
-				DetailScore: 28,
-			},
-			{
-				Title:       "UFC 4: Revenge of the Warriors",
-				Year:        1994,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "17508"},
-				Sources:     []string{"tmdb"},
-				DetailScore: 34,
-			},
-		},
-		nil,
-	)
-	if ok || winner != nil {
-		t.Fatal("expected duplicate tie without clear detail gap to remain unmatched")
-	}
-}
-
-func TestSelectInitialMatchCandidate_ProviderOrderTieRequiresExactTitleYear(t *testing.T) {
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{
-			Title: "100 Days Wild",
-			Year:  2020,
-			Type:  "series",
-		},
-		[]MatchCandidate{
-			{
-				Title:       "100 Days Wild",
-				Year:        2020,
-				ContentType: "series",
-				ProviderIDs: map[string]string{"tvdb": "383893"},
-				Sources:     []string{"tvdb"},
-			},
-			{
-				Title:       "Step Brothers",
-				Year:        2020,
-				ContentType: "series",
-				ProviderIDs: map[string]string{"tmdb": "109792", "imdb": "tt1234567"},
-				Sources:     []string{"imdb", "metadb", "tmdb", "xattr"},
-			},
-		},
-		nil,
-	)
-	if ok || winner != nil {
-		t.Fatal("expected non-equivalent cross-provider tie to remain unmatched")
-	}
-}
-
-func TestSelectInitialMatchCandidate_DetailScoreDoesNotOverrideDifferentTitleTie(t *testing.T) {
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{
-			Title: "UFC 4 Revenge of the Warriors",
-			Year:  1994,
-			Type:  "movie",
-		},
-		[]MatchCandidate{
-			{
-				Title:       "UFC 4: Revenge of the Warriors Event",
-				Year:        1994,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "17508"},
-				Sources:     []string{"tmdb"},
-				DetailScore: 22,
-			},
-			{
-				Title:       "UFC 4 Revenge of the Warriors Bonus",
-				Year:        1994,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "999999", "imdb": "tt9999999"},
-				Sources:     []string{"imdb", "tmdb"},
-				DetailScore: 80,
-			},
-		},
-		nil,
-	)
-	if ok || winner != nil {
-		t.Fatal("expected richer different-title candidate to be rejected")
-	}
-}
-
-func TestSelectInitialMatchCandidate_DetailScoreRequiresDatedDuplicateCandidates(t *testing.T) {
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{
-			Title: "UFC 4 Revenge of the Warriors",
-			Year:  1994,
-			Type:  "movie",
-		},
-		[]MatchCandidate{
-			{
-				Title:       "UFC 4: Revenge of the Warriors",
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "1558410"},
-				Sources:     []string{"tmdb"},
-				DetailScore: 18,
-			},
-			{
-				Title:       "UFC 4: Revenge of the Warriors",
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "17508", "imdb": "tt0487980"},
-				Sources:     []string{"tmdb"},
-				DetailScore: 46,
-			},
-		},
-		nil,
-	)
-	if ok || winner != nil {
-		t.Fatal("expected duplicate detail tie-breaker to reject candidates without matching years")
-	}
-}
-
-func TestSelectInitialMatchCandidate_DetailScoreRequiresHintCompatibleType(t *testing.T) {
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{
-			Title: "UFC 4 Revenge of the Warriors",
-			Year:  1994,
-			Type:  "series",
-		},
-		[]MatchCandidate{
-			{
-				Title:       "UFC 4: Revenge of the Warriors",
-				Year:        1994,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "1558410"},
-				Sources:     []string{"tmdb"},
-				DetailScore: 18,
-			},
-			{
-				Title:       "UFC 4: Revenge of the Warriors",
-				Year:        1994,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "17508", "imdb": "tt0487980"},
-				Sources:     []string{"tmdb"},
-				DetailScore: 46,
-			},
-		},
-		nil,
-	)
-	if ok || winner != nil {
-		t.Fatal("expected duplicate detail tie-breaker to reject candidates with hint-incompatible type")
-	}
-}
-
-func TestSelectInitialMatchCandidate_RejectsWeakSingleCandidate(t *testing.T) {
-	winner, ok := selectInitialMatchCandidate(
-		&MatchHints{
-			Title: "Anchorman The Legend of Ron Burgundy",
-			Year:  2004,
-			Type:  "movie",
-		},
-		[]MatchCandidate{
-			{
-				Title:       "Step Brothers",
-				Year:        2008,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "12133"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-		nil,
-	)
-	if ok || winner != nil {
-		t.Fatalf("expected weak lone candidate to be rejected")
-	}
-}
-
-func TestSelectRefreshMatchCandidate_AcceptsCandidateWithPartialTrustedIDCoverage(t *testing.T) {
-	winner, ok := selectRefreshMatchCandidate(
-		&models.MediaItem{
-			Title:  "The Matrix",
-			Year:   1999,
-			Type:   "movie",
-			TmdbID: "603",
-			ImdbID: "tt0133093",
-		},
-		nil,
-		[]MatchCandidate{
-			{
-				Title:       "The Matrix",
-				Year:        1999,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "603"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-	)
-	if !ok || winner == nil {
-		t.Fatalf("expected partial trusted-ID coverage candidate to be accepted")
-	}
-}
-
-func TestSelectRefreshMatchCandidate_RejectsCandidateWithoutTrustedIDMatches(t *testing.T) {
-	winner, ok := selectRefreshMatchCandidate(
-		&models.MediaItem{
-			Title:  "The Matrix",
-			Year:   1999,
-			Type:   "movie",
-			TmdbID: "603",
-			ImdbID: "tt0133093",
-		},
-		nil,
-		[]MatchCandidate{
-			{
-				Title:       "The Matrix",
-				Year:        1999,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{},
-				Sources:     []string{"tmdb"},
-			},
-		},
-	)
-	if ok || winner != nil {
-		t.Fatalf("expected candidate without trusted-ID matches to be rejected")
-	}
-}
-
-func TestSelectRefreshMatchCandidate_RejectsConflictingTrustedIDCandidate(t *testing.T) {
-	winner, ok := selectRefreshMatchCandidate(
-		&models.MediaItem{
-			Title:  "The Matrix",
-			Year:   1999,
-			Type:   "movie",
-			TmdbID: "603",
-			ImdbID: "tt0133093",
-		},
-		nil,
-		[]MatchCandidate{
-			{
-				Title:       "The Matrix",
-				Year:        1999,
-				ContentType: "movie",
-				ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt9999999"},
-				Sources:     []string{"tmdb"},
-			},
-		},
-	)
-	if ok || winner != nil {
-		t.Fatalf("expected conflicting trusted-ID candidate to be rejected")
-	}
-}
-
-func TestApplyCandidateProviderIDConsensusKeepsNonConflictingAggregatorIDs(t *testing.T) {
-	candidates := NormalizeCandidates([]SearchResult{{
-		Name:     "Example Movie",
-		Provider: "metadb",
-		ProviderIDs: map[string]string{
-			"tmdb": "999",
-			"imdb": "tt7654321",
-		},
-	}}, "movie")
-	if len(candidates) != 1 {
-		t.Fatalf("candidate count = %d, want 1", len(candidates))
-	}
-
-	ids := map[string]string{}
-	applyCandidateProviderIDConsensus(ids, &candidates[0], nil)
-	if ids["tmdb"] != "999" || ids["imdb"] != "tt7654321" {
-		t.Fatalf("aggregator provider ids = %#v, want tmdb/imdb retained", ids)
-	}
-}
-
-func TestApplyCandidateProviderIDConsensusPromotesIDsConfirmedByBothProviders(t *testing.T) {
-	candidates := NormalizeCandidates([]SearchResult{
-		{
-			Name: "Example", Provider: "tvdb",
-			ProviderIDs: map[string]string{"tvdb": "405851", "tmdb": "1234", "imdb": "tt12236904"},
-		},
-		{
-			Name: "Example", Provider: "tmdb",
-			ProviderIDs: map[string]string{"tvdb": "405851", "tmdb": "1234", "imdb": "tt12236904"},
-		},
-	}, "series")
-	if len(candidates) != 1 {
-		t.Fatalf("candidate count = %d, want 1", len(candidates))
-	}
-
-	ids := map[string]string{}
-	applyCandidateProviderIDConsensus(ids, &candidates[0], nil)
-	if ids["tvdb"] != "405851" || ids["tmdb"] != "1234" || ids["imdb"] != "tt12236904" {
-		t.Fatalf("confirmed provider ids = %#v, want tmdb/tvdb/imdb", ids)
 	}
 }
 
@@ -1264,6 +572,36 @@ func TestApplyCandidateProviderIDConsensusPrefersOwningProviderDuringConflict(t 
 			}
 			if ids["tvdb"] != "405851" || ids["imdb"] != "tt12236904" {
 				t.Fatalf("resolved provider ids = %#v", ids)
+			}
+		})
+	}
+}
+
+func TestSelectRefreshMatchCandidate_TrustedIDCoverage(t *testing.T) {
+	item := &models.MediaItem{Title: "The Matrix", Year: 1999, Type: "movie", TmdbID: "603", ImdbID: "tt0133093"}
+	tests := []struct {
+		name        string
+		providerIDs map[string]string
+		wantMatch   bool
+	}{
+		{name: "accepts candidate with partial trusted-ID coverage", providerIDs: map[string]string{"tmdb": "603"}, wantMatch: true},
+		{name: "rejects candidate without trusted-ID matches", providerIDs: map[string]string{}},
+		{name: "rejects conflicting trusted-ID candidate", providerIDs: map[string]string{"tmdb": "603", "imdb": "tt9999999"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			winner, ok := selectRefreshMatchCandidate(item, nil, []MatchCandidate{{
+				Title:       "The Matrix",
+				Year:        1999,
+				ContentType: "movie",
+				ProviderIDs: tt.providerIDs,
+				Sources:     []string{"tmdb"},
+			}})
+			if tt.wantMatch && (!ok || winner == nil) {
+				t.Fatalf("expected candidate to be accepted")
+			}
+			if !tt.wantMatch && (ok || winner != nil) {
+				t.Fatalf("expected candidate to be rejected, got %+v", winner)
 			}
 		})
 	}

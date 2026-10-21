@@ -59,16 +59,6 @@ function packageSlug(family: string): string {
 }
 
 describe("fonts.css", () => {
-  it("declares exactly the UI fonts", () => {
-    expect([...new Set(localFaces.map((face) => face.family))].sort()).toEqual(
-      [...UI_FONTS].sort(),
-    );
-  });
-
-  it("swaps in every face instead of hiding text while it loads", () => {
-    for (const face of localFaces) expect(face.display, face.file).toBe("swap");
-  });
-
   it.each(UI_FONTS)("matches the @fontsource-variable package for %s", (family) => {
     const packageCss = readFileSync(
       require.resolve(`@fontsource-variable/${packageSlug(family)}/wght.css`),

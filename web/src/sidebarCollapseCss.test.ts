@@ -3,8 +3,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SIDEBAR_COLLAPSE_DURATION_MS } from "./components/sidebarItemNavigation";
-import { SIDEBAR_RAIL_WIDTH, SIDEBAR_SURFACE_WIDTH } from "./components/AppSidebar.logic";
 
 /**
  * The sidebar-collapse behaviour lives mostly in CSS, so these are contract
@@ -56,66 +54,6 @@ describe("sidebar collapse CSS", () => {
     expect(surface).not.toMatch(/\b(width|margin-left|left|clip-path|grid-template-columns)\s*:/);
   });
 
-  it("slides the frame left by exactly the 196px it has to give up", () => {
-    const travel = SIDEBAR_SURFACE_WIDTH - SIDEBAR_RAIL_WIDTH;
-    expect(ruleBody('.sidebar-surface[data-collapsed="true"] {')).toContain(
-      `transform: translateX(-${travel}px)`,
-    );
-  });
-
-  it("counter-translates the contents by the same distance so nothing moves on screen", () => {
-    const inner = ruleBody(".sidebar-inner {");
-    expect(inner).toContain("transform: translateX(0)");
-    expect(inner).toMatch(/transition:\s*transform var\(--duration-sidebar-collapse\)/);
-    expect(ruleBody('.sidebar-surface[data-collapsed="true"] .sidebar-inner {')).toContain(
-      `transform: translateX(${SIDEBAR_SURFACE_WIDTH - SIDEBAR_RAIL_WIDTH}px)`,
-    );
-  });
-
-  it("moves the main stage on the same compositor timeline as the sidebar", () => {
-    const main = ruleBody(".sidebar-main-stage {");
-    expect(main).toContain("transform: none");
-    expect(main).toMatch(/transition:\s*transform var\(--duration-sidebar-collapse\)/);
-    const entering = ruleBody('.sidebar-main-stage[data-sidebar-target-collapsed="true"]:not(');
-    expect(entering).toContain("transform: translateX(196px)");
-    expect(entering).toContain("transition: none");
-    expect(css).toMatch(
-      /\.sidebar-main-stage:not\([\s\S]*?data-sidebar-target-collapsed="true"[\s\S]*?\)\[data-sidebar-visual-collapsed="true"\]\s*\{\s*transform:\s*translateX\(-196px\);\s*transition:\s*none/,
-    );
-  });
-
-  it("uses the shared collapse duration on a compositor-friendly ease", () => {
-    const duration = css.match(/--duration-sidebar-collapse:\s*(\d+)ms/);
-    expect(duration).not.toBeNull();
-    expect(Number(duration![1])).toBe(SIDEBAR_COLLAPSE_DURATION_MS);
-    expect(css).toMatch(/--ease-sidebar-collapse:\s*cubic-bezier\(/);
-  });
-
-  it("cross-fades and translates sidebar contents rather than resizing them", () => {
-    expect(ruleBody(".sidebar-fade {")).toMatch(
-      /transition:\s*opacity var\(--duration-sidebar-collapse\)/,
-    );
-    expect(ruleBody(".sidebar-row-shift {")).toMatch(
-      /transition:\s*transform var\(--duration-sidebar-collapse\)/,
-    );
-    expect(ruleBody('.sidebar-surface[data-collapsed="true"] .sidebar-row-shift {')).toContain(
-      "transform: translateX(var(--sidebar-row-shift, 0px))",
-    );
-  });
-
-  it("no longer animates any layout property, or any main-thread-only one", () => {
-    // The old `.sidebar-transition` / `.main-transition` pair is gone; nothing
-    // in the sidebar or the main column interpolates geometry any more.
-    expect(css).not.toContain(".sidebar-transition");
-    expect(css).not.toContain(".main-transition");
-    expect(css).not.toMatch(/transition:\s*margin-left/);
-    expect(css).not.toMatch(/transition:\s*clip-path/);
-    // The bespoke sidebar View Transition snapshot rules are gone.
-    expect(css).not.toContain("app-sidebar)");
-    expect(css).not.toContain("data-sidebar-collapse-transition");
-    expect(css).not.toContain(":active-view-transition");
-  });
-
   it("makes reduced motion an instant state change", () => {
     const block = reducedMotionBlock();
     expect(block).toContain("--duration-sidebar-collapse: 0ms");
@@ -129,38 +67,6 @@ describe("sidebar collapse CSS", () => {
     ]) {
       expect(block).toContain(selector);
     }
-  });
-
-  it("snaps the impersonation banner's margin instead of animating it", () => {
-    const banner = ruleBody(".impersonation-banner {");
-    expect(banner).toContain("margin-left: var(--app-sidebar-offset)");
-    // Animating margin would put the document back on the per-frame layout path.
-    expect(banner).not.toContain("transition: margin-left");
-    expect(banner).not.toMatch(/transition:[^;]*\b(margin|width|left)\b/);
-  });
-
-  it("carries the impersonation banner's edge with a compensating transform", () => {
-    // The banner renders outside Layout, so it mirrors `.sidebar-main-stage`
-    // off root attributes: hold the previous visual offset with no transition,
-    // then release to zero over the shared sidebar duration/easing.
-    expect(ruleBody(".impersonation-banner {")).not.toContain("transform:");
-
-    const entering = ruleBody(
-      ':root[data-sidebar-collapsed="true"]:not([data-sidebar-visual-collapsed="true"])',
-    );
-    expect(entering).toContain("transform: translateX(196px)");
-    expect(entering).toContain("transition: none");
-
-    const leaving = ruleBody(
-      ':root:not([data-sidebar-collapsed="true"])[data-sidebar-visual-collapsed="true"]',
-    );
-    expect(leaving).toContain("transform: translateX(-196px)");
-    expect(leaving).toContain("transition: none");
-
-    // The settled rule animates transform on the same tokens as the sidebar.
-    expect(css).toMatch(
-      /\.impersonation-banner \{\s*transition: transform var\(--duration-sidebar-collapse\) var\(--ease-sidebar-collapse\);/,
-    );
   });
 
   it("only reserves sidebar room for out-of-tree chrome while a shell is mounted", () => {

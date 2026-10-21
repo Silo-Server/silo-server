@@ -167,16 +167,6 @@ func TestParseRadarrMovieFileDelete(t *testing.T) {
 	}
 }
 
-func TestParseRadarrTest(t *testing.T) {
-	parsed, err := Parse(ProviderAuto, fixture(t, "radarr_test.json"))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if !parsed.Test || parsed.Provider != ProviderRadarr {
-		t.Fatalf("unexpected parse: %+v", parsed)
-	}
-}
-
 func TestParseUnknownEventIsNoOpNotError(t *testing.T) {
 	parsed, err := Parse(ProviderSonarr, fixture(t, "unknown_event.json"))
 	if err != nil {

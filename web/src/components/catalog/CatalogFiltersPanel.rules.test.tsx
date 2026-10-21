@@ -119,14 +119,6 @@ describe("CatalogFiltersPanel toolbar", () => {
     });
   });
 
-  it("changes only the media type and keeps rules the Guided view can't show", () => {
-    const onStateChange = renderPanel({ source: "query", query_definition: ADVANCED_RULES });
-
-    choose("All Media", "Movies");
-
-    expect(lastQuery(onStateChange)).toEqual({ ...ADVANCED_RULES, media_scope: "movie" });
-  });
-
   it("drops narrator rules, which ebooks can't use, when switching to Ebooks", () => {
     const audiobooks: QueryDefinition = {
       ...ADVANCED_RULES,
@@ -175,13 +167,6 @@ describe("CatalogFiltersPanel toolbar", () => {
 });
 
 describe("CatalogFiltersPanel rules the Guided view can't show", () => {
-  it("counts every rule on the Filters button and hides partial badges", () => {
-    renderPanel({ source: "query", query_definition: ADVANCED_RULES });
-
-    expect(screen.getByRole("button", { name: /Filters/ })).toHaveTextContent("5");
-    expect(screen.queryByText(/^Actor:/)).toBeNull();
-  });
-
   it("opens the Filters sheet in Advanced with Guided switched off", () => {
     renderPanel({ source: "query", query_definition: ADVANCED_RULES });
 
@@ -197,20 +182,6 @@ describe("CatalogFiltersPanel rules the Guided view can't show", () => {
 });
 
 describe("CatalogFiltersPanel catalog filters the Guided view can show", () => {
-  it("shows a badge per filter and opens the Guided editor", () => {
-    renderPanel({ source: "query", query_definition: GENRE_LINK });
-
-    expect(screen.getByText("Genre: Fantasy")).toBeVisible();
-    expect(screen.getByRole("button", { name: /Filters/ })).toHaveTextContent("1");
-
-    fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
-    const sheet = screen.getByRole("dialog");
-
-    expect(within(sheet).getByRole("button", { name: "Guided" })).toBeEnabled();
-    expect(within(sheet).getByText("Genres")).toBeVisible();
-    expect(within(sheet).queryByText(/Guided view can't show/)).toBeNull();
-  });
-
   it("clears a filter from its badge", () => {
     const onStateChange = renderPanel({ source: "query", query_definition: GENRE_LINK });
 

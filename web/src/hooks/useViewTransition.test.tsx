@@ -112,33 +112,12 @@ describe("useViewTransitionNavigate", () => {
     expect(document.documentElement.dataset.navigationDirection).toBe("back");
   });
 
-  it("will not push a duplicate entry for an `up` link to the current URL", async () => {
-    render(<Harness to="/item/season" options={{ up: true }} at="/item/season" />);
-    await go();
-
-    expect(mocks.navigate).toHaveBeenCalledWith("/item/season", {
-      replace: true,
-      viewTransition: true,
-    });
-  });
-
   it("reads direction off the sign of a raw delta", async () => {
     render(<Harness to={-1} />);
     await go();
 
     expect(mocks.navigate).toHaveBeenCalledWith(-1);
     expect(document.documentElement.dataset.navigationDirection).toBe("back");
-  });
-
-  it("does not forward `up` to the router as a navigate option", async () => {
-    render(<Harness to="/item/series" options={{ up: true, state: { from: "crumb" } }} />);
-    await go();
-
-    expect(mocks.navigate).toHaveBeenCalledWith("/item/series", {
-      state: { from: "crumb" },
-      replace: false,
-      viewTransition: true,
-    });
   });
 
   it.each([

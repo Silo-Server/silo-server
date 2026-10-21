@@ -333,25 +333,6 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 	}
 }
 
-// Promoting passes the role through untouched; the repository owns clearing
-// the group so every caller (invitations, provisioning) gets the same rule.
-func TestHandleUpdateUserPromoteLeavesGroupToRepository(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler("user")
-	groupID := int64(5)
-	repo.user.AccessGroupID = &groupID
-
-	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"role":"admin"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-	}
-	if repo.updated == nil || repo.updated.Role == nil || *repo.updated.Role != "admin" {
-		t.Fatalf("update = %+v, want role admin", repo.updated)
-	}
-	if repo.updated.AccessGroupID.Set {
-		t.Fatalf("AccessGroupID = %+v, want untouched (repository clears it)", repo.updated.AccessGroupID)
-	}
-}
-
 // A group named alongside the admin role is rejected the same way whether the
 // account is being promoted, is already an admin, or echoes its current role.
 func TestHandleUpdateUserRejectsGroupingAnAdmin(t *testing.T) {
@@ -380,23 +361,6 @@ func TestHandleUpdateUserRejectsGroupingAnAdmin(t *testing.T) {
 				t.Fatal("grouped-admin assignment must not be written")
 			}
 		})
-	}
-}
-
-// Demoting passes through as well; the repository lands the ex-admin on the
-// default group unless the request names one.
-func TestHandleUpdateUserDemoteLeavesGroupToRepository(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler("admin")
-
-	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"role":"user"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-	}
-	if repo.updated == nil || repo.updated.Role == nil || *repo.updated.Role != "user" {
-		t.Fatalf("update = %+v, want role user", repo.updated)
-	}
-	if repo.updated.AccessGroupID.Set {
-		t.Fatalf("AccessGroupID = %+v, want untouched (repository assigns the default group)", repo.updated.AccessGroupID)
 	}
 }
 

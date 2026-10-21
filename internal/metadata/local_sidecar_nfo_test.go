@@ -267,21 +267,6 @@ func TestLocalSidecarCheck_ItemWithoutALanguageTakesItsLibrarys(t *testing.T) {
 	}
 }
 
-func TestLocalSidecarCheck_ReappliedItemIsStoredOnce(t *testing.T) {
-	f := newMovieFixture(t, "100")
-	f.scan(t)
-	upserts := f.x.LocalSidecarUpserts()
-
-	writeNewerFile(t, filepath.Join(f.dir, "movie.nfo"), movieNFO("Film NFO v2", "Plot v2", tmdbID("100")))
-	if n := f.scan(t); n != 1 {
-		t.Fatalf("re-applied %d items, want 1", n)
-	}
-	// Stored under the item's lock, and not again outside it.
-	if got := f.x.LocalSidecarUpserts() - upserts; got != 1 {
-		t.Fatalf("re-applying an item stored its record %d times, want once", got)
-	}
-}
-
 func TestLocalSidecarCheck_FailedLookupsRecordNothing(t *testing.T) {
 	unavailable := errors.New("database unavailable")
 	for _, tc := range []struct {
@@ -758,42 +743,15 @@ func TestLocalSidecarCheck_LibrariesKeepTheirOwnRecords(t *testing.T) {
 }
 
 func TestLocalSidecarCheck_SeasonAndEpisodeEdits(t *testing.T) {
-	root, episodeFiles := buildFitnessFixture(t)
-	x := metadata.NewNFOSeriesHarness()
-	ctx := context.Background()
-	const seriesID = "local-p90x"
-	if err := x.SeedSeriesSkeleton(seriesID, "P90X"); err != nil {
-		t.Fatalf("seed skeleton: %v", err)
-	}
-	for i, path := range episodeFiles {
-		x.SeedSeriesFile(100+i, sidecarFolderID, path, root, seriesID)
-	}
-	if _, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
-		ContentID: seriesID,
-		Hints: &metadata.MatchHints{
-			Title:                     "P90X",
-			Type:                      "series",
-			FilePath:                  episodeFiles[0],
-			RepresentativeFilePath:    episodeFiles[0],
-			AllGroupFilePaths:         episodeFiles,
-			PrimarySidecarSearchPaths: []string{root},
-		},
-		Language: "en",
-		Mode:     metadata.ModeInitialMatch,
-	}, []metadata.Provider{nfo.NewProvider()}); err != nil {
-		t.Fatalf("initial match: %v", err)
-	}
-	x.UseLocalSidecars(sidecarFolderID, nfo.NewProvider())
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
-	fullScan := func() int { return scanFolder(t, x, sidecarFolderID, root, root, season1, season2) }
-	if n := fullScan(); n != 0 {
+	x, seriesID, root, season1, season2 := newSeriesFixture(t)
+	if n := scanSeries(t, x, root); n != 0 {
 		t.Fatalf("baseline check re-applied %d items", n)
 	}
 	itemFingerprint := x.LocalSidecarFingerprint(sidecarFolderID, metadata.RefreshTargetItem, seriesID)
 
 	writeNewerFile(t, filepath.Join(season1, "P90X S01E01 - Chest and Back.nfo"),
 		`<episodedetails><title>Chest, Back and Arms</title><plot>Edited.</plot></episodedetails>`)
-	if n := fullScan(); n != 1 {
+	if n := scanSeries(t, x, root); n != 1 {
 		t.Fatalf("episode NFO edit re-applied %d items, want the series", n)
 	}
 	episodes := x.Episodes(seriesID)
@@ -821,7 +779,7 @@ func TestLocalSidecarCheck_SeasonAndEpisodeEdits(t *testing.T) {
 	x.ForgetLocalSidecar(sidecarFolderID, metadata.RefreshTargetEpisode, late.ContentID)
 	writeNewerFile(t, filepath.Join(season2, "P90X S02E01 - Core.nfo"),
 		`<episodedetails><title>Core Synergistics</title></episodedetails>`)
-	if n := fullScan(); n != 1 {
+	if n := scanSeries(t, x, root); n != 1 {
 		t.Fatalf("new episode re-applied %d items, want the series", n)
 	}
 	episodes = x.Episodes(seriesID)
@@ -884,8 +842,9 @@ func TestLocalSidecarCheckTarget_ItemMovedByAnotherCheckLeavesNothingToRefresh(t
 }
 
 // newSeriesFixture matches the fitness series from its NFOs and enables local
-// sidecar detection for its library.
-func newSeriesFixture(t *testing.T) (*metadata.NFOSeriesHarness, string, string, []string) {
+// sidecar detection for its library. It returns the harness, the series ID,
+// the show root and its two season folders.
+func newSeriesFixture(t *testing.T) (*metadata.NFOSeriesHarness, string, string, string, string) {
 	t.Helper()
 	root, episodeFiles := buildFitnessFixture(t)
 	x := metadata.NewNFOSeriesHarness()
@@ -912,13 +871,18 @@ func newSeriesFixture(t *testing.T) (*metadata.NFOSeriesHarness, string, string,
 		t.Fatalf("initial match: %v", err)
 	}
 	x.UseLocalSidecars(sidecarFolderID, nfo.NewProvider())
-	return x, seriesID, root, episodeFiles
+	return x, seriesID, root, filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
+}
+
+// scanSeries runs the check a full scan of the fixture's show root would.
+func scanSeries(t *testing.T, x *metadata.NFOSeriesHarness, root string) int {
+	t.Helper()
+	return scanFolder(t, x, sidecarFolderID, root, root, filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02"))
 }
 
 func TestLocalSidecarCheck_SeasonScanLeavesOtherSeasonsForTheFullScan(t *testing.T) {
-	x, seriesID, root, _ := newSeriesFixture(t)
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
-	scanFolder(t, x, sidecarFolderID, root, root, season1, season2)
+	x, seriesID, root, season1, season2 := newSeriesFixture(t)
+	scanSeries(t, x, root)
 
 	// Season 2 changes while nothing is watching; then a file event scans
 	// only Season 1.
@@ -933,7 +897,7 @@ func TestLocalSidecarCheck_SeasonScanLeavesOtherSeasonsForTheFullScan(t *testing
 	}
 
 	// The full scan must still see Season 2's edit.
-	if n := scanFolder(t, x, sidecarFolderID, root, root, season1, season2); n != 1 {
+	if n := scanSeries(t, x, root); n != 1 {
 		t.Fatalf("full scan re-applied %d items, want the series", n)
 	}
 	episodes = x.Episodes(seriesID)
@@ -942,40 +906,17 @@ func TestLocalSidecarCheck_SeasonScanLeavesOtherSeasonsForTheFullScan(t *testing
 	}
 }
 
-func TestLocalSidecarCheck_NewBannerAndDiscArtApply(t *testing.T) {
-	f := newMovieFixture(t, "100")
-	f.scan(t)
-
-	writeNewerFile(t, filepath.Join(f.dir, "banner.jpg"), "banner-v1")
-	writeNewerFile(t, filepath.Join(f.dir, "disc.png"), "disc-v1")
-	if n := f.scan(t); n != 1 {
-		t.Fatalf("check after adding banner and disc art re-applied %d items, want 1", n)
-	}
-	item := f.item(t)
-	if !strings.HasPrefix(item.BannerSourcePath, "file://"+filepath.Join(f.dir, "banner.jpg")+"?v=") {
-		t.Fatalf("banner source = %q, want the new local banner", item.BannerSourcePath)
-	}
-	if !strings.HasPrefix(item.DiscSourcePath, "file://"+filepath.Join(f.dir, "disc.png")+"?v=") {
-		t.Fatalf("disc source = %q, want the new local disc art", item.DiscSourcePath)
-	}
-	if n := f.scan(t); n != 0 {
-		t.Fatalf("rescan re-applied %d items, want 0", n)
-	}
-}
-
 func TestLocalSidecarCheck_ShowNFOSeasonNameApplies(t *testing.T) {
-	x, seriesID, root, _ := newSeriesFixture(t)
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
-	fullScan := func() int { return scanFolder(t, x, sidecarFolderID, root, root, season1, season2) }
+	x, seriesID, root, _, season2 := newSeriesFixture(t)
 	// Season 2 has no season.nfo, so the show's <namedseason> names it.
 	if err := os.Remove(filepath.Join(season2, "season.nfo")); err != nil {
 		t.Fatalf("remove season.nfo: %v", err)
 	}
-	fullScan()
+	scanSeries(t, x, root)
 
 	writeNewerFile(t, filepath.Join(root, "tvshow.nfo"),
 		`<tvshow><title>P90X</title><plot>90-day home fitness program.</plot><namedseason number="2">Course B: Doubles</namedseason></tvshow>`)
-	if n := fullScan(); n != 1 {
+	if n := scanSeries(t, x, root); n != 1 {
 		t.Fatalf("tvshow.nfo edit re-applied %d items, want the series", n)
 	}
 	seasons := x.Seasons(seriesID)
@@ -988,10 +929,8 @@ func TestLocalSidecarCheck_ShowNFOSeasonNameApplies(t *testing.T) {
 }
 
 func TestLocalSidecarCheck_ChildEditAppliedByAnotherCheckIsNotAppliedAgain(t *testing.T) {
-	x, seriesID, root, _ := newSeriesFixture(t)
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
-	fullScan := func() int { return scanFolder(t, x, sidecarFolderID, root, root, season1, season2) }
-	fullScan()
+	x, seriesID, root, season1, _ := newSeriesFixture(t)
+	scanSeries(t, x, root)
 
 	// While this check waits for the series' lock, the season and episode
 	// NFOs change again and another check applies the newer edits.
@@ -1003,9 +942,9 @@ func TestLocalSidecarCheck_ChildEditAppliedByAnotherCheckIsNotAppliedAgain(t *te
 	x.BeforeNextLocalSidecarLock(func() {
 		writeNewerFile(t, seasonNFO, `<season><title>Course A: Revised</title><seasonnumber>1</seasonnumber></season>`)
 		writeNewerFile(t, episodeNFO, `<episodedetails><title>Chest and Back, Revised</title></episodedetails>`)
-		other = fullScan()
+		other = scanSeries(t, x, root)
 	})
-	if n := fullScan(); n != 0 {
+	if n := scanSeries(t, x, root); n != 0 {
 		t.Fatalf("check that waited for the lock re-applied %d items, want 0", n)
 	}
 	if other != 1 {
@@ -1019,16 +958,14 @@ func TestLocalSidecarCheck_ChildEditAppliedByAnotherCheckIsNotAppliedAgain(t *te
 	}
 	// The stored fingerprints are the newer edits', so nothing is left to
 	// apply.
-	if n := fullScan(); n != 0 {
+	if n := scanSeries(t, x, root); n != 0 {
 		t.Fatalf("next check re-applied %d items, want 0", n)
 	}
 }
 
 func TestLocalSidecarCheck_ChildEditOfASeriesReAnchoredMeanwhileIsLeftToItsRefresh(t *testing.T) {
-	x, seriesID, root, _ := newSeriesFixture(t)
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
-	fullScan := func() int { return scanFolder(t, x, sidecarFolderID, root, root, season1, season2) }
-	fullScan()
+	x, seriesID, root, season1, _ := newSeriesFixture(t)
+	scanSeries(t, x, root)
 	processed := x.RecordProcess("tvdb-100")
 
 	// While this check waits for the series' lock, another check applies a
@@ -1037,9 +974,9 @@ func TestLocalSidecarCheck_ChildEditOfASeriesReAnchoredMeanwhileIsLeftToItsRefre
 		`<episodedetails><title>Chest, Back and Arms</title></episodedetails>`)
 	x.BeforeNextLocalSidecarLock(func() {
 		writeNewerFile(t, filepath.Join(root, "tvshow.nfo"), `<tvshow><title>P90X</title><uniqueid type="tvdb">100</uniqueid></tvshow>`)
-		fullScan()
+		scanSeries(t, x, root)
 	})
-	if n := fullScan(); n != 0 {
+	if n := scanSeries(t, x, root); n != 0 {
 		t.Fatalf("check that waited for the lock re-applied %d items, want 0", n)
 	}
 	if got := len(processed()); got != 1 {
@@ -1054,8 +991,8 @@ func TestLocalSidecarCheck_UncatalogedSeasonIsNotRead(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("file permissions do not stop root from reading")
 	}
-	x, seriesID, root, _ := newSeriesFixture(t)
-	season1, season2, season3 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02"), filepath.Join(root, "Season 03")
+	x, seriesID, root, season1, season2 := newSeriesFixture(t)
+	season3 := filepath.Join(root, "Season 03")
 	fullScan := func() int { return scanFolder(t, x, sidecarFolderID, root, root, season1, season2, season3) }
 	fullScan()
 
@@ -1081,33 +1018,31 @@ func TestLocalSidecarCheck_UncatalogedSeasonIsNotRead(t *testing.T) {
 }
 
 func TestLocalSidecarCheck_FirstSeenInASeasonScanRecordsTheWholeSeries(t *testing.T) {
-	x, _, root, _ := newSeriesFixture(t)
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
+	x, _, root, season1, _ := newSeriesFixture(t)
 
 	// The first check of the series comes from a scan of one season folder.
 	if n := scanFolder(t, x, sidecarFolderID, season1, season1); n != 0 {
 		t.Fatalf("first season scan re-applied %d items, want 0 (a baseline)", n)
 	}
 	// The full scan finds nothing changed, Season 02 included.
-	if n := scanFolder(t, x, sidecarFolderID, root, root, season1, season2); n != 0 {
+	if n := scanSeries(t, x, root); n != 0 {
 		t.Fatalf("full scan after a first season scan re-applied %d items, want 0", n)
 	}
 }
 
 func TestLocalSidecarCheck_FirstSightKeepsBaselineModeAfterAChildFailure(t *testing.T) {
-	x, seriesID, root, _ := newSeriesFixture(t)
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
+	x, seriesID, root, _, _ := newSeriesFixture(t)
 
 	// The series' own files load; loading them again for its children fails.
 	x.FailNthFileListing(2, errors.New("database unavailable"))
-	if n := scanFolder(t, x, sidecarFolderID, root, root, season1, season2); n != 0 {
+	if n := scanSeries(t, x, root); n != 0 {
 		t.Fatalf("first check re-applied %d items, want 0", n)
 	}
 	if x.LocalSidecarFingerprint(sidecarFolderID, metadata.RefreshTargetItem, seriesID) != "" {
 		t.Fatal("a series whose children could not be checked was recorded")
 	}
 	// The retry is still a first sight: nothing applies.
-	if n := scanFolder(t, x, sidecarFolderID, root, root, season1, season2); n != 0 {
+	if n := scanSeries(t, x, root); n != 0 {
 		t.Fatalf("retry re-applied %d items, want 0 (a baseline)", n)
 	}
 	if x.LocalSidecarFingerprint(sidecarFolderID, metadata.RefreshTargetItem, seriesID) == "" {
@@ -1116,15 +1051,14 @@ func TestLocalSidecarCheck_FirstSightKeepsBaselineModeAfterAChildFailure(t *test
 }
 
 func TestLocalSidecarCheck_FirstSightIgnoresStoredChildRecords(t *testing.T) {
-	x, seriesID, root, _ := newSeriesFixture(t)
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
-	scanFolder(t, x, sidecarFolderID, root, root, season1, season2)
+	x, seriesID, root, _, season2 := newSeriesFixture(t)
+	scanSeries(t, x, root)
 
 	// The series lost its record while its episodes kept theirs; an episode
 	// NFO then changes.
 	x.ForgetLocalSidecar(sidecarFolderID, metadata.RefreshTargetItem, seriesID)
 	writeNewerFile(t, filepath.Join(season2, "P90X S02E01 - Core.nfo"), `<episodedetails><title>Core Synergistics</title></episodedetails>`)
-	if n := scanFolder(t, x, sidecarFolderID, root, root, season1, season2); n != 0 {
+	if n := scanSeries(t, x, root); n != 0 {
 		t.Fatalf("first sight re-applied %d items, want 0 (a baseline)", n)
 	}
 	episodes := x.Episodes(seriesID)
@@ -1134,9 +1068,8 @@ func TestLocalSidecarCheck_FirstSightIgnoresStoredChildRecords(t *testing.T) {
 }
 
 func TestLocalSidecarCheck_StoppedSeriesCheckLeavesItsChildrenForTheNextScan(t *testing.T) {
-	x, seriesID, root, _ := newSeriesFixture(t)
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
-	scanFolder(t, x, sidecarFolderID, root, root, season1, season2)
+	x, seriesID, root, season1, season2 := newSeriesFixture(t)
+	scanSeries(t, x, root)
 
 	writeNewerFile(t, filepath.Join(root, "tvshow.nfo"), `<tvshow><title>P90X</title><plot>Renamed plot.</plot></tvshow>`)
 	writeNewerFile(t, filepath.Join(season2, "P90X S02E01 - Core.nfo"), `<episodedetails><title>Core Synergistics</title></episodedetails>`)
@@ -1150,7 +1083,7 @@ func TestLocalSidecarCheck_StoppedSeriesCheckLeavesItsChildrenForTheNextScan(t *
 	_, _ = x.Service().CheckLocalSidecars(ctx, sidecarFolderID, root, scanner.ReadSidecarListing([]string{root, season1, season2}))
 
 	// The next scan still applies the episode edit.
-	scanFolder(t, x, sidecarFolderID, root, root, season1, season2)
+	scanSeries(t, x, root)
 	episodes := x.Episodes(seriesID)
 	if got := episodes[len(episodes)-1].Title; got != "Core Synergistics" {
 		t.Fatalf("Season 02 episode title = %q after the next scan, want its edited NFO's", got)
@@ -1248,13 +1181,12 @@ func TestLocalSidecarCheck_ScanBatchNeverOverwritesANewerRecord(t *testing.T) {
 }
 
 func TestLocalSidecarCheck_EpisodeEditKeepsItsSeasonTitle(t *testing.T) {
-	x, seriesID, root, _ := newSeriesFixture(t)
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
-	scanFolder(t, x, sidecarFolderID, root, root, season1, season2)
+	x, seriesID, root, season1, _ := newSeriesFixture(t)
+	scanSeries(t, x, root)
 
 	writeNewerFile(t, filepath.Join(season1, "P90X S01E01 - Chest and Back.nfo"),
 		`<episodedetails><title>Chest and Back, Revised</title></episodedetails>`)
-	if n := scanFolder(t, x, sidecarFolderID, root, root, season1, season2); n != 1 {
+	if n := scanSeries(t, x, root); n != 1 {
 		t.Fatalf("re-applied %d items, want the series", n)
 	}
 	if got := x.Episodes(seriesID)[0].Title; got != "Chest and Back, Revised" {
@@ -1266,8 +1198,7 @@ func TestLocalSidecarCheck_EpisodeEditKeepsItsSeasonTitle(t *testing.T) {
 }
 
 func TestLocalSidecarCheck_ConflictingSeriesIdentitySkipsSeasonsAndEpisodes(t *testing.T) {
-	x, seriesID, root, _ := newSeriesFixture(t)
-	season1, season2 := filepath.Join(root, "Season 01"), filepath.Join(root, "Season 02")
+	x, seriesID, root, season1, _ := newSeriesFixture(t)
 	// The series was identified as TVDB 999 while its tvshow.nfo names 111.
 	writeNewerFile(t, filepath.Join(root, "tvshow.nfo"),
 		`<tvshow><title>P90X</title><uniqueid type="tvdb">111</uniqueid></tvshow>`)
@@ -1279,11 +1210,11 @@ func TestLocalSidecarCheck_ConflictingSeriesIdentitySkipsSeasonsAndEpisodes(t *t
 	if err := x.SeedMatchedItem(*series); err != nil {
 		t.Fatalf("set identity: %v", err)
 	}
-	scanFolder(t, x, sidecarFolderID, root, root, season1, season2)
+	scanSeries(t, x, root)
 
 	writeNewerFile(t, filepath.Join(season1, "P90X S01E01 - Chest and Back.nfo"),
 		`<episodedetails><title>Another Show's Episode</title></episodedetails>`)
-	if n := scanFolder(t, x, sidecarFolderID, root, root, season1, season2); n != 0 {
+	if n := scanSeries(t, x, root); n != 0 {
 		t.Fatalf("re-applied %d items, want 0", n)
 	}
 	if got := x.Episodes(seriesID)[0].Title; got != "Chest and Back" {

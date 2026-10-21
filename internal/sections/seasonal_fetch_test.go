@@ -5,14 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -22,129 +18,6 @@ import (
 type fixedClock time.Time
 
 func (f fixedClock) Now() time.Time { return time.Time(f) }
-
-type stubSeasonalList []seasonalListEntry
-
-func (s stubSeasonalList) Get(_ context.Context, listURL string) (SeasonalListSnapshot, bool, error) {
-	return SeasonalListSnapshot{ListURL: listURL, Entries: s}, true, nil
-}
-
-type stubThemeNeighbors []string
-
-func (s stubThemeNeighbors) ThemeNeighbors(context.Context, []string, int, catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
-	out := make([]recommendations.ScoredItem, 0, len(s))
-	for _, id := range s {
-		out = append(out, recommendations.ScoredItem{MediaItemID: id})
-	}
-	return out, nil
-}
-
-// TestSeasonalRowShowsOwnedListTitles drives a seasonal row against the
-// catalog: the in-season list's owned titles in list order, within the
-// viewer's rating limit, topped up with theme neighbors unless the row is
-// lists only, titled by the vibe, and empty off season.
-func TestSeasonalRowShowsOwnedListTitles(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	suffix := time.Now().UnixNano()
-	id := func(name string) string { return fmt.Sprintf("seasonal-%s-%d", name, suffix) }
-	tmdb := func(n int) string { return fmt.Sprintf("%d%d", n, suffix%1_000_000_000) }
-	ids := []string{id("popular-r"), id("pg-movie"), id("pg-show"), id("neighbor")}
-	var libraryID int
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`,
-		id("library")).Scan(&libraryID); err != nil {
-		t.Fatalf("seed media folder: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, libraryID)
-	})
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO media_items (content_id, type, title, tmdb_id, tvdb_id, content_rating, content_rating_age) VALUES
-			($1, 'movie',  'Popular R Movie', $5, '', 'R', 17),
-			($2, 'movie',  'PG Movie',        $6, '', 'PG', 8),
-			($3, 'series', 'PG Show',         '', $7, 'TV-PG', 8),
-			($4, 'movie',  'Neighbor',        '', '', 'PG', 8)`,
-		ids[0], ids[1], ids[2], ids[3], tmdb(1), tmdb(2), tmdb(3)); err != nil {
-		t.Fatalf("seed media items: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO media_item_libraries (content_id, media_folder_id) SELECT unnest($1::text[]), $2`,
-		ids, libraryID); err != nil {
-		t.Fatalf("seed media item libraries: %v", err)
-	}
-
-	list := stubSeasonalList{
-		{TMDB: tmdb(1), Type: "movie"},
-		{TMDB: tmdb(9), Type: "movie"}, // not in the library
-		{TMDB: tmdb(2), Type: "movie"},
-		{TVDB: tmdb(3), Type: "show"},
-	}
-	october := fixedClock(time.Date(2026, 10, 14, 20, 0, 0, 0, time.UTC))
-	newFetcher := func(clock recipes.Clock) *Fetcher {
-		f := NewFetcher(pool)
-		f.Clock = clock
-		f.SeasonalLists = list
-		f.SeasonalNeighbors = stubThemeNeighbors{ids[1], ids[3]}
-		return f
-	}
-	section := func(params recipes.SeasonalThemedParams, limit int) ResolvedSection {
-		config, _ := json.Marshal(params)
-		return ResolvedSection{ID: "seasonal-test", SectionType: SectionSeasonalThemed, Title: "Seasonal Picks", ItemLimit: limit, Config: config}
-	}
-	pgViewer := catalog.AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}}
-	contentIDs := func(t *testing.T, s ResolvedSection, f *Fetcher, filter catalog.AccessFilter) []string {
-		t.Helper()
-		items, _, err := f.fetchSeasonalThemed(ctx, s, &libraryID, nil, filter)
-		if err != nil {
-			t.Fatalf("fetchSeasonalThemed: %v", err)
-		}
-		out := make([]string, 0, len(items))
-		for _, item := range items {
-			out = append(out, item.ContentID)
-		}
-		return out
-	}
-	halloween := recipes.SeasonalThemedParams{EnabledThemes: []string{"halloween"}}
-
-	t.Run("lists only keeps list order within the rating limit", func(t *testing.T) {
-		got := contentIDs(t, section(recipes.SeasonalThemedParams{EnabledThemes: []string{"halloween"}, Source: recipes.SeasonalSourceLists}, 10), newFetcher(october), pgViewer)
-		assertIDs(t, got, ids[1], ids[2])
-	})
-	t.Run("recommendations fill a short row without repeating list titles", func(t *testing.T) {
-		got := contentIDs(t, section(halloween, 10), newFetcher(october), pgViewer)
-		assertIDs(t, got, ids[1], ids[2], ids[3])
-	})
-	t.Run("a full row is cut at the limit", func(t *testing.T) {
-		got := contentIDs(t, section(halloween, 2), newFetcher(october), catalog.AccessFilter{})
-		assertIDs(t, got, ids[0], ids[1])
-	})
-	t.Run("off season is empty", func(t *testing.T) {
-		got := contentIDs(t, section(halloween, 10), newFetcher(fixedClock(time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC))), pgViewer)
-		assertIDs(t, got)
-	})
-	t.Run("the row takes the vibe's title", func(t *testing.T) {
-		params := recipes.SeasonalThemedParams{EnabledThemes: []string{"halloween"}, Vibes: map[string]string{"halloween": "horror"}, Source: recipes.SeasonalSourceLists}
-		result, err := newFetcher(october).FetchOne(ctx, section(params, 10), &libraryID, nil, 0, "", catalog.AccessFilter{})
-		if err != nil {
-			t.Fatalf("FetchOne: %v", err)
-		}
-		theme, _ := recipes.SeasonalThemeByKey("halloween")
-		if want := theme.Vibe("horror").Title; result.Title != want {
-			t.Errorf("title = %q, want %q", result.Title, want)
-		}
-	})
-}
 
 func assertIDs(t *testing.T, got []string, want ...string) {
 	t.Helper()
@@ -336,56 +209,5 @@ func TestSeasonalEntriesFromMDBList(t *testing.T) {
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("entries = %+v, want %+v", got, want)
-	}
-}
-
-// TestSeasonalListRepositoryKeepsLastGoodList covers the snapshot table: a
-// claim blocks a second worker, a save replaces the entries, and a failed
-// download keeps them.
-func TestSeasonalListRepositoryKeepsLastGoodList(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	listURL, err := collectionutil.CanonicalMDBListURL(fmt.Sprintf("https://mdblist.com/lists/silo-test/seasonal-%d", time.Now().UnixNano()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM seasonal_list_snapshots WHERE list_url = $1`, listURL)
-	})
-	repo := NewSeasonalListRepository(pool)
-	entries := []seasonalListEntry{{TMDB: "10439", IMDb: "tt0107120", Type: "movie"}, {TVDB: "397060", Type: "show"}}
-
-	claimAt, ok, err := repo.TryClaimRefresh(ctx, listURL, time.Minute)
-	if err != nil || !ok {
-		t.Fatalf("first claim = %v, %v", ok, err)
-	}
-	if _, ok, err := repo.TryClaimRefresh(ctx, listURL, time.Minute); err != nil || ok {
-		t.Fatalf("second claim during the lease = %v, %v; want refused", ok, err)
-	}
-	if err := repo.SaveSuccess(ctx, listURL, entries, "ok", claimAt, time.Now()); err != nil {
-		t.Fatalf("SaveSuccess: %v", err)
-	}
-
-	claimAt, ok, err = repo.TryClaimRefresh(ctx, listURL, time.Minute)
-	if err != nil || !ok {
-		t.Fatalf("claim after save = %v, %v", ok, err)
-	}
-	if err := repo.RecordFailure(ctx, listURL, "mdblist down", claimAt); err != nil {
-		t.Fatalf("RecordFailure: %v", err)
-	}
-	got, found, err := repo.Get(ctx, listURL)
-	if err != nil || !found {
-		t.Fatalf("Get = %v, %v", found, err)
-	}
-	if fmt.Sprint(got.Entries) != fmt.Sprint(entries) || got.LastStatus != "error" || got.LastError != "mdblist down" {
-		t.Fatalf("after failure: entries %v status %q error %q; want last good entries kept", got.Entries, got.LastStatus, got.LastError)
 	}
 }

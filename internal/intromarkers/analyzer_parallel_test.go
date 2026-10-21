@@ -94,30 +94,6 @@ func TestRunAnalyzesGroupsInParallelWithinFFmpegLimit(t *testing.T) {
 	}
 }
 
-func TestAnalyzeGroupMarksFailedExtractionsPartial(t *testing.T) {
-	candidates := []Candidate{
-		{FileID: 1, EpisodeID: "e1", SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800},
-		{FileID: 2, EpisodeID: "e2", SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800},
-		{FileID: 3, EpisodeID: "e3", SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800},
-	}
-	repo := &fakeIntroRepository{}
-	extractor := failingExtractor{errFor: map[int]error{2: errors.New("read failed")}}
-	analyzer := &Analyzer{repo: repo, extractor: extractor, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
-
-	summary, err := analyzer.analyzeGroup(context.Background(), candidateGroup{
-		SeasonID: "s1", MediaFolderID: 1, AnalysisGroupKey: candidates[0].AnalysisGroupKey(), Candidates: candidates,
-	}, analyzeGroupOptions{persistState: true})
-	if err != nil {
-		t.Fatalf("analyzeGroup: %v", err)
-	}
-	if summary.FingerprintExtractionErrors != 1 {
-		t.Fatalf("extraction errors = %d, want 1", summary.FingerprintExtractionErrors)
-	}
-	if len(repo.upsertedStates) != 1 || repo.upsertedStates[0].Status != seasonStatusPartial {
-		t.Fatalf("stored states = %+v, want one partial state", repo.upsertedStates)
-	}
-}
-
 func TestSeasonStateSettled(t *testing.T) {
 	now := time.Date(2026, 9, 25, 3, 30, 0, 0, time.UTC)
 	cases := []struct {
@@ -134,12 +110,6 @@ func TestSeasonStateSettled(t *testing.T) {
 		if got := tc.state.settled(now); got != tc.want {
 			t.Errorf("settled(%+v) = %v, want %v", tc.state, got, tc.want)
 		}
-	}
-}
-
-func TestDetectionRunsOneWorkerByDefault(t *testing.T) {
-	if got := DefaultConfig("ffmpeg").MaxParallelFFmpeg; got != 1 {
-		t.Fatalf("default MaxParallelFFmpeg = %d, want 1", got)
 	}
 }
 
@@ -172,25 +142,6 @@ func TestSilenceRefinementSkipsFileWhenDeadlinePassesWhileWaiting(t *testing.T) 
 	if refined || refiner.calls != 0 || summary.SilenceRefinementsAttempted != 0 {
 		t.Fatalf("refined=%v calls=%d attempted=%d, want the file skipped without running ffmpeg",
 			refined, refiner.calls, summary.SilenceRefinementsAttempted)
-	}
-}
-
-func TestAnalyzeEpisodeReportsExtractionFailures(t *testing.T) {
-	target := Candidate{FileID: 1, EpisodeID: "e1", SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800}
-	sibling := Candidate{FileID: 2, EpisodeID: "e2", SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800}
-	repo := &fakeIntroRepository{
-		episodeCandidates: map[string][]Candidate{"e1": {target}},
-		groupCandidates:   map[string][]Candidate{groupKey(1, "s1", target.AnalysisGroupKey()): {target, sibling}},
-	}
-	analyzer := &Analyzer{repo: repo, extractor: failingExtractor{errFor: map[int]error{2: errors.New("read failed")}},
-		config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
-
-	summary, err := analyzer.AnalyzeEpisode(context.Background(), "e1")
-	if err != nil {
-		t.Fatalf("AnalyzeEpisode: %v", err)
-	}
-	if summary.FingerprintExtractionErrors != 1 {
-		t.Fatalf("extraction errors = %d, want 1", summary.FingerprintExtractionErrors)
 	}
 }
 

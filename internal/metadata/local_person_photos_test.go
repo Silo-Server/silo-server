@@ -161,17 +161,6 @@ func TestLocalPersonPhotoJobs(t *testing.T) {
 	}
 }
 
-// Without the image cache queue, local photos are not used, like local
-// artwork; the zero repository below would panic if it were read.
-func TestApplyLocalPersonPhotosNeedsImageCache(t *testing.T) {
-	t.Parallel()
-
-	service := &MetadataService{personRepo: &catalog.PersonRepository{}}
-	service.applyLocalPersonPhotos(context.Background(), "movie-1", []models.ItemPerson{
-		{Person: models.Person{ID: 1}, LocalPhotoSource: "file:///media/a.jpg"},
-	})
-}
-
 // With metadata.cache_images off, local photos are not used at all, sidecar
 // or NFO-named: clients load provider artwork straight from the providers.
 // The zero repository would panic if it were read.

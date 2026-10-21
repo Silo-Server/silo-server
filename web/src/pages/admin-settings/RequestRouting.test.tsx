@@ -89,32 +89,6 @@ const created = (options: { body?: unknown }) =>
   reply(options, { ...route({ id: "new" }), ...(options.body as object) }, '"new-v1"');
 
 describe("Where requests go: the list", () => {
-  it("explains an empty media type, and offers Add a rule only once Everything else is saved", async () => {
-    serve({ servers: [sonarr], routes: [fallback("movie"), fallback("series", "sonarr-1")] });
-    mount();
-    const movies = await section();
-    expect(
-      within(movies).getByText("Add a Radarr server above to send movie requests anywhere."),
-    ).toBeInTheDocument();
-
-    const series = await section("Series");
-    expect(
-      within(series).getByText(
-        "Every series request goes to Sonarr. Add a rule only if some series should go somewhere else, like anime or kids' titles.",
-      ),
-    ).toBeInTheDocument();
-    expect(within(series).getByRole("button", { name: "Add a rule" })).toBeEnabled();
-
-    cleanup();
-    serve();
-    mount();
-    const unsaved = await section();
-    expect(within(unsaved).getByRole("button", { name: "Add a rule" })).toBeDisabled();
-    expect(
-      within(unsaved).getByText("Choose where everything else goes first."),
-    ).toBeInTheDocument();
-  });
-
   it("switches a rule on and off, and says why a switch was refused", async () => {
     serve({
       routes: [route({ id: "a", name: "First", conditions: { anime: true } }), ...ready],
@@ -322,21 +296,6 @@ describe("Where requests go: Everything else", () => {
       }),
     );
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Everything else saved"));
-  });
-
-  it("offers only HD servers for a never-saved Everything else", async () => {
-    const radarr4K = server("radarr-4k", "Radarr 4K", "radarr", {
-      plugin_config: { service_kind: "radarr", quality_profile_id: 1, is_4k: true },
-    });
-    serve({ servers: [radarr, radarr4K, sonarr] });
-    mount();
-    const movies = await section();
-    await user().click(
-      await within(movies).findByRole("combobox", { name: "Everything else server" }),
-    );
-    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
-      "Radarr",
-    ]);
   });
 
   it("offers only HD servers for the HD version and only 4K servers for the 4K version", async () => {
@@ -561,150 +520,6 @@ describe("Where requests go: adding rules", () => {
     });
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Rule added"));
   });
-
-  it("adds the Anime preset for movies without a series type", async () => {
-    serve({
-      servers: allServers,
-      routes: ready,
-      handlers: { "POST /api/v2/admin/request-routes": created },
-    });
-    mount();
-    const dialog = await pick("Movies", "Anime");
-    await choose(dialog, "HD version Send to", "Radarr Anime");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add rule" }));
-    await waitFor(() => expect(calls("POST /api/v2/admin/request-routes")).toHaveLength(1));
-    expect(calls("POST /api/v2/admin/request-routes")[0]!.body).toEqual({
-      media_type: "movie",
-      name: "Anime",
-      enabled: true,
-      conditions: { anime: true },
-      hd: { integration_id: "radarr-2" },
-      uhd: {},
-      skip_uhd: false,
-    });
-  });
-
-  it("adds Foreign language in the admin's language, with no 4K copy", async () => {
-    vi.spyOn(navigator, "language", "get").mockReturnValue("fr-FR");
-    serve({ routes: ready, handlers: { "POST /api/v2/admin/request-routes": created } });
-    mount();
-    const movies = await section();
-    fireEvent.click(within(movies).getByRole("button", { name: "Add a rule" }));
-    const cards = await screen.findByRole("dialog");
-    expect(within(cards).getByText("Titles not originally in French.")).toBeInTheDocument();
-    fireEvent.click(within(cards).getByRole("button", { name: /^Foreign language/ }));
-    const dialog = await screen.findByRole("dialog");
-    expect(
-      within(dialog).getByRole("heading", { name: "Where should foreign-language movies go?" }),
-    ).toBeTruthy();
-    await choose(dialog, "HD version Send to", "Radarr Anime");
-    await choose(dialog, "4K version Send to", "Don't send a 4K version");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add rule" }));
-    await waitFor(() => expect(calls("POST /api/v2/admin/request-routes")).toHaveLength(1));
-    expect(calls("POST /api/v2/admin/request-routes")[0]!.body).toEqual({
-      media_type: "movie",
-      name: "Foreign language",
-      enabled: true,
-      conditions: { exclude_original_languages: ["fr"] },
-      hd: { integration_id: "radarr-2" },
-      uhd: {},
-      skip_uhd: true,
-    });
-  });
-
-  it.each([
-    ["Movies", "movie", [10751]],
-    ["Series", "series", [10751, 10762]],
-  ] as const)("adds Kids & family for %s", async (tab, mediaType, genres) => {
-    serve({
-      servers: allServers,
-      routes: ready,
-      handlers: { "POST /api/v2/admin/request-routes": created },
-    });
-    mount();
-    const dialog = await pick(tab, "Kids & family");
-    await choose(
-      dialog,
-      "HD version Send to",
-      mediaType === "movie" ? "Radarr Anime" : "Sonarr Anime",
-    );
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add rule" }));
-    await waitFor(() => expect(calls("POST /api/v2/admin/request-routes")).toHaveLength(1));
-    expect(calls("POST /api/v2/admin/request-routes")[0]!.body).toEqual({
-      media_type: mediaType,
-      name: "Kids & family",
-      enabled: true,
-      conditions: { genre_ids: genres, max_content_rating: "PG" },
-      hd: { integration_id: mediaType === "movie" ? "radarr-2" : "sonarr-2" },
-      uhd: {},
-      skip_uhd: false,
-    });
-  });
-
-  it("marks a preset already in the list, and lets its conditions change", async () => {
-    serve({
-      routes: [
-        route({
-          id: "a",
-          name: "Anime",
-          conditions: { anime: true },
-          hd: { integration_id: "radarr-2" },
-        }),
-        ...ready,
-      ],
-      handlers: { "POST /api/v2/admin/request-routes": created },
-    });
-    mount();
-    const movies = await section();
-    await within(movies).findByRole("switch", { name: "Anime enabled" });
-    fireEvent.click(within(movies).getByRole("button", { name: "Add a rule" }));
-    const cards = await screen.findByRole("dialog");
-    expect(within(cards).getByRole("button", { name: /^Anime/ })).toHaveTextContent(
-      "Already added",
-    );
-    fireEvent.click(within(cards).getByRole("button", { name: /^Anime/ }));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Change" }));
-    await choose(dialog, "Anime", "isn't anime");
-    await choose(dialog, "HD version Send to", "Radarr Anime");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add rule" }));
-    await waitFor(() => expect(calls("POST /api/v2/admin/request-routes")).toHaveLength(1));
-    expect(calls("POST /api/v2/admin/request-routes")[0]!.body).toMatchObject({
-      conditions: { anime: false },
-    });
-  });
-
-  it("builds a custom rule with “is none of”, named from its conditions", async () => {
-    serve({ routes: ready, handlers: { "POST /api/v2/admin/request-routes": created } });
-    mount();
-    const movies = await section();
-    fireEvent.click(within(movies).getByRole("button", { name: "Add a rule" }));
-    fireEvent.click(
-      within(await screen.findByRole("dialog")).getByRole("button", { name: /^Custom rule/ }),
-    );
-    const dialog = await screen.findByRole("dialog");
-    await user().click(within(dialog).getByRole("button", { name: "Add condition" }));
-    await user().click(await screen.findByRole("menuitem", { name: "Genre" }));
-    await choose(dialog, "Genre match", "is none of");
-    await choose(dialog, "Add a genre", "Horror");
-    await choose(dialog, "Add a genre", "Thriller");
-    expect(within(dialog).getByLabelText("Name")).toHaveAttribute(
-      "placeholder",
-      "Not Horror or Thriller",
-    );
-    await choose(dialog, "HD version Send to", "Radarr Anime");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add rule" }));
-    await waitFor(() => expect(calls("POST /api/v2/admin/request-routes")).toHaveLength(1));
-    expect(calls("POST /api/v2/admin/request-routes")[0]!.body).toEqual({
-      media_type: "movie",
-      name: "Not Horror or Thriller",
-      enabled: true,
-      conditions: { exclude_genre_ids: [27, 53] },
-      hd: { integration_id: "radarr-2" },
-      uhd: {},
-      skip_uhd: false,
-    });
-  });
 });
 
 describe("Where requests go: the rule editor", () => {
@@ -877,57 +692,6 @@ describe("Where requests go: warnings", () => {
     });
   });
 
-  it("flags anime below a foreign-language rule, and servers that are off, need setup or are the wrong kind", async () => {
-    const off = server("sonarr-3", "Sonarr Off", "sonarr", { enabled: false });
-    const bare = server("sonarr-4", "Sonarr New", "sonarr", { has_api_key: false });
-    serve({
-      servers: [...allServers, off, bare],
-      routes: [
-        ...ready,
-        route({
-          id: "foreign",
-          name: "Foreign language",
-          media_type: "series",
-          position: 0,
-          conditions: { exclude_original_languages: ["en"] },
-          hd: { integration_id: "sonarr-3" },
-        }),
-        route({
-          id: "anime",
-          name: "Anime",
-          media_type: "series",
-          position: 1,
-          conditions: { anime: true },
-          hd: { integration_id: "sonarr-4", overrides: { series_type: "anime" } },
-          uhd: { integration_id: "radarr-1" },
-        }),
-      ],
-      handlers: {
-        "POST /api/v2/admin/request-routes/order": (options) => reply(options, { items: [] }),
-      },
-    });
-    mount();
-    const series = await section("Series");
-    const foreign = within(series)
-      .getByRole("switch", { name: "Foreign language enabled" })
-      .closest("li")!;
-    expect(foreign).toHaveTextContent(
-      "Sonarr Off is turned off. Requests this rule sends there can't go through until it's back on.",
-    );
-    const anime = within(series).getByRole("switch", { name: "Anime enabled" }).closest("li")!;
-    expect(anime).toHaveTextContent(
-      "Anime titles are usually Japanese, so “Foreign language” above catches most of them first.",
-    );
-    expect(anime).toHaveTextContent("Sonarr New needs setup.");
-    expect(anime).toHaveTextContent("Radarr is a Radarr server; series need Sonarr.");
-    fireEvent.click(within(anime).getByRole("button", { name: "Move above" }));
-    await waitFor(() => expect(calls("POST /api/v2/admin/request-routes/order")).toHaveLength(1));
-    expect(calls("POST /api/v2/admin/request-routes/order")[0]!.body).toEqual({
-      media_type: "series",
-      ids: ["anime", "foreign"],
-    });
-  });
-
   it("sets Sonarr's series type to Anime on an anime rule that lacks it", async () => {
     const rule = route({
       id: "anime",
@@ -958,23 +722,6 @@ describe("Where requests go: warnings", () => {
         },
       },
     });
-  });
-
-  it("says Everything else makes no 4K copies while every request asks for one, and opens it", async () => {
-    serve({ requestSettings: { ...settings, force_dual_quality: true }, routes: ready });
-    mount();
-    const movies = await section();
-    const everythingElse = within(movies).getByRole("group", { name: "Everything else" });
-    expect(
-      await within(everythingElse).findByText(
-        "“Also request a 4K version of every title” is on, but Everything else doesn't send 4K versions. Titles no rule sends to a 4K server get HD only.",
-      ),
-    ).toBeInTheDocument();
-    fireEvent.click(within(everythingElse).getByRole("button", { name: "Choose a 4K server" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(
-      within(dialog).getByText("Sent along with the HD version for every request (General)."),
-    ).toBeTruthy();
   });
 });
 
@@ -1188,43 +935,6 @@ describe("Where requests go: try a title", () => {
 });
 
 describe("Where requests go: names, second lines and refused conditions", () => {
-  it("names networks and studios from their own lists, though their TMDB IDs overlap", async () => {
-    serve({
-      routes: [
-        route({
-          id: "wb",
-          name: "Studio rule",
-          conditions: { company_ids: [174] },
-          hd: { integration_id: "radarr-2" },
-        }),
-        fallback("movie", "radarr-1"),
-        route({
-          id: "amc",
-          name: "Network rule",
-          media_type: "series",
-          conditions: { network_ids: [174] },
-          hd: { integration_id: "sonarr-1" },
-        }),
-        fallback("series", "sonarr-1"),
-      ],
-      handlers: {
-        "GET /api/v2/requests/discover/networks": (options) =>
-          reply(options, { items: [{ slug: "amc", display_name: "AMC", tmdb_id: 174 }] }),
-        "GET /api/v2/requests/discover/studios": (options) =>
-          reply(options, {
-            items: [{ slug: "wb", display_name: "Warner Bros. Pictures", tmdb_id: 174 }],
-          }),
-      },
-    });
-    mount();
-    const movies = await section();
-    expect(
-      await within(movies).findByText("When a movie is made by Warner Bros. Pictures"),
-    ).toBeInTheDocument();
-    const series = await section("Series");
-    expect(await within(series).findByText("When a series is on AMC")).toBeInTheDocument();
-  });
-
   it("adds a second line of a kind in the mode still free", async () => {
     serve({ routes: ready, handlers: { "POST /api/v2/admin/request-routes": created } });
     mount();

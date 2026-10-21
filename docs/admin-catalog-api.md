@@ -489,6 +489,18 @@ three operations require acting-administrator access. No native or Jellyfin
 administration caller was found; frozen v1 adapters retain their original wire
 shapes and behavior.
 
+Explicit split/merge and match/apply re-check each existing source and destination
+against the current transaction's complete library memberships before identity or
+state movement. Delegated metadata curators must cover every library of each item;
+an existing item with no memberships is refused. A newly inserted split target
+inherits only the authorized selected-file libraries. Concurrent target creation
+is treated as an existing target. V2 split/merge retain acting-administrator access;
+the frozen v1 bridge retains delegated curation under the same library policy.
+A policy refusal returns 403: the v1 bridge uses its legacy `forbidden` error
+envelope, and v2 match/apply a `permission_denied` problem. Each refused
+transaction rolls back; the multi-step match pipeline has no whole-request atomicity
+guarantee. Detached split identification retains the originating curation authority.
+
 ### Match repair
 
 `POST /api/v2/admin/items/{id}/match/search` and `/match/apply` require the

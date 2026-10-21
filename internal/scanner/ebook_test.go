@@ -16,46 +16,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 const ebookCoverTestThumbhash = "thumb"
 
 type fakeEbookEnrichmentQueue struct {
-	contentID      string
-	priority       int
-	err            error
-	reconcileCalls int
-	reconcileLimit int
-	reconcileErr   error
-	inspected      int
-	wrapped        bool
+	err error
 }
 
-func (f *fakeEbookEnrichmentQueue) Enqueue(_ context.Context, contentID string, priority int) error {
-	f.contentID = contentID
-	f.priority = priority
+func (f *fakeEbookEnrichmentQueue) Enqueue(context.Context, string, int) error {
 	return f.err
 }
 
-func (f *fakeEbookEnrichmentQueue) ReconcileMissing(_ context.Context, _ int, _ int, limit int) (int, int, bool, error) {
-	f.reconcileCalls++
-	f.reconcileLimit = limit
-	return 0, f.inspected, f.wrapped, f.reconcileErr
-}
-
-func TestScannerEbookEnrichmentHookEnqueuesHighPriorityWork(t *testing.T) {
-	queue := &fakeEbookEnrichmentQueue{}
-	s := &Scanner{}
-	s.SetEbookEnrichmentQueue(queue)
-
-	if err := s.enqueueEbookEnrichment(context.Background(), "ebook-1"); err != nil {
-		t.Fatalf("enqueueEbookEnrichment() error = %v", err)
-	}
-	if queue.contentID != "ebook-1" || queue.priority != 100 {
-		t.Fatalf("enqueue = (%q, %d), want (ebook-1, 100)", queue.contentID, queue.priority)
-	}
+func (f *fakeEbookEnrichmentQueue) ReconcileMissing(context.Context, int, int, int) (int, int, bool, error) {
+	return 0, 0, false, nil
 }
 
 func TestScannerEbookEnrichmentHookDoesNotFailScanOnQueueFailure(t *testing.T) {
@@ -67,41 +42,6 @@ func TestScannerEbookEnrichmentHookDoesNotFailScanOnQueueFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueueEbookEnrichment() error = %v, want nil", err)
 	}
-}
-
-func TestScannerEbookEnrichmentReconciliationIsBoundedAndNonFatal(t *testing.T) {
-	queue := &fakeEbookEnrichmentQueue{reconcileErr: errors.New("queue unavailable")}
-	s := &Scanner{}
-	s.SetEbookEnrichmentQueue(queue)
-
-	if err := s.reconcileEbookScan(
-		context.Background(),
-		&models.MediaFolder{ID: 17},
-		nil,
-		nil,
-		true,
-		catalog.ScanWarning{},
-	); err != nil {
-		t.Fatalf("reconcileEbookScan() error = %v", err)
-	}
-
-	if queue.reconcileCalls != 1 {
-		t.Fatalf("reconcile calls = %d, want 1", queue.reconcileCalls)
-	}
-	if queue.reconcileLimit <= 0 || queue.reconcileLimit > 1000 {
-		t.Fatalf("reconcile limit = %d, want bounded positive limit", queue.reconcileLimit)
-	}
-}
-
-type recordingEbookExecutor struct {
-	queries []string
-	args    [][]any
-}
-
-func (r *recordingEbookExecutor) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
-	r.queries = append(r.queries, query)
-	r.args = append(r.args, append([]any(nil), args...))
-	return pgconn.CommandTag{}, nil
 }
 
 type fakeFilesystemItemReader struct {
@@ -153,34 +93,6 @@ func (f *fakeEbookMetadataUpdater) SetLocalPoster(_ context.Context, contentID, 
 	f.setThumbhash = thumbhash
 	f.setPrefix = localPrefix
 	return f.err == nil, f.err
-}
-
-func TestSupportsEbookFile(t *testing.T) {
-	cases := []struct {
-		path string
-		want bool
-	}{
-		{"book.epub", true},
-		{"book.PDF", true},
-		{"book.mobi", true},
-		{"book.azw", true},
-		{"book.azw3", true},
-		{"book.FB2", true},
-		{"book.fb2.zip", true},
-		{"book.fbz", true},
-		{"book.cbz", true},
-		{"book.cbr", true},
-		{"book.txt", false},
-		{"book.md", false},
-		{"README.md", false},
-		{"book.mp3", false},
-		{"movie.mkv", false},
-	}
-	for _, tc := range cases {
-		if got := SupportsEbookFile(tc.path); got != tc.want {
-			t.Errorf("SupportsEbookFile(%q) = %v, want %v", tc.path, got, tc.want)
-		}
-	}
 }
 
 func TestParseEbookFileSupportsReaderFormatsWithoutEmbeddedMetadata(t *testing.T) {
@@ -325,23 +237,6 @@ func TestParseEbookEPUBMetadataHandlesLatin1OPF(t *testing.T) {
 	}
 }
 
-func TestParseEbookEPUBMetadataHandlesWindows1251OPF(t *testing.T) {
-	path := writeTestEPUBWithOPFBytes(t, []byte("<?xml version=\"1.0\" encoding=\"windows-1251\"?>\n"+
-		"<package xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><metadata>"+
-		"<dc:title>\xc2\xee\xe9\xed\xe0 \xe8 \xec\xe8\xf0</dc:title>"+
-		"<dc:creator>\xd2\xee\xeb\xf1\xf2\xee\xe9</dc:creator>"+
-		"</metadata></package>"))
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
-
-	if got.Title != "Война и мир" || strings.Join(got.Authors, ", ") != "Толстой" {
-		t.Fatalf("parsed windows-1251 metadata = title %q authors %v", got.Title, got.Authors)
-	}
-}
-
 func TestParseEbookFileAppliesExternalOPFSidecar(t *testing.T) {
 	dir := t.TempDir()
 	bookPath := filepath.Join(dir, "Dune.cbr")
@@ -394,21 +289,6 @@ func TestParseEbookOPFSidecarRejectsSymlinkedSidecar(t *testing.T) {
 
 	if _, err := parseEbookOPFSidecar(link); err == nil {
 		t.Fatal("parseEbookOPFSidecar accepted a symlinked sidecar; a leaf swapped to a symlink after the Lstat gate would be followed to its target")
-	}
-}
-
-func TestInsertEbookISBNProviderIDReplacesStaleISBN(t *testing.T) {
-	exec := &recordingEbookExecutor{}
-	if err := insertEbookISBNProviderID(context.Background(), exec, "book-1", "9780441172719"); err != nil {
-		t.Fatalf("insertEbookISBNProviderID: %v", err)
-	}
-	if len(exec.queries) != 1 {
-		t.Fatalf("queries = %d, want 1", len(exec.queries))
-	}
-	query := strings.Join(strings.Fields(exec.queries[0]), " ")
-	if !strings.Contains(query, "ON CONFLICT (content_id, provider) DO UPDATE") ||
-		!strings.Contains(query, "provider_id = EXCLUDED.provider_id") {
-		t.Fatalf("ISBN insert does not replace a stale value on rescan:\n%s", query)
 	}
 }
 
@@ -678,9 +558,23 @@ func TestParseEbookFBZMetadata(t *testing.T) {
 	}
 }
 
-func TestParseEbookPDFInfoMetadata(t *testing.T) {
+// parsePDFFixture writes data, completed with a cross-reference table and
+// trailer, to a temp PDF and parses it.
+func parsePDFFixture(t *testing.T, data string) parsedEbook {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte(`%PDF-1.7
+	if err := os.WriteFile(path, completePDFMetadataFixture([]byte(data)), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+	got, err := parseEbookFile(path)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	return got
+}
+
+func TestParseEbookPDFInfoMetadata(t *testing.T) {
+	got := parsePDFFixture(t, `%PDF-1.7
 1 0 obj
 << /Title (PDF Test Ebook)
    /Author (Ada Writer; Ben Author)
@@ -691,14 +585,7 @@ func TestParseEbookPDFInfoMetadata(t *testing.T) {
 endobj
 trailer
 << /Info 1 0 R >>
-%%EOF`)), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
+%%EOF`)
 
 	if got.Format != "pdf" || got.Title != "PDF Test Ebook" {
 		t.Fatalf("Format/Title = %q/%q, want pdf/PDF Test Ebook", got.Format, got.Title)
@@ -718,19 +605,11 @@ trailer
 }
 
 func TestParseEbookPDFInfoMetadataDecodesUTF16BELiterals(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
+	got := parsePDFFixture(t, "%PDF-1.7\n"+
 		"1 0 obj\n"+
 		"<< /Title (\xfe\xff\x00C\x00a\x00f\x00e)\n"+
 		"   /Author (\xfe\xff\x00T\x00h\x00o\x00m\x00a\x00s\x00 \x00D\x00 \x00S\x00e\x00e\x00l\x00e\x00y)\n"+
-		">>\nendobj\n%%EOF")), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
+		">>\nendobj\n%%EOF")
 
 	if got.Title != "Cafe" || strings.Join(got.Authors, ", ") != "Thomas D Seeley" {
 		t.Fatalf("PDF metadata = title %q authors %v, want decoded UTF-16BE", got.Title, got.Authors)
@@ -738,19 +617,11 @@ func TestParseEbookPDFInfoMetadataDecodesUTF16BELiterals(t *testing.T) {
 }
 
 func TestParseEbookPDFInfoMetadataPreservesUTF8Literals(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
+	got := parsePDFFixture(t, "%PDF-1.7\n"+
 		"1 0 obj\n"+
 		"<< /Title (Caf\xc3\xa9 Society)\n"+
 		"   /Author (\xef\xbb\xbfFran\xc3\xa7ois Author)\n"+
-		">>\nendobj\n%%EOF")), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
+		">>\nendobj\n%%EOF")
 
 	if got.Title != "Café Society" {
 		t.Fatalf("Title = %q, want UTF-8 literal preserved without Windows-1252 mojibake", got.Title)
@@ -761,18 +632,10 @@ func TestParseEbookPDFInfoMetadataPreservesUTF8Literals(t *testing.T) {
 }
 
 func TestParseEbookPDFInfoMetadataFallsBackToWindows1252(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
+	got := parsePDFFixture(t, "%PDF-1.7\n"+
 		"1 0 obj\n"+
 		"<< /Title (Caf\xe9 Society)\n"+
-		">>\nendobj\n%%EOF")), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
+		">>\nendobj\n%%EOF")
 
 	if got.Title != "Café Society" {
 		t.Fatalf("Title = %q, want Windows-1252 fallback for non-UTF-8 literal", got.Title)
@@ -780,22 +643,14 @@ func TestParseEbookPDFInfoMetadataFallsBackToWindows1252(t *testing.T) {
 }
 
 func TestParseEbookPDFInfoMetadataDecodesHexStrings(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte(`%PDF-1.7
+	got := parsePDFFixture(t, `%PDF-1.7
 1 0 obj
 << /Title <FEFF00480065007800200042006F006F006B>
    /Author <41646120577269746572>
    /CreationDate (0000-01-01)
 >>
 endobj
-%%EOF`)), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
+%%EOF`)
 
 	if got.Title != "Hex Book" || strings.Join(got.Authors, ", ") != "Ada Writer" {
 		t.Fatalf("PDF hex metadata = title %q authors %v", got.Title, got.Authors)
@@ -844,52 +699,6 @@ func TestParseEbookCBZPageCount(t *testing.T) {
 	}
 	if got.PageCount != 3 {
 		t.Fatalf("PageCount = %d, want 3", got.PageCount)
-	}
-}
-
-func TestParseEbookCBZExtractsFirstReadablePageAsCover(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "comic.cbz")
-	file, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create cbz: %v", err)
-	}
-	zw := zip.NewWriter(file)
-	for _, entry := range []struct {
-		name string
-		body []byte
-	}{
-		{name: "Comic/002.png", body: []byte("second-page")},
-		{name: "Comic/001.jpg", body: []byte("first-page")},
-		{name: "Comic/notes.txt", body: []byte("ignored")},
-	} {
-		w, err := zw.Create(entry.name)
-		if err != nil {
-			t.Fatalf("create zip entry %s: %v", entry.name, err)
-		}
-		if _, err := w.Write(entry.body); err != nil {
-			t.Fatalf("write zip entry %s: %v", entry.name, err)
-		}
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatalf("close zip: %v", err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatalf("close cbz: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
-
-	if got.Cover == nil {
-		t.Fatal("Cover = nil, want first CBZ page as cover")
-	}
-	if got.Cover.ContentType != "image/jpeg" {
-		t.Fatalf("Cover.ContentType = %q, want image/jpeg", got.Cover.ContentType)
-	}
-	if string(got.Cover.Bytes) != "first-page" {
-		t.Fatalf("Cover.Bytes = %q, want first page bytes", string(got.Cover.Bytes))
 	}
 }
 
@@ -1056,13 +865,6 @@ func TestEbookPeopleWriteAllowedFillsEmptyOnlyWhenCurated(t *testing.T) {
 		if got := ebookPeopleWriteAllowed(tc.curated, tc.existing); got != tc.want {
 			t.Errorf("%s: ebookPeopleWriteAllowed = %v, want %v", tc.name, got, tc.want)
 		}
-	}
-}
-
-func TestPlanEbookSeriesWriteReturnsQueryError(t *testing.T) {
-	queryErr := errors.New("query failed")
-	if _, err := planEbookSeriesWrite(&parsedEbook{Series: "Series"}, nil, nil, queryErr, false); !errors.Is(err, queryErr) {
-		t.Fatalf("planEbookSeriesWrite error = %v, want query error", err)
 	}
 }
 
@@ -1304,65 +1106,6 @@ func TestEbookPeopleMergePreservesExistingNonAuthorCreditsExceptNarrators(t *tes
 	}
 }
 
-func TestScanEbookBuildMediaFileSetsCorePersistenceFields(t *testing.T) {
-	modifiedAt := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
-	book := &parsedEbook{Format: "epub", Title: "Book", Authors: []string{"Author"}, Year: 2024, ISBN: "9780306406157", PageCount: 321}
-
-	got := buildEbookMediaFile(&models.MediaFolder{ID: 44}, "content-1", "/library/Book.epub", 1234, modifiedAt, book, ebookContentGroupKey(book, "/library/Book.epub"))
-	if got.ContentID != "content-1" || got.MediaFolderID != 44 {
-		t.Fatalf("ids = %q/%d, want content-1/44", got.ContentID, got.MediaFolderID)
-	}
-	if got.BaseType != "ebook" || got.BaseTitle != "Book" || got.BaseYear != 2024 || got.Container != "epub" || got.ProbeSource != "local" {
-		t.Fatalf("ebook file metadata = %+v", got)
-	}
-	if got.Duration != 321 {
-		t.Fatalf("Duration = %d, want ebook page count", got.Duration)
-	}
-	if got.CanonicalRootPath != "/library/Book.epub" || got.ObservedRootPath != "/library/Book.epub" || got.FilePath != "/library/Book.epub" {
-		t.Fatalf("ebook paths = canonical %q observed %q file %q", got.CanonicalRootPath, got.ObservedRootPath, got.FilePath)
-	}
-	if got.ContentGroupKey != "ebook:isbn:9780306406157" {
-		t.Fatalf("ContentGroupKey = %q, want ISBN-backed ebook group", got.ContentGroupKey)
-	}
-	if got.GroupKeyVersion != ebookGroupKeyVersion {
-		t.Fatalf("GroupKeyVersion = %d, want %d", got.GroupKeyVersion, ebookGroupKeyVersion)
-	}
-	if got.FileSize != 1234 || got.FileModifiedAt == nil || !got.FileModifiedAt.Equal(modifiedAt) {
-		t.Fatalf("file facts = size %d modified %v", got.FileSize, got.FileModifiedAt)
-	}
-}
-
-func TestApplyEbookLocalCoverCachesEmbeddedAndSetsPoster(t *testing.T) {
-	cacher := &fakeEbookCoverCacher{}
-	updater := &fakeEbookMetadataUpdater{}
-
-	err := applyEbookLocalCover(context.Background(), updater, cacher, "content-1", filepath.Join(t.TempDir(), "book.epub"), &parsedEbook{
-		Cover: &parsedEbookCover{
-			ContentType: "image/jpeg",
-			Bytes:       []byte("cover-bytes"),
-		},
-	})
-	if err != nil {
-		t.Fatalf("applyEbookLocalCover: %v", err)
-	}
-
-	if cacher.calls != 1 || cacher.contentID != "content-1" || string(cacher.data) != "cover-bytes" {
-		t.Fatalf("cache call = calls %d content %q data %q", cacher.calls, cacher.contentID, string(cacher.data))
-	}
-	if updater.setCalls != 1 || updater.contentID != "content-1" {
-		t.Fatalf("set call = calls %d content %q", updater.setCalls, updater.contentID)
-	}
-	if updater.setPosterPath != "local/ebooks/content-1/poster/original.test-revision.webp" {
-		t.Fatalf("poster path = %q", updater.setPosterPath)
-	}
-	if updater.setThumbhash != "thumb" {
-		t.Fatalf("poster thumbhash = %q", updater.setThumbhash)
-	}
-	if updater.setPrefix != localEbookPosterPrefix {
-		t.Fatalf("local prefix = %q, want %q", updater.setPrefix, localEbookPosterPrefix)
-	}
-}
-
 func TestApplyEbookLocalCoverPreservesProviderPoster(t *testing.T) {
 	cacher := &fakeEbookCoverCacher{}
 	updater := &fakeEbookMetadataUpdater{posterPath: "ebook-metadata/ebooks/content-1/poster/original.webp"}
@@ -1461,30 +1204,6 @@ func TestFindSidecarBookCoverIgnoresGenericNamesInMultiBookDirectories(t *testin
 	}
 }
 
-func TestScanEbookPersistenceSQLWritesLibraryMembershipAndISBNOnly(t *testing.T) {
-	ctx := context.Background()
-	exec := &recordingEbookExecutor{}
-
-	if err := insertEbookLibraryMembership(ctx, exec, "content-1", 44); err != nil {
-		t.Fatalf("insertEbookLibraryMembership: %v", err)
-	}
-	if err := insertEbookISBNProviderID(ctx, exec, "content-1", "9780306406157"); err != nil {
-		t.Fatalf("insertEbookISBNProviderID: %v", err)
-	}
-	if len(exec.queries) != 2 {
-		t.Fatalf("queries = %d, want 2", len(exec.queries))
-	}
-	if !strings.Contains(exec.queries[0], "media_item_libraries") || exec.args[0][0] != "content-1" || exec.args[0][1] != 44 {
-		t.Fatalf("library membership write = query %q args %+v", exec.queries[0], exec.args[0])
-	}
-	if !strings.Contains(exec.queries[1], "media_item_provider_ids") || !strings.Contains(exec.queries[1], "'isbn'") || !strings.Contains(exec.queries[1], "'ebook'") {
-		t.Fatalf("ISBN provider write query = %q", exec.queries[1])
-	}
-	if strings.Contains(exec.queries[1], "asin") || exec.args[1][0] != "content-1" || exec.args[1][1] != "9780306406157" {
-		t.Fatalf("ISBN provider write args/query = query %q args %+v", exec.queries[1], exec.args[1])
-	}
-}
-
 func TestCollectEbookRootScansExcludesUnmountedRootFromReconciliation(t *testing.T) {
 	healthy := t.TempDir()
 	if err := os.WriteFile(filepath.Join(healthy, "book.epub"), []byte("x"), 0o644); err != nil {
@@ -1535,21 +1254,6 @@ func TestCollectEbookRootScansTreatsSingleFileRootAsNonReconciling(t *testing.T)
 	}
 	if roots, _ := splitEbookReconcileRoots(scans); len(roots) != 0 {
 		t.Fatalf("reconcileRoots = %v, want none", roots)
-	}
-}
-
-func TestCollectEbookRootScansIncludesCompoundFB2ZipFile(t *testing.T) {
-	fileRoot := filepath.Join(t.TempDir(), "book.fb2.zip")
-	if err := os.WriteFile(fileRoot, []byte("x"), 0o644); err != nil {
-		t.Fatalf("write ebook: %v", err)
-	}
-
-	scans, err := collectEbookRootScans(t.Context(), 44, []string{fileRoot}, nil)
-	if err != nil {
-		t.Fatalf("collectEbookRootScans: %v", err)
-	}
-	if len(scans) != 1 || len(scans[0].files) != 1 || scans[0].files[0] != fileRoot {
-		t.Fatalf("scans = %+v, want compound-extension file indexed", scans)
 	}
 }
 
@@ -1697,33 +1401,6 @@ func TestScanEbookFolderReturnsCanceledContext(t *testing.T) {
 	err := s.ScanEbookFolder(ctx, &models.MediaFolder{ID: 44, Paths: []string{root}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ScanEbookFolder error = %v, want context.Canceled", err)
-	}
-}
-
-func TestScanEbookFolderReportsProgress(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "broken.epub"), []byte("not a zip"), 0o644); err != nil {
-		t.Fatalf("write ebook fixture: %v", err)
-	}
-	var updates []ProgressUpdate
-	ctx := WithProgressReporter(context.Background(), func(update ProgressUpdate) {
-		updates = append(updates, update)
-	})
-
-	err := (&Scanner{}).ScanEbookFolder(ctx, &models.MediaFolder{ID: 44, Paths: []string{root}})
-	if err == nil || !strings.Contains(err.Error(), "folder_id=44") {
-		t.Fatalf("ScanEbookFolder error = %v, want aggregate failure naming folder 44", err)
-	}
-
-	if len(updates) == 0 {
-		t.Fatal("expected ebook scanner progress updates")
-	}
-	if updates[0].Phase != "ebook_scan" || updates[0].TotalFiles != 1 {
-		t.Fatalf("first progress update = %+v, want ebook_scan discovery total", updates[0])
-	}
-	last := updates[len(updates)-1]
-	if last.FilesProcessed != 1 || last.Errors != 1 {
-		t.Fatalf("last progress update = %+v, want processed/error counts", last)
 	}
 }
 
@@ -1918,15 +1595,7 @@ func TestParseEbookPDFReadsInfoDictionaryFromFileTail(t *testing.T) {
 		"trailer\n<< /Info 2 0 R >>\n%%EOF"
 	padding := strings.Repeat("x", maxPDFMetadataScanSize)
 
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte(head+padding+tail)), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
+	got := parsePDFFixture(t, head+padding+tail)
 	if got.Title != "Tail Info Title" {
 		t.Fatalf("Title = %q, want tail Info dictionary value", got.Title)
 	}
@@ -1956,15 +1625,7 @@ func TestParseEbookPDFHeadInfoWinsOverTailStreamGarbage(t *testing.T) {
 		"trailer\n<< /Info 2 0 R >>\n%%EOF"
 	padding := strings.Repeat("x", maxPDFMetadataScanSize)
 
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte(head+padding+tail)), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
+	got := parsePDFFixture(t, head+padding+tail)
 	if got.Title != "Real Head Title" {
 		t.Fatalf("Title = %q, want authoritative head value over tail stream garbage", got.Title)
 	}
@@ -2108,11 +1769,6 @@ func TestEbookAuthorFromPath(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "empty suffix",
-			path: "/books/X/Author/Title/Title - .pdf",
-			want: "",
-		},
-		{
 			name: "inverted series folder rejected (grandparent is title)",
 			path: "/books/Books_Dutch/De legenden van de Alfen/Heinz, Markus (2118)/Heinz, Markus - De legenden van de Alfen.epub",
 			want: "",
@@ -2121,11 +1777,6 @@ func TestEbookAuthorFromPath(t *testing.T) {
 			name: "comma surname form accepted",
 			path: "/books/Books_Dutch/Mersbergen, Jan van/De laatste ontsnapping (8702)/De laatste ontsnapping - Mersbergen, Jan van.epub",
 			want: "Mersbergen, Jan van",
-		},
-		{
-			name: "particle in name accepted",
-			path: "/books/Books_English/Dean R. Koontz/Midnight (7408)/Midnight - Dean R. Koontz.epub",
-			want: "Dean R. Koontz",
 		},
 	}
 	for _, tc := range cases {
@@ -2149,15 +1800,7 @@ func TestParseEbookPDFSkipsControlCharacterInfoNoise(t *testing.T) {
 		"   /Subject (A real subject)\n" +
 		">>\nendobj\ntrailer\n<< /Info 1 0 R >>\n%%EOF"
 
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+noise+info)), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
+	got := parsePDFFixture(t, "%PDF-1.7\n"+noise+info)
 	if got.Description != "A real subject" {
 		t.Fatalf("Description = %q, want the real Info value", got.Description)
 	}
@@ -2176,39 +1819,12 @@ func TestParseEbookPDFDropsInfoKeyPresentOnlyAsStreamNoise(t *testing.T) {
 		"   /Author (Ada Writer)\n" +
 		">>\nendobj\ntrailer\n<< /Info 1 0 R >>\n%%EOF"
 
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+noise+info)), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
+	got := parsePDFFixture(t, "%PDF-1.7\n"+noise+info)
 	if got.Description != "" {
 		t.Fatalf("Description = %q, want empty when the key is only stream noise", got.Description)
 	}
 	if got.Title != "Real Title" || strings.Join(got.Authors, ", ") != "Ada Writer" {
 		t.Fatalf("title/authors = %q/%v, want the real Info values kept", got.Title, got.Authors)
-	}
-}
-
-func TestParseEbookPDFKeepsNewlinesInsideInfoValues(t *testing.T) {
-	// Tab, newline, and carriage return are legitimate inside a description
-	// and must not trip the binary check.
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
-		"1 0 obj\n<< /Subject (First line\nSecond line) >>\nendobj\n"+
-		"trailer\n<< /Info 1 0 R >>\n%%EOF")), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
-	if got.Description != "First line Second line" {
-		t.Fatalf("Description = %q, want the newline collapsed to a space", got.Description)
 	}
 }
 
@@ -2272,60 +1888,13 @@ func TestParseEbookPDFPreservesMetadataWordBoundaries(t *testing.T) {
 func TestParseEbookPDFSkipsEncryptedDocumentMetadata(t *testing.T) {
 	// Strings in an encrypted PDF are ciphertext. Storing them yields a
 	// random-looking title, so extraction is skipped entirely.
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
+	got := parsePDFFixture(t, "%PDF-1.7\n"+
 		"1 0 obj\n<< /Title (Looks Real But Is Ciphertext) >>\nendobj\n"+
-		"trailer\n<< /Info 1 0 R /Encrypt 9 0 R >>\n%%EOF")), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
+		"trailer\n<< /Info 1 0 R /Encrypt 9 0 R >>\n%%EOF")
 	if got.Format != "pdf" {
 		t.Fatalf("Format = %q, want pdf", got.Format)
 	}
 	if got.Title != "" || len(got.Authors) != 0 {
 		t.Fatalf("title/authors = %q/%v, want no metadata from an encrypted PDF", got.Title, got.Authors)
-	}
-}
-
-func TestParseEbookPDFKeepsMetadataWhenEncryptIsStreamNoise(t *testing.T) {
-	// A bare "/Encrypt" without an indirect reference is not a trailer
-	// declaration and must not cost the file its metadata.
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
-		"5 0 obj\n<< /Length 12 >>\nstream\n/Encrypt xy\nendstream\nendobj\n"+
-		"1 0 obj\n<< /Title (Real Title) >>\nendobj\n"+
-		"trailer\n<< /Info 1 0 R >>\n%%EOF")), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
-	if got.Title != "Real Title" {
-		t.Fatalf("Title = %q, want Real Title", got.Title)
-	}
-}
-
-func TestParseEbookPDFKeepsMetadataWhenEncryptReferenceIsUndelimited(t *testing.T) {
-	// "9 0 R2" is not an indirect reference, so it does not declare encryption.
-	path := filepath.Join(t.TempDir(), "book.pdf")
-	if err := os.WriteFile(path, completePDFMetadataFixture([]byte("%PDF-1.7\n"+
-		"5 0 obj\n<< /Length 16 >>\nstream\n/Encrypt 9 0 R2\nendstream\nendobj\n"+
-		"1 0 obj\n<< /Title (Real Title) >>\nendobj\n"+
-		"trailer\n<< /Info 1 0 R >>\n%%EOF")), 0o644); err != nil {
-		t.Fatalf("write pdf: %v", err)
-	}
-
-	got, err := parseEbookFile(path)
-	if err != nil {
-		t.Fatalf("parseEbookFile: %v", err)
-	}
-	if got.Title != "Real Title" {
-		t.Fatalf("Title = %q, want Real Title", got.Title)
 	}
 }

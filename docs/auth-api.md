@@ -368,6 +368,33 @@ Direct connections and requests through a network access provider, whose plugin 
 header itself, spend only the per-client budget. An exhausted budget answers 429 with
 `Retry-After`.
 
+## Authenticated account allowance
+
+Authenticated routes also spend one `account:<user_id>` budget, shared across the
+account's household profiles, login sessions, devices and API keys. Switching
+credentials or forwarding headers does not create a new account allowance. Native
+v1, v2 and the Jellyfin-compatible listener share the counter. Distinct accounts
+behind one proxy have separate account allowances; existing source and global
+budgets still apply.
+
+The account budget is four times the per-address budget set by
+`ratelimit.ip.requests_per_second`, `ratelimit.ip.requests_per_minute` and
+`ratelimit.ip.burst`: with the defaults (120 per second, 6000 per minute, burst 120)
+an account gets 480 requests per second, 24000 per minute and burst 480. One login
+often spans several networks, and each address is already held to one per-address
+budget, so one busy address or integration can spend at most a quarter of its
+account. The admin UI labels these settings **Per address and account**. IP, API-key and account checks run before the global
+check, so a request rejected by a narrower budget does not consume global capacity.
+All applicable budgets must allow the request. Successful API-key response headers
+describe the key's tier budget; an account denial reports the exhausted account
+budget using the existing 429 response and `Retry-After`.
+
+Requests without an authenticated account do not spend an account allowance.
+Pre-authentication display-token lookup and public sign-in/device operations retain
+their source and global checks. With the memory backend, counters are per process;
+Redis shares them across instances, with the existing fail-open behavior when Redis
+is unavailable. Disabling rate limiting disables the account allowance too.
+
 ## Profile PINs
 
 Profile creation through v1 and v2 stores a requested PIN hash in the same

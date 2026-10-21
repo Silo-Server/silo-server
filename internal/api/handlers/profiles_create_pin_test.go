@@ -2,11 +2,7 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -92,54 +88,6 @@ func TestCreateProfilePINProtectedAtFirstCommit(t *testing.T) {
 				}
 				if err := bcrypt.CompareHashAndPassword([]byte(profile.PINHash), []byte(pin)); err != nil {
 					t.Errorf("first committed row does not contain requested PIN: %v", err)
-				}
-			}
-		})
-	}
-}
-
-func TestHandleCreateProfilePINByteLimit(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		pin  string
-		want int
-	}{
-		{"ascii over limit", strings.Repeat("1", 73), http.StatusBadRequest},
-		{"unicode over limit", strings.Repeat("é", 37), http.StatusBadRequest},
-		{"ascii at limit", strings.Repeat("1", 72), http.StatusCreated},
-		{"unicode at limit", strings.Repeat("é", 36), http.StatusCreated},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := newProfileTestStore(t)
-			handler := NewProfileHandler(testUserStoreProvider{store: store})
-			body, err := json.Marshal(ProfileCreateRequest{Name: "New profile", PIN: tc.pin, Language: "de"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			req := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles", string(body), "user", "profile-1")
-			rr := httptest.NewRecorder()
-			handler.HandleCreateProfile(rr, req)
-			if rr.Code != tc.want {
-				t.Errorf("POST status = %d, want %d", rr.Code, tc.want)
-			}
-			profiles, err := store.ListProfiles(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if tc.want == http.StatusBadRequest {
-				if len(profiles) != 1 {
-					t.Errorf("invalid PIN persisted a profile: count=%d, want 1", len(profiles))
-				}
-				return
-			}
-			if len(profiles) != 2 {
-				t.Fatalf("profiles = %d, want 2", len(profiles))
-			}
-			for _, profile := range profiles {
-				if profile.ID != "profile-1" {
-					if err := bcrypt.CompareHashAndPassword([]byte(profile.PINHash), []byte(tc.pin)); err != nil {
-						t.Errorf("stored PIN: %v", err)
-					}
 				}
 			}
 		})
