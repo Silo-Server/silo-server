@@ -133,11 +133,12 @@ measured and where it came from, and never do Auto's arithmetic.
   - buffering while media requests are failing, or while the device is offline.
     That is an outage, and the reconnect path owns it. Media requests are the
     plan's playlist, segment and range requests; a failed API request is not a
-    media failure. A media request is failing when it errors, cannot connect,
-    or receives no data for the client's idle or first-byte timeout. A request
-    that is still receiving data is not failing, even when it runs past a
-    whole-request time limit: a slow link is what the controller exists to
-    catch. An outage ends when the plan's media data arrives again (a segment
+    media failure. Subtitle requests are not media requests: a subtitle
+    failure doesn't start an outage, and a subtitle success doesn't end one. A
+    media request is failing when it errors, cannot connect, or receives no
+    data for the client's idle or first-byte timeout. A request that is still
+    receiving data is not failing, even when it runs past a whole-request time
+    limit: a slow link is what the controller exists to catch. An outage ends when the plan's media data arrives again (a segment
     or range request receives data, or the buffered position advances) or when
     playback runs. A playlist, subtitle or API request that succeeds does not
     end it on its own. While an outage lasts the controller does not evaluate;
