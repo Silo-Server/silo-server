@@ -102,6 +102,9 @@ func DefaultConfig() Config {
 			// Session-less Apple push retirement. The 256-bit installation
 			// key is the guard; this is anti-probe hygiene.
 			"apple_push_retire": {RequestsPerMinute: 20, Burst: 10},
+			// Session-less Android push retirement. The 256-bit installation
+			// key is the guard; this is anti-probe hygiene.
+			"android_push_retire": {RequestsPerMinute: 20, Burst: 10},
 		},
 	}
 }

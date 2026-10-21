@@ -111,6 +111,7 @@ type Dependencies struct {
 	AdminOperationalLogs             AdminOperationalLogsService
 	AdminJellyfinCompatSettings      AdminJellyfinCompatSettingsService
 	OrderedAndroidPush               OrderedAndroidPushService
+	AndroidPushRetirement            AndroidPushRetirementService
 	WatchTogetherSuggestionDelete    WatchTogetherSuggestionDeleteService
 	WatchTogetherClose               WatchTogetherCloseService
 	WatchTogetherRoomRead            WatchTogetherRoomReadService
