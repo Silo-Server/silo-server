@@ -121,9 +121,11 @@ measured and where it came from, and never do Auto's arithmetic.
   never count as stalls:
   - buffering caused by a seek, a pause, the end of the media, or a source
     reload. Buffering after a seek belongs to the seek until playback next
-    runs, including a seek made while paused. A wait after resuming from a
-    pause is a stall unless a seek or reload happened since playback last ran.
-    A source reload begins when the client replaces or reopens the playing
+    runs, including a seek made while paused. Until a plan first runs, a seek,
+    including the player applying the start position, does not end the
+    start's wait: buffering after it still belongs to the start. A wait after
+    resuming from a pause is a stall unless a seek or reload happened since
+    playback last ran. A source reload begins when the client replaces or reopens the playing
     source, not when it sends the replan that leads to one; until then the
     current plan is still playing.
   - playback the platform stops when the app leaves the foreground. If the
