@@ -78,6 +78,13 @@ func (h *SettingValuesHandler) SetLibraryLookup(lookup libraryLookup) {
 	h.libraryLookup = lookup
 }
 
+// SetAdminDefaults lets the administrator's server-wide defaults stand in for
+// contract defaults on definitions that declare admin_default. Without it every
+// effective default comes from the contract.
+func (h *SettingValuesHandler) SetAdminDefaults(settings settingsresolve.ServerSettings) {
+	h.resolver = settingsresolve.New(h.contract).WithAdminDefaults(settings)
+}
+
 // SetLanguageSuggestionSource wires deployment-observed original languages
 // into effective metadata-language responses. The contract option set remains
 // the stable floor; a missing source or failed catalog lookup simply returns

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,17 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+// localSourceFile returns the file path a local artwork source names, failing
+// the test unless the source carries discovery's size+mtime fingerprint.
+func localSourceFile(t *testing.T, source string) string {
+	t.Helper()
+	match := regexp.MustCompile(`^file://(.+)\?v=\d+--?\d+$`).FindStringSubmatch(source)
+	if match == nil {
+		t.Fatalf("source %q is not a fingerprinted file:// source", source)
+	}
+	return match[1]
+}
 
 func writeFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
@@ -384,127 +396,16 @@ func TestLocalArtworkBeatsEarlierRemoteProvider(t *testing.T) {
 	}
 }
 
-// Season NFO edits propagate on manual refresh only: a scheduled refresh
-// fills empty fields but never re-applies an edited season.nfo over an
-// existing name; a manual refresh replaces unlocked fields with the merged
-// provider results, NFO first (same contract as item fields).
-func TestSeasonNFOEdit_ManualRefreshOnlyPropagation(t *testing.T) {
-	root, episodeFiles := buildFitnessFixture(t)
-
-	x := metadata.NewNFOSeriesHarness()
-	ctx := context.Background()
-	const seriesID = "local-p90x"
-	if err := x.SeedSeriesSkeleton(seriesID, "P90X"); err != nil {
-		t.Fatalf("seed skeleton: %v", err)
-	}
-	for i, path := range episodeFiles {
-		x.SeedSeriesFile(100+i, 10, path, root, seriesID)
-	}
-
-	if _, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
-		ContentID: seriesID,
-		Hints: &metadata.MatchHints{
-			Title:                     "P90X",
-			Type:                      "series",
-			FilePath:                  episodeFiles[0],
-			RepresentativeFilePath:    episodeFiles[0],
-			AllGroupFilePaths:         episodeFiles,
-			PrimarySidecarSearchPaths: []string{root},
-		},
-		Language: "en",
-		Mode:     metadata.ModeInitialMatch,
-	}, []metadata.Provider{nfo.NewProvider()}); err != nil {
-		t.Fatalf("initial match: %v", err)
-	}
-	if seasons := x.Seasons(seriesID); len(seasons) == 0 || seasons[0].Title != "Course A: Classic" {
-		t.Fatalf("initial seasons = %#v, want Course A: Classic first", seasons)
-	}
-
-	// Edit the season NFO after the initial match.
-	writeFixtureFile(t, filepath.Join(root, "Season 01", "season.nfo"),
-		`<season><title>Course A: Renamed</title><seasonnumber>1</seasonnumber></season>`)
-
-	// Scheduled refresh: fill-empty only, the edit must NOT propagate.
-	if _, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
-		ContentID: seriesID,
-		Language:  "en",
-		Mode:      metadata.ModeScheduledRefresh,
-	}, []metadata.Provider{nfo.NewProvider()}); err != nil {
-		t.Fatalf("scheduled refresh: %v", err)
-	}
-	if seasons := x.Seasons(seriesID); seasons[0].Title != "Course A: Classic" {
-		t.Errorf("after scheduled refresh season title = %q, want unchanged Course A: Classic", seasons[0].Title)
-	}
-
-	// Manual refresh: the edit propagates.
-	if _, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
-		ContentID: seriesID,
-		Language:  "en",
-		Mode:      metadata.ModeManualRefresh,
-	}, []metadata.Provider{nfo.NewProvider()}); err != nil {
-		t.Fatalf("manual refresh: %v", err)
-	}
-	if seasons := x.Seasons(seriesID); seasons[0].Title != "Course A: Renamed" {
-		t.Errorf("after manual refresh season title = %q, want Course A: Renamed", seasons[0].Title)
-	}
-}
-
-// Regression: a series with no season/episode NFOs must behave exactly as
-// before — the provider contributes nothing at season/episode depth and the
-// synthesized fallback path stays in charge.
-func TestSeriesWithoutSeasonOrEpisodeNFOs_UnchangedFallback(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "TV", "Plain Show")
-	s1 := filepath.Join(root, "Season 01")
-	e1 := filepath.Join(s1, "Plain Show S01E01.mkv")
-	writeFixtureFile(t, e1, "video")
-
-	x := metadata.NewNFOSeriesHarness()
-	ctx := context.Background()
-	const seriesID = "local-plain"
-	if err := x.SeedSeriesSkeleton(seriesID, "Plain Show"); err != nil {
-		t.Fatalf("seed skeleton: %v", err)
-	}
-
-	result, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
-		ContentID: seriesID,
-		Hints: &metadata.MatchHints{
-			Title:                     "Plain Show",
-			Type:                      "series",
-			FilePath:                  e1,
-			RepresentativeFilePath:    e1,
-			AllGroupFilePaths:         []string{e1},
-			PrimarySidecarSearchPaths: []string{root},
-		},
-		Language: "en",
-		Mode:     metadata.ModeInitialMatch,
-	}, []metadata.Provider{nfo.NewProvider()})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	// With no NFOs at all the provider finds nothing: the pipeline reports
-	// no update (the worker then synthesizes fallback structure), exactly as
-	// before Phase D.
-	if result == nil || result.Updated {
-		t.Fatalf("result = %#v, want Updated=false when the provider finds nothing", result)
-	}
-	if seasons := x.Seasons(seriesID); len(seasons) != 0 {
-		t.Errorf("seasons = %#v, want none from the provider path (fallback synthesis owns them)", seasons)
-	}
-	if episodes := x.Episodes(seriesID); len(episodes) != 0 {
-		t.Errorf("episodes = %#v, want none from the provider path", episodes)
-	}
-	if jobs := x.EnqueuedImageJobs(); len(jobs) != 0 {
-		t.Errorf("image jobs = %#v, want none without sidecar art", jobs)
-	}
-}
-
-// Local sidecar art is copied into artwork storage whatever
-// metadata.cache_images says: the setting governs downloading remote artwork,
-// and without a copy local art cannot be served at all. A refresh hands every
-// local slot (item, season, episode) to the discovering process's copier and
-// queues nothing else for it. Until a copy lands, a slot with nothing cached
-// serves the best remote image; once it lands, local wins again.
-func TestLocalArtworkCopiedWhateverImageCaching(t *testing.T) {
+// Local sidecar art is used only while metadata.cache_images is on. With it
+// on, a refresh hands every local slot (item, season, episode) to the
+// discovering process's copier and queues nothing else for it; until a copy
+// lands, a slot with nothing cached serves the best remote image, and once it
+// lands, local wins. With it off, the refresh ignores local art and serves the
+// remote images, and turning it off after the copies landed moves each slot a
+// provider fills back to the provider image, even through a fill-empty refresh
+// with an unrated poster; a slot no provider fills (the backdrop here) keeps
+// its copy. NFO text applies either way.
+func TestLocalArtworkUsedOnlyWithImageCaching(t *testing.T) {
 	const (
 		remotePoster = "https://img.example/series-poster.jpg"
 		remoteSeason = "https://img.example/season-1.jpg"
@@ -571,6 +472,29 @@ func TestLocalArtworkCopiedWhateverImageCaching(t *testing.T) {
 
 			refresh(metadata.ModeInitialMatch)
 			item, season, episode := slots()
+			if item.Overview != "90-day home fitness program." {
+				t.Errorf("item overview = %q, want the NFO plot", item.Overview)
+			}
+			if !cacheImages {
+				for name, got := range map[string][2]string{
+					"item poster":   {item.PosterPath, item.PosterSourcePath},
+					"item backdrop": {item.BackdropPath, item.BackdropSourcePath},
+					"season poster": {season.PosterPath, season.PosterSourcePath},
+					"episode still": {episode.StillPath, episode.StillSourcePath},
+				} {
+					want := map[string]string{"item poster": remotePoster, "season poster": remoteSeason, "episode still": remoteStill}[name]
+					if got[0] != want || got[1] != want {
+						t.Errorf("%s path/source = %q/%q, want the remote image %q for both", name, got[0], got[1], want)
+					}
+				}
+				if copies := x.LocalArtworkCopies(); len(copies) != 0 {
+					t.Errorf("copier got %#v, want nothing with caching off", copies)
+				}
+				if jobs := x.EnqueuedImageJobs(); len(jobs) != 0 {
+					t.Errorf("queued %#v, want nothing with caching off", jobs)
+				}
+				return
+			}
 			for name, source := range map[string]string{
 				"item poster":   item.PosterSourcePath,
 				"item backdrop": item.BackdropSourcePath,
@@ -626,6 +550,27 @@ func TestLocalArtworkCopiedWhateverImageCaching(t *testing.T) {
 			} {
 				if !strings.HasPrefix(path, "local/") {
 					t.Errorf("%s path after the copy = %q, want the cached local copy", name, path)
+				}
+			}
+			localBackdrop := item.BackdropPath
+
+			// Turning caching off: a fill-empty refresh hands each slot a
+			// provider fills to the provider, unrated or not.
+			x.Service().SetAutoCacheImages(false)
+			remote.images[0].Rating = 0
+			refresh(metadata.ModeScheduledRefresh)
+			item, season, episode = slots()
+			for name, got := range map[string][2]string{
+				"item poster":          {item.PosterPath, remotePoster},
+				"item poster source":   {item.PosterSourcePath, remotePoster},
+				"season poster":        {season.PosterPath, remoteSeason},
+				"season poster source": {season.PosterSourcePath, remoteSeason},
+				"episode still":        {episode.StillPath, remoteStill},
+				"episode still source": {episode.StillSourcePath, remoteStill},
+				"item backdrop":        {item.BackdropPath, localBackdrop},
+			} {
+				if got[0] != got[1] {
+					t.Errorf("%s path with caching off = %q, want %q", name, got[0], got[1])
 				}
 			}
 		})

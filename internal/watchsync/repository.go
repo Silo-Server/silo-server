@@ -36,7 +36,7 @@ type Repository interface {
 	ListLocalWatchEventConnections(ctx context.Context, userID int, profileID string, kind LocalWatchEventKind) ([]Connection, error)
 	ListListEventConnections(ctx context.Context, userID int, profileID string, list ListKind) ([]Connection, error)
 	UpsertHistoryExports(ctx context.Context, exports []HistoryExport) error
-	ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error)
+	ListPendingHistoryExports(ctx context.Context, connectionID string, after HistoryExportCursor, limit int) ([]HistoryExport, error)
 	ListPendingHistoryExportsByHistoryIDs(ctx context.Context, connectionID string, historyIDs []string, limit int) ([]HistoryExport, error)
 	MarkHistoryExportStatus(ctx context.Context, id string, status string, lastError string) error
 	MarkHistoryExportSatisfiedByScrobble(ctx context.Context, connectionID string, historyID string) error
@@ -1325,9 +1325,18 @@ func (r *PostgresRepository) UpsertHistoryExports(ctx context.Context, exports [
 	return nil
 }
 
-func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 100
+func (r *PostgresRepository) ListPendingHistoryExports(
+	ctx context.Context,
+	connectionID string,
+	after HistoryExportCursor,
+	limit int,
+) ([]HistoryExport, error) {
+	if limit <= 0 || limit > maxHistoryExportPage {
+		limit = maxHistoryExportPage
+	}
+	var afterID any
+	if after.ID != "" {
+		afterID = after.ID
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id::text, connection_id::text, history_id, media_item_id, watched_at,
@@ -1336,9 +1345,12 @@ func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, conn
 		WHERE connection_id = $1::uuid
 		  AND status IN ('pending', 'failed')
 		  AND attempt_count < 5
-		ORDER BY watched_at ASC
+		  AND ($3::uuid IS NULL OR (watched_at, id) > ($4::timestamptz, $3::uuid))
+		-- Qualified: a bare "id" would sort by the id::text output column,
+		-- not the uuid the cursor compares.
+		ORDER BY watched_at ASC, watch_provider_history_exports.id ASC
 		LIMIT $2
-	`, connectionID, limit)
+	`, connectionID, limit, afterID, after.WatchedAt)
 	if err != nil {
 		return nil, fmt.Errorf("list pending history exports: %w", err)
 	}
@@ -2137,13 +2149,7 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return result
 }
 
-type listItemStateRows interface {
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-}
-
-func scanListItemStates(rows listItemStateRows) ([]ListItemState, error) {
+func scanListItemStates(rows pgx.Rows) ([]ListItemState, error) {
 	var states []ListItemState
 	for rows.Next() {
 		var state ListItemState

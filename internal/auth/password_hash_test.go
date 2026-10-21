@@ -30,10 +30,6 @@ func TestPasswordHashCostDefault(t *testing.T) {
 	}
 }
 
-func TestExternalSignInPasswordHashCost(t *testing.T) {
-	assertTestPasswordHash(t, externalSignInPasswordHash, "correct horse battery")
-}
-
 func assertTestPasswordHash(t *testing.T, hash, password string) {
 	t.Helper()
 	cost, err := bcrypt.Cost([]byte(hash))

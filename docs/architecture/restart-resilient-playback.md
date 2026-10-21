@@ -746,6 +746,7 @@ request; **—** = the path never executes on that role (nothing to reconstruct)
 | native · direct | ✅ rebuild `Session` from `?st` token → `Range` re-serve | ✅ stateless re-serve from `claims.MediaPath` | — not served on a transcode node |
 | native · remux | ✅ token + `?seek`, or relay/reconstruct remote HLS | ✅ stateless per-request pipe or HLS relay | ✅ for remote HLS, using the same recipe carrier as native transcode |
 | native · transcode | ✅ token (full recipe) → respawn ffmpeg seeked to segment | ✅ same-node restart + token forward | ✅ self-contained — token is recipe-complete |
+| native · header-authenticated (any method) | ⚠️ API-origin transports: rebuild `Session` from the API's Redis recovery card for the authenticated owner, while the card exists and the durable attempt still names its plan; then as the token rows | ✅ proxy grant (`authorized_media_origins_v1`) | ✅ node recipe under the transport id |
 | jellycompat · direct | ✅ re-resolve from durable compat row → `Range` re-serve | ✅ stateless re-serve from token `MediaPath` | — |
 | jellycompat · remux | ✅ compat row + `?seek`, or relay remote HLS | ✅ stateless per-request pipe or HLS relay | ⚠️ for remote HLS, while the shared Redis recipe still exists |
 | jellycompat · transcode | ✅ `ReconstructTranscode(*ps.Recipe)` from compat row | ✅ same-node restart + token forward | ⚠️ reconstructs **iff** the shared Redis recipe (`internal/noderecipe`, ≤24h TTL) still exists; fails closed (404) otherwise |
@@ -757,6 +758,22 @@ request; **—** = the path never executes on that role (nothing to reconstruct)
 | integrated | `?st` stream token — identity for direct/remux, full recipe for transcode | durable compat row `PlaybackSession.Recipe` |
 | proxy node | self-describing path token, re-derived per request — the proxy holds no per-session state | same path token (identity); the recipe is not needed at the proxy |
 | transcode node | forwarded `X-Silo-Stream-Token`, recipe-complete | identity token + Redis `noderecipe` recipe (the Jellyfin token cannot carry it) |
+
+A native attempt that negotiated `header_authenticated_media_v1` has no token on
+any URL, so its carriers are all server-side: the API's session recipe
+(`noderecipe.NewSessionRecipeStore`, keyed by playback session id), the proxy
+grant, and the node recipe. The session recipe is written when a transport
+served from the API origin commits, and re-recorded when a sidecar-only replan
+keeps the transport; a proxy-served transport has none, since its grant already
+covers it. A user's stop and an abort drop it on the replica that ends the
+session; a system teardown that leaves the attempt live (an FFmpeg exit, a
+copy-safety stop) keeps it for a transcode the API runs itself, so the next
+request rebuilds as a token would. A remote transcode's teardown drops it,
+since the node job and node recipe go with it. It is
+only a reconstruction aid: the durable v3 attempt row decides whether it may be
+used (same plan, same account and selected profile, not expired, not stopped),
+and the rebuilt session keeps refusing unauthenticated requests. Without Redis
+the session answers `404` after a restart and the client starts a new attempt.
 
 **Reading the matrix**
 
@@ -816,9 +833,11 @@ replanned. Now, when the API relays a remote HLS transcode (native protocol,
 API egress) and cannot reach the session's node, it moves the transcode itself:
 
 - **Trigger.** The relay got no HTTP response: the connection could not be
-  opened (refused, unroutable, DNS failure, dial timeout), or any transport
-  error occurred while the pool already lists the node as unhealthy or no
-  longer pools it. A node that answers with an HTTP error is alive; its answer
+  opened (refused, unroutable, DNS failure, dial timeout), the node left the
+  relay waiting and then did not answer a health probe either (a hung node; see
+  [node failure detection](node-failure-detection.md#hung-nodes)), or any
+  transport error occurred while the pool already lists the node as unhealthy
+  or no longer pools it. A node that answers with an HTTP error is alive; its answer
   is relayed and nothing moves. A dial that failed on this host's own resources
   (out of file descriptors or socket buffers, no local address) says nothing
   about the node and does not count.
@@ -829,8 +848,10 @@ API egress) and cannot reach the session's node, it moves the transcode itself:
 - **Recipe.** The same recipe the restart paths use: the client's `?st` token
   when it names the session's current transport, otherwise the
   `internal/noderecipe` card stored under the transport id for tokenless
-  (header-authenticated) sessions. With neither, nothing moves and the relay
-  answers `502` as before. A stream-copy recipe answers to the persisted
+  (header-authenticated) sessions. The API's own session recipe never stands
+  in for a token here; a move of a header-authenticated session updates the
+  node recipe and then points the session recipe at the new executor. With
+  neither, nothing moves and the relay answers `502` as before. A stream-copy recipe answers to the persisted
   copy-safety verdict first, like any other revival.
 - **Executor.** `noderouting.Resolve` with the current policy, restricted to
   API-egress shapes and excluding the dead node: another pooled transcode node
@@ -864,8 +885,29 @@ API egress) and cannot reach the session's node, it moves the transcode itself:
   in case it is only unreachable from here; a failed stop is logged as a
   warning, and the node's idle reaper ends a job that still runs. A stored node
   recipe follows the transport to its new node, written after that stop
-  because a node deletes a transport's stored recipe when it stops it; a
-  candidate's rollback stop restores the card for the same reason.
+  because a node deletes a transport's stored recipe when it stops it. A node
+  keeps a card whose `stream_nodes` row id and route URL both differ from its
+  own (`playback.RecipeExecutor.NamesAnotherNode`), reading and deleting in one
+  Redis transaction (`noderecipe.Store.DeleteUnlessMoved`). "Its own" is the
+  identity the node had when it registered the job, since its registration
+  can change while the job runs. A hung node that
+  resumes and runs the stop late, or is force-reloaded while it still holds
+  the job, therefore leaves the new node's card in place. A card it cannot
+  tell apart from its own, such as one without a row id or one written before
+  its URL was edited, is deleted as before, so a stop does not leave its own
+  stopped transport reconstructable. The cost is that a moved transport can
+  still lose its card to such a late stop when its card carries no row id (a
+  session that predates node routing) or when the old node never resolved its
+  registration. A move never lands on the dead node's row,
+  which an operator may have repointed at a replacement process. Nodes built
+  before that check delete whatever card they find, so a candidate's rollback
+  still writes the card back after its stop. A user or admin stop on another
+  API replica does not touch this replica's copy of the session, so these
+  writes also read the session's stream deny marker, uncached, before and
+  after writing. That stop sets the marker before it deletes the card: a write
+  that finds the marker skips, and one that finds it only afterwards deletes
+  the card itself, because the stop's delete already ran. A marker that cannot
+  be read skips a write but never undoes one.
 - **Pacing.** Moves are single-flighted per session
   (`TranscodeManager.RehomeTranscode`), so every request that finds the node
   dead waits on one move, and each remote start holds a `reconstructSem` slot

@@ -282,7 +282,7 @@ func (h *AdminMarkerProvidersHandler) ValidateMarkerProvider(ctx context.Context
 	}
 	stats, err := submitter.FetchUserStats(ctx)
 	if err != nil {
-		return MarkerProviderValidationView{Error: err.Error()}, nil
+		return MarkerProviderValidationView{Error: err.Error()}, nil //nolint:nilerr // a rejected credential is the validation result (Valid=false), not a request failure
 	}
 	return MarkerProviderValidationView{Valid: true, Stats: new(toMarkerUserStatsResponse(stats))}, nil
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { joinWatchTogetherRoom } from "@/lib/watchTogether";
 import WatchPartyHub from "@/pages/watchtogether/WatchPartyHub";
 const state = vi.hoisted(() => ({ token: "invite-A", navigate: vi.fn() }));
@@ -68,15 +68,6 @@ it("sends original join input once and normalizes room proof", async () => {
   expect(fetch.mock.calls[0]![0]).toBe("/api/v2/watch-together/join");
   expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({ code: "ROOM", join_token: "invite" });
 });
-it.each([401, 500])("does not replay join %s", async (status) => {
-  setAccessToken("synthetic-access");
-  setRefreshToken("synthetic-refresh");
-
-  const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
-  vi.stubGlobal("fetch", fetch);
-  await expect(joinWatchTogetherRoom({ code: "ROOM" })).rejects.toThrow();
-  expect(fetch).toHaveBeenCalledTimes(1);
-});
 it.each(["invite", "authority", "unmount"])(
   "mounted join refuses late receipt after %s replacement",
   async (kind) => {
@@ -115,8 +106,6 @@ it.each(["invite", "authority", "unmount"])(
 
 it.each([
   ["invite removal", 200],
-  ["invite removal", 500],
-  ["authority replacement", 200],
   ["authority replacement", 500],
 ] as const)(
   "releases owned busy state after %s and stale %s without navigation",

@@ -5,6 +5,7 @@ import (
 	"math"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func TestCreditsTailRequest(t *testing.T) {
 	}
 	wantStats := mediasample.StatsOutput{CropWidth: 0.9, CropHeight: 0.8, Width: 480, BlackThresholds: []int{20, 26, 32}}
 	if req.Stats == nil || req.Stats.CropWidth != wantStats.CropWidth || req.Stats.CropHeight != wantStats.CropHeight ||
-		req.Stats.Width != wantStats.Width || len(req.Stats.BlackThresholds) != 3 || req.Stats.BlackThresholds[0] != 20 || req.Stats.BlackThresholds[2] != 32 {
+		req.Stats.Width != wantStats.Width || !slices.Equal(req.Stats.BlackThresholds, wantStats.BlackThresholds) {
 		t.Fatalf("stats %+v", req.Stats)
 	}
 	if req.Audio == nil || !req.Audio.Fingerprint || *req.Audio.Silence != (mediasample.SilenceParams{NoiseDB: -50, MinSeconds: 0.5}) {
@@ -104,7 +105,7 @@ func TestSampleCreditsTailWithRealFFmpeg(t *testing.T) {
 		"-f", "lavfi", "-i", scene, "-f", "lavfi", "-i", credits,
 		"-f", "lavfi", "-i", "aevalsrc=0.3*sin(2*PI*330*t):d=100:s=44100",
 		"-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-map", "2:a",
-		"-g", "10", "-shortest", candidate.FilePath)
+		"-c:v", "libx264", "-preset", "ultrafast", "-g", "10", "-shortest", candidate.FilePath)
 	if output, err := generate.CombinedOutput(); err != nil {
 		t.Skipf("cannot generate the clip: %v: %s", err, output)
 	}

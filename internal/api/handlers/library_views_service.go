@@ -25,6 +25,14 @@ import (
 type SectionViewer struct {
 	Access    catalog.AccessFilter
 	ImageSize imagesize.Size
+	// ImageWidths are per-slot target widths overriding ImageSize; only the
+	// native v2 API carries them.
+	ImageWidths imagesize.Widths
+}
+
+// Artwork is the viewer's artwork preference.
+func (v SectionViewer) Artwork() imagesize.Request {
+	return imagesize.Request{Size: v.ImageSize, Widths: v.ImageWidths}
 }
 
 func sectionViewerFromRequest(r *http.Request) SectionViewer {
@@ -158,7 +166,7 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 	withItems := h.fetcher.FetchAll(ctx, resolved, &libraryID, nil, userID, profileID, accessFilter)
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
-	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.ImageSize), nil
+	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork()), nil
 }
 
 // LibrarySectionItems answers one section of the library with its items, or
@@ -193,7 +201,7 @@ func (h *SectionHandler) librarySectionItems(ctx context.Context, libraryID int,
 			}
 			withItems = sections.SectionWithItems{ResolvedSection: s, Items: []*models.MediaItem{}}
 		}
-		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.ImageSize)
+		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.Artwork())
 		if len(resp.Sections) == 0 {
 			return resolvedSectionResponse{
 				ID:          withItems.ID,

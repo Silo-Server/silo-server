@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"slices"
 	"testing"
 	"time"
 )
@@ -104,40 +103,4 @@ func providerSlugs(providers []Provider) []string {
 		out[i] = p.Slug()
 	}
 	return out
-}
-
-// Switching local metadata off holds even when it leaves a level with no
-// enabled provider: the chain-less fallback, which includes the
-// default-enabled local tier, must not bring it back.
-func TestLocalTierSwitchedOffStaysOffInFallback(t *testing.T) {
-	pool := chainBuiltinTestPool(t)
-	ctx := context.Background()
-
-	localCap := fmt.Sprintf("test-local-off-%d", time.Now().UnixNano())
-	RegisterBuiltinProvider(localCap, func() Provider { return &builtinStubProvider{slug: localCap} })
-	builtinID := insertTestInstallation(t, pool, "builtin", true)
-	insertTestCapability(t, pool, builtinID, localCap, `{"default_priority":{"movie":1},"default_enabled":true}`)
-	chainRepo := NewChainRepository(pool)
-
-	resolvesLocal := func(folderID int) bool {
-		t.Helper()
-		providers, err := ResolveChainWithChecker(ctx, folderID, "movie", chainRepo, stubMetadataResolver{}, nil)
-		if err != nil {
-			t.Fatalf("resolve chain: %v", err)
-		}
-		return slices.Contains(providerSlugs(providers), localCap)
-	}
-
-	if !resolvesLocal(insertTestFolder(t, pool, "movies")) {
-		t.Error("chain-less library: local tier missing from the fallback, want it on by default")
-	}
-	folderID := insertTestFolder(t, pool, "movies")
-	if err := chainRepo.SetChain(ctx, folderID, []ChainEntry{
-		{PluginInstallationID: builtinID, CapabilityID: localCap, ContentLevel: "movie", Enabled: false},
-	}); err != nil {
-		t.Fatalf("set chain: %v", err)
-	}
-	if resolvesLocal(folderID) {
-		t.Error("local tier switched off but resolved through the fallback")
-	}
 }

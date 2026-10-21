@@ -29,6 +29,7 @@ var nativeMediaRoutes = []streamtelemetry.MediaRoute{
 	nativeRoute(http.MethodHead, "/api/v2/downloads/{id}/file-proxy", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v2/downloads/{id}/subtitles/{ref}", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v2/direct-download", streamtelemetry.ClassTransfer, false),
+	nativeRoute(http.MethodGet, "/api/v2/playback/bandwidth-probe", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodHead, "/api/v2/direct-download", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v2/direct-download-proxy", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodHead, "/api/v2/direct-download-proxy", streamtelemetry.ClassTransfer, false),

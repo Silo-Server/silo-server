@@ -43,32 +43,18 @@ func TestInferTitleSimilarity_FoldsDiacritics(t *testing.T) {
 		{"ae ligature", "Baerbar", "Bærbar", 0, 1},
 		{"oe ligature", "Coeur", "Cœur", 0, 1},
 		{"unrelated titles stay distinct", "Miniverse", "Universe", 0, 0},
+		{"kana differing by voicing stay distinct", "ガキの使い", "カキの使い", 0, 0},
+		{"spacing dakuten normalizes to the voiced kana", "ガキの使い", "カ゛キの使い", 0, 1},
+		{"spacing dakuten stays distinct from unvoiced kana", "カ゛キの使い", "カキの使い", 0, 0},
+		// Thai mai ek changes the word from ปา (throw) to ป่า (forest). It is a
+		// combining mark, but unlike a Latin accent it must remain match-significant.
+		{"thai lexical combining mark stays distinct", "ปา", "ป่า", 0, 0},
 	}
 	for _, tc := range cases {
 		if got := inferTitleSimilarity(tc.left, tc.right, tc.year); got != tc.want {
 			t.Errorf("%s: inferTitleSimilarity(%q, %q, %d) = %v, want %v",
 				tc.name, tc.left, tc.right, tc.year, got, tc.want)
 		}
-	}
-}
-
-func TestInferTitleSimilarity_PreservesKanaVoicing(t *testing.T) {
-	if got := inferTitleSimilarity("ガキの使い", "カキの使い", 0); got != 0 {
-		t.Fatalf("kana titles differing by voicing must stay distinct, got %v", got)
-	}
-	if got := inferTitleSimilarity("ガキの使い", "カ゛キの使い", 0); got != 1 {
-		t.Fatalf("spacing dakuten must normalize to the voiced kana, got %v", got)
-	}
-	if got := inferTitleSimilarity("カ゛キの使い", "カキの使い", 0); got != 0 {
-		t.Fatalf("spacing dakuten must remain distinct from unvoiced kana, got %v", got)
-	}
-}
-
-func TestInferTitleSimilarity_PreservesNonLatinCombiningMarks(t *testing.T) {
-	// Thai mai ek changes the word from ปา (throw) to ป่า (forest). It is a
-	// combining mark, but unlike a Latin accent it must remain match-significant.
-	if got := inferTitleSimilarity("ปา", "ป่า", 0); got != 0 {
-		t.Fatalf("Thai titles differing by a lexical combining mark must stay distinct, got %v", got)
 	}
 }
 

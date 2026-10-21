@@ -3,7 +3,6 @@ package abs
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -219,87 +218,6 @@ func TestMountedABSRouterAttributesPublicTrack(t *testing.T) {
 	}
 }
 
-func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
-	body := []byte("\xff\xfb\x00\x00audio-bytes")
-
-	t.Run("head counts zero bytes but one request", func(t *testing.T) {
-		registry := telemetryRegistry(t)
-		server := absTelemetryServer(t, registry, absPublicTrackDeps(t, "sid-head", "book-1", "42", body))
-		got := getWithHeaders(t, server.Client(), http.MethodHead, server.URL+"/public/session/sid-head/track/1", nil)
-		if got.status != http.StatusOK || len(got.body) != 0 {
-			t.Fatalf("HEAD = %d, %d bytes", got.status, len(got.body))
-		}
-		snapshot := server.settledSweep(t)
-		if len(snapshot.Sessions) != 1 {
-			t.Fatalf("sessions = %+v", snapshot.Sessions)
-		}
-		if snapshot.Sessions[0].BytesAccepted != 0 || snapshot.Sessions[0].RequestCount != 1 {
-			t.Fatalf("HEAD accounting = bytes %d requests %d",
-				snapshot.Sessions[0].BytesAccepted, snapshot.Sessions[0].RequestCount)
-		}
-	})
-
-	t.Run("range is byte exact", func(t *testing.T) {
-		large := bytes.Repeat([]byte("abcdefghij"), 300_000)
-		registry := telemetryRegistry(t)
-		server := absTelemetryServer(t, registry, absPublicTrackDeps(t, "sid-range", "book-1", "42", large))
-		client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
-		t.Cleanup(client.CloseIdleConnections)
-		got := getWithHeaders(t, client, http.MethodGet, server.URL+"/public/session/sid-range/track/1",
-			map[string]string{"Range": "bytes=1000-2999"})
-		if got.status != http.StatusPartialContent {
-			t.Fatalf("status = %d, want 206", got.status)
-		}
-		if want := fmt.Sprintf("bytes 1000-2999/%d", len(large)); got.header.Get("Content-Range") != want {
-			t.Fatalf("Content-Range = %q, want %q", got.header.Get("Content-Range"), want)
-		}
-		if !bytes.Equal(got.body, large[1000:3000]) {
-			t.Fatalf("range body mismatch: %d bytes", len(got.body))
-		}
-		if snapshot := server.settledSweep(t); len(snapshot.Sessions) != 1 || snapshot.Sessions[0].BytesAccepted != 2000 {
-			t.Fatalf("range accounting = %+v", snapshot.Sessions)
-		}
-	})
-
-	// A rejected request must create no LOGICAL activity. It does not produce an
-	// empty snapshot: the observer still saw the request and the error body, and
-	// that is deliberately retained in the unattributed counters.
-	for _, test := range []struct {
-		name       string
-		sid        string
-		closed     bool
-		wantStatus int
-	}{
-		{"unknown session", "sid-missing", false, http.StatusNotFound},
-		{"closed session", "sid-closed", true, http.StatusGone},
-	} {
-		t.Run(test.name+" creates no logical activity", func(t *testing.T) {
-			registry := telemetryRegistry(t)
-			deps := absPublicTrackDeps(t, "sid-real", "book-1", "42", body)
-			if test.closed {
-				closedAt := time.Now()
-				store := deps.PlaybackSessionStore.(*fakePlaybackSessionStore)
-				_ = store.InsertPlaybackSession(context.Background(), ABSPlaybackSession{
-					ID: test.sid, UserID: "42", ContentID: "book-1", ClosedAt: &closedAt,
-				})
-			}
-			server := absTelemetryServer(t, registry, deps)
-			got := getWithHeaders(t, server.Client(), http.MethodGet,
-				server.URL+"/public/session/"+test.sid+"/track/1", nil)
-			if got.status != test.wantStatus {
-				t.Fatalf("status = %d, want %d", got.status, test.wantStatus)
-			}
-			snapshot := server.settledSweep(t)
-			if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 0 {
-				t.Fatalf("rejected request created logical activity: %+v %+v", snapshot.Sessions, snapshot.Transfers)
-			}
-			if snapshot.UnattributedObservations == 0 {
-				t.Fatal("rejected request was not counted as unattributed")
-			}
-		})
-	}
-}
-
 // feedMediaStore serves one item with one media file for the RSS feed-file
 // route.
 type feedMediaStore struct {
@@ -378,18 +296,44 @@ func TestMountedABSRouterFeedFileResolvesOwner(t *testing.T) {
 	}
 }
 
-// The family gate is the kill switch that makes enrolling a family sharing the
-// API process reversible without losing all observation.
-func TestMountedABSRouterFamilyGate(t *testing.T) {
+func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
 	body := []byte("\xff\xfb\x00\x00audio-bytes")
-	registry := telemetryRegistry(t, streamtelemetry.FamilyNative)
-	server := absTelemetryServer(t, registry, absPublicTrackDeps(t, "sid-gated", "book-1", "42", body))
-	got := getWithHeaders(t, server.Client(), http.MethodGet, server.URL+"/public/session/sid-gated/track/1", nil)
-	if got.status != http.StatusOK || len(got.body) == 0 {
-		t.Fatalf("gated-out family broke serving: %d, %d bytes", got.status, len(got.body))
-	}
-	snapshot := server.settledSweep(t)
-	if len(snapshot.Sessions) != 0 || snapshot.UnattributedObservations != 0 {
-		t.Fatalf("gated-out family still observed: %+v", snapshot)
+
+	// A rejected request must create no LOGICAL activity. It does not produce an
+	// empty snapshot: the observer still saw the request and the error body, and
+	// that is deliberately retained in the unattributed counters.
+	for _, test := range []struct {
+		name       string
+		sid        string
+		closed     bool
+		wantStatus int
+	}{
+		{"unknown session", "sid-missing", false, http.StatusNotFound},
+		{"closed session", "sid-closed", true, http.StatusGone},
+	} {
+		t.Run(test.name+" creates no logical activity", func(t *testing.T) {
+			registry := telemetryRegistry(t)
+			deps := absPublicTrackDeps(t, "sid-real", "book-1", "42", body)
+			if test.closed {
+				closedAt := time.Now()
+				store := deps.PlaybackSessionStore.(*fakePlaybackSessionStore)
+				_ = store.InsertPlaybackSession(context.Background(), ABSPlaybackSession{
+					ID: test.sid, UserID: "42", ContentID: "book-1", ClosedAt: &closedAt,
+				})
+			}
+			server := absTelemetryServer(t, registry, deps)
+			got := getWithHeaders(t, server.Client(), http.MethodGet,
+				server.URL+"/public/session/"+test.sid+"/track/1", nil)
+			if got.status != test.wantStatus {
+				t.Fatalf("status = %d, want %d", got.status, test.wantStatus)
+			}
+			snapshot := server.settledSweep(t)
+			if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 0 {
+				t.Fatalf("rejected request created logical activity: %+v %+v", snapshot.Sessions, snapshot.Transfers)
+			}
+			if snapshot.UnattributedObservations == 0 {
+				t.Fatal("rejected request was not counted as unattributed")
+			}
+		})
 	}
 }

@@ -36,12 +36,6 @@ describe("canCopyToLibraries", () => {
   ])("refuses a row whose settings name a library through %s", (_key, config) => {
     expect(canCopyToLibraries({ sectionType: "recently_added", config })).toBe(false);
   });
-
-  it("refuses a legacy Trakt row, which the server won't create again", () => {
-    expect(
-      canCopyToLibraries({ sectionType: "trending_discover", config: { source: "trakt" } }),
-    ).toBe(false);
-  });
 });
 
 const PAGES = [

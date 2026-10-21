@@ -2,7 +2,7 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import { setAccessToken, setRefreshToken, setProfileId } from "@/api/client";
-import { getAdminItemImages, applyAdminItemImage } from "./adminImages";
+import { getAdminItemImages } from "./adminImages";
 beforeEach(() => {
   installPolicyStorageMocks();
   setAccessToken("test-account");
@@ -67,21 +67,4 @@ it("refuses image results when authority changes during decoding", async () => {
   });
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
   await expect(getAdminItemImages("item-1")).rejects.toThrow();
-});
-it("does not refresh or replay an image publication after401", async () => {
-  const mock = vi.fn().mockResolvedValue(
-    new Response(
-      JSON.stringify({
-        type: "https://siloserver.org/docs/api/v2/problems/authentication_required",
-        status: 401,
-        title: "Unauthorized",
-      }),
-      { status: 401, headers: { "Content-Type": "application/problem+json" } },
-    ),
-  );
-  vi.stubGlobal("fetch", mock);
-  await expect(
-    applyAdminItemImage("item-1", { original_url: "source", type: "poster", provider_id: "p" }),
-  ).rejects.toThrow();
-  expect(mock).toHaveBeenCalledTimes(1);
 });

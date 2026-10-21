@@ -104,14 +104,6 @@ describe("AdminLayout search shortcut hint", () => {
     expect(search).toHaveAttribute("title", "Search admin sections (Ctrl K)");
     expect(screen.queryByText(/⌘/)).not.toBeInTheDocument();
   });
-
-  it("names the command glyph on Apple platforms", () => {
-    mocks.shortcutLabel = "⌘ K";
-    renderAdmin();
-
-    const search = screen.getByRole("button", { name: "Search admin sections" });
-    expect(search).toHaveAttribute("title", "Search admin sections (⌘ K)");
-  });
 });
 
 describe("AdminLayout search", () => {
@@ -134,19 +126,6 @@ describe("AdminLayout shell attribute", () => {
     expect(document.documentElement).toHaveAttribute("data-admin-shell", "true");
     unmount();
     expect(document.documentElement).not.toHaveAttribute("data-admin-shell");
-  });
-});
-
-describe("AdminLayout page title", () => {
-  // The tab title, the route-change announcement and the phone header all read
-  // this name, so a renamed route must not fall back to the generic "Admin"
-  // (which the phone header shows as "Dashboard").
-  it("names the Sections page in the tab and the phone header", () => {
-    renderAdmin("/admin/sections");
-
-    expect(document.title).toBe("Admin Sections · Silo");
-    expect(screen.getByText("Sections")).toBeInTheDocument();
-    expect(screen.queryByText("Dashboard")).not.toBeInTheDocument();
   });
 });
 

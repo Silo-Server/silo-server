@@ -105,7 +105,7 @@ type SectionItemMeta struct {
 	DurationSeconds   *float64
 	ProgressUpdatedAt *string
 	ItemSource        string    // "in_progress" or "next_up"
-	SortTimestamp     time.Time // when the preceding episode was completed (for ordering)
+	SortTimestamp     time.Time // orders Continue Watching: progress time, or a next-up row's catalog.NextUpResult.ActivityAt
 }
 
 // ResolvedItems is the resolver's output.

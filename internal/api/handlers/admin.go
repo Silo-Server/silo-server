@@ -556,9 +556,9 @@ func checkScopedAPIKeyUpdate(ctx context.Context, target *models.User, input mod
 
 // rejectScopedAPIKeyUpdate applies the shared policy before v1 validation.
 //
-// It returns the target account when it had to load one, so the caller can
-// reuse it as the pre-update snapshot instead of reading the row twice, and
-// reports whether it wrote a response.
+// It returns the target account when it had to load one, so rejectGroupedAdmin
+// can reuse it instead of reading the row twice, and reports whether it wrote
+// a response.
 func (h *AdminHandler) rejectScopedAPIKeyUpdate(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -599,17 +599,18 @@ func (h *AdminHandler) loadTargetUser(w http.ResponseWriter, r *http.Request, id
 // an access group: a group named in the request together with the admin role,
 // or for an account that already holds it. Writes that only change the role
 // are not its concern — the repository clears the group on promote and falls
-// back to the default group on demote. It loads the target when the role is
-// not in the request and returns it for reuse as the pre-update snapshot.
+// back to the default group on demote. It loads the target when neither the
+// request nor current carries the role, and reports whether it wrote a
+// response.
 func (h *AdminHandler) rejectGroupedAdmin(
 	w http.ResponseWriter,
 	r *http.Request,
 	id int,
 	req *updateUserRequest,
 	current *models.User,
-) (*models.User, bool) {
+) bool {
 	if !req.AccessGroupID.Set || req.AccessGroupID.Value == nil {
-		return current, false
+		return false
 	}
 	var role string
 	switch {
@@ -618,18 +619,18 @@ func (h *AdminHandler) rejectGroupedAdmin(
 	case current != nil:
 		role = current.Role
 	default:
-		var blocked bool
-		if current, blocked = h.loadTargetUser(w, r, id); blocked {
-			return nil, true
+		target, blocked := h.loadTargetUser(w, r, id)
+		if blocked {
+			return true
 		}
-		role = current.Role
+		role = target.Role
 	}
 	if role == roleAdmin {
 		writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity",
 			"Admin accounts cannot belong to an access group")
-		return current, true
+		return true
 	}
-	return current, false
+	return false
 }
 
 // clonePtr copies a policy override pointer so a response never aliases the
@@ -995,8 +996,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity", "Invalid access_group_id")
 			return
 		}
-		currentUser, blocked = h.rejectGroupedAdmin(w, r, id, &req, currentUser)
-		if blocked {
+		if h.rejectGroupedAdmin(w, r, id, &req, currentUser) {
 			return
 		}
 		if req.AccessGroupID.Value != nil {
@@ -2427,7 +2427,6 @@ var adminSettingDependencyGroups = [][]string{
 	{"s3.private_access_key", "s3.private_secret_key"},
 	{"s3.public_url_auth", "s3.public_read_endpoint", "s3.public_token_secret"},
 	{"email.enabled", "email.smtp_host", "email.from_address"},
-	{"watchsync.trakt.client_id", "watchsync.trakt.client_secret"},
 	{"watchsync.simkl.client_id", "watchsync.simkl.client_secret"},
 	{"ratelimit.backend", "redis.url"},
 	{"download.max_per_period", "download.period_duration"},
@@ -2689,6 +2688,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		}
 		normalized[key] = value
 	}
+	checkedRedis, err := h.checkRedisSave(ctx, normalized)
+	if err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
 
 	modelValidation, err := h.prepareAIModelValidation(ctx, normalized)
 	if err != nil {
@@ -2712,17 +2715,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 				}
 			}
 
-			prospective := maps.Clone(stored)
-			for key, value := range normalized {
-				prospective[key] = value
-			}
-			rows := normalized
-			if value, ok := normalized[config.RedisDBSettingKey]; ok {
-				// The same batch can replace redis.url, so the row is decided
-				// against the URL the batch leaves in place.
-				rows = maps.Clone(normalized)
-				rows[config.RedisDBSettingKey] = redisDBRow(h.activeAdminSettings(prospective), value)
-				prospective[config.RedisDBSettingKey] = rows[config.RedisDBSettingKey]
+			prospective, rows := h.prospectiveSettings(stored, normalized)
+			if err := h.confirmRedisSave(stored, prospective, checkedRedis); err != nil {
+				preconditionErr = err
+				return nil, err
 			}
 			if modelValidation != nil {
 				if err := modelValidation.Check(stored, prospective); err != nil {
@@ -2749,7 +2745,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			validationSnapshot := adminSettingsValidationSnapshot(activeProspective, normalized)
 			if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 				validationErr = err
-				validationCode = "invalid_settings"
+				validationCode = adminInvalidSettingsCode
 				return nil, err
 			}
 			writes := make(map[string]string, len(normalized))
@@ -2799,6 +2795,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		if h.OnServerSettingUpdated != nil {
 			h.OnServerSettingUpdated(ctx, key, after[key])
 		}
+		publishAdminDefaultEvent(ctx, h.EventsHub, key)
 		if config.RestartRequired(key) {
 			restartKeys = append(restartKeys, key)
 		}
@@ -3079,6 +3076,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		}
 		req.Value = strconv.FormatBool(enabled)
 	}
+	change := map[string]string{key: req.Value}
+	checkedRedis, err := h.checkRedisSave(ctx, change)
+	if err != nil {
+		return AdminSettingUpdateResult{}, err
+	}
 
 	modelValidation, err := h.prepareAIModelValidation(ctx, map[string]string{key: req.Value})
 	if err != nil {
@@ -3101,12 +3103,12 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				}
 			}
 
-			prospective := maps.Clone(stored)
-			row := req.Value
-			if key == config.RedisDBSettingKey {
-				row = redisDBRow(h.activeAdminSettings(stored), req.Value)
+			prospective, rows := h.prospectiveSettings(stored, change)
+			row := rows[key]
+			if err := h.confirmRedisSave(stored, prospective, checkedRedis); err != nil {
+				preconditionErr = err
+				return nil, err
 			}
-			prospective[key] = row
 			if modelValidation != nil {
 				if err := modelValidation.Check(stored, prospective); err != nil {
 					validationErr, validationCode = err, adminInvalidSettingsCode
@@ -3124,7 +3126,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = adminInvalidSettingsCode
 					return nil, err
 				}
 			}
@@ -3139,7 +3141,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 					h.RedisBootstrapAvailable,
 				); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = adminInvalidSettingsCode
 					return nil, err
 				}
 			}
@@ -3149,7 +3151,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			if key == artworkStorageBackendKey || key == s3PublicBucketKey || key == s3OperationalBucketKey {
 				if err := config.ValidateArtworkStorageSettings(h.effectiveAdminSettings(prospective)); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = adminInvalidSettingsCode
 					return nil, err
 				}
 			}
@@ -3183,6 +3185,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		if h.OnServerSettingUpdated != nil {
 			h.OnServerSettingUpdated(ctx, key, after[key])
 		}
+		publishAdminDefaultEvent(ctx, h.EventsHub, key)
 	}
 	restartRequired := effectiveChanged && config.RestartRequired(key)
 	if restartRequired {

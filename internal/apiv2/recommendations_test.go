@@ -30,6 +30,7 @@ type fakeRecommendations struct {
 	lastExclude         map[string]struct{}
 	cardsHasMore        bool
 	swipePool           int
+	lastFilter          catalogpkg.AccessFilter
 }
 
 func fakeRecommendationRow() handlers.DiscoverRowView {
@@ -49,8 +50,8 @@ func (f *fakeRecommendations) BecauseWatchedCards(_ context.Context, _ int, _, i
 	return f.cards(limit)
 }
 
-func (f *fakeRecommendations) PopularCards(_ context.Context, _ int, _ string, days, limit int, _ catalogpkg.AccessFilter) ([]handlers.SectionItemView, error) {
-	f.lastItemID, f.lastDays = "", days
+func (f *fakeRecommendations) PopularCards(_ context.Context, _ int, _ string, days, limit int, filter catalogpkg.AccessFilter) ([]handlers.SectionItemView, error) {
+	f.lastItemID, f.lastDays, f.lastFilter = "", days, filter
 	return f.cards(limit)
 }
 
@@ -181,7 +182,7 @@ type recommendationRowDoc struct {
 
 func requireFakeCard(t *testing.T, card map[string]json.RawMessage) {
 	t.Helper()
-	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true}`} {
+	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true,"not_interested":false}`} {
 		if string(card[k]) != want {
 			t.Errorf("%s = %s, want %s", k, card[k], want)
 		}

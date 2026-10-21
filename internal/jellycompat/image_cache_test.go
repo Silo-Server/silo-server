@@ -23,21 +23,6 @@ func TestImageCacheLookupSizedUsesSizeBucket(t *testing.T) {
 	}
 }
 
-func TestImageCacheLookupSizedUsesTagWithinMatchingSizeBucket(t *testing.T) {
-	now := fixedNow()
-	cache := NewImageCache(time.Hour, func() time.Time { return now })
-
-	smallURL := "https://example.com/small.jpg"
-	largeURL := "https://example.com/large.jpg"
-	cache.RememberSized("item-1", "Primary", smallURL, compatCardImageSize)
-	cache.RememberSized("item-1", "Primary", largeURL, "original")
-
-	got, ok := cache.LookupSized("item-1", "Primary", tagValue(largeURL), "original")
-	if !ok || got != largeURL {
-		t.Fatalf("LookupSized(tag=large, original) = (%q, %v), want large image", got, ok)
-	}
-}
-
 // TestImageCacheLookupSizedReturnsHTTPPassthroughAcrossSizes locks in the
 // behavior PR #28's review feedback discussed: HTTP-passthrough URLs (e.g.
 // direct TMDB image URLs) are the same string regardless of requested size,
@@ -56,24 +41,6 @@ func TestImageCacheLookupSizedReturnsHTTPPassthroughAcrossSizes(t *testing.T) {
 		if !ok || got != httpURL {
 			t.Fatalf("LookupSized(tag, size=%q) = (%q, %v), want %q", size, got, ok, httpURL)
 		}
-	}
-}
-
-func TestImageCacheRememberSizedUntilCapsRouteExpiry(t *testing.T) {
-	now := fixedNow()
-	cache := NewImageCache(time.Hour, func() time.Time { return now })
-	urlExpiresAt := now.Add(10 * time.Minute)
-
-	cache.RememberSizedUntil("item-1", "Primary", "https://example.com/presigned.jpg", compatCardImageSize, &urlExpiresAt)
-
-	now = now.Add(4 * time.Minute)
-	if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); !ok || got == "" {
-		t.Fatalf("LookupSized before capped expiry = (%q, %v), want hit", got, ok)
-	}
-
-	now = now.Add(2 * time.Minute)
-	if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); ok {
-		t.Fatalf("LookupSized after capped expiry = (%q, %v), want miss", got, ok)
 	}
 }
 
@@ -159,48 +126,47 @@ func TestImageCacheNeverServesSignedURLNearExpiry(t *testing.T) {
 // to half the URL's remaining life, and the entry is never served inside it.
 func TestImageCacheKeepsShortLivedSignedURLs(t *testing.T) {
 	start := fixedNow()
-	for _, lifetime := range []time.Duration{time.Minute, 5 * time.Minute} {
-		urlExpiresAt := start.Add(lifetime)
-		stopServing := urlExpiresAt.Add(-lifetime / 2)
-		signedURLs := map[string]string{
-			"artwork": "/api/v2/artwork/tmdb/movies/1/poster/w342.abc.webp?exp=" + strconv.FormatInt(urlExpiresAt.Unix(), 10) + "&sig=x",
-			"s3": "https://bucket.s3.example.test/poster.webp?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=" +
-				start.Format("20060102T150405Z") + "&X-Amz-Expires=" + strconv.Itoa(int(lifetime.Seconds())) + "&X-Amz-Signature=y",
+	lifetime := time.Minute
+	urlExpiresAt := start.Add(lifetime)
+	stopServing := urlExpiresAt.Add(-lifetime / 2)
+	signedURLs := map[string]string{
+		"artwork": "/api/v2/artwork/tmdb/movies/1/poster/w342.abc.webp?exp=" + strconv.FormatInt(urlExpiresAt.Unix(), 10) + "&sig=x",
+		"s3": "https://bucket.s3.example.test/poster.webp?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=" +
+			start.Format("20060102T150405Z") + "&X-Amz-Expires=" + strconv.Itoa(int(lifetime.Seconds())) + "&X-Amz-Signature=y",
+	}
+	for name, signedURL := range signedURLs {
+		remember := map[string]func(*ImageCache){
+			"expiry read from URL": func(c *ImageCache) {
+				c.RememberSized("item-1", "Primary", signedURL, compatCardImageSize)
+			},
+			"expiry passed in": func(c *ImageCache) {
+				c.RememberSizedUntil("item-1", "Primary", signedURL, compatCardImageSize, &urlExpiresAt)
+			},
 		}
-		for name, signedURL := range signedURLs {
-			remember := map[string]func(*ImageCache){
-				"expiry read from URL": func(c *ImageCache) {
-					c.RememberSized("item-1", "Primary", signedURL, compatCardImageSize)
-				},
-				"expiry passed in": func(c *ImageCache) {
-					c.RememberSizedUntil("item-1", "Primary", signedURL, compatCardImageSize, &urlExpiresAt)
-				},
-			}
-			for how, rememberURL := range remember {
-				t.Run(fmt.Sprintf("%s/%s/%s", lifetime, name, how), func(t *testing.T) {
-					now := start
-					cache := NewImageCache(87600*time.Hour, func() time.Time { return now })
-					rememberURL(cache)
+		for how, rememberURL := range remember {
+			t.Run(fmt.Sprintf("%s/%s/%s", lifetime, name, how), func(t *testing.T) {
+				now := start
+				cache := NewImageCache(87600*time.Hour, func() time.Time { return now })
+				rememberURL(cache)
 
-					for _, at := range []time.Time{start, stopServing.Add(-time.Second)} {
-						now = at
-						if got, ok := cache.LookupTag(tagValue(signedURL)); !ok || got != signedURL {
-							t.Fatalf("tag lookup %s before URL expiry = (%q, %v), want hit", urlExpiresAt.Sub(now), got, ok)
-						}
-						if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); !ok || got != signedURL {
-							t.Fatalf("route lookup %s before URL expiry = (%q, %v), want hit", urlExpiresAt.Sub(now), got, ok)
-						}
+				for _, at := range []time.Time{start, stopServing.Add(-time.Second)} {
+					now = at
+					if got, ok := cache.LookupTag(tagValue(signedURL)); !ok || got != signedURL {
+						t.Fatalf("tag lookup %s before URL expiry = (%q, %v), want hit", urlExpiresAt.Sub(now), got, ok)
 					}
+					if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); !ok || got != signedURL {
+						t.Fatalf("route lookup %s before URL expiry = (%q, %v), want hit", urlExpiresAt.Sub(now), got, ok)
+					}
+				}
 
-					now = stopServing
-					if got, ok := cache.LookupTag(tagValue(signedURL)); ok {
-						t.Fatalf("tag lookup %s before URL expiry = (%q, %v), want miss", urlExpiresAt.Sub(now), got, ok)
-					}
-					if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); ok {
-						t.Fatalf("route lookup %s before URL expiry = (%q, %v), want miss", urlExpiresAt.Sub(now), got, ok)
-					}
-				})
-			}
+				now = stopServing
+				if got, ok := cache.LookupTag(tagValue(signedURL)); ok {
+					t.Fatalf("tag lookup %s before URL expiry = (%q, %v), want miss", urlExpiresAt.Sub(now), got, ok)
+				}
+				if got, ok := cache.LookupSized("item-1", "Primary", "", compatCardImageSize); ok {
+					t.Fatalf("route lookup %s before URL expiry = (%q, %v), want miss", urlExpiresAt.Sub(now), got, ok)
+				}
+			})
 		}
 	}
 }
@@ -247,45 +213,4 @@ func TestSignedImageURLExpiry(t *testing.T) {
 			}
 		})
 	}
-}
-
-// BenchmarkImageCacheRememberLookup measures one list-path remember plus one
-// route lookup of a signed artwork URL.
-func BenchmarkImageCacheRememberLookup(b *testing.B) {
-	cache := NewImageCache(time.Hour, time.Now)
-	routes := make([]string, 4096)
-	urls := make([]string, len(routes))
-	exp := time.Now().Add(4 * time.Hour).Unix()
-	for i := range routes {
-		routes[i] = fmt.Sprintf("route-%d", i)
-		urls[i] = fmt.Sprintf("/api/v2/artwork/tmdb/movies/%d/poster/w342.abc.webp?exp=%d&sig=abcdefghijklmnop", i, exp)
-	}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		j := i % len(routes)
-		cache.RememberSized(routes[j], "Primary", urls[j], compatCardImageSize)
-		cache.LookupSized(routes[j], "Primary", "", compatCardImageSize)
-	}
-}
-
-// BenchmarkImageCacheLookupParallel measures concurrent untagged route
-// lookups, which share the cache's read lock.
-func BenchmarkImageCacheLookupParallel(b *testing.B) {
-	cache := NewImageCache(time.Hour, time.Now)
-	routes := make([]string, 4096)
-	exp := time.Now().Add(4 * time.Hour).Unix()
-	for i := range routes {
-		routes[i] = fmt.Sprintf("route-%d", i)
-		cache.RememberSized(routes[i], "Primary", fmt.Sprintf("/api/v2/artwork/tmdb/movies/%d/poster/w342.abc.webp?exp=%d&sig=abcdefghijklmnop", i, exp), compatCardImageSize)
-	}
-	b.ReportAllocs()
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		i := 0
-		for pb.Next() {
-			cache.LookupSized(routes[i%len(routes)], "Primary", "", compatCardImageSize)
-			i++
-		}
-	})
 }

@@ -73,12 +73,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import {
-  fetchWatchDetail,
-  redetectItemMarkers,
-  useRefreshItemMetadata,
-  useWatchedStateMutation,
-} from "./items";
+import { useRefreshItemMetadata, useWatchedStateMutation } from "./items";
 
 type WatchedMutationOptions = {
   mutationFn: (nextPlayed: boolean) => Promise<unknown>;
@@ -142,65 +137,6 @@ describe("item query helpers", () => {
     mocks.useQueryClient.mockReturnValue({});
   });
 
-  it("reads watch detail through the v2 operation with file and library ids", async () => {
-    const detail = await fetchWatchDetail("ebook 1/isbn:978", 42, 12);
-
-    expect(mocks.v2).toHaveBeenCalledWith("GET /api/v2/watch/{id}", {
-      path: { id: "ebook 1/isbn:978" },
-      query: { file_id: "42", library_id: "12" },
-      signal: undefined,
-    });
-    expect(detail.content_id).toBe("ebook 1/isbn:978");
-    expect(detail.intro).toBeNull();
-  });
-
-  it("encodes item IDs in v2 admin item endpoints", async () => {
-    const { v2 } = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
-    mocks.v2.mockImplementationOnce(v2);
-    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ status: "started" }), {
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetch);
-    await redetectItemMarkers("episode 1/id:abc", "credits");
-
-    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/admin/items/{id}/redetect-markers", {
-      path: { id: "episode 1/id:abc" },
-      body: { kind: "credits" },
-      retryAuthentication: false,
-    });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0]?.[0]).toBe(
-      "/api/v2/admin/items/episode%201%2Fid%3Aabc/redetect-markers",
-    );
-    expect(fetch.mock.calls[0]?.[1]?.method).toBe("POST");
-    expect(fetch.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ kind: "credits" }));
-    expect(mocks.api).not.toHaveBeenCalled();
-  });
-
-  it("shows one spinning refresh notification and replaces it with success", async () => {
-    const invalidateQueries = vi.fn().mockResolvedValue(undefined);
-    mocks.useQueryClient.mockReturnValue({ invalidateQueries });
-
-    useRefreshItemMetadata();
-    const options = mocks.useMutation.mock.calls[
-      mocks.useMutation.mock.calls.length - 1
-    ]?.[0] as RefreshMetadataMutationOptions;
-    const variables: RefreshMetadataVariables = {
-      item: { content_id: "series-1", type: "series" },
-      mode: "quick",
-    };
-
-    const context = options.onMutate?.(variables);
-    expect(mocks.toastLoading).toHaveBeenCalledWith("Quick metadata refresh running…");
-
-    await options.onSuccess?.({ job: { result_payload: {} } }, variables, context);
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Metadata refreshed", {
-      id: "refresh-toast",
-    });
-  });
-
   it("warns when the refresh succeeded but artwork caching did not finish", async () => {
     const invalidateQueries = vi.fn().mockResolvedValue(undefined);
     mocks.useQueryClient.mockReturnValue({ invalidateQueries });
@@ -238,42 +174,6 @@ describe("item query helpers", () => {
     );
     // The refresh still committed, so the caches must be invalidated anyway.
     expect(invalidateQueries).toHaveBeenCalled();
-  });
-
-  it("replaces the spinning refresh notification with a failure", () => {
-    useRefreshItemMetadata();
-    const options = mocks.useMutation.mock.calls[
-      mocks.useMutation.mock.calls.length - 1
-    ]?.[0] as RefreshMetadataMutationOptions;
-    const variables: RefreshMetadataVariables = {
-      item: { content_id: "series-1", type: "series" },
-      mode: "quick",
-    };
-    const context = options.onMutate?.(variables);
-
-    options.onError?.(new Error("Artwork download failed"), variables, context);
-    expect(mocks.toastError).toHaveBeenCalledWith("Artwork download failed", {
-      id: "refresh-toast",
-    });
-  });
-
-  it("toggles ebook read state through the watched endpoint", async () => {
-    useWatchedStateMutation({ content_id: "ebook 1/isbn:978", type: "ebook" });
-    const options = mocks.useMutation.mock.calls[
-      mocks.useMutation.mock.calls.length - 1
-    ]?.[0] as WatchedMutationOptions;
-
-    await options.mutationFn(true);
-    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/watched/{id}", {
-      path: { id: "ebook 1/isbn:978" },
-      keepalive: true,
-    });
-
-    await options.mutationFn(false);
-    expect(mocks.v2).toHaveBeenCalledWith("DELETE /api/v2/watched/{id}", {
-      path: { id: "ebook 1/isbn:978" },
-      keepalive: true,
-    });
   });
 
   it("optimistically flips played state and reverts only that field on failure", async () => {

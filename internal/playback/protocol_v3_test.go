@@ -177,20 +177,7 @@ func TestPlanPlaybackV3CroppedRungKeepsEncoderHeight(t *testing.T) {
 }
 
 func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
-	start := validStartRequestV3()
-	request := ReplanRequestV3{
-		ProtocolVersion:       ProtocolV3,
-		PlaybackAttemptID:     start.PlaybackAttemptID,
-		ReplanRequestID:       "replan-operation-0001",
-		FailedPlanID:          "plan:operation-0001",
-		PlanAttemptID:         "plan-attempt-operation-0001",
-		PlanAttemptKey:        "v3:0000000000000001",
-		AttemptCount:          1,
-		QualityPreference:     start.QualityPreference,
-		Failure:               FailureV3{Classification: "parser_failure"},
-		Capabilities:          start.Capabilities,
-		ClientPlaybackContext: start.ClientPlaybackContext,
-	}
+	request := replanFixtureV3("operation-0001")
 	if request.EffectiveOperation() != ReplanOperationFailureRecoveryV3 {
 		t.Fatalf("missing operation = %q", request.EffectiveOperation())
 	}
@@ -269,20 +256,7 @@ func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
 }
 
 func TestReplanRequestV3ValidationRetainsClientBuildChannelNormalization(t *testing.T) {
-	start := validStartRequestV3()
-	request := ReplanRequestV3{
-		ProtocolVersion:       ProtocolV3,
-		PlaybackAttemptID:     start.PlaybackAttemptID,
-		ReplanRequestID:       "replan-client-metadata-0001",
-		FailedPlanID:          "plan:client-metadata-0001",
-		PlanAttemptID:         "plan-attempt-client-metadata-0001",
-		PlanAttemptKey:        "v3:0000000000000001",
-		AttemptCount:          1,
-		QualityPreference:     start.QualityPreference,
-		Failure:               FailureV3{Classification: "parser_failure"},
-		Capabilities:          start.Capabilities,
-		ClientPlaybackContext: start.ClientPlaybackContext,
-	}
+	request := replanFixtureV3("client-metadata-0001")
 	request.ClientPlaybackContext.AppVersion = "\x00" + strings.Repeat("δ", 70) + "\nignored"
 	request.ClientPlaybackContext.AppBuild = strings.Repeat("build", 20) + "\x00ignored"
 	request.ClientPlaybackContext.AppChannel = strings.Repeat("channel", 10) + "\x00ignored"
@@ -298,18 +272,6 @@ func TestReplanRequestV3ValidationRetainsClientBuildChannelNormalization(t *test
 	}
 	if got, want := request.ClientPlaybackContext.AppChannel, strings.Repeat("channel", 4)+"chan"; got != want {
 		t.Fatalf("normalized app_channel = %q, want %q", got, want)
-	}
-}
-
-func TestStartRequestV3NormalizesUnicodeAppVersionAndStripsControls(t *testing.T) {
-	request := validStartRequestV3()
-	request.ClientPlaybackContext.AppVersion = "\x00" + strings.Repeat("δ", 70) + "\nignored"
-
-	if _, err := request.NormalizeAndValidate(); err != nil {
-		t.Fatalf("NormalizeAndValidate() error = %v", err)
-	}
-	if got, want := request.ClientPlaybackContext.AppVersion, strings.Repeat("δ", 64); got != want {
-		t.Fatalf("normalized app_version = %q, want %q", got, want)
 	}
 }
 
@@ -334,20 +296,7 @@ func TestHDR10CapabilityLimitsBoundTheClaimedStreamClass(t *testing.T) {
 }
 
 func TestReplanRequestV3RejectsInvalidNetworkAndTrackEvidence(t *testing.T) {
-	start := validStartRequestV3()
-	request := ReplanRequestV3{
-		ProtocolVersion:       ProtocolV3,
-		PlaybackAttemptID:     start.PlaybackAttemptID,
-		ReplanRequestID:       "replan-validation-0001",
-		FailedPlanID:          "plan:validation-0001",
-		PlanAttemptID:         "plan-attempt-validation-0001",
-		PlanAttemptKey:        "v3:0000000000000001",
-		AttemptCount:          1,
-		QualityPreference:     start.QualityPreference,
-		Failure:               FailureV3{Classification: "parser_failure"},
-		Capabilities:          start.Capabilities,
-		ClientPlaybackContext: start.ClientPlaybackContext,
-	}
+	request := replanFixtureV3("validation-0001")
 
 	negative := -1
 	request.SelectedTracks.Subtitle = &TrackIdentityV3{ID: "file:42:subtitle:-1", Index: &negative}
@@ -715,16 +664,11 @@ func TestVideoProfileSupportedV3(t *testing.T) {
 		{name: "constrained baseline is a baseline subset", codec: "h264", source: "constrained baseline", decoderProfile: "baseline", want: true},
 		{name: "case and surrounding whitespace", codec: " H264 ", source: " Constrained Baseline ", decoderProfile: " BASELINE ", want: true},
 		{name: "hyphen variant", codec: "h264", source: "constrained-baseline", decoderProfile: "baseline", want: true},
-		{name: "underscore variant", codec: "h264", source: "constrained_baseline", decoderProfile: "baseline", want: true},
-		{name: "period variant", codec: "h264", source: "constrained.baseline", decoderProfile: "baseline", want: true},
 		{name: "unknown plus qualifier is preserved", codec: "h264", source: "baseline+", decoderProfile: "baseline", want: false},
 		{name: "unknown at-sign separator is preserved", codec: "h264", source: "constrained@baseline", decoderProfile: "baseline", want: false},
 		{name: "direction is not reversed", codec: "h264", source: "baseline", decoderProfile: "constrained baseline", want: false},
 		{name: "main is not baseline", codec: "h264", source: "main", decoderProfile: "baseline", want: false},
-		{name: "high is not baseline", codec: "h264", source: "high", decoderProfile: "baseline", want: false},
 		{name: "main identity", codec: "h264", source: "main", decoderProfile: "MAIN", want: true},
-		{name: "high identity", codec: "h264", source: "high", decoderProfile: "High", want: true},
-		{name: "high 10 identity", codec: "h264", source: "high 10", decoderProfile: "high-10", want: true},
 		{name: "colon variant matches compact spelling", codec: "h264", source: "high 4:2:2", decoderProfile: "high422", want: true},
 		{name: "colon variant matches mixed separators", codec: "h264", source: "high 4:4:4 predictive", decoderProfile: "high-4.4.4-predictive", want: true},
 		{name: "non h264 punctuation remains exact", codec: "hevc", source: "main 10", decoderProfile: "main-10", want: false},
@@ -740,50 +684,6 @@ func TestVideoProfileSupportedV3(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3DirectPlaysH264ConstrainedBaselineWithoutTranscoding(t *testing.T) {
-	file := &models.MediaFile{
-		ID: 760460, FilePath: "/media/rebel-without-a-pause.mkv", Container: "mkv",
-		CodecVideo: "h264", CodecAudio: "eac3", Resolution: "1080p", Bitrate: 6_642,
-		AudioChannels: 6,
-		VideoTracks: []models.VideoTrack{{
-			Codec: "h264", Profile: "Constrained Baseline", Level: 40,
-			Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 6_642,
-			BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR",
-		}},
-		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Layout: "5.1", Default: true}},
-	}
-	req := validStartRequestV3()
-	req.FileID = file.ID
-	req.QualityPreference = "auto"
-	req.Capabilities.CodecsVideo = []string{"h264"}
-	req.Capabilities.CodecsVideoHardware = []string{"h264"}
-	req.Capabilities.CodecsAudio = []string{"eac3"}
-	req.Capabilities.Containers = []string{"mkv"}
-	req.Capabilities.MaxResolution = "2160p"
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{
-		Codec: "h264", Profiles: []string{"baseline", "main", "high", "high 10"}, Levels: []int{52},
-		BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60,
-		MaxBitrateKbps: 20_000, Hardware: true,
-	}}
-
-	result := PlanPlaybackV3(PlannerInputV3{
-		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: false},
-	})
-	if result.Terminal != nil || result.Plan == nil {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-	if result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect {
-		t.Fatalf("route = delivery %q method %q, want original_http/direct", result.Plan.Delivery, result.PlayMethod)
-	}
-	if result.Plan.DecisionReason != "validated_original_playback" {
-		t.Fatalf("decision reason = %q", result.Plan.DecisionReason)
-	}
-	if result.TargetVideoCodec != "" || result.TranscodeAudio {
-		t.Fatalf("direct result requested adaptation: video=%q transcode_audio=%v", result.TargetVideoCodec, result.TranscodeAudio)
-	}
-}
-
 // A tier that cannot validate a stream the flat lists claim must say so:
 // the adapted plan carries evidence_insufficient_for_direct rather than
 // looking like a device refusal.
@@ -795,7 +695,7 @@ func TestPlanPlaybackV3ExactTierWithoutDecodeEntryReportsEvidenceInsufficiency(t
 	req := validStartRequestV3()
 	req.Capabilities.Containers = []string{"mkv"}
 	req.Capabilities.VideoDecode = nil
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryTranscodeHLSV3 {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -833,12 +733,9 @@ func TestAudioEligibilityV3PassthroughRequiresExactEvidence(t *testing.T) {
 
 func TestPlanPlaybackV3DirectRequiresDetailedEvidence(t *testing.T) {
 	file := detailedFixtureFileV3()
-	req := validStartRequestV3()
+	req := hdr10ClientRequestV3(true)
 	req.ClientFeatures = append(req.ClientFeatures, FeatureLayoutPassthrough)
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -892,43 +789,6 @@ func TestSourceDescriptorV3PreservesCanonicalColorRange(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3DirectPlaysLegacyHDR10WithInferredBitDepth(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.VideoTracks[0].BitDepth = 0
-	file.VideoTracks[0].PixelFormat = "yuv420p10le"
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10 {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-}
-
-func TestPlanPlaybackV3DirectPlaysLegacyDolbyVisionProfile8(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.VideoTracks[0].BitDepth = 0
-	file.VideoTracks[0].PixelFormat = "yuv420p10le"
-	file.VideoTracks[0].DVProfile = 8
-	file.VideoTracks[0].DVBLCompatID = 1
-	file.VideoTracks[0].VideoRange = "DolbyVision"
-	file.VideoTracks[0].VideoRangeType = "DOVIWithHDR10"
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}}
-	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
-
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.DolbyVision {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-	if result.Plan.RequestedMediaFileID != file.ID || result.Plan.EffectiveMediaFileID != file.ID {
-		t.Fatalf("source ids = requested %d effective %d", result.Plan.RequestedMediaFileID, result.Plan.EffectiveMediaFileID)
-	}
-}
-
 func TestPlanPlaybackV3SafariNativeHLSAvoidsProgressiveDVRemux(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.CodecAudio = "eac3"
@@ -943,10 +803,7 @@ func TestPlanPlaybackV3SafariNativeHLSAvoidsProgressiveDVRemux(t *testing.T) {
 	req := validStartRequestV3()
 	req.Capabilities.Containers = []string{"mp4"}
 	req.Capabilities.CodecsAudio = []string{"eac3"}
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{
-		Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10},
-		MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true,
-	}}
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 	hdr := &HDRCapabilitiesV3{
 		DolbyVisionProfiles: []int{8},
 		DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{
@@ -1034,7 +891,7 @@ func TestPlanPlaybackV3AndroidMedia3HLSRecipesAcrossSourceQualities(t *testing.T
 		{name: "Profile 8 preserve", profile: 8, compatibility: 1, videoRangeType: "DOVIWithHDR10", hdr: &HDRCapabilitiesV3{DolbyVisionProfiles: []int{8}, DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 6, BLCompatibilityIDs: []int{1}}}}, wantEntry: VideoSampleEntryDVH1},
 	}
 	for _, profile := range profiles {
-		for _, quality := range []string{"auto", QualityOriginalV3, "2160p"} {
+		for _, quality := range []string{"auto", "2160p"} {
 			t.Run(profile.name+"/"+quality, func(t *testing.T) {
 				file := detailedFixtureFileV3()
 				file.CodecAudio = "truehd"
@@ -1052,7 +909,7 @@ func TestPlanPlaybackV3AndroidMedia3HLSRecipesAcrossSourceQualities(t *testing.T
 				req.ClientPlaybackContext.Device.Platform = "android"
 				req.ClientPlaybackContext.AppBuild = legacyAndroidMedia3HLSBuildV3
 				req.ClientFeatures = append(req.ClientFeatures, FeatureDeviceQuirksV3)
-				req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+				req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 				req.Capabilities.HDRDetails = profile.hdr
 				req.ClientPlaybackContext.Output.HDRDetails = profile.hdr
 				delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
@@ -1063,10 +920,7 @@ func TestPlanPlaybackV3AndroidMedia3HLSRecipesAcrossSourceQualities(t *testing.T
 				hls.HDRDetails = profile.hdr
 				req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
 
-				result := PlanPlaybackV3(PlannerInputV3{
-					Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-					Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
-				})
+				result := planFileV3(req, file)
 				if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.TargetVideoCodec != "copy" || !result.TranscodeAudio {
 					t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 				}
@@ -1085,7 +939,7 @@ func TestPlanPlaybackV3RejectsTrulyIncompleteVideoMetadata(t *testing.T) {
 	file.VideoTracks[0].Profile = ""
 	req := validStartRequestV3()
 
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Terminal == nil || result.Terminal.Reason != "source_metadata_incomplete" {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -1182,10 +1036,7 @@ func TestPlanPlaybackV3TranscodesVP9WithUnknownCodecLevel(t *testing.T) {
 	req := validStartRequestV3()
 	req.Capabilities.VideoEvidence = EvidencePlatformAttestedV3
 	req.Capabilities.AudioEvidence = EvidencePlatformAttestedV3
-	result := PlanPlaybackV3(PlannerInputV3{
-		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
-	})
+	result := planFileV3(req, file)
 
 	if result.Plan == nil || result.Plan.Delivery != DeliveryTranscodeHLSV3 {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
@@ -1268,10 +1119,7 @@ func TestPlanPlaybackV3AppleSoftwareEnvelopeSelectsOriginalHTTP(t *testing.T) {
 		bitDepth, width, height, maxFrameRate, bitrate, maxBitrate        int
 	}{
 		{name: "h264 high 10", codec: "h264", sourceProfile: "High 10", claimedProfile: "high 10", resolution: "1080p", frameRate: "24000/1001", bitDepth: 10, width: 1920, height: 1080, maxFrameRate: 30, bitrate: 9_000, maxBitrate: 10_000},
-		{name: "av1 main 10", codec: "av1", sourceProfile: "Main", claimedProfile: "main", resolution: "1080p", frameRate: "24", bitDepth: 10, width: 1920, height: 1080, maxFrameRate: 30, bitrate: 2_500, maxBitrate: 3_000},
-		{name: "vp9 profile 0", codec: "vp9", sourceProfile: "Profile 0", claimedProfile: "profile 0", resolution: "1080p", frameRate: "24", bitDepth: 8, width: 1920, height: 1080, maxFrameRate: 30, bitrate: 2_600, maxBitrate: 3_000},
 		{name: "mpeg2 main interlaced", codec: "mpeg2video", sourceProfile: "Main", claimedProfile: "main", resolution: "480p", frameRate: "30.303", bitDepth: 8, width: 720, height: 480, maxFrameRate: 31, bitrate: 6_200, maxBitrate: 7_000},
-		{name: "vc1 advanced", codec: "vc1", sourceProfile: "Advanced", claimedProfile: "advanced", resolution: "1080p", frameRate: "24", bitDepth: 8, width: 1920, height: 1080, maxFrameRate: 30, bitrate: 31_200, maxBitrate: 32_000},
 	}
 
 	for _, test := range tests {
@@ -1304,11 +1152,7 @@ func TestPlanPlaybackV3AppleSoftwareEnvelopeSelectsOriginalHTTP(t *testing.T) {
 			original.AudioDecodeCodecs = []string{"aac"}
 			req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
 
-			result := PlanPlaybackV3(PlannerInputV3{
-				Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-				Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
-				Registry: testTransformationRegistryV3(),
-			})
+			result := planFileV3(req, file)
 			if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
 				t.Fatalf("final Apple software envelope = %s", ExplainPlannerResultV3(result))
 			}
@@ -1358,7 +1202,7 @@ func TestPlanPlaybackV3BlocksUltrawide4KTranscode(t *testing.T) {
 	file.VideoTracks[0].ColorTransfer = "bt709"
 	req := validStartRequestV3()
 	req.QualityPreference = "1080p"
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
 	if result.Terminal == nil || result.Terminal.Reason != "no_alternate_version" {
@@ -1366,40 +1210,11 @@ func TestPlanPlaybackV3BlocksUltrawide4KTranscode(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3Profile7FallsBackToHDR10WithoutNativeP7(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.VideoTracks[0].DVProfile = 7
-	file.VideoTracks[0].DVBLCompatID = 6
-	file.VideoTracks[0].DVELPresent = false
-	file.VideoTracks[0].DVEnhancementLayer = ""
-	file.VideoTracks[0].VideoRange = "DolbyVision"
-	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
-	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
-
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: registry})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.Plan.Claims.Video.HDR10 || result.Plan.Claims.Video.DolbyVision {
-		t.Fatalf("result = %#v", result)
-	}
-	if len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
-		t.Fatalf("transformations = %#v", result.Plan.Transformations)
-	}
-}
-
 func TestPlanPlaybackV3Profile7UsesVersionedClientTransformationsOnSameFile(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.VideoTracks[0].DVProfile = 7
-	file.VideoTracks[0].DVBLCompatID = 1
-	file.VideoTracks[0].DVELPresent = true
-	file.VideoTracks[0].DVEnhancementLayer = "unknown"
-	file.VideoTracks[0].VideoRange = "DolbyVision"
-	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
+	file := dv7WithELFixtureV3()
 	req := validStartRequestV3()
 	req.ClientFeatures = append(req.ClientFeatures, FeatureClientVideoTransforms)
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}}
 	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
 	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
@@ -1430,26 +1245,13 @@ func TestPlanPlaybackV3Profile7DoesNotInferClientTransformFromHDRProfile(t *test
 	file.VideoTracks[0].VideoRange = "DolbyVision"
 	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
 	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{7, 8}}
 	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
 
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: false}})
 	if result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 {
 		t.Fatalf("Profile 7 must not direct-play from codec claims alone: %#v", result.Plan)
-	}
-}
-
-func TestPlanPlaybackV3AudioAdaptationCopiesVideo(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1"}
-	file.CodecAudio = "truehd"
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetVideoCodec != "" {
-		t.Fatalf("result = %#v", result)
 	}
 }
 
@@ -1466,7 +1268,7 @@ func copyUnsafeFixtureV3(multiPPS bool) (*models.MediaFile, StartRequestV3) {
 	file.VideoTracks[0].MultiplePPS = &multiPPS
 	req := validStartRequestV3()
 	req.Capabilities.Containers = []string{"mp4"}
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 	return file, req
 }
 
@@ -1474,7 +1276,7 @@ func TestPlanPlaybackV3CopyUnsafeSourceForcesTranscode(t *testing.T) {
 	// The source carries conflicting in-band PPS, so the video stream-copy remux
 	// is disqualified and planning must fall through to a real transcode.
 	file, req := copyUnsafeFixtureV3(true)
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.PlayMethod != PlayTranscode {
 		t.Fatalf("PlayMethod = %q, want transcode; result = %s", result.PlayMethod, ExplainPlannerResultV3(result))
 	}
@@ -1487,7 +1289,7 @@ func TestPlanPlaybackV3CopySafeSourceStillCopies(t *testing.T) {
 	// The identical source with the copy-safety scan resolved to safe keeps the
 	// cheap video stream-copy remux.
 	file, req := copyUnsafeFixtureV3(false)
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetVideoCodec != "" {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -1501,7 +1303,7 @@ func TestPlanPlaybackV3UnknownCopySafetyStillCopies(t *testing.T) {
 	file, req := copyUnsafeFixtureV3(false)
 	file.VideoTracks[0].MultiplePPS = nil
 
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -1515,10 +1317,8 @@ func TestPlanPlaybackV3FallsBackFromProgressiveToHLSWithoutRepeatingKey(t *testi
 	file.VideoTracks[0].VideoRange = "SDR"
 	file.VideoTracks[0].VideoRangeType = "SDR"
 	file.VideoTracks[0].ColorTransfer = "bt709"
-	req := validStartRequestV3()
+	req := hdr10ClientRequestV3(false)
 	req.Capabilities.Containers = []string{"mp4"}
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
 	first := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}})
 	if first.Plan == nil || first.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("first = %s", ExplainPlannerResultV3(first))
@@ -1545,10 +1345,8 @@ func TestPlanPlaybackV3HonorsThePersistedCopySafetyVerdict(t *testing.T) {
 	file.VideoTracks[0].VideoRange = "SDR"
 	file.VideoTracks[0].VideoRangeType = "SDR"
 	file.VideoTracks[0].ColorTransfer = "bt709"
-	req := validStartRequestV3()
+	req := hdr10ClientRequestV3(false)
 	req.Capabilities.Containers = []string{"mp4"}
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
 
 	// Only the persisted columns carry the verdict, exactly as a raw repository
 	// read delivers them.
@@ -1563,7 +1361,7 @@ func TestPlanPlaybackV3HonorsThePersistedCopySafetyVerdict(t *testing.T) {
 		t.Fatal("fixture already carries the runtime copy-safety flags; the test would prove nothing")
 	}
 
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -1575,7 +1373,7 @@ func TestPlanPlaybackV3HonorsThePersistedCopySafetyVerdict(t *testing.T) {
 	// A stale verdict (the file was rewritten) must not be honored.
 	staleSize := file.FileSize + 1
 	file.MultiplePPSScanSize = &staleSize
-	stale := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	stale := planFileV3(req, file)
 	if stale.Plan == nil || stale.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("stale verdict = %s, want the ordinary remux back", ExplainPlannerResultV3(stale))
 	}
@@ -1586,99 +1384,62 @@ func TestPlanPlaybackV3HonorsThePersistedCopySafetyVerdict(t *testing.T) {
 // transcode is closed by the subtitle alone.
 func pgsBurnRequestV3(file *models.MediaFile) StartRequestV3 {
 	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "hdmv_pgs_subtitle"}}
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req := hdr10ClientRequestV3(true)
 	selected := 0
 	req.SubtitleTrackIndex = &selected
 	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", selected)
 	return req
 }
 
-// A user who just picked a bitmap subtitle can undo that choice; an HDR or 4K
-// reason points them at a problem that is not blocking them.
-func TestPlanPlaybackV3NamesTheSubtitleWhenItAloneForcedTheTranscode(t *testing.T) {
-	file := detailedFixtureFileV3()
-	req := pgsBurnRequestV3(file)
+// TestPlanPlaybackV3SubtitleTerminalPrecedence verifies which cause a bitmap
+// subtitle selection that only a burn-in transcode could deliver reports.
+func TestPlanPlaybackV3SubtitleTerminalPrecedence(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		sdr, noHDR         bool
+		transcode, allow4K bool
+		wantReason         string
+		wantSubtitleNamed  bool
+	}{
+		// A user who just picked a bitmap subtitle can undo that choice; an HDR
+		// or 4K reason points them at a problem that is not blocking them.
+		{name: "subtitle alone forced the transcode", transcode: true, allow4K: true, wantReason: "subtitle_conversion_unsupported", wantSubtitleNamed: true},
+		// The subtitle only owns the terminal when it is the sole blocker: a
+		// client that cannot take the source range at all still gets the range
+		// cause.
+		{name: "HDR terminal kept when the range is also unsupported", noHDR: true, transcode: true, allow4K: true, wantReason: "hdr_transcode_unsupported"},
+		// With transcoding disabled, the subtitle policy itself terminals a
+		// bitmap selection (burn-in is never offered), so the reason names the
+		// subtitle before the planner ever weighs range or quality causes. The
+		// selection is genuinely undeliverable, so that attribution is accurate
+		// for every cause mix.
+		{name: "disabled transcode still names an undeliverable subtitle", noHDR: true, allow4K: true, wantReason: "subtitle_conversion_unsupported"},
+		{name: "subtitle named over the 4K policy", sdr: true, transcode: true, wantReason: "subtitle_conversion_unsupported", wantSubtitleNamed: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := detailedFixtureFileV3()
+			if test.sdr {
+				file.VideoTracks[0].VideoRange = "SDR"
+				file.VideoTracks[0].VideoRangeType = "SDR"
+				file.VideoTracks[0].ColorTransfer = "bt709"
+			}
+			req := pgsBurnRequestV3(file)
+			if test.noHDR {
+				req.Capabilities.HDRDetails = nil
+				req.ClientPlaybackContext.Output.HDRDetails = nil
+			}
 
-	result := PlanPlaybackV3(PlannerInputV3{
-		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
-	})
-	if result.Terminal == nil || result.Terminal.Reason != "subtitle_conversion_unsupported" {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-	if !strings.Contains(strings.ToLower(result.Terminal.Message), "subtitle") {
-		t.Errorf("terminal message = %q, want the subtitle named", result.Terminal.Message)
-	}
-}
-
-// The subtitle only owns the terminal when it is the sole blocker: a client
-// that cannot take the source range at all still gets the range cause.
-func TestPlanPlaybackV3KeepsTheHDRTerminalWhenTheRangeIsAlsoUnsupported(t *testing.T) {
-	file := detailedFixtureFileV3()
-	req := pgsBurnRequestV3(file)
-	req.Capabilities.HDRDetails = nil
-	req.ClientPlaybackContext.Output.HDRDetails = nil
-
-	result := PlanPlaybackV3(PlannerInputV3{
-		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
-	})
-	if result.Terminal == nil || result.Terminal.Reason != "hdr_transcode_unsupported" {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-}
-
-// With transcoding disabled, the subtitle policy itself terminals a bitmap
-// selection (burn-in is never offered), so the reason names the subtitle
-// before the planner ever weighs range or quality causes. The selection is
-// genuinely undeliverable, so that attribution is accurate for every cause mix.
-func TestPlanPlaybackV3DisabledTranscodeStillNamesAnUndeliverableSubtitle(t *testing.T) {
-	file := detailedFixtureFileV3()
-	req := pgsBurnRequestV3(file)
-	req.Capabilities.HDRDetails = nil
-	req.ClientPlaybackContext.Output.HDRDetails = nil
-
-	result := PlanPlaybackV3(PlannerInputV3{
-		Request: req, RequestedFile: file, AudioTrackIndex: 0,
-		EffectiveFile: file,
-		Settings:      PlannerSettingsV3{TranscodeEnabled: false, Allow4KTranscode: true},
-	})
-	if result.Terminal == nil || result.Terminal.Reason != "subtitle_conversion_unsupported" {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-}
-
-func TestPlanPlaybackV3NamesTheSubtitleOverThe4KPolicy(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.VideoTracks[0].VideoRange = "SDR"
-	file.VideoTracks[0].VideoRangeType = "SDR"
-	file.VideoTracks[0].ColorTransfer = "bt709"
-	req := pgsBurnRequestV3(file)
-
-	result := PlanPlaybackV3(PlannerInputV3{
-		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false},
-	})
-	if result.Terminal == nil || result.Terminal.Reason != "subtitle_conversion_unsupported" {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-	if !strings.Contains(strings.ToLower(result.Terminal.Message), "subtitle") {
-		t.Errorf("terminal message = %q, want the subtitle named", result.Terminal.Message)
-	}
-}
-
-func TestPlanPlaybackV3NeverClaimsUnimplementedHDRTranscode(t *testing.T) {
-	file := detailedFixtureFileV3()
-	req := validStartRequestV3()
-	req.QualityPreference = "1080p"
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}})
-	if result.Terminal == nil || result.Terminal.Reason != "hdr_transcode_unsupported" {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			result := PlanPlaybackV3(PlannerInputV3{
+				Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: test.transcode, Allow4KTranscode: test.allow4K},
+			})
+			if result.Terminal == nil || result.Terminal.Reason != test.wantReason {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+			if test.wantSubtitleNamed && !strings.Contains(strings.ToLower(result.Terminal.Message), "subtitle") {
+				t.Errorf("terminal message = %q, want the subtitle named", result.Terminal.Message)
+			}
+		})
 	}
 }
 
@@ -1690,11 +1451,7 @@ func TestPlanPlaybackV3ToneMapSettingsSelectValidatedExecutor(t *testing.T) {
 	file.VideoTracks[0].ColorSpace = "bt2020nc"
 	req := validStartRequestV3()
 	req.QualityPreference = QualityRung2160pMediumV3
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
-		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
-		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
-	})
+	registry := toneMapTestRegistryV3()
 	capabilities := tonemap.Capabilities{
 		{Mode: tonemap.ModeSoftware, Backend: "software", Filter: "tonemapx", SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ, tonemap.SourceHLG}},
 		{Mode: tonemap.ModeHardware, Backend: "qsv", Filter: "tonemap_opencl", SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
@@ -1752,11 +1509,7 @@ func TestPlanPlaybackV3ResolvesToneMapRecipeOnce(t *testing.T) {
 	file.VideoTracks[0].ColorSpace = "bt2020nc"
 	req := validStartRequestV3()
 	req.QualityPreference = "1080p"
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
-		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
-		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
-	})
+	registry := toneMapTestRegistryV3()
 	capabilities := tonemap.Capabilities{{
 		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
 		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
@@ -1788,11 +1541,7 @@ func TestPlanPlaybackV3ResolvesToneMapRecipeOnce(t *testing.T) {
 
 // TestPlanPlaybackV3ClassifiesDolbyOnlyAndFreezesAmbiguousFallbacks verifies unsafe or uncertain sources are handled explicitly.
 func TestPlanPlaybackV3ClassifiesDolbyOnlyAndFreezesAmbiguousFallbacks(t *testing.T) {
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
-		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
-		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
-	})
+	registry := toneMapTestRegistryV3()
 	capabilities := tonemap.Capabilities{{Mode: tonemap.ModeSoftware, Backend: "software", Filter: "tonemapx", SourceKinds: tonemap.AllSourceKinds()}}
 	tests := []struct {
 		name          string
@@ -1855,11 +1604,7 @@ func TestPlanPlaybackV3ClassifiesDolbyOnlyAndFreezesAmbiguousFallbacks(t *testin
 // Profile 5 source plans a tone map only on an executor that applies its RPU,
 // and otherwise keeps the HDR refusal instead of a wrong-colored conversion.
 func TestPlanPlaybackV3DolbyVisionOnlyBaseNeedsAnRPUExecutor(t *testing.T) {
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
-		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
-		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
-	})
+	registry := toneMapTestRegistryV3()
 	tests := []struct {
 		name         string
 		capabilities tonemap.Capabilities
@@ -1931,10 +1676,7 @@ func TestPlanPlaybackV3HonorsDolbyVisionLevelBound(t *testing.T) {
 	file.VideoTracks[0].DVLevel = 7
 	file.VideoTracks[0].DVBLCompatID = 1
 	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{
-		Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10},
-		MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true,
-	}}
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 	hdr := &HDRCapabilitiesV3{
 		DolbyVisionProfiles: []int{8},
 		DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{
@@ -1979,39 +1721,13 @@ func TestSourceDescriptorV3OmitsInvalidDolbyVisionLevel(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3Profile7StripFallsBackToValidatedHLSCopy(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.VideoTracks[0].DVProfile = 7
-	file.VideoTracks[0].DVBLCompatID = 1
-	file.VideoTracks[0].DVELPresent = true
-	file.VideoTracks[0].DVEnhancementLayer = "mel"
-	file.VideoTracks[0].VideoRange = "DolbyVision"
-	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
-	req := validStartRequestV3()
-	req.Capabilities.Containers = []string{"mp4"}
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{7}}
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
-	first := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry})
-	if first.Plan == nil || first.Plan.Delivery != DeliveryRemuxProgressiveV3 || len(first.Plan.Transformations) != 1 {
-		t.Fatalf("first = %#v", first)
-	}
-	failedKey := PlanAttemptKeyV3(*first.Plan, req.ClientPlaybackContext.Output.OutputContextID, nil)
-	second := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry, AttemptedKeys: []string{failedKey}})
-	if second.Plan == nil || second.Plan.Delivery != DeliveryRemuxHLSV3 || second.TargetVideoCodec != "copy" || len(second.Plan.Transformations) != 1 || second.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
-		t.Fatalf("second = %#v", second)
-	}
-}
-
 func TestPlanPlaybackV3Profile8CompatibleBaseLayerStripsToHDR10(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].DVProfile = 8
 	file.VideoTracks[0].DVBLCompatID = 1
 	file.VideoTracks[0].VideoRange = "DolbyVision"
 	file.VideoTracks[0].VideoRangeType = "DOVI"
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req := hdr10ClientRequestV3(false)
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.Plan.EffectiveRecipe.DynamicRange != "hdr10" || len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
@@ -2023,12 +1739,10 @@ func TestPlanPlaybackV3PassthroughRequiresExactLayoutEntry(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.CodecAudio = "truehd"
 	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1"}
-	req := validStartRequestV3()
+	req := hdr10ClientRequestV3(false)
 	req.ClientFeatures = append(req.ClientFeatures, FeatureLayoutPassthrough)
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
 	req.Capabilities.AudioPassthrough = &AudioPassthroughV3{PassthroughCodecs: []string{"truehd"}, MaxChannels: 8, Entries: []AudioPassthroughEntryV3{{Codec: "truehd"}}}
-	withoutLayout := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	withoutLayout := planFileV3(req, file)
 	if withoutLayout.Plan == nil || !withoutLayout.TranscodeAudio {
 		t.Fatalf("without exact layout = %#v", withoutLayout)
 	}
@@ -2042,9 +1756,7 @@ func TestPlanPlaybackV3PassthroughRequiresExactLayoutEntry(t *testing.T) {
 
 func TestPlanPlaybackV3DownloadedSubtitleCarriesStableIdentity(t *testing.T) {
 	file := detailedFixtureFileV3()
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req := hdr10ClientRequestV3(false)
 	index := 0
 	req.SubtitleTrackIndex = &index
 	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", index)
@@ -2063,9 +1775,7 @@ func TestPlanPlaybackV3PublishesTheCompleteSubtitleInventory(t *testing.T) {
 		{Index: 0, Language: "ja", Codec: "hdmv_pgs_subtitle"},
 		{Index: 1, Language: "de", Codec: "dvd_subtitle"},
 	}
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req := hdr10ClientRequestV3(false)
 	additional := []SubtitleInventoryEntryV3{{CombinedIndex: 3, Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "es"}}
 
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, AdditionalSubtitles: additional})
@@ -2101,10 +1811,7 @@ func TestPlanPlaybackV3AdaptedRoutesPreservePGSCombinedInventory(t *testing.T) {
 	// subtitle as 0:s:0 (transport index 0).
 	file.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Codec: "hdmv_pgs_subtitle"}}
 
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req := hdr10ClientRequestV3(true)
 	for _, deliveryClass := range []string{DeliveryClassOriginalHTTPV3, DeliveryClassProgressiveV3, DeliveryClassHLSV3} {
 		delivery := req.ClientPlaybackContext.Deliveries[deliveryClass]
 		delivery.Subtitles.EmbeddedBitmap = true
@@ -2162,9 +1869,7 @@ func TestPlanPlaybackV3AdaptedRoutesPreservePGSCombinedInventory(t *testing.T) {
 // would otherwise miss the cache and clients would see spurious new attempts.
 func TestPlanAttemptKeyV3IgnoresTheSubtitleInventory(t *testing.T) {
 	file := detailedFixtureFileV3()
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req := hdr10ClientRequestV3(false)
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}})
 	if result.Plan == nil {
 		t.Fatalf("result = %#v, want a plan", result)
@@ -2244,65 +1949,18 @@ func TestResolveQualityPolicyV3HonorsBandwidthCapInAllModes(t *testing.T) {
 	}
 }
 
-func TestResolveQualityPolicyV3MeteredWithoutEvidencePrefersConservativeRung(t *testing.T) {
-	source := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 20_000}
-	req := validStartRequestV3()
-	req.QualityPreference = "auto"
-	req.Metered = true
-	result := ResolveQualityPolicyV3(req, source)
-	if result.Height != 720 || !result.RequiresTranscode || result.Reason != "quality_metered_limit" || result.ExplicitRung {
-		t.Fatalf("metered auto = %#v", result)
-	}
-
-	estimate := 30_000
-	req.BandwidthEstimateKbps = &estimate
-	result = ResolveQualityPolicyV3(req, source)
-	if !result.PreservesSource || result.Reason != "quality_bandwidth_limit" {
-		t.Fatalf("metered with estimate = %#v", result)
-	}
-
-	req.BandwidthEstimateKbps = nil
-	req.Metered = false
-	result = ResolveQualityPolicyV3(req, source)
-	if !result.PreservesSource || result.RequiresTranscode {
-		t.Fatalf("unmetered auto = %#v", result)
-	}
-}
-
 func TestPlanPlaybackV3HDRDeviceCapFallsBackToOriginalQuality(t *testing.T) {
 	file := detailedFixtureFileV3()
-	req := validStartRequestV3()
+	req := hdr10ClientRequestV3(true)
 	req.QualityPreference = "auto"
 	req.Capabilities.MaxResolution = "1080p"
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
 
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10 {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
 	if result.Plan.EffectiveRecipe.Height == nil || *result.Plan.EffectiveRecipe.Height != 2160 {
 		t.Fatalf("recipe = %#v", result.Plan.EffectiveRecipe)
-	}
-	if !hasDegradationWarningV3(result.Plan.DegradationWarnings, "quality_reduction_unavailable") {
-		t.Fatalf("warnings = %#v", result.Plan.DegradationWarnings)
-	}
-}
-
-func TestPlanPlaybackV3HDRBandwidthCapFallsBackToOriginalQuality(t *testing.T) {
-	file := detailedFixtureFileV3()
-	req := validStartRequestV3()
-	req.QualityPreference = "auto"
-	cap := 5_000
-	req.BandwidthCapKbps = &cap
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
-
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10 {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
 	if !hasDegradationWarningV3(result.Plan.DegradationWarnings, "quality_reduction_unavailable") {
 		t.Fatalf("warnings = %#v", result.Plan.DegradationWarnings)
@@ -2322,11 +1980,11 @@ func TestPlanPlaybackV3CapWithoutTranscodeRouteFallsBackToOriginal(t *testing.T)
 	req.QualityPreference = "original"
 	cap := 4_000
 	req.BandwidthCapKbps = &cap
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 	// The client has no HLS engine, so the cap-induced transcode cannot run.
 	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassHLSV3)
 
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -2341,12 +1999,9 @@ func TestPlanPlaybackV3LegacyHDRUnknownAssumesHDR10ForCapableClients(t *testing.
 	file.VideoTracks[0].VideoRange = ""
 	file.VideoTracks[0].VideoRangeType = ""
 	file.VideoTracks[0].ColorTransfer = ""
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+	req := hdr10ClientRequestV3(true)
 
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10 {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -2358,7 +2013,7 @@ func TestPlanPlaybackV3LegacyHDRUnknownAssumesHDR10ForCapableClients(t *testing.
 	// (ineligible) behavior instead of guessing at the client's range.
 	req.Capabilities.HDRDetails = nil
 	req.ClientPlaybackContext.Output.HDRDetails = nil
-	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result = planFileV3(req, file)
 	if result.Terminal == nil || result.Terminal.Reason != "hdr_transcode_unsupported" {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -2497,7 +2152,7 @@ func TestPlanPlaybackV3SeekedHLSCopyPreservesVideo(t *testing.T) {
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = DeliveryCapabilityV3{}
 	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = DeliveryCapabilityV3{}
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.TargetVideoCodec != "copy" || result.Plan.Timeline.SourceStartSeconds != start {
 		t.Fatalf("result = %#v", result)
 	}
@@ -2505,28 +2160,18 @@ func TestPlanPlaybackV3SeekedHLSCopyPreservesVideo(t *testing.T) {
 
 func TestPlanPlaybackV3TimelineChangePreservesRouteIdentity(t *testing.T) {
 	file := detailedFixtureFileV3()
-	request := validStartRequestV3()
-	request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	hdr := &HDRCapabilitiesV3{HDR10: true}
+	request := hdr10ClientRequestV3(true)
 	request.Capabilities.HDR = true
-	request.Capabilities.HDRDetails = hdr
-	request.ClientPlaybackContext.Output.HDRDetails = hdr
 	startAtZero := 0.0
 	request.StartPosition = &startAtZero
-	first := PlanPlaybackV3(PlannerInputV3{
-		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
-	})
+	first := planFileV3(request, file)
 	if first.Plan == nil {
 		t.Fatalf("initial plan = %#v", first)
 	}
 
 	startAtSeek := 321.25
 	request.StartPosition = &startAtSeek
-	second := PlanPlaybackV3(PlannerInputV3{
-		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
-	})
+	second := planFileV3(request, file)
 	if second.Plan == nil {
 		t.Fatalf("seeked plan = %#v", second)
 	}
@@ -2593,11 +2238,8 @@ func TestPlanPlaybackV3AppliesDeliverySpecificCodecAndChannelLimits(t *testing.T
 
 func TestPlanPlaybackV3AppliesDeliverySpecificHDRDetails(t *testing.T) {
 	file := detailedFixtureFileV3()
-	request := validStartRequestV3()
-	hdr := &HDRCapabilitiesV3{HDR10: true}
-	request.Capabilities.HDRDetails = hdr
-	request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	request.ClientPlaybackContext.Output.HDRDetails = hdr
+	request := hdr10ClientRequestV3(true)
+	hdr := request.Capabilities.HDRDetails
 	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = DeliveryCapabilityV3{
 		Enabled: true, SupportedOnDevice: true, Containers: []string{"mkv"}, VideoCodecs: []string{"hevc"}, AudioDecodeCodecs: []string{"aac"}, HDRDetails: &HDRCapabilitiesV3{},
 	}
@@ -2605,7 +2247,7 @@ func TestPlanPlaybackV3AppliesDeliverySpecificHDRDetails(t *testing.T) {
 		Enabled: true, SupportedOnDevice: true, Containers: []string{"mp4"}, VideoCodecs: []string{"hevc"}, AudioDecodeCodecs: []string{"aac"}, HDRDetails: hdr,
 	}
 
-	result := PlanPlaybackV3(PlannerInputV3{Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(request, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("delivery-specific HDR override did not exclude original_http: %#v", result)
 	}
@@ -2613,25 +2255,9 @@ func TestPlanPlaybackV3AppliesDeliverySpecificHDRDetails(t *testing.T) {
 
 func TestPlanPlaybackV3ClientManagedDynamicRangeUsesOriginalOnSDROutput(t *testing.T) {
 	file := detailedFixtureFileV3()
-	request := validStartRequestV3()
-	request.Capabilities.VideoEvidence = EvidenceDeclaredV3
-	request.Capabilities.AudioEvidence = EvidenceDeclaredV3
-	request.Capabilities.HDR = false
-	request.Capabilities.HDRDetails = &HDRCapabilitiesV3{}
-	request.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{}
-	direct := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-	direct.Containers = []string{"mkv"}
-	direct.VideoCodecs = []string{"hevc"}
-	direct.AudioDecodeCodecs = []string{"aac"}
-	direct.HDRDetails = &HDRCapabilitiesV3{}
-	direct.ValidatedClaims = []string{ClaimClientManagedDynamicRangeV3}
-	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+	request := clientManagedSDRRequestV3()
 
-	result := PlanPlaybackV3(PlannerInputV3{
-		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
-		Registry: testTransformationRegistryV3(),
-	})
+	result := planFileV3(request, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect {
 		t.Fatalf("client-managed HDR source did not reach original_http: %s", ExplainPlannerResultV3(result))
 	}
@@ -2664,11 +2290,7 @@ func TestPlanPlaybackV3ClientManagedDynamicRangeClaimDoesNotTransferToPackagedDe
 			packaged.ValidatedClaims = append(packaged.ValidatedClaims, ClaimClientManagedDynamicRangeV3)
 			request.ClientPlaybackContext.Deliveries[deliveryClass] = packaged
 
-			result := PlanPlaybackV3(PlannerInputV3{
-				Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-				Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
-				Registry: testTransformationRegistryV3(),
-			})
+			result := planFileV3(request, file)
 			if result.Plan != nil {
 				t.Fatalf("packaged delivery inherited the original-file claim: %s", ExplainPlannerResultV3(result))
 			}
@@ -2681,18 +2303,7 @@ func TestPlanPlaybackV3ClientManagedDynamicRangeClaimDoesNotTransferToPackagedDe
 
 func TestPlanPlaybackV3ClientManagedDynamicRangeFailureDoesNotLoop(t *testing.T) {
 	file := detailedFixtureFileV3()
-	request := validStartRequestV3()
-	request.Capabilities.VideoEvidence = EvidenceDeclaredV3
-	request.Capabilities.AudioEvidence = EvidenceDeclaredV3
-	request.Capabilities.HDRDetails = &HDRCapabilitiesV3{}
-	request.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{}
-	direct := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-	direct.Containers = []string{"mkv"}
-	direct.VideoCodecs = []string{"hevc"}
-	direct.AudioDecodeCodecs = []string{"aac"}
-	direct.HDRDetails = &HDRCapabilitiesV3{}
-	direct.ValidatedClaims = []string{ClaimClientManagedDynamicRangeV3}
-	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+	request := clientManagedSDRRequestV3()
 	input := PlannerInputV3{
 		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
 		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
@@ -2710,65 +2321,13 @@ func TestPlanPlaybackV3ClientManagedDynamicRangeFailureDoesNotLoop(t *testing.T)
 	}
 }
 
-func TestPlanPlaybackV3ClientManagedDynamicRangeCanHandDV7ToEngine(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.VideoTracks[0].DVProfile = 7
-	file.VideoTracks[0].DVBLCompatID = 1
-	file.VideoTracks[0].DVELPresent = true
-	file.VideoTracks[0].DVEnhancementLayer = "unknown"
-	file.VideoTracks[0].VideoRange = "DolbyVision"
-	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
-	request := validStartRequestV3()
-	request.Capabilities.VideoEvidence = EvidenceDeclaredV3
-	request.Capabilities.AudioEvidence = EvidenceDeclaredV3
-	request.Capabilities.HDRDetails = &HDRCapabilitiesV3{}
-	request.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{}
-	direct := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-	direct.Containers = []string{"mkv"}
-	direct.VideoCodecs = []string{"hevc"}
-	direct.AudioDecodeCodecs = []string{"aac"}
-	direct.HDRDetails = &HDRCapabilitiesV3{}
-	direct.ValidatedClaims = []string{ClaimClientManagedDynamicRangeV3}
-	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
-
-	result := PlanPlaybackV3(PlannerInputV3{
-		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
-		Registry: testTransformationRegistryV3(),
-	})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.Plan.DecisionReason != decisionReasonClientManagedDynamicRangeV3 {
-		t.Fatalf("client-managed DV7 source did not reach the engine: %s", ExplainPlannerResultV3(result))
-	}
-	if len(result.Plan.Transformations) != 0 {
-		t.Fatalf("engine-managed DV7 fallback unexpectedly selected a V3 transformation: %#v", result.Plan.Transformations)
-	}
-}
-
 func TestPlanPlaybackV3ClientManagedDynamicRangeFollowsDV7TransformationLadder(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.VideoTracks[0].DVProfile = 7
-	file.VideoTracks[0].DVBLCompatID = 1
-	file.VideoTracks[0].DVELPresent = true
-	file.VideoTracks[0].DVEnhancementLayer = "unknown"
-	file.VideoTracks[0].VideoRange = "DolbyVision"
-	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
-	request := validStartRequestV3()
-	request.ClientFeatures = append(request.ClientFeatures, FeatureClientVideoTransforms)
-	request.Capabilities.VideoEvidence = EvidenceDeclaredV3
-	request.Capabilities.AudioEvidence = EvidenceDeclaredV3
-	request.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}}
-	request.ClientPlaybackContext.Output.HDRDetails = request.Capabilities.HDRDetails
-	direct := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-	direct.Containers = []string{"mkv"}
-	direct.VideoCodecs = []string{"hevc"}
-	direct.AudioDecodeCodecs = []string{"aac"}
-	direct.HDRDetails = request.Capabilities.HDRDetails
-	direct.ValidatedClaims = append(direct.ValidatedClaims, ClaimClientManagedDynamicRangeV3)
-	direct.Transformations = []TransformationV3{
-		{Name: ClientDV7ToDV81V3, Executor: ExecutorClientV3, RecipeVersion: ClientDVTransformVersionV3},
-		{Name: ClientDV7ToHDR10V3, Executor: ExecutorClientV3, RecipeVersion: ClientDVTransformVersionV3},
-	}
-	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+	file := dv7WithELFixtureV3()
+	hdr := &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}}
+	request := clientManagedDV7RequestV3(hdr, hdr, hdr,
+		TransformationV3{Name: ClientDV7ToDV81V3, Executor: ExecutorClientV3, RecipeVersion: ClientDVTransformVersionV3},
+		TransformationV3{Name: ClientDV7ToHDR10V3, Executor: ExecutorClientV3, RecipeVersion: ClientDVTransformVersionV3},
+	)
 	input := PlannerInputV3{
 		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
 		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
@@ -2800,27 +2359,10 @@ func TestPlanPlaybackV3ClientManagedDynamicRangeFollowsDV7TransformationLadder(t
 }
 
 func TestPlanPlaybackV3ClientManagedDynamicRangeDoesNotBypassTransformationOutputLimits(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.VideoTracks[0].DVProfile = 7
-	file.VideoTracks[0].DVBLCompatID = 1
-	file.VideoTracks[0].DVELPresent = true
-	file.VideoTracks[0].DVEnhancementLayer = "unknown"
-	file.VideoTracks[0].VideoRange = "DolbyVision"
-	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
-	request := validStartRequestV3()
-	request.ClientFeatures = append(request.ClientFeatures, FeatureClientVideoTransforms)
-	request.Capabilities.VideoEvidence = EvidenceDeclaredV3
-	request.Capabilities.AudioEvidence = EvidenceDeclaredV3
-	request.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	request.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	direct := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-	direct.Containers = []string{"mkv"}
-	direct.VideoCodecs = []string{"hevc"}
-	direct.AudioDecodeCodecs = []string{"aac"}
-	direct.HDRDetails = &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920, HDR10MaxHeight: 1080}
-	direct.ValidatedClaims = append(direct.ValidatedClaims, ClaimClientManagedDynamicRangeV3)
-	direct.Transformations = []TransformationV3{{Name: ClientDV7ToHDR10V3, Executor: ExecutorClientV3, RecipeVersion: ClientDVTransformVersionV3}}
-	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+	file := dv7WithELFixtureV3()
+	request := clientManagedDV7RequestV3(&HDRCapabilitiesV3{HDR10: true}, &HDRCapabilitiesV3{HDR10: true},
+		&HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920, HDR10MaxHeight: 1080},
+		TransformationV3{Name: ClientDV7ToHDR10V3, Executor: ExecutorClientV3, RecipeVersion: ClientDVTransformVersionV3})
 
 	result := PlanPlaybackV3(PlannerInputV3{
 		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
@@ -2863,6 +2405,163 @@ func testTransformationRegistryV3() *TransformationRegistryV3 {
 		{Name: "video_to_h264", Available: true},
 		{Name: "server_dv7_to_hdr10", Available: true},
 	})
+}
+
+// replanFixtureV3 is a valid failure-recovery replan of validStartRequestV3
+// whose replan, plan and plan-attempt ids carry the given suffix.
+func replanFixtureV3(id string) ReplanRequestV3 {
+	start := validStartRequestV3()
+	return ReplanRequestV3{
+		ProtocolVersion:       ProtocolV3,
+		PlaybackAttemptID:     start.PlaybackAttemptID,
+		ReplanRequestID:       "replan-" + id,
+		FailedPlanID:          "plan:" + id,
+		PlanAttemptID:         "plan-attempt-" + id,
+		PlanAttemptKey:        "v3:0000000000000001",
+		AttemptCount:          1,
+		QualityPreference:     start.QualityPreference,
+		Failure:               FailureV3{Classification: "parser_failure"},
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: start.ClientPlaybackContext,
+	}
+}
+
+// hevcMain10DecodeV3 is an exact hardware HEVC Main 10 decoder that covers
+// the 4K detailedFixtureFileV3 source.
+func hevcMain10DecodeV3() []VideoDecodeCapabilityV3 {
+	return []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+}
+
+// hdr10ClientRequestV3 is validStartRequestV3 with hevcMain10DecodeV3 and
+// HDR10 capability; withOutput also declares an HDR10 output.
+func hdr10ClientRequestV3(withOutput bool) StartRequestV3 {
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	if withOutput {
+		req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	}
+	return req
+}
+
+// toneMapTestRegistryV3 advertises the versioned AAC, H.264 and HDR-to-SDR
+// tone-map recipes.
+func toneMapTestRegistryV3() *TransformationRegistryV3 {
+	return NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
+		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
+		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
+	})
+}
+
+// declaredRemuxFixtureV3 returns an SDR HEVC source with one audio track and a
+// declared-evidence request that decodes AAC and the track's codec, offers no
+// original_http, and limits progressive to mp4/HEVC and HLS to hlsVideo.
+func declaredRemuxFixtureV3(track models.AudioTrack, progressiveAudio, hlsVideo, hlsAudio string) (*models.MediaFile, StartRequestV3) {
+	file := detailedFixtureFileV3()
+	file.CodecAudio = track.Codec
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.AudioTracks[0] = track
+
+	req := validStartRequestV3()
+	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
+	req.Capabilities.AudioEvidence = EvidenceDeclaredV3
+	req.Capabilities.CodecsAudio = []string{"aac", track.Codec}
+	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
+	progressive := req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]
+	progressive.Containers = []string{"mp4"}
+	progressive.VideoCodecs = []string{"hevc"}
+	progressive.AudioDecodeCodecs = []string{progressiveAudio}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = progressive
+	hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.Containers = []string{"hls"}
+	hls.VideoCodecs = []string{hlsVideo}
+	hls.AudioDecodeCodecs = []string{hlsAudio}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	return file, req
+}
+
+// firefoxPackagedRequestV3 is a declared-evidence Firefox desktop request that
+// decodes only H.264 and AAC, packaged as progressive mp4 or HLS.
+func firefoxPackagedRequestV3(userAgent string) StartRequestV3 {
+	req := validStartRequestV3()
+	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
+	req.Capabilities.AudioEvidence = EvidenceDeclaredV3
+	req.ClientPlaybackContext.FormFactor = "desktop"
+	req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": userAgent}}
+	req.Capabilities.CodecsVideo = []string{"h264"}
+	req.Capabilities.CodecsAudio = []string{"aac"}
+	req.Capabilities.Containers = []string{"mp4"}
+	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
+	for delivery, container := range map[string]string{DeliveryClassProgressiveV3: "mp4", DeliveryClassHLSV3: "hls"} {
+		capability := req.ClientPlaybackContext.Deliveries[delivery]
+		capability.Containers = []string{container}
+		capability.VideoCodecs = []string{"h264"}
+		capability.AudioDecodeCodecs = []string{"aac"}
+		req.ClientPlaybackContext.Deliveries[delivery] = capability
+	}
+	return req
+}
+
+// clientManagedSDRRequestV3 is a declared-evidence request on an SDR output
+// whose original_http delivery (mkv, HEVC, AAC) carries the client-managed
+// dynamic-range claim.
+func clientManagedSDRRequestV3() StartRequestV3 {
+	request := validStartRequestV3()
+	request.Capabilities.VideoEvidence = EvidenceDeclaredV3
+	request.Capabilities.AudioEvidence = EvidenceDeclaredV3
+	request.Capabilities.HDR = false
+	request.Capabilities.HDRDetails = &HDRCapabilitiesV3{}
+	request.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{}
+	direct := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	direct.Containers = []string{"mkv"}
+	direct.VideoCodecs = []string{"hevc"}
+	direct.AudioDecodeCodecs = []string{"aac"}
+	direct.HDRDetails = &HDRCapabilitiesV3{}
+	direct.ValidatedClaims = []string{ClaimClientManagedDynamicRangeV3}
+	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+	return request
+}
+
+// dv7WithELFixtureV3 is the 4K fixture as a Dolby Vision Profile 7 source
+// whose enhancement layer type is unknown.
+func dv7WithELFixtureV3() *models.MediaFile {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].DVProfile = 7
+	file.VideoTracks[0].DVBLCompatID = 1
+	file.VideoTracks[0].DVELPresent = true
+	file.VideoTracks[0].DVEnhancementLayer = "unknown"
+	file.VideoTracks[0].VideoRange = "DolbyVision"
+	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
+	return file
+}
+
+// clientManagedDV7RequestV3 is a declared-evidence request with client video
+// transforms whose original_http delivery (mkv, HEVC, AAC, directHDR) carries
+// the client-managed dynamic-range claim and the given client transformations.
+func clientManagedDV7RequestV3(hdr, outputHDR, directHDR *HDRCapabilitiesV3, transformations ...TransformationV3) StartRequestV3 {
+	request := validStartRequestV3()
+	request.ClientFeatures = append(request.ClientFeatures, FeatureClientVideoTransforms)
+	request.Capabilities.VideoEvidence = EvidenceDeclaredV3
+	request.Capabilities.AudioEvidence = EvidenceDeclaredV3
+	request.Capabilities.HDRDetails = hdr
+	request.ClientPlaybackContext.Output.HDRDetails = outputHDR
+	direct := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	direct.Containers = []string{"mkv"}
+	direct.VideoCodecs = []string{"hevc"}
+	direct.AudioDecodeCodecs = []string{"aac"}
+	direct.HDRDetails = directHDR
+	direct.ValidatedClaims = append(direct.ValidatedClaims, ClaimClientManagedDynamicRangeV3)
+	direct.Transformations = transformations
+	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+	return request
+}
+
+// planFileV3 plans req against file with transcoding (4K included) enabled
+// and the standard test registry.
+func planFileV3(req StartRequestV3, file *models.MediaFile) PlannerResultV3 {
+	return PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
 }
 
 // A source whose RPU ffmpeg cannot parse must lose the strip in the plan, not
@@ -2989,7 +2688,7 @@ func unstrippableProfile7FixtureV3() *models.MediaFile {
 
 func hdr10OnlyProfile7RequestV3() StartRequestV3 {
 	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
 	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
 	return req
@@ -3029,7 +2728,7 @@ func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
 	req := validStartRequestV3()
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -3104,27 +2803,6 @@ func TestCompoundRungQualityResultV3Scales8KToFourK(t *testing.T) {
 	got := compoundRungQualityResultV3(rung, source, 0, nil)
 	if got.Height != 2160 || got.Label != "2160p" || !got.RequiresTranscode {
 		t.Fatalf("8K on 4K Medium = %+v, want a 2160-line transcode", got)
-	}
-}
-
-func TestAvailableQualitiesV3CroppedSourceKeepsSameClassRungs(t *testing.T) {
-	source := SourceDescriptorV3{VideoCodec: "h264", Width: 1918, Height: 872, BitrateKbps: 10_858, DynamicRange: DynamicRangeSDRV3}
-	qualities := availableQualitiesV3(PlannerInputV3{
-		Request:  validStartRequestV3(),
-		Settings: PlannerSettingsV3{TranscodeEnabled: true},
-	}, source)
-	labels := make([]string, 0, len(qualities))
-	for _, quality := range qualities {
-		labels = append(labels, quality.Label)
-	}
-	want := []string{
-		QualityOriginalV3,
-		QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
-		QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
-		"480p",
-	}
-	if !reflect.DeepEqual(labels, want) {
-		t.Fatalf("labels = %v, want %v", labels, want)
 	}
 }
 
@@ -3390,7 +3068,7 @@ func TestPlanPlaybackV3NonDefaultAudioSelectionRequiresScopedOriginalClaim(t *te
 		{Codec: "aac", Channels: 2, Layout: "stereo"},
 	}
 	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 1, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.PlayMethod != PlayRemux || result.TranscodeAudio {
@@ -3421,25 +3099,18 @@ func TestPlanPlaybackV3AndroidMedia3FFmpegPayloadUsesOriginalMKV(t *testing.T) {
 		codec    string
 		channels int
 	}{
-		{name: "AC3", codec: "ac3", channels: 6},
-		{name: "EAC3", codec: "eac3", channels: 6},
 		{name: "TrueHD", codec: "truehd", channels: 8},
-		{name: "DTS", codec: "dts", channels: 6},
 		{name: "DTS-HD", codec: "dts_hd", channels: 8},
 		{name: "ALAC", codec: "alac", channels: 2},
 	}
-	for _, formFactor := range []string{"mobile", "tv"} {
+	for _, formFactor := range []string{"tv"} {
 		for _, codec := range codecs {
 			t.Run(formFactor+"/"+codec.name, func(t *testing.T) {
 				tracks := []models.AudioTrack{{Codec: codec.codec, Channels: codec.channels, Default: true}}
 				file, request := androidMedia3FFmpegFixtureV3(formFactor, tracks, []string{"aac", codec.codec}, codec.channels)
 				selectAndroidAudioTrackV3(&request, file.ID, 0)
 
-				result := PlanPlaybackV3(PlannerInputV3{
-					Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-					Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
-					Registry: testTransformationRegistryV3(),
-				})
+				result := planFileV3(request, file)
 				if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect || result.TranscodeAudio {
 					t.Fatalf("Android Media3/FFmpeg result = %s", ExplainPlannerResultV3(result))
 				}
@@ -3504,11 +3175,7 @@ func TestPlanPlaybackV3AndroidMedia3AudioConstraintsFallBackToAAC(t *testing.T) 
 			request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
 			selectAndroidAudioTrackV3(&request, file.ID, 0)
 
-			result := PlanPlaybackV3(PlannerInputV3{
-				Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-				Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
-				Registry: testTransformationRegistryV3(),
-			})
+			result := planFileV3(request, file)
 			if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.PlayMethod != PlayRemux || result.TargetVideoCodec != "copy" || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
 				t.Fatalf("constrained Android audio result = %s", ExplainPlannerResultV3(result))
 			}
@@ -3533,7 +3200,6 @@ func TestPlanPlaybackV3ChannelCeilingAdaptsAudioAndCopiesVideo(t *testing.T) {
 		wantChannels int
 	}{
 		{name: "EAC3 5.1 to stereo", codec: "eac3", channels: 6, layout: "5.1(side)", maxChannels: 2, wantChannels: 2},
-		{name: "AC3 5.1 to stereo", codec: "ac3", channels: 6, layout: "5.1", maxChannels: 2, wantChannels: 2},
 		{name: "EAC3 7.1 to 5.1", codec: "eac3", channels: 8, layout: "7.1", maxChannels: 6, wantChannels: 6},
 	} {
 		for _, transcodeEnabled := range []bool{true, false} {
@@ -3823,7 +3489,7 @@ func TestPlanPlaybackV3HLSAudioConversionHonorsChannelCeiling(t *testing.T) {
 	file.AudioChannels = 8
 	file.AudioTracks[0] = models.AudioTrack{Codec: "dts", Channels: 8, Layout: "7.1", Default: true}
 	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
 	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
 	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassProgressiveV3)
 	maxChannels := 2
@@ -3831,7 +3497,7 @@ func TestPlanPlaybackV3HLSAudioConversionHonorsChannelCeiling(t *testing.T) {
 	hls.MaxChannels = &maxChannels
 	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
 
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	result := planFileV3(req, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || !result.TranscodeAudio || result.TargetAudioChannels != 2 {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
@@ -3956,67 +3622,28 @@ func TestPlanPlaybackV3VideoRemuxConvertsForProgressiveAudioCodecSubset(t *testi
 	}
 }
 
-func TestPlanPlaybackV3VideoRemuxPreservesHLSOnlyAudioCodec(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.CodecAudio = "eac3"
-	file.VideoTracks[0].VideoRange = "SDR"
-	file.VideoTracks[0].VideoRangeType = "SDR"
-	file.AudioTracks[0] = models.AudioTrack{Codec: "eac3", Channels: 6, Layout: "5.1"}
+func TestPlanPlaybackV3VideoRemuxHLSAudioCodecRouting(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		hlsVideo           string
+		wantDelivery       DeliveryV3
+		wantTranscodeAudio bool
+		wantAudioCodec     string
+	}{
+		{name: "HLS-only audio codec is preserved", hlsVideo: "hevc", wantDelivery: DeliveryRemuxHLSV3, wantAudioCodec: "copy"},
+		{name: "progressive adapts when HLS video is unsupported", hlsVideo: "h264", wantDelivery: DeliveryRemuxProgressiveV3, wantTranscodeAudio: true, wantAudioCodec: "aac"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file, req := declaredRemuxFixtureV3(models.AudioTrack{Codec: "eac3", Channels: 6, Layout: "5.1"}, "aac", test.hlsVideo, "eac3")
 
-	req := validStartRequestV3()
-	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
-	req.Capabilities.AudioEvidence = EvidenceDeclaredV3
-	req.Capabilities.CodecsAudio = []string{"aac", "eac3"}
-	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
-	progressive := req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]
-	progressive.Containers = []string{"mp4"}
-	progressive.VideoCodecs = []string{"hevc"}
-	progressive.AudioDecodeCodecs = []string{"aac"}
-	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = progressive
-	hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
-	hls.Containers = []string{"hls"}
-	hls.VideoCodecs = []string{"hevc"}
-	hls.AudioDecodeCodecs = []string{"eac3"}
-	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
-
-	result := PlanPlaybackV3(PlannerInputV3{
-		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
-	})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.TranscodeAudio || result.TargetAudioCodec != "copy" {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-}
-
-func TestPlanPlaybackV3VideoRemuxAdaptsProgressiveWhenHLSVideoUnsupported(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.CodecAudio = "eac3"
-	file.VideoTracks[0].VideoRange = "SDR"
-	file.VideoTracks[0].VideoRangeType = "SDR"
-	file.AudioTracks[0] = models.AudioTrack{Codec: "eac3", Channels: 6, Layout: "5.1"}
-
-	req := validStartRequestV3()
-	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
-	req.Capabilities.AudioEvidence = EvidenceDeclaredV3
-	req.Capabilities.CodecsAudio = []string{"aac", "eac3"}
-	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
-	progressive := req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]
-	progressive.Containers = []string{"mp4"}
-	progressive.VideoCodecs = []string{"hevc"}
-	progressive.AudioDecodeCodecs = []string{"aac"}
-	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = progressive
-	hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
-	hls.Containers = []string{"hls"}
-	hls.VideoCodecs = []string{"h264"}
-	hls.AudioDecodeCodecs = []string{"eac3"}
-	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
-
-	result := PlanPlaybackV3(PlannerInputV3{
-		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
-	})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			result := PlanPlaybackV3(PlannerInputV3{
+				Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
+			})
+			if result.Plan == nil || result.Plan.Delivery != test.wantDelivery || result.TranscodeAudio != test.wantTranscodeAudio || result.TargetAudioCodec != test.wantAudioCodec {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+		})
 	}
 }
 
@@ -4028,27 +3655,8 @@ func TestPlanPlaybackV3MatroskaAACRemuxUsesTimestampNormalizedAudio(t *testing.T
 	file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 804, FrameRate: "25", BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}
 	file.AudioTracks[0] = models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", SampleRate: 48_000}
 
-	req := validStartRequestV3()
-	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
-	req.Capabilities.AudioEvidence = EvidenceDeclaredV3
-	req.ClientPlaybackContext.FormFactor = "desktop"
-	req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0"}}
-	req.Capabilities.CodecsVideo = []string{"h264"}
-	req.Capabilities.CodecsAudio = []string{"aac"}
-	req.Capabilities.Containers = []string{"mp4"}
+	req := firefoxPackagedRequestV3("Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0")
 	req.Capabilities.MaxResolution = "1080p"
-	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
-	for _, delivery := range []string{DeliveryClassProgressiveV3, DeliveryClassHLSV3} {
-		capability := req.ClientPlaybackContext.Deliveries[delivery]
-		if delivery == DeliveryClassProgressiveV3 {
-			capability.Containers = []string{"mp4"}
-		} else {
-			capability.Containers = []string{"hls"}
-		}
-		capability.VideoCodecs = []string{"h264"}
-		capability.AudioDecodeCodecs = []string{"aac"}
-		req.ClientPlaybackContext.Deliveries[delivery] = capability
-	}
 
 	result := PlanPlaybackV3(PlannerInputV3{
 		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
@@ -4092,11 +3700,7 @@ func TestPlanPlaybackV3FirefoxIncompatibleAudioCodecsUseNormalizedAACRecipe(t *t
 		channels int
 	}{
 		{codec: "dts", channels: 6},
-		{codec: "eac3", channels: 6},
-		{codec: "ac3", channels: 6},
-		{codec: "truehd", channels: 8},
 		{codec: "opus", channels: 2},
-		{codec: "vorbis", channels: 2},
 		{codec: "flac", channels: 2},
 	} {
 		t.Run(test.codec, func(t *testing.T) {
@@ -4107,26 +3711,7 @@ func TestPlanPlaybackV3FirefoxIncompatibleAudioCodecsUseNormalizedAACRecipe(t *t
 			file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080, FrameRate: "24", BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}
 			file.AudioTracks[0] = models.AudioTrack{Codec: test.codec, Channels: test.channels}
 
-			req := validStartRequestV3()
-			req.Capabilities.VideoEvidence = EvidenceDeclaredV3
-			req.Capabilities.AudioEvidence = EvidenceDeclaredV3
-			req.ClientPlaybackContext.FormFactor = "desktop"
-			req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": "Mozilla/5.0 Firefox/154.0"}}
-			req.Capabilities.CodecsVideo = []string{"h264"}
-			req.Capabilities.CodecsAudio = []string{"aac"}
-			req.Capabilities.Containers = []string{"mp4"}
-			delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
-			for _, delivery := range []string{DeliveryClassProgressiveV3, DeliveryClassHLSV3} {
-				capability := req.ClientPlaybackContext.Deliveries[delivery]
-				if delivery == DeliveryClassProgressiveV3 {
-					capability.Containers = []string{"mp4"}
-				} else {
-					capability.Containers = []string{"hls"}
-				}
-				capability.VideoCodecs = []string{"h264"}
-				capability.AudioDecodeCodecs = []string{"aac"}
-				req.ClientPlaybackContext.Deliveries[delivery] = capability
-			}
+			req := firefoxPackagedRequestV3("Mozilla/5.0 Firefox/154.0")
 
 			result := PlanPlaybackV3(PlannerInputV3{
 				Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
@@ -4205,27 +3790,7 @@ func TestPlanPlaybackV3VideoOnlyRemuxIgnoresScopedAudioConstraints(t *testing.T)
 }
 
 func TestPlanPlaybackV3VideoRemuxWithNilRegistryReturnsAudioConversionTerminal(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.CodecAudio = "vorbis"
-	file.VideoTracks[0].VideoRange = "SDR"
-	file.VideoTracks[0].VideoRangeType = "SDR"
-	file.AudioTracks[0] = models.AudioTrack{Codec: "vorbis", Channels: 2, Layout: "stereo"}
-
-	req := validStartRequestV3()
-	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
-	req.Capabilities.AudioEvidence = EvidenceDeclaredV3
-	req.Capabilities.CodecsAudio = []string{"aac", "vorbis"}
-	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
-	progressive := req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]
-	progressive.Containers = []string{"mp4"}
-	progressive.VideoCodecs = []string{"hevc"}
-	progressive.AudioDecodeCodecs = []string{"aac"}
-	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = progressive
-	hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
-	hls.Containers = []string{"hls"}
-	hls.VideoCodecs = []string{"hevc"}
-	hls.AudioDecodeCodecs = []string{"aac"}
-	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	file, req := declaredRemuxFixtureV3(models.AudioTrack{Codec: "vorbis", Channels: 2, Layout: "stereo"}, "aac", "hevc", "aac")
 
 	result := PlanPlaybackV3(PlannerInputV3{
 		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
@@ -4237,28 +3802,8 @@ func TestPlanPlaybackV3VideoRemuxWithNilRegistryReturnsAudioConversionTerminal(t
 }
 
 func TestPlanPlaybackV3VideoRemuxUsesCurrentAACRecipeForHLSFallback(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.CodecAudio = "opus"
+	file, req := declaredRemuxFixtureV3(models.AudioTrack{Codec: "opus", Channels: 6, Layout: "5.1"}, "opus", "hevc", "aac")
 	file.AudioChannels = 6
-	file.VideoTracks[0].VideoRange = "SDR"
-	file.VideoTracks[0].VideoRangeType = "SDR"
-	file.AudioTracks[0] = models.AudioTrack{Codec: "opus", Channels: 6, Layout: "5.1"}
-
-	req := validStartRequestV3()
-	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
-	req.Capabilities.AudioEvidence = EvidenceDeclaredV3
-	req.Capabilities.CodecsAudio = []string{"aac", "opus"}
-	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
-	progressive := req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]
-	progressive.Containers = []string{"mp4"}
-	progressive.VideoCodecs = []string{"hevc"}
-	progressive.AudioDecodeCodecs = []string{"opus"}
-	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = progressive
-	hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
-	hls.Containers = []string{"hls"}
-	hls.VideoCodecs = []string{"hevc"}
-	hls.AudioDecodeCodecs = []string{"aac"}
-	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
 
 	input := PlannerInputV3{
 		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,

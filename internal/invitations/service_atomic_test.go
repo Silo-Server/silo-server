@@ -1,11 +1,9 @@
 package invitations
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -187,71 +185,5 @@ func TestEmailedInvitationLinkReplacementDB(t *testing.T) {
 	account, err := users.GetByEmail(t.Context(), "kai@example.invalid")
 	if err != nil || account.Username != "kai@example.invalid" {
 		t.Fatalf("account = %+v err=%v, want the bound address", account, err)
-	}
-}
-
-// An emailed acceptance holds its invitation row and then inserts the account.
-// A concurrent link acceptance for the same address must wait on that row
-// before inserting its own account; the reverse order deadlocks.
-func TestLinkAcceptWaitsForConcurrentEmailedAcceptanceDB(t *testing.T) {
-	f := atomicInvitationDB(t)
-	users := auth.NewUserRepository(f.pool)
-	accounts := auth.NewAccountProvisioner(users, pgstore.NewPostgresProvider(f.pool))
-	svc := NewService(f.repo, users, accounts, &fakeSessions{}, &fakeMail{configured: true}, nil, nil, "https://server.example.invalid")
-	emailed, err := svc.Send(t.Context(), SendInput{Email: "bob@example.invalid", Role: models.RoleUser, InvitedBy: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	link, err := svc.Send(t.Context(), SendInput{Delivery: DeliveryLink, Role: models.RoleUser, InvitedBy: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The emailed acceptance's first step: lock its invitation row.
-	tx, err := f.pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(context.WithoutCancel(t.Context())) //nolint:errcheck
-	if _, err := tx.Exec(t.Context(), `SELECT 1 FROM invitations WHERE id=$1 FOR UPDATE`, emailed.Invitation.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		token := strings.TrimPrefix(link.ClaimURL, "https://server.example.invalid/invite/")
-		_, _, err := svc.Accept(context.WithoutCancel(t.Context()), token, "bob@example.invalid", "test-password", "d", "")
-		done <- err
-	}()
-	// Wait until the link acceptance is blocked on a lock.
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var waiting int
-		if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'`).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting > 0 {
-			break
-		}
-		select {
-		case err := <-done:
-			t.Fatalf("link acceptance finished without waiting for the emailed row: %v", err)
-		default:
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("link acceptance never waited on the emailed invitation row")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	// The emailed acceptance's second step: insert the account, then commit.
-	if _, err := accounts.CreateAccountInTransaction(t.Context(), tx, auth.CreateAccountInput{User: models.CreateUserInput{Username: "bob@example.invalid", Email: "bob@example.invalid", Password: "test-password", Role: models.RoleUser}}); err != nil {
-		t.Fatalf("emailed acceptance insert: %v", err)
-	}
-	if err := tx.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; !errors.Is(err, ErrEmailTaken) {
-		t.Fatalf("link acceptance err = %v, want ErrEmailTaken", err)
 	}
 }

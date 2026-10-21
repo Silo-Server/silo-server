@@ -37,8 +37,6 @@ export interface HomeRow {
   shown: boolean;
   /** A row the profile added itself ("Yours"). Always false on the admin surface. */
   own: boolean;
-  /** A legacy Trakt row: the server refuses config changes and turning it back on. */
-  legacyTrakt: boolean;
   /** Profile: the server's own name for a row this profile renamed. */
   renamedFrom?: string;
 }

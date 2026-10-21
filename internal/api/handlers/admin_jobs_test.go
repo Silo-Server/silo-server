@@ -141,7 +141,6 @@ func TestCanReadAdminJob_OtherUserCannotReadItemRefreshJob(t *testing.T) {
 }
 
 func TestAdminJobToResponseFor_NonAdminSanitizesItemRefreshPayloads(t *testing.T) {
-	claims := &auth.Claims{UserID: 2, Role: "user"}
 	job := &models.AdminJob{
 		JobType:         adminjob.JobTypeItemRefresh,
 		CreatedByUserID: 2,
@@ -155,7 +154,7 @@ func TestAdminJobToResponseFor_NonAdminSanitizesItemRefreshPayloads(t *testing.T
 		PublicURL:    "https://example.test/public",
 	}
 
-	resp := adminJobToResponseFor(nil, job, nil, claims.Role == "admin")
+	resp := adminJobToResponseFor(nil, job, nil, false)
 
 	if string(resp.RequestPayload) != `{}` {
 		t.Fatalf("RequestPayload = %s, want sanitized empty object", resp.RequestPayload)

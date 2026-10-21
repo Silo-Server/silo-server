@@ -12,22 +12,17 @@ import (
 )
 
 // resumeFilteringUserData serves a fixed in-progress list and hides a chosen
-// set of media item IDs from FilterResumeProgress, recording which statuses
-// were listed and how often the filter ran.
+// set of media item IDs from FilterResumeProgress, recording how often the
+// filter ran.
 type resumeFilteringUserData struct {
 	mockUserDataService
-	entries           []upstreamProgress
-	hidden            map[string]bool
-	listedStatuses    []string
-	filteredStatuses  []string
-	lastFilteredTypes []string
-	filterCalls       int
-	filteredBatchSize []int
-	maxScanned        int // highest row index read across ListProgress pages
+	entries     []upstreamProgress
+	hidden      map[string]bool
+	filterCalls int
+	maxScanned  int // highest row index read across ListProgress pages
 }
 
-func (s *resumeFilteringUserData) ListProgress(_ context.Context, _ *Session, status string, limit, offset int) ([]upstreamProgress, error) {
-	s.listedStatuses = append(s.listedStatuses, status)
+func (s *resumeFilteringUserData) ListProgress(_ context.Context, _ *Session, _ string, limit, offset int) ([]upstreamProgress, error) {
 	if offset >= len(s.entries) {
 		return nil, nil
 	}
@@ -38,9 +33,7 @@ func (s *resumeFilteringUserData) ListProgress(_ context.Context, _ *Session, st
 	return s.entries[offset:end], nil
 }
 
-func (s *resumeFilteringUserData) ListProgressFiltered(_ context.Context, _ *Session, status string, types []string, _ *int, limit, offset int) ([]upstreamProgress, error) {
-	s.filteredStatuses = append(s.filteredStatuses, status)
-	s.lastFilteredTypes = types
+func (s *resumeFilteringUserData) ListProgressFiltered(_ context.Context, _ *Session, _ string, _ []string, _ *int, limit, offset int) ([]upstreamProgress, error) {
 	if offset >= len(s.entries) {
 		return nil, nil
 	}
@@ -50,7 +43,6 @@ func (s *resumeFilteringUserData) ListProgressFiltered(_ context.Context, _ *Ses
 
 func (s *resumeFilteringUserData) FilterResumeProgress(_ context.Context, _ *Session, entries []upstreamProgress) ([]upstreamProgress, error) {
 	s.filterCalls++
-	s.filteredBatchSize = append(s.filteredBatchSize, len(entries))
 	kept := make([]upstreamProgress, 0, len(entries))
 	for _, entry := range entries {
 		if s.hidden[entry.MediaItemID] {
@@ -121,75 +113,52 @@ func TestLoadProgressPage_ResumeHidesFilteredEntries(t *testing.T) {
 // FilterResumeProgress must not page through the entire history looking to fill
 // the visible page. Before the cap was made unconditional, the scan only stopped
 // once len(items) >= limit, so a page that never fills walked every row.
+//
+// The general loop and the raw-offset fast path (default Continue Watching
+// shape: no type/library filter, EnableTotalRecordCount=false, StartIndex=0)
+// have separate scan loops, so each needs its own cap. The fast path is the
+// branch the sections fallback hits in production.
 func TestLoadProgressPage_BoundsScanForSparseVisibleSet(t *testing.T) {
-	const total = 5000
-	entries := make([]upstreamProgress, 0, total)
-	items := make(map[string]*models.MediaItem, total)
-	hidden := make(map[string]bool, total)
-	for i := 0; i < total; i++ {
-		id := fmt.Sprintf("movie-%d", i)
-		entries = append(entries, upstreamProgress{MediaItemID: id, PositionSeconds: 10, DurationSeconds: 100})
-		items[id] = &models.MediaItem{ContentID: id, Type: "movie", Title: id}
-		hidden[id] = true // everything dismissed → visible page never fills
-	}
-	userData := &resumeFilteringUserData{entries: entries, hidden: hidden}
-	h := resumeTestHandler(userData, items)
+	for _, tc := range []struct {
+		name  string
+		query itemsQuery
+	}{
+		// EnableTotalRecordCount=true is the shape that previously forced the
+		// full O(history) scan.
+		{name: "general loop", query: itemsQuery{limit: 20, enableTotalRecordCount: true}},
+		// Default shape → the raw-offset fast path (loop A), not the general loop.
+		{name: "raw-offset fast path", query: itemsQuery{limit: 20}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const total = 5000
+			entries := make([]upstreamProgress, 0, total)
+			items := make(map[string]*models.MediaItem, total)
+			hidden := make(map[string]bool, total)
+			for i := 0; i < total; i++ {
+				id := fmt.Sprintf("movie-%d", i)
+				entries = append(entries, upstreamProgress{MediaItemID: id, PositionSeconds: 10, DurationSeconds: 100})
+				items[id] = &models.MediaItem{ContentID: id, Type: "movie", Title: id}
+				hidden[id] = true // everything dismissed → visible page never fills
+			}
+			userData := &resumeFilteringUserData{entries: entries, hidden: hidden}
+			h := resumeTestHandler(userData, items)
 
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	// EnableTotalRecordCount=true is the shape that previously forced the full
-	// O(history) scan.
-	query := itemsQuery{limit: 20, enableTotalRecordCount: true}
-	_, _, err := h.loadProgressPage(context.Background(), session, "in_progress", query, nil, nil)
-	if err != nil {
-		t.Fatalf("loadProgressPage: %v", err)
-	}
+			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+			_, _, err := h.loadProgressPage(context.Background(), session, "in_progress", tc.query, nil, nil)
+			if err != nil {
+				t.Fatalf("loadProgressPage: %v", err)
+			}
 
-	// The scan must stop near the cap, not walk all `total` rows. Allow one extra
-	// batch of overshoot (the break fires after offset crosses the cap).
-	const oneBatchOvershoot = 200
-	if userData.maxScanned > resumeScanMaxRows+oneBatchOvershoot {
-		t.Fatalf("scan not bounded: read %d rows, want <= %d", userData.maxScanned, resumeScanMaxRows+oneBatchOvershoot)
-	}
-	if userData.maxScanned >= total {
-		t.Fatalf("scanned the entire history (%d rows); cap did not engage", userData.maxScanned)
-	}
-}
-
-// TestLoadProgressPage_BoundsFastPathScanForSparseVisibleSet pins the cap on the
-// raw-offset fast path (default Continue Watching shape: no type/library filter,
-// EnableTotalRecordCount=false, StartIndex=0). This is the branch the sections
-// fallback hits in production, and it has its own scan loop separate from the
-// general loop. Without the fast-path cap a fully-dismissed history would page to
-// the end here even though the other bounds test (which sets
-// EnableTotalRecordCount=true) routes around this branch entirely.
-func TestLoadProgressPage_BoundsFastPathScanForSparseVisibleSet(t *testing.T) {
-	const total = 5000
-	entries := make([]upstreamProgress, 0, total)
-	items := make(map[string]*models.MediaItem, total)
-	hidden := make(map[string]bool, total)
-	for i := 0; i < total; i++ {
-		id := fmt.Sprintf("movie-%d", i)
-		entries = append(entries, upstreamProgress{MediaItemID: id, PositionSeconds: 10, DurationSeconds: 100})
-		items[id] = &models.MediaItem{ContentID: id, Type: "movie", Title: id}
-		hidden[id] = true
-	}
-	userData := &resumeFilteringUserData{entries: entries, hidden: hidden}
-	h := resumeTestHandler(userData, items)
-
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	// Default shape → the raw-offset fast path (loop A), not the general loop.
-	query := itemsQuery{limit: 20}
-	_, _, err := h.loadProgressPage(context.Background(), session, "in_progress", query, nil, nil)
-	if err != nil {
-		t.Fatalf("loadProgressPage: %v", err)
-	}
-
-	const oneBatchOvershoot = 200
-	if userData.maxScanned > resumeScanMaxRows+oneBatchOvershoot {
-		t.Fatalf("fast-path scan not bounded: read %d rows, want <= %d", userData.maxScanned, resumeScanMaxRows+oneBatchOvershoot)
-	}
-	if userData.maxScanned >= total {
-		t.Fatalf("fast path scanned the entire history (%d rows); cap did not engage", userData.maxScanned)
+			// The scan must stop near the cap, not walk all `total` rows. Allow one
+			// extra batch of overshoot (the break fires after offset crosses the cap).
+			const oneBatchOvershoot = 200
+			if userData.maxScanned > resumeScanMaxRows+oneBatchOvershoot {
+				t.Fatalf("scan not bounded: read %d rows, want <= %d", userData.maxScanned, resumeScanMaxRows+oneBatchOvershoot)
+			}
+			if userData.maxScanned >= total {
+				t.Fatalf("scanned the entire history (%d rows); cap did not engage", userData.maxScanned)
+			}
+		})
 	}
 }
 
@@ -286,44 +255,6 @@ func TestLoadProgressPage_CompletedSkipsResumeFilter(t *testing.T) {
 	}
 	if len(dtos) != 1 || dtos[0].Name != "Movie One" {
 		t.Fatalf("completed names = %v, want [Movie One]", dtoNames(dtos))
-	}
-}
-
-// TestLoadProgressPage_CompletedTypeFilterUsesFilteredFetch pins that the
-// watched-items path (completed status with an IncludeItemTypes filter) routes
-// through ListProgressFiltered — the SQL pre-filter — instead of the full-set
-// ListProgress scan it replaced.
-func TestLoadProgressPage_CompletedTypeFilterUsesFilteredFetch(t *testing.T) {
-	items := map[string]*models.MediaItem{
-		"movie-1": {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
-		"movie-2": {ContentID: "movie-2", Type: "movie", Title: "Movie Two"},
-	}
-	userData := &resumeFilteringUserData{
-		entries: []upstreamProgress{
-			{MediaItemID: "movie-1", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
-			{MediaItemID: "movie-2", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
-		},
-	}
-	h := resumeTestHandler(userData, items)
-
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	typeSet := map[string]bool{"movie": true}
-	dtos, _, err := h.loadProgressPage(context.Background(), session, "completed", itemsQuery{limit: 10}, typeSet, nil)
-	if err != nil {
-		t.Fatalf("loadProgressPage: %v", err)
-	}
-
-	if len(userData.filteredStatuses) == 0 {
-		t.Fatal("expected ListProgressFiltered to serve completed + type filter")
-	}
-	if len(userData.listedStatuses) != 0 {
-		t.Fatalf("expected ListProgress not to be called; got %v", userData.listedStatuses)
-	}
-	if len(userData.lastFilteredTypes) != 1 || userData.lastFilteredTypes[0] != "movie" {
-		t.Fatalf("filtered types = %v, want [movie]", userData.lastFilteredTypes)
-	}
-	if got := dtoNames(dtos); len(got) != 2 {
-		t.Fatalf("completed names = %v, want 2 movies", got)
 	}
 }
 

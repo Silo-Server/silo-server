@@ -194,6 +194,13 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 			attempt.AttemptNumber+1, nil, "delivery row missing", nil)
 		return
 	}
+	if row.UserID != hook.UserID || row.ProfileID != hook.ProfileID {
+		// Queued for another account's profile with the same ID by a build
+		// that matched targets on profile ID alone.
+		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
+			attempt.AttemptNumber+1, nil, "webhook belongs to another profile", nil)
+		return
+	}
 
 	result := s.send(ctx, hook, *row, false)
 	attemptNumber := attempt.AttemptNumber + 1
@@ -308,22 +315,22 @@ func (s *webhookSender) disableWebhook(ctx context.Context, hook *Webhook, resul
 // node-exclusive (SKIP LOCKED), so one node owns a given event's enqueue.
 type profileRateLimiter struct {
 	mu      sync.Mutex
-	windows map[string][]time.Time
+	windows map[profileKey][]time.Time
 }
 
 func newProfileRateLimiter() *profileRateLimiter {
-	return &profileRateLimiter{windows: make(map[string][]time.Time)}
+	return &profileRateLimiter{windows: make(map[profileKey][]time.Time)}
 }
 
 // Allow reports whether the profile is under the per-minute limit and counts
 // the delivery when it is.
-func (l *profileRateLimiter) Allow(profileID string, limit int) bool {
+func (l *profileRateLimiter) Allow(profile profileKey, limit int) bool {
 	now := time.Now()
 	cutoff := now.Add(-time.Minute)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	window := l.windows[profileID]
+	window := l.windows[profile]
 	kept := window[:0]
 	for _, ts := range window {
 		if ts.After(cutoff) {
@@ -331,9 +338,9 @@ func (l *profileRateLimiter) Allow(profileID string, limit int) bool {
 		}
 	}
 	if len(kept) >= limit {
-		l.windows[profileID] = kept
+		l.windows[profile] = kept
 		return false
 	}
-	l.windows[profileID] = append(kept, now)
+	l.windows[profile] = append(kept, now)
 	return true
 }

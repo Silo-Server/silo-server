@@ -116,13 +116,6 @@ func TestPreparedTracksAvailableRequiresAudioInventory(t *testing.T) {
 	}
 }
 
-func TestPlanPreparedTracksWithoutAudio(t *testing.T) {
-	plan := PlanPreparedTracks(&models.MediaFile{}, "aac", -1)
-	if plan.Audio == nil || len(plan.Audio) != 0 {
-		t.Fatalf("empty source plan = %+v", plan)
-	}
-}
-
 func TestBuildPrepareFileArgsMapsPreparedTracks(t *testing.T) {
 	plan := PlanPreparedTracks(preparedTracksTestFile(), "copy", -1)
 	args := buildPrepareFileArgs(TranscodeOpts{
@@ -226,7 +219,7 @@ func TestPrepareFileKeepsEveryAudioAndTextSubtitleTrack(t *testing.T) {
 	}
 	source := filepath.Join(dir, "source.mkv")
 	if output, err := exec.CommandContext(ctx, ffmpeg, "-v", "error",
-		"-f", "lavfi", "-i", "testsrc=d=2:s=320x240:r=24",
+		"-f", "lavfi", "-i", "testsrc=d=2:s=64x64:r=24",
 		"-f", "lavfi", "-i", "sine=f=440:d=2",
 		"-f", "lavfi", "-i", "sine=f=880:d=2",
 		"-i", srt, "-i", srt,

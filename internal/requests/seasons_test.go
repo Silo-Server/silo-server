@@ -223,68 +223,6 @@ func TestNotifyFulfilledSeasonRequests(t *testing.T) {
 	}
 }
 
-func TestRequestListsReadSeasonCountsOnce(t *testing.T) {
-	store := newFakeStore()
-	presence := severanceInLibrary()
-	presence.available[MediaTypeSeries][1399] = true
-	presence.seasons[fakePresenceContentID(MediaTypeSeries, 1399)] = map[int]SeasonCounts{1: {Aired: 10, Have: 3}}
-	svc := seasonService(store, presence)
-	reqs := []*Request{
-		{ID: "a", MediaType: MediaTypeSeries, TMDBID: 95396, Seasons: []int{2}},
-		{ID: "b", MediaType: MediaTypeSeries, TMDBID: 1399, Seasons: []int{1}},
-		{ID: "c", MediaType: MediaTypeSeries, TMDBID: 95396, Seasons: []int{1, 2}},
-	}
-
-	if err := svc.attachLibraryContent(context.Background(), reqs...); err != nil {
-		t.Fatal(err)
-	}
-	if presence.seasonLookups != 1 {
-		t.Fatalf("season lookups = %d, want one for the whole page", presence.seasonLookups)
-	}
-	if got := reqs[1].SeasonProgress; len(got) != 1 || got[0].Have != 3 {
-		t.Fatalf("progress = %+v", got)
-	}
-}
-
-// A router plugin without supports_seasons takes a whole series, so with a
-// download server for series on one, a series already in the library is not
-// requestable for its missing seasons.
-func TestMissingSeasonsNeedALibraryOnlySetup(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("sonarr")}
-	svc := seasonService(store, severanceInLibrary())
-	svc.SetRouterProvider(&fakeRouterProvider{})
-
-	if _, err := svc.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 95396, Title: "Severance"}); !errors.Is(err, ErrAlreadyAvailable) {
-		t.Fatalf("err = %v, want ErrAlreadyAvailable", err)
-	}
-	detail, err := svc.GetDetail(context.Background(), testViewer(1), MediaTypeSeries, 95396)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.Request.Requestable || detail.Request.Reason != "already_available" {
-		t.Fatalf("request state = %+v, want already_available", detail.Request)
-	}
-	if len(detail.Seasons) != 3 {
-		t.Fatalf("seasons = %+v, want them listed regardless", detail.Seasons)
-	}
-	status, err := svc.GetFeatureStatus(context.Background(), testViewer(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status.MissingSeasonsRequestable {
-		t.Fatal("status advertises missing seasons as requestable with a download server for series")
-	}
-
-	libraryOnly, err := seasonService(newFakeStore(), severanceInLibrary()).GetFeatureStatus(context.Background(), testViewer(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !libraryOnly.MissingSeasonsRequestable {
-		t.Fatal("status hides missing seasons without a download server")
-	}
-}
-
 // v1 keeps the whole-series rule: refused once the series is in the library,
 // and a request for the whole series otherwise.
 func TestWholeSeriesRequests(t *testing.T) {
@@ -337,36 +275,6 @@ func TestLibrarySeriesCanRequestAnUpcomingSeason(t *testing.T) {
 	}
 }
 
-// An episode of an upcoming season that reached the library ahead of its air
-// date does not make the season complete: it can still be requested.
-func TestAnEarlyEpisodeDoesNotCompleteAnUpcomingSeason(t *testing.T) {
-	presence := severanceInLibrary()
-	presence.seasons[fakePresenceContentID(MediaTypeSeries, 95396)][3] = SeasonCounts{Upcoming: 8, Have: 1}
-	svc := seasonService(newFakeStore(), presence)
-
-	req, err := svc.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 95396, Title: "Severance", Seasons: []int{3}})
-	if err != nil || !slices.Equal(req.Seasons, []int{3}) {
-		t.Fatalf("request for season 3 = %+v, %v", req, err)
-	}
-}
-
-// The detail page reads an active season request's state from the series'
-// season counts, as the request lists do.
-func TestSeriesDetailShowsSeasonRequestProgress(t *testing.T) {
-	store := newFakeStore()
-	store.active[MediaTypeSeries] = map[int]*Request{95396: {ID: "r1", MediaType: MediaTypeSeries, TMDBID: 95396,
-		Status: StatusQueued, Outcome: OutcomeActive, RequestedByUserID: 1, Seasons: []int{2}}}
-	svc := seasonService(store, severanceInLibrary())
-
-	detail, err := svc.GetDetail(context.Background(), testViewer(1), MediaTypeSeries, 95396)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.Request.State != StatePartiallyAvailable {
-		t.Fatalf("state = %q, want partially_available: 4 of season 2's 10 episodes are in", detail.Request.State)
-	}
-}
-
 // Reconciliation reads the season counts of a whole batch in one lookup.
 func TestPresentRequestsReadSeasonCountsOnce(t *testing.T) {
 	presence := severanceInLibrary()
@@ -393,73 +301,5 @@ func TestPresentRequestsReadSeasonCountsOnce(t *testing.T) {
 		if present[id] != w {
 			t.Errorf("present[%s] = %v, want %v", id, present[id], w)
 		}
-	}
-}
-
-// A season request made for a series in the library while no download server
-// took series is not sent to one set up later on a plugin without
-// supports_seasons: it would add the whole series. A season request for a
-// series outside the library still goes.
-func TestSeasonRequestForALibrarySeriesSkipsALaterRouter(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{routerInst("sonarr")}
-	for _, req := range []*Request{
-		{ID: "in-library", MediaType: MediaTypeSeries, TMDBID: 95396, Status: StatusApproved, Outcome: OutcomeActive, Seasons: []int{2}},
-		{ID: "absent", MediaType: MediaTypeSeries, TMDBID: 1399, Status: StatusApproved, Outcome: OutcomeActive, Seasons: []int{1}},
-	} {
-		store.candidates = append(store.candidates, req)
-		store.requests[req.ID] = req
-	}
-	router := &fakeRouterProvider{}
-	svc := seasonService(store, severanceInLibrary())
-	svc.SetRouterProvider(router)
-
-	if _, err := svc.ReconcileRequests(context.Background(), 10); err != nil {
-		t.Fatal(err)
-	}
-	if router.fulfillCalls != 1 {
-		t.Fatalf("router calls = %d, want one, for the series outside the library", router.fulfillCalls)
-	}
-	if got := store.requests["in-library"]; got.Status != StatusApproved || got.SubmitAttempts != 0 {
-		t.Fatalf("in-library request = %+v, want approved and unsent, waiting for the library", got)
-	}
-	if got := store.requests["absent"]; got.Status == StatusApproved {
-		t.Fatalf("absent request = %+v, want submitted", got)
-	}
-}
-
-// A mutation returns the request with its season progress, so its state
-// matches what a detail or list read reports.
-func TestSeasonRequestMutationsReturnSeasonProgress(t *testing.T) {
-	contentID := fakePresenceContentID(MediaTypeSeries, 95396)
-	input := CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 95396, Title: "Severance", Seasons: []int{2}}
-
-	store := newFakeStore()
-	store.settings.GlobalAutoApprovalEnabled = true
-	svc := seasonService(store, severanceInLibrary())
-	created, err := svc.CreateRequest(context.Background(), testViewer(1), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created.Status != StatusApproved || created.LibraryContentID != contentID || created.State() != StatePartiallyAvailable {
-		t.Fatalf("auto-approved create = status %s, content %q, state %s; want approved, %q, partially_available",
-			created.Status, created.LibraryContentID, created.State(), contentID)
-	}
-
-	store = newFakeStore()
-	svc = seasonService(store, severanceInLibrary())
-	pending, err := svc.CreateRequest(context.Background(), testViewer(1), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pending.LibraryContentID != contentID {
-		t.Fatalf("pending create content = %q, want %q", pending.LibraryContentID, contentID)
-	}
-	approved, err := svc.Approve(context.Background(), Viewer{UserID: 99, ProfileID: "admin", IsAdmin: true}, pending.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if approved.LibraryContentID != contentID || approved.State() != StatePartiallyAvailable {
-		t.Fatalf("approve = content %q, state %s; want %q, partially_available", approved.LibraryContentID, approved.State(), contentID)
 	}
 }

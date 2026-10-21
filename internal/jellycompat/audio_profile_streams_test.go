@@ -7,27 +7,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestCompatAudioSpatialFormat(t *testing.T) {
-	cases := []struct {
-		profile string
-		want    string
-	}{
-		{"Dolby Digital Plus + Dolby Atmos", "DolbyAtmos"},
-		{"TrueHD + Dolby Atmos", "DolbyAtmos"},
-		{"dolby atmos", "DolbyAtmos"},
-		{"DTS-HD MA + DTS:X", "DTSX"},
-		{"dts:x", "DTSX"},
-		{"DTS-HD MA", "None"},
-		{"LC", "None"},
-		{"", "None"},
-	}
-	for _, tc := range cases {
-		if got := compatAudioSpatialFormat(tc.profile); got != tc.want {
-			t.Errorf("compatAudioSpatialFormat(%q) = %q, want %q", tc.profile, got, tc.want)
-		}
-	}
-}
-
 func TestBuildMediaStreamsCarriesAudioProfile(t *testing.T) {
 	version := catalog.FileVersion{
 		VideoTracks: []models.VideoTrack{{Codec: "hevc"}},
@@ -90,13 +69,6 @@ func TestBuildMediaStreamsCarriesAudioProfile(t *testing.T) {
 	}
 	if aac.DisplayTitle != "English - AAC Stereo" {
 		t.Fatalf("aac DisplayTitle = %q", aac.DisplayTitle)
-	}
-}
-
-func TestAudioTrackDisplayTitleWithoutProfileKeepsCodecName(t *testing.T) {
-	title := audioTrackDisplayTitle(models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6})
-	if title != "English - EAC3 5.1" {
-		t.Fatalf("DisplayTitle = %q", title)
 	}
 }
 

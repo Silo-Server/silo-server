@@ -18,6 +18,15 @@ the route answers `413` without processing the request: `too_large` in the v1 er
 or plain text on `/api/v1/auth/oauth/complete`. Only the first JSON value is decoded; data
 after it is ignored, not rejected.
 
+`POST /api/v1/auth/setup` also requires `Content-Type: application/json` before
+reading the body. MIME parameters are accepted; missing, malformed, or other media
+types return `415` with the v1 `unsupported_media_type` error. This critical bridge
+fix prevents a cross-site browser form or `no-cors` fetch from claiming the first
+administrator. A cross-origin JSON fetch requires a preflight, which the main API
+does not grant. Same-origin browser and native JSON setup keep the existing
+database-wide one-winner transaction. This does not add a setup secret or limit
+which networks may complete setup.
+
 ## Login sessions
 
 Login sessions belong to accounts and are separate from household profiles, registered
@@ -48,9 +57,10 @@ device sign-ins, including temporary remote-playback approvals that would mint a
 login session. The same transaction revokes the account's Audiobookshelf-compatible
 sessions and deletes its stored Jellyfin-compatible sessions, as a password reset does;
 when any of it fails, nothing is revoked and the request fails. After commit, every node
-drops the Jellyfin-compatible sessions it holds in memory. A node that has not dropped them
-yet cannot write one back: extending a session or storing its refreshed tokens only updates
-an existing row, and ends the session when the row is gone. The response counts revoked
+drops the Jellyfin-compatible sessions it holds in memory. Each compatibility lookup
+also reads its stored row, so a missed eviction event cannot authorize a deleted session.
+Extending a session or storing its refreshed tokens only updates an existing row and
+ends the session when the row is gone. The response counts revoked
 live login sessions, not withdrawn approvals or
 compatibility sessions. Single-session revocation leaves other sessions and device approvals unchanged.
 Other accounts' own sessions remain usable. API keys are not login sessions and are not
@@ -358,7 +368,40 @@ Direct connections and requests through a network access provider, whose plugin 
 header itself, spend only the per-client budget. An exhausted budget answers 429 with
 `Retry-After`.
 
+## Authenticated account allowance
+
+Authenticated routes also spend one `account:<user_id>` budget, shared across the
+account's household profiles, login sessions, devices and API keys. Switching
+credentials or forwarding headers does not create a new account allowance. Native
+v1, v2 and the Jellyfin-compatible listener share the counter. Distinct accounts
+behind one proxy have separate account allowances; existing source and global
+budgets still apply.
+
+The account budget is four times the per-address budget set by
+`ratelimit.ip.requests_per_second`, `ratelimit.ip.requests_per_minute` and
+`ratelimit.ip.burst`: with the defaults (120 per second, 6000 per minute, burst 120)
+an account gets 480 requests per second, 24000 per minute and burst 480. One login
+often spans several networks, and each address is already held to one per-address
+budget, so one busy address or integration can spend at most a quarter of its
+account. The admin UI labels these settings **Per address and account**. IP, API-key and account checks run before the global
+check, so a request rejected by a narrower budget does not consume global capacity.
+All applicable budgets must allow the request. Successful API-key response headers
+describe the key's tier budget; an account denial reports the exhausted account
+budget using the existing 429 response and `Retry-After`.
+
+Requests without an authenticated account do not spend an account allowance.
+Pre-authentication display-token lookup and public sign-in/device operations retain
+their source and global checks. With the memory backend, counters are per process;
+Redis shares them across instances, with the existing fail-open behavior when Redis
+is unavailable. Disabling rate limiting disables the account allowance too.
+
 ## Profile PINs
+
+Profile creation through v1 and v2 stores a requested PIN hash in the same
+transaction as the profile and its preferences. The first committed profile
+state already requires PIN proof. Creation rejects PINs longer than 72 bytes
+before writing anything (v1: 400 `bad_request`; v2: 422 `validation_failed`).
+Omitting the PIN still creates an unlocked profile.
 
 `POST /api/v2/profiles/{id}/verify-pin` (`verifyProfilePIN`) and v1
 `POST /api/v1/profiles/{id}/verify-pin` check a household profile's PIN. A match

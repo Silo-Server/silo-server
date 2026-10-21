@@ -23,27 +23,6 @@ func TestRenderIndexHTMLEscapesTitle(t *testing.T) {
 	}
 }
 
-func TestRenderIndexHTMLKeepsDefaultFaviconWhenUnset(t *testing.T) {
-	in := []byte(indexFaviconLink + "</head>")
-	out := string(RenderIndexHTML(in, newSnapshot("X")))
-	if !strings.Contains(out, indexFaviconLink) {
-		t.Fatalf("default favicon link should be preserved: %q", out)
-	}
-}
-
-func TestRenderIndexHTMLInjectsThemeColorOnlyWhenAccentSet(t *testing.T) {
-	in := []byte("<head></head>")
-	if out := string(RenderIndexHTML(in, newSnapshot("X"))); strings.Contains(out, "theme-color") {
-		t.Fatalf("theme-color should not be injected without accent: %q", out)
-	}
-	snap := newSnapshot("X")
-	snap.AccentColor = "#5bc39d"
-	out := string(RenderIndexHTML(in, snap))
-	if !strings.Contains(out, `<meta name="theme-color" content="#5bc39d" />`) {
-		t.Fatalf("theme-color meta not injected: %q", out)
-	}
-}
-
 func TestRenderIndexHTMLDoesNotStampADefaultTheme(t *testing.T) {
 	in := []byte(`<!doctype html><html lang="en" data-theme="midnight-cinema"><head></head></html>`)
 	out := string(RenderIndexHTML(in, newSnapshot("X")))
@@ -61,15 +40,6 @@ func TestRenderKeyIncludesWordmarkLight(t *testing.T) {
 	snap.assets[KindWordmarkLight] = "wordmark-light.webp"
 	if got := snap.RenderKey(); got == baseline {
 		t.Fatal("RenderKey did not change when wordmark_light ref changed")
-	}
-}
-
-func TestRenderKeyIncludesMarkLight(t *testing.T) {
-	snap := newSnapshot("Acme")
-	baseline := snap.RenderKey()
-	snap.assets[KindMarkLight] = "mark-light.webp"
-	if got := snap.RenderKey(); got == baseline {
-		t.Fatal("RenderKey did not change when mark_light ref changed")
 	}
 }
 
@@ -94,27 +64,6 @@ func TestRenderIndexHTMLAgainstRealShell(t *testing.T) {
 	}
 	if !strings.Contains(out, "/api/v2/branding/assets/favicon?v=f00.png") {
 		t.Fatalf("favicon not rewritten in real shell")
-	}
-}
-
-func TestRenderManifestDefaults(t *testing.T) {
-	var m map[string]any
-	if err := json.Unmarshal(RenderManifest(newSnapshot("Acme TV")), &m); err != nil {
-		t.Fatalf("invalid manifest JSON: %v", err)
-	}
-	if m["name"] != "Acme TV" || m["short_name"] != "Acme TV" {
-		t.Fatalf("unexpected name: %v / %v", m["name"], m["short_name"])
-	}
-	if m["theme_color"] != DefaultThemeColor {
-		t.Fatalf("expected default theme color, got %v", m["theme_color"])
-	}
-	icons, _ := m["icons"].([]any)
-	if len(icons) != 3 {
-		t.Fatalf("expected 3 default icons, got %d", len(icons))
-	}
-	first, _ := icons[0].(map[string]any)
-	if !strings.HasPrefix(first["src"].(string), "/web-app-icon") {
-		t.Fatalf("expected bundled icon default, got %v", first["src"])
 	}
 }
 

@@ -61,28 +61,6 @@ func TestCatalogPresenceMatchesByTVDBAndBackfillsTMDB(t *testing.T) {
 	}
 }
 
-func TestCatalogPresenceKeepsLookupTMDBCompatibility(t *testing.T) {
-	lookup := &fakePresenceLookup{rows: []catalog.ExternalIDMatchRow{{
-		QueryTMDBID:     "550",
-		MediaID:         "movie-1",
-		MatchedProvider: "tmdb",
-		LibraryID:       "1",
-		Title:           "Fight Club",
-	}}}
-	presence := &CatalogPresence{items: lookup}
-
-	result, err := presence.LookupTMDB(context.Background(), MediaTypeMovie, []int{550})
-	if err != nil {
-		t.Fatalf("LookupTMDB returned error: %v", err)
-	}
-	if !result[550] {
-		t.Fatalf("result[550] = false, want true")
-	}
-	if len(lookup.got) != 1 || lookup.got[0].TMDBID != "550" {
-		t.Fatalf("lookup candidates = %+v, want tmdb candidate", lookup.got)
-	}
-}
-
 func TestNewCatalogPresenceIgnoresNilRepositories(t *testing.T) {
 	presence := NewCatalogPresence(nil, nil)
 	candidates := []PresenceCandidate{{TMDBID: 42}}

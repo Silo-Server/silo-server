@@ -1,7 +1,6 @@
 package transcodenode
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -53,26 +52,16 @@ func newLoopingFFmpegServer(t *testing.T) *Server {
 	t.Helper()
 	s := newTestServer(t)
 	s.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
-	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	s.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	useFakeFFmpeg(t, s, "#!/bin/sh\nwhile :; do sleep 0.1; done\n")
 	return s
 }
 
 func postStart(t *testing.T, s *Server, sessionID string) *httptest.ResponseRecorder {
 	t.Helper()
-	body, err := json.Marshal(TranscodeStartRequest{
+	return postStartRequest(t, s, TranscodeStartRequest{
 		SessionID: sessionID, InputPath: "/media/movie.mkv", TargetCodecVideo: "h264",
 		TargetCodecAudio: "aac", SegmentDuration: 2,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rr := httptest.NewRecorder()
-	s.handleStart(rr, httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body)))
-	return rr
 }
 
 func stopSession(t *testing.T, s *Server, sessionID string) {

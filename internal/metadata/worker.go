@@ -707,7 +707,7 @@ func (w *MatchWorker) processFiles(ctx context.Context, files []*models.MediaFil
 			if ctx.Err() != nil {
 				return false
 			}
-			contentID := key.(string)
+			contentID := key.(string) //nolint:errcheck,forcetypeassert // processFileWithFolderCache stores content ID strings as keys
 			if err := w.service.ensureSeriesEpisodeLinks(ctx, contentID); err != nil {
 				slog.WarnContext(ctx, "metadata: deferred series episode link failed", "component", "metadata",
 					"content_id", contentID, "error", err)

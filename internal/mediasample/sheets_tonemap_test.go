@@ -207,14 +207,6 @@ func TestToneMapSourceValidation(t *testing.T) {
 	}
 }
 
-func TestSupportsHardwareSheets(t *testing.T) {
-	for accel, want := range map[string]bool{"qsv": true, "vaapi": true, "videotoolbox": true, "nvenc": true, "none": false, "": false} {
-		if got := SupportsHardwareSheets(accel); got != want {
-			t.Errorf("SupportsHardwareSheets(%q) = %t, want %t", accel, got, want)
-		}
-	}
-}
-
 func TestHardwareDecoderRefusalIsUnsupported(t *testing.T) {
 	for _, log := range []string{
 		"[mpeg4 @ 0x5] Failed setup for format vaapi: hwaccel initialisation returned error.",

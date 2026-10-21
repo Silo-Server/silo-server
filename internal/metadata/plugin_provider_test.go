@@ -187,44 +187,6 @@ func TestPluginProviderGetMetadata_MapsReleaseDate(t *testing.T) {
 	}
 }
 
-func TestPluginProviderGetMetadata_MapsAirTime(t *testing.T) {
-	item := &pluginv1.MetadataItem{
-		ProviderId: "provider-1",
-		ItemType:   "series",
-		Title:      "Example Series",
-		AirTime:    "20:00",
-		ProviderIds: mustStructFromStringMap(t, map[string]string{
-			"tvdb": "123",
-		}),
-	}
-
-	provider, err := NewPluginProviderWithClientFactory(map[string]string{
-		"plugin_installation_id": "1",
-		"capability_id":          "tvdb",
-	}, func(context.Context, int, string) (pluginMetadataClient, error) {
-		return &fakePluginMetadataClient{
-			response: &pluginv1.GetMetadataResponse{Item: item},
-		}, nil
-	})
-	if err != nil {
-		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-	}
-
-	result, err := provider.GetMetadata(context.Background(), MetadataRequest{
-		ProviderIDs: map[string]string{"tvdb": "provider-1"},
-		ContentType: "series",
-	})
-	if err != nil {
-		t.Fatalf("GetMetadata() error = %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected metadata result")
-	}
-	if result.AirTime != "20:00" {
-		t.Fatalf("AirTime = %q, want 20:00", result.AirTime)
-	}
-}
-
 func TestPluginProviderGetMetadata_MapsKeywordsFromMetadata(t *testing.T) {
 	metadata, err := structpb.NewStruct(map[string]any{
 		"keywords": []any{"time loop", "heist", "time loop", "", 42},

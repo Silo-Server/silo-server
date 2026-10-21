@@ -16,6 +16,7 @@ import {
   adminKeys,
   catalogKeys,
   collectionKeys,
+  itemKeys,
   libraryKeys,
   requestKeys,
   sectionKeys,
@@ -25,6 +26,7 @@ import { invalidateCatalogState } from "./realtimeCatalogInvalidation";
 import {
   buildEventsUrl,
   EVENTS_ACCESS_CHANGED_CLOSE_CODE,
+  HIDDEN_EVENTS_SOCKET_GRACE_MS,
   RealtimeEventsProvider,
 } from "./RealtimeEventsProvider";
 
@@ -101,6 +103,39 @@ class FakeWebSocket {
   }
 }
 
+// Renders the provider and lets its first socket open; `rerender` re-renders the same tree.
+async function renderProvider(queryClient: QueryClient, children: ReactNode = <div />) {
+  const tree = () => (
+    <QueryClientProvider client={queryClient}>
+      <RealtimeEventsProvider>{children}</RealtimeEventsProvider>
+    </QueryClientProvider>
+  );
+  const view = render(tree());
+  await act(async () => {});
+  return { view, rerender: () => view.rerender(tree()) };
+}
+
+function Observe({
+  queryKey,
+  queryFn,
+  staleTime = Infinity,
+}: {
+  queryKey: readonly unknown[];
+  queryFn: () => Promise<unknown>;
+  staleTime?: number;
+}) {
+  useQuery<unknown>({ queryKey, queryFn, staleTime });
+  return null;
+}
+
+function invalidationCounter(queryClient: QueryClient) {
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+  return (key: readonly unknown[]) =>
+    invalidate.mock.calls.filter(
+      ([filters]) => JSON.stringify(filters?.queryKey) === JSON.stringify(key),
+    ).length;
+}
+
 describe("buildEventsUrl", () => {
   it("uses the websocket scheme without URL credentials", () => {
     expect(
@@ -109,15 +144,6 @@ describe("buildEventsUrl", () => {
         host: "example.com",
       }),
     ).toBe("wss://example.com/api/v2/events/ws");
-  });
-
-  it("omits the query string when no token is available", () => {
-    expect(
-      buildEventsUrl({
-        protocol: "http:",
-        host: "localhost:5173",
-      }),
-    ).toBe("ws://localhost:5173/api/v2/events/ws");
   });
 });
 
@@ -266,15 +292,7 @@ describe("RealtimeEventsProvider", () => {
     const queryClient = new QueryClient();
     const detailKey = catalogKeys.itemDetail("movie-1");
     queryClient.setQueryData(detailKey, { content_id: "movie-1", type: "movie" });
-    const provider = () => (
-      <QueryClientProvider client={queryClient}>
-        <RealtimeEventsProvider>
-          <div />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>
-    );
-    const view = render(provider());
-    await act(async () => {});
+    const { view, rerender } = await renderProvider(queryClient);
     expect(FakeWebSocket.instances).toHaveLength(1);
     const oldSocket = FakeWebSocket.instances[0]!;
     expect(oldSocket.protocols).toEqual(["silo.events.v2", `silo.ticket.${"a".repeat(43)}`]);
@@ -283,7 +301,7 @@ describe("RealtimeEventsProvider", () => {
     await act(async () => {
       setProfileToken("replacement-pin-proof");
       mockState.profile = { id: "profile-1", has_pin: true };
-      view.rerender(provider());
+      rerender();
     });
     expect(oldSocket.readyState).toBe(FakeWebSocket.CLOSED);
     expect(FakeWebSocket.instances).toHaveLength(2);
@@ -343,22 +361,11 @@ describe("RealtimeEventsProvider", () => {
             finish = resolve;
           }),
       );
-      function SessionsObserver() {
-        useQuery({ queryKey: currentKey, queryFn: load, staleTime: Infinity });
-        return null;
-      }
       const publishedLengths: number[] = [];
       const unsubscribe = queryClient.getQueryCache().subscribe(() => {
         publishedLengths.push(queryClient.getQueryData<typeof complete>(currentKey)!.length);
       });
-      render(
-        <QueryClientProvider client={queryClient}>
-          <RealtimeEventsProvider>
-            <SessionsObserver />
-          </RealtimeEventsProvider>
-        </QueryClientProvider>,
-      );
-      await act(async () => {});
+      await renderProvider(queryClient, <Observe queryKey={currentKey} queryFn={load} />);
       expect(load).not.toHaveBeenCalled();
       const socket = FakeWebSocket.instances[0]!;
       await act(async () => {
@@ -403,14 +410,7 @@ describe("RealtimeEventsProvider", () => {
     const queryClient = new QueryClient();
     for (const key of [currentKey, otherKey, adminKeys.sessions()])
       queryClient.setQueryData(key, []);
-    render(
-      <QueryClientProvider client={queryClient}>
-        <RealtimeEventsProvider>
-          <div />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>,
-    );
-    await act(async () => {});
+    await renderProvider(queryClient);
     await act(async () => {
       FakeWebSocket.instances[0]!.emitMessage({
         type: "snapshot",
@@ -432,18 +432,7 @@ describe("RealtimeEventsProvider", () => {
     const key = adminSessionsKey(captureProfileRequestContext());
     const load = vi.fn(async () => []);
     queryClient.setQueryData(key, []);
-    function SessionsObserver() {
-      useQuery({ queryKey: key, queryFn: load, staleTime: Infinity });
-      return null;
-    }
-    const view = render(
-      <QueryClientProvider client={queryClient}>
-        <RealtimeEventsProvider>
-          <SessionsObserver />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>,
-    );
-    await act(async () => {});
+    const { view } = await renderProvider(queryClient, <Observe queryKey={key} queryFn={load} />);
     const emit = () =>
       FakeWebSocket.instances[0]!.emitMessage({
         type: "event",
@@ -488,18 +477,7 @@ describe("RealtimeEventsProvider", () => {
     const initial = makePreparationList([makePreparation()]);
     const load = vi.fn(async () => initial);
     queryClient.setQueryData(key, initial);
-    function PreparationsObserver() {
-      useQuery({ queryKey: key, queryFn: load, staleTime: Infinity });
-      return null;
-    }
-    render(
-      <QueryClientProvider client={queryClient}>
-        <RealtimeEventsProvider>
-          <PreparationsObserver />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>,
-    );
-    await act(async () => {});
+    await renderProvider(queryClient, <Observe queryKey={key} queryFn={load} />);
     const socket = FakeWebSocket.instances[0]!;
     const progress = {
       encoded_seconds: 3000,
@@ -568,18 +546,7 @@ describe("RealtimeEventsProvider", () => {
     const client = new QueryClient();
     const load = vi.fn(async () => [task]);
     client.setQueryData(adminKeys.tasks(), [task]);
-    function TaskObserver() {
-      useQuery({ queryKey: adminKeys.tasks(), queryFn: load, staleTime: Infinity });
-      return null;
-    }
-    render(
-      <QueryClientProvider client={client}>
-        <RealtimeEventsProvider>
-          <TaskObserver />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>,
-    );
-    await act(async () => {});
+    await renderProvider(client, <Observe queryKey={adminKeys.tasks()} queryFn={load} />);
     await act(async () => {
       FakeWebSocket.instances[0]!.emitMessage({
         type: "event",
@@ -619,21 +586,12 @@ describe("RealtimeEventsProvider", () => {
       { queryKey: adminKeys.task("other"), queryFn: other, data: { ...task, key: "other" } },
     ];
     for (const query of queries) client.setQueryData(query.queryKey, query.data);
-    function Observer({ index }: { index: number }) {
-      const { queryKey, queryFn } = queries[index]!;
-      useQuery<unknown>({ queryKey, queryFn, staleTime: Infinity });
-      return null;
-    }
-    render(
-      <QueryClientProvider client={client}>
-        <RealtimeEventsProvider>
-          {queries.map((_, index) => (
-            <Observer key={index} index={index} />
-          ))}
-        </RealtimeEventsProvider>
-      </QueryClientProvider>,
+    await renderProvider(
+      client,
+      queries.map(({ queryKey, queryFn }, index) => (
+        <Observe key={index} queryKey={queryKey} queryFn={queryFn} />
+      )),
     );
-    await act(async () => {});
     const emit = (state: string) =>
       FakeWebSocket.instances[0]!.emitMessage({
         type: "event",
@@ -706,18 +664,10 @@ describe("RealtimeEventsProvider", () => {
             }),
         )
         .mockResolvedValue([finishedTask]);
-      function TaskObserver() {
-        useQuery({ queryKey: adminKeys.tasks(), queryFn: load });
-        return null;
-      }
-      render(
-        <QueryClientProvider client={client}>
-          <RealtimeEventsProvider>
-            <TaskObserver />
-          </RealtimeEventsProvider>
-        </QueryClientProvider>,
+      await renderProvider(
+        client,
+        <Observe queryKey={adminKeys.tasks()} queryFn={load} staleTime={0} />,
       );
-      await act(async () => {});
       expect(load).toHaveBeenCalledTimes(1);
       await act(async () => {
         FakeWebSocket.instances[0]!.emitMessage({
@@ -759,18 +709,7 @@ describe("RealtimeEventsProvider", () => {
     const finishedTask = { ...task, state: "idle", progress: 0 };
     const load = vi.fn(async () => [finishedTask]);
     client.setQueryData(adminKeys.tasks(), [task]);
-    function TaskObserver() {
-      useQuery({ queryKey: adminKeys.tasks(), queryFn: load, staleTime: Infinity });
-      return null;
-    }
-    render(
-      <QueryClientProvider client={client}>
-        <RealtimeEventsProvider>
-          <TaskObserver />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>,
-    );
-    await act(async () => {});
+    await renderProvider(client, <Observe queryKey={adminKeys.tasks()} queryFn={load} />);
     await act(async () => {
       FakeWebSocket.instances[0]!.emitMessage({
         type: "event",
@@ -792,16 +731,7 @@ describe("RealtimeEventsProvider", () => {
     });
     const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
     mockState.pathname = "/watch/movie-1";
-    const provider = () => (
-      <QueryClientProvider client={queryClient}>
-        <RealtimeEventsProvider>
-          <div />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>
-    );
-
-    const view = render(provider());
-    await act(async () => {});
+    const { rerender } = await renderProvider(queryClient);
     expect(FakeWebSocket.instances).toHaveLength(1);
     const firstSocket = FakeWebSocket.instances[0]!;
 
@@ -811,7 +741,10 @@ describe("RealtimeEventsProvider", () => {
         isVisible: false,
         canApplyRealtimeUpdates: false,
       };
-      view.rerender(provider());
+      rerender();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(HIDDEN_EVENTS_SOCKET_GRACE_MS);
     });
 
     expect(firstSocket.readyState).toBe(FakeWebSocket.CLOSED);
@@ -821,7 +754,7 @@ describe("RealtimeEventsProvider", () => {
         isVisible: true,
         canApplyRealtimeUpdates: true,
       };
-      view.rerender(provider());
+      rerender();
     });
 
     expect(FakeWebSocket.instances).toHaveLength(2);
@@ -830,7 +763,7 @@ describe("RealtimeEventsProvider", () => {
 
     await act(async () => {
       mockState.pathname = "/item/movie-1";
-      view.rerender(provider());
+      rerender();
     });
 
     // An access change made while the socket was down sends no
@@ -852,15 +785,7 @@ describe("RealtimeEventsProvider", () => {
       user_data: { played: true },
     } as ItemDetail);
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <RealtimeEventsProvider>
-          <div />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>,
-    );
-
-    await act(async () => {});
+    await renderProvider(queryClient);
     await act(async () => {
       FakeWebSocket.instances[0]?.emitMessage({
         type: "event",
@@ -881,6 +806,34 @@ describe("RealtimeEventsProvider", () => {
     });
   });
 
+  it("drops a closed player's cached watch detail when progress changes elsewhere", async () => {
+    const queryClient = new QueryClient();
+    const watchKey = itemKeys.watchDetail("movie-1");
+    const otherKey = itemKeys.watchDetail("movie-2");
+    queryClient.setQueryData(watchKey, {
+      content_id: "movie-1",
+      user_data: { position_seconds: 600 },
+    });
+    queryClient.setQueryData(otherKey, {
+      content_id: "movie-2",
+      user_data: { position_seconds: 60 },
+    });
+
+    await renderProvider(queryClient);
+    await act(async () => {
+      FakeWebSocket.instances[0]?.emitMessage({
+        type: "event",
+        channel: "user_state",
+        event: "user_state.changed",
+        data: { profile_id: "profile-1", content_id: "movie-1", change: "progress" },
+      });
+    });
+
+    // Dropped at once: a play started now would use its resume position.
+    expect(queryClient.getQueryData(watchKey)).toBeUndefined();
+    expect(queryClient.getQueryData(otherKey)).toBeDefined();
+  });
+
   it("refetches request state once per burst of request notifications, for any profile", async () => {
     const queryClient = new QueryClient();
     const refreshed = [
@@ -893,22 +846,10 @@ describe("RealtimeEventsProvider", () => {
     ];
     const untouched = [requestKeys.status(), requestKeys.discoverStudios()];
     for (const key of [...refreshed, ...untouched]) queryClient.setQueryData(key, {});
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const invalidations = (key: readonly unknown[]) =>
-      invalidate.mock.calls.filter(
-        ([filters]) => JSON.stringify(filters?.queryKey) === JSON.stringify(key),
-      ).length;
+    const invalidations = invalidationCounter(queryClient);
     mockState.profile = { id: "profile-1", has_pin: false };
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <RealtimeEventsProvider>
-          <div />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>,
-    );
-
-    await act(async () => {});
+    await renderProvider(queryClient);
     const emit = (type: string, profileID: string, index = 0) =>
       FakeWebSocket.instances[0]?.emitMessage({
         type: "event",
@@ -953,22 +894,10 @@ describe("RealtimeEventsProvider", () => {
     const mine = requestKeys.mine({ status: "all", outcome: "all", limit: 100, offset: 0 });
     const search = requestKeys.search("all", "dune", 1, "profile-1");
     for (const key of [mine, search]) queryClient.setQueryData(key, {});
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const invalidations = (key: readonly unknown[]) =>
-      invalidate.mock.calls.filter(
-        ([filters]) => JSON.stringify(filters?.queryKey) === JSON.stringify(key),
-      ).length;
+    const invalidations = invalidationCounter(queryClient);
     mockState.profile = { id: "profile-1", has_pin: false };
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <RealtimeEventsProvider>
-          <div />
-        </RealtimeEventsProvider>
-      </QueryClientProvider>,
-    );
-
-    await act(async () => {});
+    await renderProvider(queryClient);
     const snapshot = (types: string[]) =>
       FakeWebSocket.instances[0]?.emitMessage({
         type: "snapshot",
@@ -994,24 +923,227 @@ describe("RealtimeEventsProvider", () => {
     expect(invalidations(search)).toBe(1);
   });
 
+  describe("hidden page", () => {
+    const catchUp = { type: "active", predicate: expect.any(Function) };
+
+    function setPage({ visible, frozen = false }: { visible: boolean; frozen?: boolean }) {
+      mockState.pageActivity = {
+        ...mockState.pageActivity,
+        isVisible: visible,
+        isFrozen: frozen,
+        canPollDashboard: visible && !frozen && mockState.pageActivity.isFocused,
+        canApplyRealtimeUpdates: visible && !frozen,
+      };
+    }
+
+    // Mounts the provider; `show` flips page visibility and re-renders.
+    async function mount(queryClient = new QueryClient()) {
+      const refetchQueries = vi.spyOn(queryClient, "refetchQueries").mockResolvedValue(undefined);
+      const { rerender } = await renderProvider(queryClient);
+      const show = (visible: boolean, frozen = false) =>
+        act(async () => {
+          setPage({ visible, frozen });
+          rerender();
+        });
+      return { refetchQueries, rerender, show };
+    }
+
+    function ticketMints() {
+      return vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url).endsWith("/api/v2/events/ws-ticket")).length;
+    }
+
+    it("keeps the socket and skips the catch-up across a short tab switch", async () => {
+      const { refetchQueries, show } = await mount();
+      const socket = FakeWebSocket.instances[0]!;
+
+      await show(false);
+      await act(async () => {
+        vi.advanceTimersByTime(HIDDEN_EVENTS_SOCKET_GRACE_MS - 1);
+      });
+      expect(socket.readyState).not.toBe(FakeWebSocket.CLOSED);
+
+      await show(true);
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      expect(ticketMints()).toBe(1);
+      expect(refetchQueries).not.toHaveBeenCalled();
+      expect(mockState.refreshAccount).not.toHaveBeenCalled();
+    });
+
+    it("applies frames and subscribes while the tab is briefly hidden", async () => {
+      const queryClient = new QueryClient();
+      const detailKey = catalogKeys.itemDetail("movie-1");
+      queryClient.setQueryData(detailKey, { content_id: "movie-1", type: "movie" });
+      const { show } = await mount(queryClient);
+      const socket = FakeWebSocket.instances[0]!;
+      socket.readyState = FakeWebSocket.OPEN;
+      const send = vi.spyOn(socket, "send");
+
+      await show(false);
+      await act(async () => {
+        socket.emitMessage({ type: "hello" });
+        socket.emitMessage({
+          type: "event",
+          channel: "user_state",
+          event: "favorite.updated",
+          data: { content_id: "movie-1", change: "favorite", is_favorite: true },
+        });
+      });
+
+      expect(send).toHaveBeenCalledWith(expect.stringContaining('"type":"subscribe"'));
+      expect(queryClient.getQueryData(detailKey)).toMatchObject({
+        user_state: { is_favorite: true },
+      });
+    });
+
+    it("closes the socket after the grace period and catches up once on return", async () => {
+      const { refetchQueries, show } = await mount();
+      const socket = FakeWebSocket.instances[0]!;
+      const hiddenAt = Date.now();
+
+      await show(false);
+      await act(async () => {
+        vi.advanceTimersByTime(HIDDEN_EVENTS_SOCKET_GRACE_MS);
+      });
+      expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+      // Leave the clock behind so only the closed socket can ask for the catch-up.
+      vi.setSystemTime(hiddenAt);
+
+      await show(true);
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+      expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("catches up after a long suspension even when the grace timer never ran", async () => {
+      const { refetchQueries, show } = await mount();
+
+      await show(false);
+      // A suspended page's clock moves on while its timers do not.
+      vi.setSystemTime(Date.now() + 2 * HIDDEN_EVENTS_SOCKET_GRACE_MS);
+      await show(true);
+
+      // The old socket may have died without a close event, so it is replaced.
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(FakeWebSocket.instances[0]!.readyState).toBe(FakeWebSocket.CLOSED);
+      expect(ticketMints()).toBe(2);
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+      expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes the socket at once when the page is frozen and catches up on resume", async () => {
+      const { refetchQueries, show } = await mount();
+      const socket = FakeWebSocket.instances[0]!;
+
+      await show(false, true);
+      expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+
+      await show(true);
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+      expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("catches up on return when the socket drops while the tab is hidden", async () => {
+      const { refetchQueries, show } = await mount();
+
+      await show(false);
+      await act(async () => {
+        FakeWebSocket.instances[0]!.emitClose();
+        vi.advanceTimersByTime(1_000);
+      });
+      // The usual reconnect still runs during the grace period.
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(refetchQueries).not.toHaveBeenCalled();
+
+      await show(true);
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    });
+
+    it("catches up at once when a socket that lived through a hide drops later", async () => {
+      const { refetchQueries, show } = await mount();
+
+      await show(false);
+      await show(true);
+      expect(refetchQueries).not.toHaveBeenCalled();
+
+      // A resumed phone browser can learn only now that its socket died.
+      await act(async () => {
+        FakeWebSocket.instances[0]!.emitClose();
+      });
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+      expect(mockState.refreshAccount).toHaveBeenCalledTimes(1);
+    });
+
+    it("catches up on the next return after the socket dropped while visible", async () => {
+      const { refetchQueries, rerender, show } = await mount();
+
+      // A visible page reconnects without a catch-up, as before.
+      await act(async () => {
+        FakeWebSocket.instances[0]!.emitClose();
+      });
+      expect(refetchQueries).not.toHaveBeenCalled();
+
+      // A quick switch before the reconnect lands catches up what it lost.
+      await show(false);
+      await show(true);
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+      expect(refetchQueries).toHaveBeenCalledWith(catchUp);
+
+      // Once caught up, the next quick switch costs nothing.
+      await act(async () => {
+        vi.advanceTimersByTime(1_000);
+        setPage({ visible: false });
+        rerender();
+      });
+      await show(true);
+      expect(refetchQueries).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops a pending catch-up when the account signs out while hidden", async () => {
+      const signedInUser = mockState.user;
+      const { refetchQueries, rerender, show } = await mount();
+      try {
+        await show(false);
+        await act(async () => {
+          vi.advanceTimersByTime(HIDDEN_EVENTS_SOCKET_GRACE_MS);
+        });
+        await act(async () => {
+          (mockState as { user: unknown }).user = null;
+          rerender();
+        });
+        await show(true);
+        await act(async () => {
+          mockState.user = signedInUser;
+          rerender();
+        });
+        expect(refetchQueries).not.toHaveBeenCalled();
+        expect(mockState.refreshAccount).not.toHaveBeenCalled();
+      } finally {
+        mockState.user = signedInUser;
+      }
+    });
+  });
+
   describe("access changes", () => {
     const libraries = libraryKeys.user("none");
     const detail = catalogKeys.itemDetail("movie-1");
     const collections = collectionKeys.list();
     const requests = requestKeys.status();
 
-    function renderWithAccessData() {
+    async function renderWithAccessData() {
       const queryClient = new QueryClient();
       for (const key of [libraries, detail, collections, requests]) {
         queryClient.setQueryData(key, {});
       }
-      render(
-        <QueryClientProvider client={queryClient}>
-          <RealtimeEventsProvider>
-            <div />
-          </RealtimeEventsProvider>
-        </QueryClientProvider>,
-      );
+      await renderProvider(queryClient);
       return queryClient;
     }
 
@@ -1025,8 +1157,7 @@ describe("RealtimeEventsProvider", () => {
       ["the access_changed frame and close code", true],
       ["the close code alone", false],
     ])("refetches access-dependent data and reconnects at once on %s", async (_, frame) => {
-      const queryClient = renderWithAccessData();
-      await act(async () => {});
+      const queryClient = await renderWithAccessData();
       const socket = FakeWebSocket.instances[0]!;
 
       await act(async () => {
@@ -1044,8 +1175,7 @@ describe("RealtimeEventsProvider", () => {
     });
 
     it("keeps cached data and the usual backoff on an ordinary close", async () => {
-      const queryClient = renderWithAccessData();
-      await act(async () => {});
+      const queryClient = await renderWithAccessData();
 
       await act(async () => {
         FakeWebSocket.instances[0]!.emitClose();

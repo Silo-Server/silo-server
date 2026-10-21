@@ -3,7 +3,6 @@ package notifications
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/oklog/ulid/v2"
 )
@@ -67,15 +66,16 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 		return nil, nil
 	}
 	row := inserted[0]
+	owner := profileKey{delivery.UserID, delivery.ProfileID}
 
 	if opts.WebhookFilter != nil && s.webhookRepo != nil && s.Settings.WebhooksEnabled(ctx) {
-		hooksByProfile, err := s.webhookRepo.ListEnabledByProfiles(ctx, tx, []string{delivery.ProfileID})
+		hooksByProfile, err := s.webhookRepo.ListEnabledByProfiles(ctx, tx, []profileKey{owner})
 		if err != nil {
 			return nil, err
 		}
 		attempts := make([]DeliveryAttempt, 0, 2)
-		for _, hook := range hooksByProfile[delivery.ProfileID] {
-			if hook.UserID != delivery.UserID || !opts.WebhookFilter(hook) {
+		for _, hook := range hooksByProfile[owner] {
+			if !opts.WebhookFilter(hook) {
 				continue
 			}
 			attempts = append(attempts, DeliveryAttempt{
@@ -89,15 +89,12 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 		}
 	}
 	if s.webPushRepo != nil && s.Settings.WebPushEnabled(ctx) {
-		subsByProfile, err := s.webPushRepo.ListEnabledByProfiles(ctx, tx, []string{delivery.ProfileID})
+		subsByProfile, err := s.webPushRepo.ListEnabledByProfiles(ctx, tx, []profileKey{owner})
 		if err != nil {
 			return nil, err
 		}
 		attempts := make([]DeliveryAttempt, 0, 2)
-		for _, sub := range subsByProfile[delivery.ProfileID] {
-			if sub.UserID != delivery.UserID {
-				continue
-			}
+		for _, sub := range subsByProfile[owner] {
 			attempts = append(attempts, DeliveryAttempt{
 				ID:                     ulid.Make().String(),
 				NotificationDeliveryID: row.ID,
@@ -110,14 +107,11 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 	}
 	if s.pushDeviceRepo != nil {
 		if platforms := s.Settings.EnabledPushPlatforms(ctx); len(platforms) > 0 {
-			devicesByProfile, err := s.pushDeviceRepo.ListEnabledPushByProfiles(ctx, tx, []string{delivery.ProfileID}, platforms)
+			devicesByProfile, err := s.pushDeviceRepo.ListEnabledPushByProfiles(ctx, tx, []profileKey{owner}, platforms)
 			if err != nil {
 				return nil, err
 			}
-			devices := slices.DeleteFunc(devicesByProfile[delivery.ProfileID], func(device PushDevice) bool {
-				return device.UserID != delivery.UserID
-			})
-			attempts := newPushDeliveryAttempts(row.ID, devices)
+			attempts := newPushDeliveryAttempts(row.ID, devicesByProfile[owner])
 			if err := s.pushDeviceRepo.EnqueuePushAttempts(ctx, tx, attempts); err != nil {
 				return nil, err
 			}

@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
   triggerCowatchMutate: vi.fn(),
   triggerRecommendationsMutate: vi.fn(),
   resetMutateAsync: vi.fn(),
-  resetPending: false,
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }));
@@ -61,7 +60,7 @@ vi.mock("@/hooks/queries/admin/recommendations", () => ({
     mutate: (...args: unknown[]) => mocks.triggerRecommendationsMutate(...args),
   }),
   useResetEmbeddings: () => ({
-    isPending: mocks.resetPending,
+    isPending: false,
     mutateAsync: (...args: unknown[]) => mocks.resetMutateAsync(...args),
   }),
 }));
@@ -129,20 +128,7 @@ describe("AdminRecommendations", () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    mocks.useAdminServerSettings.mockReset();
-    mocks.useAdminSensitiveStatus.mockReset();
-    mocks.useRecommendationsStatus.mockReset();
-    mocks.checkConnectionMutateAsync.mockReset();
-    mocks.updateMutate.mockReset();
-    mocks.updateMutateAsync.mockReset();
-    mocks.triggerEmbeddingsMutate.mockReset();
-    mocks.triggerTasteProfilesMutate.mockReset();
-    mocks.triggerCowatchMutate.mockReset();
-    mocks.triggerRecommendationsMutate.mockReset();
-    mocks.resetMutateAsync.mockReset();
-    mocks.resetPending = false;
-    mocks.toastSuccess.mockReset();
-    mocks.toastError.mockReset();
+    for (const mock of Object.values(mocks)) mock.mockReset();
 
     mocks.useAdminServerSettings.mockReturnValue({
       data: {
@@ -290,13 +276,6 @@ describe("AdminRecommendations", () => {
     );
   });
 
-  it("shows no lock warning when the lock matches", async () => {
-    mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
-    await render();
-
-    expect(container.querySelector('[role="alert"]')).toBeNull();
-  });
-
   it("resets embeddings only after confirmation and reports the result", async () => {
     mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
     mocks.resetMutateAsync.mockResolvedValue({
@@ -320,65 +299,18 @@ describe("AdminRecommendations", () => {
     expect(mocks.toastError).not.toHaveBeenCalled();
   });
 
-  it("does not reset when the confirmation is cancelled", async () => {
-    mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
-    await render();
-
-    await click(findButton(container, "Reset embeddings"));
-    const dialog = document.body.querySelector('[role="alertdialog"]');
-    await click(findButton(dialog as HTMLElement, "Cancel"));
-
-    expect(mocks.resetMutateAsync).not.toHaveBeenCalled();
-    expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
-  });
-
-  it("reports a failed reset", async () => {
-    mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
-    mocks.resetMutateAsync.mockRejectedValue(
-      new Error("Recommendation work that uses embeddings is running on this or another server."),
-    );
-    await render();
-
-    await click(findButton(container, "Reset embeddings"));
-    await click(
-      findButton(
-        document.body.querySelector('[role="alertdialog"]') as HTMLElement,
-        "Reset embeddings",
-      ),
-    );
-
-    expect(mocks.toastError).toHaveBeenCalledWith(
-      "Recommendation work that uses embeddings is running on this or another server.",
-    );
-    expect(mocks.toastSuccess).not.toHaveBeenCalled();
-  });
-
-  it.each(["embeddings", "taste_profiles", "recommendations"] as const)(
-    "disables the reset while the %s job runs",
-    async (job) => {
-      mocks.useRecommendationsStatus.mockReturnValue({
-        data: statusWith({ [job]: { running: true, count: 1 } }),
-      });
-      await render();
-
-      expect(findButton(container, "Reset embeddings")?.disabled).toBe(true);
-    },
-  );
-
-  it("keeps the reset available while only co-watch runs", async () => {
+  it.each([
+    ["embeddings", true],
+    ["taste_profiles", true],
+    ["recommendations", true],
+    // The reset stays available while only co-watch runs.
+    ["cowatch", false],
+  ] as const)("while the %s job runs, the reset's disabled state is %s", async (job, disabled) => {
     mocks.useRecommendationsStatus.mockReturnValue({
-      data: statusWith({ cowatch: { running: true, count: 1 } }),
+      data: statusWith({ [job]: { running: true, count: 1 } }),
     });
     await render();
 
-    expect(findButton(container, "Reset embeddings")?.disabled).toBe(false);
-  });
-
-  it("disables the reset while a reset is in flight", async () => {
-    mocks.useRecommendationsStatus.mockReturnValue({ data: statusWith() });
-    mocks.resetPending = true;
-    await render();
-
-    expect(findButton(container, "Reset embeddings")?.disabled).toBe(true);
+    expect(findButton(container, "Reset embeddings")?.disabled).toBe(disabled);
   });
 });

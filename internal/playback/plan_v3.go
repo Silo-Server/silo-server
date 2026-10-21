@@ -82,10 +82,14 @@ type PlannerInputV3 struct {
 	// planner, tests). Lazy for the same reason as the HLS registries: it shells out
 	// to ffmpeg, so it is consulted only once every cheap eligibility gate
 	// has already passed and a strip route is genuinely on the table.
-	DVRPUStrippable     func() bool
-	Now                 time.Time
-	AttemptedKeys       []string
-	AdditionalSubtitles []SubtitleInventoryEntryV3
+	DVRPUStrippable func() bool
+	// SubtitleRenditionExecutable reports whether some policy-eligible HLS
+	// video executor can emit an HLS subtitle rendition. Nil means none can.
+	// Lazy for the same reason as the HLS registries.
+	SubtitleRenditionExecutable func() bool
+	Now                         time.Time
+	AttemptedKeys               []string
+	AdditionalSubtitles         []SubtitleInventoryEntryV3
 }
 
 // SourceExecutionMetadataV3 is the immutable source probe snapshot used to
@@ -172,6 +176,9 @@ type PlannerResultV3 struct {
 	SubtitleTransportTrackIndex int
 	SubtitleBurnIn              bool
 	SubtitleCodec               string
+	// SubtitleRendition emits the selected subtitle as the transcode's HLS
+	// subtitle rendition (Plan.Subtitle.HLSRendition).
+	SubtitleRendition bool
 	// DownloadedSubtitleID comes from the same inventory snapshot used for
 	// planning. Freezing must not re-list a mutable ordinal inventory after the
 	// route has already been accepted.
@@ -201,6 +208,12 @@ func (input PlannerInputV3) hlsToneMapCapabilities() tonemap.Capabilities {
 
 // PlanPlaybackV3 chooses a playable protocol-v3 route from source and client facts.
 func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
+	// Registered first so it runs last, after any rewrite of the result.
+	defer func() {
+		if result.Plan != nil {
+			result.Plan.ActiveQuality = activeQualityV3(input.Request, *result.Plan)
+		}
+	}()
 	if input.RequestedFile == nil {
 		return terminalPlannerResultV3("source_unavailable", "The requested media source is unavailable.", false)
 	}
@@ -426,7 +439,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	}
 
 	// Automatic quality reductions (device resolution limit, bandwidth
-	// estimate/cap, metered fallback) are best-effort. When the only reason to
+	// estimate or cap) are best-effort. When the only reason to
 	// transcode is such a reduction, a validated source-preserving route
 	// exists, and the transcode itself cannot execute (HDR sources have no
 	// validated reduced-quality recipe yet, or the client/server lacks the
@@ -812,6 +825,51 @@ func availableQualitiesV3(input PlannerInputV3, source SourceDescriptorV3) []Ava
 		return lowerVersionQualitiesV3(input)
 	}
 	return append([]AvailableQualityV3{originalQualityEntryV3(source)}, transcodeRungsV3(input, input.EffectiveFile, source)...)
+}
+
+// activeQualityV3 names the AvailableQualities entry plan delivers, so a
+// client checks the row the server chose instead of re-deriving it from its
+// request. A rung the request named stays active while the plan keeps its
+// resolution (an encode a cap lowered, or a source that already fits it):
+// that row is the viewer's pick. Otherwise, as for a rung a decoder held to a
+// smaller class, the delivery names its entry: an encode the rung of its own
+// resolution class and bitrate (a plain 1080p a cap held to 720p at 2000 kbps
+// is 720p Medium), and a lower version played unchanged its
+// plain resolution entry ("720p"). A source played unchanged, or an encode
+// between two rungs, names none; auto already says the source plays.
+func activeQualityV3(request StartRequestV3, plan PlanV3) string {
+	encodes := plan.Delivery == DeliveryTranscodeHLSV3
+	playsLowerVersion := !encodes && plan.EffectiveMediaFileID != plan.RequestedMediaFileID
+	class := ladderClassForSize(optionalValueV3(plan.EffectiveRecipe.Width), optionalValueV3(plan.EffectiveRecipe.Height))
+	bitrate := optionalValueV3(plan.EffectiveRecipe.BitrateKbps)
+	delivered := func(quality AvailableQualityV3) bool {
+		if _, rung := ladderRungForLabelV3(quality.Label); rung {
+			return encodes && class > 0 && quality.Height == class && quality.BitrateKbps == bitrate
+		}
+		return quality.Label != QualityOriginalV3 && playsLowerVersion && quality.Height == plan.Source.Height
+	}
+	requested, _ := NormalizeQualityV3(request.QualityPreference)
+	for _, quality := range plan.AvailableQualities {
+		if quality.Label != requested {
+			continue
+		}
+		if rung, ok := ladderRungForLabelV3(quality.Label); ok {
+			// A decoder bound fits the frame in a smaller class's box. The
+			// rung's own frame never fits one, but keeping the source aspect
+			// can class it higher: 1728x720 from a 2.4:1 film is 1080p.
+			if !encodes || class == 0 || class >= rung.Height {
+				return quality.Label
+			}
+		} else if delivered(quality) {
+			return quality.Label
+		}
+	}
+	for _, quality := range plan.AvailableQualities {
+		if delivered(quality) {
+			return quality.Label
+		}
+	}
+	return ""
 }
 
 // originalQualityEntryV3 is the menu entry that plays source unchanged.
@@ -1281,10 +1339,24 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
 	}
+	subtitleRendition := false
+	if hlsSubtitleRenditionEligibleV3(input, subtitle, targetVideoCodec) {
+		applyHLSSubtitleRenditionV3(&plan)
+		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+		subtitleRendition = true
+		// A rendition that already failed falls back to the sidecar rather
+		// than exhausting the route: the two are different recipes.
+		if planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
+			applySubtitleDecisionV3(&plan, subtitle.Decision)
+			plan.Claims.Subtitles = subtitle.Claims
+			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+			subtitleRendition = false
+		}
+	}
 	if planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
-	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
+	return PlannerResultV3{SubtitleRendition: subtitleRendition, Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
 }
 
 // h264BoundedQualityV3 fits a transcode target to the client's attested
@@ -1460,6 +1532,44 @@ func hlsHEVCOutputSupportedV3(request StartRequestV3, quality QualityResultV3, s
 	return ok
 }
 
+// hlsSubtitleRenditionEligibleV3 reports whether a server_transcode_hls plan
+// carries its selected subtitle as an HLS subtitle rendition instead of a
+// sidecar. The track must be an embedded text track the policy already shows
+// as text, the client must have negotiated the feature, an executor must be
+// able to emit it, and the transcode must use the synthetic fixed-grid
+// playlist the rendition's segments align to. A rendition is WebVTT, so ASS
+// keeps its sidecar when the client requires authored fidelity.
+func hlsSubtitleRenditionEligibleV3(input PlannerInputV3, subtitle SubtitlePolicyResultV3, targetVideoCodec string) bool {
+	if !HasFeatureV3(input.Request.ClientFeatures, FeatureHLSSubtitleRenditionsV3) ||
+		input.SubtitleRenditionExecutable == nil || input.EffectiveFile == nil {
+		return false
+	}
+	if subtitle.RequiresBurn || subtitle.Source != SubtitleSourceEmbeddedV3 || subtitle.SelectedIndex < 0 || subtitle.TransportIndex < 0 ||
+		subtitle.Decision.Embedded != nil || !SubtitleRenditionCodecSupported(subtitle.Codec) {
+		return false
+	}
+	if subtitle.Decision.Mode != SubtitleRenderV3 && subtitle.Decision.Mode != SubtitleConvertV3 ||
+		IsASS(subtitle.Codec) && input.Request.SubtitleFidelityPreference == SubtitleFidelityPreserveV3 {
+		return false
+	}
+	return SubtitleRenditionExecutable(targetVideoCodec, float64(input.EffectiveFile.Duration), DefaultSegmentDuration) &&
+		input.SubtitleRenditionExecutable()
+}
+
+// applyHLSSubtitleRenditionV3 moves the plan's selected subtitle into its HLS
+// presentation. The inventory keeps every sidecar URL, so a later selection
+// of another track still has one.
+func applyHLSSubtitleRenditionV3(plan *PlanV3) {
+	plan.Subtitle.Artifact = nil
+	plan.Subtitle.HLSRendition = &HLSSubtitleRenditionV3{
+		GroupID:  SubtitleRenditionGroupID,
+		Name:     SubtitleRenditionName,
+		Format:   SubtitleFormatVTTV3,
+		MIMEType: SubtitleMIMEVTTV3,
+	}
+	plan.Claims.Subtitles = SubtitleClaimsV3{Reason: "server_hls_subtitle_rendition"}
+}
+
 // applySubtitleDecisionV3 changes the delivery-specific subtitle policy without
 // discarding the source inventory already frozen onto the base plan. Adapted
 // routes still address the same combined ordinal space as original_http; only
@@ -1554,14 +1664,18 @@ type QualityResultV3 struct {
 
 // ResolveQualityPolicyV3 selects the delivery quality for a plan.
 //
-// bandwidth_cap_kbps is a hard delivery ceiling and is honored in every
-// quality mode: source-preserving delivery is degraded when the source bitrate
-// exceeds the cap, fixed rungs are lowered when their ladder bitrate exceeds
-// it, and "auto" folds the cap into bandwidth-based rung selection. A metered
-// connection with neither a cap nor a bandwidth estimate limits auto
-// selection to the conservative 720p rung — the rung auto would pick for a
-// mid-range bandwidth estimate — instead of assuming the link can sustain the
-// original stream.
+// "auto" is best-effort direct play: it preserves the source unless the
+// device's maximum resolution rules it out or the source's bitrate exceeds the
+// budget of a measured bandwidth estimate. A source that fits the budget is sent
+// as-is at any resolution; only one the link cannot carry drops to the class
+// the estimate earns. Without an estimate auto assumes the link can carry the
+// source; metered is ignored, since clients apply their own cellular quality.
+// A fixed rung or plain resolution never reads the estimate.
+//
+// bandwidth_cap_kbps is a hard delivery ceiling honored in every quality mode:
+// a source whose bitrate exceeds it is re-encoded at the cap's rung, and a
+// fixed rung whose ladder bitrate exceeds it is lowered. A source that fits
+// under the cap is still sent as-is.
 func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) QualityResultV3 {
 	quality, changed := NormalizeQualityV3(request.QualityPreference)
 	var warnings []DegradationWarningV3
@@ -1572,11 +1686,6 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	// The cap is a hard ceiling, so a video source whose bitrate is unknown
 	// cannot be shown to fit it, as with the server cap.
 	capExceededBySource := capKbps > 0 && (source.BitrateKbps > capKbps || source.BitrateKbps <= 0 && source.VideoCodec != "")
-	if quality == QualityOriginalV3 && !capExceededBySource {
-		result := originalQualityResultV3(source)
-		result.Warnings = warnings
-		return result
-	}
 	if rung, ok := ladderRungForLabelV3(quality); ok {
 		return compoundRungQualityResultV3(rung, source, capKbps, warnings)
 	}
@@ -1584,61 +1693,40 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	reason := "quality_auto_source"
 	explicitRung := false
 	capApplied := false
-	// budgetKbps is the share of a bandwidth estimate or cap that automatic
-	// quality plans for; the encode never targets more than it. A source over
-	// the estimate's budget is re-encoded at its own size rather than sent
-	// as-is; a cap keeps its own source rule below.
+	// budgetKbps is the share of a bandwidth estimate automatic quality plans
+	// for when the source exceeds it; the encode never targets more.
 	budgetKbps := 0
 	overEstimate := false
-	// classLimit is the tallest class the preference, device, bandwidth or
-	// cap allows, before the source's own height bounds targetHeight; 0 is
-	// no limit. It keeps a cropped source in the class it earned.
+	// classLimit is the tallest class the preference, device, estimate or cap
+	// allows, before the source's own height bounds targetHeight; 0 is no
+	// limit. It keeps a cropped source in the class it earned.
 	var classLimit int
-	switch {
-	case quality == QualityOriginalV3:
-		// Only reached when the source bitrate exceeds the cap: the cap is a
-		// hard ceiling and outranks the original preference.
-		targetHeight = streamLadderClassV3(capKbps, source)
-		classLimit = targetHeight
-		capApplied = true
-	case quality != "auto":
+	if quality != QualityAutoV3 {
 		targetHeight, _ = strconv.Atoi(strings.TrimSuffix(quality, "p"))
 		classLimit = targetHeight
 		reason = "quality_fixed_rung"
 		explicitRung = true
-	default:
+	} else {
 		maxHeight := resolutionHeightV3(request.Capabilities.MaxResolution)
 		if maxHeight > 0 && (targetHeight == 0 || maxHeight < targetHeight) {
 			targetHeight = maxHeight
 			reason = "quality_device_limit"
 		}
 		classLimit = maxHeight
-		bandwidth := optionalValueV3(request.BandwidthEstimateKbps)
-		fromEstimate := bandwidth > 0
-		if capKbps > 0 && (bandwidth == 0 || capKbps < bandwidth) {
-			bandwidth = capKbps
-			fromEstimate = false
-		}
-		if bandwidth > 0 {
-			earned := streamLadderClassV3(bandwidth, source)
+	}
+	if quality == QualityAutoV3 {
+		earned, budget, overSource := estimateLimitV3(optionalValueV3(request.BandwidthEstimateKbps), targetHeight, classLimit, source)
+		// A source the link can carry plays as-is. An encode the link forces,
+		// or one the device already requires, stays within the estimate.
+		deviceEncode := source.Height > 0 && targetHeight < source.Height
+		if budget > 0 && (overSource || deviceEncode) {
 			targetHeight = minPositiveV3(targetHeight, earned)
 			classLimit = minPositiveV3(classLimit, earned)
-			budgetKbps = streamBudgetKbpsV3(bandwidth)
-			// A source of unknown bitrate counts as needing the full bitrate
-			// of the class it would be sent at, so it goes as-is only when the
-			// budget covers that.
-			sourceKbps := source.BitrateKbps
-			if sourceKbps <= 0 {
-				sourceKbps = ladderClassBitrateKbpsV3(streamClassV3(minPositiveV3(targetHeight, source.Height), classLimit, source))
-			}
-			overEstimate = fromEstimate && sourceKbps > budgetKbps
+			budgetKbps = budget
+		}
+		if overSource {
+			overEstimate = true
 			reason = "quality_bandwidth_limit"
-		} else if request.Metered {
-			classLimit = minPositiveV3(classLimit, 720)
-			if capped := minPositiveV3(targetHeight, 720); capped != targetHeight {
-				targetHeight = capped
-				reason = "quality_metered_limit"
-			}
 		}
 	}
 	if targetHeight <= 0 {
@@ -1651,7 +1739,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	// preserve the source is forced down when the source bitrate exceeds the
 	// cap, and a transcode rung whose ladder bitrate exceeds the cap drops to
 	// the cap's rung.
-	if capKbps > 0 && !capApplied {
+	if capKbps > 0 {
 		wouldPreserve := source.Height > 0 && targetHeight >= source.Height
 		if (wouldPreserve && capExceededBySource) || (!wouldPreserve && ladderClassBitrateKbpsV3(targetHeight) > capKbps) {
 			capApplied = true
@@ -1713,6 +1801,23 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, Reason: reason, Warnings: warnings}
 	result.RequiresTranscode = !result.PreservesSource
 	return result
+}
+
+// estimateLimitV3 reads a measured bandwidth estimate for automatic quality:
+// the ladder class it earns, the 80% budget an encode stays within, and
+// whether the source's bitrate exceeds that budget. A source of unknown
+// bitrate counts as needing the full bitrate of the class it would be sent at.
+// Without an estimate it returns zeros.
+func estimateLimitV3(estimateKbps, targetHeight, classLimit int, source SourceDescriptorV3) (earned, budget int, overSource bool) {
+	if estimateKbps <= 0 {
+		return 0, 0, false
+	}
+	sourceKbps := source.BitrateKbps
+	if sourceKbps <= 0 {
+		sourceKbps = ladderClassBitrateKbpsV3(streamClassV3(minPositiveV3(targetHeight, source.Height), classLimit, source))
+	}
+	budget = streamBudgetKbpsV3(estimateKbps)
+	return streamLadderClassV3(estimateKbps, source), budget, sourceKbps > budget
 }
 
 // compoundRungQualityResultV3 resolves one explicit menu step. Its resolution

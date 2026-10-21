@@ -124,11 +124,13 @@ func shouldSkipMovieSupplementalFile(path string) bool {
 }
 
 // Scanner discovers and indexes media files in media folders.
-// scannerImageCacher is the slice of imagecache.Cacher the book scanners use.
+// scannerImageCacher is the slice of imagecache.Cacher the book scanners and
+// local extras use.
 // Wired via SetImageCacher; nil-safe when absent.
 type scannerImageCacher interface {
 	audiobookCoverCacher
 	ebookCoverCacher
+	extraStillCacher
 }
 
 type Scanner struct {
@@ -992,9 +994,6 @@ func (s *Scanner) scanPaths(
 		Unchanged:       result.Unchanged,
 		Errors:          result.Errors,
 	})
-	if walkErr != nil {
-		return nil, walkErr
-	}
 
 	// If the scan was cancelled, return partial results without marking
 	// files as missing or deleting records — that would corrupt state.
@@ -1002,7 +1001,7 @@ func (s *Scanner) scanPaths(
 		return result, ctx.Err()
 	}
 
-	extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath)
+	extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath, sidecars)
 	result.New += extraStats.New
 	result.Updated += extraStats.Updated
 	result.Unchanged += extraStats.Unchanged
@@ -1855,7 +1854,7 @@ func (s *Scanner) scanScope(
 	})
 
 	if ctx.Err() == nil {
-		extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath)
+		extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath, sidecars)
 		result.New += extraStats.New
 		result.Updated += extraStats.Updated
 		result.Unchanged += extraStats.Unchanged
@@ -2729,7 +2728,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	// A local extra (Trailers/ dir, -trailer suffix, ...) bypasses identity
 	// inference and matching entirely.
 	if candidate, isExtra := newWatchExtrasClassifier(folder.Type, folder.Paths).classify(cleanFile); isExtra {
-		stats := s.processExtraFiles(ctx, folder, []extraCandidate{candidate}, existingByPath)
+		stats := s.processExtraFiles(ctx, folder, []extraCandidate{candidate}, existingByPath, nil)
 		if stats.Errors > 0 {
 			return fmt.Errorf("processing extra file %s failed", cleanFile)
 		}

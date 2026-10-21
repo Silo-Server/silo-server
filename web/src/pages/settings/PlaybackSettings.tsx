@@ -24,6 +24,7 @@ import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import type { SeekDirection } from "@/lib/seekIntervals";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { isBrowserDecodingEnabled, setBrowserDecodingEnabled } from "@/player/engine/settings";
+import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
 
 /**
@@ -51,6 +52,9 @@ const INTRO_SKIP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_IN
 // a sentinel that never collides with a stored bitrate.
 const NO_BITRATE_LIMIT = "__no_limit__";
 
+const AUTO_QUALITY_DESCRIPTION =
+  "Plays the original file whenever your device and connection can handle it.";
+
 /**
  * Quality is the same two settings every other surface edits.
  *
@@ -58,8 +62,11 @@ const NO_BITRATE_LIMIT = "__no_limit__";
  * the device screen already presents them as two controls. Offering the same
  * two rows here means a device override reads as an override of something the
  * user can see, rather than of half a compound preset — and combinations no
- * preset covered ("Original but capped at 40 Mbps" for a remote box) become
+ * preset covered ("Auto but capped at 40 Mbps" for a remote box) become
  * expressible instead of rendering as a disabled "custom" entry.
+ *
+ * A stored "original" is shown as Auto: the contract keeps it as a deprecated
+ * value that means the same thing, and no longer offers it.
  */
 function QualitySetting() {
   const { data: effective } = useEffectiveSettings({
@@ -70,8 +77,10 @@ function QualitySetting() {
   const qualityDefinition = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY];
   const bitrateDefinition = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS];
 
-  const resolution = (effective?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]?.value ??
-    qualityDefinition.defaultValue) as string;
+  const resolution = normalizeQualityPreferenceV3(
+    (effective?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]?.value ??
+      qualityDefinition.defaultValue) as string,
+  );
   const bitrate = effective?.[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS]?.value as
     | number
     | null
@@ -83,7 +92,11 @@ function QualitySetting() {
     <>
       <SettingRow
         label="Preferred quality"
-        description="The resolution your profile should request when playback begins. Auto lets Silo pick based on your connection."
+        description={
+          resolution === "auto"
+            ? AUTO_QUALITY_DESCRIPTION
+            : "The resolution your profile should request when playback begins."
+        }
         control={(id) => (
           <Select
             value={resolution}

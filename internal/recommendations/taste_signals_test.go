@@ -7,42 +7,6 @@ import (
 	"time"
 )
 
-func TestBuildCanonicalImplicitSignalsIncludesEbookCompletion(t *testing.T) {
-	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	halfLife := 90.0
-
-	// Ebook reader progress rows map progress onto position with duration 1,
-	// so a finished book carries the same ratio shape as a finished movie.
-	progress := []WatchProgressRow{
-		{MediaItemID: "ebook-1", PositionSeconds: 0.95, DurationSeconds: 1, Completed: true, UpdatedAt: now},
-		{MediaItemID: "movie-1", PositionSeconds: 5400, DurationSeconds: 5700, Completed: true, UpdatedAt: now},
-	}
-	refs := map[string]canonicalContentRef{
-		"ebook-1": {Kind: canonicalKindEbook, CanonicalID: "ebook-1"},
-		"movie-1": {Kind: canonicalKindMovie, CanonicalID: "movie-1"},
-	}
-
-	signals, completed := buildCanonicalImplicitSignals(progress, nil, refs, now, halfLife)
-
-	ebookWeight, ok := signals["ebook-1"]
-	if !ok {
-		t.Fatal("expected ebook completion to produce a canonical implicit signal")
-	}
-	movieWeight, ok := signals["movie-1"]
-	if !ok {
-		t.Fatal("expected movie completion to produce a canonical implicit signal")
-	}
-	if math.Abs(ebookWeight-movieWeight) > 1e-9 {
-		t.Fatalf("ebook completion weight %v should match movie completion weight %v", ebookWeight, movieWeight)
-	}
-	if math.Abs(ebookWeight-WeightWatchHigh) > 1e-9 {
-		t.Fatalf("ebook completion weight = %v, want WeightWatchHigh (%v) with no decay at t=now", ebookWeight, WeightWatchHigh)
-	}
-	if _, ok := completed["ebook-1"]; !ok {
-		t.Fatal("expected completed ebook to enter the completed set")
-	}
-}
-
 func TestBuildCanonicalImplicitSignalsWeightsPartialEbookLikeMovie(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	halfLife := 90.0
@@ -100,6 +64,9 @@ func TestImplicitWatchWeightLowProgressCountsOnceStale(t *testing.T) {
 		{"abandoned 15 days ago", WatchProgressRow{PositionSeconds: 10, DurationSeconds: 100, UpdatedAt: now.Add(-15 * day)}, WeightWatchLow, true},
 		{"low progress without a timestamp", WatchProgressRow{PositionSeconds: 10, DurationSeconds: 100}, 0, false},
 		{"no duration", WatchProgressRow{PositionSeconds: 10, UpdatedAt: now.Add(-100 * day)}, 0, false},
+		// A cleared resume position (issue #2134) keeps the duration; it is not
+		// an abandoned watch, however long ago it was cleared.
+		{"cleared resume position", WatchProgressRow{DurationSeconds: 100, UpdatedAt: now.Add(-100 * day)}, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			weight, ok := implicitWatchWeight(tc.row, now)

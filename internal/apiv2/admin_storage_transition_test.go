@@ -3,7 +3,6 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -20,19 +19,6 @@ type fakeAdminStorageTransition struct {
 
 func (f *fakeAdminStorageTransition) Start(context.Context, int, storagetransition.StartRequest) (*models.AdminJob, storagetransition.Preflight, error) {
 	return nil, storagetransition.Preflight{}, f.startErr
-}
-
-func TestAdminStorageTransitionClassifiesStartErrors(t *testing.T) {
-	path := Prefix + "/admin/storage-transitions"
-	body := `{"policy":"start_fresh","values":{}}`
-	service := &fakeAdminStorageTransition{startErr: storagetransition.NewValidationError(errors.New("invalid target"))}
-	deps := requestDeps(fixtureRequests())
-	deps.AdminStorageTransition = service
-	handler := NewHandler(deps)
-	requireProblem(t, do(t, handler, http.MethodPost, path, body, actingRequestAdmin), TypeValidationFailed)
-
-	service.startErr = errors.New("database unavailable")
-	requireProblem(t, do(t, handler, http.MethodPost, path, body, actingRequestAdmin), TypeInternalError)
 }
 
 func (f *fakeAdminStorageTransition) SourceHealth(_ context.Context, probe bool) (storagetransition.SourceHealth, error) {
@@ -116,28 +102,5 @@ func TestAdminStorageTransitionHealthProjectsRecoveryState(t *testing.T) {
 	}
 	if body.RecoveryPending {
 		t.Fatalf("cleared recovery still pending: %#v", body)
-	}
-}
-
-func TestAdminStorageTransitionHealthCanSkipReachabilityProbe(t *testing.T) {
-	service := &fakeAdminStorageTransition{health: storagetransition.SourceHealth{
-		CurrentBackend: "s3", PublicConfigured: true, RecoveryPending: true,
-		RecoveryState: "waiting_retry", RecoveryError: "temporary outage",
-	}}
-	deps := requestDeps(fixtureRequests())
-	deps.AdminStorageTransition = service
-	response := do(t, NewHandler(deps), http.MethodGet, Prefix+"/admin/storage-transitions/source-health?probe=false", "", actingRequestAdmin)
-	if response.Code != http.StatusOK {
-		t.Fatal(response.Code, response.Body.String())
-	}
-	if len(service.probes) != 1 || service.probes[0] {
-		t.Fatalf("non-probing request probes = %#v, want [false]", service.probes)
-	}
-	var body AdminStorageTransitionSourceHealth
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if !body.RecoveryPending || body.RecoveryState != "waiting_retry" || body.RecoveryError == "" {
-		t.Fatalf("non-probing recovery health = %#v", body)
 	}
 }

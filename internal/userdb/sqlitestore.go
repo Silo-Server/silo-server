@@ -90,6 +90,10 @@ func (s *SQLiteUserStore) ClearProgress(_ context.Context, profileID, mediaItemI
 	return ClearProgress(s.db, profileID, mediaItemID)
 }
 
+func (s *SQLiteUserStore) ClearResumePosition(_ context.Context, profileID, mediaItemID string, at time.Time) (bool, error) {
+	return ClearResumePosition(s.db, profileID, mediaItemID, at)
+}
+
 // MarkWatchedBatch is one of the few paths here that forwards ctx: the write
 // is transactional precisely so a canceled request marks nothing.
 func (s *SQLiteUserStore) MarkWatchedBatch(ctx context.Context, profileID string, targets []userstore.MarkWatchedTarget, entries []userstore.WatchHistoryEntry) ([]userstore.WatchHistoryEntry, error) {
@@ -192,6 +196,28 @@ func (s *SQLiteUserStore) UpsertHomeDismissal(_ context.Context, dismissal users
 
 func (s *SQLiteUserStore) DeleteHomeDismissal(_ context.Context, profileID, surface, mediaItemID string) error {
 	return DeleteHomeDismissal(s.db, profileID, surface, mediaItemID)
+}
+
+// --- Not interested ---
+
+func (s *SQLiteUserStore) MarkNotInterested(_ context.Context, profileID, mediaItemID string) (bool, error) {
+	return MarkNotInterested(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) UnmarkNotInterested(_ context.Context, profileID, mediaItemID string) (bool, error) {
+	return UnmarkNotInterested(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) GetNotInterested(_ context.Context, profileID, mediaItemID string) (*userstore.NotInterestedEntry, error) {
+	return GetNotInterested(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) ListNotInterestedPage(_ context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.NotInterestedEntry, error) {
+	return ListNotInterestedPage(s.db, profileID, after, limit)
+}
+
+func (s *SQLiteUserStore) ListNotInterestedByMediaItems(_ context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error) {
+	return ListNotInterestedByMediaItems(s.db, profileID, mediaItemIDs)
 }
 
 // --- Favorites & Watchlist ---

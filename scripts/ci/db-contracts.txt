@@ -18,6 +18,9 @@
 ./internal/scanner TestMatroskaTrackBackfillReadsEachFileOnce
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
+./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
+./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
+./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
 # Series air-date sort keys advance when a known episode airs.
@@ -25,6 +28,10 @@
 
 # Same-day episodes sorted by air date keep series title and season/episode order on every query path.
 ./internal/catalog TestQueryEpisodeAirDateTiesPostgres
+
+# PostgreSQL search keeps typo matches that contain every query word and ranks
+# titles starting with the query first, on the cursor and offset paths.
+./internal/catalog TestSearchRelevancePostgres
 
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
@@ -34,6 +41,8 @@
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
 
 # Profile history and account/invitation persistence.
+./internal/api/handlers TestAccessGroupUpdateLibraryPolicyDB
+./internal/api/handlers TestClearResumePositionTargetsDB
 ./internal/api/handlers TestEbookProgressEventsPostgres
 ./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
 ./internal/api/handlers TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres
@@ -54,6 +63,16 @@
 
 # Scoped administrator keys cannot redirect recovery through either API version.
 ./internal/apiv2 TestScopedAdminKeyCannotRedirectRecoveryDB
+
+# API key verifiers preserve credentials without retaining recoverable bearers.
+./internal/auth TestAPIKeyStorageDoesNotRetainBearer
+./internal/auth TestAPIKeyVerifierUpgrade
+./internal/auth TestAPIKeyVerifierEmptyMigrationRoundTrip
+./internal/auth TestAPIKeyVerifierLegacyDigestCollision
+./internal/auth TestAPIKeyVerifierMigrationRollback
+./internal/auth TestAPIKeyVerifierDownSeesConcurrentInsert
+./internal/api/handlers TestAPIKeyLegacyListsAndEditorNeverReturnStoredSecret
+./internal/api/handlers TestAPIKeyCreationStillReturnsTheOnlyFullSecretResponse
 
 # Recovery identity changes retire links and prevent delivery to a stale address.
 ./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
@@ -91,6 +110,13 @@
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
 
+# Legacy mobile registration protects account ownership under the installation lock.
+./internal/notifications TestLegacyMobilePushRefusesForeignAccountDB
+./internal/notifications TestLegacyMobilePushProfileSwitchRollbackDB
+./internal/notifications TestLegacyMobilePushPreservesOrderedProofDB
+./internal/notifications TestLegacyMobilePushWaitsForOwnershipDB
+./internal/notifications TestLegacyPushRegistrationStaysOnTheAccount
+
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
 
@@ -108,8 +134,22 @@
 ./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
 ./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
 
+# With metadata.cache_images off, stored artwork goes back to its provider
+# source, and items whose stored art has none are queued for a refresh.
+./internal/metadata TestStoredArtworkReleaseDB
+
+# The artwork ladder backfill finds cached artwork that predates the current
+# ladder, on every surface its image type is cached for.
+./internal/metadata TestLadderBackfillCandidatesDB
+# The database fence reopens a finished backfill only for artwork published
+# without the current ladder's new rung, on every surface it regenerates.
+./internal/metadata TestImageLadderBackfillLateOldArtworkReopensCompletedVersion
+./internal/metadata TestImageLadderBackfillCurrentArtworkKeepsCompletedVersion
+./internal/metadata TestImageLadderBackfillLateOldBackdropReopensCompletedVersion
+
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
+./internal/metadata TestArtworkPublicationSelectsPublishedRungWithoutExternalDelivery
 ./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking
 ./internal/metadata TestArtworkRevisionGCExpandsTriggerManifestFromImageType
 ./internal/metadata TestArtworkRevisionGCBatchRechecksClaimedState
@@ -147,6 +187,12 @@
 ./internal/notifications TestNotifyFulfilledRetriesWhenRecipientScopeFails
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
+./internal/notifications TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences
+./internal/notifications TestFanoutSkipsProfilesThatMutedTheSeries
+./internal/notifications TestSeriesMutesList
+./internal/notifications TestSeriesMutesUnmuteAndPurge
+./internal/metadata TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres
+./internal/catalog/reattribute TestMovePairsMovesNotificationMutesDB
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestIntegrationKeyStaysWithItsAddressDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
@@ -172,7 +218,15 @@
 ./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
 ./internal/downloads TestPreparationControlsPauseResumeAndCancel
 ./internal/downloads TestDownloadLinkedToCanceledPreparationFails
+./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
+./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
+./internal/userstore/pgstore TestPostgresConcurrentSectionOverrideSaves
+./internal/userstore/pgstore TestPostgresConcurrentProfileDeletesWithCrossVisibility
+./internal/userstore/pgstore TestPostgresConcurrentProfileAndCollectionDeletes
+./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
+./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 
@@ -355,3 +409,18 @@
 ./internal/metadata TestMatchQueuesSkipIgnoredItemsDB
 ./internal/metadata TestRefreshLeavesIgnoredItemAloneDB
 ./internal/adminjob TestLibraryRefreshSkipsIgnoredItemsDB
+
+# A played mark later in the same second as a history removal stays visible.
+./internal/userstore/pgstore TestImportedWritesAfterSameSecondRemovalDB
+./internal/webhooksync TestProcessWebhookPlayedInSameSecondAsUnplayedDB
+
+# A history import run stays within its source limits from the queue to
+# Postgres: large Jellyfin, Emby and Plex sources import completely with paged
+# listings and chunked lookups, and a listing that decodes into millions of
+# values fails the run without allocating it.
+./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
+./internal/historyimport TestImportRunFailsOnExpandingSourceListing
+
+# Explore all on a row the catalog cannot express as a query pages the row's
+# own fetch past its item limit, on Home and on its library page.
+./internal/api/handlers TestCatalogRowBackedSectionBrowseDB

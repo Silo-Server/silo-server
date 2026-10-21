@@ -27,15 +27,17 @@ func coldStartLevel(positiveTitles int) int {
 	}
 }
 
-// signal_counts kinds. A 1-2 star rating (rated_low) and a title abandoned
-// below lowProgressThreshold (watch_low) record a dislike; a 3-star rating
-// carries no weight of its own (see ratingSignal).
+// signal_counts kinds. A 1-2 star rating (rated_low), a title abandoned
+// below lowProgressThreshold (watch_low) and a Not interested mark
+// (not_interested) record a dislike; a 3-star rating carries no weight of its
+// own (see ratingSignal).
 const (
-	signalKindRated5   = "rated_5"
-	signalKindRated4   = "rated_4"
-	signalKindRated3   = "rated_3"
-	signalKindRatedLow = "rated_low"
-	signalKindWatchLow = "watch_low"
+	signalKindRated5        = "rated_5"
+	signalKindRated4        = "rated_4"
+	signalKindRated3        = "rated_3"
+	signalKindRatedLow      = "rated_low"
+	signalKindWatchLow      = "watch_low"
+	signalKindNotInterested = "not_interested"
 )
 
 // signalCountPositiveTitles is the signal_counts entry a taste refresh writes
@@ -71,7 +73,7 @@ func positiveSignalCount(meta *TasteProfileMeta) int {
 	positive := 0
 	for kind, count := range meta.SignalCounts {
 		switch kind {
-		case signalKindRatedLow, signalKindWatchLow, signalKindRated3, signalCountPositiveTitles:
+		case signalKindRatedLow, signalKindWatchLow, signalKindNotInterested, signalKindRated3, signalCountPositiveTitles:
 			continue
 		}
 		positive += count

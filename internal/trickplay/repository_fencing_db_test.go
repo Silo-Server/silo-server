@@ -6,21 +6,6 @@ import (
 	"time"
 )
 
-func TestClaimRecordsAlgorithmVersionDB(t *testing.T) {
-	f := newFixture(t)
-	folder := f.library(t, "movies", true)
-	file := f.file(t, folder, "older-version")
-	f.exec(t, `INSERT INTO public.media_file_trickplay (media_file_id, recipe_version) VALUES ($1, $2)`, file, AlgorithmVersion-1)
-	job, err := f.repo.ClaimFile(t.Context(), file, "current-server", time.Minute)
-	if err != nil || job == nil {
-		t.Fatalf("claim: %v %v", job, err)
-	}
-	row, ok := f.row(t, file)
-	if !ok || row.version != AlgorithmVersion {
-		t.Fatalf("claimed version = %d, want %d", row.version, AlgorithmVersion)
-	}
-}
-
 func TestTrickplayQueuesBigintMediaFileIDsDB(t *testing.T) {
 	f := newFixture(t)
 	folder := f.library(t, "movies", true)

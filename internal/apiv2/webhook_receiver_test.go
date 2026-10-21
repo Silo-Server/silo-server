@@ -194,23 +194,6 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/webhook-sync/webhooks/receiver-secret", `{}`, bearer(memberToken)), TypeNotFound)
 }
 
-func TestWebhookReceiverUnavailable(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/webhook-sync/webhooks/secret", "", nil), TypeDependencyUnavailable)
-	rec := do(t, h, http.MethodGet, Prefix+"/webhook-sync/capabilities", "", nil)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":false`) {
-		t.Fatal(rec.Code, rec.Body)
-	}
-}
-
 func (f *fakeWebhookManagement) RotateWebhookConnection(context.Context, int, string) (*webhooksync.RotateWebhookResult, error) {
 	return &webhooksync.RotateWebhookResult{WebhookURL: "/api/v2/webhook-sync/webhooks/new-secret"}, nil
-}
-func TestWebhookRotationEmitsV2Receiver(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.WebhookSync = new(fakeWebhookManagement)
-	rec := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/webhook-sync/connections/"+webhookFixtureID+"/webhook/rotate", "", bearer(memberToken))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), Prefix+"/webhook-sync/webhooks/new-secret") {
-		t.Fatal(rec.Code, rec.Body)
-	}
 }

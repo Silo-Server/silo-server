@@ -48,14 +48,7 @@ func (r *modeRecorder) reset() {
 }
 
 func TestHandleMasterManifestReplansAfterRemoteSoftwareToneMapFailure(t *testing.T) {
-	hardware := tonemap.Capability{
-		Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, Filter: tonemap.HardwareFilterOpenCL,
-		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}
-	software := tonemap.Capability{
-		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}
+	hardware, software := testPQHardwareToneMap, testPQSoftwareToneMap
 
 	var failedModes = &modeRecorder{}
 	var failedNodeCleaned atomic.Bool
@@ -179,14 +172,7 @@ func TestHandleMasterManifestFallsBackToValidatedLocalSoftwareAfterRemoteFailure
 	compatManifestStartupTimeout = time.Second
 	t.Cleanup(func() { compatManifestStartupTimeout = previousTimeout })
 
-	hardware := tonemap.Capability{
-		Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, Filter: tonemap.HardwareFilterOpenCL,
-		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}
-	software := tonemap.Capability{
-		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}
+	hardware, software := testPQHardwareToneMap, testPQSoftwareToneMap
 
 	var firstModes = &modeRecorder{}
 	var firstHardwareCleaned atomic.Bool
@@ -260,25 +246,9 @@ func TestHandleMasterManifestFallsBackToValidatedLocalSoftwareAfterRemoteFailure
 	firstHardwareCleaned.Store(false)
 
 	handler, planner, sessionMgr, store, source := newManifestToneMapFailoverHandler(t, firstNode.URL, true, secondNode.URL)
-	handler.compatToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-		return tonemap.Capabilities{hardware, software}, nil
-	}
 	handler.HWAccel = playback.HWAccelNone
-	handler.TranscodeDir = t.TempDir()
 	localHardwareMarker := filepath.Join(t.TempDir(), "local-hardware-attempted")
-	handler.FFmpegPath = filepath.Join(t.TempDir(), "ffmpeg")
-	ffmpegScript := "#!/bin/sh\n" +
-		"case \"$*\" in *tonemap_opencl*) touch " + localHardwareMarker + "; exit 41;; esac\n" +
-		"out=\"\"\n" +
-		"for arg in \"$@\"; do case \"$arg\" in *.m3u8) out=\"$(dirname \"$arg\")\";; esac; done\n" +
-		"mkdir -p \"$out\"\n" +
-		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
-		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-		"exec sleep 30\n"
-	if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeMatchingToneMapFFprobe(t, handler.FFmpegPath, source.Version.VideoTracks[0])
+	useLocalToneMapFFmpeg(t, handler, source, "case \"$*\" in *tonemap_opencl*) touch "+localHardwareMarker+"; exit 41;; esac\n", hardware, software)
 
 	request := httptest.NewRequest(http.MethodGet, "/Videos/item/master.m3u8?PlaySessionId=play-1&MediaSourceId="+source.ID, nil)
 	request = request.WithContext(context.WithValue(request.Context(), compatSessionKey, &Session{Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1"}))
@@ -315,14 +285,7 @@ func TestHandleMasterManifestFallsBackToValidatedLocalSoftwareAfterRemoteFailure
 }
 
 func TestHandleMasterManifestClassifiesExhaustedRemoteLiveValidation(t *testing.T) {
-	hardware := tonemap.Capability{
-		Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, Filter: tonemap.HardwareFilterOpenCL,
-		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}
-	software := tonemap.Capability{
-		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}
+	hardware, software := testPQHardwareToneMap, testPQSoftwareToneMap
 	tests := []struct {
 		name       string
 		status     int
@@ -371,35 +334,12 @@ func TestEnsureTranscodeSessionRequiredSoftwareReplacesExistingHardware(t *testi
 	compatManifestStartupTimeout = time.Second
 	t.Cleanup(func() { compatManifestStartupTimeout = previousTimeout })
 
-	hardware := tonemap.Capability{
-		Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, Filter: tonemap.HardwareFilterOpenCL,
-		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}
-	software := tonemap.Capability{
-		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}
+	hardware, software := testPQHardwareToneMap, testPQSoftwareToneMap
 	handler, _, _, _, source := newManifestToneMapFailoverHandler(t, "http://unused.invalid", true)
-	handler.compatToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-		return tonemap.Capabilities{hardware, software}, nil
-	}
 	handler.HWAccel = tonemap.BackendQSV
-	handler.TranscodeDir = t.TempDir()
 	hardwareMarker := filepath.Join(t.TempDir(), "hardware")
 	softwareMarker := filepath.Join(t.TempDir(), "software")
-	handler.FFmpegPath = filepath.Join(t.TempDir(), "ffmpeg")
-	ffmpegScript := "#!/bin/sh\n" +
-		"case \"$*\" in *tonemap_opencl*) touch " + hardwareMarker + ";; *tonemapx*) touch " + softwareMarker + ";; esac\n" +
-		"out=\"\"\n" +
-		"for arg in \"$@\"; do case \"$arg\" in *.m3u8) out=\"$(dirname \"$arg\")\";; esac; done\n" +
-		"mkdir -p \"$out\"\n" +
-		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
-		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-		"exec sleep 30\n"
-	if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeMatchingToneMapFFprobe(t, handler.FFmpegPath, source.Version.VideoTracks[0])
+	useLocalToneMapFFmpeg(t, handler, source, "case \"$*\" in *tonemap_opencl*) touch "+hardwareMarker+";; *tonemapx*) touch "+softwareMarker+";; esac\n", hardware, software)
 
 	first, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
 	if err != nil {
@@ -467,32 +407,10 @@ func TestEnsureTranscodeSessionReadyHardwareYieldsPublicationToSoftwareWinner(t 
 			compatManifestStartupTimeout = time.Second
 			t.Cleanup(func() { compatManifestStartupTimeout = previousTimeout })
 
-			hardware := tonemap.Capability{
-				Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, Filter: tonemap.HardwareFilterOpenCL,
-				SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}
-			software := tonemap.Capability{
-				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-				SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}
+			hardware, software := testPQHardwareToneMap, testPQSoftwareToneMap
 			handler, _, _, baseStore, source := newManifestToneMapFailoverHandler(t, "http://unused.invalid", true)
-			handler.compatToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-				return tonemap.Capabilities{hardware, software}, nil
-			}
 			handler.HWAccel = tonemap.BackendQSV
-			handler.TranscodeDir = t.TempDir()
-			handler.FFmpegPath = filepath.Join(t.TempDir(), "ffmpeg")
-			ffmpegScript := "#!/bin/sh\n" +
-				"out=\"\"\n" +
-				"for arg in \"$@\"; do case \"$arg\" in *.m3u8) out=\"$(dirname \"$arg\")\";; esac; done\n" +
-				"mkdir -p \"$out\"\n" +
-				"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
-				"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-				"exec sleep 30\n"
-			if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			writeMatchingToneMapFFprobe(t, handler.FFmpegPath, source.Version.VideoTracks[0])
+			useLocalToneMapFFmpeg(t, handler, source, "", hardware, software)
 
 			sessionMgr := &lockedCompatSessionManager{session: playback.Session{
 				ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: 42,
@@ -666,4 +584,40 @@ func newManifestToneMapFailoverHandler(
 		requireCompatWorkerRouting(handler)
 	}
 	return handler, planner, sessionMgr, store, source
+}
+
+// testPQHardwareToneMap and testPQSoftwareToneMap are the QSV OpenCL and
+// BT.2390 software tone-map capabilities a host or node reports for PQ sources.
+var (
+	testPQHardwareToneMap = tonemap.Capability{
+		Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, Filter: tonemap.HardwareFilterOpenCL,
+		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+	}
+	testPQSoftwareToneMap = tonemap.Capability{
+		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
+		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+	}
+)
+
+// useLocalToneMapFFmpeg makes handler transcode locally. Its tone-map probe
+// reports probed, and its fake ffmpeg runs prelude, writes a three-segment HLS
+// playlist, and keeps running. The fake ffprobe reports source's video track.
+func useLocalToneMapFFmpeg(t *testing.T, handler *PlaybackHandler, source PlaybackMediaSource, prelude string, probed ...tonemap.Capability) {
+	t.Helper()
+	handler.compatToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
+		return append(tonemap.Capabilities(nil), probed...), nil
+	}
+	handler.TranscodeDir = t.TempDir()
+	handler.FFmpegPath = filepath.Join(t.TempDir(), "ffmpeg")
+	ffmpegScript := "#!/bin/sh\n" + prelude +
+		"out=\"\"\n" +
+		"for arg in \"$@\"; do case \"$arg\" in *.m3u8) out=\"$(dirname \"$arg\")\";; esac; done\n" +
+		"mkdir -p \"$out\"\n" +
+		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
+		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
+		"exec sleep 30\n"
+	if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeMatchingToneMapFFprobe(t, handler.FFmpegPath, source.Version.VideoTracks[0])
 }

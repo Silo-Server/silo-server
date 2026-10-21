@@ -54,53 +54,42 @@ func TestDialogueBoundaryRefinerMovesStartPastEarlyDialogue(t *testing.T) {
 	}
 }
 
-func TestDialogueBoundaryRefinerIgnoresMusicCues(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	segment := Segment{Start: 100, End: 150, Confidence: 0.85, Algorithm: ChromaprintAlgorithm}
-	subtitlePath := filepath.Join(t.TempDir(), "episode.en.srt")
-	if err := os.WriteFile(subtitlePath, []byte("1\n00:01:40,000 --> 00:01:48,000\n♪ Opening theme ♪\n\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	candidate := Candidate{
-		FileID:        1,
-		AudioLanguage: "en",
-		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: subtitlePath, Language: "en", Format: "srt"},
-		},
-	}
-	refiner := NewDialogueBoundaryRefiner(cfg)
+// A subtitle cue does not refine the start when it is a music cue, or when
+// moving past it would leave too short an intro.
+func TestDialogueBoundaryRefinerLeavesSegmentUnrefined(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		end  float64
+		srt  string
+		why  string
+	}{
+		{"music cue", 150, "1\n00:01:40,000 --> 00:01:48,000\n♪ Opening theme ♪\n\n", "music cue should not refine segment"},
+		{"minimum remaining duration", 112, "1\n00:01:40,000 --> 00:01:45,000\nStill talking.\n\n", "refinement should not leave too-short intro"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := DefaultConfig("ffmpeg")
+			segment := Segment{Start: 100, End: tc.end, Confidence: 0.85, Algorithm: ChromaprintAlgorithm}
+			subtitlePath := filepath.Join(t.TempDir(), "episode.en.srt")
+			if err := os.WriteFile(subtitlePath, []byte(tc.srt), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			candidate := Candidate{
+				FileID:        1,
+				AudioLanguage: "en",
+				ExternalSubtitles: []models.ExternalSubtitle{
+					{Path: subtitlePath, Language: "en", Format: "srt"},
+				},
+			}
+			refiner := NewDialogueBoundaryRefiner(cfg)
 
-	refined, ok, err := refiner.RefineChromaprintStart(context.Background(), candidate, segment)
-	if err != nil {
-		t.Fatalf("RefineChromaprintStart returned error: %v", err)
-	}
-	if ok {
-		t.Fatalf("music cue should not refine segment, got %+v", refined)
-	}
-}
-
-func TestDialogueBoundaryRefinerKeepsMinimumRemainingDuration(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	segment := Segment{Start: 100, End: 112, Confidence: 0.85, Algorithm: ChromaprintAlgorithm}
-	subtitlePath := filepath.Join(t.TempDir(), "episode.en.srt")
-	if err := os.WriteFile(subtitlePath, []byte("1\n00:01:40,000 --> 00:01:45,000\nStill talking.\n\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	candidate := Candidate{
-		FileID:        1,
-		AudioLanguage: "en",
-		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: subtitlePath, Language: "en", Format: "srt"},
-		},
-	}
-	refiner := NewDialogueBoundaryRefiner(cfg)
-
-	refined, ok, err := refiner.RefineChromaprintStart(context.Background(), candidate, segment)
-	if err != nil {
-		t.Fatalf("RefineChromaprintStart returned error: %v", err)
-	}
-	if ok {
-		t.Fatalf("refinement should not leave too-short intro, got %+v", refined)
+			refined, ok, err := refiner.RefineChromaprintStart(context.Background(), candidate, segment)
+			if err != nil {
+				t.Fatalf("RefineChromaprintStart returned error: %v", err)
+			}
+			if ok {
+				t.Fatalf("%s, got %+v", tc.why, refined)
+			}
+		})
 	}
 }
 

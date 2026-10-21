@@ -65,6 +65,21 @@ type RecipeCard struct {
 	ClientUserAgent  string `json:"client_user_agent,omitempty"`
 	IsJellyfinCompat bool   `json:"is_jellyfin_compat,omitempty"`
 
+	// Header-authenticated recovery. A session that negotiated
+	// header_authenticated_media_v1 publishes no stream token, so the API keeps
+	// its recipe server-side instead (see noderecipe.NewSessionRecipeStore).
+	// These fields exist only on that stored copy and are never projected into
+	// stream-token claims. PlanID binds the card to the v3 plan it was committed
+	// under, so a card a later replan failed to overwrite cannot rebuild a
+	// superseded transport. RequireMediaAuthorization carries the mode onto the
+	// rebuilt session, whose UUID must stay a route identifier rather than a
+	// bearer. RequestedMediaFileID and DisableProgressPersistence are the live
+	// session's when the card is written, so the rebuilt session keeps them.
+	PlanID                     string `json:"plan_id,omitempty"`
+	RequireMediaAuthorization  bool   `json:"require_media_authorization,omitempty"`
+	RequestedMediaFileID       int    `json:"requested_media_file_id,omitempty"`
+	DisableProgressPersistence bool   `json:"disable_progress_persistence,omitempty"`
+
 	// Encode parameters — mirror of the byte-affecting TranscodeOpts fields.
 	// Direct cards leave them zero; remux cards use the audio targets when the
 	// selected stream must be converted.
@@ -114,6 +129,7 @@ type RecipeCard struct {
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
 	SubtitleBurnIn             bool                   `json:"subtitle_burn_in,omitempty"`
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
+	SubtitleRendition          bool                   `json:"subtitle_rendition,omitempty"`
 	AudioTrackIndex            int                    `json:"audio_track_index"`
 	TargetBitrateKbps          int                    `json:"target_bitrate_kbps,omitempty"`
 	TotalDuration              float64                `json:"total_duration"`
@@ -139,6 +155,33 @@ func (c RecipeCard) EffectiveEncoderHWAccel() string {
 // so binaries predating it reject the card instead of reconstructing old bytes.
 func (c RecipeCard) IsTranscodeRecipe() bool {
 	return c.PlayMethod == "" || c.PlayMethod == PlayTranscode || c.PlayMethod == playMethodCopyFMP4V1
+}
+
+// RecipeExecutor identifies a transcode node by its stream_nodes row id and
+// the route URL stored on that row. Either is zero while the node has not
+// resolved its row.
+type RecipeExecutor struct {
+	NodeID  int
+	NodeURL string
+}
+
+// NamesAnotherNode reports whether card was issued for a different node to
+// run, so that e must not delete it. The API moves a transport to another node
+// under the same transport id, so a stop the old node runs late can find the
+// new node's card stored there. Only a card whose row id and node URL both
+// differ from e's counts: when either side lacks one, or either matches, the
+// card is treated as e's and deleted as it always was, because keeping a card
+// a stop should remove leaves the stopped transport reconstructable. A node
+// whose row or URL changed while it ran a transport therefore still deletes
+// that transport's card.
+func (e RecipeExecutor) NamesAnotherNode(card RecipeCard) bool {
+	nodeURL, cardURL := normalizeExecutorURL(e.NodeURL), normalizeExecutorURL(card.TranscodeNodeURL)
+	return e.NodeID > 0 && card.RoutingExecutionNodeID > 0 && card.RoutingExecutionNodeID != e.NodeID &&
+		nodeURL != "" && cardURL != "" && cardURL != nodeURL
+}
+
+func normalizeExecutorURL(nodeURL string) string {
+	return strings.TrimRight(strings.TrimSpace(nodeURL), "/")
 }
 
 // ValidateCopyFMP4RecipeCard rejects an old copy card under the current
@@ -219,6 +262,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		SubtitleTrackIndex:         opts.SubtitleTrackIndex,
 		SubtitleBurnIn:             opts.SubtitleBurnIn,
 		SubtitleCodec:              opts.SubtitleCodec,
+		SubtitleRendition:          opts.SubtitleRendition,
 		AudioTrackIndex:            opts.AudioTrackIndex,
 		TargetBitrateKbps:          opts.TargetBitrateKbps,
 		TotalDuration:              opts.TotalDuration,
@@ -323,6 +367,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		SubtitleTrackIndex:         c.SubtitleTrackIndex,
 		SubtitleBurnIn:             c.SubtitleBurnIn,
 		SubtitleCodec:              c.SubtitleCodec,
+		SubtitleRendition:          c.SubtitleRendition,
 		AudioTrackIndex:            c.AudioTrackIndex,
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
@@ -427,6 +472,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		SubtitleTrackIndex:         c.SubtitleTrackIndex,
 		SubtitleBurnIn:             c.SubtitleBurnIn,
 		SubtitleCodec:              c.SubtitleCodec,
+		SubtitleRendition:          c.SubtitleRendition,
 		TargetBitrateKbps:          c.TargetBitrateKbps,
 		TotalDuration:              c.TotalDuration,
 		FastStart:                  c.FastStart,
@@ -519,6 +565,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		SubtitleTrackIndex:            c.SubtitleTrackIndex,
 		SubtitleBurnIn:                c.SubtitleBurnIn,
 		SubtitleCodec:                 c.SubtitleCodec,
+		SubtitleRendition:             c.SubtitleRendition,
 		AudioTrackIndex:               c.AudioTrackIndex,
 		TargetBitrateKbps:             c.TargetBitrateKbps,
 		TotalDuration:                 c.TotalDuration,

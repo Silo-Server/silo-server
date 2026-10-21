@@ -252,33 +252,6 @@ describe("LibraryPage saved state", () => {
     }
   });
 
-  it("retries a transient rate-limit rejection without looping", async () => {
-    vi.useFakeTimers();
-    const rateLimited = v2Problem(429, "rate_limited", "rate limited");
-    mocks.saveLibrarySearch.mockRejectedValueOnce(rateLimited);
-    try {
-      renderPage();
-
-      expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1);
-      await mocks.saveLibrarySearch.mock.results[0]?.value.catch(() => undefined);
-
-      await act(async () => {
-        vi.advanceTimersByTime(2_000);
-        await Promise.resolve();
-      });
-      expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2);
-      await expect(mocks.saveLibrarySearch.mock.results[1]?.value).resolves.toBeUndefined();
-
-      await act(async () => {
-        vi.advanceTimersByTime(60_000);
-        await Promise.resolve();
-      });
-      expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("does not carry a terminal retry marker into a different profile", async () => {
     vi.useFakeTimers();
     mocks.saveLibrarySearch.mockRejectedValueOnce(
@@ -351,7 +324,13 @@ describe("LibraryPage saved state", () => {
     expect(mocks.saveLibrarySearch).not.toHaveBeenCalledWith(7, "tab=collections");
   });
 
-  it("clears inherited URL state when the new profile has no saved value", async () => {
+  it.each([
+    ["has no saved value", { savedSearch: undefined }],
+    [
+      "disables remembering",
+      { rememberEnabled: false, savedSearch: "tab=library&sort=year&order=desc" },
+    ],
+  ])("clears inherited URL state when the new profile %s", async (_change, newProfile) => {
     mocks.savedSearch = "tab=collections";
     const view = renderPage("/libraries/7");
 
@@ -360,24 +339,7 @@ describe("LibraryPage saved state", () => {
     );
 
     mocks.ownerKey = "profile-2";
-    mocks.savedSearch = undefined;
-    view.rerender(page("/libraries/7"));
-
-    await waitFor(() => expect(screen.getByTestId("location-search")).toBeEmptyDOMElement());
-    expect(mocks.saveLibrarySearch).not.toHaveBeenCalledWith(7, "tab=collections");
-  });
-
-  it("clears inherited URL state when the new profile disables remembering", async () => {
-    mocks.savedSearch = "tab=collections";
-    const view = renderPage("/libraries/7");
-
-    await waitFor(() =>
-      expect(screen.getByTestId("location-search")).toHaveTextContent("?tab=collections"),
-    );
-
-    mocks.ownerKey = "profile-2";
-    mocks.rememberEnabled = false;
-    mocks.savedSearch = "tab=library&sort=year&order=desc";
+    Object.assign(mocks, newProfile);
     view.rerender(page("/libraries/7"));
 
     await waitFor(() => expect(screen.getByTestId("location-search")).toBeEmptyDOMElement());

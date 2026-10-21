@@ -104,10 +104,10 @@ type ProgressKey struct {
 	MediaItemID string
 }
 
-// ListKey is the keyset position ListFavoritesPage and ListWatchlistPage
-// resume after: the (AddedAt, MediaItemID) of the last row a caller already
-// holds, copied verbatim from a Favorite or WatchlistEntry the page returned.
-// media_item_id is unique per profile in both tables, so with the fixed
+// ListKey is the keyset position ListFavoritesPage, ListWatchlistPage and
+// ListNotInterestedPage resume after: the (AddedAt, MediaItemID) of the last
+// row a caller already holds, copied verbatim from an entry the page
+// returned. media_item_id is unique per profile in each table, so with the fixed
 // ORDER BY added_at DESC, media_item_id DESC the pair orders every row
 // totally, and a row added or removed between pages neither repeats nor
 // hides another.
@@ -227,6 +227,13 @@ type Favorite struct {
 
 // WatchlistEntry represents a watchlist item.
 type WatchlistEntry struct {
+	ProfileID   string
+	MediaItemID string
+	AddedAt     string
+}
+
+// NotInterestedEntry is a movie or series a profile marked Not interested.
+type NotInterestedEntry struct {
 	ProfileID   string
 	MediaItemID string
 	AddedAt     string

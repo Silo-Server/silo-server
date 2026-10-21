@@ -86,6 +86,12 @@ type UserStore interface {
 	MarkProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error
 	ClearProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error
 	ClearProgress(ctx context.Context, profileID, mediaItemID string) error
+	// ClearResumePosition sets a visible resume position to 0 and reports
+	// whether there was one. It keeps the watched latch, the duration and
+	// watch history, never inserts a row, and stamps updated_at and event_at
+	// no earlier than at, so delta sync carries the change and an older
+	// provider resume point loses to it.
+	ClearResumePosition(ctx context.Context, profileID, mediaItemID string, at time.Time) (bool, error)
 	GetProgress(ctx context.Context, profileID, mediaItemID string) (*WatchProgress, error)
 	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]WatchProgress, error)
 	// ListProgressPage is the keyset form of ListProgress: the same status
@@ -174,6 +180,19 @@ type UserStore interface {
 	// removed outright on completion, while fully-watched series are only
 	// hidden from display so they reappear when new episodes are added.
 	RemoveWatchedFromWatchlist(ctx context.Context, profileID string) (bool, error)
+
+	// Not interested. A mark keeps a movie or series out of the profile's
+	// recommendations and counts against similar titles there; it leaves
+	// every other surface alone. Mark and unmark report whether they changed
+	// a row.
+	MarkNotInterested(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	UnmarkNotInterested(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	// GetNotInterested answers the profile's mark on the item, nil when the
+	// item is not marked.
+	GetNotInterested(ctx context.Context, profileID, mediaItemID string) (*NotInterestedEntry, error)
+	// ListNotInterestedPage pages the profile's marks like ListFavoritesPage.
+	ListNotInterestedPage(ctx context.Context, profileID string, after *ListKey, limit int) ([]NotInterestedEntry, error)
+	ListNotInterestedByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 
 	// Collections
 	CreateCollection(ctx context.Context, input CreateCollectionInput) (*Collection, error)

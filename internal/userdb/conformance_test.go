@@ -65,6 +65,7 @@ func TestSQLiteProgressPage(t *testing.T) {
 func TestSQLitePersonalListPage(t *testing.T) {
 	storetest.RunPersonalListPage(t, newConformanceStore)
 	storetest.RunPersonalListMembership(t, newConformanceStore)
+	storetest.RunNotInterested(t, newConformanceStore)
 }
 
 func TestSQLiteHistoryEntryOnce(t *testing.T) {
@@ -97,4 +98,8 @@ func TestSQLiteCollectionSharing(t *testing.T) {
 // in internal/userstore/pgstore.
 func TestSQLiteProfilePINRevision(t *testing.T) {
 	storetest.RunProfilePINRevision(t, newConformanceStore)
+}
+
+func TestSQLiteDeleteProfileRemovesProfileState(t *testing.T) {
+	storetest.RunDeleteProfileRemovesProfileState(t, newConformanceStore, false)
 }

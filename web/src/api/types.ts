@@ -768,6 +768,8 @@ export interface MediaItemUserState {
   played: boolean;
   is_favorite: boolean;
   in_watchlist: boolean;
+  /** The profile marked the movie or series Not interested. */
+  not_interested?: boolean;
 }
 
 export interface BrowseItemSortMetrics {
@@ -1124,6 +1126,9 @@ export interface ItemExtra {
   title?: string;
   duration_seconds?: number;
   file_id?: number;
+  /** 16:9 image: a sidecar beside the file, or a frame of the video. */
+  still_url?: string;
+  still_thumbhash?: string;
 }
 
 /**
@@ -1331,7 +1336,7 @@ export interface EpisodesResponse {
 }
 
 // Collections
-export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb";
 
 export type UserCollectionSyncStatus = "" | "running" | "success" | "failed" | "warning";
 // UI-only presets for the two display-filter dropdowns. They no longer map to
@@ -1552,7 +1557,7 @@ export interface LibraryCollection {
   slug: string;
   title: string;
   description: string;
-  collection_type: "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+  collection_type: "manual" | "smart" | "mdblist" | "tmdb";
   visibility: "visible" | "hidden";
   sort_order: number;
   group_id?: string | null;
@@ -1622,7 +1627,7 @@ export interface CreateLibraryCollectionRequest {
   slug?: string;
   title: string;
   description?: string;
-  collection_type?: "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
+  collection_type?: "manual" | "smart" | "mdblist" | "tmdb";
   visibility?: "visible" | "hidden";
   sort_order?: number;
   group_id?: string | null;
@@ -1748,35 +1753,6 @@ export interface ImportTMDBCollectionRequest {
 }
 
 export interface ImportTMDBCollectionResponse {
-  collection: LibraryCollection;
-  sync_run?: LibraryCollectionSyncRun;
-}
-
-export interface ImportTraktCollectionRequest {
-  library_id?: number;
-  library_ids?: number[];
-  title: string;
-  description?: string;
-  // preset/media_type drive a discovery-feed collection; list_url drives a
-  // user-authored Trakt list. Exactly one path is used per request.
-  preset?: "trending" | "popular" | "recommended";
-  media_type?: "movie" | "tv";
-  profile_id?: string;
-  list_url?: string;
-  limit?: number;
-  featured?: boolean;
-  poster_url?: string;
-  poster_source_url?: string;
-  backdrop_source_url?: string;
-  sync_schedule?: string;
-  management_mode?: LibraryCollectionManagementMode;
-  management_source?: string;
-  management_key?: string;
-  /** Default order viewers land on; `{}` keeps the source list's own order. */
-  sort_config?: CollectionSortConfig;
-}
-
-export interface ImportTraktCollectionResponse {
   collection: LibraryCollection;
   sync_run?: LibraryCollectionSyncRun;
 }
@@ -3337,7 +3313,10 @@ export interface AdminDeviceProfileSummary {
 /** One device the signed-in viewer watches on. */
 export interface UserDevice {
   device_id: string;
+  /** The name the device reports for itself. */
   device_name: string;
+  /** The name the profile gave the device; absent when it has none. */
+  custom_name?: string;
   device_platform: string;
   last_seen_at: string;
   profile_id: string;

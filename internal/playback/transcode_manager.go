@@ -489,10 +489,9 @@ const (
 // manager type.
 //
 // card is the reconstruction recipe the caller decoded from the verified stream
-// token the client presented (nil when the request carried no usable token).
-// Under token-carried reconstruction it is the sole descriptor source — there is
-// no shared per-session store to fall back on — so a not-found session with a nil
-// card is a genuine miss.
+// token the client presented, or, for a header-authenticated session, the API's
+// validated server-side recovery card (nil when neither exists). It is the sole
+// descriptor source, so a not-found session with a nil card is a genuine miss.
 func (m *TranscodeManager) LoadOrReconstructSession(ctx context.Context, getSession func(string) (*Session, error), sessionID string, requestUserID int, card *RecipeCard) (*Session, SessionLoadStatus) {
 	session, status, _ := m.LoadOrReconstructSessionDetail(ctx, getSession, sessionID, requestUserID, card)
 	return session, status
@@ -791,6 +790,11 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		SubtitleTrackIndex: card.SubtitleTrackIndex,
 		SubtitleBurnIn:     card.SubtitleBurnIn,
 		SegmentDuration:    card.SegmentDuration,
+		// Only a server-side card for a header-authenticated session sets these;
+		// a token's claims never do, so token reconstruction is unchanged.
+		RequireMediaAuthorization:  card.RequireMediaAuthorization,
+		RequestedMediaFileID:       card.RequestedMediaFileID,
+		DisableProgressPersistence: card.DisableProgressPersistence,
 	}
 	if card.IsTranscodeRecipe() {
 		s.OutputContainer = HLSOutputContainer(card.TranscodeOpts("", "", nil))

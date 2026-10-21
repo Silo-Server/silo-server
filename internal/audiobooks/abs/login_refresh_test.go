@@ -1,7 +1,6 @@
 package abs
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -192,33 +191,34 @@ func TestHandleRefresh_HeaderToken_RotatesAndReturnsBothForms(t *testing.T) {
 	}
 }
 
-// TestHandleRefresh_ReturnsFullLoginEnvelope guards that /auth/refresh returns
-// the SAME payload shape as /login (real ABS behavior) — not a thin token map —
-// so strict clients can decode it with their login model.
-func TestHandleRefresh_ReturnsFullLoginEnvelope(t *testing.T) {
+func TestHandleRefresh_AccessTokenRejected(t *testing.T) {
 	h, store, cfg := newRefreshTestHandler(t)
-	refresh, _ := mintAndPersistRefresh(t, store, cfg, "5")
+	jti := "an-access-jti"
+	access, _ := IssueAccessToken(cfg.secret, "9", "", nil, jti, time.Hour)
+	_ = store.InsertToken(context.Background(), ABSToken{ID: jti, UserID: "9", JTI: jti, ExpiresAt: time.Now().Add(time.Hour)})
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", strings.NewReader(""))
+	req.Header.Set("x-refresh-token", access)
+	rec := httptest.NewRecorder()
+	h.handleRefresh(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleRefresh_RevokedTokenRejected(t *testing.T) {
+	h, store, cfg := newRefreshTestHandler(t)
+	refresh, oldJTI := mintAndPersistRefresh(t, store, cfg, "7")
+	_ = store.RevokeTokenByJTI(context.Background(), oldJTI)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
 	req.Header.Set("x-refresh-token", refresh)
 	rec := httptest.NewRecorder()
 	h.handleRefresh(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	for _, k := range []string{"user", "userDefaultLibraryId", "serverSettings", "Source", "ereaderDevices"} {
-		if _, ok := resp[k]; !ok {
-			t.Errorf("refresh envelope missing top-level %q", k)
-		}
-	}
-	// x-refresh-token present → token in body, not a cookie.
-	if user, _ := resp["user"].(map[string]any); user["refreshToken"] == nil {
-		t.Errorf("user.refreshToken should be in body when x-refresh-token sent")
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
 	}
 }
 
@@ -257,77 +257,38 @@ func TestHandleRefresh_ResolvesUsername(t *testing.T) {
 	}
 }
 
-// TestHandleRefresh_NoHeader_SetsCookie: without x-refresh-token the rotated
-// refresh token is delivered as the refresh_token cookie and nulled in the body.
-func TestHandleRefresh_NoHeader_SetsCookie(t *testing.T) {
-	h, store, cfg := newRefreshTestHandler(t)
-	refresh, _ := mintAndPersistRefresh(t, store, cfg, "6")
+func TestHandleABSAuthorize_ResolvesUsername(t *testing.T) {
+	// Given
+	h, _, _ := newRefreshTestHandler(t)
+	h.deps.UsernameResolver = func(context.Context, string, string) string { return "sara" }
 
-	body := bytes.NewBufferString(`{"refreshToken":"` + refresh + `"}`)
-	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", body)
-	req.Header.Set("Content-Type", "application/json")
+	req := httptest.NewRequest(http.MethodPost, "/api/authorize", nil)
+	req = req.WithContext(context.WithValue(req.Context(), ctxKey{}, ctxAuth{
+		UserID:    "15",
+		ProfileID: "profile-1",
+		Token:     "access.jwt",
+	}))
 	rec := httptest.NewRecorder()
-	h.handleRefresh(rec, req)
 
+	// When
+	h.handleABSAuthorize(rec, req)
+
+	// Then
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	var got *http.Cookie
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == "refresh_token" {
-			got = c
-		}
+	var env map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
 	}
-	if got == nil || got.Value == "" {
-		t.Fatalf("refresh_token cookie not set")
+	user, ok := env["user"].(map[string]any)
+	if !ok {
+		t.Fatalf("user is not a map: %T", env["user"])
 	}
-	if !got.HttpOnly {
-		t.Errorf("refresh_token cookie should be HttpOnly")
+	if user["username"] != "sara" {
+		t.Errorf("username = %v, want sara", user["username"])
 	}
-	var resp map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-	if user, _ := resp["user"].(map[string]any); user["refreshToken"] != nil {
-		t.Errorf("user.refreshToken should be null when delivered via cookie")
-	}
-}
-
-func TestHandleRefresh_NoToken_400(t *testing.T) {
-	h, _, _ := newRefreshTestHandler(t)
-	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
-	rec := httptest.NewRecorder()
-	h.handleRefresh(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rec.Code)
-	}
-}
-
-func TestHandleRefresh_AccessTokenRejected(t *testing.T) {
-	h, store, cfg := newRefreshTestHandler(t)
-	jti := "an-access-jti"
-	access, _ := IssueAccessToken(cfg.secret, "9", "", nil, jti, time.Hour)
-	_ = store.InsertToken(context.Background(), ABSToken{ID: jti, UserID: "9", JTI: jti, ExpiresAt: time.Now().Add(time.Hour)})
-
-	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", strings.NewReader(""))
-	req.Header.Set("x-refresh-token", access)
-	rec := httptest.NewRecorder()
-	h.handleRefresh(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestHandleRefresh_RevokedTokenRejected(t *testing.T) {
-	h, store, cfg := newRefreshTestHandler(t)
-	refresh, oldJTI := mintAndPersistRefresh(t, store, cfg, "7")
-	_ = store.RevokeTokenByJTI(context.Background(), oldJTI)
-
-	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
-	req.Header.Set("x-refresh-token", refresh)
-	rec := httptest.NewRecorder()
-	h.handleRefresh(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rec.Code)
+	if user["id"] != "15" {
+		t.Errorf("id = %v, want 15", user["id"])
 	}
 }

@@ -20,9 +20,8 @@ type fakeSeriesDrops struct {
 	activityAtWrite map[string]time.Time
 	resolveErr      error
 
-	resolveCalls int
-	imported     []importedDrop
-	deleted      []importedDrop
+	imported []importedDrop
+	deleted  []importedDrop
 }
 
 type importedDrop struct {
@@ -32,7 +31,6 @@ type importedDrop struct {
 }
 
 func (f *fakeSeriesDrops) EpisodeSeriesIDs(_ context.Context, episodeIDs []string) (map[string]string, error) {
-	f.resolveCalls++
 	if f.resolveErr != nil {
 		return nil, f.resolveErr
 	}
@@ -192,125 +190,155 @@ func TestReconcileContinueWatchingDropsUnfinishedShowsTheRowLeavesOut(t *testing
 	}
 }
 
-// Emby can keep Next Up out of the row; then a show between episodes is
-// missing from it whether or not it was hidden, and only shows with an
-// episode in progress can be judged.
-func TestReconcileContinueWatchingWithoutNextUpJudgesOnlyShowsInProgress(t *testing.T) {
-	t.Parallel()
-
-	played := time.Date(2026, 10, 1, 21, 0, 0, 0, time.UTC)
-	drops := &fakeSeriesDrops{seriesOf: map[string]string{"between-1": "s-between", "paused-1": "s-paused"}}
-	service := reconcileService(drops, surfaceAll(drops), nil)
-
-	row := ContinueWatchingRow{
-		SourceSeriesIDs:        map[string]bool{},
-		UnfinishedSourceSeries: map[string]bool{"src-between": true, "src-paused": true},
-	}
-	episodes := []importedEpisode{
-		{itemID: "between-1", sourceSeriesID: "src-between", at: played},
-		{itemID: "paused-1", sourceSeriesID: "src-paused", at: played, inProgress: true},
-	}
-	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, episodes); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if got := drops.importedIDs(); !slices.Equal(got, []string{"s-paused"}) {
-		t.Fatalf("dropped %v, want only the show in progress", got)
-	}
+// reconcileDropCase is one TestReconcileContinueWatchingDropDecisions case.
+type reconcileDropCase struct {
+	name     string
+	seriesOf map[string]string
+	matcher  *matcherRepoStub
+	row      ContinueWatchingRow
+	episodes []importedEpisode
+	want     []string
 }
 
-// A listed show that matches nothing the run imported could be a copy of
-// any imported show, so nothing is dropped.
-func TestReconcileContinueWatchingStopsAtAnUnidentifiedListedShow(t *testing.T) {
-	t.Parallel()
-
+var reconcileContinueWatchingDropDecisionsCases = func() []reconcileDropCase {
 	played := time.Date(2026, 10, 1, 21, 0, 0, 0, time.UTC)
-	drops := &fakeSeriesDrops{seriesOf: map[string]string{"hidden-1": "s-hidden"}}
-	service := reconcileService(drops, surfaceAll(drops), nil)
-
-	row := ContinueWatchingRow{
-		SourceSeriesIDs:        map[string]bool{"src-unknown": true},
-		Series:                 []Record{{ExternalID: "src-unknown", Kind: KindSeries}},
-		IncludesNextUp:         true,
-		UnfinishedSourceSeries: map[string]bool{"src-hidden": true},
-	}
-	episodes := []importedEpisode{{itemID: "hidden-1", sourceSeriesID: "src-hidden", at: played}}
-	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, episodes); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if len(drops.imported) != 0 {
-		t.Fatalf("dropped %v with an unidentified show in the row, want none", drops.importedIDs())
-	}
-}
-
-// A listed show Silo doesn't have, recognizable by its provider IDs, hides
-// nothing and doesn't stop the pass.
-func TestReconcileContinueWatchingIgnoresListedShowsSiloLacks(t *testing.T) {
-	t.Parallel()
-
-	played := time.Date(2026, 10, 1, 21, 0, 0, 0, time.UTC)
-	drops := &fakeSeriesDrops{seriesOf: map[string]string{"hidden-1": "s-hidden"}}
-	service := reconcileService(drops, surfaceAll(drops), nil)
-
-	row := ContinueWatchingRow{
-		SourceSeriesIDs:        map[string]bool{"src-elsewhere": true},
-		Series:                 []Record{{ExternalID: "src-elsewhere", Kind: KindSeries, TMDBID: "999999"}},
-		IncludesNextUp:         true,
-		UnfinishedSourceSeries: map[string]bool{"src-hidden": true},
-	}
-	episodes := []importedEpisode{{itemID: "hidden-1", sourceSeriesID: "src-hidden", at: played}}
-	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, episodes); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if got := drops.importedIDs(); !slices.Equal(got, []string{"s-hidden"}) {
-		t.Fatalf("dropped %v, want s-hidden", got)
-	}
-}
-
-// Emby leaves out a show whose paused episode is older than a later finished
-// one, so only a show whose newest play is in progress counts as in progress.
-func TestReconcileContinueWatchingJudgesProgressByTheNewestPlay(t *testing.T) {
-	t.Parallel()
-
 	older := time.Date(2026, 9, 1, 21, 0, 0, 0, time.UTC)
 	newer := older.Add(24 * time.Hour)
-	drops := &fakeSeriesDrops{seriesOf: map[string]string{
-		"stale-paused": "s-stale", "stale-finished": "s-stale",
-		"paused-old": "s-paused", "paused-new": "s-paused",
-	}}
-	service := reconcileService(drops, surfaceAll(drops), nil)
+	return []reconcileDropCase{
+		{
+			// Emby can keep Next Up out of the row; then a show between episodes is
+			// missing from it whether or not it was hidden, and only shows with an
+			// episode in progress can be judged.
+			name:     "without next up only shows in progress are judged",
+			seriesOf: map[string]string{"between-1": "s-between", "paused-1": "s-paused"},
+			row: ContinueWatchingRow{
+				SourceSeriesIDs:        map[string]bool{},
+				UnfinishedSourceSeries: map[string]bool{"src-between": true, "src-paused": true},
+			},
+			episodes: []importedEpisode{
+				{itemID: "between-1", sourceSeriesID: "src-between", at: played},
+				{itemID: "paused-1", sourceSeriesID: "src-paused", at: played, inProgress: true},
+			},
+			want: []string{"s-paused"},
+		},
+		{
+			// A listed show that matches nothing the run imported could be a copy of
+			// any imported show, so nothing is dropped.
+			name:     "an unidentified listed show stops the pass",
+			seriesOf: map[string]string{"hidden-1": "s-hidden"},
+			row: ContinueWatchingRow{
+				SourceSeriesIDs:        map[string]bool{"src-unknown": true},
+				Series:                 []Record{{ExternalID: "src-unknown", Kind: KindSeries}},
+				IncludesNextUp:         true,
+				UnfinishedSourceSeries: map[string]bool{"src-hidden": true},
+			},
+			episodes: []importedEpisode{{itemID: "hidden-1", sourceSeriesID: "src-hidden", at: played}},
+		},
+		{
+			// A listed show Silo doesn't have, recognizable by its provider IDs, hides
+			// nothing and doesn't stop the pass.
+			name:     "listed shows Silo lacks are ignored",
+			seriesOf: map[string]string{"hidden-1": "s-hidden"},
+			row: ContinueWatchingRow{
+				SourceSeriesIDs:        map[string]bool{"src-elsewhere": true},
+				Series:                 []Record{{ExternalID: "src-elsewhere", Kind: KindSeries, TMDBID: "999999"}},
+				IncludesNextUp:         true,
+				UnfinishedSourceSeries: map[string]bool{"src-hidden": true},
+			},
+			episodes: []importedEpisode{{itemID: "hidden-1", sourceSeriesID: "src-hidden", at: played}},
+			want:     []string{"s-hidden"},
+		},
+		{
+			// Emby leaves out a show whose paused episode is older than a later finished
+			// one, so only a show whose newest play is in progress counts as in progress.
+			// No Next Up in the row: only shows in progress can be judged.
+			name: "progress is judged by the newest play",
+			seriesOf: map[string]string{
+				"stale-paused": "s-stale", "stale-finished": "s-stale",
+				"paused-old": "s-paused", "paused-new": "s-paused",
+			},
+			row: ContinueWatchingRow{SourceSeriesIDs: map[string]bool{}},
+			episodes: []importedEpisode{
+				{itemID: "stale-finished", sourceSeriesID: "src-stale", at: newer},
+				{itemID: "stale-paused", sourceSeriesID: "src-stale", at: older, inProgress: true},
+				{itemID: "paused-new", sourceSeriesID: "src-paused", at: newer, inProgress: true},
+				{itemID: "paused-old", sourceSeriesID: "src-paused", at: older},
+			},
+			want: []string{"s-paused"},
+		},
+		{
+			// A play stamped after this server's clock comes from a source clock that
+			// runs ahead; a drop can be dated neither before nor after it safely, so the
+			// show waits for a later import.
+			name:     "shows played after the server clock are skipped",
+			seriesOf: map[string]string{"ep": "s-1"},
+			row:      ContinueWatchingRow{SourceSeriesIDs: map[string]bool{}, IncludesNextUp: true, UnfinishedSourceSeries: map[string]bool{"src": true}},
+			episodes: []importedEpisode{{itemID: "ep", sourceSeriesID: "src", at: reconcileNow.Add(10 * time.Minute)}},
+		},
+		{
+			// A listed show is recognized by its primary provider ID; a stale secondary
+			// ID that names another series doesn't mark that one as listed.
+			name:     "a listed show is recognized by its primary provider ID",
+			seriesOf: map[string]string{"listed-1": "s-listed", "hidden-1": "s-hidden"},
+			matcher: &matcherRepoStub{mediaByExternal: map[string][]mediaLookupRow{
+				"series:tmdb_id:100": {{ContentID: "s-listed"}},
+				// Stale TVDB ID on the listed Emby series, naming the hidden show.
+				"series:tvdb_id:200": {{ContentID: "s-hidden"}},
+			}},
+			row: ContinueWatchingRow{
+				SourceSeriesIDs:        map[string]bool{"src-listed-copy": true},
+				Series:                 []Record{{ExternalID: "src-listed-copy", Kind: KindSeries, TMDBID: "100", TVDBID: "200", PreferTMDB: true}},
+				IncludesNextUp:         true,
+				UnfinishedSourceSeries: map[string]bool{"src-listed": true, "src-hidden": true},
+			},
+			episodes: []importedEpisode{
+				{itemID: "listed-1", sourceSeriesID: "src-listed", at: played},
+				{itemID: "hidden-1", sourceSeriesID: "src-hidden", at: played},
+			},
+			want: []string{"s-hidden"},
+		},
+		{
+			// One source series can span several Silo series; listing it lists them all.
+			name:     "listing a source show lists every Silo series it spans",
+			seriesOf: map[string]string{"s1e1": "s-part-1", "s2e1": "s-part-2"},
+			row: ContinueWatchingRow{
+				SourceSeriesIDs:        map[string]bool{"src-show": true},
+				IncludesNextUp:         true,
+				UnfinishedSourceSeries: map[string]bool{"src-show": true},
+			},
+			episodes: []importedEpisode{
+				{itemID: "s1e1", sourceSeriesID: "src-show", at: played},
+				{itemID: "s2e1", sourceSeriesID: "src-show", at: played},
+			},
+		},
+	}
+}()
 
-	// No Next Up in the row: only shows in progress can be judged.
-	row := ContinueWatchingRow{SourceSeriesIDs: map[string]bool{}}
-	episodes := []importedEpisode{
-		{itemID: "stale-finished", sourceSeriesID: "src-stale", at: newer},
-		{itemID: "stale-paused", sourceSeriesID: "src-stale", at: older, inProgress: true},
-		{itemID: "paused-new", sourceSeriesID: "src-paused", at: newer, inProgress: true},
-		{itemID: "paused-old", sourceSeriesID: "src-paused", at: older},
-	}
-	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, episodes); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if got := drops.importedIDs(); !slices.Equal(got, []string{"s-paused"}) {
-		t.Fatalf("dropped %v, want only the show paused at its newest play", got)
-	}
-}
-
-// A play stamped after this server's clock comes from a source clock that
-// runs ahead; a drop can be dated neither before nor after it safely, so the
-// show waits for a later import.
-func TestReconcileContinueWatchingSkipsShowsPlayedAfterTheServerClock(t *testing.T) {
+// Each case runs one reconciliation over a row and the run's episodes, then
+// checks which shows were dropped. A case that wants nothing dropped wants no
+// drop written at all.
+func TestReconcileContinueWatchingDropDecisions(t *testing.T) {
 	t.Parallel()
 
-	drops := &fakeSeriesDrops{seriesOf: map[string]string{"ep": "s-1"}}
-	service := reconcileService(drops, surfaceAll(drops), nil)
+	for _, tc := range reconcileContinueWatchingDropDecisionsCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	row := ContinueWatchingRow{SourceSeriesIDs: map[string]bool{}, IncludesNextUp: true, UnfinishedSourceSeries: map[string]bool{"src": true}}
-	episodes := []importedEpisode{{itemID: "ep", sourceSeriesID: "src", at: reconcileNow.Add(10 * time.Minute)}}
-	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, episodes); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if len(drops.imported) != 0 {
-		t.Fatalf("drops = %+v, want none for a future-stamped play", drops.imported)
+			drops := &fakeSeriesDrops{seriesOf: tc.seriesOf}
+			service := reconcileService(drops, surfaceAll(drops), tc.matcher)
+			if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", tc.row, tc.episodes); err != nil {
+				t.Fatalf("reconcile: %v", err)
+			}
+			if len(tc.want) == 0 {
+				if len(drops.imported) != 0 {
+					t.Fatalf("drops = %+v, want none", drops.imported)
+				}
+				return
+			}
+			if got := drops.importedIDs(); !slices.Equal(got, tc.want) {
+				t.Fatalf("dropped %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -340,89 +368,6 @@ func TestReconcileContinueWatchingTakesBackADropRacedByPlayback(t *testing.T) {
 	}
 	if len(drops.deleted) != 1 || drops.deleted[0].seriesID != "s-raced" || !drops.deleted[0].droppedAt.Equal(reconcileNow) {
 		t.Fatalf("taken back = %+v, want s-raced fenced on its drop time", drops.deleted)
-	}
-}
-
-// A listed show is recognized by its primary provider ID; a stale secondary
-// ID that names another series doesn't mark that one as listed.
-func TestReconcileContinueWatchingListsByThePrimaryProviderID(t *testing.T) {
-	t.Parallel()
-
-	played := time.Date(2026, 10, 1, 21, 0, 0, 0, time.UTC)
-	drops := &fakeSeriesDrops{seriesOf: map[string]string{"listed-1": "s-listed", "hidden-1": "s-hidden"}}
-	matcherRepo := &matcherRepoStub{mediaByExternal: map[string][]mediaLookupRow{
-		"series:tmdb_id:100": {{ContentID: "s-listed"}},
-		// Stale TVDB ID on the listed Emby series, naming the hidden show.
-		"series:tvdb_id:200": {{ContentID: "s-hidden"}},
-	}}
-	service := reconcileService(drops, surfaceAll(drops), matcherRepo)
-
-	row := ContinueWatchingRow{
-		SourceSeriesIDs:        map[string]bool{"src-listed-copy": true},
-		Series:                 []Record{{ExternalID: "src-listed-copy", Kind: KindSeries, TMDBID: "100", TVDBID: "200", PreferTMDB: true}},
-		IncludesNextUp:         true,
-		UnfinishedSourceSeries: map[string]bool{"src-listed": true, "src-hidden": true},
-	}
-	episodes := []importedEpisode{
-		{itemID: "listed-1", sourceSeriesID: "src-listed", at: played},
-		{itemID: "hidden-1", sourceSeriesID: "src-hidden", at: played},
-	}
-	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, episodes); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if got := drops.importedIDs(); !slices.Equal(got, []string{"s-hidden"}) {
-		t.Fatalf("dropped %v, want s-hidden despite the stale secondary ID", got)
-	}
-}
-
-// Episodes are resolved to their series in one batch.
-func TestReconcileContinueWatchingResolvesEpisodesInOneBatch(t *testing.T) {
-	t.Parallel()
-
-	played := time.Date(2026, 10, 1, 21, 0, 0, 0, time.UTC)
-	drops := &fakeSeriesDrops{seriesOf: map[string]string{"a": "s-1", "b": "s-1", "c": "s-2"}}
-	service := reconcileService(drops, surfaceAll(drops), nil)
-
-	row := ContinueWatchingRow{SourceSeriesIDs: map[string]bool{}, IncludesNextUp: true, UnfinishedSourceSeries: map[string]bool{"src-1": true, "src-2": true}}
-	episodes := []importedEpisode{
-		{itemID: "a", sourceSeriesID: "src-1", at: played},
-		{itemID: "b", sourceSeriesID: "src-1", at: played},
-		{itemID: "a", sourceSeriesID: "src-1", at: played},
-		{itemID: "c", sourceSeriesID: "src-2", at: played},
-	}
-	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, episodes); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if drops.resolveCalls != 1 {
-		t.Fatalf("resolve calls = %d, want 1", drops.resolveCalls)
-	}
-	if got := drops.importedIDs(); !slices.Equal(got, []string{"s-1", "s-2"}) {
-		t.Fatalf("dropped %v, want both shows", got)
-	}
-}
-
-// One source series can span several Silo series; listing it lists them all.
-func TestReconcileContinueWatchingListsEverySeriesOfASourceShow(t *testing.T) {
-	t.Parallel()
-
-	played := time.Date(2026, 10, 1, 21, 0, 0, 0, time.UTC)
-	drops := &fakeSeriesDrops{seriesOf: map[string]string{"s1e1": "s-part-1", "s2e1": "s-part-2"}}
-	service := reconcileService(drops, surfaceAll(drops), nil)
-
-	row := ContinueWatchingRow{
-		SourceSeriesIDs:        map[string]bool{"src-show": true},
-		IncludesNextUp:         true,
-		UnfinishedSourceSeries: map[string]bool{"src-show": true},
-	}
-	episodes := []importedEpisode{
-		{itemID: "s1e1", sourceSeriesID: "src-show", at: played},
-		{itemID: "s2e1", sourceSeriesID: "src-show", at: played},
-	}
-	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, episodes); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	if len(drops.imported) != 0 {
-		t.Fatalf("dropped %v, want neither part of the listed show", drops.importedIDs())
 	}
 }
 
@@ -498,16 +443,6 @@ func TestNewImportedEpisodeMarksEpisodesInProgress(t *testing.T) {
 	}
 	if newImportedEpisode("ep", Record{}).inProgress {
 		t.Fatal("episode without a resume point in progress")
-	}
-}
-
-func TestReconcileContinueWatchingDoesNothingWithoutItsStores(t *testing.T) {
-	t.Parallel()
-
-	episodes := []importedEpisode{{itemID: "ep", sourceSeriesID: "src", at: time.Now()}}
-	dropped, err := (&Service{}).reconcileContinueWatching(context.Background(), 7, "p", ContinueWatchingRow{}, episodes)
-	if err != nil || dropped != 0 {
-		t.Fatalf("reconcile without stores = %d, %v; want 0, nil", dropped, err)
 	}
 }
 

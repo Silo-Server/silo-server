@@ -506,6 +506,14 @@ func (s *interestTrackingStore) ClearProgress(ctx context.Context, profileID, me
 	return err
 }
 
+func (s *interestTrackingStore) ClearResumePosition(ctx context.Context, profileID, mediaItemID string, at time.Time) (bool, error) {
+	cleared, err := s.UserStore.ClearResumePosition(ctx, profileID, mediaItemID, at)
+	if err == nil && cleared {
+		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
+	}
+	return cleared, err
+}
+
 func (s *interestTrackingStore) ClearProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error {
 	err := s.UserStore.ClearProgressBatch(ctx, profileID, mediaItemIDs, updatedAt)
 	if err == nil {
@@ -637,7 +645,7 @@ func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) er
 	if err == nil {
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		if purgeErr := s.system.PurgeProfile(purgeCtx, id); purgeErr != nil {
+		if purgeErr := s.system.PurgeProfile(purgeCtx, s.userID, id); purgeErr != nil {
 			slog.WarnContext(ctx, "notifications: profile purge failed", "component", "notifications", "profile_id", id, "error", purgeErr)
 		}
 	}

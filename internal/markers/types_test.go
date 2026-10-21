@@ -123,122 +123,62 @@ func TestPopulationRegistryReturnsLastProviderErrorAsMiss(t *testing.T) {
 	}
 }
 
-func TestPopulationRegistryKeepsBestPerSegmentByProviderPriority(t *testing.T) {
-	a := &fakeProvider{id: "a", result: Result{ProviderID: "a", Algorithm: "a:v1", Markers: []Marker{
-		{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.7, SubmissionCount: 1},
-		{Kind: MarkerKindCredits, Start: 100 * time.Second, End: 110 * time.Second, Confidence: 0.5, SubmissionCount: 1},
-	}}}
-	b := &fakeProvider{id: "b", result: Result{ProviderID: "b", Algorithm: "b:v1", Markers: []Marker{
-		{Kind: MarkerKindIntro, Start: 0, End: 25 * time.Second, Confidence: 0.9, SubmissionCount: 500},
-		{Kind: MarkerKindCredits, Start: 105 * time.Second, End: 120 * time.Second, Confidence: 0.6, SubmissionCount: 400},
-	}}}
-
-	registry := NewRegistry(nil)
-	if err := registry.Register(a); err != nil {
-		t.Fatalf("register a: %v", err)
-	}
-	if err := registry.Register(b); err != nil {
-		t.Fatalf("register b: %v", err)
-	}
-
-	res, ok, err := populateRegistryForTest(context.Background(), registry)
-	if err != nil {
-		t.Fatalf("population: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected hit")
-	}
-
-	byKind := map[MarkerKind]Marker{}
-	for _, m := range res.Markers {
-		byKind[m.Kind] = m
-	}
-	if intro := byKind[MarkerKindIntro]; intro.ProviderID != "a" || intro.End != 30*time.Second {
-		t.Errorf("intro = %+v, want priority provider a end 30s", intro)
-	}
-	if credits := byKind[MarkerKindCredits]; credits.ProviderID != "a" || credits.End != 110*time.Second {
-		t.Errorf("credits = %+v, want priority provider a end 110s", credits)
-	}
-}
-
+// With fetch priorities configured, the lowest priority that answers wins,
+// a failing preferred provider falls back with its error reported, and equal
+// priorities break the tie by marker quality.
 func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
-	a := &fakeProvider{id: "a", result: Result{ProviderID: "a", Markers: []Marker{
-		{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.9, SubmissionCount: 500},
-	}}}
-	b := &fakeProvider{id: "b", result: Result{ProviderID: "b", Markers: []Marker{
-		{Kind: MarkerKindIntro, Start: 0, End: 25 * time.Second, Confidence: 0.6, SubmissionCount: 1},
-	}}}
+	intro := func(id string, end time.Duration, confidence float64, submissions int) *fakeProvider {
+		return &fakeProvider{id: id, result: Result{ProviderID: id, Markers: []Marker{
+			{Kind: MarkerKindIntro, Start: 0, End: end, Confidence: confidence, SubmissionCount: submissions},
+		}}}
+	}
+	for _, tc := range []struct {
+		name       string
+		providers  []*fakeProvider
+		priorities map[string]int
+		wantErr    bool
+		winner     string
+		wantEnd    time.Duration // zero: not checked
+	}{
+		{
+			name:       "lower fetch_priority wins",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 500), intro("b", 25*time.Second, 0.6, 1)},
+			priorities: map[string]int{"a": 20, "b": 10},
+			winner:     "b", wantEnd: 25 * time.Second,
+		},
+		{
+			name:       "falls back when the higher priority provider errors",
+			providers:  []*fakeProvider{{id: "higher", err: errors.New("temporary provider failure")}, intro("lower", 25*time.Second, 0.6, 0)},
+			priorities: map[string]int{"higher": 10, "lower": 20},
+			wantErr:    true, winner: "lower",
+		},
+		{
+			name:       "same priority tie-breaks by submission count",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.7, 1), intro("b", 25*time.Second, 0.9, 2)},
+			priorities: map[string]int{"a": 10, "b": 10},
+			winner:     "b",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := NewRegistry(nil)
+			config := &ProviderConfigStore{cache: map[string]ProviderConfig{}}
+			for _, provider := range tc.providers {
+				_ = registry.Register(provider)
+				config.cache[provider.id] = ProviderConfig{Provider: provider.id, FetchEnabled: true, FetchPriority: tc.priorities[provider.id]}
+			}
+			registry.config = config
 
-	registry := NewRegistry(nil)
-	_ = registry.Register(a)
-	_ = registry.Register(b)
-	registry.config = &ProviderConfigStore{cache: map[string]ProviderConfig{
-		"a": {Provider: "a", FetchEnabled: true, FetchPriority: 20},
-		"b": {Provider: "b", FetchEnabled: true, FetchPriority: 10},
-	}}
-
-	res, ok, err := populateRegistryForTest(context.Background(), registry)
-	if err != nil {
-		t.Fatalf("population: %v", err)
-	}
-	if !ok || len(res.Markers) != 1 {
-		t.Fatalf("merged = %+v, ok=%v", res.Markers, ok)
-	}
-	if got := res.Markers[0]; got.ProviderID != "b" || got.End != 25*time.Second {
-		t.Fatalf("winner = %+v, want lower fetch_priority provider b", got)
-	}
-}
-
-func TestPopulationRegistryFallsBackWhenHigherPriorityProviderErrors(t *testing.T) {
-	higher := &fakeProvider{id: "higher", err: errors.New("temporary provider failure")}
-	lower := &fakeProvider{id: "lower", result: Result{ProviderID: "lower", Markers: []Marker{
-		{Kind: MarkerKindIntro, Start: 0, End: 25 * time.Second, Confidence: 0.6},
-	}}}
-
-	registry := NewRegistry(nil)
-	_ = registry.Register(higher)
-	_ = registry.Register(lower)
-	registry.config = &ProviderConfigStore{cache: map[string]ProviderConfig{
-		"higher": {Provider: "higher", FetchEnabled: true, FetchPriority: 10},
-		"lower":  {Provider: "lower", FetchEnabled: true, FetchPriority: 20},
-	}}
-
-	res, ok, err := populateRegistryForTest(context.Background(), registry)
-	if err == nil {
-		t.Fatal("expected partial provider failure alongside fallback markers")
-	}
-	if !ok || len(res.Markers) != 1 {
-		t.Fatalf("merged = %+v, ok=%v", res.Markers, ok)
-	}
-	if got := res.Markers[0]; got.ProviderID != "lower" {
-		t.Fatalf("winner provider = %q, want lower", got.ProviderID)
-	}
-}
-
-func TestPopulationRegistryTieBreaksSamePriorityByQuality(t *testing.T) {
-	a := &fakeProvider{id: "a", result: Result{ProviderID: "a", Markers: []Marker{
-		{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.7, SubmissionCount: 1},
-	}}}
-	b := &fakeProvider{id: "b", result: Result{ProviderID: "b", Markers: []Marker{
-		{Kind: MarkerKindIntro, Start: 0, End: 25 * time.Second, Confidence: 0.9, SubmissionCount: 2},
-	}}}
-	registry := NewRegistry(nil)
-	_ = registry.Register(a)
-	_ = registry.Register(b)
-	registry.config = &ProviderConfigStore{cache: map[string]ProviderConfig{
-		"a": {Provider: "a", FetchEnabled: true, FetchPriority: 10},
-		"b": {Provider: "b", FetchEnabled: true, FetchPriority: 10},
-	}}
-
-	res, ok, err := populateRegistryForTest(context.Background(), registry)
-	if err != nil {
-		t.Fatalf("population: %v", err)
-	}
-	if !ok || len(res.Markers) != 1 {
-		t.Fatalf("merged = %+v, ok=%v", res.Markers, ok)
-	}
-	if got := res.Markers[0]; got.ProviderID != "b" {
-		t.Fatalf("winner provider = %q, want b by same-priority submission count", got.ProviderID)
+			res, ok, err := populateRegistryForTest(context.Background(), registry)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("population error = %v, want error %v", err, tc.wantErr)
+			}
+			if !ok || len(res.Markers) != 1 {
+				t.Fatalf("merged = %+v, ok=%v", res.Markers, ok)
+			}
+			if got := res.Markers[0]; got.ProviderID != tc.winner || (tc.wantEnd != 0 && got.End != tc.wantEnd) {
+				t.Fatalf("winner = %+v, want provider %s", got, tc.winner)
+			}
+		})
 	}
 }
 

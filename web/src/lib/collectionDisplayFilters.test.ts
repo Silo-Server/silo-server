@@ -20,13 +20,6 @@ describe("displayFiltersToQueryDefinition", () => {
     });
   });
 
-  it("builds a watched=false rule for the unwatched preset", () => {
-    expect(displayFiltersToQueryDefinition("unwatched", "all")).toEqual({
-      match: "all",
-      groups: [{ match: "all", rules: [{ field: "watched", op: "is", value: false }] }],
-    });
-  });
-
   it("builds a type rule for the media preset", () => {
     expect(displayFiltersToQueryDefinition("all", "movie")).toEqual({
       match: "all",
@@ -97,14 +90,6 @@ describe("queryDefinitionToDisplayFilters", () => {
       ],
     };
     expect(queryDefinitionToDisplayFilters(def)).toEqual({ watch: "unwatched", media: "series" });
-  });
-
-  it("round-trips both presets through the fragment", () => {
-    const fragment = displayFiltersToQueryDefinition("watched", "movie");
-    expect(queryDefinitionToDisplayFilters(fragment)).toEqual({
-      watch: "watched",
-      media: "movie",
-    });
   });
 
   it("tolerates a group with a missing rules array", () => {

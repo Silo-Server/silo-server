@@ -87,7 +87,7 @@ const (
 // unrated; base is the last agreed rating. A zero remoteAt is unknown.
 func decideRating(local, remote, base int, localAt, remoteAt time.Time) ratingAction {
 	switch {
-	case local == remote && local == base:
+	case local == base && remote == base:
 		return ratingKeep
 	case local == remote:
 		return ratingRebase

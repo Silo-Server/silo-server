@@ -22,11 +22,11 @@ type OrderedApplePushV2 struct {
 	issuer   ApplePushDisplayTokenIssuer
 }
 
-func NewOrderedApplePushV2(store *notifications.PushDeviceService, issuer ApplePushDisplayTokenIssuer, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker) *OrderedApplePushV2 {
+func NewOrderedApplePushV2(store *notifications.PushDeviceService, issuer ApplePushDisplayTokenIssuer, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider) *OrderedApplePushV2 {
 	if jwt, ok := issuer.(*auth.JWTService); ok && jwt == nil {
 		issuer = nil
 	}
-	return &OrderedApplePushV2{store: store, issuer: issuer, validate: newSocketAuthorityValidator(sessions, users, resolver, primary)}
+	return &OrderedApplePushV2{store: store, issuer: issuer, validate: newSocketAuthorityValidator(sessions, users, resolver, actingAdmin)}
 }
 func (h *OrderedApplePushV2) OrderedApplePushAvailable() bool {
 	return h != nil && h.store != nil && h.store.OrderedAppleAvailable() && h.validate != nil && h.issuer != nil

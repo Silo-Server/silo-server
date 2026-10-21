@@ -98,8 +98,7 @@ export const USER_SETTINGS_GROUPS: UserSettingsNavGroup[] = [
         path: "subtitle-appearance",
         label: "Language & Subtitles",
         icon: Subtitles,
-        description:
-          "Preferred languages, when subtitles appear, and how they look on this device.",
+        description: "Preferred languages, when subtitles appear, and how they look.",
         keywords: [
           "language",
           "audio language",
@@ -115,6 +114,8 @@ export const USER_SETTINGS_GROUPS: UserSettingsNavGroup[] = [
           "font color",
           "background",
           "position",
+          "timing",
+          "subtitle delay",
         ],
         settings: settingIndex(
           "Spoken language",
@@ -136,6 +137,7 @@ export const USER_SETTINGS_GROUPS: UserSettingsNavGroup[] = [
           "Background opacity",
           "Background color",
           "Subtitle position",
+          "Subtitle offset",
         ),
       },
       {
@@ -363,11 +365,21 @@ export const USER_SETTINGS_GROUPS: UserSettingsNavGroup[] = [
         label: "Personalize",
         icon: Sparkles,
         description: "Re-tune the taste profile behind your recommendations.",
-        keywords: ["taste profile", "recommendations", "ratings", "likes", "dislikes", "tour"],
+        keywords: [
+          "taste profile",
+          "recommendations",
+          "ratings",
+          "likes",
+          "dislikes",
+          "not interested",
+          "hidden",
+          "tour",
+        ],
         settings: settingIndex(
           "Refine your taste profile",
           "Taste profile",
           "Recommendations",
+          "Not interested",
           "Replay the feature tour",
         ),
       },
@@ -418,9 +430,8 @@ export const USER_SETTINGS_GROUPS: UserSettingsNavGroup[] = [
         path: "watch-providers",
         label: "Watch Providers",
         icon: Cloud,
-        description: "Sync watch history, ratings, and watchlists with services like Trakt.",
+        description: "Sync watch history, ratings, and watchlists with services like Simkl.",
         keywords: [
-          "trakt",
           "simkl",
           "import",
           "export",

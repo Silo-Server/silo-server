@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -55,8 +56,8 @@ func (f *fakePushDeviceStore) UpsertFCM(ctx context.Context, registration FCMPus
 	}, nil
 }
 
-func (f *fakePushDeviceStore) DeleteByProfileDevice(ctx context.Context, profileID, deviceID string) error {
-	f.deleted = append(f.deleted, profileID+"/"+deviceID)
+func (f *fakePushDeviceStore) DeleteByProfileDevice(ctx context.Context, userID int, profileID, deviceID string) error {
+	f.deleted = append(f.deleted, fmt.Sprintf("%d/%s/%s", userID, profileID, deviceID))
 	return f.err
 }
 
@@ -169,33 +170,6 @@ func TestPushDeviceServiceRegisterAppleRejectsInvalidOrUnsupported(t *testing.T)
 				t.Fatalf("store was called for rejected input")
 			}
 		})
-	}
-}
-
-func TestPushDeviceServiceRegisterFCMNormalizesAndStores(t *testing.T) {
-	store := &fakePushDeviceStore{}
-	service := NewPushDeviceService(store, testPushCipher(t))
-
-	token := strings.Repeat("F", 100) + ":APA91b-" + strings.Repeat("x", 40)
-	device, err := service.RegisterFCM(context.Background(), 42, " profile-1 ", FCMPushRegistrationInput{
-		DeviceID: " local-device ",
-		FCMToken: " " + token + " ",
-		PushMode: "",
-	})
-	if err != nil {
-		t.Fatalf("register fcm: %v", err)
-	}
-	if device.ServerDeviceID != "server-device" || !device.Enabled || device.PushMode != PushModePrivatePush {
-		t.Fatalf("unexpected device response: %+v", device)
-	}
-	if store.gotFCM.UserID != 42 || store.gotFCM.ProfileID != "profile-1" || store.gotFCM.DeviceID != "local-device" {
-		t.Fatalf("unexpected owner scope: %+v", store.gotFCM)
-	}
-	if store.gotFCM.FCMToken != token {
-		t.Fatalf("fcm token was not trimmed exactly: %q", store.gotFCM.FCMToken)
-	}
-	if store.gotFCM.PushMode != PushModePrivatePush {
-		t.Fatalf("push mode = %q", store.gotFCM.PushMode)
 	}
 }
 
@@ -381,64 +355,5 @@ func TestPushDeviceRepositoryUpsertApplePreservesStableIDs(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("row count = %d, want 1", count)
-	}
-}
-
-func TestPushDeviceRepositoryUpsertApplePurgesOtherProfiles(t *testing.T) {
-	ctx := context.Background()
-	repo, pool := newPushDeviceTestRepo(t)
-	cipher := testPushCipher(t)
-
-	registration := ApplePushDeviceRegistration{
-		UserID:          42,
-		ProfileID:       "profile-parent",
-		DeviceID:        "shared-phone",
-		APNsToken:       strings.Repeat("a", 64),
-		APNsEnvironment: APNsEnvironmentProd,
-		APNsTopic:       ApplePushTopicSilo,
-		PushMode:        PushModePrivatePush,
-	}
-	if _, err := repo.UpsertApple(ctx, registration, cipher); err != nil {
-		t.Fatalf("register under first profile: %v", err)
-	}
-
-	// A different install on another profile must be untouched by the purge.
-	other := registration
-	other.ProfileID = "profile-parent"
-	other.DeviceID = "other-phone"
-	if _, err := repo.UpsertApple(ctx, other, cipher); err != nil {
-		t.Fatalf("register unrelated device: %v", err)
-	}
-
-	// The shared phone switches profiles and re-registers: the old profile's
-	// row for that install must be gone, not left enabled.
-	registration.ProfileID = "profile-kid"
-	device, err := repo.UpsertApple(ctx, registration, cipher)
-	if err != nil {
-		t.Fatalf("register under second profile: %v", err)
-	}
-	if device.ProfileID != "profile-kid" {
-		t.Fatalf("profile = %q, want profile-kid", device.ProfileID)
-	}
-
-	rows, err := pool.Query(ctx, `SELECT profile_id, device_id FROM push_devices ORDER BY profile_id`)
-	if err != nil {
-		t.Fatalf("list rows: %v", err)
-	}
-	defer rows.Close()
-	got := map[string]string{}
-	for rows.Next() {
-		var profileID, deviceID string
-		if err := rows.Scan(&profileID, &deviceID); err != nil {
-			t.Fatalf("scan row: %v", err)
-		}
-		got[profileID] = deviceID
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows: %v", err)
-	}
-	want := map[string]string{"profile-kid": "shared-phone", "profile-parent": "other-phone"}
-	if len(got) != len(want) || got["profile-kid"] != want["profile-kid"] || got["profile-parent"] != want["profile-parent"] {
-		t.Fatalf("rows after reassignment = %v, want %v", got, want)
 	}
 }

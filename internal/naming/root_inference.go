@@ -320,7 +320,7 @@ func extractPathEvidence(filePath string, libraryType string, libraryRoots ...st
 		}
 	}
 
-	rootPath := parentDir
+	var rootPath string
 	var seriesContext *PathContext
 	if inferredType == "series" {
 		seriesContext = ResolvePathContext(cleanFilePath, libraryType, libraryRoot)

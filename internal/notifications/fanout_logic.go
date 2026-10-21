@@ -22,14 +22,25 @@ func EvaluateRecipient(interest SeriesInterest, prefs Preferences, episodeKey in
 	if interest.LastNotifiedEpisodeKey != nil && *interest.LastNotifiedEpisodeKey >= episodeKey {
 		return ReasonFlags{}, false
 	}
-	flags := ReasonFlags{
+	flags := ActiveReasons(interest, prefs)
+	flags.NextUp = flags.NextUp && episodeKey >= *interest.NextExpectedEpisodeKey
+	return flags, flags.Any()
+}
+
+// ActiveReasons is the part of the eligibility rules that does not depend on
+// a release event: the interest reasons the profile's preferences let notify.
+// A Next Up reason counts only once the row knows the episode it waits for;
+// EvaluateRecipient then matches it against each event's episode key.
+func ActiveReasons(interest SeriesInterest, prefs Preferences) ReasonFlags {
+	if !prefs.Enabled {
+		return ReasonFlags{}
+	}
+	return ReasonFlags{
 		Favorite:         interest.Favorite && prefs.NotifyFavorites,
 		Watchlist:        interest.Watchlist && prefs.NotifyWatchlist,
 		ContinueWatching: interest.ContinueWatching && prefs.NotifyContinueWatching,
-		NextUp: interest.NextUpCandidate && prefs.NotifyNextUp &&
-			interest.NextExpectedEpisodeKey != nil && episodeKey >= *interest.NextExpectedEpisodeKey,
+		NextUp:           interest.NextUpCandidate && prefs.NotifyNextUp && interest.NextExpectedEpisodeKey != nil,
 	}
-	return flags, flags.Any()
 }
 
 // PartitionEventsByKind splits claimed events into episode events (which fan

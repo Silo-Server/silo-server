@@ -104,16 +104,8 @@ func newCopySafetyFixture(t *testing.T) (*SessionManager, *RealtimeHub, *Command
 // until it reports back.
 func TestCopySafetyNotifierPushesPlanInvalidated(t *testing.T) {
 	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if err := sessions.SetRealtimeConnection(session.ID, true); err != nil {
-		t.Fatalf("SetRealtimeConnection: %v", err)
-	}
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
+	conn := connectRealtimeTestConn(t, sessions, hub, session.ID)
 
 	attempts := &fakeAttemptLookup{records: map[string]*AttemptRecordV3{
 		session.ID: remuxAttempt(session.ID, "plan-abc", FeaturePlanInvalidatedV3),
@@ -171,18 +163,13 @@ func TestCopySafetyNotifierStopsSessionsItCannotTell(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sessions, hub, tracker, control := newCopySafetyFixture(t)
-			session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-			if err != nil {
-				t.Fatalf("StartSession: %v", err)
-			}
+			session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
+			conn := listenRealtimeTestConn(t, hub, session.ID)
 			if tc.connected {
 				if err := sessions.SetRealtimeConnection(session.ID, true); err != nil {
 					t.Fatalf("SetRealtimeConnection: %v", err)
 				}
 			}
-			conn := &dispatchTestConn{}
-			reg := hub.Register(session.ID, conn)
-			defer hub.Unregister(reg)
 
 			attempts := &fakeAttemptLookup{records: map[string]*AttemptRecordV3{}}
 			if tc.attempt {
@@ -207,18 +194,9 @@ func TestCopySafetyNotifierStopsSessionsItCannotTell(t *testing.T) {
 // transcode is already safe, and a direct play never repackages into fMP4.
 func TestCopySafetyNotifierIgnoresNonCopyRoutes(t *testing.T) {
 	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	transcoding, err := sessions.StartSession(1, "profile-1", 100, PlayTranscode, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	direct, err := sessions.StartSession(2, "profile-2", 100, PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	otherFile, err := sessions.StartSession(3, "profile-3", 101, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	transcoding := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayTranscode)
+	direct := startPlaybackTestSession(t, sessions, 2, "profile-2", 100, PlayDirect)
+	otherFile := startPlaybackTestSession(t, sessions, 3, "profile-3", 101, PlayRemux)
 
 	transcodeAttempt := remuxAttempt(transcoding.ID, "plan-transcode", FeaturePlanInvalidatedV3)
 	transcodeAttempt.CurrentPlan.Delivery = DeliveryTranscodeHLSV3
@@ -248,14 +226,8 @@ func TestCopySafetyNotifierIgnoresNonCopyRoutes(t *testing.T) {
 // it can be told nothing.
 func TestCopySafetyNotifierUsesSessionPlayMethodWithoutAnAttempt(t *testing.T) {
 	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	remuxing, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	transcoding, err := sessions.StartSession(2, "profile-2", 100, PlayTranscode, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	remuxing := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
+	transcoding := startPlaybackTestSession(t, sessions, 2, "profile-2", 100, PlayTranscode)
 
 	notifier := NewCopySafetyNotifier(sessions, nil, NewCommandDispatcher(sessions, hub, tracker), control)
 	notifier.settle = 0
@@ -280,10 +252,7 @@ func TestCopySafetyNotifierLeavesJellyfinCompatSessionsAlone(t *testing.T) {
 	if !compat.IsJellyfinCompat {
 		t.Fatal("fixture session is not a compat session; the test would prove nothing")
 	}
-	native, err := sessions.StartSession(2, "profile-2", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	native := startPlaybackTestSession(t, sessions, 2, "profile-2", 100, PlayRemux)
 
 	notifier := NewCopySafetyNotifier(sessions, nil, NewCommandDispatcher(sessions, hub, tracker), control)
 	notifier.settle = 0
@@ -301,13 +270,8 @@ func TestCopySafetyNotifierLeavesJellyfinCompatSessionsAlone(t *testing.T) {
 // built: the notifier waits out the settle window and looks again.
 func TestCopySafetyNotifierWaitsOutTheSettleWindowBeforeStopping(t *testing.T) {
 	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
+	conn := listenRealtimeTestConn(t, hub, session.ID)
 
 	attempts := &fakeAttemptLookup{records: map[string]*AttemptRecordV3{}}
 	notifier := NewCopySafetyNotifier(sessions, attempts, NewCommandDispatcher(sessions, hub, tracker), control)
@@ -346,25 +310,13 @@ func TestCopySafetyNotifierWaitsOutTheSettleWindowBeforeStopping(t *testing.T) {
 // window later than an already-settled one.
 func TestCopySafetyNotifierStopsAfterTheSettleWindow(t *testing.T) {
 	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 	notifier := NewCopySafetyNotifier(sessions, nil, NewCommandDispatcher(sessions, hub, tracker), control)
 	notifier.settle = 20 * time.Millisecond
 
 	notifier.VideoCopyUnsafe(context.Background(), 100)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if stopped := control.stoppedSessions(); len(stopped) == 1 && stopped[0] == session.ID {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("stopped = %v, want the unreachable session terminated after the settle window", control.stoppedSessions())
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForStop(t, control, session.ID)
 }
 
 // The session lookup also matches the requested file, which after a 4K guard or
@@ -376,12 +328,7 @@ func TestCopySafetyNotifierIgnoresSessionsServingAnotherFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSessionWithFiles: %v", err)
 	}
-	if err := sessions.SetRealtimeConnection(session.ID, true); err != nil {
-		t.Fatalf("SetRealtimeConnection: %v", err)
-	}
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
+	conn := connectRealtimeTestConn(t, sessions, hub, session.ID)
 
 	record := remuxAttempt(session.ID, "plan-abc", FeaturePlanInvalidatedV3)
 	record.RequestedMediaFileID = 10
@@ -410,16 +357,8 @@ func TestCopySafetyNotifierIgnoresSessionsServingAnotherFile(t *testing.T) {
 // its session, so it cannot keep decoding a stream the server withdrew.
 func TestCopySafetyNotifierDeadlineStopsUnansweredSession(t *testing.T) {
 	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if err := sessions.SetRealtimeConnection(session.ID, true); err != nil {
-		t.Fatalf("SetRealtimeConnection: %v", err)
-	}
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
+	conn := connectRealtimeTestConn(t, sessions, hub, session.ID)
 
 	attempts := &fakeAttemptLookup{records: map[string]*AttemptRecordV3{
 		session.ID: remuxAttempt(session.ID, "plan-abc", FeaturePlanInvalidatedV3),
@@ -432,16 +371,7 @@ func TestCopySafetyNotifierDeadlineStopsUnansweredSession(t *testing.T) {
 	if len(conn.messages) != 1 {
 		t.Fatalf("messages = %d, want the command delivered first", len(conn.messages))
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if stopped := control.stoppedSessions(); len(stopped) == 1 && stopped[0] == session.ID {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("stopped = %v, want the unanswered session terminated by the deadline", control.stoppedSessions())
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForStop(t, control, session.ID)
 	// An acked-then-completed command cancels the deadline; here nothing
 	// answered, so the tracker must have released the command as well.
 	if _, tracked := tracker.Status("unused"); tracked {
@@ -453,16 +383,8 @@ func TestCopySafetyNotifierDeadlineStopsUnansweredSession(t *testing.T) {
 // replanned itself.
 func TestCopySafetyNotifierCompletedResultKeepsSession(t *testing.T) {
 	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if err := sessions.SetRealtimeConnection(session.ID, true); err != nil {
-		t.Fatalf("SetRealtimeConnection: %v", err)
-	}
-	conn := &dispatchTestConn{}
-	reg := hub.Register(session.ID, conn)
-	defer hub.Unregister(reg)
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
+	conn := connectRealtimeTestConn(t, sessions, hub, session.ID)
 
 	attempts := &fakeAttemptLookup{records: map[string]*AttemptRecordV3{
 		session.ID: remuxAttempt(session.ID, "plan-abc", FeaturePlanInvalidatedV3),
@@ -517,16 +439,7 @@ func TestCopySafetyNotifierSweepsSessionSkippedDuringAReplanCommit(t *testing.T)
 	committed.EffectiveMediaFileID = 11
 	attempts.set(session.ID, committed)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if stopped := control.stoppedSessions(); len(stopped) == 1 && stopped[0] == session.ID {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("stopped = %v, want the mid-replan session swept once its identities agreed", control.stoppedSessions())
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForStop(t, control, session.ID)
 }
 
 // The same hole on the route test rather than the file test: mid-commit the
@@ -534,10 +447,7 @@ func TestCopySafetyNotifierSweepsSessionSkippedDuringAReplanCommit(t *testing.T)
 // session reads as "not on a copy route" even though it is now remuxing.
 func TestCopySafetyNotifierSweepsSessionWhoseDurablePlanLagsTheRoute(t *testing.T) {
 	sessions, hub, tracker, control := newCopySafetyFixture(t)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	stale := remuxAttempt(session.ID, "plan-old")
 	stale.CurrentPlan.Delivery = DeliveryTranscodeHLSV3
@@ -555,16 +465,7 @@ func TestCopySafetyNotifierSweepsSessionWhoseDurablePlanLagsTheRoute(t *testing.
 	committed.CurrentPlan.Delivery = DeliveryRemuxProgressiveV3
 	attempts.set(session.ID, committed)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if stopped := control.stoppedSessions(); len(stopped) == 1 && stopped[0] == session.ID {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("stopped = %v, want the session swept once its durable plan caught up", control.stoppedSessions())
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForStop(t, control, session.ID)
 }
 
 // Regression for the scan winning the race against the start path by
@@ -582,19 +483,7 @@ func TestCopySafetyNotifierSweepsSessionsThatAppearAfterTheVerdict(t *testing.T)
 	notifier.VideoCopyUnsafe(context.Background(), 100)
 
 	// The start path finishes registering the session just after.
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if stopped := control.stoppedSessions(); len(stopped) == 1 && stopped[0] == session.ID {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("stopped = %v, want the late-registered session swept after the settle window", control.stoppedSessions())
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForStop(t, control, session.ID)
 }

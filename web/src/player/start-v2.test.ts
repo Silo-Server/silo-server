@@ -38,7 +38,6 @@ const fixtureStartRequestV3 = () =>
     qualityPreference: "auto",
     position: 0,
     forceStartPosition: false,
-    metered: false,
     clientCapabilities: fixtureClientCapabilitiesV3(),
     clientPlaybackContext: fixtureClientPlaybackContextV3(),
   });

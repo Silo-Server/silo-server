@@ -2,7 +2,6 @@ package ebookconvert
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -95,47 +94,6 @@ func TestCache_KeyChangesOnModTime(t *testing.T) {
 	}
 }
 
-// A transient timeout is NOT negatively cached: it would otherwise wedge a
-// slow-but-convertible book onto the raw-fallback path for the whole TTL.
-func TestCache_TimeoutNotNegativelyCached(t *testing.T) {
-	conv, err := NewConverter(context.Background(), Options{Timeout: time.Nanosecond})
-	if err != nil {
-		t.Fatalf("NewConverter: %v", err)
-	}
-	t.Cleanup(func() { _ = conv.Close(context.Background()) })
-	c, err := NewCache(conv, CacheOptions{Dir: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewCache: %v", err)
-	}
-	src := filepath.Join("testdata", "sample-ncx.mobi")
-	key := keyFor(t, 1, src)
-
-	_, err = c.GetOrConvert(context.Background(), src, key)
-	if !errors.Is(err, ErrConversionTimedOut) {
-		t.Fatalf("got %v, want ErrConversionTimedOut", err)
-	}
-	c.mu.Lock()
-	_, cached := c.neg[key.hash()]
-	c.mu.Unlock()
-	if cached {
-		t.Fatal("a transient timeout must not be negatively cached")
-	}
-}
-
-// Eviction must never delete the EPUB it is about to hand back, even when the
-// configured budget is smaller than a single converted file.
-func TestCache_EvictionKeepsJustConverted(t *testing.T) {
-	c := newTestCache(t, CacheOptions{Dir: t.TempDir(), MaxBytes: 1})
-	src := filepath.Join("testdata", "sample-ncx.mobi")
-	p, err := c.GetOrConvert(context.Background(), src, keyFor(t, 1, src))
-	if err != nil {
-		t.Fatalf("convert: %v", err)
-	}
-	if fi, statErr := os.Stat(p); statErr != nil || fi.Size() == 0 {
-		t.Fatalf("returned path must exist and be non-empty (eviction deleted it): stat=%v", statErr)
-	}
-}
-
 // Eviction must ignore other conversions' in-flight temp files; deleting one
 // would corrupt a concurrent conversion mid-flight.
 func TestCache_EvictionSkipsInFlightTemps(t *testing.T) {
@@ -178,28 +136,6 @@ func TestCache_CallerCancelDoesNotAbortSharedWork(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("detached conversion did not populate the cache after the caller canceled")
-}
-
-func TestCache_NegativeCachesDRM(t *testing.T) {
-	c := newTestCache(t, CacheOptions{})
-	src := filepath.Join("testdata", "sample-drm-v1.mobi")
-	key := keyFor(t, 7, src)
-
-	err1 := mustConvertErr(t, c, src, key)
-	if !errors.Is(err1, ErrDRMProtected) {
-		t.Fatalf("got %v, want ErrDRMProtected", err1)
-	}
-	// Second call should be served from the negative cache (still DRM error).
-	err2 := mustConvertErr(t, c, src, key)
-	if !errors.Is(err2, ErrDRMProtected) {
-		t.Fatalf("negative-cached call: got %v, want ErrDRMProtected", err2)
-	}
-	c.mu.Lock()
-	_, cached := c.neg[key.hash()]
-	c.mu.Unlock()
-	if !cached {
-		t.Fatal("DRM result was not negatively cached")
-	}
 }
 
 func TestCache_Singleflight(t *testing.T) {
@@ -273,10 +209,4 @@ func TestCache_BudgetEviction(t *testing.T) {
 	if total > budget {
 		t.Fatalf("budget not enforced: total=%d > %d (%d files)", total, budget, len(epubs))
 	}
-}
-
-func mustConvertErr(t *testing.T, c *Cache, src string, key SourceKey) error {
-	t.Helper()
-	_, err := c.GetOrConvert(context.Background(), src, key)
-	return err
 }

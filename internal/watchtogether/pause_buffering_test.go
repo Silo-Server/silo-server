@@ -23,7 +23,9 @@ func TestPausedRoomIgnoresLateBuffering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.PlaybackState != RoomPlaybackStatePaused || snapshot.Generation != paused.Generation || snapshot.AnchorPositionSeconds != 120 || len(conn.payloads) != frames {
+	// The room played on until the pause executed, so it paused one lead later.
+	pausedAt := 120 + defaultTransportLead.Seconds()
+	if snapshot.PlaybackState != RoomPlaybackStatePaused || snapshot.Generation != paused.Generation || snapshot.AnchorPositionSeconds != pausedAt || len(conn.payloads) != frames {
 		t.Fatalf("late buffering reopened paused room: %+v", snapshot)
 	}
 }

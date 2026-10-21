@@ -52,12 +52,17 @@ type ExecutableRecipeV3 struct {
 	ExternalSubtitlePath string `json:"external_subtitle_path,omitempty"`
 	EmbeddedStreamIndex  int    `json:"embedded_stream_index,omitempty"`
 	DownloadedSubtitleID int    `json:"downloaded_subtitle_id,omitempty"`
+	// SubtitleRendition emits the selected subtitle as the transcode's HLS
+	// subtitle rendition. It needs version 4 so a binary that predates it
+	// rejects the recipe instead of reopening the transport without one.
+	SubtitleRendition bool `json:"subtitle_rendition,omitempty"`
 }
 
 const (
-	executableRecipeVersionLegacyV3      = 1
-	executableRecipeVersionV3            = 2
-	executableRecipeVersionSourceAudioV3 = 3
+	executableRecipeVersionLegacyV3            = 1
+	executableRecipeVersionV3                  = 2
+	executableRecipeVersionSourceAudioV3       = 3
+	executableRecipeVersionSubtitleRenditionV3 = 4
 )
 
 // FreezeExecutableRecipeV3 captures the byte-affecting facts from a planner result.
@@ -103,12 +108,16 @@ func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 		SubtitleBurnIn:                result.SubtitleBurnIn,
 		SubtitleCodec:                 result.SubtitleCodec,
 		DownloadedSubtitleID:          result.DownloadedSubtitleID,
+		SubtitleRendition:             result.SubtitleRendition,
 	}
 	if recipe.hasVersion2Fields() {
 		recipe.Version = executableRecipeVersionV3
 	}
 	if recipe.hasVersion3Fields() {
 		recipe.Version = executableRecipeVersionSourceAudioV3
+	}
+	if recipe.hasVersion4Fields() {
+		recipe.Version = executableRecipeVersionSubtitleRenditionV3
 	}
 	return recipe
 }
@@ -130,13 +139,21 @@ func (r ExecutableRecipeV3) hasVersion3Fields() bool {
 	return r.SourceAudioChannels != 0
 }
 
+func (r ExecutableRecipeV3) hasVersion4Fields() bool {
+	return r.SubtitleRendition
+}
+
 // Valid reports whether an executable recipe is complete and internally consistent.
 func (r ExecutableRecipeV3) Valid() bool {
-	if (r.Version != executableRecipeVersionLegacyV3 && r.Version != executableRecipeVersionV3 && r.Version != executableRecipeVersionSourceAudioV3) || r.PlanID == "" || r.SourceAudioChannels < 0 {
+	if r.Version < executableRecipeVersionLegacyV3 || r.Version > executableRecipeVersionSubtitleRenditionV3 || r.PlanID == "" || r.SourceAudioChannels < 0 {
 		return false
 	}
 	if (r.Version == executableRecipeVersionLegacyV3 && r.hasVersion2Fields()) ||
-		(r.Version < executableRecipeVersionSourceAudioV3 && r.hasVersion3Fields()) {
+		(r.Version < executableRecipeVersionSourceAudioV3 && r.hasVersion3Fields()) ||
+		(r.Version < executableRecipeVersionSubtitleRenditionV3 && r.hasVersion4Fields()) {
+		return false
+	}
+	if r.SubtitleRendition && (r.PlayMethod != PlayTranscode || r.SubtitleBurnIn || r.SubtitleTransportTrackIndex < 0) {
 		return false
 	}
 	hasToneMapField := r.ToneMapPolicy != "" || r.ToneMapMode != "" || r.ToneMapSourceKind != "" || r.ToneMapRecipeVersion != "" || r.ToneMapPreflightRequired || !r.ToneMapSourceRevision.IsZero()
@@ -194,6 +211,7 @@ func (r ExecutableRecipeV3) PlannerResult(plan *PlanV3) PlannerResultV3 {
 		SubtitleTransportTrackIndex: r.SubtitleTransportTrackIndex,
 		SubtitleBurnIn:              r.SubtitleBurnIn,
 		SubtitleCodec:               r.SubtitleCodec,
+		SubtitleRendition:           r.SubtitleRendition,
 		DownloadedSubtitleID:        r.DownloadedSubtitleID,
 	}
 }

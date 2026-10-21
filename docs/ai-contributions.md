@@ -19,10 +19,15 @@ developed is not part of the review summary.
 ## Before submitting
 
 Read the complete diff and be able to explain its behavior and tradeoffs. Verify
-that referenced APIs, configuration, schemas, commands, and paths exist. Add and
-run focused tests for changed behavior, run the
+that referenced APIs, configuration, schemas, commands, and paths exist. Run
+focused tests for changed behavior, run the
 [validation gate](../CONTRIBUTING.md#validate-your-change) against the complete
 diff, and exercise user-facing behavior manually when practical.
+
+Add tests only where [Decide what to test](../CONTRIBUTING.md#decide-what-to-test)
+calls for them. Coding agents tend to add a test for every change and to test
+the same behavior at every layer. Hold agent-written tests to that section and
+delete the ones that don't meet it before you submit.
 
 Review effects beyond the edited files, including security regressions and
 interactions between components. Run an independent or adversarial review and

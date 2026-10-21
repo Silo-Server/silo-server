@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -51,6 +52,12 @@ type ProfileHandler struct {
 	// titles outside the library, and the titles no profile keeps any more.
 	// They live in Postgres whichever store holds the profile.
 	WatchlistTitlesPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
+	// EbookReaderPurger removes a deleted profile's ebook reading progress,
+	// reader settings and annotations, which live in Postgres whichever
+	// store holds the profile.
+	EbookReaderPurger interface {
 		PurgeProfile(ctx context.Context, userID int, profileID string) error
 	}
 	// RecommendationsPurger removes a deleted profile's ratings, taste
@@ -352,6 +359,9 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	if strings.TrimSpace(req.Name) == "" {
 		return none, fieldError("name", "Profile name is required")
 	}
+	if len(req.PIN) > 72 {
+		return none, fieldError("pin", "PIN must be at most 72 bytes")
+	}
 	avatarRef, err := normalizePresetAvatarReference(req.Avatar)
 	if err != nil {
 		return none, fieldError("avatar", err.Error())
@@ -429,12 +439,24 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		showForcedSubtitles = *req.ShowForcedSubtitles
 	}
 
+	// Prepare PIN protection before the transaction publishes the profile. A
+	// failed hash must not leave behind a profile that can be used without proof.
+	var pinHash string
+	if req.PIN != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.PIN), bcrypt.DefaultCost)
+		if err != nil {
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
+		}
+		pinHash = string(hash)
+	}
+
 	profileID := uuid.New().String()
 	profile := userstore.Profile{
 		ID: profileID,
 		// Store the trimmed form the conflict check compared, so " Laura "
 		// doesn't persist with stray whitespace.
 		Name:                       strings.TrimSpace(req.Name),
+		PINHash:                    pinHash,
 		Avatar:                     avatarRef,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
@@ -468,20 +490,6 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 	created := *createdPtr
 
-	// If PIN was provided, update the profile to set it.
-	if req.PIN != "" {
-		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
-			PIN: &req.PIN,
-		}); err != nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
-		}
-		// Re-read the profile to get the updated state.
-		p, err := store.GetProfile(ctx, created.ID)
-		if err != nil || p == nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve profile after PIN set")
-		}
-		created = *p
-	}
 	if req.ShowForcedSubtitles != nil && !*req.ShowForcedSubtitles {
 		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
 			ShowForcedSubtitles: req.ShowForcedSubtitles,
@@ -814,6 +822,13 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		defer cancel()
 		if purgeErr := h.WatchlistTitlesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
 			slog.WarnContext(ctx, "profile watchlist-title purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	if h.EbookReaderPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.EbookReaderPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile ebook reader purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
 	if h.RecommendationsPurger != nil {

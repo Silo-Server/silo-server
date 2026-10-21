@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useFavorites } from "@/hooks/queries/favorites";
 import { useOnboardingFlow } from "@/hooks/queries/onboarding";
 import { TourHost } from "@/components/onboarding/TourHost";
+import { NotInterestedList } from "@/components/settings/NotInterestedList";
 
 /**
  * Re-entry point for the taste-seeding flow. Always links to /taste-seed —
@@ -50,6 +51,8 @@ export default function PersonalizeSettings() {
           </div>
         </div>
       </div>
+
+      <NotInterestedList />
 
       <div className="surface-panel rounded-2xl border-0 p-6">
         <div className="flex items-start gap-4">

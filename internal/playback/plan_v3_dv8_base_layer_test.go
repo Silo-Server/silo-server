@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -83,35 +84,57 @@ func TestPlanPlaybackV3DV8BaseLayerClaimUsesHLGForCompat4(t *testing.T) {
 	if result.Plan == nil || result.Plan.DecisionReason != decisionReasonClientDV8BaseLayerV3 || result.Plan.EffectiveRecipe.DynamicRange != DynamicRangeHLGV3 {
 		t.Fatalf("expected an HLG base-layer plan: %s", ExplainPlannerResultV3(result))
 	}
-	// Without HLG on the output the HLG base cannot be promised.
-	result = planDV8V3(t, file, dv8BaseLayerRequestV3(&HDRCapabilitiesV3{HDR10: true}))
-	if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
-		t.Fatalf("HLG base layer was promised on an output without HLG: %#v", result.Plan)
-	}
 }
 
-func TestPlanPlaybackV3DV8BaseLayerClaimFailsClosedOnUnsupportedCompatIDs(t *testing.T) {
+// The narrow base-layer claim fails closed: only a proven single-layer
+// Profile 8 base with compat id 1 (HDR10) or 4 (HLG, on an HLG output) takes
+// it, and only on original_http.
+func TestPlanPlaybackV3DV8BaseLayerClaimRefusals(t *testing.T) {
+	hdr10 := &HDRCapabilitiesV3{HDR10: true}
+	hdr10HLG := &HDRCapabilitiesV3{HDR10: true, HLG: true}
+	type refusal struct {
+		name       string
+		compatID   int
+		output     *HDRCapabilitiesV3
+		mutateFile func(*models.VideoTrack)
+		mutateReq  func(*StartRequestV3)
+	}
+	tests := []refusal{
+		// Without HLG on the output the HLG base cannot be promised.
+		{name: "compat 4 without HLG output", compatID: 4, output: hdr10},
+		{name: "profile 5", compatID: 1, output: hdr10, mutateFile: func(track *models.VideoTrack) { track.DVProfile = 5 }},
+		{name: "enhancement layer present", compatID: 1, output: hdr10, mutateFile: func(track *models.VideoTrack) { track.DVELPresent = true }},
+		{name: "unproven compatibility id", compatID: 1, output: hdr10, mutateFile: func(track *models.VideoTrack) { track.DVBLCompatIDPresent = false }},
+		{name: "absent base layer", compatID: 1, output: hdr10, mutateFile: func(track *models.VideoTrack) { track.DVBLPresent = false }},
+		{name: "claim on packaged deliveries only", compatID: 1, output: hdr10, mutateReq: func(req *StartRequestV3) {
+			direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+			direct.Enabled = false
+			req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+			for _, class := range []string{DeliveryClassProgressiveV3, DeliveryClassHLSV3} {
+				packaged := req.ClientPlaybackContext.Deliveries[class]
+				packaged.ValidatedClaims = append(packaged.ValidatedClaims, ClaimClientDV8BaseLayerFallbackV3)
+				req.ClientPlaybackContext.Deliveries[class] = packaged
+			}
+		}},
+	}
 	for _, compatID := range []int{0, 3, 5, 6, 7} {
-		file := dv8BaseLayerFixtureV3(compatID)
-		result := planDV8V3(t, file, dv8BaseLayerRequestV3(&HDRCapabilitiesV3{HDR10: true, HLG: true}))
-		if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
-			t.Fatalf("compat id %d must not take the base-layer route: %#v", compatID, result.Plan)
-		}
+		tests = append(tests, refusal{name: fmt.Sprintf("unsupported compat id %d", compatID), compatID: compatID, output: hdr10HLG})
 	}
-}
-
-func TestPlanPlaybackV3DV8BaseLayerClaimRequiresProfile8SingleLayer(t *testing.T) {
-	file := dv8BaseLayerFixtureV3(1)
-	file.VideoTracks[0].DVProfile = 5
-	result := planDV8V3(t, file, dv8BaseLayerRequestV3(&HDRCapabilitiesV3{HDR10: true}))
-	if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
-		t.Fatalf("Profile 5 must not take the base-layer route: %#v", result.Plan)
-	}
-	file = dv8BaseLayerFixtureV3(1)
-	file.VideoTracks[0].DVELPresent = true
-	result = planDV8V3(t, file, dv8BaseLayerRequestV3(&HDRCapabilitiesV3{HDR10: true}))
-	if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
-		t.Fatalf("a source with an enhancement layer must not take the base-layer route: %#v", result.Plan)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := dv8BaseLayerFixtureV3(tt.compatID)
+			if tt.mutateFile != nil {
+				tt.mutateFile(&file.VideoTracks[0])
+			}
+			req := dv8BaseLayerRequestV3(tt.output)
+			if tt.mutateReq != nil {
+				tt.mutateReq(&req)
+			}
+			result := planDV8V3(t, file, req)
+			if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
+				t.Fatalf("must not take the base-layer route: %#v", result.Plan)
+			}
+		})
 	}
 }
 
@@ -123,67 +146,48 @@ func TestPlanPlaybackV3NativeDolbyVisionWinsOverBaseLayerClaim(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3BaseLayerClaimDoesNotTransferToPackagedDeliveries(t *testing.T) {
-	file := dv8BaseLayerFixtureV3(1)
-	req := dv8BaseLayerRequestV3(&HDRCapabilitiesV3{HDR10: true})
-	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-	direct.Enabled = false
-	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
-	for _, class := range []string{DeliveryClassProgressiveV3, DeliveryClassHLSV3} {
-		packaged := req.ClientPlaybackContext.Deliveries[class]
-		packaged.ValidatedClaims = append(packaged.ValidatedClaims, ClaimClientDV8BaseLayerFallbackV3)
-		req.ClientPlaybackContext.Deliveries[class] = packaged
-	}
-	result := planDV8V3(t, file, req)
-	if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
-		t.Fatalf("the base-layer claim is original_http only: %#v", result.Plan)
-	}
-}
-
-func TestPlanPlaybackV3UnknownDisplayEvidenceFailsClosedForNativeHDR(t *testing.T) {
-	file := detailedFixtureFileV3() // plain HDR10 source
+// hdr10NativeRequestV3 is a client with an exact-tier HEVC Main 10 decoder
+// and decoder-scoped HDR10 whose original_http delivery takes the 4K HDR10
+// fixture as-is, so only the output and display facts decide native HDR10.
+func hdr10NativeRequestV3(output *HDRCapabilitiesV3, display *OutputDisplayV3) StartRequestV3 {
 	req := validStartRequestV3()
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceUnknownV3}
+	req.ClientPlaybackContext.Output.HDRDetails = output
+	req.ClientPlaybackContext.Output.Display = display
 	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
 	direct.Containers = []string{"mkv"}
 	direct.VideoCodecs = []string{"hevc"}
 	direct.AudioDecodeCodecs = []string{"aac"}
 	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
+	return req
+}
 
-	result := planDV8V3(t, file, req)
-	if result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 && result.Plan.Claims.Video.HDR10 {
+func planNativeHDR10V3(t *testing.T, req StartRequestV3) (PlannerResultV3, bool) {
+	t.Helper()
+	result := planDV8V3(t, detailedFixtureFileV3(), req) // plain 4K HDR10 source
+	return result, result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 && result.Plan.Claims.Video.HDR10
+}
+
+func TestPlanPlaybackV3UnknownDisplayEvidenceFailsClosedForNativeHDR(t *testing.T) {
+	req := hdr10NativeRequestV3(&HDRCapabilitiesV3{HDR10: true}, &OutputDisplayV3{HDREvidence: OutputHDREvidenceUnknownV3})
+	if result, native := planNativeHDR10V3(t, req); native {
 		t.Fatalf("unknown display evidence must not earn a native HDR10 claim: %#v", result.Plan)
 	}
 
 	// The same request with exact evidence and matching panel facts keeps
 	// the native route.
 	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{HDR10: true}}
-	result = planDV8V3(t, file, req)
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10 {
+	if result, native := planNativeHDR10V3(t, req); !native {
 		t.Fatalf("exact display evidence should keep native HDR10 direct play: %s", ExplainPlannerResultV3(result))
 	}
 }
 
 func TestPlanPlaybackV3DisplayEvidenceDisablesDeviceLevelFallback(t *testing.T) {
-	file := detailedFixtureFileV3()
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	// Decoder-scoped HDR10 but no output HDR facts at all, with the display
 	// evidence field present: a decoder fact must not become a native claim.
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = nil
-	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{}}
-	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-	direct.Containers = []string{"mkv"}
-	direct.VideoCodecs = []string{"hevc"}
-	direct.AudioDecodeCodecs = []string{"aac"}
-	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
-
-	result := planDV8V3(t, file, req)
-	if result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 && result.Plan.Claims.Video.HDR10 {
+	req := hdr10NativeRequestV3(nil, &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{}})
+	if result, native := planNativeHDR10V3(t, req); native {
 		t.Fatalf("device-level HDR must not be promoted to native output once display evidence is reported: %#v", result.Plan)
 	}
 }
@@ -203,39 +207,12 @@ func TestStartRequestV3RejectsInvalidDisplayEvidence(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3DV8BaseLayerRequiresProvenBaseLayerMetadata(t *testing.T) {
-	file := dv8BaseLayerFixtureV3(1)
-	file.VideoTracks[0].DVBLCompatIDPresent = false
-	result := planDV8V3(t, file, dv8BaseLayerRequestV3(&HDRCapabilitiesV3{HDR10: true}))
-	if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
-		t.Fatalf("an unproven compatibility id must not take the base-layer route: %#v", result.Plan)
-	}
-	file = dv8BaseLayerFixtureV3(1)
-	file.VideoTracks[0].DVBLPresent = false
-	result = planDV8V3(t, file, dv8BaseLayerRequestV3(&HDRCapabilitiesV3{HDR10: true}))
-	if result.Plan != nil && result.Plan.DecisionReason == decisionReasonClientDV8BaseLayerV3 {
-		t.Fatalf("an absent base layer must not take the base-layer route: %#v", result.Plan)
-	}
-}
-
 func TestPlanPlaybackV3ExactSDRDisplayNarrowsContradictoryOutputHDR(t *testing.T) {
-	file := detailedFixtureFileV3()
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{}}
-	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-	direct.Containers = []string{"mkv"}
-	direct.VideoCodecs = []string{"hevc"}
-	direct.AudioDecodeCodecs = []string{"aac"}
-	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
-
+	req := hdr10NativeRequestV3(&HDRCapabilitiesV3{HDR10: true}, &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{}})
 	if _, err := req.NormalizeAndValidate(); err == nil {
 		t.Fatal("a contradiction between exact display and output hdr_details must be rejected at validation")
 	}
-	result := planDV8V3(t, file, req)
-	if result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 && result.Plan.Claims.Video.HDR10 {
+	if result, native := planNativeHDR10V3(t, req); native {
 		t.Fatalf("an exact SDR panel must not authorize native HDR10 through hdr_details: %#v", result.Plan)
 	}
 }
@@ -317,21 +294,10 @@ func TestNativeOutputHDRV3IntersectsDolbyVisionCompatibilityIDs(t *testing.T) {
 }
 
 func TestPlanPlaybackV3ExactPanelHDR10CeilingGatesNativeRouteWithoutDeliveryBounds(t *testing.T) {
-	file := detailedFixtureFileV3() // 4K HDR10
-	req := validStartRequestV3()
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920, HDR10MaxHeight: 1080}
-	req.ClientPlaybackContext.Output.Display = &OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920, HDR10MaxHeight: 1080}}
-	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
-	direct.Containers = []string{"mkv"}
-	direct.VideoCodecs = []string{"hevc"}
-	direct.AudioDecodeCodecs = []string{"aac"}
-	direct.HDRDetails = nil // delivery omits its own bounds
-	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
-
-	result := planDV8V3(t, file, req)
-	if result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 && result.Plan.Claims.Video.HDR10 {
+	// The delivery omits its own bounds.
+	req := hdr10NativeRequestV3(&HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920, HDR10MaxHeight: 1080},
+		&OutputDisplayV3{HDREvidence: OutputHDREvidenceExactV3, HDRTypes: &HDRCapabilitiesV3{HDR10: true, HDR10MaxWidth: 1920, HDR10MaxHeight: 1080}})
+	if result, native := planNativeHDR10V3(t, req); native {
 		t.Fatalf("a 4K HDR10 source must not be planned natively on a panel capped at 1080p HDR10: %#v", result.Plan)
 	}
 }

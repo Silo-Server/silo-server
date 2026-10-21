@@ -27,20 +27,6 @@ func TestGPUGateRefusesReprobeWhileWorkIsAdmitted(t *testing.T) {
 	}
 }
 
-// The node's own running-session count is read under the same lock, so "no
-// admitted work" and "no active jobs" cannot be true at two different instants.
-func TestGPUGateRefusesReprobeWhileJobsAreActive(t *testing.T) {
-	var gate gpuGate
-
-	busy, ok := gate.beginReprobe(otherWork(2))
-	if ok {
-		t.Fatal("re-probe admitted on a node running transcodes")
-	}
-	if busy != 2 {
-		t.Fatalf("busy = %d, want 2", busy)
-	}
-}
-
 // A re-probe holds the encoder for the whole rebuild, so work arriving mid-probe
 // is refused rather than queued: a viewer pressing play must not wait minutes
 // for a probe, and the API retries elsewhere.

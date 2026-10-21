@@ -9,13 +9,22 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 var ErrConnectionTestUnsupported = errors.New("plugin connection test unsupported")
+
+// Capability types a connection check can probe.
+const (
+	metadataProviderCapability = "metadata_provider.v1"
+	markerProviderCapability   = "marker_provider.v1"
+)
 
 type ConnectionTestError struct {
 	Message string
@@ -41,11 +50,14 @@ func runPluginConnectionCheck(
 	client pluginClient,
 	manifest *pluginv1.PluginManifest,
 ) error {
-	capabilityID, err := metadataProviderConnectionCheckCapabilityID(manifest)
+	capability, err := connectionCheckCapability(manifest)
 	if err != nil {
 		return err
 	}
-	capability := metadataProviderConnectionCheckCapability(manifest, capabilityID)
+	capabilityID := capability.GetId()
+	if capability.GetType() == markerProviderCapability {
+		return runMarkerProviderConnectionCheck(ctx, client, capabilityID)
+	}
 	if !metadataProviderSupportsConnectionProbe(capability, "movie") {
 		slog.DebugContext(ctx,
 			"skipping metadata provider connection check for unsupported probe type", "component", "plugins",
@@ -119,7 +131,7 @@ func (s *Service) TestGlobalConfigWithClears(
 	if err != nil {
 		return err
 	}
-	if _, err := metadataProviderConnectionCheckCapabilityID(manifest); err != nil {
+	if _, err := connectionCheckCapability(manifest); err != nil {
 		return err
 	}
 
@@ -271,26 +283,47 @@ func cloneConfigMap(value map[string]any) map[string]any {
 	return cloned
 }
 
-func metadataProviderConnectionCheckCapabilityID(manifest *pluginv1.PluginManifest) (string, error) {
-	for _, capability := range manifest.GetCapabilities() {
-		if capability.GetType() != "metadata_provider.v1" {
-			continue
+// connectionCheckCapability picks the capability a connection check probes: the
+// plugin's first metadata provider, or else its first marker provider.
+func connectionCheckCapability(manifest *pluginv1.PluginManifest) (*pluginv1.CapabilityDescriptor, error) {
+	for _, capabilityType := range []string{metadataProviderCapability, markerProviderCapability} {
+		for _, capability := range manifest.GetCapabilities() {
+			if capability.GetType() == capabilityType {
+				return capability, nil
+			}
 		}
-		return capability.GetId(), nil
 	}
-	return "", &ConnectionTestError{
-		Message: "Connection checks are not supported for this plugin yet.",
+	return nil, &ConnectionTestError{
+		Message: connectionCheckUnsupportedMessage,
 		Cause:   ErrConnectionTestUnsupported,
 	}
 }
 
-func metadataProviderConnectionCheckCapability(
-	manifest *pluginv1.PluginManifest,
-	capabilityID string,
-) *pluginv1.CapabilityDescriptor {
-	for _, capability := range manifest.GetCapabilities() {
-		if capability.GetType() == "metadata_provider.v1" && capability.GetId() == capabilityID {
-			return capability
+const connectionCheckUnsupportedMessage = "Connection checks are not supported for this plugin yet."
+
+// runMarkerProviderConnectionCheck asks a marker provider for its account
+// statistics, which need the provider's credentials, so a success shows that
+// the staged settings authenticate. A provider without statistics has no
+// check to run.
+func runMarkerProviderConnectionCheck(ctx context.Context, client pluginClient, capabilityID string) error {
+	markerClient, err := client.MarkerProvider(capabilityID)
+	if err != nil {
+		return &ConnectionTestError{
+			Message: fmt.Sprintf("Failed to initialize the marker provider: %v", err),
+			Cause:   err,
+		}
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	if _, err := markerClient.GetMarkerProviderStats(probeCtx, &pluginv1.GetMarkerProviderStatsRequest{}); err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return &ConnectionTestError{Message: connectionCheckUnsupportedMessage, Cause: ErrConnectionTestUnsupported}
+		}
+		return &ConnectionTestError{
+			Message: "Connection check failed: " + status.Convert(err).Message(),
+			Cause:   err,
 		}
 	}
 	return nil
