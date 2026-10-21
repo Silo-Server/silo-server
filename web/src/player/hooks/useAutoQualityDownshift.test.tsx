@@ -11,7 +11,6 @@ const plan: BufferingPlan = {
 };
 beforeEach(() => {
   vi.useFakeTimers();
-  vi.setSystemTime(0);
 });
 afterEach(() => vi.useRealTimers());
 
@@ -148,7 +147,7 @@ it("does not treat an in-place update as a new adoption", () => {
   h.rerender(next);
   h.advance(1000);
   const deadline = h.result.current.pill?.deadlineMs;
-  expect(deadline).toBe(Date.now() + 14_000);
+  expect(deadline).toBe(performance.now() + 14_000);
   h.rerender({ ...next, plan: { ...next.plan } });
   h.advance(100);
   expect(h.result.current.pill?.deadlineMs).toBe(deadline);
