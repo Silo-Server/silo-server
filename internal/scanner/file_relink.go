@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -186,23 +185,15 @@ func pathMatchIdentityOf(filePath, folderType, libraryRoot string) pathMatchIden
 // fileGoneFromHealthyRoot reports whether filePath no longer exists under a
 // library root that answers and still holds entries. An unreachable root, or
 // an empty one (the signature of a lost mount), says nothing about whether the
-// file is still there, so it never counts as gone. The root and then the
-// file's directory are probed with a timeout first, so a dead mount anywhere
-// on the path cannot hang the scan; the final stat is of an entry in a
-// directory that was just listed.
+// file is still there, so it never counts as gone. Both checks go through
+// rootcheck's bounded, per-path coalesced probe, so a dead mount anywhere on
+// the path cannot hang a scan worker; a probe that times out does not count
+// as gone.
 func fileGoneFromHealthyRoot(ctx context.Context, filePath, libraryRoot string) bool {
 	root := rootcheck.ProbeWithTimeout(ctx, libraryRoot, rootcheck.DefaultProbeTimeout)
 	if !root.Reachable || root.Empty {
 		return false
 	}
-	dir := rootcheck.ProbeWithTimeout(ctx, filepath.Dir(filePath), rootcheck.DefaultProbeTimeout)
-	if dir.ErrorCode == rootcheck.ErrCodeNotFound {
-		// The whole directory went, as when a title's folder is moved.
-		return true
-	}
-	if !dir.Reachable {
-		return false
-	}
-	_, err := os.Lstat(filePath)
-	return errors.Is(err, os.ErrNotExist)
+	file := rootcheck.ProbeWithTimeout(ctx, filePath, rootcheck.DefaultProbeTimeout)
+	return file.ErrorCode == rootcheck.ErrCodeNotFound
 }
