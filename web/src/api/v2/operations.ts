@@ -769,6 +769,7 @@ export const v2Operations = {
   "POST /api/v2/notifications/discord/link/init": "beginNotificationDiscordLink",
   "POST /api/v2/notifications/email/unsubscribe": "unsubscribeNotificationEmailOneClick",
   "POST /api/v2/notifications/push/devices": "registerPushDevice",
+  "POST /api/v2/notifications/push/devices/{device_id}/retire": "retirePushDevice",
   "POST /api/v2/notifications/read-all": "markNotificationsRead",
   "POST /api/v2/notifications/web-push/subscriptions": "subscribeNotificationWebPush",
   "POST /api/v2/notifications/web-push/unsubscribe": "unsubscribeNotificationWebPush",

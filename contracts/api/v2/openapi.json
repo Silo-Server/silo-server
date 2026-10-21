@@ -20484,6 +20484,28 @@
         ],
         "type": "object"
       },
+      "AndroidPushRetirementReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "description": "The retirement's generation, which is now the installation's newest intent.",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "removed": {
+            "description": "Always true: the server delivers nothing to this installation until it registers again with a higher generation.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "generation",
+          "removed"
+        ],
+        "type": "object"
+      },
       "ApplePushRegistrationBody": {
         "additionalProperties": false,
         "properties": {
@@ -176403,6 +176425,153 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "domain_identity",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/push/devices/{device_id}/retire": {
+      "post": {
+        "operationId": "retirePushDevice",
+        "parameters": [
+          {
+            "description": "Secret 32-byte base64url installation credential. Persist privately; never rotate on retry or account switch.",
+            "in": "header",
+            "name": "X-Push-Installation-Key",
+            "required": true,
+            "schema": {
+              "description": "Secret 32-byte base64url installation credential. Persist privately; never rotate on retry or account switch.",
+              "maxLength": 43,
+              "minLength": 43,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Positive decimal int64, persisted and incremented for each new installation intent across account/profile switches. Reuse exactly after uncertainty.",
+            "in": "header",
+            "name": "X-Push-Generation",
+            "required": true,
+            "schema": {
+              "description": "Positive decimal int64, persisted and incremented for each new installation intent across account/profile switches. Reuse exactly after uncertainty.",
+              "maxLength": 19,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AndroidPushRetirementReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Stop delivery to an Android installation without a login session, proved by its installation key. Send it after removing this server or signing out, when the login is already gone.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "public",
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
