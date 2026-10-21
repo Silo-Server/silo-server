@@ -187,6 +187,11 @@ func (r *APIKeyRepository) Delete(ctx context.Context, id int64, userID int) err
 		return fmt.Errorf("beginning api key deletion: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	// The audit row's account locks come before the key row lock, the order
+	// an account deletion takes them in.
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
 	deleted, err := scanAPIKeyMetadata(tx.QueryRow(ctx, `DELETE FROM api_keys ak WHERE ak.id = $1 AND ak.user_id = $2 RETURNING `+apiKeyMetadataColumns, id, userID))
 	if errors.Is(err, ErrAPIKeyNotFound) {
 		return ErrAPIKeyNotFound

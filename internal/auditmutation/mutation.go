@@ -170,6 +170,31 @@ func Recording(ctx context.Context) bool {
 	return lc != nil && lc.Request != nil && recordsDomainActions(ctx, lc.Request.URL.Path)
 }
 
+// LockActors takes KEY SHARE locks, in id order, on the accounts a domain row
+// for this request names (its user and impersonator). The row's foreign keys
+// take those locks at insert time anyway. A transaction that locks another row
+// before it records must take them first: a writer that locks the account and
+// then that row would otherwise deadlock against it.
+func LockActors(ctx context.Context, tx pgx.Tx) error {
+	if !Recording(ctx) {
+		return nil
+	}
+	lc := GetLogContext(ctx)
+	var ids []int
+	for _, id := range []*int{lc.UserID, lc.ImpersonatorUserID} {
+		if id != nil {
+			ids = append(ids, *id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM users WHERE id = ANY($1) ORDER BY id FOR KEY SHARE`, ids); err != nil {
+		return fmt.Errorf("locking audit actors: %w", err)
+	}
+	return nil
+}
+
 // RedactSecretPath strips bearer credentials from a request path before it
 // reaches any log sink. Public endpoints that authenticate through a secret
 // path segment name it with a chi route parameter "token" or "secret"

@@ -152,6 +152,9 @@ func (r *APIKeyRepository) UpdateTierConditional(ctx context.Context, id int64, 
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return nil, err
+	}
 	before, err := lockAPIKeyMetadata(ctx, tx, id, guard)
 	if err != nil {
 		return nil, err
@@ -179,6 +182,9 @@ func (r *APIKeyRepository) DeleteByAdminConditional(ctx context.Context, id int6
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
 	before, err := lockAPIKeyMetadata(ctx, tx, id, guard)
 	if err != nil {
 		return err
