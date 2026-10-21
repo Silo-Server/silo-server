@@ -73,7 +73,7 @@ func TestPersonalCollectionReadsRememberedDB(t *testing.T) {
 	})
 
 	t.Run("collages", func(t *testing.T) {
-		gen := &fakeCollageGenerator{}
+		gen := &signalingCollageGenerator{composed: make(chan string, 4)}
 		collages := NewPersonalCollectionCollages(pool, gen)
 		def := []PersonalCollectionDefinition{{ID: manual.ID, CollectionType: "manual"}}
 		if got := collages.Posters(ctx, userID, def, viewer); len(got) != 0 {
@@ -99,8 +99,31 @@ func TestPersonalCollectionReadsRememberedDB(t *testing.T) {
 			t.Fatalf("add: %v", err)
 		}
 		collages.Posters(ctx, userID, def, viewer)
-		waitForStoredCollage(t, personalCollageStore{pool: pool, userID: userID}, CollectionCollageRef{CollectionID: manual.ID, Key: CollectionCollageKey([]string{poster})})
+		select {
+		case key := <-gen.composed:
+			if want := CollectionCollageKey([]string{poster}); key != want {
+				t.Fatalf("composed collage %s, want %s", key, want)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the collage was never built")
+		}
 	})
+}
+
+// signalingCollageGenerator is a fakeCollageGenerator that reports the key of
+// each collage it composes.
+type signalingCollageGenerator struct {
+	fakeCollageGenerator
+	composed chan string
+}
+
+func (g *signalingCollageGenerator) ComposeCollectionCollage(ctx context.Context, collectionID, key string, sources []string) (string, string, error) {
+	path, thumb, err := g.fakeCollageGenerator.ComposeCollectionCollage(ctx, collectionID, key, sources)
+	select {
+	case g.composed <- key:
+	default:
+	}
+	return path, thumb, err
 }
 
 // seedPersonalCollectionReadMemo seeds an account with one profile, a library

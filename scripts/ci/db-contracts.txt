@@ -699,3 +699,7 @@
 
 # Household PIN proof must still match when the protected write transaction starts.
 ./internal/userstore/pgstore TestPostgresProfilePINRevisionTransactions
+
+# Personal collection list reads remember counts and collages with no source
+# until the membership revision or the viewer's access changes.
+./internal/catalog TestPersonalCollectionReadsRememberedDB
