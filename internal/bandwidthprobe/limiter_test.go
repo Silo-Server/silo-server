@@ -6,7 +6,7 @@ import (
 )
 
 func TestBandwidthProbeLimiterBoundsInFlightProbesPerAccount(t *testing.T) {
-	limiter := &Limiter{accounts: map[int]*bandwidthProbeAccount{}}
+	limiter := NewLimiter()
 	now := time.Unix(1_000_000, 0)
 	for range bandwidthProbeMaxInFlight {
 		if ok, _, _ := limiter.Acquire(1, 1000, now); !ok {
@@ -26,7 +26,7 @@ func TestBandwidthProbeLimiterBoundsInFlightProbesPerAccount(t *testing.T) {
 }
 
 func TestBandwidthProbeLimiterBoundsProbesPerNode(t *testing.T) {
-	limiter := &Limiter{accounts: map[int]*bandwidthProbeAccount{}}
+	limiter := NewLimiter()
 	now := time.Unix(1_000_000, 0)
 	for id := range bandwidthProbeNodeMaxInFlight {
 		if ok, _, _ := limiter.Acquire(id, 1000, now); !ok {
@@ -44,7 +44,7 @@ func TestBandwidthProbeLimiterBoundsProbesPerNode(t *testing.T) {
 }
 
 func TestBandwidthProbeLimiterBoundsBytesPerWindow(t *testing.T) {
-	limiter := &Limiter{accounts: map[int]*bandwidthProbeAccount{}}
+	limiter := NewLimiter()
 	now := time.Unix(1_000_000, 0)
 	const size = 100_000_000
 	for i := range bandwidthProbeWindowBytes / size {
@@ -67,7 +67,7 @@ func TestBandwidthProbeLimiterBoundsBytesPerWindow(t *testing.T) {
 }
 
 func TestBandwidthProbeLimiterRefundsUnsentBytes(t *testing.T) {
-	limiter := &Limiter{accounts: map[int]*bandwidthProbeAccount{}}
+	limiter := NewLimiter()
 	now := time.Unix(1_000_000, 0)
 	// One probe more than the window holds unrefunded.
 	for range bandwidthProbeWindowBytes/40_000_000 + 1 {
@@ -81,7 +81,7 @@ func TestBandwidthProbeLimiterRefundsUnsentBytes(t *testing.T) {
 }
 
 func TestBandwidthProbeLimiterRefundsOnlyTheGrantingWindow(t *testing.T) {
-	limiter := &Limiter{accounts: map[int]*bandwidthProbeAccount{}}
+	limiter := NewLimiter()
 	now := time.Unix(1_000_000, 0)
 	_, first, _ := limiter.Acquire(1, 100_000_000, now)
 	// The window rolls over while the first probe runs, and the new window
@@ -101,7 +101,7 @@ func TestBandwidthProbeLimiterRefundsOnlyTheGrantingWindow(t *testing.T) {
 }
 
 func TestBandwidthProbeLimiterForgetsIdleAccounts(t *testing.T) {
-	limiter := &Limiter{accounts: map[int]*bandwidthProbeAccount{}}
+	limiter := NewLimiter()
 	now := time.Unix(1_000_000, 0)
 	_, window, _ := limiter.Acquire(1, 1000, now)
 	limiter.Release(1, 0, window, now.Add(bandwidthProbeWindow))
@@ -124,7 +124,7 @@ func TestBandwidthProbeLimiterForgetsIdleAccounts(t *testing.T) {
 // An accurate test asks for MaxSize. After the quick tests that came before
 // it, it is still admitted; a run of accurate tests is not.
 func TestBandwidthProbeLimiterAdmitsAnAccurateTestAfterQuickOnes(t *testing.T) {
-	limiter := &Limiter{accounts: map[int]*bandwidthProbeAccount{}}
+	limiter := NewLimiter()
 	now := time.Unix(1_000_000, 0)
 	for range 3 {
 		ok, window, _ := limiter.Acquire(1, MaxSize/10, now)
