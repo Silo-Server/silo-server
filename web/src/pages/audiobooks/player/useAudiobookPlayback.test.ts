@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { act, fireEvent, render, renderHook } from "@testing-library/react";
 import { createElement, useEffect, type MutableRefObject, type ReactNode } from "react";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player";
@@ -7,6 +7,7 @@ import type { AudiobookFile } from "@/lib/audiobooks/types";
 import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
 import { resetCodecDetectionForTests } from "@/player/hooks/useCodecDetection";
 import { resetSessionMutations } from "@/player/session-mutations";
+import { forgetBandwidthEstimate } from "@/player/bandwidth-readings";
 
 const realtimeOptions = vi.hoisted(() => ({
   current: null as null | {
@@ -434,6 +435,7 @@ describe("useAudiobookPlayback", () => {
 
   it("replans a failed media-element route without starting a new attempt", async () => {
     // A speed reading this device keeps: the start sends it, a replan never does.
+    onTestFinished(forgetBandwidthEstimate);
     localStorage.setItem(
       "silo-bandwidth-estimate",
       JSON.stringify({
@@ -529,7 +531,6 @@ describe("useAudiobookPlayback", () => {
       bandwidth_estimate_source: "probe",
     });
     expect(observed.replanBody).not.toHaveProperty("bandwidth_estimate_kbps");
-    localStorage.removeItem("silo-bandwidth-estimate");
   });
 
   it("allows another recovery attempt after a transient recovery request failure", async () => {

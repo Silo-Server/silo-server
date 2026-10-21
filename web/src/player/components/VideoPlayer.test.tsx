@@ -4413,6 +4413,8 @@ describe("VideoPlayer Firefox copy-remux fallback", () => {
       expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
     } finally {
       vi.useRealTimers();
+      vi.unstubAllGlobals();
+      hlsJS.supported = false;
     }
   });
 });

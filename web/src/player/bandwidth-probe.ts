@@ -707,8 +707,10 @@ export function stopBandwidthProbes(): void {
   stopProbe("stopped");
 }
 
-/** Clears what outlives a schedule, the 429 hold, so each test starts clean. */
+/** Clears the schedule, media hold and 429 hold so each test starts clean. */
 export function resetBandwidthProbesForTests(): void {
   stopBandwidthProbes();
+  releasePlayingHold?.();
+  releasePlayingHold = undefined;
   notBefore = 0;
 }

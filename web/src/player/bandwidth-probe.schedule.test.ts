@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 vi.mock("@/api/v2/request", () => ({
   V2_CLIENT_HEADERS: {},
@@ -601,6 +601,7 @@ describe("scheduleBandwidthProbe", () => {
 
     const theme = Object.assign(new EventTarget(), { paused: true, ended: false });
     const untrack = trackDetachedMedia(theme as unknown as HTMLMediaElement);
+    onTestFinished(untrack);
     theme.paused = false;
     theme.dispatchEvent(new Event("play"));
     expect(signal.aborted).toBe(true);
@@ -608,7 +609,6 @@ describe("scheduleBandwidthProbe", () => {
     await awayFor(60_000);
     await readThenTest();
     expect(fetchWithSession).toHaveBeenCalledTimes(1);
-    untrack();
   });
 
   // WEB-SETTINGS-3: Settings shows what the schedule read, and a new network
@@ -617,6 +617,8 @@ describe("scheduleBandwidthProbe", () => {
     const connection = Object.assign(new EventTarget(), { type: "wifi" });
     vi.stubGlobal("navigator", { ...navigator, connection });
     server({ reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: DAY } } });
+    const defaults = queryClient.getQueryDefaults(["playback", "connection"]);
+    onTestFinished(() => queryClient.setQueryDefaults(["playback", "connection"], defaults));
     queryClient.setQueryDefaults(["playback", "connection"], { gcTime: Infinity });
     scheduleBandwidthProbe();
     await vi.advanceTimersByTimeAsync(0);
