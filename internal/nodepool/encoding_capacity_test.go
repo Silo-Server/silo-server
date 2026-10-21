@@ -3,9 +3,13 @@ package nodepool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestHealthPersistsEncodingCapacityWithoutResourceSample(t *testing.T) {
@@ -199,10 +203,41 @@ func TestReportedEncodingCeilingPreservesDrainState(t *testing.T) {
 	}
 }
 
-func TestRepositoryEncodingCeilingPreservesDrainState(t *testing.T) {
-	repo := newLastStatsTestPool(t)
+// The repository tests below run in CI through scripts/ci/db-contracts.txt.
+func newCapacityTestRepo(t *testing.T) *Repository {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return NewRepository(pool)
+}
+
+func createCapacityTestNode(t *testing.T, repo *Repository) *Node {
+	t.Helper()
 	ctx := context.Background()
-	node := createLastStatsNode(t, repo)
+	unique := time.Now().UnixNano()
+	node, err := repo.Create(ctx, CreateNodeInput{
+		Name: fmt.Sprintf("capacity-test-%d", unique),
+		Type: NodeTypeTranscode,
+		URL:  fmt.Sprintf("http://capacity-test-%d", unique),
+	})
+	if err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Delete(ctx, node.ID) })
+	return node
+}
+
+func TestRepositoryEncodingCeilingPreservesDrainState(t *testing.T) {
+	repo := newCapacityTestRepo(t)
+	ctx := context.Background()
+	node := createCapacityTestNode(t, repo)
 	if _, err := repo.Update(ctx, node.ID, UpdateNodeInput{MaxJobs: intPtr(20)}); err != nil {
 		t.Fatal(err)
 	}
@@ -254,9 +289,9 @@ func TestFiniteWorkerCeilingKeepsCurrentDrainingSession(t *testing.T) {
 }
 
 func TestRepositoryHealthReconcilesWorkerCeilingAndRevision(t *testing.T) {
-	repo := newLastStatsTestPool(t)
+	repo := newCapacityTestRepo(t)
 	ctx := context.Background()
-	node := createLastStatsNode(t, repo)
+	node := createCapacityTestNode(t, repo)
 	if _, err := repo.Update(ctx, node.ID, UpdateNodeInput{MaxJobs: intPtr(20)}); err != nil {
 		t.Fatal(err)
 	}
