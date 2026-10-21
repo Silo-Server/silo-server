@@ -329,3 +329,14 @@ func TestPlaybackDecisionV2EmptySubtitleInventoryIsArray(t *testing.T) {
 		})
 	}
 }
+
+func TestPlaybackDecisionV2PublishesTheActiveQuality(t *testing.T) {
+	in := playback.DecisionResponseV3{PlaybackPlan: &playback.PlanV3{ActiveQuality: playback.QualityRung1080pLowV3}}
+	raw, err := json.Marshal(playbackDecision(in).PlaybackPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"active_quality":"1080p-low"`) {
+		t.Fatalf("v2 plan must carry active_quality: %s", raw)
+	}
+}

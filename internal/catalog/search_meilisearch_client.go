@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -204,6 +205,48 @@ func (c *meilisearchClient) Health(ctx context.Context) error {
 		return fmt.Errorf("meilisearch health status %q", out.Status)
 	}
 	return nil
+}
+
+// ErrMeilisearchCheckRedirected reports a credentialed connection check that
+// Meilisearch redirected to another scheme, host or port.
+var ErrMeilisearchCheckRedirected = errors.New("meilisearch redirected the connection check to another address")
+
+// checkConnection keeps a credentialed administrative probe at its configured
+// scheme, host and port: it follows redirects within them and reports any
+// other as ErrMeilisearchCheckRedirected. Runtime clients and checks without a
+// key retain their redirect policy.
+func (c *meilisearchClient) checkConnection(ctx context.Context) error {
+	if c.apiKey == "" {
+		return c.Health(ctx)
+	}
+	c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !sameCheckAuthority(req.URL, via[0].URL) {
+			return ErrMeilisearchCheckRedirected
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return c.Health(ctx)
+}
+
+// sameCheckAuthority reports whether a redirect keeps the scheme, host and
+// effective port the check started at, so "host" and "host:443" match over
+// https. Hosts compare exactly. That is stricter than net/http, which keeps
+// the Authorization header on a redirect to a subdomain.
+func sameCheckAuthority(a, b *url.URL) bool {
+	return a.Scheme == b.Scheme && a.Hostname() == b.Hostname() && checkEffectivePort(a) == checkEffectivePort(b)
+}
+
+func checkEffectivePort(u *url.URL) int {
+	if port, err := strconv.Atoi(u.Port()); err == nil {
+		return port
+	}
+	if u.Scheme == "https" {
+		return 443
+	}
+	return 80
 }
 
 func (c *meilisearchClient) CreateIndex(ctx context.Context, uid string) (meilisearchTaskRef, error) {

@@ -594,10 +594,15 @@ connection's shared budget, as described in
   `/Users/AuthenticateWithQuickConnect` spend `device_poll`, and Authorize
   spends `device_lookup` in place of the generic limiter.
 - Authenticated routes, media and HLS included, run the generic limiter
-  (global and per-IP) after authentication, as the native authenticated routes
+  (global, per-IP and account) after authentication, as the native authenticated routes
   and v2 playback delivery do. Unauthenticated requests are refused before they
   spend budget. Compat auth sets no native API-key claims, so the per-API-key
-  tier budget does not apply here.
+  tier budget does not apply here. Compat sessions, admin API keys and explicit
+  `PlaySessionId` grants charge the owning login account, shared with its native
+  sessions and keys. An address-only static-stream grant carries no caller
+  credential and spends only source/global budgets, without charging an inferred
+  owner's account. See [Authenticated account allowance](auth-api.md#authenticated-account-allowance)
+  for defaults and settings.
 - Anonymous routes are not limited: item and user images, `/api/v2/artwork/*`,
   `/web/*`, and the public `/System/*`, `/Branding/Configuration`,
   `/QuickConnect/Enabled`, and `/Users/Public` reads. Native artwork and public
