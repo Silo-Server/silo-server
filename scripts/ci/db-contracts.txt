@@ -433,3 +433,7 @@
 # Explore all on a row the catalog cannot express as a query pages the row's
 # own fetch past its item limit, on Home and on its library page.
 ./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
+
+# Personal collection list reads remember counts and collages with no source
+# until the membership revision or the viewer's access changes.
+./internal/catalog TestPersonalCollectionReadsRememberedDB

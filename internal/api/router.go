@@ -1145,6 +1145,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// Personal collections without an uploaded or imported poster show a
 	// collage of their titles; it needs artwork storage and poster signing.
 	var personalCollages *catalog.PersonalCollectionCollages
+	var personalMemberCounts *catalog.PersonalCollectionMemberCounts
+	if deps.DB != nil {
+		personalMemberCounts = catalog.NewPersonalCollectionMemberCounts(deps.DB)
+	}
 	if deps.DB != nil && detailSvc != nil {
 		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, deps.ArtworkSigner, nil); gen != nil {
 			personalCollages = deps.PersonalCollectionCollages
@@ -1227,6 +1231,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		collectionHandler.CollectionOwners = collectionOwners
 		collectionHandler.Collages = personalCollages
+		collectionHandler.MemberCounts = personalMemberCounts
 		// The import handler is built beside the collection handler so the v1
 		// route group and the v2 operations share one instance; the v1 routes
 		// keep their userImportHandler != nil condition.
@@ -2158,6 +2163,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryCollectionHandler.UserCollectionPool = deps.DB
 		libraryCollectionHandler.CollectionOwners = collectionOwners
 		libraryCollectionHandler.PersonalCollages = personalCollages
+		libraryCollectionHandler.PersonalMemberCounts = personalMemberCounts
 		libraryCollectionHandler.EventsHub = deps.EventsHub
 		libraryCollectionHandler.SortPreferenceCleaner = collectionSortCleaner
 		if deps.FolderRepo != nil {

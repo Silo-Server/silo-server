@@ -67,6 +67,10 @@ type LibraryCollectionHandler struct {
 	// read those posters from ArtworkStore. Nil when storage serves its own
 	// URLs.
 	ArtworkSigner *artworkurl.Signer
+	// PersonalMemberCounts counts the members a viewer sees in the
+	// hand-picked and imported personal collections opted into a library
+	// tab and remembers the counts between reads; nil counts on every read.
+	PersonalMemberCounts *catalog.PersonalCollectionMemberCounts
 }
 
 var errLibraryCollectionInUse = catalog.ErrLibraryCollectionInUse
