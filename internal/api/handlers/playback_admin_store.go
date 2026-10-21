@@ -37,9 +37,10 @@ type AdminPlaybackHistoryEntry struct {
 // RecordHistory keeps one row per session. A session finalized again (copies
 // on several replicas, or one resumed after expiry) updates its row only when
 // it reached further, so the row holds the furthest position whichever
-// finalization lands first. Measured watch time is kept separately: the copy
-// that received the play's progress reports holds the largest counters, so
-// each counter keeps its largest value whatever the position did.
+// finalization lands first. Completion, once any copy records it, stays.
+// Measured watch time is kept separately: the copy that received the play's
+// progress reports holds the largest counters, so each counter keeps its
+// largest value whatever the position did.
 type PlaybackAdminStore interface {
 	RecordHistory(ctx context.Context, entry AdminPlaybackHistoryEntry) error
 	DeleteSession(ctx context.Context, sessionID string) error
@@ -77,9 +78,7 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 			duration_seconds = CASE WHEN EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
 				THEN COALESCE(EXCLUDED.duration_seconds, admin_playback_history.duration_seconds)
 				ELSE admin_playback_history.duration_seconds END,
-			completed = CASE WHEN EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
-				THEN admin_playback_history.completed OR EXCLUDED.completed
-				ELSE admin_playback_history.completed END,
+			completed = admin_playback_history.completed OR EXCLUDED.completed,
 			ended_at = CASE WHEN EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
 				THEN GREATEST(admin_playback_history.ended_at, EXCLUDED.ended_at)
 				ELSE admin_playback_history.ended_at END,
@@ -94,6 +93,7 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 			OR EXCLUDED.played_seconds > admin_playback_history.played_seconds
 			OR EXCLUDED.paused_seconds > admin_playback_history.paused_seconds
 			OR (EXCLUDED.measured AND NOT admin_playback_history.measured)
+			OR (EXCLUDED.completed AND NOT admin_playback_history.completed)
 	`,
 		entry.SessionID,
 		entry.UserID,

@@ -972,6 +972,25 @@ func TestSessionManagerConfirmedPauseFencesOnlyAcceptedSamples(t *testing.T) {
 	}
 }
 
+// Progress side effects re-apply the latest accepted sample on retries;
+// measuring it again would restart the watch-time interval and make the next
+// report look like a seek.
+func TestSessionManagerReappliedSampleLeavesWatchTime(t *testing.T) {
+	m := playback.NewSessionManager(0, 0)
+	s := mustStartSession(t, m, 1, "profile-1", 100, playback.PlayDirect, false)
+	sample := playback.ProgressSampleV3{Sequence: 1, Position: 30}
+	if err := m.UpdateProgressSample(s.ID, sample); err != nil {
+		t.Fatal(err)
+	}
+	watch := mustGetSession(t, m, s.ID).Watch
+	if err := m.UpdateProgressSample(s.ID, sample); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGetSession(t, m, s.ID).Watch; got != watch {
+		t.Fatalf("watch time after the sample was re-applied = %+v, want %+v", got, watch)
+	}
+}
+
 // A seek planned after accepted progress supersedes it: a confirmation that
 // offers that same sample must not move the live position back.
 func TestSessionManagerConfirmedPauseKeepsLaterSeekPosition(t *testing.T) {
@@ -1011,6 +1030,7 @@ func TestSessionManagerReplacementRollbackRestoresPositionSequence(t *testing.T)
 	if err := m.UpdateProgressSample(s.ID, playback.ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
 		t.Fatal(err)
 	}
+	watch := mustGetSession(t, m, s.ID).Watch
 	seek := 321.0
 	rollback, err := m.ApplyReplacement(s.ID, playback.SessionReplacement{EffectiveMediaFileID: 100, PositionSeconds: &seek, PositionSequence: 2})
 	if err != nil {
@@ -1018,6 +1038,10 @@ func TestSessionManagerReplacementRollbackRestoresPositionSequence(t *testing.T)
 	}
 	if err := m.RollbackReplacement(s.ID, rollback); err != nil {
 		t.Fatal(err)
+	}
+	// The rolled-back seek must not stay in the watch-time measurement either.
+	if got := mustGetSession(t, m, s.ID).Watch; got != watch {
+		t.Fatalf("watch time after rollback = %+v, want %+v", got, watch)
 	}
 	// With the seek rolled back, sequence 2 is newer than the live position.
 	if _, err := m.SetPaused(s.ID, true, 2, &playback.ProgressSampleV3{Sequence: 2, Position: 31}); err != nil {

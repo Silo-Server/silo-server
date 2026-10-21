@@ -231,6 +231,7 @@ type SessionReplacementRollback struct {
 	previousPosition             float64
 	previousPaused               bool
 	previousPositionSequence     int64
+	previousWatch                WatchTime
 	restoreProgress              bool
 	previousReplacementMethod    PlayMethod
 }
@@ -1008,6 +1009,11 @@ func (m *SessionManager) updateProgress(sessionID string, position float64, isPa
 		return ErrSessionNotFound
 	}
 
+	// Progress side effects re-apply the latest accepted sample on retries
+	// and on another replica's passes. Measuring a sample it has already seen
+	// would restart the watch-time interval and make the next report look
+	// like a seek, so only a sample newer than any applied is observed.
+	unseen := sequence < 0 || sequence > s.positionSequence
 	s.Position = position
 	s.positionSequence = max(s.positionSequence, sequence)
 	if sequence < 0 || sequence > s.confirmedPauseSequence {
@@ -1016,7 +1022,9 @@ func (m *SessionManager) updateProgress(sessionID string, position float64, isPa
 	s.StopReported = false
 	s.streamRevision++
 	m.touchSessionLocked(s)
-	s.Watch.Observe(s.Position, s.IsPaused, s.UpdatedAt)
+	if unseen {
+		s.Watch.Observe(s.Position, s.IsPaused, s.UpdatedAt)
+	}
 	return nil
 }
 
@@ -1336,6 +1344,7 @@ func (m *SessionManager) applyReplacementLocked(
 		rollback.previousPosition = s.Position
 		rollback.previousPaused = s.IsPaused
 		rollback.previousPositionSequence = s.positionSequence
+		rollback.previousWatch = s.Watch
 		rollback.restoreProgress = true
 	}
 
@@ -1381,6 +1390,7 @@ func (m *SessionManager) RollbackReplacement(sessionID string, rollback SessionR
 		s.Position = rollback.previousPosition
 		s.IsPaused = rollback.previousPaused
 		s.positionSequence = rollback.previousPositionSequence
+		s.Watch = rollback.previousWatch
 	}
 	s.replacementPlayMethod = rollback.previousReplacementMethod
 	s.streamRevision++
