@@ -75,9 +75,9 @@ func (reg *Registry) androidPushCommand(ctx context.Context, authority AndroidPu
 	if p != nil {
 		return notifications.AndroidPushCommand{}, p
 	}
-	generation, err := strconv.ParseInt(authority.Generation, 10, 64)
-	if err != nil || generation <= 0 || strconv.FormatInt(generation, 10) != authority.Generation {
-		return notifications.AndroidPushCommand{}, NewProblem(TypeValidationFailed, "X-Push-Generation must be a positive canonical decimal int64.")
+	generation, err := pushGeneration(authority.Generation)
+	if err != nil {
+		return notifications.AndroidPushCommand{}, err
 	}
 	return notifications.AndroidPushCommand{UserID: user, ProfileID: profile, DeviceID: device, InstallationKey: authority.InstallationKey, Generation: generation}, nil
 }

@@ -740,6 +740,7 @@ export const v2Operations = {
   "POST /api/v2/collections/preview": "previewCollection",
   "POST /api/v2/collections/{id}/sync": "syncCollection",
   "POST /api/v2/devices/push/apple": "registerApplePushDevice",
+  "POST /api/v2/devices/push/apple/retire": "retireApplePushInstallation",
   "POST /api/v2/diagnostics/reports": "uploadDiagnosticsReport",
   "POST /api/v2/diagnostics/reports/uploads": "createDiagnosticsUpload",
   "POST /api/v2/diagnostics/reports/uploads/{upload_id}/complete": "completeDiagnosticsUpload",

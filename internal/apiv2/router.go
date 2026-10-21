@@ -91,6 +91,7 @@ type Dependencies struct {
 	DirectDownloadLinks              DirectDownloadLinkService
 	ViewerSubtitleDelete             ViewerSubtitleDeleteService
 	OrderedApplePush                 OrderedApplePushService
+	ApplePushRetirement              ApplePushRetirementService
 	NotificationEmailVerification    NotificationEmailVerificationService
 	AdminAutoscanSourceDeletes       AdminAutoscanSourceDeleteService
 	AdminAutoscanSourceWrites        AdminAutoscanSourceWriteService

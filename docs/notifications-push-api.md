@@ -93,6 +93,48 @@ shared Keychain access group) and clear it on sign-out, server removal, or
 profile change. The server revokes it implicitly when the login session is
 revoked or expires.
 
+## Retirement without a session
+
+```
+POST /api/v2/devices/push/apple/retire
+X-Push-Installation-Key: <installation secret>
+X-Push-Generation: <positive decimal int64>
+
+{"device_id": "<installation device_id>"}
+```
+
+`retireApplePushInstallation` stops delivery to an installation when the app no
+longer has a login session, for example after it removed this server and
+discarded its session before a `push_mode: "off"` registration got through. The
+route is public: the installation key is the only authority, checked against the
+hash stored at registration. It spends the `apple_push_retire` per-IP rate-limit
+budget.
+
+Use the next unused generation, the same counter registration uses. The
+retirement becomes the installation's newest intent:
+
+- A higher generation than the stored one deletes the installation's Apple push
+  rows, which also drops their queued delivery attempts, and returns `200`
+  `{"generation": "<sent generation>", "removed": true}`. A provider request
+  already sent cannot be recalled.
+- Replaying the newest retirement exactly returns the same `200` and writes
+  nothing.
+- A lower generation, or the stored generation when it belongs to a
+  registration, returns `409`. A late retirement therefore never removes a
+  newer registration.
+- A key that does not match the stored hash returns `403`, as registration does.
+- An installation the server has no ordered record of returns `200` with
+  `removed: true` and writes nothing. Without a stored key the server cannot
+  authorize removal, so a legacy unordered registration for that `device_id` is
+  left in place.
+
+The server keeps the key hash and owner. To receive pushes again, register
+through `registerApplePushDevice` with the same key and a higher generation.
+
+Retirement does not revoke the login session, so a display token minted for that
+session keeps working until the session is revoked or expires. No pushes reach
+the installation after retirement, so the extension has no reason to use it.
+
 ## Display fetch
 
 ```
