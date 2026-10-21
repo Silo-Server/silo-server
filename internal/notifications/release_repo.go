@@ -522,7 +522,10 @@ func (r *ReleaseRepository) ClaimUnprocessed(ctx context.Context, tx pgx.Tx, lim
 		SELECT `+releaseEventColumns+`
 		FROM release_events
 		WHERE processed_at IS NULL
-		ORDER BY created_at
+		-- One ingest's events share created_at. Breaking the tie by episode
+		-- keeps a season that spans two batches ascending, so the second
+		-- batch is not behind the notified cursor.
+		ORDER BY created_at, library_id, series_id, episode_key
 		LIMIT $1
 		FOR UPDATE SKIP LOCKED`,
 		limit)
