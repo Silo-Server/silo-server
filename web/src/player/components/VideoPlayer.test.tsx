@@ -5732,25 +5732,7 @@ describe("VideoPlayer buffering pill", () => {
   });
 
   it("waits behind a segment skip and shows once it ends", async () => {
-    const rendered = renderPlayer({
-      bufferingMode: "ask",
-      qualityPreference: "auto",
-      recap: { start: 25, end: 60 },
-      plan: fixturePlanV3({
-        ...directPlan,
-        available_qualities: [
-          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
-          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
-        ],
-        source: { ...directPlan.source, bitrate_kbps: 20_000 },
-      }),
-    });
-    const video = rendered.container.querySelector("video");
-    if (!video) throw new Error("expected video element");
-    fireEvent.loadedMetadata(video);
-    markPlaying(video);
-    fireEvent.playing(video);
-    act(() => vi.advanceTimersByTime(20_000));
+    const { video } = askPlayer({ recap: { start: 25, end: 60 } });
     video.currentTime = 30;
     fireFrameTimeUpdate(video);
     await act(async () => Promise.resolve());
@@ -5771,32 +5753,15 @@ describe("VideoPlayer buffering pill", () => {
   });
 
   it("keeps a prompt's timer while the player is minimized", async () => {
-    const rendered = renderPlayer({
-      bufferingMode: "ask",
-      qualityPreference: "auto",
-      plan: fixturePlanV3({
-        ...directPlan,
-        available_qualities: [
-          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
-          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
-        ],
-        source: { ...directPlan.source, bitrate_kbps: 20_000 },
-      }),
-    });
-    const video = rendered.container.querySelector("video");
-    if (!video) throw new Error("expected video element");
-    fireEvent.loadedMetadata(video);
-    markPlaying(video);
-    fireEvent.playing(video);
-    act(() => vi.advanceTimersByTime(20_000));
+    const { video, rerenderPlayer } = askPlayer();
     fireEvent.waiting(video);
     act(() => vi.advanceTimersByTime(7_000));
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
 
     // Minimized past the 15-second timer, the prompt waits instead of expiring.
-    rendered.rerenderPlayer({ displayMode: "detached" });
+    rerenderPlayer({ displayMode: "detached" });
     act(() => vi.advanceTimersByTime(20_000));
-    rendered.rerenderPlayer({ displayMode: "foreground" });
+    rerenderPlayer({ displayMode: "foreground" });
     act(() => vi.advanceTimersByTime(200));
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(15_000));
@@ -5942,21 +5907,14 @@ describe("VideoPlayer buffering pill", () => {
   });
 
   it("shows the buffering notice for five seconds", async () => {
-    const rendered = renderPlayer({
+    const { video } = askPlayer({
       bufferingMode: "always",
-      qualityPreference: "auto",
       plan: fixturePlanV3({
         ...directPlan,
         available_qualities: [{ label: "original", preserves_source: true, bitrate_kbps: 20_000 }],
         source: { ...directPlan.source, bitrate_kbps: 20_000 },
       }),
     });
-    const video = rendered.container.querySelector("video");
-    if (!video) throw new Error("expected video element");
-    fireEvent.loadedMetadata(video);
-    markPlaying(video);
-    fireEvent.playing(video);
-    act(() => vi.advanceTimersByTime(20_000));
     fireEvent.waiting(video);
     act(() => vi.advanceTimersByTime(6_100));
     expect(screen.getByText("Can't lower quality for this video")).toBeInTheDocument();
