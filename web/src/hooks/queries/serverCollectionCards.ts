@@ -48,20 +48,22 @@ export function useServerCollectionCards(
   const [requested, setRequested] = useState<ReadonlySet<number>>(() => new Set());
   const cutShort = (entry: ServerCollectionsLibrary) =>
     entry.collections.length < entry.total_count;
+  const asked = (entry: ServerCollectionsLibrary) =>
+    cutShort(entry) && (!loadOnScroll || requested.has(entry.library_id));
   const fullLists = useQueries({
     queries: libraries.map((entry) => {
       const options = libraryCollectionsQueryOptions(entry.library_id);
-      const asked = !loadOnScroll || requested.has(entry.library_id);
-      return { ...options, enabled: options.enabled && asked && cutShort(entry) };
+      return { ...options, enabled: options.enabled && asked(entry) };
     }),
   });
   const lists = libraries.map((entry, index) => {
-    const query = fullLists[index];
+    // A library not asked for yet shows nothing from the cache, even if its
+    // Collections tab left a full list there: a disabled query never
+    // refetches, and its rest would land among the rests asked for later.
+    const query = asked(entry) ? fullLists[index] : undefined;
     // The first 20 always come from the aggregated answer, which is never
     // older than a cached full list; the full list only adds the rest.
-    const full: LibraryTabCollection[] | undefined = cutShort(entry)
-      ? query?.data?.collections
-      : undefined;
+    const full: LibraryTabCollection[] | undefined = query?.data?.collections;
     const inFirst = new Set(entry.collections.map((collection) => collection.id));
     return {
       entry,
@@ -69,12 +71,12 @@ export function useServerCollectionCards(
       first: entry.collections,
       rest: full ? full.filter((collection) => !inFirst.has(collection.id)) : [],
       // Still to load: asked for and on its way, or waiting for the next ask.
-      loading: cutShort(entry) && !full && !query?.isError && query?.fetchStatus !== "idle",
-      waiting: cutShort(entry) && !full && !query?.isError && query?.fetchStatus === "idle",
-      failed: cutShort(entry) && !full && query?.isError === true,
+      loading: query !== undefined && !full && !query.isError && query.fetchStatus !== "idle",
+      waiting: cutShort(entry) && query === undefined,
+      failed: !full && query?.isError === true,
       // A refetch (on focus, or after an admin change) failed: the cached rest
       // stays, so the failure would otherwise go unseen.
-      refreshFailed: cutShort(entry) && query?.isRefetchError === true,
+      refreshFailed: query?.isRefetchError === true,
     };
   });
   // Each collection once. A collection in several libraries opens across all

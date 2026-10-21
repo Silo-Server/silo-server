@@ -32,7 +32,7 @@ type ServerCollectionsView struct {
 
 // capServerCollections trims a library's collections to the per-library teaser
 // cap and returns the capped slice alongside the original total count (used for
-// the frontend's "See all (N)" affordance).
+// the web Collections page to tell whether a library has more to load).
 func capServerCollections(collections []*models.LibraryCollection) ([]*models.LibraryCollection, int) {
 	total := len(collections)
 	if total > serverCollectionsPerLibraryCap {

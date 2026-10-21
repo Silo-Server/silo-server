@@ -408,10 +408,12 @@ describe("Server collections", () => {
     });
     show();
     const server = await screen.findByRole("region", { name: "Server collections" });
-    await userEvent.click(await within(server).findByRole("button", { name: "Load more" }));
-    expect(
-      await within(server).findByRole("link", { name: "See all 30 in Movies" }),
-    ).toHaveAttribute("href", "/library/1?tab=collections");
+    (await within(server).findByRole("button", { name: "Load more" })).focus();
+    await userEvent.keyboard("{Enter}");
+    const seeAll = await within(server).findByRole("link", { name: "See all 30 in Movies" });
+    expect(seeAll).toHaveAttribute("href", "/library/1?tab=collections");
+    // The button went with nothing added, so focus moves to the link.
+    await vi.waitFor(() => expect(seeAll).toHaveFocus());
     expect(cardsIn(server)).toEqual([oscarWinners.title, "Studio Ghibli"]);
     expect(within(server).queryByRole("link", { name: /in Kids$/ })).toBeNull();
   });
@@ -460,6 +462,52 @@ describe("Server collections", () => {
       expect(within(server).getByRole("link", { name: kiki.title })).toHaveFocus(),
     );
     expect(within(server).queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
+  it("adds a cached library's rest under All only once it is asked for, after the earlier ones", async () => {
+    const kiki = { ...oscarWinners, id: "lc-kiki", title: "Kiki's Delivery Service" };
+    v2Recorder.answer("GET /api/v2/collections/server", {
+      libraries: [
+        serverLibrary("1", "Movies", [oscarWinners], 3),
+        serverLibrary("2", "Kids", [ghibli], 2),
+      ],
+    });
+    v2Recorder.answer("GET /api/v2/library/{id}/collections", (call: { path: string }) =>
+      call.path === "/api/v2/library/1/collections"
+        ? libraryTab("1", [oscarWinners, heistNight, spaceOperas])
+        : libraryTab("2", [ghibli, kiki]),
+    );
+    show();
+    const server = await screen.findByRole("region", { name: "Server collections" });
+    // Picking Kids caches its whole list.
+    await userEvent.click(await within(server).findByRole("button", { name: "Kids" }));
+    await within(server).findByRole("link", { name: kiki.title });
+    await userEvent.click(within(server).getByRole("button", { name: "All" }));
+    expect(cardsIn(server)).toEqual([oscarWinners.title, "Studio Ghibli"]);
+
+    within(server).getByRole("button", { name: "Load more" }).focus();
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() =>
+      expect(within(server).getByRole("link", { name: "Heist night" })).toHaveFocus(),
+    );
+    expect(cardsIn(server)).toEqual([
+      oscarWinners.title,
+      "Studio Ghibli",
+      "Heist night",
+      "Space operas",
+    ]);
+    within(server).getByRole("button", { name: "Load more" }).focus();
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() =>
+      expect(within(server).getByRole("link", { name: kiki.title })).toHaveFocus(),
+    );
+    expect(cardsIn(server)).toEqual([
+      oscarWinners.title,
+      "Studio Ghibli",
+      "Heist night",
+      "Space operas",
+      kiki.title,
+    ]);
   });
 
   it("keeps a library's rest on screen and offers Try again when refreshing it fails", async () => {

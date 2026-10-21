@@ -710,7 +710,8 @@ function ServerCollectionsSection() {
  * Every library's first 20 come before any library's rest. If a list fails,
  * that library's first 20 stay with a link to its Collections tab; if a list
  * already on screen fails to refresh, it stays with a notice offering Try
- * again. Pressing Load more moves focus to the first card it added.
+ * again. Pressing Load more moves focus to the first card it added, or to
+ * the library's link when its list failed and nothing is left to load.
  */
 function ServerCollectionsGrid({
   libraries,
@@ -727,7 +728,10 @@ function ServerCollectionsGrid({
     onIntersect: loadNext,
     enabled: loadOnScroll && !loading && next !== undefined,
   });
-  const { listRef, buttonRef, press } = useLoadMoreFocus<HTMLUListElement>(loading, cards.length);
+  const { listRef, buttonRef, fallbackRef, press } = useLoadMoreFocus<HTMLUListElement>(
+    loading,
+    cards.length,
+  );
   const pressLoadMore = () => {
     if (loading || !next) return;
     press();
@@ -776,7 +780,7 @@ function ServerCollectionsGrid({
         </div>
       ) : null}
       {failed.length > 0 ? (
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
+        <div ref={fallbackRef} className="flex flex-wrap gap-x-4 gap-y-1">
           {failed.map((entry) => (
             <Link
               key={entry.library_id}
