@@ -1187,7 +1187,7 @@ func (p *PluginProvider) latestCredentials(ctx context.Context, conn Connection)
 		return Connection{}, retryableProviderError{message: "watch sync plugin credentials could not be read"}
 	}
 	if !ok {
-		return Connection{}, retryableProviderError{message: "watch sync connection was removed during the sync"}
+		return Connection{}, retryableProviderError{message: "watch sync connection was removed during the sync", cause: ErrConnectionNotFound}
 	}
 	if stored.ProviderAccountID != conn.ProviderAccountID {
 		// Reconnected to another account: its credentials aren't this call's.
@@ -1226,7 +1226,7 @@ func (p *PluginProvider) persistUpdatedCredentials(
 			"component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID)
 		return updated, nil
 	case errors.Is(err, ErrConnectionNotFound):
-		return Connection{}, retryableProviderError{message: "watch sync connection was removed during the plugin call"}
+		return Connection{}, retryableProviderError{message: "watch sync connection was removed during the plugin call", cause: ErrConnectionNotFound}
 	default:
 		return Connection{}, retryableProviderError{message: "watch sync plugin credential update could not be persisted"}
 	}

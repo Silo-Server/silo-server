@@ -439,10 +439,17 @@ func AsRateLimited(err error) (RateLimitedError, bool) {
 
 type retryableProviderError struct {
 	message string
+	// cause, when set, is a sentinel such as ErrConnectionNotFound that
+	// callers match with errors.Is.
+	cause error
 }
 
 func (e retryableProviderError) Error() string {
 	return e.message
+}
+
+func (e retryableProviderError) Unwrap() error {
+	return e.cause
 }
 
 func isRetryableProviderError(err error) bool {

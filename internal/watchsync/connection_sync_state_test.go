@@ -3,6 +3,7 @@ package watchsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -105,10 +106,12 @@ func TestServiceSyncFlowKeepsConnectionChangesMadeDuringIt(t *testing.T) {
 }
 
 // watchedAndProgressImporter deletes the connection while watched history
-// is read, and records whether progress was read afterwards.
+// is read, then returns readErr, and records whether progress was read
+// afterwards.
 type watchedAndProgressImporter struct {
 	watchedImporterStub
 	repo         *serviceFakeRepo
+	readErr      error
 	progressRead *bool
 }
 
@@ -117,7 +120,10 @@ func (p watchedAndProgressImporter) Capabilities() Capabilities {
 }
 
 func (p watchedAndProgressImporter) FetchWatchedBatch(ctx context.Context, _ ServerConfig, conn Connection) (WatchedImportBatch, error) {
-	return WatchedImportBatch{}, p.repo.DeleteConnection(ctx, conn.Provider, conn.UserID, conn.ProfileID)
+	if err := p.repo.DeleteConnection(ctx, conn.Provider, conn.UserID, conn.ProfileID); err != nil {
+		return WatchedImportBatch{}, err
+	}
+	return WatchedImportBatch{}, p.readErr
 }
 
 func (p watchedAndProgressImporter) FetchProgress(context.Context, ServerConfig, Connection) ([]RemoteProgress, error) {
@@ -126,32 +132,40 @@ func (p watchedAndProgressImporter) FetchProgress(context.Context, ServerConfig,
 }
 
 func TestServiceSyncRunStopsWhenTheConnectionIsDisconnected(t *testing.T) {
-	repo := newServiceFakeRepo()
-	conn := Connection{
-		ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", AccessToken: testAccessToken,
-		ImportWatchedEnabled: true, ImportProgressEnabled: true,
-	}
-	key := connectionKey(conn.Provider, conn.UserID, conn.ProfileID)
-	repo.connections[key] = conn
-	progressRead := false
-	registry := NewRegistry()
-	if err := registry.Register(watchedAndProgressImporter{repo: repo, progressRead: &progressRead}); err != nil {
-		t.Fatal(err)
-	}
-	service := NewService(repo, registry).
-		WithMatcher(unmatchedMatcherStub{}).
-		WithWatchState(noopWatchState{}).
-		WithUserStoreProvider(staticStoreProvider{})
+	for name, readErr := range map[string]error{
+		"flow succeeds": nil,
+		// A plugin call that finds the connection gone fails the flow.
+		"flow fails on the missing connection": fmt.Errorf("plugin call: %w", ErrConnectionNotFound),
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			conn := Connection{
+				ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", AccessToken: testAccessToken,
+				ImportWatchedEnabled: true, ImportProgressEnabled: true,
+			}
+			key := connectionKey(conn.Provider, conn.UserID, conn.ProfileID)
+			repo.connections[key] = conn
+			progressRead := false
+			registry := NewRegistry()
+			if err := registry.Register(watchedAndProgressImporter{repo: repo, readErr: readErr, progressRead: &progressRead}); err != nil {
+				t.Fatal(err)
+			}
+			service := NewService(repo, registry).
+				WithMatcher(unmatchedMatcherStub{}).
+				WithWatchState(noopWatchState{}).
+				WithUserStoreProvider(staticStoreProvider{})
 
-	err := service.SyncConnection(t.Context(), conn, "manual")
-	if !errors.Is(err, ErrConnectionNotFound) && (err == nil || !strings.Contains(err.Error(), ErrConnectionNotFound.Error())) {
-		t.Fatalf("SyncConnection error = %v, want the disconnect reported", err)
-	}
-	if _, exists := repo.connections[key]; exists {
-		t.Fatal("disconnected connection restored")
-	}
-	if progressRead {
-		t.Fatal("the run kept syncing a disconnected connection")
+			err := service.SyncConnection(t.Context(), conn, "manual")
+			if err == nil || !strings.Contains(err.Error(), ErrConnectionNotFound.Error()) {
+				t.Fatalf("SyncConnection error = %v, want the disconnect reported", err)
+			}
+			if _, exists := repo.connections[key]; exists {
+				t.Fatal("disconnected connection restored")
+			}
+			if progressRead {
+				t.Fatal("the run kept syncing a disconnected connection")
+			}
+		})
 	}
 }
 
@@ -255,7 +269,7 @@ func TestPluginProviderPersistsRotatedCredentialsOnlyOverTheOnesItUsed(t *testin
 	t.Run("disconnected", func(t *testing.T) {
 		repo := &fakePluginCredentialRepository{err: ErrConnectionNotFound}
 		provider := &PluginProvider{repository: repo}
-		if _, err := provider.persistUpdatedCredentials(t.Context(), used, rotated); !isRetryableProviderError(err) {
+		if _, err := provider.persistUpdatedCredentials(t.Context(), used, rotated); !isRetryableProviderError(err) || !errors.Is(err, ErrConnectionNotFound) {
 			t.Fatalf("err = %v, want a retryable error", err)
 		}
 	})

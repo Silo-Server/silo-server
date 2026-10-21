@@ -866,8 +866,9 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 		}
 	}
 	// After a flow succeeds, the next one starts from the stored connection.
-	// A connection disconnected meanwhile ends the run: nothing is left to
-	// sync it for.
+	// A connection disconnected meanwhile ends the run, whether the flow
+	// succeeded or failed on the missing connection: nothing is left to sync
+	// it for.
 	disconnected := false
 	reload := func(label string) {
 		refreshed, err := s.reloadConnection(ctx, conn)
@@ -881,6 +882,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 	afterFlow := func(label string, err error) {
 		if err != nil {
 			recordFlowError(label, err)
+			disconnected = disconnected || errors.Is(err, ErrConnectionNotFound)
 			return
 		}
 		reload(label)
