@@ -741,8 +741,9 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	return withNativeServerFeaturesV3(response), err
 }
 
-// ReportRouteEventV2 is POST /api/v2/playback/route-events. The event is
-// queued and never waits on the store; event_id dedups a retried report.
+// ReportRouteEventV2 is POST /api/v2/playback/route-events. Only the ownership
+// check waits on the store; the event itself is queued, and event_id dedups a
+// retried report.
 func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller PlaybackCaller, command PlaybackRouteEventCommand) error {
 	if err := h.validatePlaybackCaller(ctx, caller); err != nil {
 		return err
@@ -782,14 +783,6 @@ func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller Playbac
 		record.ConnectionKey, _ = connectionstore.Key(ctx, h.JWTSecret)
 		record.ReceivedAt = time.Now().UTC()
 		record.SampleLifetime = h.playbackConfig().BandwidthProbeMaxAge()
-		if lookup, ok := h.PlanStoreV3.(interface {
-			PlanDelivery(context.Context, string, string) (string, error)
-		}); ok {
-			record.Delivery, err = lookup.PlanDelivery(ctx, event.PlaybackAttemptID, event.PlanID)
-			if err != nil {
-				return playbackStoreOperationError()
-			}
-		}
 	}
 	h.enqueueRouteEventV3(record)
 	return nil

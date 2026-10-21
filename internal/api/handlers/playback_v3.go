@@ -6617,6 +6617,15 @@ func recordRouteEventV3(store playback.PlanStoreV3, event playback.RouteEventRec
 		return
 	}
 	if inserted {
+		if lookup, ok := store.(interface {
+			PlanDelivery(context.Context, string, string) (string, error)
+		}); ok && event.Event == playback.RouteEventPlanSummaryV3 {
+			// The delivery only labels the summary's metrics; without it they
+			// count under "unknown".
+			if event.Delivery, err = lookup.PlanDelivery(ctx, event.PlaybackAttemptID, event.PlanID); err != nil {
+				slog.Warn("playback plan delivery lookup failed", "error", err)
+			}
+		}
 		playback.ObserveStoredRouteEvent(event)
 		if event.Event == playback.RouteEventPlanSummaryV3 {
 			summary := connectionstore.PlanSummary{PlanID: event.PlanID, ReportedAt: event.ReceivedAt, Diagnostics: event.Diagnostics}
