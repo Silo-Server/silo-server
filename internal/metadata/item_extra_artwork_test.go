@@ -114,7 +114,7 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 		item := &models.MediaItem{}
 		carryItemOnlyArtwork(item, existing)
 		applyBestImages(item, nil, MergeFillEmpty, "en")
-		prepareItemImagesForQueue(item, existing, true)
+		prepareItemImagesForQueue(item, existing, true, false)
 		if item.BannerSourcePath != pending || item.BannerPath != "" {
 			t.Fatalf("banner = %q from %q, want the pending source kept", item.BannerPath, item.BannerSourcePath)
 		}
@@ -126,7 +126,7 @@ func TestPendingItemOnlyArtworkKeepsItsSource(t *testing.T) {
 		const remote = "https://img.example/de-poster.jpg"
 		existing := &models.MediaItem{PosterSourcePath: remote}
 		item := &models.MediaItem{PosterSourcePath: remote}
-		prepareItemImagesForQueue(item, existing, true)
+		prepareItemImagesForQueue(item, existing, true, false)
 		if item.PosterSourcePath != "" {
 			t.Fatalf("poster source = %q, want it cleared", item.PosterSourcePath)
 		}

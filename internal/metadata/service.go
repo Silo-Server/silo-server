@@ -2964,7 +2964,7 @@ func (s *MetadataService) mergeAndPersist(
 	}
 
 	if handleArtwork {
-		prepareItemImagesForQueue(item, existingItem, keepStored)
+		prepareItemImagesForQueue(item, existingItem, keepStored, req.Mode == ModeIdentify)
 		dropGoneItemOnlyArtwork(localArt, item, images)
 		applyLocalArtworkFallback(item, existingItem, images, req.Language)
 	}
@@ -3020,7 +3020,7 @@ func (s *MetadataService) mergeAndPersist(
 		loc := buildItemLocalizationRecord(
 			existingLoc, contentID, req.Language, contentType, accumulator, images, mergeMode, req.Language,
 			isFieldLocked(locked, FieldName),
-			keepStored,
+			keepStored, req.Mode == ModeIdentify,
 		)
 		if err := s.itemLocalizationRepo.Upsert(ctx, loc); err != nil {
 			return nil, fmt.Errorf("upserting item localization: %w", err)
@@ -5019,6 +5019,7 @@ func buildItemLocalizationRecord(
 	preferredLanguage string,
 	titleLocked bool,
 	keepStored bool,
+	identify bool,
 ) *models.MediaItemLocalization {
 	loc := &models.MediaItemLocalization{
 		ContentID: contentID,
@@ -5063,7 +5064,7 @@ func buildItemLocalizationRecord(
 	// Local sidecar art is language-neutral: it must not duplicate into every
 	// localization row, so local candidates only compete at the item level.
 	applyBestImages(locItem, withoutLocalImages(images), mergeMode, preferredLanguage)
-	prepareItemImagesForQueue(locItem, existingLocItem, keepStored)
+	prepareItemImagesForQueue(locItem, existingLocItem, keepStored, identify)
 
 	loc.PosterPath = locItem.PosterPath
 	loc.PosterSourcePath = locItem.PosterSourcePath
@@ -9256,9 +9257,14 @@ func (s storedItemArtwork) restoreUnfilled(item *models.MediaItem) {
 	}
 }
 
+// prepareItemImagesForQueue settles each artwork path before persistence.
 // keepStored is preserveCachedArtwork's: false while metadata.cache_images is
-// off and the item's artwork is not locked.
-func prepareItemImagesForQueue(item, existing *models.MediaItem, keepStored bool) {
+// off and the item's artwork is not locked. Otherwise a cached copy keeps
+// serving until the new source's cache job lands. On an identify the item may
+// now be a different title, so a cached copy of a different source would show
+// the previous title's artwork. The new provider image is served instead until
+// its own cached copy lands.
+func prepareItemImagesForQueue(item, existing *models.MediaItem, keepStored, identify bool) {
 	for _, field := range itemArtworkFields(item) {
 		// applyBestImages intentionally clears a clear-art logo on a manual
 		// refresh when no wordmark replacement exists. Do not let the
@@ -9286,6 +9292,10 @@ func prepareItemImagesForQueue(item, existing *models.MediaItem, keepStored bool
 			if field.thumbhash != nil && currentThumbhash == "" {
 				*field.thumbhash = existingThumbhash
 			}
+			continue
+		}
+		if identify && isRemoteImageSourcePath(*field.path) && *field.path != existingSource {
+			*field.source = *field.path
 			continue
 		}
 		nextPath, nextThumbhash, nextSource := preserveCachedArtwork(
