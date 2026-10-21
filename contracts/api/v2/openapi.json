@@ -25921,6 +25921,10 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "box_sets": {
+            "description": "listCatalogItems, queryCatalogItems, and queryCatalogLetters accept group=box_set, and searchCatalogBoxSets and getCatalogBoxSet answer; listUserLibraries reports which libraries have box sets on",
+            "type": "boolean"
+          },
           "extended_query_rules": {
             "description": "Rule groups in catalog queries, sections, and Smart collections accept the title, decade, runtime, rating_tmdb, rating_rt_critic, rating_rt_audience, latest_episode_added, and last_air_date fields, the not_contains, begins_with, and ends_with operators on title, and not_in_last on date fields",
             "type": "boolean"
@@ -143366,12 +143370,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],

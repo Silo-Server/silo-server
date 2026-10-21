@@ -13,7 +13,8 @@ import (
 // Section catalog-box-sets: movie box sets. A library with box sets on
 // browses the movies TMDB lists in one collection (a franchise such as Harry
 // Potter) as one box_set card under group=box_set; these reads search box
-// sets and open one. getLibraryCapabilities.box_sets advertises them.
+// sets and open one. getCatalogSearchCapabilities.box_sets advertises them
+// to viewers, and getLibraryCapabilities.box_sets to administrators.
 
 const (
 	groupBoxSet         = "box_set"

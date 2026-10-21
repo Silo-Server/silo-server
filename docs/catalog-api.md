@@ -797,8 +797,9 @@ franchise such as Harry Potter) as one box set. An administrator turns it on
 with the library's `box_sets_enabled`; `box_set_min_movies` (2 to 10, default
 2) is the fewest of a collection's movies the library must hold, and
 `box_sets_in_search` (default true) lists the library's box sets in search.
-`getLibraryCapabilities` reports `box_sets: true` when the server supports
-them, and `listUserLibraries` reports each viewer library's `box_sets_enabled`
+`getCatalogSearchCapabilities` reports `box_sets: true` to viewers when the
+server supports them (`getLibraryCapabilities` reports the same to
+administrators), and `listUserLibraries` reports each viewer library's `box_sets_enabled`
 so a client knows which libraries to browse with `group=box_set`.
 
 `listCatalogItems` and `queryCatalogItems` with `group=box_set`, on a
