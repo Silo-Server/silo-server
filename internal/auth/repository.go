@@ -764,6 +764,16 @@ func (r *UserRepository) CreateInvited(ctx context.Context, input models.CreateU
 	if err := EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx); err != nil {
 		return nil, err
 	}
+	// The local-login guard holds the settings mutation lock until commit.
+	// Judge signup policy under that same lock before spending the invite.
+	enabled, err := readServerSetting(ctx, tx, "signup.enabled")
+	if err != nil {
+		return nil, err
+	}
+	const signupEnabledValue = "true"
+	if enabled != signupEnabledValue {
+		return nil, ErrSignupDisabled
+	}
 	if err := redeemCode(ctx, tx, code); err != nil {
 		return nil, err
 	}

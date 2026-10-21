@@ -27,6 +27,11 @@ func TestInvitedAccountAtomicDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	t.Cleanup(saveSettings(t, pool, "signup.enabled"))
+	if _, err := pool.Exec(ctx, `INSERT INTO server_settings (key,value) VALUES ('signup.enabled','true')
+		ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
 	prefix := fmt.Sprintf("signup-atomic-%d", time.Now().UnixNano())
 	t.Cleanup(func() {
 		cleanup := context.WithoutCancel(ctx)

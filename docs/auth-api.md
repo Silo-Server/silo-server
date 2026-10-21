@@ -728,6 +728,9 @@ state and must not be automatically replayed after an uncertain response.
 
 Invited signup commits invite consumption and account creation together. With the
 PostgreSQL profile provider, the optional default profile joins that transaction.
+The transaction rechecks public-signup and local-password policy while holding
+the settings mutation lock. If disabling signup commits first, the in-flight
+signup is refused without creating an account or spending the invite.
 SQLite profile storage remains a separate-store boundary; this does not certify
 an atomic cross-store operation or activate backend conversion.
 
