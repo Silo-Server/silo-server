@@ -46,33 +46,10 @@ type FanoutWorker struct {
 	logger      *slog.Logger
 	nudge       chan struct{}
 
-	// Per-target outboxes: when set, the fanout transaction also enqueues
-	// `pending` attempt rows for each newly inserted delivery — one per
-	// enabled, reason-matching webhook and one per enabled web push
-	// subscription.
-	webhooks    *WebhookRepository
+	// outbox enqueues each new delivery's channel attempts in the fanout
+	// transaction; rateLimiter bounds webhook attempts per profile.
+	outbox      channelOutbox
 	rateLimiter *profileRateLimiter
-	webPush     *WebPushRepository
-	pushDevices *PushDeviceRepository
-}
-
-// SetWebhookOutbox wires durable webhook attempt enqueueing into the fanout
-// transaction.
-func (w *FanoutWorker) SetWebhookOutbox(webhooks *WebhookRepository, limiter *profileRateLimiter) {
-	w.webhooks = webhooks
-	w.rateLimiter = limiter
-}
-
-// SetWebPushOutbox wires durable web push attempt enqueueing into the fanout
-// transaction.
-func (w *FanoutWorker) SetWebPushOutbox(webPush *WebPushRepository) {
-	w.webPush = webPush
-}
-
-// SetPushOutbox wires durable Apple push attempt enqueueing into the fanout
-// transaction.
-func (w *FanoutWorker) SetPushOutbox(pushDevices *PushDeviceRepository) {
-	w.pushDevices = pushDevices
 }
 
 // NewFanoutWorker creates a FanoutWorker. scopes resolves each recipient's
@@ -356,21 +333,12 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 	if err != nil {
 		return nil, 0, err
 	}
-	// Durable dispatch outbox: enqueue per-target attempt rows in the same
-	// transaction so a crash after commit delays a send instead of silently
-	// dropping it. Push targets get only the deliveries past the series
-	// cooldown.
-	if err := w.enqueueWebhookOutbox(ctx, tx, inserted, pending); err != nil {
-		return nil, 0, err
-	}
+	// Push targets get only the deliveries past the series cooldown.
 	pushable, err := w.deliveries.PushCooledDown(ctx, tx, event.SeriesID, pushSeriesCooldown, inserted)
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := w.enqueueWebPushOutbox(ctx, tx, pushable); err != nil {
-		return nil, 0, err
-	}
-	if err := w.enqueuePushOutbox(ctx, tx, pushable); err != nil {
+	if err := w.enqueueOutbox(ctx, tx, inserted, pushable, pending); err != nil {
 		return nil, 0, err
 	}
 
@@ -418,111 +386,28 @@ type pendingDelivery struct {
 	flags    ReasonFlags
 }
 
-// insertedProfileKeys lists the distinct account/profile pairs of the
-// inserted deliveries. Channel targets are looked up by both: profile IDs
-// repeat across accounts, and one account's delivery must not reach another
-// account's devices or webhooks.
-func insertedProfileKeys(inserted []InsertedDelivery) []profileKey {
-	seen := make(map[profileKey]struct{}, len(inserted))
-	keys := make([]profileKey, 0, len(inserted))
-	for _, row := range inserted {
-		key := row.key()
-		if _, ok := seen[key]; !ok {
-			seen[key] = struct{}{}
-			keys = append(keys, key)
-		}
-	}
-	return keys
-}
-
-// enqueuePushOutbox inserts pending push attempt rows for each newly inserted
-// delivery and enabled private-push device on every admin-enabled platform
-// (Apple and Android).
-func (w *FanoutWorker) enqueuePushOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery) error {
-	if w.pushDevices == nil || len(inserted) == 0 {
-		return nil
-	}
-	platforms := w.settings.EnabledPushPlatforms(ctx)
-	if len(platforms) == 0 {
-		return nil
-	}
-	devicesByProfile, err := w.pushDevices.ListEnabledPushByProfiles(ctx, tx, insertedProfileKeys(inserted), platforms)
-	if err != nil {
-		return err
-	}
-	attempts := make([]PushDeliveryAttempt, 0, len(inserted))
-	for _, row := range inserted {
-		attempts = append(attempts, newPushDeliveryAttempts(row.ID, devicesByProfile[row.key()])...)
-	}
-	return w.pushDevices.EnqueuePushAttempts(ctx, tx, attempts)
-}
-
-// enqueueWebPushOutbox inserts `pending` web push attempt rows for each newly
-// inserted delivery, inside the fanout transaction. Subscriptions have no
-// per-reason filters: profile preferences already gated delivery creation,
-// and pushSeriesCooldown bounds push volume per series.
-func (w *FanoutWorker) enqueueWebPushOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery) error {
-	if w.webPush == nil || len(inserted) == 0 || !w.settings.WebPushEnabled(ctx) {
-		return nil
-	}
-	subsByProfile, err := w.webPush.ListEnabledByProfiles(ctx, tx, insertedProfileKeys(inserted))
-	if err != nil {
-		return err
-	}
-	attempts := make([]DeliveryAttempt, 0, len(inserted))
-	for _, row := range inserted {
-		for _, sub := range subsByProfile[row.key()] {
-			attempts = append(attempts, DeliveryAttempt{
-				ID:                     ulid.Make().String(),
-				NotificationDeliveryID: row.ID,
-				TargetID:               sub.ID,
-			})
-		}
-	}
-	return w.webPush.EnqueueAttempts(ctx, tx, attempts)
-}
-
-// enqueueWebhookOutbox inserts `pending` webhook attempt rows for each newly
-// inserted delivery, inside the fanout transaction. Two filters apply:
-// per-webhook reason flags, and the per-profile delivery rate limit
-// (over-limit notifications stay in the inbox; webhooks just don't fire).
-func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[profileKey]pendingDelivery) error {
-	if w.webhooks == nil || len(inserted) == 0 || !w.settings.WebhooksEnabled(ctx) {
-		return nil
-	}
-	hooksByProfile, err := w.webhooks.ListEnabledByProfiles(ctx, tx, insertedProfileKeys(inserted))
-	if err != nil {
-		return err
-	}
+// enqueueOutbox enqueues the channel attempts for the inserted deliveries;
+// only pushable ones reach push targets. A webhook receives a delivery when its reason filter matches and the
+// profile is within its per-minute webhook allowance (over-limit
+// notifications stay in the inbox; webhooks just don't fire).
+func (w *FanoutWorker) enqueueOutbox(ctx context.Context, tx pgx.Tx, inserted, pushable []InsertedDelivery, pending map[profileKey]pendingDelivery) error {
 	rateLimit := w.settings.WebhooksDeliveriesPerMinute(ctx)
-
-	attempts := make([]DeliveryAttempt, 0, len(inserted))
 	rateLimited := 0
-	for _, row := range inserted {
-		key := row.key()
-		entry, ok := pending[key]
-		if !ok {
-			continue
+	err := w.outbox.enqueue(ctx, tx, inserted, pushable, func(row InsertedDelivery, hook Webhook) bool {
+		entry, ok := pending[row.key()]
+		if !ok || !hook.MatchesReasons(entry.flags) {
+			return false
 		}
-		for _, hook := range hooksByProfile[key] {
-			if !hook.MatchesReasons(entry.flags) {
-				continue
-			}
-			if w.rateLimiter != nil && !w.rateLimiter.Allow(key, rateLimit) {
-				rateLimited++
-				continue
-			}
-			attempts = append(attempts, DeliveryAttempt{
-				ID:                     ulid.Make().String(),
-				NotificationDeliveryID: row.ID,
-				TargetID:               hook.ID,
-			})
+		if w.rateLimiter != nil && !w.rateLimiter.Allow(row.key(), rateLimit) {
+			rateLimited++
+			return false
 		}
-	}
+		return true
+	})
 	if rateLimited > 0 {
 		w.logger.WarnContext(ctx, "webhook deliveries rate limited", "skipped", rateLimited)
 	}
-	return w.webhooks.EnqueueAttempts(ctx, tx, attempts)
+	return err
 }
 
 type eventDisplay struct {

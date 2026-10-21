@@ -348,7 +348,7 @@ func TestFanoutPushesOnlyTheFirstEpisodeOfASeriesBurst(t *testing.T) {
 
 	worker := newAccessFanoutWorker(pool, scopeByProfile{"viewer": {}})
 	worker.settings = NewSettings(mapSettingReader{SettingApplePushDeliveryEnabled: "true"})
-	worker.SetPushOutbox(NewPushDeviceRepository(pool))
+	worker.outbox = channelOutbox{settings: worker.settings, pushDevices: NewPushDeviceRepository(pool)}
 	if processed, err := worker.processBatch(ctx); err != nil || processed != 3 {
 		t.Fatalf("processBatch = %d, %v; want 3 events", processed, err)
 	}

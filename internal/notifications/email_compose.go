@@ -211,7 +211,7 @@ func emailSubject(mode string, items emailItems) string {
 	}
 	summary := strings.Join(parts, ", ")
 
-	if mode == EmailModeDailyDigest {
+	if mode == ChannelModeDailyDigest {
 		return "Silo daily digest: " + summary
 	}
 	if items.episodes == 1 && len(items.requests) == 0 && len(items.others) == 0 {
@@ -365,7 +365,7 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, opts emailCompose
 		forProfile = " for " + opts.ProfileName
 	}
 	intro := fmt.Sprintf("New in your library%s:", forProfile)
-	if mode == EmailModeDailyDigest {
+	if mode == ChannelModeDailyDigest {
 		intro = fmt.Sprintf("Here's what's new%s since the last digest:", forProfile)
 	}
 	subjectFor := ""

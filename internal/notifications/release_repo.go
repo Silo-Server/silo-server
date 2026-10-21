@@ -44,7 +44,7 @@ func (r *ReleaseRepository) MarkLibrarySeeded(ctx context.Context, libraryID int
 	return err
 }
 
-// availabilityInsertColumns is shared by the library-wide and path-scoped
+// availabilityReturning is shared by the library-wide and path-scoped
 // availability inserts.
 const availabilityReturning = ` RETURNING episode_id, series_id, season_number, episode_number, episode_key, available_at`
 

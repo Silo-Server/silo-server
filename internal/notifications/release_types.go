@@ -56,17 +56,15 @@ type ReleaseEvent struct {
 	Kind      string
 	// ItemID is the media_items content id for flat item kind events (movie,
 	// audiobook, ebook); empty for episode events.
-	ItemID           string
-	SeriesID         string
-	EpisodeID        string
-	SeasonNumber     int
-	EpisodeNumber    int
-	EpisodeKey       int
-	AvailableAt      time.Time
-	DedupeKey        string
-	ProcessedAt      *time.Time
-	SuppressedReason *string
-	CreatedAt        time.Time
+	ItemID        string
+	SeriesID      string
+	EpisodeID     string
+	SeasonNumber  int
+	EpisodeNumber int
+	EpisodeKey    int
+	AvailableAt   time.Time
+	DedupeKey     string
+	CreatedAt     time.Time
 }
 
 // SeriesInterest is the compact recipient-index row used by fanout.

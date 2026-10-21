@@ -19,16 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
-var pushRetrySchedule = []time.Duration{
-	0,
-	30 * time.Second,
-	2 * time.Minute,
-	10 * time.Minute,
-	30 * time.Minute,
-}
-
 const (
-	pushMaxAttempts         = 5
 	pushDispatchQueue       = 512
 	pushRetryClaimLimit     = 100
 	pushRelayRequestTimeout = 15 * time.Second
@@ -52,15 +43,8 @@ const (
 
 var errRelayReplacementCoolingDown = errors.New("push relay credential was rejected; replacement is cooling down")
 
-func pushRetryDelay(completedAttempt int) (time.Duration, bool) {
-	if completedAttempt < 1 || completedAttempt >= pushMaxAttempts {
-		return 0, false
-	}
-	return pushRetrySchedule[completedAttempt] - pushRetrySchedule[completedAttempt-1], true
-}
-
 func pushRetryDelayWithHint(completedAttempt int, retryAfter time.Duration) (time.Duration, bool) {
-	delay, more := pushRetryDelay(completedAttempt)
+	delay, more := retryDelay(pushRetrySchedule, completedAttempt)
 	if retryAfter > 0 {
 		// The relay retains idempotency state for 24 hours. Stay safely inside
 		// that window even if APNs returns an unusually large Retry-After value.

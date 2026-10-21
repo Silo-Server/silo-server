@@ -14,29 +14,7 @@ import (
 	webpush "github.com/SherClockHolmes/webpush-go"
 )
 
-// webPushRetrySchedule is deliberately shorter than the webhook schedule:
-// vendor push services queue undeliverable messages themselves (the TTL
-// covers offline devices), so server-side retries only need to ride out
-// transient push-service errors.
-var webPushRetrySchedule = []time.Duration{
-	0,
-	30 * time.Second,
-	2 * time.Minute,
-	10 * time.Minute,
-	30 * time.Minute,
-}
-
-const (
-	webPushMaxAttempts = 5
-	webPushTTLSeconds  = 12 * 60 * 60 // push-service queue TTL for offline devices
-)
-
-func webPushRetryDelay(completedAttempt int) (time.Duration, bool) {
-	if completedAttempt < 1 || completedAttempt >= webPushMaxAttempts {
-		return 0, false
-	}
-	return webPushRetrySchedule[completedAttempt] - webPushRetrySchedule[completedAttempt-1], true
-}
+const webPushTTLSeconds = 12 * 60 * 60 // push-service queue TTL for offline devices
 
 // webPushPayload is the JSON the service worker receives. It is encrypted
 // end-to-end (RFC 8291): only the subscribed browser can read it, never the
@@ -189,7 +167,7 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		message_ = fmt.Sprintf("HTTP %d", status)
 	}
 
-	delay, more := webPushRetryDelay(attemptNumber)
+	delay, more := retryDelay(pushRetrySchedule, attemptNumber)
 	if retryAfter > 0 {
 		delay = retryAfter
 	}

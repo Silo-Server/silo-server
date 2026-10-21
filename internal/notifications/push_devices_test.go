@@ -379,7 +379,7 @@ func TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB(t *testing.T
 	}
 
 	cmd.Generation = 5
-	first, err := repo.ApplyApplePush(ctx, cmd, cipher)
+	first, err := repo.ApplyApplePushAndFinalize(ctx, cmd, cipher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,11 +421,11 @@ func TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB(t *testing.T
 	}
 
 	cmd.Generation = 6
-	if _, err = repo.ApplyApplePush(ctx, cmd, cipher); !errors.Is(err, ErrPushGenerationConflict) {
+	if _, err = repo.ApplyApplePushAndFinalize(ctx, cmd, cipher, nil); !errors.Is(err, ErrPushGenerationConflict) {
 		t.Fatalf("registration at the retirement's generation=%v", err)
 	}
 	cmd.Generation = 7
-	again, err := repo.ApplyApplePush(ctx, cmd, cipher)
+	again, err := repo.ApplyApplePushAndFinalize(ctx, cmd, cipher, nil)
 	if err != nil || !again.Enabled || again.RegistrationID == first.RegistrationID {
 		t.Fatalf("re-register=%+v err=%v", again, err)
 	}

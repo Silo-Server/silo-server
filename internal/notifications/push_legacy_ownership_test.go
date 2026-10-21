@@ -145,7 +145,7 @@ func applyOrderedMobile(t *testing.T, repo *PushDeviceRepository, platform strin
 	if platform == PushPlatformApple {
 		input := validApplePushInput()
 		input.DeviceID = "fixture-phone"
-		_, err := repo.ApplyApplePush(t.Context(), ApplePushCommand{UserID: user, ProfileID: "default", InstallationKey: key, Generation: generation, ApplePushRegistrationInput: input}, testPushCipher(t))
+		_, err := repo.ApplyApplePushAndFinalize(t.Context(), ApplePushCommand{UserID: user, ProfileID: "default", InstallationKey: key, Generation: generation, ApplePushRegistrationInput: input}, testPushCipher(t), nil)
 		return err
 	}
 	_, err := repo.ApplyAndroidPush(t.Context(), AndroidPushCommand{UserID: user, ProfileID: "default", DeviceID: "fixture-phone", InstallationKey: key, Generation: generation, Token: strings.Repeat("a", 64), PushMode: PushModePrivatePush}, testPushCipher(t))
