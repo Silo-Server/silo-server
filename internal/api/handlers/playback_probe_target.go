@@ -88,38 +88,45 @@ func (h *PlaybackHandler) sourceBitratePercentile(ctx context.Context, filter ca
 	// request that started it, so a client that disconnects mid-read does
 	// not leave a failure cached for everyone.
 	target, _, _ := h.probeTargets.reads.Do(key, func() (any, error) {
-		// Look again: a read that finished since the check above stored the
-		// target, and a failure below falls back on the latest one.
-		cached, fresh := h.probeTargets.lookup(key)
-		if fresh {
-			return cached.kbps, nil
-		}
-		queryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTargetQueryTimeout)
-		defer cancel()
-		kbps, err := h.SourceBitrates.Percentile(queryCtx, filter, probeTargetPercentile)
-		entry := probeTargetEntry{kbps: kbps, expires: time.Now().Add(probeTargetCacheTTL)}
-		if err != nil {
-			slog.WarnContext(ctx, "speed test target unavailable", "component", "playback", "error", err)
-			// Keep the last good target while the read is retried soon.
-			entry = probeTargetEntry{kbps: cached.kbps, expires: time.Now().Add(probeTargetErrorTTL)}
-		}
-		h.probeTargets.mu.Lock()
-		if h.probeTargets.entries == nil {
-			h.probeTargets.entries = map[string]probeTargetEntry{}
-		}
-		// Scopes come and go with profiles and their restrictions. An expired
-		// one stays an hour longer as the last good target for its failed
-		// reads, then goes.
-		now := time.Now()
-		for cachedKey, cachedEntry := range h.probeTargets.entries {
-			if now.Sub(cachedEntry.expires) > probeTargetCacheTTL {
-				delete(h.probeTargets.entries, cachedKey)
-			}
-		}
-		h.probeTargets.entries[key] = entry
-		h.probeTargets.mu.Unlock()
-		return entry.kbps, nil
+		return h.readProbeTarget(ctx, filter, key), nil
 	})
 	kbps, _ := target.(int)
 	return kbps
+}
+
+// readProbeTarget reads a scope's percentile for the cache, as the one shared
+// read for that scope.
+func (h *PlaybackHandler) readProbeTarget(ctx context.Context, filter catalog.AccessFilter, key string) int {
+	// Look again: a caller that missed the cache just before another read
+	// stored the target uses it, and a failure below falls back on the
+	// latest one.
+	cached, fresh := h.probeTargets.lookup(key)
+	if fresh {
+		return cached.kbps
+	}
+	queryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTargetQueryTimeout)
+	defer cancel()
+	kbps, err := h.SourceBitrates.Percentile(queryCtx, filter, probeTargetPercentile)
+	entry := probeTargetEntry{kbps: kbps, expires: time.Now().Add(probeTargetCacheTTL)}
+	if err != nil {
+		slog.WarnContext(ctx, "speed test target unavailable", "component", "playback", "error", err)
+		// Keep the last good target while the read is retried soon.
+		entry = probeTargetEntry{kbps: cached.kbps, expires: time.Now().Add(probeTargetErrorTTL)}
+	}
+	h.probeTargets.mu.Lock()
+	if h.probeTargets.entries == nil {
+		h.probeTargets.entries = map[string]probeTargetEntry{}
+	}
+	// Scopes come and go with profiles and their restrictions. An expired
+	// one stays an hour longer as the last good target for its failed
+	// reads, then goes.
+	now := time.Now()
+	for cachedKey, cachedEntry := range h.probeTargets.entries {
+		if now.Sub(cachedEntry.expires) > probeTargetCacheTTL {
+			delete(h.probeTargets.entries, cachedKey)
+		}
+	}
+	h.probeTargets.entries[key] = entry
+	h.probeTargets.mu.Unlock()
+	return entry.kbps
 }

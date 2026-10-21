@@ -142,6 +142,28 @@ func TestBandwidthProbeTargetKeepsLastGoodAcrossScopes(t *testing.T) {
 	}
 }
 
+// Of two capability reads that miss the cache together, the one whose shared
+// read starts after the other's has stored the target uses that target: it
+// neither queries again nor, when that query would fail, replaces the target
+// with a short-lived fallback.
+func TestBandwidthProbeTargetLateReadUsesTheStoredTarget(t *testing.T) {
+	source := &countingPercentiles{kbps: 40000}
+	h := &PlaybackHandler{SourceBitrates: source}
+	ctx := newAuthorizedPlaybackContext()
+	h.bandwidthProbeTargetKbps(ctx)
+	var key string
+	for cached := range h.probeTargets.entries {
+		key = cached
+	}
+	source.err = errors.New("down")
+	if got := h.readProbeTarget(ctx, AccessFilterFromContext(ctx, ""), key); got != 40000 || source.calls != 1 {
+		t.Fatalf("late read = %d after %d percentile reads, want the stored 40000 after 1", got, source.calls)
+	}
+	if entry, fresh := h.probeTargets.lookup(key); !fresh || entry.kbps != 40000 || time.Until(entry.expires) <= probeTargetErrorTTL {
+		t.Fatalf("late read replaced the stored target with %+v", entry)
+	}
+}
+
 // expireProbeTargets moves every cached target's expiry age into the past.
 func expireProbeTargets(h *PlaybackHandler, age time.Duration) {
 	h.probeTargets.mu.Lock()
