@@ -753,7 +753,11 @@ reloaded, terminated or killed. Send its summary at that moment where the
 platform allows it (a keepalive request, a background task). Otherwise keep the
 summary on the device, updated each time the app leaves the foreground, and
 send it at the next launch while its playback attempt is current (under 24
-hours). Any `plan_summary` sent at a later launch, whether the summary kept for
+hours). A web page the browser keeps in its back-forward cache ends its plan
+and sends the summary as it is hidden; when it comes back, it adopts its
+playing plan again as a new adoption of the same attempt, with its own grace
+and summary, and the answer, the kept estimate, the re-offer wait and the
+once-per-title notice carry over. Any `plan_summary` sent at a later launch, whether the summary kept for
 app exit or a live send that failed and is retried, omits `throughput_kbps`.
 Each plan's summary has one `event_id`, so a resend is a no-op: the server
 dedupes on `(playback_attempt_id, event_id)`.
