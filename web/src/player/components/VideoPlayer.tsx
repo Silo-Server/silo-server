@@ -4410,13 +4410,13 @@ export function VideoPlayer({
 
   // The id is the plan's own quality label, handed back to the server verbatim.
   const handleQualitySelect = useCallback(
-    (id: string) => {
+    (id: string, onAdopt?: (planRevision?: number) => void) => {
       // A new quality replaces the stream; reload pacing from the old one
       // does not apply to it.
       roomReloadBudgetRef.current = createRoomReloadBudget();
       roomIssuedSeekRef.current = null;
       roomSeekCorrectorRef.current = createRoomSeekCorrector();
-      onQualitySelect?.(id, currentTime);
+      onQualitySelect?.(id, currentTime, undefined, onAdopt);
     },
     [currentTime, onQualitySelect],
   );
@@ -5354,10 +5354,13 @@ export function VideoPlayer({
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={(id) => {
-            // Picking the quality already playing changes nothing.
+            // Picking the quality already playing changes nothing, and a pick
+            // the session refuses is no quality change: it counts once its
+            // plan is adopted, which the session tells before it renders.
             if (id === activeQualityId) return;
-            answerBufferingPill("quality_changed");
-            handleQualitySelect(id);
+            handleQualitySelect(id, (revision) => {
+              if (revision !== undefined) answerBufferingPill("quality_changed");
+            });
           }}
           versionLocked={!!watchTogetherRoomId}
           versions={

@@ -2000,7 +2000,12 @@ describe("VideoPlayer room catch-up", () => {
     const selectQuality = (controls.current as unknown as { onQualitySelect: (id: string) => void })
       .onQualitySelect;
     act(() => selectQuality("720p"));
-    expect(onQualitySelect).toHaveBeenCalledWith("720p", expect.any(Number));
+    expect(onQualitySelect).toHaveBeenCalledWith(
+      "720p",
+      expect.any(Number),
+      undefined,
+      expect.any(Function),
+    );
     await correct("correction-3");
     expect(onReanchorSeek).toHaveBeenCalledTimes(2);
   });
@@ -2032,7 +2037,12 @@ describe("VideoPlayer room catch-up", () => {
     expect(screen.queryByRole("button", { name: "Lower quality" })).not.toBeInTheDocument();
     await stall();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Lower quality" })));
-    expect(onQualitySelect).toHaveBeenCalledWith("1080p-medium", expect.any(Number));
+    expect(onQualitySelect).toHaveBeenCalledWith(
+      "1080p-medium",
+      expect.any(Number),
+      undefined,
+      undefined,
+    );
   });
 
   it("chooses the lower quality from the ladder shown when the viewer accepts", async () => {
@@ -2071,7 +2081,7 @@ describe("VideoPlayer room catch-up", () => {
       ]),
     });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Lower quality" })));
-    expect(onQualitySelect).toHaveBeenCalledWith("720p", expect.any(Number));
+    expect(onQualitySelect).toHaveBeenCalledWith("720p", expect.any(Number), undefined, undefined);
   });
 
   it("withdraws the lower-quality offer when a replan leaves no lower quality", async () => {
@@ -5854,21 +5864,69 @@ describe("VideoPlayer buffering pill", () => {
     expect(onQualitySelect).not.toHaveBeenCalled();
   });
 
-  it("ignores a pick of the quality already playing, and hides the pill on another", () => {
+  /** Picks a quality from the menu; returns what the session tells of it. */
+  function pickQuality(onQualitySelect: ReturnType<typeof vi.fn>, id: string) {
+    const qualityControls = controls.current as unknown as {
+      onQualitySelect: (id: string) => void;
+    };
+    act(() => qualityControls.onQualitySelect(id));
+    const onAdopt = onQualitySelect.mock.calls.at(-1)?.[3] as
+      | ((planRevision?: number) => void)
+      | undefined;
+    return (planRevision?: number) => act(() => onAdopt?.(planRevision));
+  }
+
+  it("ignores a pick of the quality already playing, and hides the pill once another is adopted", () => {
     const onQualitySelect = vi.fn();
     const { video } = askPlayer({ onQualitySelect });
     fireEvent.waiting(video);
     act(() => vi.advanceTimersByTime(7_000));
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
-    const qualityControls = controls.current as unknown as {
-      onQualitySelect: (id: string) => void;
-    };
-    act(() => qualityControls.onQualitySelect("auto"));
+    pickQuality(onQualitySelect, "auto");
     expect(onQualitySelect).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
-    act(() => qualityControls.onQualitySelect("1080p-high"));
-    expect(onQualitySelect).toHaveBeenCalledWith("1080p-high", expect.any(Number));
+    const adopted = pickQuality(onQualitySelect, "1080p-high");
+    expect(onQualitySelect).toHaveBeenCalledWith(
+      "1080p-high",
+      expect.any(Number),
+      undefined,
+      expect.any(Function),
+    );
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+    adopted(2);
     expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+  });
+
+  // A pick the session refuses (a recovery is queued, the server has no plan
+  // for it, or the request fails) is no quality change.
+  it("keeps the viewer's answer when the session refuses a quality pick", () => {
+    const onQualitySelect = vi.fn();
+    const { video } = askPlayer({ onQualitySelect });
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    fireEvent.click(screen.getByRole("button", { name: "Keep quality" }));
+    pickQuality(onQualitySelect, "1080p-high")(undefined);
+
+    // Still answered: the next long stall asks nothing.
+    fireEvent.playing(video);
+    act(() => vi.advanceTimersByTime(20_000));
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+  });
+
+  it("keeps the step-down estimate when the session refuses a quality pick", () => {
+    const onQualitySelect = vi.fn();
+    const onKeptEstimate = vi.fn();
+    const { video } = askPlayer({ onQualitySelect, onKeptEstimate });
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    fireEvent.click(screen.getByRole("button", { name: "Lower quality" }));
+    expect(onKeptEstimate).toHaveBeenLastCalledWith(expect.any(Number));
+    const reports = onKeptEstimate.mock.calls.length;
+
+    pickQuality(onQualitySelect, "1080p-high")(undefined);
+    expect(onKeptEstimate).toHaveBeenCalledTimes(reports);
   });
 
   it("starts over when the cap its replans send changes", () => {

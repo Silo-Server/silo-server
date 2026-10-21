@@ -192,7 +192,11 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
     label: string,
     currentPosition: number,
     buffering?: BufferingReplan,
-    /** `sent` is false when the replan was refused before it was sent. */
+    /**
+     * Gets the adopted plan's revision before the session's state names that
+     * plan, or no revision when the replan is refused; `sent` is false when it
+     * was refused before it was sent.
+     */
     onAdopt?: (planRevision?: number, sent?: boolean) => void,
   ) => void;
   /**
@@ -555,12 +559,14 @@ export function usePlaybackSession(
     retireSessionOnRefusal: boolean;
     resolve: (adopted: boolean) => void;
     planId: string;
+    onAdopt?: (planRevision: number) => void;
   } | null>(null);
   const issueReplanRef = useRef<
     (
       options: ReplanOptions,
       retireSessionOnRefusal?: boolean,
       reconnect?: boolean,
+      onAdopt?: (planRevision: number) => void,
     ) => Promise<boolean>
   >(async () => false);
   const qualityRef = useRef(normalizeQualityPreferenceV3(qualityPreference));
@@ -711,6 +717,7 @@ export function usePlaybackSession(
     (
       decision: DecisionResponseV3,
       initialSubtitleFailure?: PlaybackSessionErrorState | null,
+      onAdopt?: (planRevision: number) => void,
     ): boolean => {
       serverFeaturesRef.current = decision.server_features;
       const plan = decision.playback_plan;
@@ -775,6 +782,9 @@ export function usePlaybackSession(
         awaitingInitialPlayerPositionRef.current = plan.timeline.source_start_seconds > 0;
       }
 
+      // Told before the state update, so the caller hears of the adoption
+      // before anything can render the new plan.
+      onAdopt?.(planRevisionRef.current);
       setState((current) => ({
         ...planToSessionState(
           plan,
@@ -1227,6 +1237,7 @@ export function usePlaybackSession(
       options: ReplanOptions,
       retireSessionOnRefusal = false,
       reconnect = false,
+      onAdopt?: (planRevision: number) => void,
     ): Promise<boolean> {
       const plan = planRef.current;
       const sessionId = sessionIdRef.current;
@@ -1281,6 +1292,7 @@ export function usePlaybackSession(
               retireSessionOnRefusal,
               resolve,
               planId: plan.plan_id,
+              onAdopt,
             };
           });
         }
@@ -1386,6 +1398,7 @@ export function usePlaybackSession(
         const adopted = adoptDecision(
           decision,
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
+          onAdopt,
         );
         if (!adopted && retireSessionOnRefusal) {
           const pending = pendingReplanRef.current;
@@ -1465,7 +1478,12 @@ export function usePlaybackSession(
             // render. Dispatch through the latest callback so its request carries
             // the current output evidence rather than the closed-over snapshot.
             void issueReplanRef
-              .current(pendingReplan.options, pendingReplan.retireSessionOnRefusal)
+              .current(
+                pendingReplan.options,
+                pendingReplan.retireSessionOnRefusal,
+                false,
+                pendingReplan.onAdopt,
+              )
               .then(pendingReplan.resolve);
           } else {
             pendingReplan.resolve(false);
@@ -1594,19 +1612,26 @@ export function usePlaybackSession(
       const previousPreference = qualityRef.current;
       qualityRef.current = normalized;
       setState((current) => ({ ...current, qualityPreference: normalized }));
-      void replan({
-        operation: "quality_change",
-        positionSeconds: currentPosition,
-        ...(buffering
-          ? {
-              bandwidthEstimateKbps: buffering.bandwidth_estimate_kbps ?? null,
-              bandwidthEstimateSource: buffering.bandwidth_estimate_source,
-              learnedLimit: buffering.learned_limit,
-            }
-          : {}),
-      }).then((adopted) => {
-        onAdopt?.(adopted ? planRevisionRef.current : undefined);
+      // The replan tells onAdopt as it adopts, before the new plan renders; a
+      // refusal is told here.
+      void replan(
+        {
+          operation: "quality_change",
+          positionSeconds: currentPosition,
+          ...(buffering
+            ? {
+                bandwidthEstimateKbps: buffering.bandwidth_estimate_kbps ?? null,
+                bandwidthEstimateSource: buffering.bandwidth_estimate_source,
+                learnedLimit: buffering.learned_limit,
+              }
+            : {}),
+        },
+        false,
+        false,
+        onAdopt,
+      ).then((adopted) => {
         if (adopted) return;
+        onAdopt?.(undefined);
         if (qualityRef.current !== normalized) return;
         qualityRef.current = previousPreference;
         setState((current) =>

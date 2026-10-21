@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { createElement, type ReactNode } from "react";
+import { createElement, useEffect, type ReactNode } from "react";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { forgetBandwidthEstimate } from "../bandwidth-probe";
@@ -3283,6 +3283,37 @@ it("sends the speed-test reading on a start but never on a replan", async () => 
   await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
   expect(server.bodiesTo("/replan")[0]).not.toHaveProperty("bandwidth_estimate_kbps");
   expect(server.bodiesTo("/replan")[0]).not.toHaveProperty("bandwidth_estimate_source");
+  unmount();
+});
+
+// The player counts a quality pick once the session adopts its plan, and the
+// controller must hear of the pick before that plan's adoption.
+it("tells a quality change it was adopted before the new plan renders", async () => {
+  recordingServer();
+  const events: string[] = [];
+  const { result, unmount } = renderHook(
+    () => {
+      const session = usePlaybackSession("request-1", [], [], 7, 0, false, "auto");
+      const revision = session.planRevision;
+      useEffect(() => {
+        events.push(`rendered ${revision}`);
+      }, [revision]);
+      return session;
+    },
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  // A discrete-priority update renders, effects included, before the promise
+  // continuations that follow it, so no later callback can come first.
+  const click = vi.spyOn(window, "event", "get").mockReturnValue(new MouseEvent("click"));
+  onTestFinished(() => click.mockRestore());
+  act(() =>
+    result.current.changeQuality("720p", 120, undefined, (revision) => {
+      events.push(`adopted ${revision}`);
+    }),
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(2));
+  expect(events.filter((event) => event.endsWith(" 2"))).toEqual(["adopted 2", "rendered 2"]);
   unmount();
 });
 
