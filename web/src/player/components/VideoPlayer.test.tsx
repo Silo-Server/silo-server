@@ -5815,6 +5815,32 @@ describe("VideoPlayer buffering pill", () => {
     return { ...rendered, video };
   }
 
+  // N6: the player applies a resume position before the first frame, and the
+  // seek that fires must not end the plan's slow start (D5/D10 addendum).
+  it("keeps timing a resumed start's wait through the player's own resume seek", () => {
+    const rendered = renderPlayer({
+      bufferingMode: "ask",
+      qualityPreference: "auto",
+      plan: fixturePlanV3({
+        ...directPlan,
+        timeline: { ...directPlan.timeline, player_start_seconds: 1300 },
+        available_qualities: [
+          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
+          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
+        ],
+        source: { ...directPlan.source, bitrate_kbps: 20_000 },
+      }),
+    });
+    const video = rendered.container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    // Metadata arrives and the player seeks to the resume position; nothing plays.
+    fireEvent.loadedMetadata(video);
+    fireEvent.seeking(video);
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(16_200));
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+  });
+
   function setVisibility(state: "visible" | "hidden") {
     Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
     act(() => {
