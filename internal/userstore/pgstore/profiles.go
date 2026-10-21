@@ -410,6 +410,13 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		s.userID, userstore.ProfileDisplayPrefsPrefix(id)); err != nil {
 		return fmt.Errorf("deleting display preferences for profile %s: %w", id, err)
 	}
+	// Jellyfin-compatible sessions signed in as the profile end with it. Every
+	// lookup reads the stored row, so deleting it ends them on all replicas.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM jellycompat_sessions WHERE streamapp_user_id = $1 AND profile_id = $2`,
+		s.userID, id); err != nil {
+		return fmt.Errorf("deleting Jellyfin sessions for profile %s: %w", id, err)
+	}
 	if err := deleteProfileSectionOverrides(ctx, tx, s.userID, id); err != nil {
 		return err
 	}

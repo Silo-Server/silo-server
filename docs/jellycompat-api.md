@@ -507,6 +507,11 @@ login session ends the compat session with `401`; a lookup that fails is a
 retryable `503` and keeps it. `sa_` API keys have no login session and are checked
 as keys instead.
 
+Deleting a profile deletes the compatibility sessions signed in as it, so their next
+request gets `401` on every node. The account's other profiles keep their sessions.
+As with token logout below, an open socket closes at its next re-check and signed
+node stream URLs already issued keep their lifetime.
+
 Once token logout deletes the stored compatibility row, later checks through the
 session store refuse it on every node, including media requests and playback-grant
 resolution. Cached copies and missed eviction events do not grant authority. Other

@@ -60,6 +60,11 @@ type ProfileHandler struct {
 	EbookReaderPurger interface {
 		PurgeProfile(ctx context.Context, userID int, profileID string) error
 	}
+	// JellyfinSessionPurger signs out the Jellyfin-compatible sessions of a
+	// deleted profile, which live in Postgres whichever store holds it.
+	JellyfinSessionPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
 	// RecommendationsPurger removes a deleted profile's ratings, taste
 	// profile and cached recommendations, which live in Postgres whichever
 	// store holds the profile.
@@ -806,6 +811,13 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 
 	if err := store.DeleteProfile(ctx, profileID); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Profile not found")
+	}
+	if h.JellyfinSessionPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.JellyfinSessionPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile Jellyfin session purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
 	}
 	if h.WatchlistRequestWithdrawer != nil {
 		withdrawCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
