@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
+
 	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -20,16 +22,6 @@ var probeWriteTimeout = 2 * time.Minute
 // its slot back, so a test can observe a probe that is over but still counted.
 var probeEndHook func()
 
-type probeCountingWriter struct {
-	http.ResponseWriter
-	bytes int
-}
-
-func (w *probeCountingWriter) Write(b []byte) (int, error) {
-	n, err := w.ResponseWriter.Write(b)
-	w.bytes += n
-	return n, err
-}
 func (s *Server) handleBandwidthProbe(w http.ResponseWriter, r *http.Request) {
 	claims := s.verifyToken(w, r)
 	if claims == nil {
@@ -52,12 +44,12 @@ func (s *Server) handleBandwidthProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(probeWriteTimeout))
-	writer := &probeCountingWriter{ResponseWriter: w}
+	writer := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 	defer func() {
 		if probeEndHook != nil {
 			probeEndHook()
 		}
-		s.probeLimiter.Release(claims.UserID, size-writer.bytes, window, time.Now())
+		s.probeLimiter.Release(claims.UserID, size-writer.BytesWritten(), window, time.Now())
 	}()
 	streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID), StartedAtSource: streamtelemetry.StartedAtSourceFirstSeen, TokenIssuedAtSource: streamtelemetry.TokenIssuedAtSourceNone})
 	w.Header().Set("Content-Type", "application/octet-stream")
