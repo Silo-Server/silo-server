@@ -272,9 +272,6 @@ async function runSpeedTest(): Promise<ProbeResult | SpeedTestSkipped> {
   }
 }
 
-let lookTimer: ReturnType<typeof setTimeout> | undefined;
-/** Bumped by stopBandwidthProbes so a stopped schedule never looks again. */
-let scheduleGeneration = 0;
 let scheduleCleanup: (() => void) | undefined;
 /**
  * Bumped by cancelBandwidthProbe and when Test speed takes over, so a test
@@ -510,13 +507,15 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
   } catch {
     // Cross-tab coordination is optional.
   }
-  const generation = scheduleGeneration;
+  // Set when the schedule stops, so it never looks again.
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const later = (ms: number, step: () => Promise<void>) => {
-    if (generation !== scheduleGeneration) return;
-    clearTimeout(lookTimer);
-    lookTimer = setTimeout(
+    if (stopped) return;
+    clearTimeout(timer);
+    timer = setTimeout(
       () => {
-        lookTimer = undefined;
+        timer = undefined;
         void step();
       },
       Math.max(0, ms),
@@ -527,7 +526,7 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
     !probeRunning() &&
     !speedTest &&
     !tabHidden() &&
-    generation === scheduleGeneration &&
+    !stopped &&
     automaticTestAllowed() &&
     Date.now() >= notBefore;
   const readingProvesLink = (schedule: ProbeSchedule) =>
@@ -549,7 +548,7 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
   const look = async () => {
     // A test already running keeps what it measures when it settles; one that
     // was stopped, as by a network change, measures nothing.
-    if (probeRunning() || tabHidden() || generation !== scheduleGeneration) return;
+    if (probeRunning() || tabHidden() || stopped) return;
     lookDue = false;
     owedTest = undefined;
     try {
@@ -634,8 +633,8 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
     if (tabHidden()) {
       hiddenAt = Date.now();
       // A hidden tab does not test; one that is running stops and measured nothing.
-      clearTimeout(lookTimer);
-      lookTimer = undefined;
+      clearTimeout(timer);
+      timer = undefined;
       cancelEpoch++;
       stopProbe("hidden");
       return;
@@ -651,6 +650,8 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
   // online, which may be on another network.
   window.addEventListener("online", networkChanged);
   scheduleCleanup = () => {
+    stopped = true;
+    clearTimeout(timer);
     network?.removeEventListener?.("change", onNetworkChange);
     document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("online", networkChanged);
@@ -696,7 +697,6 @@ export function cancelBandwidthProbe(): () => void {
 export function stopBandwidthProbes(): void {
   scheduleCleanup?.();
   scheduleCleanup = undefined;
-  scheduleGeneration++;
   readingEpoch++;
   lastPlaybackStartAt = undefined;
   otherTabPlaybackStartAt = undefined;
@@ -704,10 +704,6 @@ export function stopBandwidthProbes(): void {
   releaseStartHold?.();
   playbackChannel?.close();
   playbackChannel = undefined;
-  if (lookTimer !== undefined) {
-    clearTimeout(lookTimer);
-    lookTimer = undefined;
-  }
   stopProbe("stopped");
   activeProbe = undefined;
 }
