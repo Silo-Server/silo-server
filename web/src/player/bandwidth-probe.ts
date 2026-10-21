@@ -33,7 +33,7 @@ import type { ProbeMode, ProbeResult } from "./probe-meter";
 
 export { forgetBandwidthEstimate, readMeasuredBandwidthKbps } from "./bandwidth-readings";
 export { ProbeRateLimited } from "./bandwidth-measure";
-export { networkInformation, type NetworkInformationLike } from "./network-information";
+export { networkInformation } from "./network-information";
 
 /** Let the first screen settle before spending bandwidth on a test. */
 const TEST_DELAY_MS = 5_000;
@@ -705,7 +705,6 @@ export function stopBandwidthProbes(): void {
   playbackChannel?.close();
   playbackChannel = undefined;
   stopProbe("stopped");
-  activeProbe = undefined;
 }
 
 /** Clears what outlives a schedule, the 429 hold, so each test starts clean. */
@@ -713,5 +712,3 @@ export function resetBandwidthProbesForTests(): void {
   stopBandwidthProbes();
   notBefore = 0;
 }
-
-export type { ProbeResult } from "./probe-meter";
