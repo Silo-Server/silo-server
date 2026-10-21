@@ -52,9 +52,16 @@ the fact would be noise.
 Server channels read the event feed directly, suppressed events included, and
 skip a title that a different, still existing library had made available
 before the event: a second copy (a 4K library beside an HD one) is not news
-for a server-wide post. Profile fanout keeps those events. It already deduplicates per episode
-across libraries, and it must still reach profiles that can see only the
-library that got the copy.
+for a server-wide post. Profile fanout keeps those events, because it must
+still reach profiles that can see only the library that got the copy. It
+skips a profile that can open the episode through another library that
+holds it now and made it available before the event, so the copy is not news
+to that profile. The check reads current access and current copies, not
+what the profile was told: a profile that can open the earlier copy is
+skipped even if that copy's own event never reached it (a burst-capped or
+stale event, or access granted later). Once the earlier library's copy is
+gone, the check no longer skips the profile, though the delivery dedupe key
+below still holds the copy back while the first delivery is in the inbox.
 
 The delivery `type` registry (`episode.available`, `webhook.auto_disabled`,
 `request.*`, …) is extensible by construction; clients must render unknown
@@ -142,9 +149,11 @@ release event's episode key:
 
 Multiple matching reasons produce one delivery with merged reason flags.
 Deliveries are deduplicated per `(account, profile, release event)` and, for
-`episode.available`, per `(account, profile, episode)` across libraries, so
-dual-quality library setups notify at most once. Reprocessing an event is
-idempotent.
+`episode.available`, per `(account, profile, episode)` across libraries.
+Retention removes those rows, so once the first delivery is gone, profile
+fanout's earlier-copy check (see "Release types") is what keeps a profile
+that can still open the earlier copy from being told again.
+Reprocessing an event is idempotent.
 
 A profile ID is unique only within its account: every account from before
 profiles has a profile named `default`. Interest rows, preferences, mutes,

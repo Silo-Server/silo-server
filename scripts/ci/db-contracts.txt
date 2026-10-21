@@ -182,6 +182,7 @@
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
+./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
 ./internal/notifications TestFanoutRetriesWhenRecipientScopeFails
 ./internal/notifications TestFanoutResolvesOnlyEligibleRecipients
