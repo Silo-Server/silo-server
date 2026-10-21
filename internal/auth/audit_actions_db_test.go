@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
@@ -161,11 +162,21 @@ func TestImpersonationAuditDB(t *testing.T) {
 
 func TestOwnershipTransferAuditDB(t *testing.T) {
 	d := newAuditActionsDB(t)
-	var owners int
-	if err := d.pool.QueryRow(t.Context(), `SELECT count(*) FROM users WHERE is_owner`).Scan(&owners); err != nil || owners != 0 {
-		t.Skipf("needs a database without an Owner (%d, %v)", owners, err)
+	// The installation has at most one Owner. Borrow an existing one and hand
+	// ownership back afterwards.
+	var owner int
+	err := d.pool.QueryRow(t.Context(), `SELECT id FROM users WHERE is_owner`).Scan(&owner)
+	borrowed := err == nil
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		owner = d.account(t, "admin", true)
+	case err != nil:
+		t.Fatal(err)
 	}
-	owner, next := d.account(t, "admin", true), d.account(t, "admin", false)
+	next := d.account(t, "admin", false)
+	if borrowed {
+		t.Cleanup(func() { _ = d.users.TransferOwnership(context.Background(), next, owner) })
+	}
 	nextID := strconv.Itoa(next)
 	path := "/api/v2/admin/users/" + nextID + "/transfer-ownership"
 	pattern := "/api/v2/admin/users/{id}/transfer-ownership"
@@ -272,6 +283,19 @@ func TestLoginSessionRevocationAuditDB(t *testing.T) {
 	if audittest.Value(everywhere.Change(t, "revoked_login_sessions").After) != "2" || everywhere.StatusCode != http.StatusOK {
 		t.Fatalf("revoke all row: %s", everywhere.Raw)
 	}
+	// A Jellyfin-compatible sign-in alone is still a sign-out worth recording.
+	if _, err := d.pool.Exec(t.Context(), `INSERT INTO jellycompat_sessions(token, username, account_username, profile_id, profile_name, pseudo_user_id,
+		streamapp_user_id, streamapp_access_token, streamapp_refresh_token, streamapp_token_expiry, expires_at)
+		VALUES ($1, 'audit', 'audit', 'primary', 'audit', gen_random_uuid(), $2, 'access', 'refresh', now() + interval '1 hour', now() + interval '1 day')`,
+		"audit-jf-"+d.suffix, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.sessions.RevokeAsAdmin(all, admin, user, nil); err != nil {
+		t.Fatal(err)
+	}
+	if rows := audittest.Rows(t, d.pool, auditmutation.ActionLoginSessionsRevoked, auditmutation.TargetUser, userID); len(rows) != 2 {
+		t.Fatalf("Jellyfin-only sign out everywhere: %+v", rows)
+	}
 }
 
 func TestAPIKeyAuditDB(t *testing.T) {
@@ -349,4 +373,53 @@ func TestAPIKeyAuditDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	noRows(t, d.pool, auditmutation.ActionAPIKeyCreated, auditmutation.TargetAPIKey, strconv.FormatInt(v1.ID, 10))
+}
+
+// TestSessionRevocationQueuesBehindAccountLockDB holds the account lock that
+// RevokeAsAdmin takes before it revokes the account's sessions, and checks
+// that an audited revocation of one of those sessions waits for it instead of
+// locking the session first and deadlocking on its audit row's account key.
+func TestSessionRevocationQueuesBehindAccountLockDB(t *testing.T) {
+	d := newAuditActionsDB(t)
+	user := d.account(t, "user", false)
+	own := d.session(t, user)
+	ctx := d.ctx(t, http.MethodDelete, "/api/v2/auth/sessions/{id}", "/api/v2/auth/sessions/"+own, user, true)
+
+	signOut, err := d.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = signOut.Rollback(context.WithoutCancel(t.Context())) }()
+	var holder int
+	if err := signOut.QueryRow(t.Context(), `SELECT pg_backend_pid() FROM users WHERE id = $1 FOR UPDATE`, user).Scan(&holder); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- d.svc.RevokeSession(ctx, own, user) }()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for waiting := false; !waiting; {
+		if err := d.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, holder).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("revocation finished while the account was locked: %v", err)
+		case <-deadline.C:
+			t.Fatal("revocation never waited for the account")
+		case <-tick.C:
+		}
+	}
+	if _, err := signOut.Exec(t.Context(), `UPDATE auth_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, user); err != nil {
+		t.Fatalf("sign out everywhere behind a revocation: %v", err)
+	}
+	if err := signOut.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("revocation behind sign out everywhere: %v", err)
+	}
+	noRows(t, d.pool, auditmutation.ActionLoginSessionRevoked, auditmutation.TargetUser, strconv.Itoa(user))
 }

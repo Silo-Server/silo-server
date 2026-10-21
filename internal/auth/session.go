@@ -247,6 +247,11 @@ func (r *SessionRepository) revokeChecked(ctx context.Context, id string, check 
 		return fmt.Errorf("beginning session revocation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	// The audit row's account locks come before the session lock, the order
+	// RevokeAsAdmin takes them in.
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
 	session, err := scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM auth_sessions WHERE id = $1 FOR UPDATE`, id))
 	if err != nil {
 		return err
@@ -254,11 +259,14 @@ func (r *SessionRepository) revokeChecked(ctx context.Context, id string, check 
 	if err := check(session); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = $1`, id); err != nil {
+	// Expiry is judged on the database clock, as RevokeAsAdmin judges it.
+	var unexpired bool
+	if err := tx.QueryRow(ctx, `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW()) WHERE id = $1
+		RETURNING expires_at > NOW()`, id).Scan(&unexpired); err != nil {
 		return fmt.Errorf("revoking session: %w", err)
 	}
 	var entry *auditmutation.Entry
-	if session.RevokedAt == nil && session.ExpiresAt.After(time.Now()) {
+	if session.RevokedAt == nil && unexpired {
 		if entry, err = audit(tx, session); err != nil {
 			return err
 		}
@@ -445,28 +453,31 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	if sessionID != nil && tag.RowsAffected() == 0 {
 		return 0, ErrSessionNotFound
 	}
+	// Sign out everywhere also ends the account's other sign-ins; ending any
+	// of them is worth a domain row, even with no login session left.
+	ended := tag.RowsAffected()
+	if sessionID == nil {
+		for _, revoke := range []func(context.Context, pgx.Tx, []int) (int64, error){
+			revokeAudiobookshelfSessionsInTransaction, deleteJellyfinSessionsInTransaction, withdrawDeviceSignInApprovalsInTransaction,
+		} {
+			n, err := revoke(ctx, tx, []int{userID})
+			if err != nil {
+				return 0, err
+			}
+			ended += n
+		}
+	}
 	var audit *auditmutation.Entry
 	switch {
 	case sessionID != nil && wasLive:
 		audit, err = auditmutation.RecordMutation(ctx, tx, auditmutation.ActionLoginSessionRevoked, auditmutation.TargetUser,
 			strconv.Itoa(userID), http.StatusNoContent, auditmutation.Removed(auditFieldLoginSession, *sessionID))
-	case sessionID == nil && tag.RowsAffected() > 0:
+	case sessionID == nil && ended > 0:
 		audit, err = auditmutation.RecordMutation(ctx, tx, auditmutation.ActionLoginSessionsRevoked, auditmutation.TargetUser,
 			strconv.Itoa(userID), http.StatusOK, auditmutation.Created(auditFieldRevokedLoginSessions, tag.RowsAffected()))
 	}
 	if err != nil {
 		return 0, err
-	}
-	if sessionID == nil {
-		if err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, []int{userID}); err != nil {
-			return 0, err
-		}
-		if err := deleteJellyfinSessionsInTransaction(ctx, tx, []int{userID}); err != nil {
-			return 0, err
-		}
-		if err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {
-			return 0, err
-		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, err
