@@ -21,6 +21,13 @@ import (
 const (
 	fanoutPollInterval = 15 * time.Second
 	fanoutClaimLimit   = 100
+
+	// pushSeriesCooldown keeps a season that arrives together from buzzing a
+	// phone once per episode: a new episode reaches a profile's push targets
+	// only when the profile had no other new-episode notification for the
+	// series in this window. The inbox, email and webhooks still get every
+	// episode.
+	pushSeriesCooldown = 12 * time.Hour
 )
 
 // FanoutWorker consumes unprocessed release_events and materializes
@@ -94,8 +101,8 @@ func NewFanoutWorker(
 	}
 }
 
-// Nudge schedules a near-term claim pass (after the settle delay) so
-// notifications feel realtime without tight polling. Non-blocking.
+// Nudge schedules an immediate claim pass so notifications feel realtime
+// without tight polling. Non-blocking.
 func (w *FanoutWorker) Nudge() {
 	if w == nil {
 		return
@@ -116,14 +123,6 @@ func (w *FanoutWorker) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 		case <-w.nudge:
-			// Wait out the settle delay so one scan's burst for a series
-			// lands in a single claim batch instead of trickling through.
-			settle := w.settings.SettleDelay(ctx)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(settle + time.Second):
-			}
 		}
 		if !w.settings.FanoutEnabled(ctx) {
 			continue
@@ -150,8 +149,6 @@ func (w *FanoutWorker) Run(ctx context.Context) {
 // dedupe. Returns the number of events handled (fanned out + suppressed).
 func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr error) {
 	started := time.Now()
-	settle := w.settings.SettleDelay(ctx)
-	maxBurst := w.settings.MaxSeriesBurst(ctx)
 
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
@@ -159,7 +156,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	claimed, err := w.releases.ClaimUnprocessed(ctx, tx, settle, fanoutClaimLimit)
+	claimed, err := w.releases.ClaimUnprocessed(ctx, tx, fanoutClaimLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -172,9 +169,8 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	defer func() { observation.Finish(telemetry.Outcome(runErr)) }()
 	// Non-episode kinds (movies, audiobooks, ebooks) have no per-profile
 	// interest and never fan out; mark them processed immediately so retention
-	// reclaims them. This must happen before the burst cap: flat item events
-	// have no series_id, and ApplyBurstCap groups by (library_id, series_id). The server-channel
-	// sweep reads events by cursor regardless of processed state.
+	// reclaims them. The server-channel sweep reads events by cursor
+	// regardless of processed state.
 	events, others := PartitionEventsByKind(claimed)
 	if err := w.releases.MarkProcessed(ctx, tx, eventIDs(others), nil); err != nil {
 		return 0, err
@@ -201,13 +197,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		}
 	}
 
-	fanout, suppressed := ApplyBurstCap(fresh, maxBurst)
-	if len(suppressed) > 0 {
-		reason := SuppressedReasonSeriesBurst
-		if err := w.releases.MarkProcessed(ctx, tx, eventIDs(suppressed), &reason); err != nil {
-			return 0, err
-		}
-	}
+	sortForFanout(fresh)
 
 	// Capture the entire batch before acquiring inbox locks. Locking one event
 	// at a time could acquire the same profiles in opposite transaction order.
@@ -227,14 +217,14 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	// beside an HD one) is no news to a profile that can open it there, so
 	// that profile is not captured. The delivery dedupe key alone would let
 	// the copy through once retention has removed the first delivery.
-	earlier, err := w.releases.EarlierEpisodeCopies(ctx, tx, eventIDs(fanout))
+	earlier, err := w.releases.EarlierEpisodeCopies(ctx, tx, eventIDs(fresh))
 	if err != nil {
 		return 0, err
 	}
 	recipients := newRecipientAccess(w.scopes)
-	candidatesByEvent := make(map[string]map[profileKey]struct{}, len(fanout))
+	candidatesByEvent := make(map[string]map[profileKey]struct{}, len(fresh))
 	profiles := make(map[string]struct{})
-	for _, event := range fanout {
+	for _, event := range fresh {
 		candidates, err := w.interests.ListActiveBySeries(ctx, tx, event.LibraryID, event.SeriesID)
 		if err != nil {
 			return 0, err
@@ -274,7 +264,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	totalRecipients := 0
 	totalInserted := 0
 	dispatchRows := make([]DeliveryRow, 0, 32)
-	for _, event := range fanout {
+	for _, event := range fresh {
 		rows, recipients, err := w.fanOutEvent(ctx, tx, event, candidatesByEvent[event.ID])
 		if err != nil {
 			return 0, fmt.Errorf("fan out event %s: %w", event.ID, err)
@@ -283,7 +273,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		totalInserted += len(rows)
 		dispatchRows = append(dispatchRows, rows...)
 	}
-	if err := w.releases.MarkProcessed(ctx, tx, eventIDs(fanout), nil); err != nil {
+	if err := w.releases.MarkProcessed(ctx, tx, eventIDs(fresh), nil); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -302,8 +292,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	w.logger.InfoContext(ctx, "fanout batch processed",
 		"claimed", len(claimed),
 		"non_episode", len(others),
-		"fanned_out", len(fanout),
-		"suppressed", len(suppressed),
+		"fanned_out", len(fresh),
 		"stale", len(stale),
 		"recipient_count", totalRecipients,
 		"inserted_count", totalInserted,
@@ -372,15 +361,20 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 		return nil, 0, err
 	}
 	// Durable dispatch outbox: enqueue per-target attempt rows in the same
-	// transaction so a crash after commit delays webhooks instead of silently
-	// dropping them. Push channels (specs 02-03) plug in here the same way.
+	// transaction so a crash after commit delays a send instead of silently
+	// dropping it. Push targets get only the deliveries past the series
+	// cooldown.
 	if err := w.enqueueWebhookOutbox(ctx, tx, inserted, pending); err != nil {
 		return nil, 0, err
 	}
-	if err := w.enqueueWebPushOutbox(ctx, tx, inserted); err != nil {
+	pushable, err := w.deliveries.PushCooledDown(ctx, tx, event.SeriesID, pushSeriesCooldown, inserted)
+	if err != nil {
 		return nil, 0, err
 	}
-	if err := w.enqueuePushOutbox(ctx, tx, inserted); err != nil {
+	if err := w.enqueueWebPushOutbox(ctx, tx, pushable); err != nil {
+		return nil, 0, err
+	}
+	if err := w.enqueuePushOutbox(ctx, tx, pushable); err != nil {
 		return nil, 0, err
 	}
 
@@ -470,7 +464,7 @@ func (w *FanoutWorker) enqueuePushOutbox(ctx context.Context, tx pgx.Tx, inserte
 // enqueueWebPushOutbox inserts `pending` web push attempt rows for each newly
 // inserted delivery, inside the fanout transaction. Subscriptions have no
 // per-reason filters: profile preferences already gated delivery creation,
-// and push volume is bounded by the per-series burst cap.
+// and pushSeriesCooldown bounds push volume per series.
 func (w *FanoutWorker) enqueueWebPushOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery) error {
 	if w.webPush == nil || len(inserted) == 0 || !w.settings.WebPushEnabled(ctx) {
 		return nil

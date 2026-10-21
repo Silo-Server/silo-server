@@ -13,10 +13,6 @@ import (
 // fallback.
 const DeliveryTypeEpisodeAvailable = "episode.available"
 
-// SuppressedReasonSeriesBurst marks release events consumed by the per-series
-// burst cap without fanout.
-const SuppressedReasonSeriesBurst = "series_burst"
-
 // SuppressedReasonStale marks release events that aged past the fanout
 // staleness horizon before they could fan out (fanout disabled for a stretch,
 // extended downtime); delivering them long after the fact would be noise.

@@ -32,8 +32,6 @@ const (
 	SettingReleaseEventsEnabled = "notifications.release_events_enabled"
 	SettingFanoutEnabled        = "notifications.fanout_enabled"
 	SettingUIEnabled            = "notifications.ui_enabled"
-	SettingFanoutSettleSeconds  = "notifications.fanout.settle_seconds"
-	SettingFanoutMaxSeriesBurst = "notifications.fanout.max_series_burst"
 	SettingFanoutMaxEventAge    = "notifications.fanout.max_event_age_hours"
 	SettingRetentionReadDays    = "notifications.retention.read_days"
 	SettingRetentionUnreadDays  = "notifications.retention.unread_days"
@@ -75,8 +73,6 @@ const (
 )
 
 const (
-	defaultSettleSeconds      = 30
-	defaultMaxSeriesBurst     = 3
 	defaultMaxEventAgeHours   = 72
 	defaultRetentionReadDays  = 90
 	defaultRetentionUnread    = 180
@@ -279,18 +275,6 @@ func (s *Settings) FanoutEnabled(ctx context.Context) bool {
 // UIEnabled gates the inbox/preferences API surface advertised to clients.
 func (s *Settings) UIEnabled(ctx context.Context) bool {
 	return s.boolSetting(ctx, SettingUIEnabled, true)
-}
-
-// SettleDelay is how old a release event must be before the fanout worker
-// claims it, so one scan's burst for a series lands in the same claim batch.
-func (s *Settings) SettleDelay(ctx context.Context) time.Duration {
-	return time.Duration(s.intSetting(ctx, SettingFanoutSettleSeconds, defaultSettleSeconds, 0, 3600)) * time.Second
-}
-
-// MaxSeriesBurst is the per-(library, series) cap on fanned-out events per
-// claim batch; the remainder is suppressed with suppressed_reason.
-func (s *Settings) MaxSeriesBurst(ctx context.Context) int {
-	return s.intSetting(ctx, SettingFanoutMaxSeriesBurst, defaultMaxSeriesBurst, 1, 1000)
 }
 
 // MaxEventAge bounds how old an unprocessed release event may be and still

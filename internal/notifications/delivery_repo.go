@@ -165,6 +165,54 @@ func (r *DeliveryRepository) BulkInsert(ctx context.Context, tx pgx.Tx, deliveri
 	return inserted, nil
 }
 
+// PushCooledDown returns the inserted deliveries whose profile had no other
+// episode.available delivery for seriesID within window: the ones that may
+// reach push targets. Callers hold the inbox locks of every inserted profile,
+// so a concurrent fanout for the same profile cannot slip a delivery past
+// this check.
+func (r *DeliveryRepository) PushCooledDown(ctx context.Context, tx pgx.Tx, seriesID string, window time.Duration, inserted []InsertedDelivery) ([]InsertedDelivery, error) {
+	if len(inserted) == 0 {
+		return nil, nil
+	}
+	userIDs, profileIDs := profileKeyArrays(insertedProfileKeys(inserted))
+	ids := make([]string, len(inserted))
+	for i, row := range inserted {
+		ids[i] = row.ID
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT d.user_id, d.profile_id
+		FROM notification_deliveries d
+		JOIN unnest($1::integer[], $2::text[]) AS p(user_id, profile_id)
+		  ON d.user_id = p.user_id AND d.profile_id = p.profile_id
+		WHERE d.type = '`+DeliveryTypeEpisodeAvailable+`'
+		  AND d.series_id = $3
+		  AND d.created_at > now() - ($4 * interval '1 second')
+		  AND d.id <> ALL($5::text[])`,
+		userIDs, profileIDs, seriesID, window.Seconds(), ids)
+	if err != nil {
+		return nil, fmt.Errorf("list recent series deliveries: %w", err)
+	}
+	defer rows.Close()
+	recent := make(map[profileKey]struct{})
+	for rows.Next() {
+		var key profileKey
+		if err := rows.Scan(&key.userID, &key.profileID); err != nil {
+			return nil, fmt.Errorf("scan recent series delivery: %w", err)
+		}
+		recent[key] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read recent series deliveries: %w", err)
+	}
+	pushable := make([]InsertedDelivery, 0, len(inserted))
+	for _, row := range inserted {
+		if _, ok := recent[row.key()]; !ok {
+			pushable = append(pushable, row)
+		}
+	}
+	return pushable, nil
+}
+
 // HasRequestFulfilled reports whether the account's profile already has a
 // request.fulfilled delivery for requestID: the key of the at-most-once
 // index notification_deliveries_account_profile_request_key. The type is a
