@@ -284,6 +284,12 @@ and never the title. Embeds cannot ping: Discord only parses mentions from
 the top-level `content` field, which this payload never sets (the
 `allowed_mentions` field is omitted rather than sent).
 
+Discord applies the 6000-char total to a whole message, not to each embed.
+Multi-embed messages (Discord DM digests and server-channel content posts, up
+to 10 embeds) count characters across all their embeds: overview teasers
+shorten first, then the oldest embeds move into the "…and N more" `content`
+line, which also counts items past the 10-embed cap.
+
 ### Generic payload and HMAC signing
 
 Generic webhooks receive canonical Silo JSON: event name, delivery and
