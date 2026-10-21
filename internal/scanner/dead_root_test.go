@@ -112,7 +112,7 @@ func TestCollectLogicalFilePathsReportsUnreadableEntries(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
 
-	files, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{root}, "movies", nil)
+	files, walkFailures, walk, err := collectLogicalFilePaths(t.Context(), []string{root}, "movies", nil)
 	if err != nil {
 		t.Fatalf("collectLogicalFilePaths: %v", err)
 	}
@@ -128,6 +128,11 @@ func TestCollectLogicalFilePathsReportsUnreadableEntries(t *testing.T) {
 	}
 	if walkFailures[0] == root {
 		t.Fatal("failure was recorded against the library root; protection must be scoped to the subtree")
+	}
+	// A folder protects its own tree only; it is not an entry that may be a
+	// single file, which would also protect the folder holding it.
+	if len(walk.unreadableEntries) != 0 {
+		t.Fatalf("unreadable entries = %v, want none for an unreadable folder", walk.unreadableEntries)
 	}
 	// The readable file is still found — one bad subtree must not abort the walk.
 	if len(files) != 1 {

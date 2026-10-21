@@ -75,6 +75,24 @@ func TestScopedWalksInheritIgnoreRules(t *testing.T) {
 	}
 }
 
+// A subtree scan under a library root that its ignore files skip walks
+// nothing. It reports the subtree as not verified, so the list of skipped files
+// keeps its rows there, and leaves the decision to a full library scan.
+func TestScanSubtreeUnderSkippedRootProtectsTheSubtree(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ".ignore"), "")
+	scope := filepath.Join(root, "Show", "Season 01")
+	writeTestFile(t, filepath.Join(scope, "Episode 01.mkv"), "x")
+	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
+	result, err := s.ScanSubtree(t.Context(), &models.MediaFolder{ID: 1, Type: "series", Paths: []string{root}, Enabled: true}, scope)
+	if err != nil {
+		t.Fatalf("ScanSubtree: %v", err)
+	}
+	if result == nil || !slices.Equal(result.ProtectedPaths, []string{scope}) {
+		t.Fatalf("protected paths = %+v, want [%s]", result, scope)
+	}
+}
+
 func TestScanRootIgnoreRulesStayWithinLibrary(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "Library")
