@@ -357,6 +357,74 @@ func TestLearnedLimitCarriesThroughReplansDB(t *testing.T) {
 	}
 }
 
+// TestLearnedLimitMarksOnlyAStartItLoweredDB: a start under a stored limit
+// reports bandwidth_limit only when it plays something lower than the same
+// start would without the limit. A client that cannot decode the 4K HDR HEVC
+// source plays its 1080p H.264 version either way, so the limit lowered
+// nothing. A client that plays the source moves to that version only under
+// the limit.
+func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
+	pool := catalogTransferPool(t)
+	var user int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-starts-%d", time.Now().UnixNano())).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(t.Context()), `DELETE FROM users WHERE id = $1`, user) })
+
+	for _, tc := range []struct {
+		name          string
+		decodesSource bool
+	}{
+		{"compatibility picks the version", false},
+		{"the limit picks the version", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
+			handler.InstallationID = serviceInstallation
+			handler.JWTSecret = "learned-limit-starts-secret"
+			handler.Connections = &connectionstore.Store{Pool: pool}
+			startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
+			h264 := v3HandlerStartRequest().Capabilities.VideoDecode[0]
+			if tc.decodesSource {
+				startRequest.Capabilities.VideoDecode = append(startRequest.Capabilities.VideoDecode, h264)
+			} else {
+				startRequest.Capabilities.VideoDecode = []playback.VideoDecodeCapabilityV3{h264}
+			}
+			device := "tv-" + strings.ReplaceAll(tc.name, " ", "-")
+			caller := PlaybackCaller{UserID: user, ProfileID: "profile-1", InstallationID: serviceInstallation, ConnectionDeviceID: device}
+			ctx := apimw.SetProfileID(apimw.SetClaims(t.Context(), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "profile-1")
+			ctx = clientip.SetContext(ctx, "203.0.113.7")
+			start := func(attempt string) *playback.PlanV3 {
+				request := startRequest
+				request.PlaybackAttemptID = attempt
+				started, err := handler.StartPlaybackV2(ctx, caller, request)
+				if err != nil || started.PlaybackPlan == nil {
+					t.Fatalf("start %s: err=%v response=%#v", attempt, err, started)
+				}
+				t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+				return started.PlaybackPlan
+			}
+
+			unlimited := start("attempt-limit-start-0001")
+			want := alternate.ID
+			if tc.decodesSource {
+				want = source.ID
+			}
+			if unlimited.EffectiveMediaFileID != want || unlimited.BandwidthLimit != nil {
+				t.Fatalf("without a limit played file %d with bandwidth_limit %+v, want %d unlimited", unlimited.EffectiveMediaFileID, unlimited.BandwidthLimit, want)
+			}
+			key, _ := connectionstore.Key(ctx, handler.JWTSecret)
+			if err := handler.Connections.Observe(ctx, user, device, key, 44100); err != nil {
+				t.Fatal(err)
+			}
+			limited := start("attempt-limit-start-0002")
+			if limited.EffectiveMediaFileID != alternate.ID || (limited.BandwidthLimit != nil) != tc.decodesSource {
+				t.Fatalf("under the limit played file %d with bandwidth_limit %+v, want the lower version %d, limited=%v", limited.EffectiveMediaFileID, limited.BandwidthLimit, alternate.ID, tc.decodesSource)
+			}
+		})
+	}
+}
+
 // TestConnectionReadingsDB: a plan summary's throughput becomes the
 // connection's playback sample, a nonsense figure does not, a probe keeps its
 // lower bound, and only readings within their lifetime count toward the

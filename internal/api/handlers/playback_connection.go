@@ -108,13 +108,19 @@ func markLearnedLimit(result *playback.PlannerResultV3, limit *playback.Bandwidt
 		request.BandwidthCapKbps = new(serverCap)
 	}
 	baseline := playback.ResolveQualityPolicyV3(request, descriptor)
-	delivered := result.Plan.Source.BitrateKbps
-	if result.Plan.EffectiveRecipe.BitrateKbps != nil {
-		delivered = *result.Plan.EffectiveRecipe.BitrateKbps
-	}
+	delivered := deliveredKbpsV3(result.Plan)
 	if original > playback.StreamBudgetKbpsV3(limit.Kbps) && delivered > 0 && delivered < original && delivered < baseline.BitrateKbps {
 		result.Plan.BandwidthLimit = limit
 	}
+}
+
+// deliveredKbpsV3 is the bitrate a plan sends: its recipe's when it sets one,
+// else its source's.
+func deliveredKbpsV3(plan *playback.PlanV3) int {
+	if plan.EffectiveRecipe.BitrateKbps != nil {
+		return *plan.EffectiveRecipe.BitrateKbps
+	}
+	return plan.Source.BitrateKbps
 }
 
 // A measured stall budget first tries the existing, authorized edition order.
