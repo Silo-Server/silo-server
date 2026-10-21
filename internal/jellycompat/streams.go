@@ -3688,8 +3688,13 @@ func playedMediaSource(session *PlaybackSession, mediaSourceID string) *Playback
 	if session == nil || session.UpstreamMediaFileID == 0 {
 		return nil
 	}
+	return mediaSourceByFileID(session, session.UpstreamMediaFileID)
+}
+
+// mediaSourceByFileID returns a copy of the play's source for fileID, or nil.
+func mediaSourceByFileID(session *PlaybackSession, fileID int) *PlaybackMediaSource {
 	for _, source := range session.MediaSources {
-		if source.FileID == session.UpstreamMediaFileID {
+		if source.FileID == fileID {
 			copy := source
 			return &copy
 		}
@@ -3698,8 +3703,9 @@ func playedMediaSource(session *PlaybackSession, mediaSourceID string) *Playback
 }
 
 // playedSourceDuration returns the runtime in seconds that a progress report
-// is judged against: the played version's (see playedMediaSource), or the
-// first listed runtime when no version can be identified.
+// is judged against: the played version's (see playedMediaSource), which is 0
+// when that version has none, or the first listed runtime when no version can
+// be identified.
 func playedSourceDuration(session *PlaybackSession, mediaSourceID string) float64 {
 	if source := playedMediaSource(session, mediaSourceID); source != nil {
 		return float64(source.Version.Duration)
