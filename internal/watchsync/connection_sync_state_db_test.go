@@ -1,6 +1,7 @@
 package watchsync
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -12,6 +13,30 @@ import (
 )
 
 func TestConnectionSyncStateUpdatesDB(t *testing.T) {
+	ctx := t.Context()
+	repo, saved, now := newSyncStateTestConnection(t)
+	got := checkSyncStateKeepsRefreshedTokens(t, repo, saved, now)
+	checkSyncStateDeferral(t, repo, saved.ID, got, now)
+
+	// A disconnect during a sync stays a disconnect.
+	if err := repo.DeleteConnection(ctx, saved.Provider, saved.UserID, saved.ProfileID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateConnectionSyncState(ctx, saved.ID, connectionError("too late")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateConnectionSyncState(ctx, "", connectionError("no connection")); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists, err := repo.GetConnection(ctx, saved.Provider, saved.UserID, saved.ProfileID); err != nil || exists {
+		t.Fatalf("disconnected connection restored: exists=%v err=%v", exists, err)
+	}
+}
+
+// newSyncStateTestConnection saves a connection for a new user and profile,
+// removed when the test ends.
+func newSyncStateTestConnection(t *testing.T) (*PostgresRepository, Connection, time.Time) {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -21,12 +46,12 @@ func TestConnectionSyncStateUpdatesDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 	var userID int
 	if err := pool.QueryRow(ctx, "INSERT INTO users(username,role) VALUES($1,'user') RETURNING id", "sync-state-"+uuid.NewString()).Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id=$1", userID) }()
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM users WHERE id=$1", userID) })
 	profileID := uuid.NewString()
 	if _, err := pool.Exec(ctx, "INSERT INTO user_profiles(user_id,id,name) VALUES($1,$2,'Sync state')", userID, profileID); err != nil {
 		t.Fatal(err)
@@ -46,8 +71,15 @@ func TestConnectionSyncStateUpdatesDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = repo.DeleteConnection(ctx, saved.Provider, userID, profileID) }()
+	t.Cleanup(func() { _ = repo.DeleteConnection(context.Background(), saved.Provider, userID, profileID) })
+	return repo, saved, now
+}
 
+// checkSyncStateKeepsRefreshedTokens saves a flow's bookkeeping over a token
+// refresh and returns the stored connection.
+func checkSyncStateKeepsRefreshedTokens(t *testing.T, repo *PostgresRepository, saved Connection, now time.Time) Connection {
+	t.Helper()
+	ctx := t.Context()
 	// A refresh lands while a sync holds the saved copy.
 	refreshed, err := repo.UpdateConnectionTokens(ctx, saved, connectionWithTokens(saved, TokenSet{
 		AccessToken: "new-access", RefreshToken: "new-refresh", TokenExpiresAt: new(now.Add(2 * time.Hour)),
@@ -90,12 +122,20 @@ func TestConnectionSyncStateUpdatesDB(t *testing.T) {
 		unchanged.RateLimitedUntil != nil || len(unchanged.SyncCursors) != 2 {
 		t.Fatalf("empty update changed the connection: %+v", unchanged)
 	}
+	return unchanged
+}
+
+// checkSyncStateDeferral checks that a deferral and its error last until it
+// ends, across a plugin credential rotation.
+func checkSyncStateDeferral(t *testing.T, repo *PostgresRepository, id string, unchanged Connection, now time.Time) {
+	t.Helper()
+	ctx := t.Context()
 
 	// A deferral replaces the stored one; a flow that finishes before it ends
 	// keeps it, and one that finishes after it clears it.
 	deferral := connectionError("rate limited")
 	deferral.RateLimitedUntil = new(now.Add(time.Minute))
-	if err := repo.UpdateConnectionSyncState(ctx, saved.ID, deferral); err != nil {
+	if err := repo.UpdateConnectionSyncState(ctx, id, deferral); err != nil {
 		t.Fatal(err)
 	}
 	// Credentials a plugin rotates with a copy loaded before the deferral
@@ -113,10 +153,10 @@ func TestConnectionSyncStateUpdatesDB(t *testing.T) {
 		{now, new(now.Add(time.Minute)), "rate limited"},
 		{now.Add(time.Minute), nil, ""},
 	} {
-		if err := repo.UpdateConnectionSyncState(ctx, saved.ID, flowSucceeded(step.at)); err != nil {
+		if err := repo.UpdateConnectionSyncState(ctx, id, flowSucceeded(step.at)); err != nil {
 			t.Fatal(err)
 		}
-		got, _, err := repo.GetConnectionByID(ctx, saved.ID)
+		got, _, err := repo.GetConnectionByID(ctx, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,17 +167,4 @@ func TestConnectionSyncStateUpdatesDB(t *testing.T) {
 		}
 	}
 
-	// A disconnect during a sync stays a disconnect.
-	if err := repo.DeleteConnection(ctx, saved.Provider, userID, profileID); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.UpdateConnectionSyncState(ctx, saved.ID, connectionError("too late")); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.UpdateConnectionSyncState(ctx, "", connectionError("no connection")); err != nil {
-		t.Fatal(err)
-	}
-	if _, exists, err := repo.GetConnection(ctx, saved.Provider, userID, profileID); err != nil || exists {
-		t.Fatalf("disconnected connection restored: exists=%v err=%v", exists, err)
-	}
 }

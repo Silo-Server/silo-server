@@ -878,6 +878,13 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 		}
 		conn = refreshed
 	}
+	afterFlow := func(label string, err error) {
+		if err != nil {
+			recordFlowError(label, err)
+			return
+		}
+		reload(label)
+	}
 	halted := func() bool { return rateLimited != nil || disconnected }
 	// Dropped shows run first: they cost a request or two, and a large
 	// history read that exhausts the provider's rate limit must not starve
@@ -886,11 +893,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 	if conn.SyncDroppedEnabled && provider.Capabilities().SyncDropped {
 		result, err := s.syncDropped(ctx, conn, cfg, provider)
 		run.Warning = appendWarning(run.Warning, result.Warnings)
-		if err != nil {
-			recordFlowError("dropped shows", err)
-		} else {
-			reload("dropped shows")
-		}
+		afterFlow("dropped shows", err)
 	}
 	if !halted() && conn.ImportWatchedEnabled && provider.Capabilities().ImportWatched {
 		importer, ok := provider.(WatchedImporter)
@@ -902,11 +905,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			run.InboundWatchedImported = result.Imported
 			signalsChanged = signalsChanged || result.Imported > 0
 			run.Warning = appendWarning(run.Warning, result.Warnings)
-			if err != nil {
-				recordFlowError("watched import", err)
-			} else {
-				reload("watched import")
-			}
+			afterFlow("watched import", err)
 		}
 	}
 	if !halted() && conn.ImportProgressEnabled && provider.Capabilities().ImportProgress {
@@ -919,11 +918,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			run.InboundProgressImported = result.Imported
 			signalsChanged = signalsChanged || result.Imported > 0
 			run.Warning = appendWarning(run.Warning, result.Warnings)
-			if err != nil {
-				recordFlowError("progress import", err)
-			} else {
-				reload("progress import")
-			}
+			afterFlow("progress import", err)
 		}
 	}
 	if !halted() && conn.ExportWatchedEnabled && provider.Capabilities().ExportWatched {
@@ -934,11 +929,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			result, err := s.ExportWatched(ctx, conn, cfg, exporter)
 			run.OutboundFound = result.LocalFound
 			run.OutboundSent = result.Sent
-			if err != nil {
-				recordFlowError("watched export", err)
-			} else {
-				reload("watched export")
-			}
+			afterFlow("watched export", err)
 		}
 	}
 	// Favorites and watchlist share one pipeline, run per list kind.
@@ -952,21 +943,13 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			b.setImportCounts(&run, result.Found, result.Imported)
 			signalsChanged = signalsChanged || result.changedLocalList()
 			run.Warning = appendWarning(run.Warning, result.Warnings)
-			if err != nil {
-				recordFlowError(string(b.kind)+" import", err)
-			} else {
-				reload(string(b.kind) + " import")
-			}
+			afterFlow(string(b.kind)+" import", err)
 		}
 		if !halted() && b.exportEnabled(conn) && b.capExport(caps) {
 			result, err := s.exportList(ctx, conn, cfg, provider, b)
 			b.setExportCounts(&run, result.LocalFound, result.Sent)
 			run.Warning = appendWarning(run.Warning, result.Warnings)
-			if err != nil {
-				recordFlowError(string(b.kind)+" export", err)
-			} else {
-				reload(string(b.kind) + " export")
-			}
+			afterFlow(string(b.kind)+" export", err)
 		}
 		if !halted() && b.removalsEnabled(conn) && b.capRemove(caps) {
 			removed, err := s.removePendingListItems(ctx, conn, cfg, provider, b)
@@ -985,11 +968,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 		run.OutboundRatingsFound = result.LocalFound
 		run.OutboundRatingsSent = result.Sent
 		run.Warning = appendWarning(run.Warning, result.Warnings)
-		if err != nil {
-			recordFlowError("ratings", err)
-		} else {
-			reload("ratings")
-		}
+		afterFlow("ratings", err)
 	}
 
 	if rateLimited != nil && !disconnected {

@@ -39,7 +39,7 @@ func TestServiceSyncFlowKeepsConnectionChangesMadeDuringIt(t *testing.T) {
 			repo.connections[key] = cloneConnectionForTest(saved)
 			service := NewService(repo, NewRegistry()).
 				WithMatcher(unmatchedMatcherStub{}).
-				WithWatchState(noOpWatchState{})
+				WithWatchState(noopWatchState{})
 			service.now = func() time.Time { return now }
 			importer := watchedImporterDuring{
 				cursors: map[string]string{"trakt.watched": "cursor-2"},
@@ -140,7 +140,7 @@ func TestServiceSyncRunStopsWhenTheConnectionIsDisconnected(t *testing.T) {
 	}
 	service := NewService(repo, registry).
 		WithMatcher(unmatchedMatcherStub{}).
-		WithWatchState(noOpWatchState{}).
+		WithWatchState(noopWatchState{}).
 		WithUserStoreProvider(staticStoreProvider{})
 
 	err := service.SyncConnection(t.Context(), conn, "manual")
@@ -165,7 +165,7 @@ func TestServiceSyncFlowClearsOnlyAnEndedRateLimit(t *testing.T) {
 			repo.connections[key] = conn
 			service := NewService(repo, NewRegistry()).
 				WithMatcher(unmatchedMatcherStub{}).
-				WithWatchState(noOpWatchState{})
+				WithWatchState(noopWatchState{})
 			service.now = func() time.Time { return now }
 
 			if _, err := service.ImportWatched(t.Context(), conn, ServerConfig{}, watchedImporterStub{}); err != nil {

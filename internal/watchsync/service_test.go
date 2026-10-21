@@ -3209,7 +3209,9 @@ func favoriteImportFixture(t *testing.T) (*userdb.SQLiteUserStore, *serviceFakeR
 		ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1",
 		ImportFavoritesEnabled: true, SyncFavoriteRemovalsEnabled: true,
 	}
-	return userdb.NewSQLiteUserStore(openUserDB(t)), newServiceFakeRepo(), conn
+	repo := newServiceFakeRepo()
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+	return userdb.NewSQLiteUserStore(openUserDB(t)), repo, conn
 }
 
 func TestServiceAppliesIncrementalFavoriteTombstone(t *testing.T) {
