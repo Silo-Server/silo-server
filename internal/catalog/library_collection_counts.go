@@ -28,30 +28,96 @@ func (f AccessFilter) NarrowsCatalog() bool {
 		limits.Active() || len(f.ExcludedMediaTypes) > 0
 }
 
-// ViewerCollectionCounts returns how many members each server collection
-// shows the viewer described by access, keyed by collection ID, under the
-// predicates its member list applies. It returns nil when access narrows
-// nothing, since the stored counts are then the viewer's, and otherwise a
-// non-nil map. Stored members are counted in one statement; smart collections
-// run their count queries in concurrent batches. A collection whose count
-// could not be read is absent from the result, and the error says why.
-func (r *LibraryCollectionRepository) ViewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) (map[string]int, error) {
+// ViewerCollectionCount is what one server collection shows a viewer.
+type ViewerCollectionCount struct {
+	// Count is the members the viewer can open.
+	Count int
+	// HidesMembers reports that the collection has members and the viewer
+	// can open none of them.
+	HidesMembers bool
+}
+
+// ViewerCollectionCounts returns what each server collection shows the viewer
+// described by access, keyed by collection ID, counted the way the
+// collection's catalog page counts its members. It returns nil when access
+// narrows nothing, since the stored counts are then the viewer's, and
+// otherwise a non-nil map. Stored members are counted in one statement; smart
+// collections run their count queries in concurrent batches, and those the
+// viewer can open nothing in are counted again without the viewer's access,
+// because their cached count may predate their current members. A collection
+// whose count could not be read is absent from the result, and the error says
+// why.
+func (r *LibraryCollectionRepository) ViewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) (map[string]ViewerCollectionCount, error) {
 	if !access.NarrowsCatalog() || len(collections) == 0 {
 		return nil, nil
 	}
 	access = stripCatalogUserScope(access)
-	counts := make(map[string]int, len(collections))
-	var stored []string
-	var queries []collectionCountStatement
-	var failures []error
+	counts := make(map[string]ViewerCollectionCount, len(collections))
+	var stored []*models.LibraryCollection
+	var smart []*models.LibraryCollection
 	for _, c := range collections {
 		if c == nil {
 			continue
 		}
-		if !collectionUsesLiveQuery(c) {
-			stored = append(stored, c.ID)
-			continue
+		if collectionUsesLiveQuery(c) {
+			smart = append(smart, c)
+		} else {
+			stored = append(stored, c)
 		}
+	}
+	var failures []error
+	if len(stored) > 0 {
+		ids := make([]string, 0, len(stored))
+		for _, c := range stored {
+			ids = append(ids, c.ID)
+		}
+		visible, err := r.countVisibleStoredMembers(ctx, ids, access)
+		if err != nil {
+			failures = append(failures, err)
+		} else {
+			// The stored count is read live, so it says whether members exist.
+			for _, c := range stored {
+				n := visible[c.ID]
+				counts[c.ID] = ViewerCollectionCount{Count: n, HidesMembers: n == 0 && c.ItemCount > 0}
+			}
+		}
+	}
+	visible, err := r.countSmartCollections(ctx, smart, access)
+	if err != nil {
+		failures = append(failures, err)
+	}
+	var none []*models.LibraryCollection
+	for _, c := range smart {
+		n, ok := visible[c.ID]
+		switch {
+		case !ok:
+		case n > 0:
+			counts[c.ID] = ViewerCollectionCount{Count: n}
+		default:
+			none = append(none, c)
+		}
+	}
+	everyone, err := r.countSmartCollections(ctx, none, AccessFilter{})
+	if err != nil {
+		failures = append(failures, err)
+	}
+	for _, c := range none {
+		if n, ok := everyone[c.ID]; ok {
+			counts[c.ID] = ViewerCollectionCount{HidesMembers: n > 0}
+		}
+	}
+	return counts, errors.Join(failures...)
+}
+
+// countSmartCollections counts the members each smart collection lists under
+// access, as its catalog page resolves them: its rules narrowed to its
+// libraries and access's, with its item limit. A collection whose count could
+// not be read is absent from the result.
+func (r *LibraryCollectionRepository) countSmartCollections(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) (map[string]int, error) {
+	counts := make(map[string]int, len(collections))
+	var queries []collectionCountStatement
+	var failures []error
+	for _, c := range collections {
 		membership, err := ResolveLibraryCollectionMembership(c, access.AllowedLibraryIDs)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("collection %s: %w", c.ID, err))
@@ -69,19 +135,9 @@ func (r *LibraryCollectionRepository) ViewerCollectionCounts(ctx context.Context
 		}
 		queries = append(queries, collectionCountStatement{id: c.ID, sql: sql, args: args})
 	}
-	if len(stored) > 0 {
-		visible, err := r.countVisibleStoredMembers(ctx, stored, access)
-		if err != nil {
-			failures = append(failures, err)
-		} else {
-			for _, id := range stored {
-				counts[id] = visible[id]
-			}
-		}
-	}
-	smart, smartFailures := runCollectionCountStatements(ctx, r.pool, queries)
-	maps.Copy(counts, smart)
-	return counts, errors.Join(append(failures, smartFailures...)...)
+	batchCounts, batchFailures := runCollectionCountStatements(ctx, r.pool, queries)
+	maps.Copy(counts, batchCounts)
+	return counts, errors.Join(append(failures, batchFailures...)...)
 }
 
 // CollectionsShownToViewer returns copies of the server collections a user
@@ -91,26 +147,26 @@ func (r *LibraryCollectionRepository) ViewerCollectionCounts(ctx context.Context
 // or when it has members the viewer can open none of: either way its card
 // would name titles the viewer's limits may hide, and a stored count would
 // say how many. One that is empty for everyone stays listed.
-func CollectionsShownToViewer(collections []*models.LibraryCollection, counts map[string]int) []*models.LibraryCollection {
+func CollectionsShownToViewer(collections []*models.LibraryCollection, counts map[string]ViewerCollectionCount) []*models.LibraryCollection {
 	if counts == nil {
 		return collections
 	}
 	shown := make([]*models.LibraryCollection, 0, len(collections))
 	for _, c := range collections {
 		n, ok := counts[c.ID]
-		if !ok || (n == 0 && c.ItemCount > 0) {
+		if !ok || n.HidesMembers {
 			continue
 		}
 		viewed := *c
-		viewed.ItemCount = n
+		viewed.ItemCount = n.Count
 		shown = append(shown, &viewed)
 	}
 	return shown
 }
 
 // countVisibleStoredMembers counts the stored members of each collection that
-// access admits, with the predicates ListCollectionCollageSources and the
-// member list apply. Collections with none are absent from the result.
+// access admits and the collection's catalog page lists. Collections with
+// none are absent from the result.
 func (r *LibraryCollectionRepository) countVisibleStoredMembers(ctx context.Context, collectionIDs []string, access AccessFilter) (map[string]int, error) {
 	counts := make(map[string]int, len(collectionIDs))
 	if access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0 {
@@ -144,6 +200,8 @@ func buildCountVisibleStoredMembersSQL(collectionIDs []string, access AccessFilt
 	for _, c := range itemAccessConditions(access, &args, &argIdx) {
 		sql.WriteString("\n            AND " + c)
 	}
+	// The catalog page a collection card opens never lists manga chapters.
+	sql.WriteString("\n            AND " + MangaChapterExclusionWhere("mi"))
 	sql.WriteString("\n            GROUP BY lci.collection_id")
 	return sql.String(), args
 }

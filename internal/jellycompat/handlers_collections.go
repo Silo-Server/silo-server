@@ -29,7 +29,7 @@ type collectionSource interface {
 	ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error)
 	ListContainingItem(ctx context.Context, mediaItemID string) ([]*models.LibraryCollection, error)
 	AnyVisibleInLibraries(ctx context.Context, libraryIDs []int) (bool, error)
-	ViewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access catalog.AccessFilter) (map[string]int, error)
+	ViewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access catalog.AccessFilter) (map[string]catalog.ViewerCollectionCount, error)
 }
 
 // CollectionPosterResolver picks the poster a viewer sees for each server

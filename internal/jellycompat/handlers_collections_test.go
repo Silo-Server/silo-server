@@ -23,7 +23,7 @@ type fakeCollectionSource struct {
 	listAllLib  *int
 	// viewerCounts answers ViewerCollectionCounts; nil means the viewer's
 	// access narrows nothing.
-	viewerCounts map[string]int
+	viewerCounts map[string]catalog.ViewerCollectionCount
 }
 
 func (f *fakeCollectionSource) ListAll(_ context.Context, libraryID *int, _ catalog.ListLibraryCollectionsOptions) ([]*models.LibraryCollection, error) {
@@ -82,7 +82,7 @@ func (f *fakeCollectionSource) ListContainingItem(_ context.Context, mediaItemID
 	return out, nil
 }
 
-func (f *fakeCollectionSource) ViewerCollectionCounts(context.Context, []*models.LibraryCollection, catalog.AccessFilter) (map[string]int, error) {
+func (f *fakeCollectionSource) ViewerCollectionCounts(context.Context, []*models.LibraryCollection, catalog.AccessFilter) (map[string]catalog.ViewerCollectionCount, error) {
 	return f.viewerCounts, nil
 }
 
@@ -208,7 +208,8 @@ func TestHandleItems_BoxSetListingFiltersHiddenLibraries(t *testing.T) {
 }
 
 // A restricted viewer's BoxSets carry the members it can open, and one whose
-// members it can open none of is not served, by listing or by ID (#2828).
+// members it can open none of is not served, by listing, by ID or as an
+// image (#2828).
 func TestHandleItems_BoxSetsFollowTheViewersCounts(t *testing.T) {
 	collections := &fakeCollectionSource{
 		collections: []*models.LibraryCollection{
@@ -216,7 +217,7 @@ func TestHandleItems_BoxSetsFollowTheViewersCounts(t *testing.T) {
 			{ID: "102", LibraryID: 1, Title: "Saw", Visibility: "visible", ItemCount: 9},
 			{ID: "103", LibraryID: 1, Title: "Empty", Visibility: "visible", ItemCount: 0},
 		},
-		viewerCounts: map[string]int{"101": 1, "102": 0, "103": 0},
+		viewerCounts: map[string]catalog.ViewerCollectionCount{"101": {Count: 1}, "102": {HidesMembers: true}, "103": {}},
 	}
 	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
 
@@ -239,6 +240,19 @@ func TestHandleItems_BoxSetsFollowTheViewersCounts(t *testing.T) {
 	h.handleBoxSetItem(rec, req, collectionsTestSession(), "102")
 	if rec.Code != 404 {
 		t.Fatalf("hidden collection detail = %d, want 404", rec.Code)
+	}
+
+	// Nor is its poster, which would be generated from its title.
+	images := &ImagesHandler{codec: h.codec, content: h.content, images: NewImageCache(time.Hour, time.Now), collections: collections}
+	for id, want := range map[string]int{"101": 200, "102": 404} {
+		routeID := h.codec.EncodeStringID(EncodedIDCollection, id)
+		req := withImageRouteParams(httptest.NewRequest("GET", "/Items/"+routeID+"/Images/Primary", nil), routeID, "Primary")
+		req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+		rec := httptest.NewRecorder()
+		images.HandleItemImage(rec, req)
+		if rec.Code != want {
+			t.Errorf("collection %s poster = %d, want %d", id, rec.Code, want)
+		}
 	}
 }
 

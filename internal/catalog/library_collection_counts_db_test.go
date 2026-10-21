@@ -11,13 +11,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestViewerCollectionCountsStatementBudgetDB pins what counting server
 // collections for a viewer costs: nothing for a viewer whose access narrows
 // nothing, and otherwise one statement for every stored collection plus at
-// most collectionCountConcurrency for the smart ones, however many are listed.
+// most collectionCountConcurrency for the smart ones, and as many again to
+// recount without the viewer's access the smart ones it can open nothing in,
+// however many are listed.
 func TestViewerCollectionCountsStatementBudgetDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -61,7 +62,6 @@ func TestViewerCollectionCountsStatementBudgetDB(t *testing.T) {
 
 	repo := NewLibraryCollectionRepository(pool)
 	const storedCount, smartCount = 6, 9
-	var collections []*models.LibraryCollection
 	for i := range storedCount + smartCount {
 		input := CreateLibraryCollectionInput{LibraryID: library, LibraryIDs: []int{library}, Slug: fmt.Sprintf("%s-%d", prefix, i), Title: prefix, CollectionType: "manual", Visibility: "visible"}
 		if i >= storedCount {
@@ -80,7 +80,11 @@ func TestViewerCollectionCountsStatementBudgetDB(t *testing.T) {
 				}
 			}
 		}
-		collections = append(collections, c)
+	}
+	// Read back as a listing reads them, with their stored counts.
+	collections, err := repo.ListByLibrary(ctx, library, ListLibraryCollectionsOptions{})
+	if err != nil || len(collections) != storedCount+smartCount {
+		t.Fatalf("listed %d collections (%v), want %d", len(collections), err, storedCount+smartCount)
 	}
 
 	for _, tc := range []struct {
@@ -88,9 +92,11 @@ func TestViewerCollectionCountsStatementBudgetDB(t *testing.T) {
 		access    AccessFilter
 		maxStmts  int64
 		wantCount int
+		wantHides bool
 	}{
-		{"unrestricted", AccessFilter{}, 0, -1},
-		{"rating limited", AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}, 1 + collectionCountConcurrency, 1},
+		{"unrestricted", AccessFilter{}, 0, -1, false},
+		{"rating limited", AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}, 1 + collectionCountConcurrency, 1, false},
+		{"every member hidden", AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "G"}}, 1 + 2*collectionCountConcurrency, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tracer.statements.Store(0)
@@ -107,9 +113,10 @@ func TestViewerCollectionCountsStatementBudgetDB(t *testing.T) {
 				}
 				return
 			}
+			want := ViewerCollectionCount{Count: tc.wantCount, HidesMembers: tc.wantHides}
 			for _, c := range collections {
-				if counts[c.ID] != tc.wantCount {
-					t.Errorf("collection %s (%s) counts %d, want %d", c.ID, c.CollectionType, counts[c.ID], tc.wantCount)
+				if got, ok := counts[c.ID]; !ok || got != want {
+					t.Errorf("collection %s (%s) counts %+v, want %+v", c.ID, c.CollectionType, got, want)
 				}
 			}
 		})

@@ -33,8 +33,8 @@ func TestServerCollectionCountsFollowTheViewerDB(t *testing.T) {
 		scope *access.Scope
 		want  map[string]int
 	}{
-		{"unrestricted", nil, map[string]int{f.ids["hidden"]: 2, f.ids["mixed"]: 3, f.ids["empty"]: 0, f.ids["smart"]: 3, f.ids["broken"]: 4}},
-		{"rating and library limited", &pgViewer, map[string]int{f.ids["mixed"]: 1, f.ids["empty"]: 0, f.ids["smart"]: 1}},
+		{"unrestricted", nil, map[string]int{f.ids["hidden"]: 2, f.ids["mixed"]: 3, f.ids["empty"]: 0, f.ids["chapter"]: 1, f.ids["smart"]: 4, f.ids["broken"]: 4, f.ids["uncounted"]: 0, f.ids["emptied"]: 5}},
+		{"rating and library limited", &pgViewer, map[string]int{f.ids["mixed"]: 1, f.ids["empty"]: 0, f.ids["smart"]: 2, f.ids["emptied"]: 0}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -84,10 +84,12 @@ type viewerCountCollections struct {
 	ids map[string]string
 }
 
-// seedViewerCountCollections seeds two movie libraries, titles rated 7 and 17,
-// and server collections scoped to the first: one holding only 17-rated
-// titles, one also spanning the second library, one empty, one smart, and one
-// smart whose saved rule no longer resolves.
+// seedViewerCountCollections seeds two movie libraries, titles rated 7 and 17
+// and a manga chapter, and server collections scoped to the first: curated
+// ones holding only 17-rated titles, also spanning the second library, empty,
+// and holding only the chapter; and smart ones matching every movie, whose
+// saved rule no longer resolves, whose cached count predates its matches, and
+// whose cached count predates it matching nothing.
 func seedViewerCountCollections(t *testing.T) viewerCountCollections {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -129,6 +131,9 @@ func seedViewerCountCollections(t *testing.T) viewerCountCollections {
 	mature1, mature2 := item("mature1", 17, shown), item("mature2", 17, shown)
 	family := item("family", 7, shown)
 	elsewhere := item("elsewhere", 7, other)
+	// A manga chapter, which a collection's catalog page never lists.
+	series, chapter := item("series", 7, shown), item("chapter", 7, shown)
+	exec(`INSERT INTO manga_chapters(chapter_content_id,series_content_id) VALUES($1,$2)`, chapter, series)
 
 	f := viewerCountCollections{pool: pool, repo: catalog.NewLibraryCollectionRepository(pool), shown: shown, ids: map[string]string{}}
 	create := func(name, kind string, libraries []int, query string, members ...string) {
@@ -152,10 +157,17 @@ func seedViewerCountCollections(t *testing.T) viewerCountCollections {
 	create("hidden", "manual", []int{shown}, "", mature1, mature2)
 	create("mixed", "manual", []int{shown, other}, "", mature1, family, elsewhere)
 	create("empty", "manual", []int{shown}, "")
+	create("chapter", "manual", []int{shown}, "", chapter)
 	create("smart", "smart", []int{shown}, everyMovie)
 	create("broken", "smart", []int{shown}, everyMovie)
+	// Matches only the title in the other library, but its cached count is
+	// still the 0 of a collection the refresher hasn't reached.
+	create("uncounted", "smart", []int{shown, other}, fmt.Sprintf(`{"library_ids":[%d],"media_scope":"movie","match":"all","groups":[]}`, other))
+	// Matches nothing now, but its cached count is from before.
+	create("emptied", "smart", []int{shown}, fmt.Sprintf(`{"library_ids":[%d],"media_scope":"movie","match":"all","groups":[{"match":"all","rules":[{"field":"genre","op":"is","value":"%s-none"}]}]}`, shown, prefix))
 	// The smart-count refresher counts with no access filter.
-	exec(`UPDATE library_collections SET item_count_cached=3 WHERE id=$1`, f.ids["smart"])
+	exec(`UPDATE library_collections SET item_count_cached=4 WHERE id=$1`, f.ids["smart"])
+	exec(`UPDATE library_collections SET item_count_cached=5 WHERE id=$1`, f.ids["emptied"])
 	exec(`UPDATE library_collections SET item_count_cached=4, query_definition='{"groups":[{"match":"all","rules":[{"field":"no_such_field","op":"is","value":"x"}]}]}' WHERE id=$1`, f.ids["broken"])
 	return f
 }
