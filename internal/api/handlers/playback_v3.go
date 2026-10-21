@@ -6604,6 +6604,10 @@ func (h *PlaybackHandler) enqueueRouteEventV3(event playback.RouteEventRecordV3)
 	}
 }
 
+// planDeliveryLookupTimeout bounds the lookup that labels a plan summary's
+// metrics, inside the route event write's own two seconds.
+const planDeliveryLookupTimeout = 500 * time.Millisecond
+
 // recordRouteEventV3 writes one queued route event and feeds the metrics
 // derived from it; a plan summary also becomes its connection's latest. Only a
 // newly inserted row is observed: a v2 retry after a lost 202 reuses its
@@ -6621,8 +6625,12 @@ func recordRouteEventV3(store playback.PlanStoreV3, event playback.RouteEventRec
 			PlanDelivery(context.Context, string, string) (string, error)
 		}); ok && event.Event == playback.RouteEventPlanSummaryV3 {
 			// The delivery only labels the summary's metrics; without it they
-			// count under "unknown".
-			if event.Delivery, err = lookup.PlanDelivery(ctx, event.PlaybackAttemptID, event.PlanID); err != nil {
+			// count under "unknown". It gets a short budget of its own, so a
+			// slow lookup cannot starve the summary and sample writes below.
+			lookupCtx, cancelLookup := context.WithTimeout(ctx, planDeliveryLookupTimeout)
+			event.Delivery, err = lookup.PlanDelivery(lookupCtx, event.PlaybackAttemptID, event.PlanID)
+			cancelLookup()
+			if err != nil {
 				slog.Warn("playback plan delivery lookup failed", "error", err)
 			}
 		}

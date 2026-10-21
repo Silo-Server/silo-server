@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
 
 // deliveryLookupStore answers the optional plan delivery lookup the route
@@ -110,5 +112,37 @@ func TestReportRouteEventV2LabelsPlanSummaryDelivery(t *testing.T) {
 				t.Fatalf("stall ratio samples with delivery %q = %d, want %d", tc.label, got, before+1)
 			}
 		})
+	}
+}
+
+// stalledDeliveryStore answers the plan delivery lookup only when its context
+// ends, as a lookup stuck behind a loaded database would.
+type stalledDeliveryStore struct{ playback.PlanStoreV3 }
+
+func (stalledDeliveryStore) PlanDelivery(ctx context.Context, _, _ string) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+// A slow delivery lookup only loses the metric's label: the summary and the
+// playback sample it carries are still kept for the connection.
+func TestSlowPlanDeliveryLookupKeepsTheSummaryDB(t *testing.T) {
+	pool := catalogTransferPool(t)
+	ctx := t.Context()
+	var user int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("slow-delivery-%d", time.Now().UnixNano())).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM users WHERE id = $1`, user) })
+	event := playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{Event: playback.RouteEventPlanSummaryV3, PlanID: "plan-1", Diagnostics: map[string]string{"throughput_kbps": "60000"}},
+		EventID: uuid.NewString(), UserID: user, ConnectionDeviceID: "tv-1", ConnectionKey: "local", ReceivedAt: time.Now(), SampleLifetime: 7 * 24 * time.Hour}
+	recordRouteEventV3(stalledDeliveryStore{playback.NewMemoryPlanStoreV3()}, event, &connectionstore.Store{Pool: pool})
+	var hasSummary bool
+	var sample *int
+	if err := pool.QueryRow(ctx, `SELECT plan_summary IS NOT NULL, sample_kbps FROM playback_connections WHERE user_id = $1 AND device_id = 'tv-1'`, user).Scan(&hasSummary, &sample); err != nil {
+		t.Fatalf("no connection row after a slow lookup: %v", err)
+	}
+	if !hasSummary || sample == nil || *sample != 60000 {
+		t.Fatalf("after a slow lookup: summary kept %v, sample %v", hasSummary, sample)
 	}
 }

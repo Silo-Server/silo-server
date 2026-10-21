@@ -426,8 +426,9 @@
 # user store, also when two deletions race) and after 30 days without an
 # update, a seek replay never records a limit, a later replan plans under the
 # stored limit, a start reports the limit only when it lowered the plan, the
-# connection budget honours the administrator cap, and a plan summary keeps the
-# delivery of the plan it reports after a replan replaced it.
+# connection budget honours the administrator cap, a plan summary keeps the
+# delivery of the plan it reports after a replan replaced it, and a slow
+# delivery lookup does not cost the summary its write.
 ./internal/playback/connectionstore TestStoreLifecycle
 ./internal/playback/connectionstore TestReadingsDB
 ./internal/catalog TestSourceBitratePercentileDB
@@ -437,6 +438,7 @@
 ./internal/api/handlers TestLearnedLimitMarksOnlyAStartItLoweredDB
 ./internal/api/handlers TestConnectionReadingsDB
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
+./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB
 ./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
 ./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB
 ./internal/api/handlers TestSQLiteRegistrationRemovalDropsConnectionsDB
