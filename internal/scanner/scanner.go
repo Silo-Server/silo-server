@@ -900,6 +900,7 @@ func (s *Scanner) scanPaths(
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workerCount())
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
+	var skipped skippedFiles
 	subtitleCache := newExternalSubtitleDirCache()
 
 	for range s.workerCount() {
@@ -923,6 +924,8 @@ func (s *Scanner) scanPaths(
 					slog.DebugContext(ctx, "scanner: file updated", "component", "scanner", "path", path, "reasons", updateReasons)
 				case actionUnchanged:
 					unchangedCount.Add(1)
+				case actionSkipped:
+					skipped.add(path)
 				}
 				processedCount.Add(1)
 			}
@@ -977,6 +980,7 @@ func (s *Scanner) scanPaths(
 	wg.Wait()
 	close(stopProgress)
 	<-progressDone
+	skipped.unsee(seenPaths)
 
 	result.New = int(newCount.Load())
 	result.Updated = int(updatedCount.Load())
@@ -1758,6 +1762,7 @@ func (s *Scanner) scanScope(
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workerCount())
 	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
+	var skipped skippedFiles
 	subtitleCache := newExternalSubtitleDirCache()
 
 	for range s.workerCount() {
@@ -1781,6 +1786,8 @@ func (s *Scanner) scanScope(
 					slog.DebugContext(ctx, "scanner: file updated", "component", "scanner", "path", path, "reasons", updateReasons)
 				case actionUnchanged:
 					unchangedCount.Add(1)
+				case actionSkipped:
+					skipped.add(path)
 				}
 				processedCount.Add(1)
 			}
@@ -1835,6 +1842,7 @@ func (s *Scanner) scanScope(
 	wg.Wait()
 	close(stopProgress)
 	<-progressDone
+	skipped.unsee(seenPaths)
 
 	result.New = int(newCount.Load())
 	result.Updated = int(updatedCount.Load())
@@ -2785,9 +2793,20 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		return fmt.Errorf("loading group overrides for file: %w", err)
 	}
 	applyGroupOverrides(&groupInference, groupOverrides)
-	_, _, err = s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)], newExternalSubtitleDirCache())
+	action, _, err := s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)], newExternalSubtitleDirCache())
 	if err != nil {
 		return err
+	}
+	if action == actionSkipped {
+		// Only a row of this library cataloged while the file still held video
+		// has anything to retire; it leaves as a removed file does.
+		if existing == nil || existing.MediaFolderID != folder.ID || existing.MissingSince != nil {
+			return nil
+		}
+		if err := s.retireMissingFile(ctx, folder, existing); err != nil {
+			return err
+		}
+		return s.syncVanishedVideoQueues(ctx, folder.ID, cleanFile)
 	}
 	if err := s.reconcileScannedRoots(
 		ctx,
@@ -2847,23 +2866,29 @@ func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *mod
 	if file.MediaFolderID != folder.ID {
 		return true, fmt.Errorf("vanished media file %s belongs to library %d, not %d", filePath, file.MediaFolderID, folder.ID)
 	}
+	return true, s.retireMissingFile(ctx, folder, file)
+}
+
+// retireMissingFile marks file, a row of folder, missing unless it already
+// is, and runs the reconciliation that follows a removed file.
+func (s *Scanner) retireMissingFile(ctx context.Context, folder *models.MediaFolder, file *models.MediaFile) error {
 	if file.MissingSince == nil {
 		if err := s.fileRepo.MarkMissing(ctx, file.ID, time.Now().UTC()); err != nil {
-			return true, fmt.Errorf("marking vanished media file %s missing: %w", filePath, err)
+			return fmt.Errorf("marking media file %s missing: %w", file.FilePath, err)
 		}
 	}
 	if _, _, _, err := s.sweepMissingAndReconcile(ctx, folder, false); err != nil {
-		return true, err
+		return err
 	}
 	if librarykind.IsManga(folder.Type) {
 		if err := s.deleteOrphanedMangaSeries(ctx, folder.ID); err != nil {
-			return true, err
+			return err
 		}
 	}
 	if librarykind.IsEbook(folder.Type) || librarykind.IsManga(folder.Type) {
 		s.reconcileMissingEbookEnrichment(ctx, folder.ID)
 	}
-	return true, nil
+	return nil
 }
 
 func (s *Scanner) syncVanishedVideoQueues(ctx context.Context, folderID int, filePath string) error {
@@ -2974,7 +2999,70 @@ const (
 	actionNew fileAction = iota
 	actionUpdated
 	actionUnchanged
+	// actionSkipped means the file is not catalogable after all (see
+	// probeFindsNoVideo) and nothing was written for it.
+	actionSkipped
 )
+
+// probeFindsNoVideo reports whether probe shows that a file in folder, a
+// library cataloged by video extension, holds no video stream: it read the
+// whole stream list from a container header and found no video. Embedded
+// cover art is not a video stream (convertProbeData). A container that
+// announces streams as its packets arrive can hold video past the part
+// ffprobe reads, and podcast scans share this path with audio files, so
+// neither is judged.
+func probeFindsNoVideo(folder *models.MediaFolder, probe *ProbeData) bool {
+	return probe != nil && catalogsOnlyVideo(folder) &&
+		len(probe.VideoTracks) == 0 && strings.TrimSpace(probe.CodecVideo) == "" && containerListsStreams(probe.Container)
+}
+
+// retiredForNoVideo reports whether existing is a row a scan retired because
+// its probe found no video (probeFindsNoVideo). A later probe that fails or
+// cannot run says nothing new about the file, so the row stays retired rather
+// than coming back with no stream facts.
+func retiredForNoVideo(folder *models.MediaFolder, existing *scanStateFile) bool {
+	return existing != nil && existing.MissingSince != nil && existing.ProbeUpdatedAt != nil && catalogsOnlyVideo(folder) &&
+		!existing.HasVideoTracks && strings.TrimSpace(existing.CodecVideo) == "" && containerListsStreams(existing.Container)
+}
+
+func catalogsOnlyVideo(folder *models.MediaFolder) bool {
+	if folder == nil {
+		return false
+	}
+	mode := walkModeFor(folder.Type)
+	return mode == walkModeMovie || mode == walkModeVideo
+}
+
+func logNoVideoSkip(ctx context.Context, filePath string, probe *ProbeData) {
+	slog.WarnContext(ctx, "scanner: skipped a file with no video stream; movie and series libraries catalog only video", "component", "scanner",
+		"path", filePath,
+		"container", probe.Container,
+		"audio_codec", probe.CodecAudio,
+	)
+}
+
+// skippedFiles collects the paths a scan's workers skipped.
+type skippedFiles struct {
+	mu    sync.Mutex
+	paths []string
+}
+
+func (f *skippedFiles) add(path string) {
+	f.mu.Lock()
+	f.paths = append(f.paths, path)
+	f.mu.Unlock()
+}
+
+// unsee takes the skipped paths out of seenPaths, so a row cataloged while
+// such a file still held video leaves the catalog as a removed file does:
+// marked missing, then deleted after the removal grace.
+func (f *skippedFiles) unsee(seenPaths map[string]bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, path := range f.paths {
+		delete(seenPaths, path)
+	}
+}
 
 // processFile handles a single file: checks if it changed, gathers hints,
 // probes it, and upserts it.
@@ -3068,6 +3156,13 @@ func (s *Scanner) processFile(
 
 		// Try to get probe data.
 		probe, probeSource, probeRejected := s.probeFile(ctx, filePath)
+		if probeFindsNoVideo(folder, probe) {
+			logNoVideoSkip(ctx, filePath, probe)
+			return actionSkipped, nil, nil
+		}
+		if probe == nil && !probeRejected && retiredForNoVideo(folder, existing) {
+			return actionSkipped, nil, nil
+		}
 		rejectionStands := probeRejectionStands(existing, fileSize, fileModifiedAt)
 		if shouldPreserveExistingProbeAfterProbeFailure(updateReasons, probe, rejectionStands) {
 			if probeRejected {
@@ -3173,6 +3268,10 @@ func (s *Scanner) processFile(
 
 	// Try to get probe data.
 	probe, probeSource, probeRejected := s.probeFile(ctx, filePath)
+	if probeFindsNoVideo(folder, probe) {
+		logNoVideoSkip(ctx, filePath, probe)
+		return actionSkipped, nil, nil
+	}
 
 	// Detect external subtitles.
 	externalSubs = loadExternalSubs()

@@ -1032,9 +1032,19 @@ func containerForFile(formatName, filePath string) string {
 	return container
 }
 
+// Normalized container names, as detectContainer and containerForFile
+// return them. containerMKV is declared in matroska_tracks.go.
 const (
+	containerMP4    = "mp4"
+	containerAVI    = "avi"
 	containerMPEGTS = "ts"
 	containerBDAV   = "m2ts"
+	containerASF    = "wmv"
+	containerFLV    = "flv"
+	containerOgg    = "ogg"
+	// detectContainer passes these format names through unchanged.
+	containerMPEGPS    = "mpeg"
+	containerMPEGVideo = "mpegvideo"
 )
 
 // detectContainer maps ffprobe format names to common container names.
@@ -1048,17 +1058,17 @@ func detectContainer(formatName string) string {
 		case "matroska", "webm":
 			return containerMKV
 		case "mov", "mp4", "m4a":
-			return "mp4"
+			return containerMP4
 		case "avi":
-			return "avi"
+			return containerAVI
 		case "mpegts":
 			return containerMPEGTS
 		case "flv":
-			return "flv"
+			return containerFLV
 		case "ogg":
-			return "ogg"
+			return containerOgg
 		case "wmv", "asf":
-			return "wmv"
+			return containerASF
 		}
 	}
 	// Fallback: return first part
