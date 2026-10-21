@@ -3,8 +3,12 @@ package handlers
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -297,5 +301,68 @@ func TestNativeSessionKeepsHistoryRowPerStop(t *testing.T) {
 
 	if got := len(listFinishHistory(t, store)); got != 2 {
 		t.Fatalf("watch history rows = %d, want 2", got)
+	}
+}
+
+// TestAdminPlaybackWatchTimeDB proves a resumed play counts what was watched,
+// not where it ended: the measured watch time survives a later finalization
+// of another copy that never saw progress, and the watch summary sums it with
+// the capped estimate for a play recorded before measurement existed.
+func TestAdminPlaybackWatchTimeDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	suffix := uuid.NewString()
+	var account int
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "watch-time-"+suffix).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	// Deleting the account cascades to its playback history.
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) }()
+
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	started, ended := now.Add(-15*time.Minute), now.Add(-time.Minute)
+	store := NewPGPlaybackAdminStore(pool, nil)
+	finalize := func(position float64, watch playback.WatchTime) {
+		t.Helper()
+		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+			SessionID: "resumed-" + suffix, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
+			StartedAt: started.Format(time.RFC3339Nano), EndedAt: ended.Format(time.RFC3339Nano),
+			WatchedSeconds: position, Watch: watch,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Resumed at 1:30:00, watched two minutes; then a copy on another replica
+	// that only served media finalizes further along with no measurement.
+	finalize(5520, playback.WatchTime{Measured: true, StartPosition: 5400, PlayedSeconds: 120, PausedSeconds: 30})
+	finalize(5600, playback.WatchTime{})
+	// A one-minute play recorded before measurement, ending at 100 seconds.
+	if _, err = pool.Exec(ctx, `INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_file_id,play_method,started_at,ended_at,watched_seconds)
+		VALUES($1,$2,'p-1',0,'direct_play',$3,$4,100)`, "legacy-"+suffix, account, now.Add(-2*time.Hour), now.Add(-2*time.Hour+time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	var watched, played float64
+	var measured bool
+	if err = pool.QueryRow(ctx, `SELECT watched_seconds, played_seconds, measured FROM admin_playback_history WHERE session_id=$1`, "resumed-"+suffix).Scan(&watched, &played, &measured); err != nil {
+		t.Fatal(err)
+	}
+	if watched != 5600 || played != 120 || !measured {
+		t.Fatalf("resumed row = watched %v, played %v, measured %v; want 5600, 120, measured", watched, played, measured)
+	}
+	got, err := (&AdminHandler{pool: pool}).ReadAdminWatchSummary(ctx, AdminWatchSummaryQuery{UserID: account, Days: 7, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Plays != 2 || got.WatchedSeconds != 180 {
+		t.Fatalf("summary = %d plays, %v seconds; want 2 plays, 180 seconds (120 measured + 60 capped)", got.Plays, got.WatchedSeconds)
 	}
 }

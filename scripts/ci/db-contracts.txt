@@ -240,6 +240,10 @@
 # Admin top-activity leaderboards count playback, not marked-watched rows.
 ./internal/api/handlers TestAdminTopActivityCountsPlaybackNotMarks
 
+# A resumed play's measured watch time survives repeated finalizations and is
+# what admin watch totals count.
+./internal/api/handlers TestAdminPlaybackWatchTimeDB
+
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
 

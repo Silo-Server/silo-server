@@ -50,6 +50,12 @@ type AdminPlaybackHistoryRow struct {
 	WatchedSeconds  float64
 	DurationSeconds *float64
 	Completed       bool
+	// StartPositionSeconds, PlayedSeconds and PausedSeconds are the measured
+	// watch time (see playback.WatchTime); nil when the play has no
+	// measurement, which includes every row written before it was recorded.
+	StartPositionSeconds *float64
+	PlayedSeconds        *float64
+	PausedSeconds        *float64
 	// SeriesTitle, SeasonNumber and EpisodeNumber describe an episode's
 	// place in its series; empty and nil for anything else.
 	SeriesTitle   string
@@ -117,6 +123,9 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			h.watched_seconds,
 			h.duration_seconds,
 			h.completed,
+			CASE WHEN h.measured THEN h.start_position_seconds END,
+			CASE WHEN h.measured THEN h.played_seconds END,
+			CASE WHEN h.measured THEN h.paused_seconds END,
 			COALESCE(sm.title, ''),
 			ep.season_number,
 			ep.episode_number
@@ -146,6 +155,7 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			&row.SessionID, &row.UserID, &row.Username, &row.ProfileID, &row.ProfileName,
 			&row.MediaItemID, &row.MediaFileID, &row.MediaTitle, &row.MediaType, &row.PlayMethod,
 			&row.StartedAt, &row.EndedAt, &row.WatchedSeconds, &row.DurationSeconds, &row.Completed,
+			&row.StartPositionSeconds, &row.PlayedSeconds, &row.PausedSeconds,
 			&row.SeriesTitle, &row.SeasonNumber, &row.EpisodeNumber,
 		); err != nil {
 			rows.Close()

@@ -99,6 +99,9 @@ type Session struct {
 
 	Position float64
 	IsPaused bool
+	// Watch measures how much of the session was actually watched; Position
+	// is only where the player is now. See WatchTime.
+	Watch WatchTime
 	// StopReported marks a session a client reported stopped without an ID
 	// that could end it (#1454). It only hides the session from the live
 	// admin view: pause state and idle grace are untouched, so a stale stop
@@ -1013,6 +1016,7 @@ func (m *SessionManager) updateProgress(sessionID string, position float64, isPa
 	s.StopReported = false
 	s.streamRevision++
 	m.touchSessionLocked(s)
+	s.Watch.Observe(s.Position, s.IsPaused, s.UpdatedAt)
 	return nil
 }
 
@@ -1039,12 +1043,14 @@ func (m *SessionManager) SetPaused(sessionID string, paused bool, acceptedSequen
 	if s.IsPaused == paused {
 		if moved {
 			s.streamRevision++
+			s.Watch.Observe(s.Position, s.IsPaused, time.Now())
 		}
 		return false, nil
 	}
 	s.IsPaused = paused
 	s.streamRevision++
 	m.touchSessionLocked(s)
+	s.Watch.Observe(s.Position, s.IsPaused, s.UpdatedAt)
 	return true, nil
 }
 
@@ -1348,6 +1354,9 @@ func (m *SessionManager) applyReplacementLocked(
 	s.streamRevision++
 	rollback.appliedRevision = s.streamRevision
 	m.touchSessionLocked(s)
+	if replacement.PositionSeconds != nil {
+		s.Watch.Observe(s.Position, s.IsPaused, s.UpdatedAt)
+	}
 	return rollback, nil
 }
 
