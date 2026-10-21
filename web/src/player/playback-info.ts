@@ -224,9 +224,9 @@ export function plainResolutionLabel(preference: string): string | null {
 
 /**
  * The next quality rung below what the viewer receives now, for a viewer whose
- * connection cannot keep up. A lit rung steps down from itself; otherwise the
- * step is from the delivered bitrate, or to the top transcode rung when a copy
- * delivery reports none.
+ * connection cannot keep up. The step is from the lower of the lit rung's
+ * bitrate and the delivered one, since a cap can encode a lit rung below its
+ * listed rate. With neither, a copy delivery steps to the top transcode rung.
  */
 export function lowerQualityOption(
   options: QualityOption[],
@@ -239,8 +239,10 @@ export function lowerQualityOption(
     .sort((a, b) => b.bitrateKbps - a.bitrateKbps);
   const activeId = resolveActiveQualityOptionId(options, preference, activeQuality);
   const active = rungs.find((option) => option.id === activeId);
-  const ceiling =
-    active?.bitrateKbps ?? (isPositive(deliveredBitrateKbps) ? deliveredBitrateKbps : Infinity);
+  const ceiling = Math.min(
+    active?.bitrateKbps ?? Infinity,
+    isPositive(deliveredBitrateKbps) ? deliveredBitrateKbps : Infinity,
+  );
   return rungs.find((option) => option.bitrateKbps < ceiling) ?? null;
 }
 

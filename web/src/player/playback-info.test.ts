@@ -372,6 +372,10 @@ describe("lowerQualityOption", () => {
     expect(lowerQualityOption(options, "720p", "720p", 3000)).toBeNull();
   });
 
+  it("steps down from the delivered bitrate when a cap encodes the lit rung lower", () => {
+    expect(lowerQualityOption(options, "2160p-medium", "2160p-medium", 5000)?.id).toBe("720p");
+  });
+
   it("steps down from the delivered bitrate when no rung is lit", () => {
     expect(lowerQualityOption(options, "auto", "1080p-medium", 6000)?.id).toBe("720p");
     expect(lowerQualityOption(options, "original", undefined, 40_000)?.id).toBe("2160p-medium");
