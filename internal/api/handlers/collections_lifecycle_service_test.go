@@ -39,6 +39,9 @@ func (s *lifecycleStore) ReorderCollectionItems(context.Context, string, []strin
 func (s *lifecycleStore) UpdateCollection(_ context.Context, input userstore.UpdateCollectionInput) error {
 	s.mutations++
 	s.update = input
+	if input.PosterURL != nil {
+		s.collection.PosterURL = *input.PosterURL
+	}
 	return nil
 }
 func (s *lifecycleStore) ListCollectionItems(context.Context, string) ([]userstore.CollectionItem, error) {
@@ -194,5 +197,29 @@ func TestSyncPersonalCollectionNotFoundVersusForbidden(t *testing.T) {
 		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != tc.want {
 			t.Errorf("shared=%t: sync error = %v; want %d", tc.shared, err, tc.want)
 		}
+	}
+}
+
+// A variant that fails to delete must not leave the collection pointing at
+// partly deleted artwork: the poster is cleared first and the failed cleanup
+// only leaves orphans (issue #2419).
+func TestDeletePersonalCollectionImageClearsPosterWhenVariantDeleteFails(t *testing.T) {
+	poster := "user-collection-images/c/poster/original.0000000000000001.webp"
+	store := &lifecycleStore{collection: userstore.Collection{ID: "c", CreatorProfileID: "owner", CollectionType: "manual", PosterURL: poster}}
+	artwork := &partialDeleteStore{okKeys: 1, stubListDeleteStore: stubListDeleteStore{keys: []string{
+		poster,
+		"user-collection-images/c/poster/w300.0000000000000001.webp",
+	}}}
+	h := NewCollectionHandler(lifecycleProvider{store: store})
+	h.ArtworkStore = artwork
+
+	if err := h.DeletePersonalCollectionImage(t.Context(), 1, "owner", "c", "poster"); err != nil {
+		t.Fatalf("DeletePersonalCollectionImage: %v", err)
+	}
+	if store.update.PosterURL == nil || *store.update.PosterURL != "" || store.update.PosterThumbhash == nil || *store.update.PosterThumbhash != "" {
+		t.Fatalf("poster reference not cleared: %#v", store.update)
+	}
+	if len(artwork.deleted) != 1 {
+		t.Fatalf("cleanup did not run after the clear: deleted %#v", artwork.deleted)
 	}
 }

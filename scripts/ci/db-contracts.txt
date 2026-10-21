@@ -428,3 +428,7 @@
 # Explore all on a row the catalog cannot express as a query pages the row's
 # own fetch past its item limit, on Home and on its library page.
 ./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
+
+# Clearing admin collection artwork commits the cleared reference even when a
+# stored variant fails to delete.
+./internal/api/handlers TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB
