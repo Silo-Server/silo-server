@@ -23,10 +23,17 @@ import (
 // the v1 handlers and the v2 operations share. Each returns the view the v1
 // handler writes verbatim and, on failure, an *APIError.
 
-// HomeSections answers every section of the home page with its items for
+// HomeSections answers every section of the home page that has items for
 // the profile on the context, each row capped at viewer.ItemLimitCap items
 // when it is set.
 func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer) (SectionsView, error) {
+	return h.homeSections(ctx, viewer, false)
+}
+
+// homeSections is HomeSections. With keepEmptyRows, it answers sections with
+// no items as the frozen v1 endpoint always has, leaving out only an
+// off-season seasonal row and one that hiding watched titles emptied.
+func (h *SectionHandler) homeSections(ctx context.Context, viewer SectionViewer, keepEmptyRows bool) (SectionsView, error) {
 	start := time.Now()
 	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(ctx)
 	if err != nil {
@@ -44,10 +51,13 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 		// Filter before the cross-section diversity pass so a watched item
 		// cut here can't suppress the same title in a later section.
 		withItems, userStates = h.filterWatchedHomeSections(ctx, withItems, resolved)
-		withItems = dropEmptyWatchedHomeSections(withItems)
 	}
 	withItems = applyDiversityFilter(withItems)
-	withItems = dropEmptySeasonalSections(withItems)
+	if keepEmptyRows {
+		withItems = dropEmptySeasonalSections(withItems)
+	} else {
+		withItems = dropEmptySections(withItems)
+	}
 	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.Artwork(), userStates)
 	itemCount := 0
 	for _, section := range withItems {
