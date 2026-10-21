@@ -4403,6 +4403,7 @@ export function VideoPlayer({
       plan_id: plan.plan_id,
       delivered_kbps: plan.effective_recipe.bitrate_kbps ?? plan.source.bitrate_kbps ?? 0,
       quality: activeQualityId,
+      active_quality: plan.active_quality,
       available_qualities: plan.available_qualities,
       degradation_warnings: plan.degradation_warnings.map((w) => w.code),
     }),

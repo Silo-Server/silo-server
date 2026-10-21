@@ -24,6 +24,8 @@ export interface BufferingPlan {
   delivered_kbps: number;
   /** The active quality preference: "auto" or a rung label. */
   quality: string;
+  /** The `available_qualities` entry the plan delivers, when the server names one. */
+  active_quality?: string;
   available_qualities: { label: string; bitrate_kbps?: number; preserves_source?: boolean }[];
   degradation_warnings?: string[];
 }
@@ -593,19 +595,25 @@ export class BufferingQualityController {
     if (this.plan && this.summary) this.onSummary?.(this.plan, { ...this.summary });
   }
 
-  /** The web's lowerQualityOption over the plan's own menu. */
+  /**
+   * The web's lowerQualityOption over the plan's own menu: the highest rung
+   * below the lower of the named rung's bitrate and the delivered bitrate. A
+   * cap can encode below the rung the plan names, and the step must still be
+   * below what plays.
+   */
   private lowerRung() {
     const plan = this.plan;
     if (!plan) return undefined;
-    const active =
-      plan.quality === "auto"
-        ? plan.delivered_kbps
-        : (plan.available_qualities.find((q) => q.label === plan.quality)?.bitrate_kbps ??
-          plan.delivered_kbps);
+    const named = plan.available_qualities.find(
+      (q) => plan.active_quality !== undefined && q.label === plan.active_quality,
+    )?.bitrate_kbps;
+    const delivered = plan.delivered_kbps > 0 ? plan.delivered_kbps : Infinity;
+    const ceiling =
+      named !== undefined && named > 0 ? Math.min(named, delivered) : plan.delivered_kbps;
     let best: BufferingPlan["available_qualities"][number] | undefined;
     for (const rung of plan.available_qualities) {
       const kbps = rung.bitrate_kbps ?? 0;
-      if (kbps > 0 && kbps < active && kbps > (best?.bitrate_kbps ?? 0)) best = rung;
+      if (kbps > 0 && kbps < ceiling && kbps > (best?.bitrate_kbps ?? 0)) best = rung;
     }
     return best;
   }
