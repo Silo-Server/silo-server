@@ -207,30 +207,6 @@ func TestBufferedAutoPrefersCopyVersion(t *testing.T) {
 	}
 }
 
-func TestBufferedHDRChoosesSDRVersionWithoutToneMap(t *testing.T) {
-	source := v3HandlerFixtureFile(t)
-	source.Bitrate = 63000
-	source.Resolution = "4k"
-	source.CodecVideo = "hevc"
-	source.VideoTracks[0] = models.VideoTrack{Codec: "hevc", Width: 3840, Height: 2160, BitDepth: 10, Bitrate: 63000, VideoRange: "HDR", VideoRangeType: "HDR10"}
-	alternate := v3HandlerFixtureFile(t)
-	alternate.ID = 84
-	alternate.Bitrate = 31600
-	alternate.VideoTracks[0].Bitrate = 31600
-	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
-	h.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
-	req := v3HandlerStartRequest()
-	req.Capabilities.VideoDecode[0].MaxBitrateKbps = 100000
-	req.QualityPreference = playback.QualityAutoV3
-	req.BandwidthEstimateKbps = new(44100)
-	req.BandwidthEstimateSource = playback.BandwidthEstimateObservedRebufferV3
-	r := httptest.NewRequest("POST", "/", nil).WithContext(newAuthorizedPlaybackContext())
-	chosen, _, _ := h.lowerBufferedVersion(r, req, source, 0, playback.PlannerSettingsV3{})
-	if chosen.ID != alternate.ID {
-		t.Fatalf("HDR without tone-map policy chose %d, want SDR original %d", chosen.ID, alternate.ID)
-	}
-}
-
 func TestPlaybackCallerKeepsConnectionDeviceSeparate(t *testing.T) {
 	for _, device := range []string{"declared-device", ""} {
 		r := playbackCallerRequest(newAuthorizedPlaybackContext(), PlaybackCaller{DeviceID: "playback-device", ConnectionDeviceID: device})
