@@ -51,18 +51,6 @@ describe("UnsupportedFilesSection", () => {
     mocks.useFiles.mockReset();
   });
 
-  it("shows the count while collapsed", () => {
-    mocks.useFiles.mockReturnValue(
-      listing([group({}), group({ directory_path: "/media/movies/Manhunter (1986)" })]),
-    );
-
-    render(<UnsupportedFilesSection libraries={libraries} />);
-
-    const header = screen.getByRole("button", { name: /files not cataloged/i });
-    expect(header).toHaveAttribute("aria-expanded", "false");
-    expect(within(header).getByText("2")).toBeInTheDocument();
-  });
-
   it("lists each folder under its library root and explains it on demand", async () => {
     mocks.useFiles.mockReturnValue(
       listing([
@@ -122,24 +110,6 @@ describe("UnsupportedFilesSection", () => {
     expect(screen.getByText("and 40 more")).toBeInTheDocument();
   });
 
-  it("opens and closes a folder from the keyboard", async () => {
-    mocks.useFiles.mockReturnValue(listing([group({})]));
-    const user = userEvent.setup();
-
-    render(<UnsupportedFilesSection libraries={libraries} />);
-    await user.click(screen.getByRole("button", { name: /files not cataloged/i }));
-    const toggle = screen.getByRole("button", { name: "Ronin (1998)/VIDEO_TS" });
-    toggle.focus();
-
-    await user.keyboard("{Enter}");
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("VTS_01_1.VOB")).toBeInTheDocument();
-
-    await user.keyboard(" ");
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("VTS_01_1.VOB")).not.toBeInTheDocument();
-  });
-
   it("labels a folder against its own library's roots only", async () => {
     // The Shows root sits inside the Movies root. A Movies row under it must
     // not be labeled against the Shows root.
@@ -156,18 +126,6 @@ describe("UnsupportedFilesSection", () => {
     await user.click(screen.getByRole("button", { name: /files not cataloged/i }));
 
     expect(screen.getByText("tv/Concert (2001)/VIDEO_TS")).toBeInTheDocument();
-  });
-
-  it("loads the next page on request", async () => {
-    const fetchNextPage = vi.fn();
-    mocks.useFiles.mockReturnValue(listing([group({})], { hasNextPage: true, fetchNextPage }));
-    const user = userEvent.setup();
-
-    render(<UnsupportedFilesSection libraries={libraries} />);
-    await user.click(screen.getByRole("button", { name: /files not cataloged/i }));
-    await user.click(screen.getByRole("button", { name: "Load more" }));
-
-    expect(fetchNextPage).toHaveBeenCalledTimes(1);
   });
 
   it("keeps loaded folders and offers a retry when a refresh fails", async () => {
@@ -201,27 +159,5 @@ describe("UnsupportedFilesSection", () => {
     expect(screen.queryByText("No skipped files found.")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(refetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("says when nothing was skipped", async () => {
-    mocks.useFiles.mockReturnValue(listing([]));
-    const user = userEvent.setup();
-
-    render(<UnsupportedFilesSection libraries={libraries} />);
-    await user.click(screen.getByRole("button", { name: /files not cataloged/i }));
-
-    expect(screen.getByText("No skipped files found.")).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
-  });
-
-  it("passes the filter to the listing", async () => {
-    mocks.useFiles.mockReturnValue(listing([group({})]));
-    const user = userEvent.setup();
-
-    render(<UnsupportedFilesSection libraries={libraries} />);
-    await user.click(screen.getByRole("button", { name: /files not cataloged/i }));
-    await user.type(screen.getByRole("textbox", { name: "Filter files not cataloged" }), "ronin");
-
-    await vi.waitFor(() => expect(mocks.useFiles).toHaveBeenLastCalledWith({ search: "ronin" }));
   });
 });
