@@ -177,7 +177,16 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
   /** What the media element itself plays from an untouched original. */
   nativeOriginalSupport: NativeOriginalSupport;
   /** Starts a fresh session against another file (edition/version switch). */
-  switchVersion: (fileId: number, currentPosition: number) => void;
+  /**
+   * Switches to another version of the title. `onAdopt` gets the adopted
+   * plan's revision before the new plan renders, or no revision when the
+   * switch does not adopt one.
+   */
+  switchVersion: (
+    fileId: number,
+    currentPosition: number,
+    onAdopt?: (planRevision?: number) => void,
+  ) => void;
   /** `track_change` replan selecting another audio track by combined index. */
   switchAudioTrack: (index: number, currentPosition: number) => void;
   /**
@@ -934,6 +943,7 @@ export function usePlaybackSession(
       intentAt,
       reconnect = false,
       tracks,
+      onAdopt,
     }: {
       preferredFileId?: number;
       position: number;
@@ -945,6 +955,8 @@ export function usePlaybackSession(
       intentAt: number | null;
       /** The start is a reconnect attempt, which must not cancel itself. */
       reconnect?: boolean;
+      /** Told the adopted plan's revision before the new plan renders. */
+      onAdopt?: (planRevision: number) => void;
       /**
        * Track selection to start with instead of the initial request's, so a
        * restarted session keeps what the viewer picked during playback. An
@@ -1101,7 +1113,7 @@ export function usePlaybackSession(
           return { kind: "superseded" };
         }
 
-        const adopted = adoptDecision(decisionToAdopt, initialSubtitleFailure);
+        const adopted = adoptDecision(decisionToAdopt, initialSubtitleFailure, onAdopt);
         if (adopted) {
           // The kept estimate belonged to the attempt this start replaced.
           keptEstimateRef.current = undefined;
@@ -1970,11 +1982,17 @@ export function usePlaybackSession(
   }, [reportEvent]);
 
   const switchVersion = useCallback(
-    (newFileId: number, currentPosition: number) => {
-      if (!allowAlternateVersions) return;
-      if (switchingRef.current) return;
-      if (newFileId === stateRef.current.mediaFileId) return;
+    (newFileId: number, currentPosition: number, onAdopt?: (planRevision?: number) => void) => {
+      if (
+        !allowAlternateVersions ||
+        switchingRef.current ||
+        newFileId === stateRef.current.mediaFileId
+      ) {
+        onAdopt?.(undefined);
+        return;
+      }
       switchingRef.current = true;
+      let adopted = false;
       // The viewer picked the version in the player: the new attempt's first
       // frame is timed from here.
       const intentAt = performance.now();
@@ -1992,9 +2010,14 @@ export function usePlaybackSession(
             replacementErrorMessage: "Failed to switch playback version",
             initialErrorMessage: "Failed to switch version",
             intentAt,
+            onAdopt: (revision) => {
+              adopted = true;
+              onAdopt?.(revision);
+            },
           });
         } finally {
           switchingRef.current = false;
+          if (!adopted) onAdopt?.(undefined);
         }
       })();
     },

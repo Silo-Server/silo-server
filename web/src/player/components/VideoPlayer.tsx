@@ -249,7 +249,11 @@ interface VideoPlayerProps {
   trickplayUpdatedAt?: number;
   /** A preview sheet failed to load; read the previews again. */
   onTrickplayError?: () => void;
-  onSwitchVersion?: (fileId: number, currentPosition: number) => void;
+  onSwitchVersion?: (
+    fileId: number,
+    currentPosition: number,
+    onAdopt?: (planRevision?: number) => void,
+  ) => void;
   subtitleUrls: PlayerSubtitleInfo[];
   initialPosition: number;
   /** `quality_change` replan for a label taken from `plan.available_qualities`. */
@@ -5381,9 +5385,14 @@ export function VideoPlayer({
           onSwitchVersion={
             onSwitchVersion && !watchTogetherRoomId
               ? (fileId) => {
-                  // A version the viewer chooses is a quality change.
-                  answerBufferingPill("quality_changed");
-                  onSwitchVersion(fileId, currentTime);
+                  // A version the viewer chooses is a quality change, counted
+                  // like a quality pick: pending until its plan is adopted.
+                  answerBufferingPill("pick_sent");
+                  onSwitchVersion(fileId, currentTime, (revision) => {
+                    answerBufferingPill(
+                      revision === undefined ? "pick_refused" : "quality_changed",
+                    );
+                  });
                 }
               : undefined
           }

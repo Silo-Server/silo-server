@@ -5940,6 +5940,33 @@ describe("VideoPlayer buffering pill", () => {
     expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
   });
 
+  // D12/D16: a version switch counts like a quality pick.
+  it("hides the pill when the viewer switches version, and keeps the answer if the switch adopts nothing", () => {
+    const onSwitchVersion = vi.fn();
+    const { video } = askPlayer({ onSwitchVersion });
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    fireEvent.click(screen.getByRole("button", { name: "Keep quality" }));
+    fireEvent.playing(video);
+    act(() => vi.advanceTimersByTime(20_000));
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+    const switchControls = controls.current as unknown as {
+      onSwitchVersion: (fileId: number) => void;
+    };
+    act(() => switchControls.onSwitchVersion(99));
+    const onAdopt = onSwitchVersion.mock.calls.at(-1)?.[2] as (planRevision?: number) => void;
+    act(() => onAdopt(undefined));
+
+    // Still answered: the next long stall asks nothing.
+    fireEvent.playing(video);
+    act(() => vi.advanceTimersByTime(20_000));
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+  });
+
   it("keeps the step-down estimate when the session refuses a quality pick", () => {
     const onQualitySelect = vi.fn();
     const onKeptEstimate = vi.fn();

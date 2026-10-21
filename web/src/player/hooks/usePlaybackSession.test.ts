@@ -3349,6 +3349,20 @@ it("refuses a lowering while another replan is in flight, and sends a Restore af
   unmount();
 });
 
+// D12/D16: a version switch tells its caller whether it adopted a plan.
+it("tells a version switch's caller the adopted revision, or none", async () => {
+  recordingServer();
+  const { result, unmount } = await startSession();
+  const sameFile = vi.fn();
+  act(() => result.current.switchVersion(result.current.mediaFileId ?? 7, 10, sameFile));
+  expect(sameFile).toHaveBeenCalledWith(undefined);
+  const switched = vi.fn();
+  act(() => result.current.switchVersion(99, 10, switched));
+  await waitFor(() => expect(switched).toHaveBeenCalledWith(2));
+  expect(switched).toHaveBeenCalledTimes(1);
+  unmount();
+});
+
 it("sends a displaced Restore's clear on one start only", async () => {
   const server = recordingServer({ holdFirstReplan: true });
   const { result, unmount } = await startSession();

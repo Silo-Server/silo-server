@@ -298,8 +298,8 @@ function WatchPagePlayer({
   );
 
   const handleSwitchVersion = useCallback(
-    (newFileId: number, currentPosition: number) => {
-      session.switchVersion(newFileId, currentPosition);
+    (newFileId: number, currentPosition: number, onAdopt?: (planRevision?: number) => void) => {
+      session.switchVersion(newFileId, currentPosition, onAdopt);
     },
     [session],
   );
