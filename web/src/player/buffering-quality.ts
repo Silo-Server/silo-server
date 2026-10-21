@@ -245,9 +245,10 @@ export class BufferingQualityController {
   private deferredPill: BufferingPill | null = null;
   private obscured = false;
   /**
-   * The viewer picked a quality that is not adopted yet. Its pill is gone, but
-   * the answer, history and kept estimate wait for the pick's adoption
-   * (`quality_changed`), and a lowering adopted meanwhile is not announced.
+   * The viewer picked a quality that is not adopted yet. Its pill is gone and
+   * nothing prompts or lowers meanwhile, but the answer, history and kept
+   * estimate wait for the pick's adoption (`quality_changed`), and a lowering
+   * adopted meanwhile is not announced.
    */
   private pickPending = false;
   /**
@@ -385,6 +386,8 @@ export class BufferingQualityController {
         break;
       case "pick_refused":
         this.pickPending = false;
+        // A long stall the pick held off is evaluated at once.
+        if (this.longStallInProgress(now)) this.check(now);
         break;
       case "quality_changed":
         this.pickPending = false;
@@ -535,15 +538,18 @@ export class BufferingQualityController {
     this.stalls = [];
     this.longStallEnded = undefined;
     this.blockedUntil = 0;
-    // A lowering the viewer's pending pick is about to replace says nothing.
-    if (!pending || pending.restore || this.pickPending) return;
+    if (!pending || pending.restore) return;
+    // A lowering the viewer's pending pick is about to replace shows nothing,
+    // but its action and cooldown stand.
     if (
       plan.delivered_kbps >= pending.bitrate ||
       plan.degradation_warnings?.includes("quality_reduction_unavailable")
     ) {
-      this.showCantLower(now, false);
+      if (this.pickPending) this.setAction("cant_lower");
+      else this.showCantLower(now, false);
       this.blockedUntil = now + NO_LOWER_COOLDOWN_MS;
-    } else if (pending.undo) this.show("undo", now);
+    } else if (this.pickPending) return;
+    else if (pending.undo) this.show("undo", now);
     else this.emit({ type: "notice", key: "lowered" }, now);
   }
 
@@ -673,6 +679,7 @@ export class BufferingQualityController {
       this.paused ||
       this.outage ||
       this.answered ||
+      this.pickPending ||
       this.pending ||
       this.pill ||
       this.deferredPill ||
