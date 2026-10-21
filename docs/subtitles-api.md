@@ -455,6 +455,19 @@ A 204 confirms metadata removal only. Object cleanup is best effort using the ac
 
 The bundled viewer subtitle search dialogs and track selector have no stored-subtitle deletion action. Administrator deletion and subtitle-preference removal are separate caller families. Native viewer-deletion inventories remain a coordination prerequisite; no new viewer deletion UI or Jellyfin behavior is introduced.
 
+## Text encoding
+
+Every text subtitle a client receives is UTF-8, as its `charset=utf-8` content
+type says: the playback subtitle routes, the Jellyfin subtitle stream, offline
+downloads, and the source of an AI translation. Sidecars and stored subtitles
+saved in a legacy code page (Windows-1251 Russian, Windows-1250 Polish,
+UTF-16, and so on) are decoded on delivery, with the code page chosen from the
+subtitle's language and, among a language's common code pages, from the bytes
+(`subtitles.DecodeText`). UTF-8 is delivered unchanged. Text the server cannot
+place safely, such as Chinese tagged without a script or region, or untagged
+text that is not Latin, is delivered as stored. The administrator attachment
+returns the stored bytes unchanged.
+
 ## Subtitle sync
 
 Sync aligns a subtitle to its file's audio and stores a timing correction that

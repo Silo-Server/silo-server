@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/encoding/unicode"
 )
 
@@ -41,8 +42,11 @@ func TestDeliveryBytesDeliversUTF8(t *testing.T) {
 		}
 		return out
 	}
+	const ruSigns = "1\r\n00:00:01,000 --> 00:00:02,000\r\nПОЛИЦИЯ. ПРОДАЕТСЯ ДОМ\r\n"
 	vobsub := []byte{0x00, 0x00, 0x01, 0xBA, 0x44, 0x00, 0x04, 0x00, 0x04, 0x01}
 	cp1251Untagged := encode(charmap.Windows1251, ruSRT)
+	damagedUTF8 := append([]byte(ruSRT), 0xC0, '\n')
+	gbkUntagged := encode(simplifiedchinese.GBK, "1\r\n00:00:01,000 --> 00:00:02,000\r\n你好，世界\r\n")
 	tests := []struct {
 		name     string
 		language string
@@ -52,6 +56,7 @@ func TestDeliveryBytesDeliversUTF8(t *testing.T) {
 	}{
 		{"windows-1251 russian", "ru", FormatSRT, encode(charmap.Windows1251, ruSRT), ruSRT},
 		{"koi8-r russian", "rus", FormatSRT, encode(charmap.KOI8R, ruSRT), ruSRT},
+		{"windows-1251 capitals", "ru", FormatSRT, encode(charmap.Windows1251, ruSigns), ruSigns},
 		{"windows-1250 polish", "pl", FormatSRT, encode(charmap.Windows1250, plSRT), plSRT},
 		{"iso-8859-2 polish", "pol", FormatSRT, encode(charmap.ISO8859_2, plSRT), plSRT},
 		{"windows-1252 untagged", "", FormatSRT, encode(charmap.Windows1252, frSRT), frSRT},
@@ -61,6 +66,8 @@ func TestDeliveryBytesDeliversUTF8(t *testing.T) {
 		{"utf-8", "ru", FormatSRT, []byte(ruSRT), ruSRT},
 		{"utf-8 with bom", "ru", FormatSRT, []byte("\ufeff" + ruSRT), "\ufeff" + ruSRT},
 		{"untagged non-latin stays as stored", "", FormatSRT, cp1251Untagged, string(cp1251Untagged)},
+		{"damaged utf-8 stays as stored", "ru", FormatSRT, damagedUTF8, string(damagedUTF8)},
+		{"chinese without a script stays as stored", "zh", FormatSRT, gbkUntagged, string(gbkUntagged)},
 		{"binary sub stays as stored", "ru", FormatSUB, vobsub, string(vobsub)},
 	}
 	for _, tt := range tests {

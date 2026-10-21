@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -220,23 +221,16 @@ func ServeSubtitle(w http.ResponseWriter, data []byte, format string) {
 // LoadExternalSubtitleAsVTT reads a sidecar subtitle file as UTF-8
 // (subtitles.DecodeText) and converts it to WebVTT for player consumption.
 func LoadExternalSubtitleAsVTT(ctx context.Context, sub models.ExternalSubtitle, ffmpegPath ...string) ([]byte, error) {
-	raw, err := os.ReadFile(sub.Path)
-	if err != nil {
-		return nil, fmt.Errorf("read external subtitle: %w", err)
-	}
-	data := subtitles.DecodeText(subtitles.SubtitleFormat(sub.Format), sub.Language, raw)
 	switch strings.ToLower(sub.Format) {
 	case "srt", "vtt", "webvtt":
-		return ConvertToVTT(data, sub.Format)
+		data, err := os.ReadFile(sub.Path)
+		if err != nil {
+			return nil, fmt.Errorf("read external subtitle: %w", err)
+		}
+		return ConvertToVTT(subtitles.DecodeText(subtitles.SubtitleFormat(sub.Format), sub.Language, data), sub.Format)
 	default:
-		// FFmpeg picks the demuxer by probing the file and its extension, so
-		// re-encoded text goes to it as a file with the same extension.
 		input := sub.Path
-		if !bytes.Equal(data, raw) {
-			tmp, err := writeTempSubtitle(data, filepath.Ext(sub.Path))
-			if err != nil {
-				return nil, err
-			}
+		if tmp := decodedSubtitleCopy(ctx, sub); tmp != "" {
 			defer os.Remove(tmp) //nolint:errcheck // a leftover temp file is harmless
 			input = tmp
 		}
@@ -262,27 +256,45 @@ func LoadExternalSubtitleAsVTT(ctx context.Context, sub models.ExternalSubtitle,
 				err, truncateStderr(stderr.String()))
 		}
 
-		out := stdout.Bytes()
-		if len(out) == 0 {
+		data := stdout.Bytes()
+		if len(data) == 0 {
 			return nil, fmt.Errorf("ffmpeg produced empty subtitle output for %s", sub.Path)
 		}
 
-		return out, nil
+		return data, nil
 	}
 }
 
-func writeTempSubtitle(data []byte, ext string) (string, error) {
-	f, err := os.CreateTemp("", "silo-subtitle-*"+ext)
+// decodedSubtitleCopy writes a sidecar that DecodeText re-encodes to a temp
+// file with the same extension, since FFmpeg picks the demuxer by probing the
+// file and its extension. It returns "" when the file needs no decoding, is
+// too large to be text (a VobSub .sub), or the copy fails; FFmpeg then reads
+// the original as before.
+func decodedSubtitleCopy(ctx context.Context, sub models.ExternalSubtitle) string {
+	info, err := os.Stat(sub.Path)
+	if err != nil || info.Size() > subtitles.MaxUploadSize {
+		return ""
+	}
+	raw, err := os.ReadFile(sub.Path)
 	if err != nil {
-		return "", fmt.Errorf("create subtitle temp file: %w", err)
+		return ""
+	}
+	data := subtitles.DecodeText(subtitles.SubtitleFormat(sub.Format), sub.Language, raw)
+	if bytes.Equal(data, raw) {
+		return ""
+	}
+	f, err := os.CreateTemp("", "silo-subtitle-*"+filepath.Ext(sub.Path))
+	if err != nil {
+		slog.WarnContext(ctx, "subtitle temp file failed; converting the original", "component", "playback", "error", err)
+		return ""
 	}
 	_, writeErr := f.Write(data)
-	closeErr := f.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
+	if err := errors.Join(writeErr, f.Close()); err != nil {
 		os.Remove(f.Name()) //nolint:errcheck // already failing; a leftover temp file is harmless
-		return "", fmt.Errorf("write subtitle temp file: %w", err)
+		slog.WarnContext(ctx, "subtitle temp file failed; converting the original", "component", "playback", "error", err)
+		return ""
 	}
-	return f.Name(), nil
+	return f.Name()
 }
 
 // ConvertToVTT converts subtitle data from a given format to WebVTT.

@@ -21,15 +21,19 @@ import (
 // often in a legacy code page that only the subtitle's language identifies.
 //
 // UTF-8 input, and anything that is not a text format, is returned as it is,
-// including a UTF-8 BOM. A UTF-16 file needs its BOM. Bytes containing NUL
+// including a UTF-8 BOM; so is UTF-8 with a few damaged bytes, which reads
+// better as it is than decoded whole. A UTF-16 file needs its BOM. Bytes containing NUL
 // are binary (a VobSub .sub) and stay untouched. Other input is decoded from
 // the code page its language uses, chosen between that language's common
 // alternatives by the bytes themselves. Without a language, or for a language
 // written in Latin script, Windows-1252 applies only when the bytes look like
 // Latin text; any other input is returned unchanged, since a client that
 // detects encodings itself can still read it.
+//
+// Offline clients keep stored subtitles by DeliveryRevision: a change here
+// that alters delivered bytes needs a new revision suffix there.
 func DecodeText(format SubtitleFormat, languageTag string, data []byte) []byte {
-	if !isTextSubtitleFormat(format) || utf8.Valid(data) {
+	if !isTextSubtitleFormat(format) || mostlyUTF8(data) {
 		return data
 	}
 	var enc encoding.Encoding
@@ -55,11 +59,28 @@ func DecodeText(format SubtitleFormat, languageTag string, data []byte) []byte {
 }
 
 func isTextSubtitleFormat(format SubtitleFormat) bool {
-	switch normalizeFormat(format) {
-	case FormatSRT, FormatVTT, FormatASS, FormatSSA, FormatSUB:
+	return SupportsRetime(format) || normalizeFormat(format) == FormatSUB
+}
+
+// mostlyUTF8 reports whether data is UTF-8, allowing a few invalid bytes
+// among more valid multibyte characters. Text in a legacy code page almost
+// never forms a valid multibyte sequence.
+func mostlyUTF8(data []byte) bool {
+	if utf8.Valid(data) {
 		return true
 	}
-	return false
+	var multibyte, invalid int
+	for len(data) > 0 {
+		r, size := utf8.DecodeRune(data)
+		switch {
+		case r == utf8.RuneError && size == 1:
+			invalid++
+		case size > 1:
+			multibyte++
+		}
+		data = data[size:]
+	}
+	return multibyte > invalid
 }
 
 // legacyEncoding picks the code page a subtitle in languageTag was most
@@ -77,11 +98,12 @@ func legacyEncoding(languageTag string, data []byte) encoding.Encoding {
 	case "uk":
 		return cyrillicEncoding(charmap.KOI8U, data)
 	case "sr":
-		// Serbian subtitles are written in either script.
+		// Serbian subtitles are written in either script; KOI8 has no
+		// Serbian letters.
 		if (script.String() == "Latn" && scriptConf == language.Exact) || looksLatin(data) {
 			return centralEuropeanEncoding(data)
 		}
-		return cyrillicEncoding(charmap.KOI8R, data)
+		return charmap.Windows1251
 	case "pl", "cs", "sk", "sl", "hu", "ro", "hr", "bs":
 		return centralEuropeanEncoding(data)
 	case "el":
@@ -103,6 +125,11 @@ func legacyEncoding(languageTag string, data []byte) encoding.Encoding {
 	case "ko":
 		return korean.EUCKR
 	case "zh":
+		// Big5 text decodes as GB18030 without error, so the tag has to
+		// name the script or the region.
+		if _, regionConf := tag.Region(); scriptConf != language.Exact && regionConf != language.Exact {
+			return nil
+		}
 		if script.String() == "Hant" {
 			return traditionalchinese.Big5
 		}
@@ -134,19 +161,20 @@ func looksLatin(data []byte) bool {
 	return high*4 < ascii
 }
 
-// cyrillicEncoding tells Windows-1251 from KOI8: Windows-1251 puts lowercase
-// letters, the bulk of any text, in 0xE0-0xFF, and KOI8 puts them in 0xC0-0xDF.
+// cyrillicEncoding tells Windows-1251 from KOI8 by the commonest letters,
+// о, а, and и, which the two code pages place at different bytes in either
+// case.
 func cyrillicEncoding(koi8 encoding.Encoding, data []byte) encoding.Encoding {
-	var low, high int
+	var windows, koi int
 	for _, b := range data {
-		switch {
-		case b >= 0xE0:
-			high++
-		case b >= 0xC0:
-			low++
+		switch b {
+		case 0xEE, 0xCE, 0xE0, 0xC0, 0xE8, 0xC8:
+			windows++
+		case 0xCF, 0xEF, 0xC1, 0xE1, 0xC9, 0xE9:
+			koi++
 		}
 	}
-	if low > high {
+	if koi > windows {
 		return koi8
 	}
 	return charmap.Windows1251
