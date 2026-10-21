@@ -99,7 +99,7 @@ func (h *NotificationsHandler) RotateNotificationWebhookSecret(ctx context.Conte
 	if svc == nil {
 		return "", apiError(503, "unavailable", "Webhooks are not available")
 	}
-	return svc.RotateSecretV2(ctx, user, profile, id)
+	return svc.RotateSecret(ctx, user, profile, id)
 }
 
 func (h *NotificationsHandler) UpdateNotificationWebhook(ctx context.Context, user int, profile, id string, input notifications.WebhookInput, check func(int64) error) (*notifications.Webhook, error) {
@@ -114,12 +114,12 @@ func (h *NotificationsHandler) RotateNotificationServerChannelSecret(ctx context
 	if h == nil || h.system == nil || h.system.ServerChannels == nil {
 		return "", apiError(503, "unavailable", "Server channels are not available")
 	}
-	return h.system.ServerChannels.RotateSecretV2(ctx, id)
+	return h.system.ServerChannels.RotateSecret(ctx, id)
 }
 
 func (h *NotificationsHandler) UpdateNotificationServerChannel(ctx context.Context, id string, input notifications.ServerChannelInput) (*notifications.ServerChannel, error) {
 	if h == nil || h.system == nil || h.system.ServerChannels == nil {
 		return nil, apiError(503, "unavailable", "Server channels are not available")
 	}
-	return h.system.ServerChannels.UpdateV2(ctx, id, input)
+	return h.system.ServerChannels.Update(ctx, id, input)
 }

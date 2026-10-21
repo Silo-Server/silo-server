@@ -192,36 +192,6 @@ func (r *WebhookRepository) InsertWithLimit(ctx context.Context, hook Webhook, m
 	return nil
 }
 
-// Update persists the mutable fields of a webhook (name, URL, flags,
-// enabled state, secret) and bumps updated_at.
-func (r *WebhookRepository) Update(ctx context.Context, hook Webhook) error {
-	_, err := r.pool.Exec(ctx, `
-		UPDATE notification_webhooks SET
-			name = $2, type = $3, url_ciphertext = $4, url_host = $5,
-			signing_secret_ciphertext = $6, enabled = $7,
-			notify_favorites = $8, notify_watchlist = $9,
-			notify_continue_watching = $10, notify_next_up = $11,
-			notify_requests = $12,
-			consecutive_failures = $13, disabled_reason = $14,
-			-- Every rejection is also a failure, so resetting the failure
-			-- streak (re-enable, new URL) resets the rejection streak too.
-			consecutive_rejections = LEAST(consecutive_rejections, $13),
-			updated_at = now()
-		WHERE id = $1`,
-		hook.ID, hook.Name, hook.Type, hook.URLCiphertext, hook.URLHost,
-		hook.SigningSecretCiphertext, hook.Enabled,
-		hook.NotifyFavorites, hook.NotifyWatchlist, hook.NotifyContinueWatching, hook.NotifyNextUp,
-		hook.NotifyRequests,
-		hook.ConsecutiveFailures, hook.DisabledReason)
-	if err != nil {
-		if isWebhookNameViolation(err) {
-			return ErrWebhookNameTaken
-		}
-		return fmt.Errorf("update webhook: %w", err)
-	}
-	return nil
-}
-
 // Delete removes an account profile's webhook; attempts cascade. Idempotent.
 func (r *WebhookRepository) Delete(ctx context.Context, userID int, profileID, id string) error {
 	_, err := r.pool.Exec(ctx,
