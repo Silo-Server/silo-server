@@ -250,6 +250,11 @@ export class BufferingQualityController {
    * (`quality_changed`), and a lowering adopted meanwhile is not announced.
    */
   private pickPending = false;
+  /**
+   * The quality of the last plan adopted. It outlives `stop`, so a plan the
+   * page adopts again after the back-forward cache is no quality change.
+   */
+  private lastQuality?: string;
   /** In a Watch Party room: stalls are tracked and reported, but nothing acts. */
   private suspended = false;
   /** The latest Auto lowering's step-down estimate, for this playback attempt. */
@@ -500,7 +505,8 @@ export class BufferingQualityController {
   private adopt(plan: BufferingPlan, controllerInitiated: boolean | undefined, now: number) {
     // An in-place update of the same adoption keeps its history.
     if (adoptionOf(plan) === adoptionOf(this.plan)) return;
-    const previousQuality = this.plan?.quality;
+    const previousQuality = this.lastQuality;
+    this.lastQuality = plan.quality;
     this.flush(now);
     const pending = controllerInitiated === false ? undefined : this.pending;
     this.pending = undefined;

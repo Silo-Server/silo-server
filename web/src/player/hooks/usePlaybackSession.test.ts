@@ -3143,15 +3143,23 @@ it("reports each adoption's summary once, with the estimate it was requested wit
       adoptionId: "1",
       diagnostics: { buffering_action: "none" },
     });
+    // The plan adopted again after the back-forward cache reports on its own,
+    // against the plan it adopted again.
+    result.current.reportEvent("plan_summary", {
+      adoptionId: "2.1",
+      diagnostics: { buffering_action: "none" },
+    });
   });
-  await waitFor(() => expect(summaries).toHaveLength(2));
+  await waitFor(() => expect(summaries).toHaveLength(3));
   await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-  expect(summaries).toHaveLength(2);
-  expect(summaries.map((s) => s.plan_id)).toEqual([plan.plan_id, plan.plan_id]);
+  expect(summaries).toHaveLength(3);
+  expect(summaries.map((s) => s.plan_id)).toEqual([plan.plan_id, plan.plan_id, plan.plan_id]);
   expect(summaries[0]?.plan_attempt_id).not.toBe(summaries[1]?.plan_attempt_id);
+  expect(summaries[2]?.plan_attempt_id).toBe(summaries[1]?.plan_attempt_id);
   expect(summaries.map((s) => s.diagnostics)).toEqual([
     { buffering_action: "lowered" },
     { buffering_action: "cant_lower", bandwidth_estimate_kbps: "44100" },
+    { buffering_action: "none", bandwidth_estimate_kbps: "44100" },
   ]);
   expect(summaries[0]).not.toHaveProperty("adoptionId");
   unmount();

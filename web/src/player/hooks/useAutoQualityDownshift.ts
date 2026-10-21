@@ -180,18 +180,41 @@ export function useAutoQualityDownshift(options: Options) {
       c.stop(now());
       pageEnding.current = false;
     };
+    // A page back from the back-forward cache plays on: its plan is adopted
+    // again as a new adoption of the same attempt, with its own grace and
+    // summary, and the title's answer and kept estimate carry over.
+    let restores = 0;
+    const pageshow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      const { plan, planRevision, videoRef } = latest.current;
+      restores += 1;
+      c.event(
+        {
+          type: "plan_adopted",
+          plan: { ...plan, adoption_id: `${planRevision}.${restores}` },
+          controllerInitiated: false,
+        },
+        now(),
+      );
+      const video = videoRef.current;
+      if (video && !video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA)
+        c.event({ type: "playing" }, now());
+      refresh();
+    };
     window.addEventListener("pagehide", pagehide);
+    window.addEventListener("pageshow", pageshow);
     adoptedPlan.current = undefined;
     attempt.current = latest.current.attemptId;
     return () => {
       window.removeEventListener("pagehide", pagehide);
+      window.removeEventListener("pageshow", pageshow);
       c.stop(now());
       controller.current = null;
       // The next controller starts without a kept estimate and could never
       // discard this one, so the session stops repeating it.
       latest.current.onKeptEstimate?.(undefined);
     };
-  }, [options.sessionId]);
+  }, [options.sessionId, refresh]);
   useEffect(() => {
     const c = controller.current;
     if (!c || options.attemptId === attempt.current) return;

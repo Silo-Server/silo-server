@@ -481,6 +481,8 @@ export function usePlaybackSession(
       }
     >(),
   );
+  // The adoptions already summarized, so a second report of one is dropped.
+  const summarizedAdoptionsRef = useRef(new Set<string>());
   // The estimate on the start or replan in flight; requests are serialized,
   // so the next adoption answers it.
   const requestedEstimateRef = useRef<number | null | undefined>(undefined);
@@ -676,10 +678,17 @@ export function usePlaybackSession(
       if (event === "plan_summary") {
         if (!serverFeaturesRef.current.includes("playback_plan_summary_v1")) return;
         // Each adoption is summarized once, against its own plan and session.
-        if (!extra?.adoptionId) return;
-        const identity = summaryIdentitiesRef.current.get(extra.adoptionId);
+        // A plan the page adopted again after the back-forward cache
+        // ("<revision>.<n>") is summarized against the plan it adopted again.
+        const adoptionId = extra?.adoptionId;
+        if (!adoptionId || summarizedAdoptionsRef.current.has(adoptionId)) return;
+        const identity = summaryIdentitiesRef.current.get(adoptionId.split(".")[0]!);
         if (!identity) return;
-        summaryIdentitiesRef.current.delete(extra.adoptionId);
+        summarizedAdoptionsRef.current.add(adoptionId);
+        if (summarizedAdoptionsRef.current.size > 100) {
+          const oldest = summarizedAdoptionsRef.current.values().next().value;
+          if (oldest) summarizedAdoptionsRef.current.delete(oldest);
+        }
         input = {
           event,
           ...identity.route,
@@ -765,7 +774,8 @@ export function usePlaybackSession(
         },
         bandwidthEstimateKbps: requestedEstimateRef.current,
       });
-      // A summary arrives as its plan is replaced; only a few stay unsent.
+      // An identity outlives its summary, since a plan adopted again after the
+      // back-forward cache reports against it; only the newest are kept.
       if (summaryIdentitiesRef.current.size > 100) {
         const oldest = summaryIdentitiesRef.current.keys().next().value;
         if (oldest) summaryIdentitiesRef.current.delete(oldest);

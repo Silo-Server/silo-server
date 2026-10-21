@@ -345,6 +345,29 @@ it("reports the playing plan when the page closes", () => {
   expect(h.options.onSummary).toHaveBeenCalledTimes(1);
 });
 
+// N2: the back-forward cache.
+it("adopts the playing plan again when the page comes back from the back-forward cache", () => {
+  const h = setup();
+  // A lowering keeps an estimate for the title.
+  h.send("waiting");
+  h.advance(6000);
+  expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(44100);
+  act(() => {
+    window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+  });
+  expect(h.options.onSummary).toHaveBeenCalledTimes(1);
+  act(() => {
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  // The kept estimate survives, and the plan played after the return has its
+  // own adoption and summary.
+  expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(44100);
+  h.unmount();
+  expect(h.options.onSummary).toHaveBeenCalledTimes(2);
+  const [first, second] = h.options.onSummary.mock.calls.map((call) => call[0].adoption_id);
+  expect(second).not.toBe(first);
+});
+
 it("keeps a stall that hls.js steps over a hole in", () => {
   const h = setup();
   const video = h.options.videoRef.current;
