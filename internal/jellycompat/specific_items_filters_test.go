@@ -176,3 +176,29 @@ func TestSpecificIDsWithoutLimitReturnEveryNamedItem(t *testing.T) {
 		})
 	}
 }
+
+func TestSpecificIDsSendOnlyRequestedEmptyLists(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields string
+		wantTags     bool
+	}{
+		{name: "without Fields"},
+		{name: "with Fields=Tags", fields: "&Fields=Tags", wantTags: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newCollectionsTestHandler(&fakeCollectionSource{}, nil, nil)
+			h.content = &mixedIDsContent{librariesContentService: h.content.(*librariesContentService)}
+			result := performItemsRequest(t, h, "/Items?Ids="+h.codec.EncodeStringID(EncodedIDItem, "a")+tc.fields)
+			if len(result.Items) != 1 {
+				t.Fatalf("items=%d, want 1", len(result.Items))
+			}
+			item := result.Items[0]
+			if (item.Tags != nil) != tc.wantTags {
+				t.Errorf("Tags present=%v, want %v", item.Tags != nil, tc.wantTags)
+			}
+			if item.People != nil || item.MediaSources != nil || item.MediaStreams != nil || item.Chapters != nil || item.LockedFields != nil {
+				t.Errorf("unrequested empty lists sent: %+v", item)
+			}
+		})
+	}
+}

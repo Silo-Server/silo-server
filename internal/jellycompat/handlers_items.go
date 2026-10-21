@@ -2956,6 +2956,11 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		}
 		h.rememberDetailImages(*detail)
 		dto := h.mapper.itemFromDetailWithFields(*detail, favorites[detail.ContentID], progress[detail.ContentID], query.requestedFields)
+		if query.requestedFields == nil {
+			// Without Fields the mapper fills every list field, as for item
+			// detail; a list leaves out the empty ones nobody asked for.
+			dropUnrequestedEmptyLists(&dto, func(string) bool { return false })
+		}
 		if query.mediaTypesExplicit && !query.mediaTypesSet[strings.ToLower(dto.MediaType)] {
 			continue
 		}

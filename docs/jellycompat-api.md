@@ -197,9 +197,10 @@ carry none of the three. Similar and Suggestions ignore `Fields`.
 
 Item list fields such as `Genres`, `GenreItems`, `Studios`, `Tags`,
 `Taglines`, `People`, `MediaSources` and `MediaStreams` follow Jellyfin, which
-leaves out null fields but sends empty arrays: a list field that `Fields`
-requests is `[]` when the item has none, and an empty one that wasn't requested
-is left out. Roku (BrightScript) clients index some of these arrays without
+leaves out null fields but sends empty arrays: a list field the response fills
+is `[]` when the item has none, and an empty one that `Fields` didn't request is
+left out, including on `/Items?Ids=` without `Fields`. Item detail fills every
+list field. Roku (BrightScript) clients index some of these arrays without
 checking that they exist.
 
 Global `/Shows/NextUp` and the Resume lists leave out series the profile dropped,
