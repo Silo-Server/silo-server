@@ -19,9 +19,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
+// pushRetryClaimLimit keeps a sweep batch inside its lease; see
+// webhookRetryClaimLimit.
+const pushRetryClaimLimit = int(webhookClaimLease / pushRelayRequestTimeout / 2)
+
 const (
 	pushDispatchQueue       = 512
-	pushRetryClaimLimit     = 100
 	pushRelayRequestTimeout = 15 * time.Second
 	pushRelayMaxRetryAfter  = 23 * time.Hour
 	relayAppleSendPath      = "/v1/apple/send"

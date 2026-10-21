@@ -205,22 +205,30 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	if result.HTTPStatus > 0 {
 		status = &result.HTTPStatus
 	}
-	if err := s.webhooks.RecordFailure(ctx, hook.ID, status, result.Message); err != nil {
+	rejected := result.HTTPStatus > 0 && !retryableHTTPStatus(result.HTTPStatus)
+	rejections, err := s.webhooks.RecordFailure(ctx, hook.ID, status, result.Message, rejected)
+	if err != nil {
 		s.logger.WarnContext(ctx, "webhook failure bookkeeping failed", "webhook_id", hook.ID, "error", err)
 	}
 
-	if result.HTTPStatus > 0 && !retryableHTTPStatus(result.HTTPStatus) {
-		// Deterministic destination-side rejection: fail this delivery now.
+	if rejected {
+		// Deterministic destination-side rejection: fail this delivery now. A
+		// single 4xx is not proof the webhook is dead (CDN/WAF blips), but
+		// three consecutive rejected deliveries are.
 		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
 			attemptNumber, status, result.Message, nil)
-		s.maybeDisableAfter4xx(ctx, hook, result)
+		if rejections >= autoDisableConsecutive4xx {
+			s.disableWebhook(ctx, hook, result,
+				fmt.Sprintf("%d consecutive deliveries rejected by the destination", autoDisableConsecutive4xx))
+		}
 		return
 	}
 
+	// Retry-After can lengthen the wait but never shorten the schedule: a
+	// destination answering 429 with a few seconds would otherwise use up
+	// every attempt in minutes.
 	delay, more := retryDelay(webhookRetrySchedule, attemptNumber)
-	if result.RetryAfter > 0 {
-		delay = result.RetryAfter
-	}
+	delay = max(delay, result.RetryAfter)
 	if more {
 		nextRetry := time.Now().Add(delay)
 		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeRetrying,
@@ -234,28 +242,6 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	s.disableWebhook(ctx, hook, result, "Deliveries failed for 24 hours")
 }
 
-// maybeDisableAfter4xx applies the 3-consecutive-non-retryable-4xx rule. A
-// single 4xx is not proof the webhook is dead (CDN/WAF blips), but three
-// consecutive deterministic rejections are.
-func (s *webhookSender) maybeDisableAfter4xx(ctx context.Context, hook *Webhook, result webhookSendResult) {
-	recent, err := s.webhooks.RecentFinalOutcomes(ctx, hook.ID, autoDisableConsecutive4xx)
-	if err != nil {
-		s.logger.WarnContext(ctx, "webhook 4xx history lookup failed", "webhook_id", hook.ID, "error", err)
-		return
-	}
-	if len(recent) < autoDisableConsecutive4xx {
-		return
-	}
-	for _, attempt := range recent {
-		if attempt.Outcome != WebhookOutcomeFailed ||
-			attempt.HTTPStatus == nil || retryableHTTPStatus(*attempt.HTTPStatus) {
-			return
-		}
-	}
-	s.disableWebhook(ctx, hook, result,
-		fmt.Sprintf("%d consecutive deliveries rejected by the destination", autoDisableConsecutive4xx))
-}
-
 // disableWebhook auto-disables the webhook and posts the in-app notice so the
 // failure is not silent. The notice type is on the webhook deny list, so it
 // can never loop back into another webhook attempt.
@@ -264,9 +250,13 @@ func (s *webhookSender) disableWebhook(ctx context.Context, hook *Webhook, resul
 	if result.Message != "" {
 		fullReason = fmt.Sprintf("%s (last error: %s)", reason, result.Message)
 	}
-	if err := s.webhooks.Disable(ctx, hook.ID, fullReason); err != nil {
+	disabled, err := s.webhooks.Disable(ctx, hook.ID, fullReason)
+	if err != nil {
 		s.logger.ErrorContext(ctx, "webhook auto-disable failed", "webhook_id", hook.ID, "error", err)
 		return
+	}
+	if !disabled {
+		return // another worker disabled it and posted the notice
 	}
 	s.logger.WarnContext(ctx, "webhook auto-disabled",
 		"webhook_id", hook.ID, "url_host", hook.URLHost, "reason", fullReason)

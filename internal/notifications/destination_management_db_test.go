@@ -132,3 +132,50 @@ func TestLegacyPushRegistrationStaysOnTheAccount(t *testing.T) {
 		t.Fatalf("registration after owner unregisters: %v", err)
 	}
 }
+
+// TestWebhookRejectionStreak covers the three-consecutive-4xx auto-disable
+// rule: only rejected deliveries extend the streak, re-enabling and success
+// reset it, and concurrent disables agree on one winner so one notice posts.
+func TestWebhookRejectionStreak(t *testing.T) {
+	pool := schemaDB(t, "notification_webhook_streak_")
+	ctx := t.Context()
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE notification_webhooks (LIKE public.notification_webhooks INCLUDING ALL);
+		INSERT INTO notification_webhooks (id, user_id, profile_id, name, type, url_ciphertext, url_host)
+		VALUES ('wh', 1, 'default', 'Discord', 'discord', 'x', 'discord.com')`); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewWebhookRepository(pool)
+	status := 404
+	fail := func(rejected bool, want int) {
+		t.Helper()
+		got, err := repo.RecordFailure(ctx, "wh", &status, "rejected", rejected)
+		if err != nil || got != want {
+			t.Fatalf("RecordFailure(rejected=%v) = %d, %v; want %d", rejected, got, err, want)
+		}
+	}
+	fail(true, 1)
+	fail(false, 1) // a retryable failure is not a rejection
+	fail(true, 2)
+	fail(true, 3)
+
+	if disabled, err := repo.Disable(ctx, "wh", "rejected"); err != nil || !disabled {
+		t.Fatalf("first Disable = %v, %v; want true", disabled, err)
+	}
+	if disabled, err := repo.Disable(ctx, "wh", "rejected"); err != nil || disabled {
+		t.Fatalf("second Disable = %v, %v; want false", disabled, err)
+	}
+
+	if _, err := repo.UpdateGuarded(ctx, 1, "default", "wh", func(hook *Webhook) error {
+		hook.Enabled, hook.ConsecutiveFailures, hook.DisabledReason = true, 0, nil
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fail(true, 1) // re-enabled: the old rejections do not count
+
+	if err := repo.RecordSuccess(ctx, "wh"); err != nil {
+		t.Fatal(err)
+	}
+	fail(true, 1)
+}

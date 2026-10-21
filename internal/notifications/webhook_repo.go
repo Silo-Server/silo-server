@@ -203,6 +203,9 @@ func (r *WebhookRepository) Update(ctx context.Context, hook Webhook) error {
 			notify_continue_watching = $10, notify_next_up = $11,
 			notify_requests = $12,
 			consecutive_failures = $13, disabled_reason = $14,
+			-- Every rejection is also a failure, so resetting the failure
+			-- streak (re-enable, new URL) resets the rejection streak too.
+			consecutive_rejections = LEAST(consecutive_rejections, $13),
 			updated_at = now()
 		WHERE id = $1`,
 		hook.ID, hook.Name, hook.Type, hook.URLCiphertext, hook.URLHost,
@@ -237,48 +240,43 @@ func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, userID int,
 func (r *WebhookRepository) RecordSuccess(ctx context.Context, webhookID string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notification_webhooks
-		SET last_success_at = now(), consecutive_failures = 0, updated_at = now()
+		SET last_success_at = now(), consecutive_failures = 0, consecutive_rejections = 0,
+		    updated_at = now()
 		WHERE id = $1`, webhookID)
 	return err
 }
 
-// RecordFailure increments the failure streak and stores the diagnostic.
-func (r *WebhookRepository) RecordFailure(ctx context.Context, webhookID string, httpStatus *int, message string) error {
-	_, err := r.pool.Exec(ctx, `
+// RecordFailure increments the failure streak and stores the diagnostic. A
+// rejected delivery (a non-retryable 4xx) also extends the rejection streak,
+// whose new length is returned. Success, re-enabling, and a URL change reset
+// both streaks.
+func (r *WebhookRepository) RecordFailure(ctx context.Context, webhookID string, httpStatus *int, message string, rejected bool) (int, error) {
+	var rejections int
+	err := r.pool.QueryRow(ctx, `
 		UPDATE notification_webhooks
 		SET last_failure_at = now(),
 		    last_failure_status = $2,
 		    last_failure_message = left($3, 256),
 		    consecutive_failures = consecutive_failures + 1,
+		    consecutive_rejections = consecutive_rejections + CASE WHEN $4 THEN 1 ELSE 0 END,
 		    updated_at = now()
-		WHERE id = $1`, webhookID, httpStatus, message)
-	return err
+		WHERE id = $1
+		RETURNING consecutive_rejections`, webhookID, httpStatus, message, rejected).Scan(&rejections)
+	return rejections, err
 }
 
-// Disable auto-disables a webhook with a profile-visible reason.
-func (r *WebhookRepository) Disable(ctx context.Context, webhookID, reason string) error {
-	_, err := r.pool.Exec(ctx, `
+// Disable auto-disables an enabled webhook with a profile-visible reason. It
+// reports whether this call disabled it, so concurrent failures post one
+// notice.
+func (r *WebhookRepository) Disable(ctx context.Context, webhookID, reason string) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
 		UPDATE notification_webhooks
 		SET enabled = false, disabled_reason = left($2, 256), updated_at = now()
-		WHERE id = $1`, webhookID, reason)
-	return err
-}
-
-// RecentFinalOutcomes returns the most recent terminal attempt outcomes
-// (delivered/failed/auto_disabled) for a webhook, newest first. Used for the
-// 3-consecutive-non-retryable-4xx auto-disable rule.
-func (r *WebhookRepository) RecentFinalOutcomes(ctx context.Context, webhookID string, limit int) ([]DeliveryAttempt, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, notification_delivery_id, webhook_id, attempt_number, attempted_at,
-		       next_retry_at, http_status, outcome, failure_message
-		FROM webhook_delivery_attempts
-		WHERE webhook_id = $1 AND outcome IN ('delivered', 'failed', 'auto_disabled')
-		ORDER BY attempted_at DESC
-		LIMIT $2`, webhookID, limit)
+		WHERE id = $1 AND enabled`, webhookID, reason)
 	if err != nil {
-		return nil, fmt.Errorf("list final webhook outcomes: %w", err)
+		return false, err
 	}
-	return scanDeliveryAttempts(rows)
+	return tag.RowsAffected() == 1, nil
 }
 
 func scanDeliveryAttempts(rows pgx.Rows) ([]DeliveryAttempt, error) {
@@ -482,6 +480,7 @@ func (r *WebhookRepository) UpdateGuarded(ctx context.Context, userID int, profi
  name=$4, url_ciphertext=$5, url_host=$6, enabled=$7,
  notify_favorites=$8, notify_watchlist=$9, notify_continue_watching=$10,
  notify_next_up=$11, notify_requests=$12, consecutive_failures=$13,
+ consecutive_rejections=LEAST(consecutive_rejections, $13),
  disabled_reason=$14, updated_at=now()
  WHERE user_id=$1 AND profile_id=$2 AND id=$3 RETURNING `+webhookColumns,
 		userID, profile, id, hook.Name, hook.URLCiphertext, hook.URLHost, hook.Enabled,
