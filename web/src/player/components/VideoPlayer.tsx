@@ -396,8 +396,6 @@ const ROOM_STALL_WINDOW_MS = 5 * 60_000;
 const LOWER_QUALITY_ACTION_LABEL = "Lower quality";
 // Buffering this soon after a failed media request is treated as an outage,
 // not a slow link, by the Auto downshift.
-const TRANSPORT_TROUBLE_WINDOW_MS = 15_000;
-
 /** Where the element's buffered media ends, in seconds; 0 with none. */
 function bufferedEndSeconds(media: HTMLMediaElement): number {
   const ranges = media.buffered;
@@ -592,14 +590,15 @@ export function VideoPlayer({
   const hlsStartupGuardRef = useRef<HlsStartupGuard | null>(null);
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
-  // When media requests last failed: hls.js reported a failed load, or the
-  // element a network error or `stalled`. Buffering soon after is an outage,
-  // not a slow link, for the Auto downshift. The outage ends when media data
-  // arrives again, a buffered end past the one at the failure, or playback
-  // runs. A `progress` alone is not enough, since the browser decoder fires
-  // one every second whether data arrived or not.
-  const lastTransportErrorAtRef = useRef(0);
-  const troubleBufferedEndRef = useRef(0);
+  // Media requests are failing: hls.js reported a failed load, the element a
+  // network error or `stalled`, or the device went offline or came back.
+  // Buffering meanwhile is an outage, not a slow link, for the Auto
+  // downshift. Only media data arriving again (a buffered end past the one at
+  // the failure) or playback running ends it; no time limit does. A
+  // `progress` alone is not enough, since the browser decoder fires one every
+  // second whether data arrived or not.
+  const mediaOutageRef = useRef(false);
+  const outageBufferedEndRef = useRef(0);
   const reportedPlanFailureKeyRef = useRef<string | null>(null);
   // Whether the current transport has shown a frame. A network error after
   // that is a lost connection, not a route that cannot play. Reset whenever
@@ -2611,8 +2610,8 @@ export function VideoPlayer({
                 !subtitleLoad &&
                 (details.endsWith("LoadError") || (details.endsWith("LoadTimeOut") && loaded <= 0))
               ) {
-                lastTransportErrorAtRef.current = Date.now();
-                troubleBufferedEndRef.current = bufferedEndSeconds(video);
+                mediaOutageRef.current = true;
+                outageBufferedEndRef.current = bufferedEndSeconds(video);
               }
               if (!data.fatal || destroyed) return;
 
@@ -2993,11 +2992,8 @@ export function VideoPlayer({
     const onDurationChange = () => applyElementDuration(video);
     const onProgress = () => {
       setBuffered(video.buffered);
-      if (
-        lastTransportErrorAtRef.current &&
-        bufferedEndSeconds(video) > troubleBufferedEndRef.current
-      ) {
-        lastTransportErrorAtRef.current = 0;
+      if (mediaOutageRef.current && bufferedEndSeconds(video) > outageBufferedEndRef.current) {
+        mediaOutageRef.current = false;
       }
     };
     const onVolumeChange = () => {
@@ -3038,7 +3034,7 @@ export function VideoPlayer({
     };
     const onPlaying = () => {
       // Playback runs again, so media requests are not failing.
-      lastTransportErrorAtRef.current = 0;
+      mediaOutageRef.current = false;
       clearBuffering();
       markPlaybackStarted();
       if (roomReadinessPending && watchTogetherSync.attachedSessionId === sessionId) {
@@ -3053,8 +3049,8 @@ export function VideoPlayer({
     const onStalled = () => {
       // The browser received no data for its idle time (the engine reports a
       // failed read the same way): the transport is failing, not slow.
-      lastTransportErrorAtRef.current = Date.now();
-      troubleBufferedEndRef.current = bufferedEndSeconds(video);
+      mediaOutageRef.current = true;
+      outageBufferedEndRef.current = bufferedEndSeconds(video);
       if (watchTogetherRoomActive && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportBuffering();
       }
@@ -3062,14 +3058,14 @@ export function VideoPlayer({
     // Going offline fails the media requests; coming back online does not
     // bring their data yet. Either way the outage lasts until data arrives.
     const onNetworkChange = () => {
-      lastTransportErrorAtRef.current = Date.now();
-      troubleBufferedEndRef.current = bufferedEndSeconds(video);
+      mediaOutageRef.current = true;
+      outageBufferedEndRef.current = bufferedEndSeconds(video);
     };
     const onError = () => {
       if (video.error) {
         if (video.error.code === MEDIA_ERR_NETWORK) {
-          lastTransportErrorAtRef.current = Date.now();
-          troubleBufferedEndRef.current = bufferedEndSeconds(video);
+          mediaOutageRef.current = true;
+          outageBufferedEndRef.current = bufferedEndSeconds(video);
         }
         if (video.error.code === MEDIA_ERR_NETWORK && reportConnectionLost()) return;
         const message = video.error.message || "Unknown media element error";
@@ -4394,7 +4390,7 @@ export function VideoPlayer({
   // A new plan is a new transport; the previous one's failed requests say
   // nothing about it.
   useEffect(() => {
-    lastTransportErrorAtRef.current = 0;
+    mediaOutageRef.current = false;
   }, [planRevision]);
 
   // When playback keeps buffering, lower quality, ask first, or only report,
@@ -4431,7 +4427,7 @@ export function VideoPlayer({
     transportTrouble: () =>
       connectionStatus !== "connected" ||
       (typeof navigator !== "undefined" && navigator.onLine === false) ||
-      Date.now() - lastTransportErrorAtRef.current < TRANSPORT_TROUBLE_WINDOW_MS,
+      mediaOutageRef.current,
     onReplan: (request, onAdopt) =>
       onQualitySelect?.(request.quality_preference, currentTime, request, onAdopt),
     onNotice: (key) => {
