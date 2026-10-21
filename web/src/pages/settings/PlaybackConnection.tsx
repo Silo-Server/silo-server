@@ -48,7 +48,7 @@ function usePlaybackConnection() {
   });
   const connection = useQuery({
     queryKey: CONNECTION_QUERY_KEY,
-    queryFn: () => v2("GET /api/v2/playback/connection"),
+    queryFn: ({ signal }) => v2("GET /api/v2/playback/connection", { signal }),
     enabled: capabilities.data?.features.includes("buffering_quality_v1") === true,
     staleTime: 0,
   });

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { QueryObserver } from "@tanstack/react-query";
 
 vi.mock("@/api/v2/request", () => ({
   V2_CLIENT_HEADERS: {},
@@ -714,6 +715,33 @@ describe("scheduleBandwidthProbe", () => {
     release();
     await vi.advanceTimersByTimeAsync(0);
     expect(readMeasuredBandwidthKbps()).toBe(9_000);
+  });
+
+  // Settings' first read, still out when the network changes, describes the network left.
+  it("cancels a Settings read with nothing cached when the network changes", async () => {
+    const connection = Object.assign(new EventTarget(), { type: "wifi" });
+    vi.stubGlobal("navigator", { ...navigator, connection });
+    server({ reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: DAY } } });
+    scheduleBandwidthProbe();
+    await vi.advanceTimersByTimeAsync(0);
+    queryClient.removeQueries({ queryKey: ["playback", "connection"] });
+    const release = holdNextConnectionRead();
+    const unsubscribe = new QueryObserver(queryClient, {
+      queryKey: ["playback", "connection"],
+      queryFn: () => v2("GET /api/v2/playback/connection"),
+    }).subscribe(() => undefined);
+    await vi.advanceTimersByTimeAsync(0);
+
+    server({ reading: { probe: { kbps: 9_000, lower_bound: false, ageMs: DAY } } });
+    connection.type = "ethernet";
+    connection.dispatchEvent(new Event("change"));
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(queryClient.getQueryData(["playback", "connection"])).toMatchObject({
+      probe: { kbps: 9_000 },
+    });
+    unsubscribe();
   });
 
   it("reads the new network at once when it changes during a test's read", async () => {

@@ -619,6 +619,9 @@ export function scheduleBandwidthProbe(testDelayMs = TEST_DELAY_MS): () => void 
     readingEpoch++;
     stopProbe("network");
     forgetServerReadings();
+    // A Settings read still out describes the network left. Invalidating
+    // alone would join a first read rather than replace it.
+    void queryClient.cancelQueries({ queryKey: CONNECTION_QUERY_KEY });
     void queryClient.invalidateQueries({ queryKey: CONNECTION_QUERY_KEY });
     lookDue = true;
     later(0, look);
