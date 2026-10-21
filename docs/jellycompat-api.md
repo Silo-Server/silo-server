@@ -20,9 +20,12 @@ Jellyfin Web custom CSS: its own custom CSS styles Silo's web client, so it is
 not served here.
 
 Authenticated `GET /System/Configuration/encoding` returns
-`{"EnableFallbackFont":false}`. Jellyfin Web loads it before drawing ASS/SSA
-subtitles and draws nothing when the request fails. Silo serves no fallback
-fonts. The key matches case-insensitively; any other key returns 404.
+`{"EnableFallbackFont":false,"EnableSubtitleExtraction":true}`. Jellyfin Web
+loads it before drawing ASS/SSA subtitles and draws nothing when the request
+fails; Silo serves no fallback fonts. The Kodi add-on reads
+`EnableSubtitleExtraction` before offering embedded text subtitles, which Silo
+serves as External. The key matches case-insensitively; any other key returns
+404.
 
 The route inventory is maintained in
 `internal/jellycompat/testdata/media_routes.txt`. `internal/jellycompat/router.go`

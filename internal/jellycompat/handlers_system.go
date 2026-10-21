@@ -31,10 +31,13 @@ type brandingConfigurationResponse struct {
 }
 
 // encodingConfigurationResponse is the part of Jellyfin's EncodingOptions that
-// Jellyfin Web reads before it starts its ASS/SSA renderer. Silo serves no
-// fallback fonts, so EnableFallbackFont is always false.
+// clients read to set up subtitles. Jellyfin Web reads EnableFallbackFont
+// before it starts its ASS/SSA renderer; Silo serves no fallback fonts. The
+// Kodi add-on indexes EnableSubtitleExtraction before offering embedded text
+// subtitles, which Silo extracts and serves as External.
 type encodingConfigurationResponse struct {
-	EnableFallbackFont bool `json:"EnableFallbackFont"`
+	EnableFallbackFont       bool `json:"EnableFallbackFont"`
+	EnableSubtitleExtraction bool `json:"EnableSubtitleExtraction"`
 }
 
 type endpointInfoResponse struct {
@@ -89,7 +92,7 @@ func (h *SystemHandler) HandleNamedConfiguration(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusNotFound, "NotFound", "Configuration not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, encodingConfigurationResponse{})
+	writeJSON(w, http.StatusOK, encodingConfigurationResponse{EnableSubtitleExtraction: true})
 }
 
 // HandleEndpoint serves GET /System/Endpoint.

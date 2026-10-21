@@ -81,11 +81,12 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 	} else if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
 		t.Errorf("authed GET /Sessions body = %q, want []", got)
 	}
-	// Jellyfin Web draws no ASS/SSA subtitle until the encoding config loads.
+	// Jellyfin Web draws no ASS/SSA subtitle until the encoding config loads, and
+	// the Kodi add-on indexes EnableSubtitleExtraction from it.
 	if rec := authed(http.MethodGet, "/System/Configuration/encoding"); rec.Code != http.StatusOK {
 		t.Errorf("authed GET /System/Configuration/encoding = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	} else if got := strings.TrimSpace(rec.Body.String()); got != `{"EnableFallbackFont":false}` {
-		t.Errorf("authed GET /System/Configuration/encoding body = %s, want EnableFallbackFont false", got)
+	} else if got := strings.TrimSpace(rec.Body.String()); got != `{"EnableFallbackFont":false,"EnableSubtitleExtraction":true}` {
+		t.Errorf("authed GET /System/Configuration/encoding body = %s, want fallback font off and subtitle extraction on", got)
 	}
 	if rec := authed(http.MethodGet, "/System/Configuration/livetv"); rec.Code != http.StatusNotFound {
 		t.Errorf("authed GET /System/Configuration/livetv = %d, want 404", rec.Code)
