@@ -189,9 +189,9 @@ func registerAdminDevices(reg *Registry) {
 				return nil, serviceProblem(err)
 			}
 			for _, c := range connections {
-				item := AdminDeviceConnection{ID: c.ID, Connection: c.Connection, Probe: playbackProbeOf(c.Probe), PlaybackSample: playbackSampleOf(c.PlaybackSample), LearnedLimit: playbackLimitOf(c.LearnedLimit)}
+				item := AdminDeviceConnection{ID: c.ID, Connection: c.Connection, Probe: NullableObject[PlaybackProbe]{playbackProbeOf(c.Probe)}, PlaybackSample: NullableObject[PlaybackSample]{playbackSampleOf(c.PlaybackSample)}, LearnedLimit: NullableObject[PlaybackLearnedLimit]{playbackLimitOf(c.LearnedLimit)}}
 				if c.PlanSummary != nil {
-					item.PlanSummary = &PlaybackPlanSummary{PlanID: c.PlanSummary.PlanID, ReportedAt: c.PlanSummary.ReportedAt, Diagnostics: c.PlanSummary.Diagnostics}
+					item.PlanSummary.Value = &PlaybackPlanSummary{PlanID: c.PlanSummary.PlanID, ReportedAt: c.PlanSummary.ReportedAt, Diagnostics: c.PlanSummary.Diagnostics}
 				}
 				out.Connections = append(out.Connections, item)
 			}
@@ -231,12 +231,12 @@ func registerAdminConnectionReset(reg *Registry) {
 }
 
 type AdminDeviceConnection struct {
-	ID             string                `json:"id"`
-	Connection     string                `json:"connection"`
-	Probe          *PlaybackProbe        `json:"probe"`
-	PlaybackSample *PlaybackSample       `json:"playback_sample"`
-	LearnedLimit   *PlaybackLearnedLimit `json:"learned_limit"`
-	PlanSummary    *PlaybackPlanSummary  `json:"plan_summary"`
+	ID             string                               `json:"id"`
+	Connection     string                               `json:"connection"`
+	Probe          NullableObject[PlaybackProbe]        `json:"probe"`
+	PlaybackSample NullableObject[PlaybackSample]       `json:"playback_sample"`
+	LearnedLimit   NullableObject[PlaybackLearnedLimit] `json:"learned_limit"`
+	PlanSummary    NullableObject[PlaybackPlanSummary]  `json:"plan_summary"`
 }
 type PlaybackPlanSummary struct {
 	PlanID      string            `json:"plan_id"`

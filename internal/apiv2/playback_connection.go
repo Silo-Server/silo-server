@@ -2,8 +2,12 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"reflect"
 	"time"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
@@ -20,12 +24,27 @@ type PlaybackLearnedLimit struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 type PlaybackConnection struct {
-	Probe          *PlaybackProbe        `json:"probe,omitempty"`
-	PlaybackSample *PlaybackSample       `json:"playback_sample,omitempty" doc:"The best recent playback throughput on this connection, a lower bound on its speed."`
-	AutoBudgetKbps *int                  `json:"auto_budget_kbps,omitempty"`
-	Connection     string                `json:"connection"`
-	LearnedLimit   *PlaybackLearnedLimit `json:"learned_limit"`
+	Probe          *PlaybackProbe                       `json:"probe,omitempty"`
+	PlaybackSample *PlaybackSample                      `json:"playback_sample,omitempty" doc:"The best recent playback throughput on this connection, a lower bound on its speed."`
+	AutoBudgetKbps *int                                 `json:"auto_budget_kbps,omitempty"`
+	Connection     string                               `json:"connection"`
+	LearnedLimit   NullableObject[PlaybackLearnedLimit] `json:"learned_limit" doc:"The learned limit on this connection; null when there is none."`
 }
+
+// NullableObject is an object or an explicit null. Huma cannot mark a
+// referenced object nullable, so the schema inlines the object, as
+// NullableLoginSession does.
+type NullableObject[T any] struct{ Value *T }
+
+func (n NullableObject[T]) MarshalJSON() ([]byte, error)  { return json.Marshal(n.Value) }
+func (n *NullableObject[T]) UnmarshalJSON(b []byte) error { return json.Unmarshal(b, &n.Value) }
+func (NullableObject[T]) Schema(r huma.Registry) *huma.Schema {
+	s := r.Schema(reflect.TypeFor[T](), false, "")
+	out := *s
+	out.Nullable = true
+	return &out
+}
+
 type PlaybackConnectionOutput struct {
 	CacheControl string `header:"Cache-Control"`
 	Body         PlaybackConnection
@@ -52,7 +71,7 @@ func registerPlaybackConnection(reg *Registry) {
 		}
 		body := PlaybackConnection{Connection: state.Connection, Probe: playbackProbeOf(state.Probe), PlaybackSample: playbackSampleOf(state.PlaybackSample), AutoBudgetKbps: state.AutoBudgetKbps}
 		if limit := state.LearnedLimit; limit != nil {
-			body.LearnedLimit = &PlaybackLearnedLimit{Kbps: limit.Kbps, ObservedAt: limit.ObservedAt, ExpiresAt: limit.ExpiresAt}
+			body.LearnedLimit.Value = &PlaybackLearnedLimit{Kbps: limit.Kbps, ObservedAt: limit.ObservedAt, ExpiresAt: limit.ExpiresAt}
 		}
 		return &PlaybackConnectionOutput{CacheControl: playbackCacheControl, Body: body}, nil
 	})

@@ -5017,16 +5017,108 @@
             "type": "string"
           },
           "learned_limit": {
-            "$ref": "#/components/schemas/PlaybackLearnedLimit"
+            "additionalProperties": false,
+            "properties": {
+              "expires_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "kbps": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "observed_at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kbps",
+              "observed_at",
+              "expires_at"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "plan_summary": {
-            "$ref": "#/components/schemas/PlaybackPlanSummary"
+            "additionalProperties": false,
+            "properties": {
+              "diagnostics": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "plan_id": {
+                "type": "string"
+              },
+              "reported_at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "plan_id",
+              "reported_at",
+              "diagnostics"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "playback_sample": {
-            "$ref": "#/components/schemas/PlaybackSample"
+            "additionalProperties": false,
+            "properties": {
+              "kbps": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "measured_at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kbps",
+              "measured_at"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "probe": {
-            "$ref": "#/components/schemas/PlaybackProbe"
+            "additionalProperties": false,
+            "properties": {
+              "kbps": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "lower_bound": {
+                "description": "The test proved only that the link carries at least kbps.",
+                "type": "boolean"
+              },
+              "measured_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "transport": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kbps",
+              "lower_bound",
+              "measured_at",
+              "transport"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
           }
         },
         "required": [
@@ -38531,7 +38623,31 @@
             "type": "string"
           },
           "learned_limit": {
-            "$ref": "#/components/schemas/PlaybackLearnedLimit"
+            "additionalProperties": false,
+            "description": "The learned limit on this connection; null when there is none.",
+            "properties": {
+              "expires_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "kbps": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "observed_at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kbps",
+              "observed_at",
+              "expires_at"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "playback_sample": {
             "$ref": "#/components/schemas/PlaybackSample",

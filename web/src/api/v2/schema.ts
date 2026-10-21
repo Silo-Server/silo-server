@@ -14251,10 +14251,37 @@ export interface components {
     AdminDeviceConnection: {
       connection: string;
       id: string;
-      learned_limit: components["schemas"]["PlaybackLearnedLimit"];
-      plan_summary: components["schemas"]["PlaybackPlanSummary"];
-      playback_sample: components["schemas"]["PlaybackSample"];
-      probe: components["schemas"]["PlaybackProbe"];
+      learned_limit: {
+        /** Format: date-time */
+        expires_at: string;
+        /** Format: int64 */
+        kbps: number;
+        /** Format: date-time */
+        observed_at: string;
+      } | null;
+      plan_summary: {
+        diagnostics: {
+          [key: string]: string;
+        };
+        plan_id: string;
+        /** Format: date-time */
+        reported_at: string;
+      } | null;
+      playback_sample: {
+        /** Format: int64 */
+        kbps: number;
+        /** Format: date-time */
+        measured_at: string;
+      } | null;
+      probe: {
+        /** Format: int64 */
+        kbps: number;
+        /** @description The test proved only that the link carries at least kbps. */
+        lower_bound: boolean;
+        /** Format: date-time */
+        measured_at: string;
+        transport: string;
+      } | null;
     };
     AdminDeviceDetail: {
       connections?: components["schemas"]["AdminDeviceConnection"][];
@@ -27217,7 +27244,15 @@ export interface components {
       /** Format: int64 */
       auto_budget_kbps?: number;
       connection: string;
-      learned_limit: components["schemas"]["PlaybackLearnedLimit"];
+      /** @description The learned limit on this connection; null when there is none. */
+      learned_limit: {
+        /** Format: date-time */
+        expires_at: string;
+        /** Format: int64 */
+        kbps: number;
+        /** Format: date-time */
+        observed_at: string;
+      } | null;
       /** @description The best recent playback throughput on this connection, a lower bound on its speed. */
       playback_sample?: components["schemas"]["PlaybackSample"];
       probe?: components["schemas"]["PlaybackProbe"];
