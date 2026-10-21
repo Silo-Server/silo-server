@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -141,15 +142,31 @@ func TestWebhookRejectionStreak(t *testing.T) {
 	ctx := t.Context()
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE notification_webhooks (LIKE public.notification_webhooks INCLUDING ALL);
+		CREATE TABLE webhook_delivery_attempts (LIKE public.webhook_delivery_attempts INCLUDING ALL);
 		INSERT INTO notification_webhooks (id, user_id, profile_id, name, type, url_ciphertext, url_host)
 		VALUES ('wh', 1, 'default', 'Discord', 'discord', 'x', 'discord.com')`); err != nil {
 		t.Fatal(err)
 	}
 	repo := NewWebhookRepository(pool)
 	status := 404
+	attempts := 0
+	// newAttempt queues an attempt for the next send to finalize.
+	newAttempt := func() string {
+		t.Helper()
+		attempts++
+		id := "attempt-" + strconv.Itoa(attempts)
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO webhook_delivery_attempts (id, notification_delivery_id, webhook_id, attempt_number, outcome)
+			VALUES ($1, $1, 'wh', 0, 'pending')`, id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
 	fail := func(rejected bool, want int) {
 		t.Helper()
-		got, err := repo.RecordFailure(ctx, "wh", &status, "rejected", rejected)
+		done := WebhookAttemptOutcome{AttemptID: newAttempt(), Outcome: WebhookOutcomeFailed,
+			AttemptNumber: 1, HTTPStatus: &status, Message: "rejected"}
+		got, err := repo.RecordFailure(ctx, "wh", done, rejected)
 		if err != nil || got != want {
 			t.Fatalf("RecordFailure(rejected=%v) = %d, %v; want %d", rejected, got, err, want)
 		}
@@ -174,8 +191,15 @@ func TestWebhookRejectionStreak(t *testing.T) {
 	}
 	fail(true, 1) // re-enabled: the old rejections do not count
 
-	if err := repo.RecordSuccess(ctx, "wh"); err != nil {
+	delivered := WebhookAttemptOutcome{AttemptID: newAttempt(), Outcome: WebhookOutcomeDelivered, AttemptNumber: 1}
+	if err := repo.RecordSuccess(ctx, "wh", delivered); err != nil {
 		t.Fatal(err)
 	}
 	fail(true, 1)
+
+	// Each send's outcome lands with its streak update.
+	var unfinished int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM webhook_delivery_attempts WHERE outcome = 'pending'`).Scan(&unfinished); err != nil || unfinished != 0 {
+		t.Fatalf("pending attempts = %d, %v; want every attempt finalized", unfinished, err)
+	}
 }

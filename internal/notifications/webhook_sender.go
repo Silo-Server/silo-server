@@ -193,53 +193,49 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	attemptNumber := attempt.AttemptNumber + 1
 
 	if result.OK {
-		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeDelivered,
-			attemptNumber, &result.HTTPStatus, "", nil)
-		if err := s.webhooks.RecordSuccess(ctx, hook.ID); err != nil {
+		done := WebhookAttemptOutcome{AttemptID: attempt.ID, Outcome: WebhookOutcomeDelivered,
+			AttemptNumber: attemptNumber, HTTPStatus: &result.HTTPStatus}
+		if err := s.webhooks.RecordSuccess(ctx, hook.ID, done); err != nil {
 			s.logger.WarnContext(ctx, "webhook success bookkeeping failed", "webhook_id", hook.ID, "error", err)
 		}
 		return
 	}
 
-	var status *int
+	done := WebhookAttemptOutcome{AttemptID: attempt.ID, AttemptNumber: attemptNumber, Message: result.Message}
 	if result.HTTPStatus > 0 {
-		status = &result.HTTPStatus
+		done.HTTPStatus = &result.HTTPStatus
 	}
+	// A deterministic destination-side rejection (a non-retryable 4xx) fails
+	// this delivery now. A single 4xx is not proof the webhook is dead
+	// (CDN/WAF blips), but three consecutive rejected deliveries are.
 	rejected := result.HTTPStatus > 0 && !retryableHTTPStatus(result.HTTPStatus)
-	rejections, err := s.webhooks.RecordFailure(ctx, hook.ID, status, result.Message, rejected)
+	switch delay, more := retryDelay(webhookRetrySchedule, attemptNumber); {
+	case rejected:
+		done.Outcome = WebhookOutcomeFailed
+	case more:
+		// Retry-After can lengthen the wait but never shorten the schedule: a
+		// destination answering 429 with a few seconds would otherwise use up
+		// every attempt in minutes.
+		nextRetry := time.Now().Add(max(delay, result.RetryAfter))
+		done.Outcome, done.NextRetryAt = WebhookOutcomeRetrying, &nextRetry
+	default:
+		// Retry schedule exhausted (~24h of consecutive failures).
+		done.Outcome = WebhookOutcomeAutoDisabled
+	}
+	rejections, err := s.webhooks.RecordFailure(ctx, hook.ID, done, rejected)
 	if err != nil {
+		// Nothing was written: the lease expires and the retry worker
+		// reclaims the attempt.
 		s.logger.WarnContext(ctx, "webhook failure bookkeeping failed", "webhook_id", hook.ID, "error", err)
-	}
-
-	if rejected {
-		// Deterministic destination-side rejection: fail this delivery now. A
-		// single 4xx is not proof the webhook is dead (CDN/WAF blips), but
-		// three consecutive rejected deliveries are.
-		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
-			attemptNumber, status, result.Message, nil)
-		if rejections >= autoDisableConsecutive4xx {
-			s.disableWebhook(ctx, hook, result,
-				fmt.Sprintf("%d consecutive deliveries rejected by the destination", autoDisableConsecutive4xx))
-		}
 		return
 	}
-
-	// Retry-After can lengthen the wait but never shorten the schedule: a
-	// destination answering 429 with a few seconds would otherwise use up
-	// every attempt in minutes.
-	delay, more := retryDelay(webhookRetrySchedule, attemptNumber)
-	delay = max(delay, result.RetryAfter)
-	if more {
-		nextRetry := time.Now().Add(delay)
-		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeRetrying,
-			attemptNumber, status, result.Message, &nextRetry)
-		return
+	switch {
+	case done.Outcome == WebhookOutcomeAutoDisabled:
+		s.disableWebhook(ctx, hook, result, "Deliveries failed for 24 hours")
+	case rejected && rejections >= autoDisableConsecutive4xx:
+		s.disableWebhook(ctx, hook, result,
+			fmt.Sprintf("%d consecutive deliveries rejected by the destination", autoDisableConsecutive4xx))
 	}
-
-	// Retry schedule exhausted (~24h of consecutive failures).
-	_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeAutoDisabled,
-		attemptNumber, status, result.Message, nil)
-	s.disableWebhook(ctx, hook, result, "Deliveries failed for 24 hours")
 }
 
 // disableWebhook auto-disables the webhook and posts the in-app notice so the
