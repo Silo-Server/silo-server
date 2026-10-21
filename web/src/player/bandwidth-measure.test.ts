@@ -3,52 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The speed test's transfer and timing, with the network and the clock faked.
 // The schedule is covered in bandwidth-probe.schedule.test.ts, Test speed in
 // bandwidth-probe.test.ts.
-const fetchWithSession = vi.fn();
 vi.mock("@/api/v2/request", () => ({
   V2_CLIENT_HEADERS: {},
   v2: vi.fn(async () => ({ features: [] })),
 }));
-vi.mock("@/api/client", () => ({
-  fetchWithSession: (...args: unknown[]) => fetchWithSession(...args),
-}));
+vi.mock("@/api/client", () => ({ fetchWithSession: vi.fn() }));
 
 import { measureBandwidth, ProbeRateLimited } from "./bandwidth-measure";
-
-const PROBE_URL = "/api/v2/playback/bandwidth-probe?media_path=true";
-
-/** A body that yields `chunks` of `chunkBytes`, advancing a fake clock `stepMs` per chunk. */
-function timedBody(chunks: number, chunkBytes: number, stepMs: number) {
-  let time = 0;
-  let sent = 0;
-  const cancel = vi.fn(async () => undefined);
-  const reader = {
-    read: async () => {
-      if (sent >= chunks) return { done: true, value: undefined };
-      if (sent > 0) time += stepMs;
-      sent++;
-      return { done: false, value: new Uint8Array(chunkBytes) };
-    },
-    cancel,
-  };
-  return {
-    res: { ok: true, body: { getReader: () => reader } },
-    clock: () => time,
-    cancel,
-    sent: () => sent,
-  };
-}
-
-/** A probe request that never answers until it is aborted. */
-function hangingProbe() {
-  fetchWithSession.mockImplementation(
-    (_url: string, init: RequestInit) =>
-      new Promise((_resolve, reject) => {
-        init.signal?.addEventListener("abort", () =>
-          reject(new DOMException("aborted", "AbortError")),
-        );
-      }),
-  );
-}
+import {
+  fetchWithSession,
+  hangingProbe,
+  PROBE_URL,
+  timedBody,
+} from "./bandwidth-probe.test-support";
 
 beforeEach(() => {
   fetchWithSession.mockReset();
