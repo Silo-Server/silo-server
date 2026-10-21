@@ -2798,9 +2798,10 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		return err
 	}
 	if action == actionSkipped {
-		// Only a row of this library cataloged while the file still held video
-		// has anything to retire; it leaves as a removed file does.
-		if existing == nil || existing.MediaFolderID != folder.ID || existing.MissingSince != nil {
+		// Only a row of this library has anything to retire. It leaves as a
+		// removed file does; like a vanished file's, the reconciliation runs
+		// again for a row already missing, so one that failed is retried.
+		if existing == nil || existing.MediaFolderID != folder.ID {
 			return nil
 		}
 		if err := s.retireMissingFile(ctx, folder, existing); err != nil {
