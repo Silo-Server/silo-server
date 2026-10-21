@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,9 +28,9 @@ func (h *PlaybackHandler) PlaybackProbeRedirect(ctx context.Context, user int, s
 	}
 	decision, err := noderouting.Resolve(planner, noderouting.ResolveRequest{Request: noderouting.Request{
 		Workload: noderouting.WorkloadDirectPlay, Delivery: noderouting.DeliveryDirect, Policy: h.playbackRoutingPolicyForContextV3(ctx), ProxyAllowed: h.JWTSecret != "",
-	}, SessionID: id, ProxyEligible: eligible, ProxyExecutionEligible: eligible})
+	}, SessionID: id, ProxyEligible: eligible})
 	if err != nil || !decision.Selected() {
-		return "", playbackOperationError(http.StatusServiceUnavailable, "capability_not_configured", "No media path is available for a connection speed test")
+		return "", playbackOperationError(http.StatusServiceUnavailable, "dependency_unavailable", "No media path is available for a connection speed test")
 	}
 	if decision.Plan.ProxyNode == nil {
 		return "", nil
@@ -40,11 +39,11 @@ func (h *PlaybackHandler) PlaybackProbeRedirect(ctx context.Context, user int, s
 	// predates probes. That would measure a path playback will not use.
 	entry := h.pooledNodeCapabilitiesV3(ctx, []string{decision.Plan.ProxyNode.URL})[decision.Plan.ProxyNode.URL]
 	if !slices.Contains(entry.transportFeatures, playback.TransportFeatureBandwidthProbeV1) {
-		return "", playbackOperationError(http.StatusServiceUnavailable, "capability_not_configured", "The selected media proxy does not support connection speed tests")
+		return "", playbackOperationError(http.StatusServiceUnavailable, "dependency_unavailable", "The selected media proxy does not support connection speed tests")
 	}
 	token, err := streamtoken.Sign(streamtoken.Claims{PlayMethod: streamtoken.PlayMethodBandwidthProbe, UserID: user}, h.JWTSecret, 2*time.Minute)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s/stream/bandwidth-probe/%s?size=%d", strings.TrimRight(decision.Plan.ProxyNode.ClientURLFor(path), "/"), token, size), nil
+	return fmt.Sprintf("%s/stream/bandwidth-probe/%s?size=%d", decision.Plan.ProxyNode.ClientURLFor(path), token, size), nil
 }
