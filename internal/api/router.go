@@ -737,6 +737,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				nil,
 				checkPrimaryProfile,
 				householdRequiresProfile,
+				accessGroupStore,
 			).RequireMarkerEdit
 		}
 	}

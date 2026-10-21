@@ -92,7 +92,7 @@ func (h *PasswordResetHandler) CompletePasswordReset(ctx context.Context, token,
 	}
 	view := PasswordResetCompletionView{Username: user.Username}
 	if err == nil {
-		view.Tokens = &TokenPairView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn, User: buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil)}
+		view.Tokens = &TokenPairView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn, User: buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil)}
 	}
 	return view, err
 }

@@ -883,8 +883,8 @@ existing `500`. API keys keep their profile-less admin access. A PIN-locked prim
 needs its `X-Profile-Token` because the viewer gate runs before the acting-admin gate on the v1
 admin groups and on every v2 `acting_admin` and `permission_gated` operation; the one v1
 acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refresh`. The
-admin-role `marker_edit` grant is not an acting-admin decision and is unchanged here (#1911).
-This is the same critical bridge fix.
+admin-role `marker_edit` grant follows the same acting-admin rule as the metadata-curation
+bypass (#1911). This is the same critical bridge fix.
 
 Routes outside the admin groups that widen what an admin sees or may do (another account's
 media requests and their download-server fields, another account's downloaded subtitles,
