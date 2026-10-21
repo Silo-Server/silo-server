@@ -214,7 +214,7 @@ func readResponseStream(data io.Reader) (string, error) {
 				// as an HTTP 401, without retrying the rejected token first.
 				return &permanentError{&HTTPError{StatusCode: http.StatusUnauthorized, Code: code, message: "ChatGPT subscriber credentials were rejected"}}
 			}
-			return &permanentError{errors.New("ChatGPT request failed; check the account and ChatGPT usage settings")}
+			return &permanentError{&HTTPError{StatusCode: http.StatusBadRequest, Code: code, message: "ChatGPT request failed; check the account and ChatGPT usage settings"}}
 		case "response.incomplete":
 			return &permanentError{unusable("ChatGPT returned an incomplete response")}
 		}
