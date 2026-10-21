@@ -321,10 +321,13 @@ line, which also counts items past the 10-embed cap.
 ### Generic payload and HMAC signing
 
 Generic webhooks receive canonical Silo JSON: event name, delivery and
-webhook IDs, timestamp, `version`, `test` flag, profile ID, delivery type,
-reason flags, and the series/episode (or request) content blocks.
+webhook IDs, timestamp, `version`, `test` flag, profile ID, library ID,
+delivery type, reason flags, and the series/episode (or request) content
+blocks.
 
-Each request is signed with the webhook's per-destination 32-byte secret:
+Each request is signed with the webhook's per-destination signing secret: 32
+random bytes, base64-encoded into the 44-character string the API returns.
+The HMAC key is that string's bytes as returned, not the decoded 32 bytes.
 
 - Headers: `X-Silo-Event`, `X-Silo-Webhook-Id`, `X-Silo-Delivery-Id`,
   `X-Silo-Timestamp` (Unix epoch seconds), and
