@@ -575,6 +575,7 @@ function auditChangeValue(value: string | undefined, targetType?: string, field?
       }
       return "inherit";
     }
+    if (field === "scopes" && Array.isArray(parsed) && !parsed.length) return "full access";
     if (Array.isArray(parsed)) return parsed.length ? parsed.join(", ") : "none";
     return typeof parsed === "object" ? JSON.stringify(parsed) : String(parsed);
   } catch {
