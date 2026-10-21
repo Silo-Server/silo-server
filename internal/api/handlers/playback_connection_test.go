@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -29,16 +26,8 @@ import (
 // may record or clear the limit, so a replay neither renews it nor stores the
 // probe estimate as a new limit.
 func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
+	pool := catalogTransferPool(t)
 	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
 	var user int
 	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-replay-%d", time.Now().UnixNano())).Scan(&user); err != nil {
 		t.Fatal(err)
@@ -117,16 +106,8 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 // Auto's budget under the administrator's bitrate cap for the caller's
 // network, the cap a start would plan under.
 func TestConnectionBudgetAppliesAdminCapDB(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
+	pool := catalogTransferPool(t)
 	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
 	var user int
 	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("connection-budget-cap-%d", time.Now().UnixNano())).Scan(&user); err != nil {
 		t.Fatal(err)
@@ -325,15 +306,7 @@ func TestBufferedReplansGoLowerToAVersion(t *testing.T) {
 // later output change that sends no estimate still plans under it from the
 // store, stays on the lower version and reports bandwidth_limit.
 func TestLearnedLimitCarriesThroughReplansDB(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	pool, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
+	pool := catalogTransferPool(t)
 	var user int
 	if err := pool.QueryRow(t.Context(), `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-replans-%d", time.Now().UnixNano())).Scan(&user); err != nil {
 		t.Fatal(err)
@@ -389,16 +362,8 @@ func TestLearnedLimitCarriesThroughReplansDB(t *testing.T) {
 // lower bound, and only readings within their lifetime count toward the
 // budget, though both are still returned.
 func TestConnectionReadingsDB(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
+	pool := catalogTransferPool(t)
 	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
 	var user int
 	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("connection-readings-%d", time.Now().UnixNano())).Scan(&user); err != nil {
 		t.Fatal(err)
