@@ -41,6 +41,7 @@ type ffprobeFormat struct {
 	Filename       string            `json:"filename"`
 	FormatName     string            `json:"format_name"`
 	FormatLongName string            `json:"format_long_name"`
+	ProbeScore     int               `json:"probe_score"`
 	StartTime      string            `json:"start_time"`
 	Duration       string            `json:"duration"`
 	Size           string            `json:"size"`
@@ -163,6 +164,9 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 	}
 
 	probe := convertProbeData(&raw)
+	if probeGuessedWrongContainer(raw.Format.ProbeScore, filePath, probe.Container) {
+		return nil, fmt.Errorf("%w: %s read as %s with probe score %d", errProbeGuessedContainer, filePath, raw.Format.FormatName, raw.Format.ProbeScore)
+	}
 	applyMatroskaSubtitleTrackIDs(ctx, filePath, probe)
 	if probe.Duration == 0 {
 		if frameRate, hasVideo := primaryVideoFrameRate(raw.Streams); hasVideo {
@@ -188,13 +192,35 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 	return probe, nil
 }
 
+// probeScoreRetry is FFmpeg's AVPROBE_SCORE_RETRY. A format detected at or
+// below it is a guess: FFmpeg reads further while the score stays this low and
+// warns "misdetection possible" when it settles on one.
+const probeScoreRetry = 25
+
+// errProbeGuessedContainer reports that ffprobe exited 0 after guessing a
+// container the file's video extension does not name, such as an AVI with a
+// damaged header read as a bare MPEG-4 stream at score 5. A low score alone
+// does not show damage, since a valid stream of a few frames scores low too;
+// a guess that contradicts the extension does.
+var errProbeGuessedContainer = errors.New("ffprobe guessed a container the file extension does not name")
+
+// probeGuessedWrongContainer reports whether ffprobe settled on container for
+// filePath only by guessing (score at or below probeScoreRetry), and the
+// file's extension rules that container out. A missing score (0) counts as a
+// reading.
+func probeGuessedWrongContainer(score int, filePath, container string) bool {
+	return score > 0 && score <= probeScoreRetry && !extensionAllowsContainer(filePath, container)
+}
+
 // IsProbeRejection reports whether err, returned by ProbeFile for filePath
 // under ctx, means ffprobe ran to completion and refused the file's content:
 // a non-zero exit status while the caller's context was still live, for a file
 // this process can read, with no sign that ffprobe itself hit a read failure.
-// Zero-byte, corrupt, and truncated media end this way.
+// Zero-byte, corrupt, and truncated media end this way. So does a probe that
+// exited 0 after only guessing a container the file's extension rules out
+// (errProbeGuessedContainer).
 //
-// ffprobe exits the same way when it cannot read the file (permission denied,
+// ffprobe also exits non-zero when it cannot read the file (permission denied,
 // an I/O error or timeout on a network mount, a stale handle, a file that
 // vanished). Those say nothing about the content and stay retryable, so two
 // independent checks run before the failure is blamed on the file: ffprobe's
@@ -210,16 +236,16 @@ func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
 	if err == nil || ctx.Err() != nil {
 		return false
 	}
+	// A guessed container leaves no ffprobe error output, since ffprobe
+	// exited 0; the read check still keeps storage that fails retryable.
 	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
+	if !errors.Is(err, errProbeGuessedContainer) && (!errors.As(err, &exitErr) || !ffprobeRefusedInput(exitErr.ExitCode())) {
 		return false
 	}
-	// ffprobe refuses input with exit status 1; 126 and 127 come from the
-	// shell or the dynamic loader when ffprobe itself cannot start.
-	if code := exitErr.ExitCode(); code <= 0 || code == 126 || code == 127 {
-		return false
+	var accessErr error
+	if exitErr != nil {
+		accessErr = probeStderrAccessFailure(exitErr.Stderr)
 	}
-	accessErr := probeStderrAccessFailure(exitErr.Stderr)
 	if accessErr == nil {
 		accessErr = boundedProbeInputReadable(ctx, filePath)
 	}
@@ -232,6 +258,13 @@ func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
 		return false
 	}
 	return true
+}
+
+// ffprobeRefusedInput reports whether an ffprobe exit status refuses its
+// input: ffprobe exits 1 for that, while 126 and 127 come from the shell or
+// the dynamic loader when ffprobe itself cannot start.
+func ffprobeRefusedInput(code int) bool {
+	return code > 0 && code != 126 && code != 127
 }
 
 // probeAccessFailureMarkers are operating-system error strings (strerror text,
@@ -1168,9 +1201,20 @@ func containerForFile(formatName, filePath string) string {
 	return container
 }
 
+// Normalized container names, as detectContainer and containerForFile
+// return them. containerMKV is declared in matroska_tracks.go.
 const (
+	containerMP4    = "mp4"
+	containerAVI    = "avi"
 	containerMPEGTS = "ts"
 	containerBDAV   = "m2ts"
+	containerASF    = "wmv"
+	containerFLV    = "flv"
+	containerOgg    = "ogg"
+	// detectContainer passes these format names through unchanged.
+	containerMPEGPS    = "mpeg"
+	containerMPEGVideo = "mpegvideo"
+	containerM4V       = "m4v"
 )
 
 // detectContainer maps ffprobe format names to common container names.
@@ -1184,17 +1228,17 @@ func detectContainer(formatName string) string {
 		case "matroska", "webm":
 			return containerMKV
 		case "mov", "mp4", "m4a":
-			return "mp4"
+			return containerMP4
 		case "avi":
-			return "avi"
+			return containerAVI
 		case "mpegts":
 			return containerMPEGTS
 		case "flv":
-			return "flv"
+			return containerFLV
 		case "ogg":
-			return "ogg"
+			return containerOgg
 		case "wmv", "asf":
-			return "wmv"
+			return containerASF
 		}
 	}
 	// Fallback: return first part

@@ -17,6 +17,8 @@ func observeFile(action fileAction, err error) {
 			status = "updated"
 		case actionUnchanged:
 			status = "unchanged"
+		case actionSkipped:
+			status = "skipped"
 		}
 	}
 	scannedFiles.WithLabelValues(status).Inc()

@@ -2,37 +2,76 @@ package scanner
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 )
+
+// videoContainers lists the containers the movie and series scanner branches
+// catalog: each group's file extensions, the containers a probe of such a file
+// names (detectContainer's names), and whether the container's header lists
+// every stream the file holds.
+//
+// Each entry is a container ffprobe identifies and the playback planner can
+// direct play, remux, or transcode; playback.MimeFromExtension names a media
+// type for every one of them.
+var videoContainers = []videoContainer{
+	{".mkv .webm", []string{containerMKV}, true},                         // Matroska; WebM is its VP8/VP9/AV1 subset
+	{".mp4 .mov .3gp .3g2 .f4v", []string{containerMP4}, true},           // MP4/QuickTime family
+	{".m4v", []string{containerMP4, containerM4V}, true},                 // MP4, or a bare MPEG-4 video stream
+	{".avi .divx", []string{containerAVI}, true},                         // AVI; .divx is AVI with a DivX stream
+	{".ts .m2ts .mts", []string{containerMPEGTS, containerBDAV}, false},  // MPEG-TS; .m2ts/.mts use 192-byte BDAV packets
+	{".mpg .mpeg", []string{containerMPEGPS, containerMPEGVideo}, false}, // MPEG program stream, or a bare MPEG video stream
+	{".wmv .asf", []string{containerASF}, true},                          // ASF
+	{".flv", []string{containerFLV}, false},                              // Flash video
+	{".ogv .ogm", []string{containerOgg}, false},                         // Ogg video and legacy Ogg Media
+}
+
+type videoContainer struct {
+	extensions string
+	containers []string
+	// listsStreams is set when the header declares every stream, so a probe
+	// that finds no video stream shows the file has none. Containers that
+	// announce streams as their packets arrive can hold video past the part
+	// ffprobe reads.
+	listsStreams bool
+}
 
 // videoExtensions is the set of file extensions the movie and series scanner
 // branches catalog. Every decision about whether a path is a video file goes
 // through this set (SupportsVideoFile, the library walk, ScanFile, extras
 // classification, and scantrigger), so they cannot disagree.
-//
-// Each entry is a container ffprobe identifies and the playback planner can
-// direct play, remux, or transcode; playback.MimeFromExtension names a media
-// type for every one of them.
-var videoExtensions = extensionSet(
-	".mkv .webm",                    // Matroska; WebM is its VP8/VP9/AV1 subset
-	".mp4 .m4v .mov .3gp .3g2 .f4v", // MP4/QuickTime family
-	".avi .divx",                    // AVI; .divx is AVI with a DivX stream
-	".ts .m2ts .mts",                // MPEG-TS; .m2ts/.mts use 192-byte BDAV packets
-	".mpg .mpeg",                    // MPEG program stream
-	".wmv .asf",                     // ASF
-	".flv",                          // Flash video
-	".ogv .ogm",                     // Ogg video and legacy Ogg Media
-)
-
-// extensionSet builds a set from groups of space-separated extensions.
-func extensionSet(groups ...string) map[string]bool {
+var videoExtensions = func() map[string]bool {
 	set := make(map[string]bool)
-	for _, group := range groups {
-		for _, ext := range strings.Fields(group) {
+	for _, group := range videoContainers {
+		for _, ext := range strings.Fields(group.extensions) {
 			set[ext] = true
 		}
 	}
 	return set
+}()
+
+// extensionAllowsContainer reports whether filePath's extension allows a
+// probe's container: false only for a video extension whose group does not
+// list that container.
+func extensionAllowsContainer(filePath, container string) bool {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	for _, group := range videoContainers {
+		if slices.Contains(strings.Fields(group.extensions), ext) {
+			return slices.Contains(group.containers, container)
+		}
+	}
+	return true
+}
+
+// containerListsStreams reports whether container's header declares every
+// stream the file holds.
+func containerListsStreams(container string) bool {
+	for _, group := range videoContainers {
+		if slices.Contains(group.containers, container) {
+			return group.listsStreams
+		}
+	}
+	return false
 }
 
 // unsupportedVideoExtensions names video formats the scanner recognizes but
