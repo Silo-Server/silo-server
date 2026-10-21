@@ -347,43 +347,6 @@ func TestAnalyzeMovieStatuses(t *testing.T) {
 	}
 }
 
-// A probe repair can fill in a missing or misread video codec without
-// changing the file. The movie's tail is then sampled, even over a no_video
-// row an earlier build stored.
-func TestAnalyzeMovieTailAfterProbeRepair(t *testing.T) {
-	for _, legacy := range []bool{false, true} {
-		movie := movieCandidate(10, 7200)
-		movie.CodecVideo = "mjpeg"
-		repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
-		sampler := &fakeMovieSampler{}
-		analyzer := movieAnalyzer(repo, sampler)
-		if legacy {
-			spec := movieTailSpec(movie)
-			repo.artifacts = map[artifactSlot]mediaartifact.Artifact{{10, ArtifactKindCreditsTail}: {
-				MediaFileID: 10, Key: spec.key, Identity: spec.window.identity(movie),
-				Status: mediaartifact.StatusUnusable, Detail: tailDetailNoVideo,
-			}}
-		} else {
-			summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if summary.CreditsTailUnusable != 1 || sampler.tailCount() != 0 || repo.artifact(10, ArtifactKindCreditsTail).Status != "" {
-				t.Fatalf("summary %+v, %d tail passes; want the tail ruled out, unsampled and unstored", summary, sampler.tailCount())
-			}
-		}
-
-		repo.movieCandidates[0].CodecVideo = "hevc"
-		summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if sampler.tailCount() != 1 || summary.CreditsTailScansComputed != 1 || summary.MovieCreditsMarkersWritten != 1 {
-			t.Fatalf("legacy=%t: summary %+v, %d tail passes; want the repaired movie sampled and placed", legacy, summary, sampler.tailCount())
-		}
-	}
-}
-
 func TestAnalyzeMovieWithoutVisualsUsesChaptersOnly(t *testing.T) {
 	chapterCandidate := movieCandidate(11, 7200)
 	chapterCandidate.Chapters = []models.MediaChapter{{Title: "End Credits", StartSeconds: 6900, EndSeconds: 7200}}

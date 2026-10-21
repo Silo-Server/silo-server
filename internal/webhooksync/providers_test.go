@@ -162,54 +162,6 @@ func TestEmbyProviderParseWebhookMarkUnplayed(t *testing.T) {
 	}
 }
 
-func TestEmbyProviderParseWebhookFavorites(t *testing.T) {
-	t.Parallel()
-
-	provider := NewEmbyProvider()
-	tests := []struct {
-		name      string
-		eventName string
-		want      string
-	}{
-		{name: "add", eventName: "item.favorited", want: ActionAddFavorite},
-		{name: "remove", eventName: "item.unfavorite", want: ActionRemoveFavorite},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			req := httptest.NewRequest("POST", "/webhook", strings.NewReader(`{
-				"Event": "`+tc.eventName+`",
-				"Date": "2026-04-07T12:00:00Z",
-				"User": { "Id": "user-1", "Name": "Alice" },
-				"Item": {
-					"Id": "item-1",
-					"Name": "Movie",
-					"Type": "Movie",
-					"ProductionYear": 2024,
-					"ProviderIds": { "Imdb": "tt123" }
-				}
-			}`))
-
-			event, err := provider.ParseWebhook(context.Background(), &Connection{ServerName: "Emby"}, req)
-			if err != nil {
-				t.Fatalf("ParseWebhook() error = %v", err)
-			}
-			if event == nil || !event.Apply {
-				t.Fatalf("expected event to apply")
-			}
-			if event.Action != tc.want {
-				t.Fatalf("unexpected action: %q", event.Action)
-			}
-			if event.Record.IMDbID != "tt123" {
-				t.Fatalf("unexpected record: %#v", event.Record)
-			}
-		})
-	}
-}
-
 func TestEmbyProviderParseWebhookItemRateAsToggleFavorite(t *testing.T) {
 	t.Parallel()
 
@@ -352,6 +304,8 @@ func TestEmbyWebhookAction(t *testing.T) {
 		{eventName: "item.rate", want: ActionToggleFavorite, ok: true},
 		{eventName: "item.addedtofavorites", want: ActionAddFavorite, ok: true},
 		{eventName: "item.removedfromfavorites", want: ActionRemoveFavorite, ok: true},
+		{eventName: "item.favorited", want: ActionAddFavorite, ok: true},
+		{eventName: "item.unfavorite", want: ActionRemoveFavorite, ok: true},
 		{eventName: "user.created", ok: false},
 		{eventName: "system.notificationtest", ok: false},
 	}

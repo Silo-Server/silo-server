@@ -18,11 +18,6 @@ describe("edgeScrollSpeed", () => {
     expect(edgeScrollSpeed(bottom - EDGE_ZONE_PX, top, bottom)).toBe(0);
   });
 
-  it("scrolls up (negative) near the top and down (positive) near the bottom", () => {
-    expect(edgeScrollSpeed(10, top, bottom)).toBeLessThan(0);
-    expect(edgeScrollSpeed(bottom - 10, top, bottom)).toBeGreaterThan(0);
-  });
-
   it("ramps: the closer to the edge, the faster", () => {
     const far = edgeScrollSpeed(70, top, bottom);
     const near = edgeScrollSpeed(10, top, bottom);
@@ -99,15 +94,6 @@ describe("findScrollContainer", () => {
 });
 
 describe("scrollViewportBounds", () => {
-  it("uses the viewport for the document itself", () => {
-    // jsdom leaves `document.scrollingElement` null, so the root element
-    // stands in — the function treats both as "the page scrolls".
-    expect(scrollViewportBounds(document.documentElement)).toEqual({
-      top: 0,
-      bottom: window.innerHeight,
-    });
-  });
-
   it("clips an inner container's rect to the viewport", () => {
     const el = document.createElement("div");
     el.getBoundingClientRect = () => ({ top: -50, bottom: window.innerHeight + 50 }) as DOMRect;

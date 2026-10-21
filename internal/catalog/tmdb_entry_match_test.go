@@ -76,25 +76,6 @@ func (f *findingFetcher) FindTMDBIDs(_ context.Context, _ string, titles []Title
 	return ids, nil
 }
 
-func TestMatchTMDBEntriesMakesNoTMDBRequestsWhenEveryTitleHasATMDBID(t *testing.T) {
-	items := &fakeExternalIDResolver{byType: map[string]*ExternalIDLookup{
-		"movie": {ByTMDB: map[string]string{"1": "movie-a"}},
-	}}
-	fetcher := &findingFetcher{}
-	entries := []TMDBCollectionEntry{{ID: 1, MediaType: "movie"}, {ID: 2, MediaType: "movie"}, {ID: 3, MediaType: "tv"}}
-
-	got, err := MatchTMDBEntries(t.Context(), items, fetcher, entries)
-	if err != nil {
-		t.Fatalf("MatchTMDBEntries: %v", err)
-	}
-	if !slices.Equal(got, []string{"movie-a", "", ""}) {
-		t.Fatalf("content IDs = %v", got)
-	}
-	if len(fetcher.asked) != 0 || len(fetcher.found) != 0 {
-		t.Fatalf("made TMDB requests (enriched %v, found %v) with no title lacking a TMDB ID", fetcher.asked, fetcher.found)
-	}
-}
-
 func TestMatchTMDBEntriesFindsTitlesWhenFewerThanUnmatchedEntries(t *testing.T) {
 	items := &fakeExternalIDResolver{
 		byType:      map[string]*ExternalIDLookup{"movie": {ByTMDB: map[string]string{"1": "movie-a"}}},

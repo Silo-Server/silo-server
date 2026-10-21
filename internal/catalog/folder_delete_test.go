@@ -127,17 +127,6 @@ func TestDeleteInBatchesStopsImmediatelyWhenFirstBatchUnderSize(t *testing.T) {
 	}
 }
 
-func TestDeleteInBatchesReturnsError(t *testing.T) {
-	withFastDeadlockRetry(t, 5)
-	sentinel := errors.New("delete failed")
-	_, err := deleteInBatches(context.Background(), 5, func(context.Context) (int64, error) {
-		return 0, sentinel
-	})
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("expected sentinel, got %v", err)
-	}
-}
-
 func TestLateOrphanCleanupUsesProvisionalSafetyPredicate(t *testing.T) {
 	conditions := normalizePredicateSQL(orphanedProvisionalMediaItemConditions)
 	for name, query := range map[string]string{

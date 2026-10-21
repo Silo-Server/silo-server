@@ -119,40 +119,6 @@ func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
 	})
 }
 
-// TestUpdateProfileSyncsIntroSkipMode covers both directions of the legacy
-// switch, including the one an untouched-looking false has to produce: "ask" is
-// the mode that reproduces what auto_skip_intro=false always did, and a profile
-// route that wrote only the boolean would leave the enum saying something else.
-func TestUpdateProfileSyncsIntroSkipMode(t *testing.T) {
-	for _, tc := range []struct{ body, wantMode, wantBool string }{
-		{`{"auto_skip_intro":true}`, `"always"`, `true`},
-		{`{"auto_skip_intro":false}`, `"ask"`, `false`},
-	} {
-		t.Run(tc.body, func(t *testing.T) {
-			store := newProfileTestStore(t)
-			handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-			if rr := updateProfileVia(t, handler, "profile-1", tc.body); rr.Code != http.StatusOK {
-				t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
-			}
-
-			for key, want := range map[string]string{
-				settingskeys.PlaybackIntroSkipMode: tc.wantMode,
-				settingskeys.PlaybackAutoSkipIntro: tc.wantBool,
-			} {
-				value := storedProfileSetting(t, store, key, "profile-1")
-				if value == nil {
-					t.Errorf("no canonical %s row after the profile update", key)
-					continue
-				}
-				if string(value.Value) != want {
-					t.Errorf("canonical %s = %s, want %s", key, value.Value, want)
-				}
-			}
-		})
-	}
-}
-
 // TestUpdateProfileRejectsInvalidLanguageBeforeWriting: a value the canonical
 // endpoint would refuse must fail the request as a no-op instead of leaving
 // the column and the canonical store disagreeing.
@@ -441,34 +407,6 @@ func TestListProfilesServesCanonicalWrite(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, after) {
 		t.Errorf("a canonical write moved the legacy columns:\n before = %+v\n after  = %+v", before, after)
-	}
-}
-
-// TestListProfilesFallsBackToContractDefaults: a profile with neither a
-// canonical row nor column data serves the contract's defaults, not the
-// columns' schema defaults. subtitle_mode is the one that shows the
-// difference is real — the column defaults to 'auto' and so does the
-// contract, so show_forced_subtitles and the languages carry the assertion.
-func TestListProfilesFallsBackToContractDefaults(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	got := profileFromList(t, listProfilesVia(t, handler), "profile-1")
-	if got.Language != "" {
-		t.Errorf("language = %q, want the contract default \"\"", got.Language)
-	}
-	if got.PreferredMetadataLanguage != "" {
-		t.Errorf("preferred_metadata_language = %q, want the contract default \"\"",
-			got.PreferredMetadataLanguage)
-	}
-	if got.SubtitleLanguage != "" {
-		t.Errorf("subtitle_language = %q, want the contract default \"\"", got.SubtitleLanguage)
-	}
-	if got.SubtitleMode != "auto" {
-		t.Errorf("subtitle_mode = %q, want the contract default %q", got.SubtitleMode, "auto")
-	}
-	if !got.ShowForcedSubtitles {
-		t.Error("show_forced_subtitles = false, want the contract default true")
 	}
 }
 

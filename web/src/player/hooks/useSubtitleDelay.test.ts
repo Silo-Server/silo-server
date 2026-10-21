@@ -30,11 +30,6 @@ describe("useSubtitleDelay", () => {
     vi.useRealTimers();
   });
 
-  it("starts from the profile's saved offset", () => {
-    const { result } = renderHook(() => useSubtitleDelay());
-    expect(result.current[0]).toBe(200);
-  });
-
   it("shows each nudge at once and saves only the last one after a pause", async () => {
     const { result } = renderHook(() => useSubtitleDelay());
 

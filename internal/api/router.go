@@ -2801,6 +2801,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminNotificationPush = deps.Notifications
 		v2deps.AdminNotificationDiscord = deps.Notifications
 		v2deps.NotificationChannels = deps.Notifications
+		v2deps.NotificationDiscordManagement = newDiscordNotificationsHandler(deps, profileTokenService)
 		v2deps.NotificationEmailVerification = deps.Notifications.EmailVerification
 		v2deps.NotificationEmailLinks = handlers.NewEmailLinkHandler(deps.Notifications)
 		linkHandler := handlers.NewDiscordLinkHandler(deps.Notifications, deps.Notifications.Settings, deps.PublicURL)
@@ -3307,7 +3308,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// /notifications subrouter below (static routes win in chi).
 		var discordNotificationsHandler *handlers.DiscordNotificationsHandler
 		if deps.Notifications != nil {
-			discordNotificationsHandler = handlers.NewDiscordNotificationsHandler(deps.Notifications, deps.PublicURL)
+			discordNotificationsHandler = newDiscordNotificationsHandler(deps, profileTokenService)
 			if deps.OnConfigChange != nil {
 				h := discordNotificationsHandler
 				deps.OnConfigChange(func(_, updated *config.Config) { h.SetPublicURL(updated.Server.PublicURL) })
@@ -3494,7 +3495,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
 					r.With(apimw.RequireProfile).Post("/devices/push/apple", notificationsHandler.HandleRegisterApplePushDevice)
 					// Discord DM channel: the linked identity and mode hang off
-					// the login account, not a profile, so these stay outside
+					// the login account. Writes require the household manager
+					// in the handler; the optional profile routes stay outside
 					// the RequireProfile subrouter below (static paths coexist
 					// with it, same as the public email-link routes above).
 					if discordNotificationsHandler != nil {
@@ -5392,6 +5394,14 @@ func newPersonalAPIKeyHandler(
 ) *handlers.APIKeyHandler {
 	h := handlers.NewAPIKeyHandler(repo)
 	h.Stores = stores
+	h.ProfileTokens = tokens
+	return h
+}
+
+// Both API versions use the same household authority dependencies.
+func newDiscordNotificationsHandler(deps Dependencies, tokens *access.ProfileTokenService) *handlers.DiscordNotificationsHandler {
+	h := handlers.NewDiscordNotificationsHandler(deps.Notifications, deps.PublicURL)
+	h.Stores = deps.UserStoreProvider
 	h.ProfileTokens = tokens
 	return h
 }

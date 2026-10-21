@@ -1276,6 +1276,12 @@ func (h *ItemsHandler) extraToBaseItem(extra catalog.ItemExtraInfo, parentEncode
 	if extra.DurationSeconds > 0 {
 		dto.RunTimeTicks = secondsToTicks(float64(extra.DurationSeconds))
 	}
+	if tags := imageTagsWithSeed(h.mapper.imageTagSigner,
+		imageTagSeed(extra.ContentID, "Primary", compatCardImageSize, extra.StillPath, extra.StillThumbhash, time.Time{}),
+		extra.StillURL,
+	); tags != nil {
+		dto.ImageTags = tags
+	}
 	applyPlayableLocation(&dto, true)
 	return dto
 }

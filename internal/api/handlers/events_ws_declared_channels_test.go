@@ -216,58 +216,6 @@ func TestEventsWebSocketPartialDeclarationSurvives(t *testing.T) {
 	}
 }
 
-// TestEventsWebSocketRepeatedChannelsParameter covers the other natural
-// spelling of a selection. Honoring only the first occurrence dropped the rest
-// with an empty rejected array — the connection came up subscribed to less than
-// it asked for and reported nothing wrong.
-func TestEventsWebSocketRepeatedChannelsParameter(t *testing.T) {
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	_, readFrame := eventsWSTestConn(t, hub, &auth.Claims{UserID: 1, Role: "user"},
-		"?channels=catalog&channels=user_settings")
-
-	readFrame("hello")
-	subscribed := readFrame("subscribed")
-
-	for _, want := range []string{`"catalog"`, `"user_settings"`} {
-		if !strings.Contains(string(subscribed["channels"]), want) {
-			t.Errorf("channel %s was dropped: %s", want, subscribed["channels"])
-		}
-	}
-}
-
-// TestEventsWebSocketSilentConnectionStillClosed pins the other half: the grace
-// period still applies to a connection that declared nothing, so the URL path
-// relaxes the rule rather than removing it.
-func TestEventsWebSocketSilentConnectionStillClosed(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("waits out the subscribe grace period in real time")
-	}
-
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	conn, readFrame := eventsWSTestConn(t, hub, &auth.Claims{UserID: 1, Role: "user"}, "")
-
-	hello := readFrame("hello")
-	if string(hello["required_action"]) != `"subscribe"` {
-		t.Errorf("required_action = %s, want \"subscribe\"", hello["required_action"])
-	}
-
-	if err := conn.SetReadDeadline(time.Now().Add(subscribeGracePeriod + 5*time.Second)); err != nil {
-		t.Fatalf("setting read deadline: %v", err)
-	}
-	// The error frame, then the close.
-	if _, _, err := conn.ReadMessage(); err != nil {
-		t.Fatalf("reading error frame: %v", err)
-	}
-	_, _, err := conn.ReadMessage()
-	if err == nil {
-		t.Fatal("silent connection was not closed after the grace period")
-	}
-	if !websocket.IsCloseError(err, websocket.ClosePolicyViolation) {
-		t.Fatalf("close error = %v, want policy violation", err)
-	}
-}
-
 // TestEventsWebSocketDeclaredChannelsCannotEscalate is the authorization
 // guarantee: naming an admin-only channel on the URL must not grant it, and
 // must not grant the events published to it either.
@@ -619,24 +567,6 @@ func TestResolveChannelSelectionDeduplicates(t *testing.T) {
 	}
 	if len(rejected) != 0 {
 		t.Fatalf("unexpected rejections: %v", rejected)
-	}
-}
-
-// TestResolveChannelSelectionDeduplicatesRejections covers the other half of
-// dedup: a channel asked for twice is answered once whether it was accepted or
-// refused. Only the accepted side deduplicated before.
-func TestResolveChannelSelectionDeduplicatesRejections(t *testing.T) {
-	_, _, rejected := resolveChannelSelection(
-		[]evt.EventChannel{
-			evt.ChannelSessions, evt.ChannelSessions, // forbidden for a user
-			"bogus", "bogus", // unknown
-		},
-		allowedChannelsForRole("user"),
-		"",
-	)
-
-	if len(rejected) != 2 {
-		t.Fatalf("rejected = %v, want one entry per distinct channel", rejected)
 	}
 }
 

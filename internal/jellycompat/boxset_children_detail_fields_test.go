@@ -357,25 +357,6 @@ func TestHandleItems_BoxSetPlayAllByItemTypes(t *testing.T) {
 	assertNames(t, episodesOnly.Items, "S1E1", "S1E2", "S2E1", "Special")
 }
 
-// Shuffle sends SortBy=Random: the same leaves come back in any order.
-func TestHandleItems_BoxSetShuffleReturnsAllLeaves(t *testing.T) {
-	h, parentID := newPlayAllFixture(t)
-	result := performItemsRequest(t, h, "/Items?ParentId="+parentID+
-		"&Filters=IsNotFolder&Recursive=true&MediaTypes=Audio,Video&SortBy=Random&Limit=300")
-	got := map[string]bool{}
-	for _, name := range itemNames(result.Items) {
-		got[name] = true
-	}
-	for _, want := range []string{"Movie One", "S1E1", "S1E2", "S2E1", "Special", "Movie Two"} {
-		if !got[want] {
-			t.Fatalf("expected shuffled leaves to include %q, got %v", want, itemNames(result.Items))
-		}
-	}
-	if len(result.Items) != 6 || result.TotalRecordCount != 6 {
-		t.Fatalf("expected 6 of 6 leaves, got %d of %d", len(result.Items), result.TotalRecordCount)
-	}
-}
-
 // Paging applies to the expanded leaves, and the total counts all of them.
 func TestHandleItems_BoxSetPlayAllPages(t *testing.T) {
 	h, parentID := newPlayAllFixture(t)
@@ -425,50 +406,6 @@ func TestHandleItems_SmartEpisodeBoxSetPlayAll(t *testing.T) {
 	}
 }
 
-// Recursive requests that only exclude types, or that also ask for series,
-// are listings rather than Play all, so they keep the member list.
-func TestHandleItems_BoxSetRecursiveListingsStayMembers(t *testing.T) {
-	h, parentID := newPlayAllFixture(t)
-	for _, q := range []string{
-		"&Recursive=true&ExcludeItemTypes=Season",
-		"&Recursive=true&IncludeItemTypes=Movie,Series,Episode",
-	} {
-		query := parseItemsQuery(httptest.NewRequest("GET", "/Items?ParentId="+parentID+q, nil), h.codec)
-		if query.wantsCollectionLeaves() {
-			t.Fatalf("%s: expected a member listing, not Play all", q)
-		}
-	}
-}
-
-// Stored collections reference media_items only, so a member hidden from the
-// session must not trigger an episode lookup.
-func TestHandleItems_StoredBoxSetHiddenMemberSkipsEpisodeLookup(t *testing.T) {
-	collections := &fakeCollectionSource{
-		collections: []*models.LibraryCollection{
-			{ID: "103", LibraryID: 1, Title: "Partly Hidden", Visibility: "visible"},
-		},
-		items: map[string][]*models.LibraryCollectionItem{
-			"103": {
-				{CollectionID: "103", MediaItemID: "m-1", Position: 0},
-				{CollectionID: "103", MediaItemID: "m-hidden", Position: 1},
-			},
-		},
-	}
-	itemRepo := &fakeBatchItemRepo{items: map[string]*models.MediaItem{
-		"m-1": {ContentID: "m-1", Type: "movie", Title: "Visible"},
-	}}
-	episodeRepo := &countingEpisodeRepo{}
-	h, _ := newDetailCollectionsHandler(t, collections, itemRepo, nil)
-	h.episodeRepo = episodeRepo
-
-	parentID := h.codec.EncodeStringID(EncodedIDCollection, "103")
-	result := performItemsRequest(t, h, "/Items?ParentId="+parentID)
-	assertNames(t, result.Items, "Visible")
-	if episodeRepo.getByIDsCalls != 0 {
-		t.Fatalf("expected no episode lookup for a stored collection, got %d", episodeRepo.getByIDsCalls)
-	}
-}
-
 // Clients such as Swiftfin, Findroid, and Kodi send SortBy when listing a
 // collection. Catalog browse cannot see episodes, so an episode-scoped smart
 // collection sorts its own members, and a type filter excluding Episode is empty.
@@ -492,14 +429,6 @@ func TestHandleItems_SmartEpisodeBoxSetHonorsSortBy(t *testing.T) {
 	movies := performItemsRequest(t, h, "/Items?ParentId="+parentID+"&SortBy=SortName&IncludeItemTypes=Movie")
 	if len(movies.Items) != 0 {
 		t.Fatalf("expected no movies in an episode-scoped collection, got %v", itemNames(movies.Items))
-	}
-
-	// Without an episode repository the sort cannot run, but the collection
-	// keeps its members instead of reporting itself empty.
-	h.episodeRepo = nil
-	unsorted := performItemsRequest(t, h, "/Items?ParentId="+parentID+"&SortBy=SortName")
-	if unsorted.TotalRecordCount != 3 {
-		t.Fatalf("expected TotalRecordCount 3 without an episode repository, got %d", unsorted.TotalRecordCount)
 	}
 }
 

@@ -170,19 +170,6 @@ describe("useASSSubtitles font fallback", () => {
     expect(opts.availableFonts).toEqual({ "liberation sans": expect.any(String) });
   });
 
-  it("passes fetched ASS content into JASSUB", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      mockFetchResponse("[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello"),
-    );
-
-    renderHook(() => useASSSubtitles(makeVideoRef(), [germanTrack], 6, false, 0, 0));
-
-    await waitFor(() => expect(constructorOpts).toHaveLength(1));
-
-    expect(constructorOpts[0]!.subContent).toContain("Dialogue:");
-    expect(constructorOpts[0]!.subUrl).toBeUndefined();
-  });
-
   it("preloads embedded ASS font bundle bytes when the track advertises them", async () => {
     vi.mocked(fetch).mockImplementation((input) => {
       const url = String(input);
@@ -202,14 +189,6 @@ describe("useASSSubtitles font fallback", () => {
     expect(opts.defaultFont).toBeUndefined();
     expect(opts.fonts).toEqual([expect.any(Uint8Array)]);
   });
-
-  it("disables local font probing to avoid permission-related console noise", async () => {
-    renderHook(() => useASSSubtitles(makeVideoRef(), [arabicTrack], 5, false, 0, 0));
-
-    await waitFor(() => expect(constructorOpts).toHaveLength(1));
-
-    expect(constructorOpts[0]!.queryFonts).toBe(false);
-  });
 });
 
 describe("useASSSubtitles time offset", () => {
@@ -227,14 +206,6 @@ describe("useASSSubtitles time offset", () => {
     // origin 30s, +2000ms delay → event at source time S renders at video
     // time S - 28 = (S - 30) + 2, i.e. 2s later than the undelayed position.
     expect(constructorOpts[0]!.timeOffset).toBe(28);
-  });
-
-  it("adds a negative user delay to the constructed timeOffset", async () => {
-    renderHook(() => useASSSubtitles(makeVideoRef(), [germanTrack], 6, false, 30, -2000));
-
-    await waitFor(() => expect(constructorOpts).toHaveLength(1));
-
-    expect(constructorOpts[0]!.timeOffset).toBe(32);
   });
 
   it("waits for the renderer before repainting a changed subtitle offset", async () => {

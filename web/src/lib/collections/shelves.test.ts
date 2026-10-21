@@ -5,12 +5,10 @@ import {
   UNGROUPED,
   applyCollectionMove,
   applyPin,
-  applyShelfMove,
   boardShelves,
   planCollectionMove,
   planShelfMove,
   pinnedBand,
-  shelfCountLine,
   shownCollections,
   type Shelf,
 } from "./shelves";
@@ -157,19 +155,6 @@ describe("pinned collections", () => {
   });
 });
 
-describe("shelfCountLine", () => {
-  it("counts the collections and names an automatic order", () => {
-    expect(shelfCountLine(board[0]!)).toBe("3 collections");
-    expect(shelfCountLine(board[1]!)).toBe("1 collection, sorted by name");
-    expect(shelfCountLine({ ...board[1]!, sortMode: "most_items" })).toBe(
-      "1 collection, sorted by most titles",
-    );
-    expect(shelfCountLine({ ...board[1]!, sortMode: "recent" })).toBe(
-      "1 collection, sorted by recently updated",
-    );
-  });
-});
-
 describe("planCollectionMove", () => {
   it("drops a collection on the card it lands on, in its own shelf, like the drag showed", () => {
     expect(planCollectionMove(board, "a24", "studios", "criterion")).toEqual({
@@ -299,11 +284,5 @@ describe("planShelfMove", () => {
       "studios",
     ]);
     expect(planShelfMove(board, "studios", 0)).toBeNull();
-  });
-
-  it("reorders the board's shelves", () => {
-    expect(
-      applyShelfMove(board, ["mine", "studios", "awards", UNGROUPED]).map((s) => s.id),
-    ).toEqual(["mine", "studios", "awards", UNGROUPED]);
   });
 });

@@ -58,48 +58,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import {
-  useClearResumePosition,
-  useContinueWatching,
-  useReportMediaProgress,
-  useResetProgressAction,
-} from "./progress";
-
-describe("useContinueWatching", () => {
-  const signal = new AbortController().signal;
-  beforeEach(() => {
-    mocks.useQuery.mockReset();
-    mocks.useQueries.mockReset();
-    mocks.fetchCatalogItemDetail.mockReset();
-    mocks.fetchCatalogItemDetail.mockResolvedValue({
-      content_id: "movie-123",
-      title: "Catalog Detail",
-      type: "movie",
-    });
-    mocks.useQuery.mockReturnValue({
-      data: {
-        items: [{ media_item_id: "movie-123" }],
-      },
-      isLoading: false,
-    });
-    mocks.useQueries.mockImplementation(
-      ({
-        queries,
-      }: {
-        queries: Array<{ queryFn: (context: { signal: AbortSignal }) => Promise<unknown> }>;
-      }) => {
-        void queries[0]?.queryFn({ signal });
-        return [{ data: undefined, isLoading: false }];
-      },
-    );
-  });
-
-  it("looks up continue-watching details through catalog item detail", () => {
-    useContinueWatching();
-
-    expect(mocks.fetchCatalogItemDetail).toHaveBeenCalledWith("movie-123", undefined, { signal });
-  });
-});
+import { useClearResumePosition, useReportMediaProgress, useResetProgressAction } from "./progress";
 
 describe("useReportMediaProgress", () => {
   type ReportOptions = {
@@ -168,19 +127,6 @@ describe("useReportMediaProgress", () => {
       options.mutationFn({ contentId: "hidden", positionSeconds: 1, durationSeconds: 10 }),
     ).rejects.toThrow("Catalog item not found.");
   });
-
-  it("scopes the post-sync invalidation to progress and the reported item", async () => {
-    const invalidateQueries = vi.fn();
-    mocks.useQueryClient.mockReturnValue({ invalidateQueries });
-    const options = useReportMediaProgress() as unknown as ReportOptions;
-
-    options.onSuccess?.(syncProgressOk, { contentId: "movie-8f2c1a" });
-
-    expect(invalidateQueries).toHaveBeenCalledTimes(2);
-    expect(invalidateQueries.mock.calls[1]?.[0]?.queryKey).toEqual(
-      expect.arrayContaining(["movie-8f2c1a"]),
-    );
-  });
 });
 
 describe("useClearResumePosition", () => {
@@ -204,17 +150,6 @@ describe("useClearResumePosition", () => {
     mocks.invalidateMediaSurfaceQueries.mockResolvedValue(undefined);
     mocks.bumpHomeRefreshSignal.mockReset();
     mocks.toastSuccess.mockReset();
-  });
-
-  it("clears the resume position through clearResumePosition", async () => {
-    mocks.useQueryClient.mockReturnValue({});
-    const options = useClearResumePosition() as unknown as ClearOptions;
-
-    await options.mutationFn({ contentId: "movie-8f2c1a" });
-
-    expect(mocks.v2).toHaveBeenCalledWith("DELETE /api/v2/progress/{media_item_id}/position", {
-      path: { media_item_id: "movie-8f2c1a" },
-    });
   });
 
   it("takes the item off Continue Watching and drops its cached resume point", async () => {

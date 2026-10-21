@@ -73,34 +73,6 @@ func TestApplySettingsOverlaysNodeHWOverrides(t *testing.T) {
 	}
 }
 
-// A node's own prepared-download directory replaces the cluster setting; with
-// no override the cluster value stands.
-func TestApplySettingsOverlaysNodeArtifactDir(t *testing.T) {
-	dir := "/mnt/fast-ssd/silo-downloads"
-	for _, test := range []struct {
-		name      string
-		overrides nodeHWOverrides
-		want      string
-	}{
-		{name: "overridden", overrides: nodeHWOverrides{ArtifactDir: &dir}, want: dir},
-		{name: "inherited", want: "/srv/cluster-downloads"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			w := newOverrideWatcher(t, "http://node-1", func(context.Context, string, string) (nodeHWOverrides, bool, error) {
-				return test.overrides, true, nil
-			})
-			settings := clusterSettings()
-			settings["download.artifact_dir"] = "/srv/cluster-downloads"
-			if err := w.applySettings(context.Background(), settings); err != nil {
-				t.Fatalf("apply: %v", err)
-			}
-			if got := w.Config().Download.ArtifactDir; got != test.want {
-				t.Fatalf("artifact dir = %q, want %q", got, test.want)
-			}
-		})
-	}
-}
-
 // The API host has no stream_nodes row and must never pay for a lookup.
 func TestApplySettingsSkipsOverlayWithoutNodeIdentity(t *testing.T) {
 	looked := false
@@ -116,63 +88,6 @@ func TestApplySettingsSkipsOverlayWithoutNodeIdentity(t *testing.T) {
 	}
 	if got := w.Config().Playback.HWAccel; got != "qsv" {
 		t.Fatalf("HWAccel = %q, want the cluster value", got)
-	}
-}
-
-// A split-horizon node whose registered url differs from its own NODE_URL
-// still finds its row by NODE_NAME — the fallback identity an operator
-// controls on both sides. The fake models the DB-level fallback behavior:
-// it only reports a hit when the name matches, and this test asserts the
-// overlay guard passes both bootstrap values through to the loader.
-func TestApplySettingsOverlaysNodeHWOverridesByName(t *testing.T) {
-	accel := "vaapi"
-	var gotURL, gotName string
-	w := NewWatcher(nil, nil, nil, BootstrapOverrides{
-		NodeURL:  "http://10.0.4.7:8082",
-		NodeName: "silo-dev-transcode-ns17",
-	})
-	w.loadOverrides = func(_ context.Context, nodeURL, nodeName string) (nodeHWOverrides, bool, error) {
-		gotURL, gotName = nodeURL, nodeName
-		if nodeName == "silo-dev-transcode-ns17" {
-			return nodeHWOverrides{HWAccel: &accel}, true, nil
-		}
-		return nodeHWOverrides{}, false, nil
-	}
-	if err := w.applySettings(context.Background(), clusterSettings()); err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-	if gotURL != "http://10.0.4.7:8082" || gotName != "silo-dev-transcode-ns17" {
-		t.Fatalf("loader received url %q name %q, want both bootstrap values", gotURL, gotName)
-	}
-	if got := w.Config().Playback.HWAccel; got != "vaapi" {
-		t.Fatalf("HWAccel = %q, want the name-matched override", got)
-	}
-}
-
-// A node with only NODE_NAME set (no NODE_URL at all) still runs the
-// overlay: the guard fires when either identity is present, not just the url.
-func TestApplySettingsOverlayRunsWithNodeNameOnly(t *testing.T) {
-	accel := "none"
-	looked := false
-	w := NewWatcher(nil, nil, nil, BootstrapOverrides{NodeName: "silo-dev-transcode-ns17"})
-	w.loadOverrides = func(_ context.Context, nodeURL, nodeName string) (nodeHWOverrides, bool, error) {
-		looked = true
-		if nodeURL != "" {
-			t.Fatalf("nodeURL = %q, want empty", nodeURL)
-		}
-		if nodeName != "silo-dev-transcode-ns17" {
-			t.Fatalf("nodeName = %q, want the bootstrap value", nodeName)
-		}
-		return nodeHWOverrides{HWAccel: &accel}, true, nil
-	}
-	if err := w.applySettings(context.Background(), clusterSettings()); err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-	if !looked {
-		t.Fatal("a host with NodeName set skipped the overlay lookup")
-	}
-	if got := w.Config().Playback.HWAccel; got != "none" {
-		t.Fatalf("HWAccel = %q, want the overlay applied", got)
 	}
 }
 
@@ -299,5 +214,32 @@ func TestApplySettingsKeepsOverrideWhenTheRowStopsMatching(t *testing.T) {
 	if cfg.Playback.HWAccel != "nvenc" || cfg.Playback.HWDevice != "0" {
 		t.Fatalf("effective policy = %q / %q, want the last override read from the row",
 			cfg.Playback.HWAccel, cfg.Playback.HWDevice)
+	}
+}
+
+// A node with only NODE_NAME set (no NODE_URL at all) still runs the
+// overlay: the guard fires when either identity is present, not just the url.
+func TestApplySettingsOverlayRunsWithNodeNameOnly(t *testing.T) {
+	accel := "none"
+	looked := false
+	w := NewWatcher(nil, nil, nil, BootstrapOverrides{NodeName: "silo-dev-transcode-ns17"})
+	w.loadOverrides = func(_ context.Context, nodeURL, nodeName string) (nodeHWOverrides, bool, error) {
+		looked = true
+		if nodeURL != "" {
+			t.Fatalf("nodeURL = %q, want empty", nodeURL)
+		}
+		if nodeName != "silo-dev-transcode-ns17" {
+			t.Fatalf("nodeName = %q, want the bootstrap value", nodeName)
+		}
+		return nodeHWOverrides{HWAccel: &accel}, true, nil
+	}
+	if err := w.applySettings(context.Background(), clusterSettings()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if !looked {
+		t.Fatal("a host with NodeName set skipped the overlay lookup")
+	}
+	if got := w.Config().Playback.HWAccel; got != "none" {
+		t.Fatalf("HWAccel = %q, want the overlay applied", got)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -18,7 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanbatch"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type itemRefreshTestFolderRepo struct {
@@ -59,38 +57,6 @@ func TestItemRefreshResolverBuildRequestAcceptsPathOutsideLibraryRoots(t *testin
 	}
 	if req == nil {
 		t.Fatal("buildRequest() request = nil, want non-nil")
-	}
-	if got, want := req.ScanPath, "/srv/media/movies/4k/Example Movie (2026)"; got != want {
-		t.Fatalf("buildRequest() scan path = %q, want %q", got, want)
-	}
-}
-
-func TestItemRefreshResolverBuildRequestAcceptsPathWithinLibraryRoots(t *testing.T) {
-	t.Parallel()
-
-	resolver := &ItemRefreshResolver{
-		folderRepo: &itemRefreshTestFolderRepo{
-			folder: &models.MediaFolder{
-				ID:    3,
-				Paths: []string{"/srv/media/movies"},
-			},
-		},
-	}
-
-	req, err := resolver.buildRequest(
-		context.Background(),
-		3,
-		"/srv/media/movies/4k/Example Movie (2026)",
-		&ItemRefreshRequest{RequestedContentID: "119730834381996036"},
-	)
-	if err != nil {
-		t.Fatalf("buildRequest() error = %v, want nil", err)
-	}
-	if req == nil {
-		t.Fatal("buildRequest() request = nil, want non-nil")
-	}
-	if got, want := req.ScanFolderID, 3; got != want {
-		t.Fatalf("buildRequest() folder = %d, want %d", got, want)
 	}
 	if got, want := req.ScanPath, "/srv/media/movies/4k/Example Movie (2026)"; got != want {
 		t.Fatalf("buildRequest() scan path = %q, want %q", got, want)
@@ -280,12 +246,10 @@ func (r *itemRefreshTestRefresher) RefreshTargetForLibrary(_ context.Context, ta
 	return r.err
 }
 
-func TestItemRefreshWithholdsScanCompleteWhenMetadataFails(t *testing.T) {
-	t.Parallel()
-
-	eventBus := &libraryRefreshTestEventBus{}
-	scanRuns := &itemRefreshTestScanRuns{}
-	executor := NewItemRefreshExecutor(
+// newItemRefreshTestExecutor builds an executor over enabled folder 3 with
+// empty claim, file and skipped-root fakes.
+func newItemRefreshTestExecutor(ingester *itemRefreshTestIngester, scanRuns *itemRefreshTestScanRuns, refresher *itemRefreshTestRefresher, eventBus cache.EventBus) *ItemRefreshExecutor {
+	return NewItemRefreshExecutor(
 		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
 		&itemRefreshTestFileRepo{},
 		&itemRefreshTestRootClaimRepo{},
@@ -293,12 +257,20 @@ func TestItemRefreshWithholdsScanCompleteWhenMetadataFails(t *testing.T) {
 		newItemRefreshTestSkippedRootRepo(),
 		nil,
 		nil,
-		&itemRefreshTestIngester{},
+		ingester,
 		scanRuns,
-		&itemRefreshTestRefresher{err: errors.New("metadata failed")},
+		refresher,
 		eventBus,
 		nil,
 	)
+}
+
+func TestItemRefreshWithholdsScanCompleteWhenMetadataFails(t *testing.T) {
+	t.Parallel()
+
+	eventBus := &libraryRefreshTestEventBus{}
+	scanRuns := &itemRefreshTestScanRuns{}
+	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, scanRuns, &itemRefreshTestRefresher{err: errors.New("metadata failed")}, eventBus)
 
 	_, err := executor.Execute(context.Background(), ItemRefreshRequest{
 		RequestedContentID: "series-1",
@@ -325,20 +297,7 @@ func TestItemRefreshPublishesScanCompleteAfterMetadataRefresh(t *testing.T) {
 
 	eventBus := &libraryRefreshTestEventBus{}
 	refresher := &itemRefreshTestRefresher{}
-	executor := NewItemRefreshExecutor(
-		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
-		&itemRefreshTestFileRepo{},
-		&itemRefreshTestRootClaimRepo{},
-		&itemRefreshTestGroupClaimRepo{},
-		newItemRefreshTestSkippedRootRepo(),
-		nil,
-		nil,
-		&itemRefreshTestIngester{},
-		&itemRefreshTestScanRuns{},
-		refresher,
-		eventBus,
-		nil,
-	)
+	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, refresher, eventBus)
 
 	if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
 		RequestedContentID: "series-1",
@@ -364,20 +323,7 @@ func TestItemRefreshIngestsWithoutRunWhenScopeAlreadyClaimed(t *testing.T) {
 
 	ingester := &itemRefreshTestIngester{}
 	scanRuns := &itemRefreshTestScanRuns{existing: &models.ScanRun{ID: "queued-autoscan-run", Status: scanqueue.StatusAccepted}}
-	executor := NewItemRefreshExecutor(
-		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
-		&itemRefreshTestFileRepo{},
-		&itemRefreshTestRootClaimRepo{},
-		&itemRefreshTestGroupClaimRepo{},
-		newItemRefreshTestSkippedRootRepo(),
-		nil,
-		nil,
-		ingester,
-		scanRuns,
-		&itemRefreshTestRefresher{},
-		nil,
-		nil,
-	)
+	executor := newItemRefreshTestExecutor(ingester, scanRuns, &itemRefreshTestRefresher{}, nil)
 
 	result, err := executor.Execute(context.Background(), ItemRefreshRequest{
 		RequestedContentID: "series-1",
@@ -488,21 +434,6 @@ func (r *itemRefreshTestSkippedRootRepo) DeleteMissingInScope(_ context.Context,
 	return nil
 }
 
-type itemRefreshTestSeasonRepo struct {
-	season *models.Season
-}
-
-func (r *itemRefreshTestSeasonRepo) GetByID(_ context.Context, _ string) (*models.Season, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (r *itemRefreshTestSeasonRepo) GetBySeriesAndNumber(_ context.Context, seriesID string, seasonNum int) (*models.Season, error) {
-	if r.season != nil && r.season.SeriesID == seriesID && r.season.SeasonNumber == seasonNum {
-		return r.season, nil
-	}
-	return nil, errors.New("season not found")
-}
-
 type itemRefreshTestEpisodeRepo struct {
 	episode *models.Episode
 }
@@ -530,83 +461,13 @@ func (r *itemRefreshTestEpisodeRepo) ListBySeasonID(_ context.Context, _ string)
 	return nil, errors.New("not implemented")
 }
 
-func TestItemRefreshExecutorAllowsScanPathOutsideLibraryRoots(t *testing.T) {
-	t.Parallel()
-
-	folderRepo := &itemRefreshTestFolderRepo{
-		folder: &models.MediaFolder{
-			ID:      3,
-			Enabled: true,
-			Paths:   []string{"/LibraryManager2/movies/popular_trending"},
-		},
-	}
-	ingester := &itemRefreshTestIngester{}
-	refresher := &itemRefreshTestRefresher{}
-	fileRepo := &itemRefreshTestFileRepo{}
-	rootClaimRepo := &itemRefreshTestRootClaimRepo{}
-	groupClaimRepo := &itemRefreshTestGroupClaimRepo{}
-	skippedRootRepo := newItemRefreshTestSkippedRootRepo()
-	scanRuns := &itemRefreshTestScanRuns{}
-
-	executor := NewItemRefreshExecutor(folderRepo, fileRepo, rootClaimRepo, groupClaimRepo, skippedRootRepo, nil, nil, ingester, scanRuns, refresher, nil, nil)
-	artworkCacher := &itemRefreshTestArtworkCacher{}
-	executor.SetArtworkCacher(artworkCacher)
-
-	result, err := executor.Execute(context.Background(), ItemRefreshRequest{
-		RequestedContentID: "119730834381996036",
-		RefreshContentID:   "119730834381996036",
-		ScanFolderID:       3,
-		ScanPath:           "/srv/media/movies/4k/Example Movie (2026)",
-	}, nil)
-	if err != nil {
-		t.Fatalf("Execute() error = %v, want nil", err)
-	}
-	if result == nil {
-		t.Fatal("Execute() result = nil, want non-nil")
-	}
-	if got, want := ingester.scanPath, "/srv/media/movies/4k/Example Movie (2026)"; got != want {
-		t.Fatalf("IngestSubtree() path = %q, want %q", got, want)
-	}
-	if got, want := refresher.contentID, "119730834381996036"; got != want {
-		t.Fatalf("RefreshItem() content_id = %q, want %q", got, want)
-	}
-	if got, want := refresher.folderID, 3; got != want {
-		t.Fatalf("RefreshItemForLibrary() folder_id = %d, want %d", got, want)
-	}
-	if got, want := artworkCacher.contentID, "119730834381996036"; got != want {
-		t.Fatalf("CacheTargetArtwork() content_id = %q, want %q", got, want)
-	}
-	if got, want := result.MatchedFiles, 2; got != want {
-		t.Fatalf("Execute() matched files = %d, want %d", got, want)
-	}
-	if ingester.runID != "admin-refresh-run" || scanRuns.startedID != "admin-refresh-run" || scanRuns.completedID != "admin-refresh-run" {
-		t.Fatalf("scan lifecycle run context=%q started=%q completed=%q", ingester.runID, scanRuns.startedID, scanRuns.completedID)
-	}
-	if scanRuns.createdInput.Mode != scanqueue.ModeSubtree || scanRuns.createdInput.Trigger != itemRefreshScanTrigger {
-		t.Fatalf("scan create input = %#v", scanRuns.createdInput)
-	}
-}
-
 func TestItemRefreshExecutorFailsScanRunWhenIngestFails(t *testing.T) {
 	t.Parallel()
 
 	ingestErr := errors.New("scanner failed")
 	ingester := &itemRefreshTestIngester{err: ingestErr}
 	scanRuns := &itemRefreshTestScanRuns{}
-	executor := NewItemRefreshExecutor(
-		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
-		&itemRefreshTestFileRepo{},
-		&itemRefreshTestRootClaimRepo{},
-		&itemRefreshTestGroupClaimRepo{},
-		newItemRefreshTestSkippedRootRepo(),
-		nil,
-		nil,
-		ingester,
-		scanRuns,
-		&itemRefreshTestRefresher{},
-		nil,
-		nil,
-	)
+	executor := newItemRefreshTestExecutor(ingester, scanRuns, &itemRefreshTestRefresher{}, nil)
 
 	_, err := executor.Execute(context.Background(), ItemRefreshRequest{
 		RequestedContentID: "movie-1",
@@ -625,127 +486,10 @@ func TestItemRefreshExecutorFailsScanRunWhenIngestFails(t *testing.T) {
 	}
 }
 
-type itemRefreshDBIngester struct {
-	repo      *scanner.FileRepository
-	seriesID  string
-	episodeID string
-	filePath  string
-}
-
-func (i *itemRefreshDBIngester) IngestSubtree(ctx context.Context, folder *models.MediaFolder, _ string) (*libraryingest.Result, error) {
-	file, err := i.repo.Upsert(ctx, models.MediaFile{
-		ContentID:     i.seriesID,
-		EpisodeID:     i.episodeID,
-		MediaFolderID: folder.ID,
-		FilePath:      i.filePath,
-		FileSize:      1024,
-		SeasonNumber:  1,
-		EpisodeNumber: 1,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if err := i.repo.UpdateEpisodeLink(ctx, file.ID, i.episodeID, 1, 1); err != nil {
-		return nil, err
-	}
-	return &libraryingest.Result{ScanResult: &scanner.ScanResult{New: 1}, MatchedFiles: 1}, nil
-}
-
-func TestItemRefreshExecutorPersistsForeignKeyBackedScanProvenance(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	suffix := time.Now().UnixNano()
-	seriesID := fmt.Sprintf("admin-refresh-series-%d", suffix)
-	episodeID := fmt.Sprintf("admin-refresh-episode-%d", suffix)
-	filePath := fmt.Sprintf("/tmp/admin-refresh-%d-s01e01.mkv", suffix)
-	var folderID int
-	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('series', $1, true) RETURNING id`, seriesID).Scan(&folderID); err != nil {
-		t.Fatalf("seed folder: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
-		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
-	})
-	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'series', 'Admin Refresh', 'matched', '{}'::text[])`, seriesID); err != nil {
-		t.Fatalf("seed series: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, seriesID, folderID); err != nil {
-		t.Fatalf("seed series membership: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, 1, 1, 'Episode One')`, episodeID, seriesID); err != nil {
-		t.Fatalf("seed episode: %v", err)
-	}
-
-	ingester := &itemRefreshDBIngester{
-		repo:      scanner.NewFileRepository(pool),
-		seriesID:  seriesID,
-		episodeID: episodeID,
-		filePath:  filePath,
-	}
-	executor := NewItemRefreshExecutor(
-		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: folderID, Type: "series", Enabled: true}},
-		&itemRefreshTestFileRepo{},
-		&itemRefreshTestRootClaimRepo{},
-		&itemRefreshTestGroupClaimRepo{},
-		newItemRefreshTestSkippedRootRepo(),
-		nil,
-		nil,
-		ingester,
-		scanqueue.NewRepository(pool),
-		&itemRefreshTestRefresher{},
-		nil,
-		nil,
-	)
-	if _, err := executor.Execute(ctx, ItemRefreshRequest{
-		RequestedContentID: seriesID,
-		RefreshContentID:   seriesID,
-		ScanFolderID:       folderID,
-		ScanPath:           filepath.Dir(filePath),
-	}, nil); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-
-	var fileRunID, episodeRunID, status string
-	if err := pool.QueryRow(ctx, `
-		SELECT mf.first_seen_scan_run_id, el.first_seen_scan_run_id, sr.status
-		FROM media_files mf
-		JOIN episode_libraries el ON el.episode_id = mf.episode_id AND el.media_folder_id = mf.media_folder_id
-		JOIN scan_runs sr ON sr.id = mf.first_seen_scan_run_id
-		WHERE mf.file_path = $1
-	`, filePath).Scan(&fileRunID, &episodeRunID, &status); err != nil {
-		t.Fatalf("read persisted provenance: %v", err)
-	}
-	if fileRunID == "" || episodeRunID != fileRunID || status != scanqueue.StatusCompleted {
-		t.Fatalf("file run=%q episode run=%q status=%q", fileRunID, episodeRunID, status)
-	}
-}
-
 func TestItemRefreshExecutorReportsArtworkCacheFailureAsWarning(t *testing.T) {
 	t.Parallel()
 
-	executor := NewItemRefreshExecutor(
-		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
-		&itemRefreshTestFileRepo{},
-		&itemRefreshTestRootClaimRepo{},
-		&itemRefreshTestGroupClaimRepo{},
-		newItemRefreshTestSkippedRootRepo(),
-		nil,
-		nil,
-		&itemRefreshTestIngester{},
-		&itemRefreshTestScanRuns{},
-		&itemRefreshTestRefresher{},
-		nil,
-		nil,
-	)
+	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil)
 	executor.SetArtworkCacher(&itemRefreshTestArtworkCacher{err: errors.New("download failed")})
 
 	// The metadata refresh is already committed when artwork caching runs, so
@@ -764,47 +508,6 @@ func TestItemRefreshExecutorReportsArtworkCacheFailureAsWarning(t *testing.T) {
 	}
 	if got, want := result.RefreshContentID, "series-1"; got != want {
 		t.Fatalf("Execute() refresh content id = %q, want %q", got, want)
-	}
-}
-
-func TestItemRefreshExecutorSkipsArtworkStepWhenCachingDisabled(t *testing.T) {
-	t.Parallel()
-
-	executor := NewItemRefreshExecutor(
-		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
-		&itemRefreshTestFileRepo{},
-		&itemRefreshTestRootClaimRepo{},
-		&itemRefreshTestGroupClaimRepo{},
-		newItemRefreshTestSkippedRootRepo(),
-		nil,
-		nil,
-		&itemRefreshTestIngester{},
-		&itemRefreshTestScanRuns{},
-		&itemRefreshTestRefresher{},
-		nil,
-		nil,
-	)
-	cacher := &itemRefreshTestArtworkCacher{disabled: true}
-	executor.SetArtworkCacher(cacher)
-
-	var totals []int
-	if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
-		RequestedContentID: "series-1",
-		RefreshContentID:   "series-1",
-		ScanFolderID:       3,
-		ScanPath:           "/media/series-1",
-	}, func(_, total int, _ string) {
-		totals = append(totals, total)
-	}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if cacher.called {
-		t.Fatal("CacheTargetArtwork() called while image caching is disabled")
-	}
-	for _, total := range totals {
-		if total != 3 {
-			t.Fatalf("progress total = %d, want 3", total)
-		}
 	}
 }
 

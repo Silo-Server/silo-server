@@ -67,6 +67,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/extrastills"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
@@ -3110,6 +3111,13 @@ func main() {
 		}
 		if chapterBackfiller, ok := deps.ChapterThumbnailQueuer.(*chapterthumbs.Service); ok {
 			taskMgr.Register(tasks.NewChapterThumbnailBackfillTask(chapterBackfiller, 25))
+			// Local extras without an image beside them get a frame through the
+			// same extractor, in every library.
+			stillCacher := imagecache.New(deps.Blobs.Assets)
+			stillCacher.SetArtworkRevisionTracker(catalog.NewArtworkRevisionTracker(deps.DB))
+			taskMgr.Register(tasks.NewGenerateExtraStillsTask(
+				extrastills.NewGenerator(deps.DB, deps.FileRepo, chapterBackfiller, stillCacher), 200,
+			))
 		}
 		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
@@ -3500,9 +3508,8 @@ func main() {
 		}
 	}
 	// The revoking transaction deletes the account's stored
-	// Jellyfin-compatible sessions, but every replica caches them in memory
-	// and serves a cached one without reading the database, so a revocation
-	// is announced on the admin channel for each replica to drop its copies.
+	// Jellyfin-compatible sessions. Persistent lookups always check those
+	// rows; the admin event also lets each replica discard its cached copies.
 	if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
 		if event.Type != cache.EventUserSessionsRevoked {
 			return

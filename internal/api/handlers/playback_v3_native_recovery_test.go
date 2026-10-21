@@ -1,11 +1,7 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -37,12 +33,7 @@ func assertNativeSubtitleFailureFallsBackAndStaysDisabled(t *testing.T, features
 	caps := start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
 	caps.Subtitles.NativeEmbedded = []playback.NativeEmbeddedSubtitleCapabilityV3{{Container: "mp4", Codecs: []string{"mov_text"}, TrackIdentity: "container_track_id"}}
 	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = caps
-	rr := httptest.NewRecorder()
-	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
-	var started playback.DecisionResponseV3
-	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
-		t.Fatalf("start: %d %s", rr.Code, rr.Body.String())
-	}
+	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, start))
 	native := started.PlaybackPlan
 	if native.Delivery != playback.DeliveryOriginalHTTPV3 || native.Subtitle.Embedded == nil || native.Subtitle.Embedded.StreamIndex != 3 || native.Subtitle.Embedded.ContainerTrackID != "4" || native.Subtitle.Artifact != nil {
 		t.Fatalf("native plan=%+v subtitle=%+v", native, native.Subtitle)

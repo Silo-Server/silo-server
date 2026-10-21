@@ -150,7 +150,6 @@ func (f *fakeServiceHost) Shutdown(context.Context) error {
 type fakePluginClient struct {
 	manifest              *pluginv1.PluginManifest
 	metadataProviderCalls int
-	metadataProviderErr   error
 	markerProvider        *pluginhost.MarkerProviderClient
 }
 
@@ -160,7 +159,7 @@ func (f *fakePluginClient) Manifest() *pluginv1.PluginManifest {
 
 func (f *fakePluginClient) MetadataProvider(string) (*pluginhost.MetadataProviderClient, error) {
 	f.metadataProviderCalls++
-	return nil, f.metadataProviderErr
+	return nil, nil
 }
 
 func (f *fakePluginClient) ImageResolver(string) (*pluginhost.ImageResolverClient, error) {
@@ -240,6 +239,15 @@ func newFakeServiceInstallationStore(installations ...*Installation) *fakeServic
 		store.byPluginID[cloned.PluginID] = append(store.byPluginID[cloned.PluginID], &cloned)
 	}
 	return store
+}
+
+// installedPluginStore holds manifest, written to disk, as enabled installation id.
+func installedPluginStore(t *testing.T, id int, manifest *pluginv1.PluginManifest) *fakeServiceInstallationStore {
+	t.Helper()
+	return newFakeServiceInstallationStore(&Installation{
+		ID: id, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
+		InstallPath: writeInstalledPluginManifest(t, manifest), Enabled: true,
+	})
 }
 
 func (s *fakeServiceInstallationStore) Create(_ context.Context, input CreateInstallationInput) (*Installation, error) {

@@ -3686,7 +3686,7 @@ func (f *Fetcher) fetchNewToLibrary(ctx context.Context, s ResolvedSection, libr
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s %s ORDER BY mi.created_at DESC LIMIT $%d`,
+		`SELECT %s FROM %s %s ORDER BY mi.created_at DESC, mi.content_id ASC LIMIT $%d`,
 		itemColumns("mi"), fromClause, whereClause, argIdx,
 	)
 	args = append(args, limit)

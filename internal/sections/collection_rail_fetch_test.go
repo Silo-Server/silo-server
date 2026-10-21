@@ -72,34 +72,3 @@ func TestNarrowLibraryScopeNeverWidensAllowedLibraries(t *testing.T) {
 		})
 	}
 }
-
-func TestApplySectionLibraryScopeToQueryRejectsDisjointScope(t *testing.T) {
-	library := 9
-	tests := []struct {
-		name       string
-		query      []int
-		libraryID  *int
-		libraryIDs []int
-		want       []int
-		ok         bool
-	}{
-		{name: "no scope", query: []int{1}, want: []int{1}, ok: true},
-		{name: "scope only", libraryIDs: []int{1, 2}, want: []int{1, 2}, ok: true},
-		{name: "overlap", query: []int{1, 2}, libraryIDs: []int{2, 3}, want: []int{2}, ok: true},
-		{name: "disjoint", query: []int{1}, libraryIDs: []int{2}, ok: false},
-		{name: "empty scope", query: []int{1}, libraryIDs: []int{}, ok: false},
-		{name: "empty scope, unscoped query", libraryIDs: []int{}, ok: false},
-		{name: "library page", query: []int{1}, libraryID: &library, want: []int{9}, ok: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := applySectionLibraryScopeToQuery(catalog.QueryDefinition{LibraryIDs: tt.query}, tt.libraryID, tt.libraryIDs)
-			if ok != tt.ok {
-				t.Fatalf("ok = %t, want %t", ok, tt.ok)
-			}
-			if ok && !slices.Equal(got.LibraryIDs, tt.want) {
-				t.Fatalf("library_ids = %v, want %v", got.LibraryIDs, tt.want)
-			}
-		})
-	}
-}

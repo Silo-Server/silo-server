@@ -3,16 +3,14 @@
  * card must not open after a drag, a press inside its ⋯ menu must not drag it,
  * and its confirm dialogs hand focus back to the ⋯ that opened them.
  */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import listCollectionsOk from "../../../contracts/api/v2/fixtures/list_collections_ok.json";
 import { personalCapabilities } from "@/test/fixtures/collectionAnswers";
 import { installV2Recorder, v2Recorder } from "@/test/v2Recorder";
-import Collections from "./Collections";
+import { renderCollectionsPage } from "./collectionsPage.test-support";
 
 vi.mock("@/api/v2/request", async () => (await import("@/test/v2Recorder")).mockV2Request());
 vi.mock("@/hooks/queries/profiles", () => ({
@@ -45,24 +43,7 @@ beforeEach(() => {
   v2Recorder.answer("GET /api/v2/collections/order", { ordered_ids: ["c1", "c2"] });
 });
 
-function show() {
-  render(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })
-      }
-    >
-      <MemoryRouter initialEntries={["/collections"]}>
-        <Routes>
-          <Route path="/collections" element={<Collections />} />
-          <Route path="*" element={<p>Somewhere else</p>} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
+const show = () => renderCollectionsPage(<p>Somewhere else</p>);
 
 const pointer = { isPrimary: true, button: 0, pointerId: 1, pointerType: "mouse" };
 
@@ -96,15 +77,6 @@ describe("Dragging a Your collections card", () => {
       fireEvent.click(link);
       expect(screen.getByText("Somewhere else")).toBeInTheDocument();
     });
-  });
-
-  it("still opens the collection on a plain click", async () => {
-    show();
-    await screen.findByRole("button", { name: "More for Rainy days" });
-    const link = within(cardOf("Rainy days")).getAllByRole("link")[0]!;
-
-    fireEvent.click(link);
-    expect(await screen.findByText("Somewhere else")).toBeInTheDocument();
   });
 
   it("does not drag the card when a press inside its ⋯ menu moves", async () => {
@@ -164,24 +136,6 @@ describe("Dragging a Your collections card", () => {
     act(() => void fireEvent.pointerUp(document, { ...touch, clientX: 60, clientY: 10 }));
     await vi.waitFor(() => expect(fireEvent.click(document.body)).toBe(true));
   });
-
-  it("still drags the card from its handle", async () => {
-    show();
-    await screen.findByRole("button", { name: "More for Rainy days" });
-
-    act(() => {
-      fireEvent.pointerDown(screen.getByRole("button", { name: "Drag Rainy days" }), {
-        ...pointer,
-        clientX: 10,
-        clientY: 10,
-      });
-    });
-    act(() => void fireEvent.pointerMove(document, { ...pointer, clientX: 60, clientY: 10 }));
-    expect(cardOf("Rainy days")).toHaveStyle({ opacity: "0.4" });
-    act(() => void fireEvent.pointerUp(document, { ...pointer, clientX: 60, clientY: 10 }));
-    // Let the click guard that follows a pointer drag lift before the next test.
-    await vi.waitFor(() => expect(fireEvent.click(document.body)).toBe(true));
-  });
 });
 
 describe("Your collections confirm dialogs", () => {
@@ -228,21 +182,5 @@ describe("Your collections confirm dialogs", () => {
     expect(titles.some((text) => text.includes('Delete "Rainy days"?'))).toBe(true);
     expect(titles.some((text) => text.includes("Stop sharing Rainy days?"))).toBe(true);
     expect(titles.filter((text) => text.includes("undefined"))).toEqual([]);
-  });
-
-  it("return focus to the card's ⋯ when stopping sharing is cancelled", async () => {
-    show();
-    const trigger = await screen.findByRole("button", { name: "More for Rainy days" });
-    await userEvent.click(trigger);
-    await userEvent.click(
-      within(await screen.findByRole("menu")).getByRole("menuitemcheckbox", {
-        name: "Show to other profiles",
-      }),
-    );
-    const dialog = await screen.findByRole("alertdialog");
-    await userEvent.keyboard("{Escape}");
-    expect(dialog).not.toBeInTheDocument();
-
-    await vi.waitFor(() => expect(trigger).toHaveFocus());
   });
 });

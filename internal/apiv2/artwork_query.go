@@ -16,7 +16,7 @@ type ArtworkQuery struct {
 	PosterWidth   int    `query:"poster_width" minimum:"1" maximum:"7680" doc:"Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original" example:"352"`
 	BackdropWidth int    `query:"backdrop_width" minimum:"1" maximum:"7680" doc:"Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops" example:"2688"`
 	LogoWidth     int    `query:"logo_width" minimum:"1" maximum:"7680" doc:"Width in device pixels the client draws logo_url at. Overrides image_size for logos" example:"1760"`
-	StillWidth    int    `query:"still_width" minimum:"1" maximum:"7680" doc:"Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills" example:"720"`
+	StillWidth    int    `query:"still_width" minimum:"1" maximum:"7680" doc:"Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills" example:"720"`
 	PhotoWidth    int    `query:"photo_width" minimum:"1" maximum:"7680" doc:"Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots" example:"400"`
 }
 

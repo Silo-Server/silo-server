@@ -55,17 +55,7 @@ type APIKeyHandler struct {
 // primary profile and returns access.ErrProfileUnverified when it is not.
 // The admin-role check stays with the callers, which run it first.
 func (h *APIKeyHandler) MayCreatePersonalAPIKey(ctx context.Context, userID int, activeProfileID string, verify func(profileID string) error) (bool, error) {
-	if h.Stores == nil {
-		return false, nil
-	}
-	store, err := h.Stores.ForUser(ctx, userID)
-	if err != nil {
-		return false, fmt.Errorf("opening user store: %w", err)
-	}
-	if verify == nil {
-		verify = func(string) error { return access.ErrProfileUnverified }
-	}
-	return canManageHouseholdAs(ctx, store, activeProfileID, verify)
+	return mayManageHouseholdOf(ctx, h.Stores, userID, activeProfileID, verify)
 }
 
 // checkOwnerAccount refuses the admin key operations on the Owner's account

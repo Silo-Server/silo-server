@@ -238,9 +238,12 @@ export default function MediaCarousel({
             <Link to={titleHref} className="group/title hover:text-primary transition-colors">
               <h2 className={titleClass}>
                 {title}
-                <span className="text-muted-foreground group-hover/title:text-primary ml-2 text-sm transition-colors">
-                  View
-                </span>
+                {/* "Explore all" already names the destination. */}
+                {viewAllHref || onViewAll ? null : (
+                  <span className="text-muted-foreground group-hover/title:text-primary ml-2 text-sm transition-colors">
+                    View
+                  </span>
+                )}
               </h2>
             </Link>
           ) : (

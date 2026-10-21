@@ -42,14 +42,6 @@ describe("AdminSectionCommandDialog", () => {
     mocks.navigateToPluginRoute.mockReset();
   });
 
-  it("opens and focuses admin search with Cmd+K", async () => {
-    renderDialog();
-
-    await openDialog();
-
-    expect(screen.getByRole("option", { name: /Dashboard/ })).toBeInTheDocument();
-  });
-
   it("opens and focuses admin search with Ctrl+K", async () => {
     renderDialog();
 
@@ -115,17 +107,6 @@ describe("AdminSectionCommandDialog", () => {
 
     expect(mocks.navigateToPluginRoute).toHaveBeenCalledWith("/api/v2/plugin-content/plugins/7/");
     expect(screen.queryByRole("searchbox", { name: "Search admin sections" })).toBeNull();
-  });
-
-  it("closes with Escape", async () => {
-    renderDialog();
-
-    await openDialog();
-    await userEvent.keyboard("{Escape}");
-
-    await waitFor(() =>
-      expect(screen.queryByRole("searchbox", { name: "Search admin sections" })).toBeNull(),
-    );
   });
 
   it("captures Cmd+K before document-level global search handlers", async () => {

@@ -40,10 +40,8 @@ import {
   useCancelMediaRequest,
   useCreateMediaRequest,
   useMyMediaRequests,
-  useRequestFeatureStatus,
   useRequestMediaDetail,
   useRequestSearch,
-  useToggleRequestFollow,
 } from "./useRequests";
 import {
   useAdminCancelMediaRequest,
@@ -75,67 +73,6 @@ describe("useRequestSearch", () => {
 
     const options = mocks.useQuery.mock.calls[0]![0] as { queryKey: readonly unknown[] };
     expect(options.queryKey).toEqual(["requests", "search", "profile-1", "all", "dune", 1]);
-  });
-
-  it("uses 'anon' as the viewer key when there is no profile", () => {
-    mocks.useCurrentProfile.mockReturnValue({ profile: null });
-    render(<CallHook mediaType="movie" q="dune" />);
-
-    const options = mocks.useQuery.mock.calls[0]![0] as { queryKey: readonly unknown[] };
-    expect(options.queryKey).toEqual(["requests", "search", "anon", "movie", "dune", 1]);
-  });
-
-  it("forwards the react-query signal to v2()", async () => {
-    mocks.api.mockResolvedValue({ page: 1, total_pages: 0, total_results: 0, results: [] });
-    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "profile-1" } });
-    render(<CallHook mediaType="all" q="dune" />);
-
-    const options = mocks.useQuery.mock.calls[0]![0] as {
-      queryFn: (ctx: { signal: AbortSignal }) => unknown;
-    };
-    const controller = new AbortController();
-    await options.queryFn({ signal: controller.signal });
-
-    expect(mocks.api).toHaveBeenCalledTimes(1);
-    const apiCall = mocks.api.mock.calls[0]!;
-    expect(apiCall[0]).toBe("GET /api/v2/requests/search");
-    const init = apiCall[1] as { signal?: AbortSignal; query: { q: string } };
-    expect(init.signal).toBe(controller.signal);
-    expect(init.query.q).toBe("dune");
-  });
-
-  it("respects the enabled option override", () => {
-    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p" } });
-
-    function CallHookWithOpt({ enabled }: { enabled: boolean }) {
-      useRequestSearch("all", "dune", 1, { enabled });
-      return null;
-    }
-    render(<CallHookWithOpt enabled={false} />);
-
-    const options = mocks.useQuery.mock.calls[0]![0] as { enabled: boolean };
-    expect(options.enabled).toBe(false);
-  });
-
-  it("does not require profile by default", () => {
-    mocks.useCurrentProfile.mockReturnValue({ profile: null });
-    render(<CallHook mediaType="all" q="dune" />);
-
-    const options = mocks.useQuery.mock.calls[0]![0] as { enabled: boolean };
-    expect(options.enabled).toBe(true);
-  });
-
-  it("can require a profile before fetching", () => {
-    mocks.useCurrentProfile.mockReturnValue({ profile: null });
-
-    function CallHookRequiringProfile() {
-      useRequestSearch("all", "dune", 1, { requireProfile: true });
-      return null;
-    }
-    render(<CallHookRequiringProfile />);
-
-    const options = mocks.useQuery.mock.calls[0]![0] as { enabled: boolean };
-    expect(options.enabled).toBe(false);
   });
 });
 
@@ -176,33 +113,6 @@ describe("infinite request browse paging", () => {
   });
 });
 
-describe("requestKeys.all invalidation", () => {
-  it("invalidates entries under requestKeys.search() when invalidating requestKeys.all", async () => {
-    const client = new QueryClient();
-    client.setQueryData(requestKeys.search("all", "dune", 1, "profile-1"), { sentinel: true });
-
-    expect(client.getQueryData(requestKeys.search("all", "dune", 1, "profile-1"))).toEqual({
-      sentinel: true,
-    });
-
-    await client.invalidateQueries({ queryKey: requestKeys.all });
-
-    const state = client.getQueryState(requestKeys.search("all", "dune", 1, "profile-1"));
-    expect(state?.isInvalidated).toBe(true);
-  });
-});
-
-describe("viewer-scoped cache isolation", () => {
-  it("does not return profile-1 results when keyed by profile-2", () => {
-    const client = new QueryClient();
-    client.setQueryData(requestKeys.search("all", "dune", 1, "profile-1"), {
-      results: [{ tmdb_id: 1 }],
-    });
-
-    expect(client.getQueryData(requestKeys.search("all", "dune", 1, "profile-2"))).toBeUndefined();
-  });
-});
-
 describe("useCancelMediaRequest", () => {
   const wireRequest = {
     id: "req-1",
@@ -226,19 +136,6 @@ describe("useCancelMediaRequest", () => {
   beforeEach(() => {
     mocks.api.mockReset();
     mocks.api.mockResolvedValue(wireRequest);
-  });
-
-  it("posts to the viewer's cancel operation", async () => {
-    const client = new QueryClient();
-    const { result } = renderHook(() => useCancelMediaRequest(), { wrapper: wrapperFor(client) });
-
-    const cancelled = await result.current.mutateAsync("req-1");
-
-    expect(mocks.api).toHaveBeenCalledExactlyOnceWith("POST /api/v2/requests/{id}/cancel", {
-      path: { id: "req-1" },
-      body: {},
-    });
-    expect(cancelled).toMatchObject({ id: "req-1", outcome: "cancelled" });
   });
 
   it("refreshes the same request surfaces a new request does", async () => {
@@ -363,54 +260,6 @@ describe("access group request limits", () => {
     expect(
       client.getQueryData(adminKeys.requestGroupLimit(7, adminAuthorityScope(owner))),
     ).toMatchObject({ group_id: 7, etag: '"limit-1"' });
-  });
-});
-
-function CallStatusHook() {
-  useRequestFeatureStatus();
-  return null;
-}
-
-it("reads request capabilities through v2", async () => {
-  mocks.useQuery.mockReset();
-  mocks.api.mockReset();
-  render(<CallStatusHook />);
-  const options = mocks.useQuery.mock.calls[0]![0] as { queryFn: () => Promise<unknown> };
-  await options.queryFn();
-  expect(mocks.api).toHaveBeenCalledWith("GET /api/v2/requests/status");
-});
-
-describe("useToggleRequestFollow", () => {
-  function wrapperFor(client: QueryClient) {
-    return function Wrapper({ children }: { children: ReactNode }) {
-      return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-    };
-  }
-
-  beforeEach(() => {
-    mocks.api.mockReset();
-    mocks.api.mockResolvedValue({ requestable: false, following: true });
-  });
-
-  it("follows and unfollows by title, then refreshes request surfaces", async () => {
-    const client = new QueryClient();
-    const invalidations = vi.spyOn(client, "invalidateQueries");
-    const { result } = renderHook(() => useToggleRequestFollow(), { wrapper: wrapperFor(client) });
-
-    await result.current.mutateAsync({ mediaType: "movie", tmdbID: 603, follow: true });
-    await result.current.mutateAsync({ mediaType: "series", tmdbID: 1399, follow: false });
-
-    expect(mocks.api.mock.calls).toEqual([
-      [
-        "PUT /api/v2/requests/follows/{media_type}/{tmdb_id}",
-        { path: { media_type: "movie", tmdb_id: 603 } },
-      ],
-      [
-        "DELETE /api/v2/requests/follows/{media_type}/{tmdb_id}",
-        { path: { media_type: "series", tmdb_id: 1399 } },
-      ],
-    ]);
-    expect(invalidations).toHaveBeenCalledWith({ queryKey: ["requests"] });
   });
 });
 

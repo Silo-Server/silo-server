@@ -1,7 +1,6 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import { renderWithClient, setupAutoscanAdmin } from "./autoscanTestSession.test-support";
 import ConnectionsPanel from "./ConnectionsPanel";
 
 vi.mock("@/hooks/queries/admin/requests", () => ({ useRequestIntegrations: () => ({ data: [] }) }));
@@ -25,48 +24,11 @@ vi.mock("@/hooks/queries/useAutoscan", async (importOriginal) => {
     useUpdateAutoscanConnection: () => ({ mutate: vi.fn(), isPending: false }),
   };
 });
-const browserMethods = [
-  "hasPointerCapture",
-  "setPointerCapture",
-  "releasePointerCapture",
-  "scrollIntoView",
-] as const;
-const originalMethods = browserMethods.map((name) =>
-  Object.getOwnPropertyDescriptor(HTMLElement.prototype, name),
-);
-beforeEach(() => {
-  vi.stubGlobal("PointerEvent", MouseEvent);
-  for (const name of browserMethods)
-    Object.defineProperty(HTMLElement.prototype, name, {
-      configurable: true,
-      value: name === "hasPointerCapture" ? () => false : () => {},
-    });
-  localStorage.clear();
-  sessionStorage.clear();
-  setAccessToken("synthetic-admin");
-  setRefreshToken(null);
-  setProfileId("profile-a");
-  setProfileToken("pin-a");
-});
-afterEach(() => {
-  cleanup();
-  browserMethods.forEach((name, index) => {
-    const original = originalMethods[index];
-    if (original) Object.defineProperty(HTMLElement.prototype, name, original);
-    else Reflect.deleteProperty(HTMLElement.prototype, name);
-  });
-  vi.unstubAllGlobals();
-});
-function fixture(component: React.ReactNode) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: 3 } },
-  });
-  render(<QueryClientProvider client={client}>{component}</QueryClientProvider>);
-}
+setupAutoscanAdmin({ profileId: "profile-a", pointerCapture: true });
 it("confirms one delete and explains the existing source restriction", async () => {
   const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
   vi.stubGlobal("fetch", fetchMock);
-  fixture(<ConnectionsPanel />);
+  renderWithClient(<ConnectionsPanel />);
   fireEvent.click(screen.getByRole("button", { name: "Delete connection" }));
   expect(screen.getByText(/Deletion is blocked while scan sources reference/)).toBeTruthy();
   expect(fetchMock).not.toHaveBeenCalled();

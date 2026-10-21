@@ -1669,7 +1669,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	if response.Outcome == playback.OutcomePlayableV3 {
 		h.recordStartingDevice(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), deviceMetadataFromRequest(r))
 	}
-	writeJSON(w, http.StatusCreated, response)
+	writeJSON(w, http.StatusCreated, frozenV1DecisionV3(response))
 }
 
 // recordStartingDevice registers the device that started playback, so a
@@ -4739,7 +4739,7 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		writePlaybackOperationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, frozenV1DecisionV3(response))
 }
 
 // replanPlaybackApplicationV3 is the replan application shared by the v1
@@ -6901,6 +6901,17 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 		plan.RuntimeCorrections = []string{}
 	}
 	return normalizeDecisionResponseV3(playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: record.SessionID, PlaybackPlan: &plan})
+}
+
+// frozenV1DecisionV3 removes what only /api/v2 publishes from a decision
+// written on the frozen /api/v1 surface.
+func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
+	if response.PlaybackPlan != nil && response.PlaybackPlan.ActiveQuality != "" {
+		plan := *response.PlaybackPlan
+		plan.ActiveQuality = ""
+		response.PlaybackPlan = &plan
+	}
+	return response
 }
 
 func normalizeDecisionResponseV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {

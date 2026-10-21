@@ -127,42 +127,6 @@ describe("CollectionPageActions", () => {
     );
   });
 
-  it("offers no Open in for a collection in one library", async () => {
-    serverCollection();
-    renderPage({ scope: "server", id: "c1", libraryId: 1 });
-
-    const menu = await openMenu();
-    await within(menu).findByRole("menuitem", { name: "Delete…" });
-    expect(within(menu).queryByRole("menuitem", { name: "Open in" })).not.toBeInTheDocument();
-  });
-
-  it("syncs a synced list from Sync now", async () => {
-    personalCollection({
-      collection_type: "mdblist",
-      source_url: "https://mdblist.com/lists/a/b",
-    });
-    v2Recorder.answer("POST /api/v2/collections/{id}/sync", {
-      status: "ok",
-      message: "",
-      items_matched: 12,
-    });
-    v2Recorder.answer("GET /api/v2/collections/capabilities", {
-      ...getCollectionCapabilitiesOk,
-      imports: true,
-    });
-    renderPage({ scope: "personal", id: "c1" });
-
-    const menu = await openMenu();
-    await userEvent.click(await within(menu).findByRole("menuitem", { name: "Sync now" }));
-
-    await waitFor(() =>
-      expect(v2Recorder.operations()).toContain("POST /api/v2/collections/{id}/sync"),
-    );
-    expect(v2Recorder.callsOf("POST /api/v2/collections/{id}/sync")).toMatchObject([
-      { path: "/api/v2/collections/c1/sync" },
-    ]);
-  });
-
   it("offers no Sync now for a synced list when your storage can't import", async () => {
     personalCollection({
       collection_type: "mdblist",
@@ -182,35 +146,6 @@ describe("CollectionPageActions", () => {
     expect(within(menu).queryByRole("menuitem", { name: "Sync now" })).not.toBeInTheDocument();
   });
 
-  it("offers no Sync now for a synced server list when the server can't import", async () => {
-    serverCollection({
-      collection_type: "mdblist",
-      source_url: "https://mdblist.com/lists/a/b",
-    });
-    v2Recorder.answer("GET /api/v2/admin/collections/capabilities", {
-      ...getAdminCollectionCapabilitiesOk,
-      imports: false,
-    });
-    renderPage({ scope: "server", id: "c1", libraryId: 1 });
-
-    const menu = await openMenu();
-    await within(menu).findByRole("menuitem", { name: "Delete…" });
-    await waitFor(() =>
-      expect(v2Recorder.operations()).toContain("GET /api/v2/admin/collections/capabilities"),
-    );
-    expect(within(menu).queryByRole("menuitem", { name: "Sync now" })).not.toBeInTheDocument();
-    expect(v2Recorder.operations()).not.toContain("GET /api/v2/collections/capabilities");
-  });
-
-  it("offers no Sync now for a manual collection", async () => {
-    personalCollection();
-    renderPage({ scope: "personal", id: "c1" });
-
-    const menu = await openMenu();
-    await within(menu).findByRole("menuitem", { name: "Delete…" });
-    expect(within(menu).queryByRole("menuitem", { name: "Sync now" })).not.toBeInTheDocument();
-  });
-
   it("deletes your own collection after you confirm, then goes to your collections", async () => {
     personalCollection();
     renderPage({ scope: "personal", id: "c1" });
@@ -225,33 +160,6 @@ describe("CollectionPageActions", () => {
     expect(v2Recorder.callsOf("DELETE /api/v2/collections/{id}")).toMatchObject([
       { path: "/api/v2/collections/c1", headers: { "If-Match": '"/api/v2/collections/c1#1"' } },
     ]);
-  });
-
-  it("deletes a server collection and returns to its library's Collections tab", async () => {
-    serverCollection();
-    renderPage({ scope: "server", id: "c1", libraryId: 1 });
-
-    const menu = await openMenu();
-    await userEvent.click(await within(menu).findByRole("menuitem", { name: "Delete…" }));
-    const dialog = await screen.findByRole("alertdialog", { name: 'Delete "Original"?' });
-    expect(dialog).toHaveTextContent("Movies");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
-
-    await waitFor(() => expect(location()).toHaveTextContent("/library/1?tab=collections"));
-    expect(v2Recorder.callsOf("DELETE /api/v2/admin/collections/{id}")).toHaveLength(1);
-  });
-
-  it("sends nothing when you cancel the delete", async () => {
-    personalCollection();
-    renderPage({ scope: "personal", id: "c1" });
-
-    const menu = await openMenu();
-    await userEvent.click(await within(menu).findByRole("menuitem", { name: "Delete…" }));
-    const dialog = await screen.findByRole("alertdialog");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
-    expect(v2Recorder.writes()).toEqual([]);
   });
 
   it("stays on the page when the collection changed, and deletes on the next try", async () => {

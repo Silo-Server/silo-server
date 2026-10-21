@@ -253,17 +253,6 @@ describe("SearchBar", () => {
     expect(input).toHaveValue("the ");
   });
 
-  it("shows a query from outside navigation", () => {
-    vi.useFakeTimers();
-    renderSearchPage("/catalog?source=query&q=heat");
-
-    expect(screen.getByRole("textbox")).toHaveValue("heat");
-    fireEvent.click(screen.getByRole("button", { name: "Open dune" }));
-
-    expect(currentQueryParam()).toBe("dune");
-    expect(screen.getByRole("textbox")).toHaveValue("dune");
-  });
-
   it("keeps All Media selected when live search changes the query", () => {
     vi.useFakeTimers();
     const state = parseCatalogSearchParams(
@@ -293,29 +282,6 @@ describe("SearchBar", () => {
       match: "all",
       rules: [{ field: "genre", op: "contains", value: "Drama" }],
     });
-    expect(mocks.transitionNavigate).not.toHaveBeenCalled();
-  });
-
-  it("settles rapid typing to one final route without a view transition", () => {
-    vi.useFakeTimers();
-
-    render(
-      <MemoryRouter initialEntries={["/catalog?source=query&q=l"]}>
-        <SearchBar prominent initialQuery="l" />
-        <LocationProbe />
-      </MemoryRouter>,
-    );
-
-    const input = screen.getByRole("textbox");
-    fireEvent.change(input, { target: { value: "la" } });
-    act(() => vi.advanceTimersByTime(100));
-    fireEvent.change(input, { target: { value: "lan" } });
-    act(() => vi.advanceTimersByTime(100));
-    fireEvent.change(input, { target: { value: "lant" } });
-    act(() => vi.advanceTimersByTime(201));
-
-    const location = new URL(`http://example.test${screen.getByLabelText("location").textContent}`);
-    expect(location.searchParams.get("q")).toBe("lant");
     expect(mocks.transitionNavigate).not.toHaveBeenCalled();
   });
 

@@ -119,17 +119,11 @@ func TestRecordPlaybackStopAddsMovieIdentity(t *testing.T) {
 		t.Fatalf("RecordPlaybackStop result = %+v", result)
 	}
 
-	history, err := store.ListHistory(context.Background(), "profile-1", 10, 0)
-	if err != nil {
-		t.Fatalf("ListHistory: %v", err)
+	entry := onlyHistoryEntry(t, store)
+	if entry.Identity.StableType != "movie" {
+		t.Fatalf("Identity.StableType = %q, want movie", entry.Identity.StableType)
 	}
-	if len(history) != 1 {
-		t.Fatalf("history len = %d, want 1", len(history))
-	}
-	if history[0].Identity.StableType != "movie" {
-		t.Fatalf("Identity.StableType = %q, want movie", history[0].Identity.StableType)
-	}
-	if got := history[0].Identity.ProviderIDs["tmdb"]; got != "603" {
+	if got := entry.Identity.ProviderIDs["tmdb"]; got != "603" {
 		t.Fatalf("Identity.ProviderIDs[tmdb] = %q, want 603", got)
 	}
 }
@@ -165,27 +159,21 @@ func TestManualMarkWatchedAddsEpisodeIdentity(t *testing.T) {
 		t.Fatalf("RecordManualMarkWatched: %v", err)
 	}
 
-	history, err := store.ListHistory(context.Background(), "profile-1", 10, 0)
-	if err != nil {
-		t.Fatalf("ListHistory: %v", err)
+	entry := onlyHistoryEntry(t, store)
+	if entry.Identity.StableType != "episode" {
+		t.Fatalf("Identity.StableType = %q, want episode", entry.Identity.StableType)
 	}
-	if len(history) != 1 {
-		t.Fatalf("history len = %d, want 1", len(history))
+	if len(entry.Identity.ProviderIDs) != 0 {
+		t.Fatalf("Identity.ProviderIDs = %#v, want empty", entry.Identity.ProviderIDs)
 	}
-	if history[0].Identity.StableType != "episode" {
-		t.Fatalf("Identity.StableType = %q, want episode", history[0].Identity.StableType)
-	}
-	if len(history[0].Identity.ProviderIDs) != 0 {
-		t.Fatalf("Identity.ProviderIDs = %#v, want empty", history[0].Identity.ProviderIDs)
-	}
-	if got := history[0].Identity.SeriesProviderIDs["tvdb"]; got != "765" {
+	if got := entry.Identity.SeriesProviderIDs["tvdb"]; got != "765" {
 		t.Fatalf("Identity.SeriesProviderIDs[tvdb] = %q, want 765", got)
 	}
-	if history[0].Identity.Season == nil || *history[0].Identity.Season != 2 {
-		t.Fatalf("Identity.Season = %v, want 2", history[0].Identity.Season)
+	if entry.Identity.Season == nil || *entry.Identity.Season != 2 {
+		t.Fatalf("Identity.Season = %v, want 2", entry.Identity.Season)
 	}
-	if history[0].Identity.Episode == nil || *history[0].Identity.Episode != 7 {
-		t.Fatalf("Identity.Episode = %v, want 7", history[0].Identity.Episode)
+	if entry.Identity.Episode == nil || *entry.Identity.Episode != 7 {
+		t.Fatalf("Identity.Episode = %v, want 7", entry.Identity.Episode)
 	}
 }
 
@@ -206,15 +194,9 @@ func TestManualMarkWatchedPreservesVisibleWatchedAt(t *testing.T) {
 		t.Fatalf("RecordManualMarkWatched: %v", err)
 	}
 
-	history, err := store.ListHistory(context.Background(), "profile-1", 10, 0)
-	if err != nil {
-		t.Fatalf("ListHistory: %v", err)
-	}
-	if len(history) != 1 {
-		t.Fatalf("history len = %d, want 1", len(history))
-	}
-	if history[0].WatchedAt != "2026-04-25T12:00:00Z" {
-		t.Fatalf("history watched_at = %q, want caller watchedAt", history[0].WatchedAt)
+	entry := onlyHistoryEntry(t, store)
+	if entry.WatchedAt != "2026-04-25T12:00:00Z" {
+		t.Fatalf("history watched_at = %q, want caller watchedAt", entry.WatchedAt)
 	}
 }
 
@@ -241,17 +223,11 @@ func TestIdentityLookupFailureDoesNotBlockHistory(t *testing.T) {
 		t.Fatalf("RecordManualMarkWatched: %v", err)
 	}
 
-	history, err := store.ListHistory(context.Background(), "profile-1", 10, 0)
-	if err != nil {
-		t.Fatalf("ListHistory: %v", err)
-	}
-	if len(history) != 1 {
-		t.Fatalf("history len = %d, want 1", len(history))
-	}
-	if history[0].Identity.StableType != "" ||
-		len(history[0].Identity.ProviderIDs) != 0 ||
-		len(history[0].Identity.SeriesProviderIDs) != 0 {
-		t.Fatalf("identity = %+v, want empty", history[0].Identity)
+	entry := onlyHistoryEntry(t, store)
+	if entry.Identity.StableType != "" ||
+		len(entry.Identity.ProviderIDs) != 0 ||
+		len(entry.Identity.SeriesProviderIDs) != 0 {
+		t.Fatalf("identity = %+v, want empty", entry.Identity)
 	}
 }
 
@@ -459,102 +435,65 @@ func TestManualMarkWatchedAfterHiddenWatermarkIsVisible(t *testing.T) {
 	if progress == nil || !progress.Completed {
 		t.Fatalf("progress = %+v, want visible completed progress", progress)
 	}
-	history, err := store.ListHistory(context.Background(), "profile-1", 10, 0)
-	if err != nil {
-		t.Fatalf("ListHistory: %v", err)
-	}
-	if len(history) != 1 || history[0].WatchedAt <= hiddenBefore {
-		t.Fatalf("history = %+v, want visible history after hidden watermark %q", history, hiddenBefore)
+	if entry := onlyHistoryEntry(t, store); entry.WatchedAt <= hiddenBefore {
+		t.Fatalf("history = %+v, want visible history after hidden watermark %q", entry, hiddenBefore)
 	}
 }
 
-func TestImportedWatchIfNewerDoesNotOverwriteNewerResume(t *testing.T) {
-	store, db := newTestUserStore(t)
-	defer db.Close()
-	createWatchstateProfile(t, store)
-	if err := store.SetProgressAt(
-		context.Background(),
-		"profile-1",
-		"movie-1",
-		1200,
-		7200,
-		false,
-		time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC),
-	); err != nil {
-		t.Fatalf("SetProgressAt: %v", err)
-	}
+// An imported completed watch projects onto the resume point only when it is
+// newer than that resume point; either way the history row is recorded.
+func TestImportedWatchIfNewerAgainstExistingResume(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		resumeAt      time.Time
+		watchedAt     time.Time
+		source        userstore.WatchHistorySource
+		wantCompleted bool
+		wantPosition  float64
+	}{
+		{
+			name:         "an older import keeps the newer resume",
+			resumeAt:     time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC),
+			watchedAt:    time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+			source:       userstore.WatchHistorySourceTrakt,
+			wantPosition: 1200,
+		},
+		{
+			name:          "a newer import completes the older resume",
+			resumeAt:      time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+			watchedAt:     time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC),
+			source:        userstore.WatchHistorySourceSimkl,
+			wantCompleted: true,
+			wantPosition:  0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, db := newTestUserStore(t)
+			defer func() { _ = db.Close() }()
+			createWatchstateProfile(t, store)
+			if err := store.SetProgressAt(context.Background(), "profile-1", "movie-1", 1200, 7200, false, tc.resumeAt); err != nil {
+				t.Fatalf("SetProgressAt: %v", err)
+			}
 
-	watchedAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
-	service := NewService(testStoreProvider{store: store})
-	created, err := service.RecordImportedWatchIfNewerWithSource(
-		context.Background(),
-		1,
-		"profile-1",
-		"movie-1",
-		7200,
-		0,
-		true,
-		watchedAt,
-		&watchedAt,
-		userstore.WatchHistorySourceTrakt,
-	)
-	if err != nil {
-		t.Fatalf("RecordImportedWatchIfNewerWithSource: %v", err)
-	}
-	if !created {
-		t.Fatal("created = false, want imported history row recorded")
-	}
-	progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
-	if err != nil {
-		t.Fatalf("GetProgress: %v", err)
-	}
-	if progress == nil || progress.Completed || progress.PositionSeconds != 1200 {
-		t.Fatalf("progress after older import = %+v, want newer resume preserved", progress)
-	}
-}
-
-func TestImportedWatchIfNewerCompletesOlderResume(t *testing.T) {
-	store, db := newTestUserStore(t)
-	defer db.Close()
-	createWatchstateProfile(t, store)
-	if err := store.SetProgressAt(
-		context.Background(),
-		"profile-1",
-		"movie-1",
-		1200,
-		7200,
-		false,
-		time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
-	); err != nil {
-		t.Fatalf("SetProgressAt: %v", err)
-	}
-
-	watchedAt := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
-	service := NewService(testStoreProvider{store: store})
-	created, err := service.RecordImportedWatchIfNewerWithSource(
-		context.Background(),
-		1,
-		"profile-1",
-		"movie-1",
-		7200,
-		0,
-		true,
-		watchedAt,
-		&watchedAt,
-		userstore.WatchHistorySourceSimkl,
-	)
-	if err != nil {
-		t.Fatalf("RecordImportedWatchIfNewerWithSource: %v", err)
-	}
-	if !created {
-		t.Fatal("created = false, want imported history row recorded")
-	}
-	progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
-	if err != nil {
-		t.Fatalf("GetProgress: %v", err)
-	}
-	if progress == nil || !progress.Completed || progress.PositionSeconds != 0 {
-		t.Fatalf("progress after newer import = %+v, want completed projection", progress)
+			watchedAt := tc.watchedAt
+			service := NewService(testStoreProvider{store: store})
+			created, err := service.RecordImportedWatchIfNewerWithSource(
+				context.Background(), 1, "profile-1", "movie-1", 7200, 0, true, watchedAt, &watchedAt, tc.source,
+			)
+			if err != nil {
+				t.Fatalf("RecordImportedWatchIfNewerWithSource: %v", err)
+			}
+			if !created {
+				t.Fatal("created = false, want imported history row recorded")
+			}
+			progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
+			if err != nil {
+				t.Fatalf("GetProgress: %v", err)
+			}
+			if progress == nil || progress.Completed != tc.wantCompleted || progress.PositionSeconds != tc.wantPosition {
+				t.Fatalf("progress after import = %+v, want completed %v at %v", progress, tc.wantCompleted, tc.wantPosition)
+			}
+		})
 	}
 }
 
@@ -722,6 +661,20 @@ func TestClearResumePositionWithoutProgressWritesNothing(t *testing.T) {
 	if progress, err := store.GetProgress(ctx, "profile-1", "movie-1"); err != nil || progress != nil {
 		t.Fatalf("progress = %+v, %v; want no row", progress, err)
 	}
+}
+
+// onlyHistoryEntry returns profile-1's single history row, failing unless
+// there is exactly one.
+func onlyHistoryEntry(t *testing.T, store userstore.UserStore) userstore.WatchHistoryEntry {
+	t.Helper()
+	history, err := store.ListHistory(context.Background(), "profile-1", 10, 0)
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	return history[0]
 }
 
 func newTestUserStore(t *testing.T) (userstore.UserStore, *sql.DB) {

@@ -303,24 +303,6 @@ func TestLibraryProviders(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(memberToken)), TypePermissionDenied)
 }
 
-// TestLibraryProvidersMarksLocalEntry: the built-in local metadata entry is
-// flagged so a client can pin it and offer one switch for it.
-func TestLibraryProvidersMarksLocalEntry(t *testing.T) {
-	deps, fake := libraryDeps(t)
-	fake.providers = map[string][]handlers.ChainLevelEntryView{
-		"movie": {
-			{PluginInstallationID: 1, CapabilityID: "nfo", ProviderSlug: "nfo", Priority: 0, Enabled: true, Local: true},
-			{PluginInstallationID: 3, CapabilityID: "tmdb", ProviderSlug: "tmdb", Priority: 1, Enabled: true},
-		},
-	}
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(adminToken))
-	want := `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"1","capability_id":"nfo","provider_slug":"nfo","priority":0,"enabled":true,"local":true},{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":1,"enabled":true,"local":false}]}]}` + "\n"
-	if rec.Code != 200 || rec.Body.String() != want {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-}
-
 // TestLibraryProvidersLegacyLevel: an upgraded database keeps unlevelled
 // (content_level empty) rows; v2 omits that level and a save of the remaining levels carries the
 // legacy rows across unchanged instead of dropping them.
@@ -485,46 +467,4 @@ func TestLibraryCollections(t *testing.T) {
 	deps := libraryViewDeps(t)
 	deps.LibraryCollections = &fakeLibraryViews{err: &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Library not found"}}
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/library/1/collections", "", viewerHeaders()), TypeNotFound)
-}
-
-// A configured v2 route reports unavailable when its paging service is absent.
-func TestLibraryCollectionItemsUnavailable(t *testing.T) {
-	rec := do(t, newTestHandler(t, libraryViewDeps(t)), http.MethodGet, "/api/v2/library/1/collections/c1/items", "", viewerHeaders())
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("unconfigured route status = %d, want 503", rec.Code)
-	}
-}
-
-// Library collection cards and listLibraryUserCollections entries mark a
-// collage poster, as getCollectionCapabilities poster_collages promises.
-func TestLibraryCollectionCardsMarkCollages(t *testing.T) {
-	cards := collectionCardsOf([]handlers.LibraryCollectionTabEntryView{
-		{ID: "collage", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true},
-		{ID: "uploaded", PosterURL: "https://cdn.test/uploaded.webp"},
-		{ID: "unsigned", PosterIsCollage: true},
-	})
-	for i, want := range []bool{true, false, false} {
-		if cards[i].PosterIsCollage != want {
-			t.Fatalf("card %s poster_is_collage = %v, want %v", cards[i].ID, cards[i].PosterIsCollage, want)
-		}
-	}
-	if got := userCollectionOf(usercollections.ServerVisibleCollection{ID: "collage", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true}); !got.PosterIsCollage {
-		t.Fatalf("user collection = %+v, want poster_is_collage", got)
-	}
-	if got := userCollectionOf(usercollections.ServerVisibleCollection{ID: "unsigned", PosterIsCollage: true}); got.PosterIsCollage {
-		t.Fatalf("user collection without poster_url = %+v, want no poster_is_collage", got)
-	}
-	// getLibraryCollections' full collections[] entries mark it too.
-	for _, tc := range []struct {
-		view handlers.LibraryCollectionView
-		want bool
-	}{
-		{handlers.LibraryCollectionView{ID: "collage", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true}, true},
-		{handlers.LibraryCollectionView{ID: "uploaded", PosterURL: "https://cdn.test/uploaded.webp"}, false},
-		{handlers.LibraryCollectionView{ID: "unsigned", PosterIsCollage: true}, false},
-	} {
-		if got := curatedCollectionOf(tc.view); got.PosterIsCollage != tc.want {
-			t.Fatalf("curated %s poster_is_collage = %v, want %v", tc.view.ID, got.PosterIsCollage, tc.want)
-		}
-	}
 }

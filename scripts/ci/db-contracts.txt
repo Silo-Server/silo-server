@@ -64,6 +64,16 @@
 # Scoped administrator keys cannot redirect recovery through either API version.
 ./internal/apiv2 TestScopedAdminKeyCannotRedirectRecoveryDB
 
+# API key verifiers preserve credentials without retaining recoverable bearers.
+./internal/auth TestAPIKeyStorageDoesNotRetainBearer
+./internal/auth TestAPIKeyVerifierUpgrade
+./internal/auth TestAPIKeyVerifierEmptyMigrationRoundTrip
+./internal/auth TestAPIKeyVerifierLegacyDigestCollision
+./internal/auth TestAPIKeyVerifierMigrationRollback
+./internal/auth TestAPIKeyVerifierDownSeesConcurrentInsert
+./internal/api/handlers TestAPIKeyLegacyListsAndEditorNeverReturnStoredSecret
+./internal/api/handlers TestAPIKeyCreationStillReturnsTheOnlyFullSecretResponse
+
 # Recovery identity changes retire links and prevent delivery to a stale address.
 ./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
 ./internal/passwordreset TestResetIssuanceRejectsChangedRecoveryEmailDB
@@ -99,6 +109,13 @@
 # Verification delivery survives a lost persistence receipt with bounded retries.
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
+
+# Legacy mobile registration protects account ownership under the installation lock.
+./internal/notifications TestLegacyMobilePushRefusesForeignAccountDB
+./internal/notifications TestLegacyMobilePushProfileSwitchRollbackDB
+./internal/notifications TestLegacyMobilePushPreservesOrderedProofDB
+./internal/notifications TestLegacyMobilePushWaitsForOwnershipDB
+./internal/notifications TestLegacyPushRegistrationStaysOnTheAccount
 
 # Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
 ./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
@@ -403,3 +420,7 @@
 # values fails the run without allocating it.
 ./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
 ./internal/historyimport TestImportRunFailsOnExpandingSourceListing
+
+# Explore all on a row the catalog cannot express as a query pages the row's
+# own fetch past its item limit, on Home and on its library page.
+./internal/api/handlers TestCatalogRowBackedSectionBrowseDB

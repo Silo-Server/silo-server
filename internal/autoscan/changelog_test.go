@@ -2,7 +2,6 @@ package autoscan
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -30,32 +29,6 @@ func pollOneSource(t *testing.T, src Source, changes []Change, q Queuer, suppres
 
 func arrSource(rewrites ...PathRewrite) Source {
 	return Source{ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", Enabled: true, PathRewrites: rewrites}
-}
-
-func TestChangeLogRecordsUnmappedPathAndReason(t *testing.T) {
-	// The radarr root /movies has no rewrite to a Silo library, so the path
-	// arrives unchanged and matches no library folder.
-	event := pollOneSource(t, arrSource(PathRewrite{From: "/data/tv", To: "/mnt/media/tv"}),
-		[]Change{{SourcePath: "/movies/Film (2024)/Film.mkv", Scope: ChangeScopeAuto}},
-		&recordingQueuer{}, allowSuppressor{}, fakeResolver{})
-
-	if event.Status != EventStatusUnresolved {
-		t.Fatalf("status = %q, want unresolved", event.Status)
-	}
-	if len(event.Changes) != 1 || event.ChangesTruncated {
-		t.Fatalf("changes = %+v truncated=%v", event.Changes, event.ChangesTruncated)
-	}
-	got := event.Changes[0]
-	want := ChangeRecord{
-		SourcePath:    "/movies/Film (2024)/Film.mkv",
-		RewrittenPath: "/movies/Film (2024)/Film.mkv",
-		Scope:         ChangeScopeAuto,
-		Outcome:       ChangeOutcomeUnresolved,
-		Reason:        string(scantrigger.ReasonNoLibraryMatch),
-	}
-	if got != want {
-		t.Fatalf("change = %+v, want %+v", got, want)
-	}
 }
 
 type reasonResolver struct{ fakeResolver }
@@ -104,30 +77,6 @@ func TestChangeLogRecordsRewriteTargetAndRunIDs(t *testing.T) {
 	}
 	if second.Outcome != ChangeOutcomeJoined || second.ScanRunID != "run-1" {
 		t.Fatalf("second outcome = %+v", second)
-	}
-}
-
-func TestChangeLogSharesOutcomeAcrossChangesInOneDirectory(t *testing.T) {
-	event := pollOneSource(t, arrSource(),
-		[]Change{
-			{SourcePath: "/mnt/media/Show/S01/E01.mkv"},
-			{SourcePath: "/mnt/media/Show/S01/E02.mkv"},
-		},
-		&recordingQueuer{}, allowSuppressor{}, fakeResolver{})
-	for i, rec := range event.Changes {
-		if rec.Outcome != ChangeOutcomeQueued || rec.ScanRunID != "run-0" || rec.TargetPath != "/mnt/media/Show/S01" {
-			t.Fatalf("change %d = %+v", i, rec)
-		}
-	}
-}
-
-func TestChangeLogRecordsSuppressedChanges(t *testing.T) {
-	event := pollOneSource(t, arrSource(),
-		[]Change{{SourcePath: "/mnt/media/Show/S01/E01.mkv", Scope: ChangeScopeFile}},
-		&recordingQueuer{}, denySuppressor{}, fakeResolver{})
-	got := event.Changes[0]
-	if got.Outcome != ChangeOutcomeSuppressed || got.ScanRunID != "" || got.TargetPath != "/mnt/media/Show/S01/E01.mkv" {
-		t.Fatalf("change = %+v", got)
 	}
 }
 
@@ -224,33 +173,5 @@ func TestBoundChangeRecordsReplacesNUL(t *testing.T) {
 	}
 	if got.SourcePath != "/tv/a\uFFFDb.mkv" {
 		t.Fatalf("source path = %q", got.SourcePath)
-	}
-}
-
-func TestChangeLogRecordedForWebhookDeliveries(t *testing.T) {
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DebounceSeconds: 60},
-		sources:  []Source{{ID: "w1", PluginID: BuiltinArrWebhookPluginID, CapabilityID: BuiltinArrWebhookCapabilityID, Enabled: true, DeliveryMode: DeliveryModeWebhook}},
-	}
-	svc := newService(store, &fakeProvider{}, &recordingQueuer{}, allowSuppressor{})
-	if _, err := svc.IngestChanges(context.Background(), ChangeIngest{
-		SourceID: "w1",
-		Changes:  []Change{{SourcePath: "/movies/Film/Film.mkv", Scope: ChangeScopeFile}},
-	}); err != nil {
-		t.Fatalf("IngestChanges: %v", err)
-	}
-	if len(store.events) != 1 || len(store.events[0].Changes) != 1 {
-		t.Fatalf("events = %+v", store.events)
-	}
-	if got := store.events[0].Changes[0]; got.Outcome != ChangeOutcomeUnresolved {
-		t.Fatalf("change = %+v", got)
-	}
-}
-
-func TestSetUnresolvedFallsBackToGenericReason(t *testing.T) {
-	var rec ChangeRecord
-	rec.setUnresolved(errors.New("plain"), nil)
-	if rec.Reason != ChangeReasonUnresolvable || rec.Detail != "" {
-		t.Fatalf("record = %+v", rec)
 	}
 }

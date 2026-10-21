@@ -5,7 +5,7 @@
 FROM node:24-slim AS jellyfin_web_node
 
 # Stage 1: Build frontend
-FROM node:22-slim AS frontend
+FROM node:24-slim AS frontend
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app/web
 COPY web/package.json web/pnpm-lock.yaml ./
@@ -13,7 +13,7 @@ COPY web/vendor/foliate-js ./vendor/foliate-js
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY web/ .
-# The v2 contract fixtures are imported by web tests, which `tsc -b` type-checks
+# The v2 contract fixtures are imported by web tests, which `tsrs -b` type-checks
 # as part of the build; they live outside web/ so copy them explicitly.
 COPY contracts/api/v2/fixtures/ /app/contracts/api/v2/fixtures/
 RUN pnpm run build

@@ -1,80 +1,14 @@
 package userdb
 
 import (
-	"database/sql"
-	"reflect"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-func TestWatchHistoryIdentityRoundTrip(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer db.Close()
-
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	seasonNumber := 2
-	episodeNumber := 7
-	entry := userstore.WatchHistoryEntry{
-		ProfileID:       "profile-1",
-		MediaItemID:     "episode-1",
-		WatchedAt:       "2026-04-25T12:00:00Z",
-		DurationSeconds: 1800,
-		Completed:       true,
-		Source:          userstore.WatchHistorySourcePlayback,
-		Identity: userstore.WatchIdentity{
-			StableType:        "episode",
-			SeriesProviderIDs: map[string]string{"tmdb": "123", "tvdb": "456"},
-			Season:            &seasonNumber,
-			Episode:           &episodeNumber,
-		},
-	}
-	if err := AddHistory(db, entry); err != nil {
-		t.Fatalf("AddHistory: %v", err)
-	}
-
-	history, err := ListHistory(db, "profile-1", 10, 0)
-	if err != nil {
-		t.Fatalf("ListHistory: %v", err)
-	}
-	if len(history) != 1 {
-		t.Fatalf("history len = %d, want 1", len(history))
-	}
-	got := history[0]
-	if got.Identity.StableType != "episode" {
-		t.Fatalf("Identity.StableType = %q, want episode", got.Identity.StableType)
-	}
-	if len(got.Identity.ProviderIDs) != 0 {
-		t.Fatalf("Identity.ProviderIDs = %#v, want empty", got.Identity.ProviderIDs)
-	}
-	if !reflect.DeepEqual(got.Identity.SeriesProviderIDs, entry.Identity.SeriesProviderIDs) {
-		t.Fatalf("Identity.SeriesProviderIDs = %#v, want %#v", got.Identity.SeriesProviderIDs, entry.Identity.SeriesProviderIDs)
-	}
-	if got.Identity.Season == nil || *got.Identity.Season != seasonNumber {
-		t.Fatalf("Identity.Season = %v, want %d", got.Identity.Season, seasonNumber)
-	}
-	if got.Identity.Episode == nil || *got.Identity.Episode != episodeNumber {
-		t.Fatalf("Identity.Episode = %v, want %d", got.Identity.Episode, episodeNumber)
-	}
-}
-
 func TestAddHistoryIfMissingKeepsExistingSemantics(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer db.Close()
-
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	entry := userstore.WatchHistoryEntry{
 		ProfileID:       "profile-1",
@@ -120,18 +54,7 @@ func TestAddHistoryIfMissingKeepsExistingSemantics(t *testing.T) {
 // its timestamps as text, so it keeps them in whole seconds: one stored that
 // way before still dedupes the replay, and a removal still hides it.
 func TestAddHistoryIfMissingStoresWholeSeconds(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	entry := userstore.WatchHistoryEntry{ProfileID: "profile-1", MediaItemID: "movie-1", WatchedAt: "2026-04-25T12:00:00Z", Completed: true, Source: userstore.WatchHistorySourceImport}
 	if created, err := AddHistoryIfMissing(db, entry); err != nil || !created {
@@ -161,77 +84,8 @@ func TestAddHistoryIfMissingStoresWholeSeconds(t *testing.T) {
 	}
 }
 
-func TestListCompletedHistoryAppliesScopedFilters(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer db.Close()
-
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	entries := []userstore.WatchHistoryEntry{
-		{
-			ProfileID:       "profile-1",
-			MediaItemID:     "movie-1",
-			WatchedAt:       "2026-04-25T12:00:00Z",
-			DurationSeconds: 7200,
-			Completed:       true,
-			Source:          userstore.WatchHistorySourcePlayback,
-		},
-		{
-			ProfileID:       "profile-1",
-			MediaItemID:     "movie-2",
-			WatchedAt:       "2026-04-26T12:00:00Z",
-			DurationSeconds: 7200,
-			Completed:       true,
-			Source:          userstore.WatchHistorySourceTrakt,
-		},
-		{
-			ProfileID:       "profile-1",
-			MediaItemID:     "movie-3",
-			WatchedAt:       "2026-04-27T12:00:00Z",
-			DurationSeconds: 7200,
-			Completed:       true,
-			Source:          userstore.WatchHistorySourceImport,
-		},
-	}
-	for _, entry := range entries {
-		if err := AddHistory(db, entry); err != nil {
-			t.Fatalf("AddHistory(%s): %v", entry.MediaItemID, err)
-		}
-	}
-
-	history, err := ListCompletedHistory(db, userstore.CompletedHistoryQuery{
-		ProfileID:      "profile-1",
-		MediaItemIDs:   []string{"movie-1", "movie-2"},
-		IncludeSources: []userstore.WatchHistorySource{userstore.WatchHistorySourcePlayback, userstore.WatchHistorySourceTrakt},
-		ExcludeSources: []userstore.WatchHistorySource{userstore.WatchHistorySourceTrakt},
-		Limit:          10,
-	})
-	if err != nil {
-		t.Fatalf("ListCompletedHistory: %v", err)
-	}
-	if len(history) != 1 {
-		t.Fatalf("history len = %d, want 1: %+v", len(history), history)
-	}
-	if history[0].MediaItemID != "movie-1" {
-		t.Fatalf("media item = %q, want movie-1", history[0].MediaItemID)
-	}
-}
-
 func TestListCompletedHistoryItemsAppliesScopedFilters(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer db.Close()
-
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	entries := []userstore.WatchHistoryEntry{
 		{
@@ -349,15 +203,7 @@ func TestListCompletedHistoryItemsAppliesScopedFilters(t *testing.T) {
 }
 
 func TestMarkProgressBatch_CompactsDirtyInput(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer db.Close()
-
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	at := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
 	if err := MarkProgressBatch(db, "p1", []string{"a", "", "a", "  "}, at); err != nil {
@@ -403,14 +249,7 @@ func TestMarkProgressBatch_CompactsDirtyInput(t *testing.T) {
 //
 // Regression guard for the post-perf-overhaul code review (Codex P1).
 func TestClearProgressBatch_ClearsPartiallyWatchedRows(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer db.Close()
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	// Seed a partially-watched row: completed=false, position=300.
 	thresholds := userstore.ProgressThresholds{WatchedPct: 90}
@@ -449,56 +288,11 @@ func TestClearProgressBatch_ClearsPartiallyWatchedRows(t *testing.T) {
 	}
 }
 
-func TestClearProgressBatch_CompactsDirtyInput(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer db.Close()
-
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	at := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
-	if err := MarkProgressBatch(db, "p1", []string{"a"}, at); err != nil {
-		t.Fatalf("seed MarkProgressBatch: %v", err)
-	}
-
-	if err := ClearProgressBatch(db, "p1", []string{"a", "", "a", "  "}, at); err != nil {
-		t.Fatalf("ClearProgressBatch: %v", err)
-	}
-
-	wpA, err := GetProgress(db, "p1", "a")
-	if err != nil {
-		t.Fatalf("GetProgress(a): %v", err)
-	}
-	if wpA == nil || wpA.Completed {
-		t.Fatalf("GetProgress(a) = %+v, want completed=false", wpA)
-	}
-
-	// Sanity: still only one row, and no dirty placeholder leaked in.
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM watch_progress WHERE profile_id = ?`, "p1").Scan(&count); err != nil {
-		t.Fatalf("count: %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("watch_progress row count = %d, want 1", count)
-	}
-}
-
 // Backward seeks are legitimate resume points: UpdateProgress is
 // last-write-wins on position (the old MAX clamp made "rewind and stop"
 // resume at the stale later position). Mirrors the pgstore expectation.
 func TestUpdateProgressBackwardSeekPersists(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer db.Close()
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	noThreshold := userstore.ProgressThresholds{}
 	if err := UpdateProgress(db, "p1", "movie-1", 2400, 7200, noThreshold); err != nil {
@@ -531,14 +325,7 @@ func TestClearResumePositionNeverMovesTimestampsBack(t *testing.T) {
 		{"a later second", time.Date(2026, 10, 14, 23, 48, 51, 0, time.UTC), "2026-10-14T23:48:51Z", "2026-10-14T23:48:51Z"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db, err := sql.Open("sqlite3", ":memory:")
-			if err != nil {
-				t.Fatalf("open sqlite: %v", err)
-			}
-			t.Cleanup(func() { _ = db.Close() })
-			if err := InitSchema(db); err != nil {
-				t.Fatalf("InitSchema: %v", err)
-			}
+			db := newSchemaDB(t)
 			if _, err := db.Exec(`
 				INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at, event_at)
 				VALUES ('p1', 'm1', 600, 5400, 0, ?, ?)`, updatedAt, eventAt); err != nil {

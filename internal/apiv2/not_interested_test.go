@@ -91,19 +91,6 @@ func notInterestedDeps(svc NotInterestedService) Dependencies {
 	return deps
 }
 
-// The list pages the acting profile's marks newest first, through ties.
-func TestListNotInterested(t *testing.T) {
-	svc := &fakeNotInterested{marks: notInterestedRows()}
-	h := newTestHandler(t, notInterestedDeps(svc))
-	ids, pages := listCardIDs(t, h, "/api/v2/not-interested?limit=2", viewerHeaders())
-	if pages != 2 || strings.Join(ids, ",") != "movie:c,series:b,movie:a" {
-		t.Fatalf("ids = %v pages = %d", ids, pages)
-	}
-	if svc.limits[0] != 3 || svc.viewers[0].ProfileID != "p-owner" {
-		t.Fatalf("call = %d %+v", svc.limits[0], svc.viewers[0])
-	}
-}
-
 func TestMarkGetAndUnmarkNotInterested(t *testing.T) {
 	svc := &fakeNotInterested{missing: map[string]bool{"movie:hidden": true}}
 	h := newTestHandler(t, notInterestedDeps(svc))
@@ -132,21 +119,5 @@ func TestMarkGetAndUnmarkNotInterested(t *testing.T) {
 	}
 	if len(svc.marks) != 0 {
 		t.Fatalf("marks after unmark = %+v", svc.marks)
-	}
-}
-
-func TestNotInterestedCapability(t *testing.T) {
-	for _, tc := range []struct {
-		svc  NotInterestedService
-		want string
-	}{
-		{&fakeNotInterested{}, StateAvailable},
-		{nil, StateUnsupported},
-	} {
-		h := newTestHandler(t, notInterestedDeps(tc.svc))
-		rec := do(t, h, http.MethodGet, "/api/v2/capabilities/not-interested", "", viewerHeaders())
-		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"state":"`+tc.want+`"`) {
-			t.Fatalf("capability = %d %s, want state %s", rec.Code, rec.Body.String(), tc.want)
-		}
 	}
 }

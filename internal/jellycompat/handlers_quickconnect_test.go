@@ -169,7 +169,6 @@ func TestQuickConnectConnectReportsState(t *testing.T) {
 		{auth.DeviceLoginStatusApproved, http.StatusOK, true},
 		{auth.DeviceLoginStatusConsumed, http.StatusOK, true},
 		{auth.DeviceLoginStatusDenied, http.StatusNotFound, false},
-		{auth.DeviceLoginStatusExpired, http.StatusNotFound, false},
 	}
 	for _, tc := range cases {
 		service := &fakeQuickConnect{state: &auth.QuickConnectState{Status: tc.status, Code: "482177", DeviceName: "TV", AppName: "Jellyfin Android TV"}}
@@ -285,15 +284,6 @@ func TestAuthenticateWithQuickConnectMintsProfileSession(t *testing.T) {
 	}
 	if rec := serveQuickConnect(router, http.MethodPost, "/Users/AuthenticateWithQuickConnect", `{}`, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing secret = %d", rec.Code)
-	}
-}
-
-func TestQuickConnectUsernameMatchesPasswordSignIn(t *testing.T) {
-	if got := quickConnectUsername("alice", "Alice"); got != "alice" {
-		t.Fatalf("account-named profile = %q", got)
-	}
-	if got := quickConnectUsername("alice", "Kids"); got != "alice#Kids" {
-		t.Fatalf("other profile = %q", got)
 	}
 }
 

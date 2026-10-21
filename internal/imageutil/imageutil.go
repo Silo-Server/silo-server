@@ -290,13 +290,19 @@ func Thumbhash(data []byte) (string, error) {
 }
 
 func decodeThumbhashSource(data []byte) (image.Image, error) {
-	if normalized, err := normalizeThumbhashSource(data); err == nil {
+	normalized, normalizeErr := normalizeThumbhashSource(data)
+	if normalizeErr == nil {
 		if img, _, err := image.Decode(bytes.NewReader(normalized)); err == nil {
 			return img, nil
 		}
 	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
+		// Bytes neither libvips nor the standard library can read keep
+		// ErrInvalidImage, as GenerateVariants reports them.
+		if errors.Is(normalizeErr, ErrInvalidImage) {
+			return nil, fmt.Errorf("%w: decode for thumbhash: %w", ErrInvalidImage, err)
+		}
 		return nil, fmt.Errorf("imageutil: decode for thumbhash: %w", err)
 	}
 	return img, nil

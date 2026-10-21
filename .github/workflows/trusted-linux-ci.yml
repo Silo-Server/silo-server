@@ -782,7 +782,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: web/pnpm-lock.yaml
@@ -842,36 +842,12 @@ jobs:
       #   run: pnpm exec knip
       # Not measured; needs a prototype defining entrypoints and public consumers.
 
-      - name: Restore the TypeScript cache
-        if: matrix.part == 'build' && runner.environment == 'github-hosted' && github.event_name == 'pull_request'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/silo-tsc
-          key: tsc-${{ runner.os }}-${{ github.sha }}
-          restore-keys: tsc-${{ runner.os }}-
-
-      - name: Restore and save the TypeScript cache
-        if: matrix.part == 'build' && runner.environment == 'github-hosted' && github.event_name != 'pull_request'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/silo-tsc
-          key: tsc-${{ runner.os }}-${{ github.sha }}
-          restore-keys: tsc-${{ runner.os }}-
-
       - name: Typecheck and build
         if: matrix.part == 'build'
         run: |
-          cache_dir="$RUNNER_TEMP/silo-tsc"
-          mkdir -p "$cache_dir"
-          # -p --incremental reuses content checks after checkout resets mtimes; tsc -b rechecks.
-          pnpm exec tsc -p tsconfig.app.json --incremental --tsBuildInfoFile "$cache_dir/app.tsbuildinfo" &
-          app_pid=$!
-          pnpm exec tsc -p tsconfig.node.json --incremental --tsBuildInfoFile "$cache_dir/node.tsbuildinfo" &
-          node_pid=$!
           failed=0
+          pnpm exec tsrs -b || { echo "::error::Typecheck failed"; failed=1; }
           pnpm exec vite build || { echo "::error::Vite build failed"; failed=1; }
-          wait "$app_pid" || { echo "::error::App typecheck failed"; failed=1; }
-          wait "$node_pid" || { echo "::error::Node typecheck failed"; failed=1; }
           exit "$failed"
 
       # Reports the launch bundle size, and fails when the React vendor chunk
@@ -937,7 +913,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: web/pnpm-lock.yaml

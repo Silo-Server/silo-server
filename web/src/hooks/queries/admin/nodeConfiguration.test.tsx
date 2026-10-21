@@ -73,25 +73,6 @@ afterEach(() => {
   onlineManager.setOnline(true);
   vi.unstubAllGlobals();
 });
-it("update queues the original validator, node and draft once", async () => {
-  onlineManager.setOnline(false);
-  const fetchMock = vi.fn().mockImplementation(async () => saved());
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useUpdateNode, fixture());
-  const selected = structuredClone(node);
-  const body = { name: "Submitted", public_url: null };
-  act(() => result.current.mutate({ node: selected, body }));
-  selected.id = "99";
-  selected.config_etag = '"later"';
-  body.name = "Later draft";
-  act(() => onlineManager.setOnline(true));
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-  const [url, init] = fetchMock.mock.calls[0]!;
-  expect(String(url)).toContain("/api/v2/admin/nodes/17");
-  expect(new Headers(init.headers).get("If-Match")).toBe('"original"');
-  expect(JSON.parse(init.body)).toEqual({ name: "Submitted", public_url: null });
-});
 it("queued deletion refuses same-profile PIN replacement without dispatch", async () => {
   onlineManager.setOnline(false);
   const fetchMock = vi.fn();

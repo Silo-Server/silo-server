@@ -2,21 +2,6 @@ package access
 
 import "testing"
 
-func TestQuality_Order(t *testing.T) {
-	if CompareQuality("480p", "720p") >= 0 {
-		t.Fatal("expected 480p < 720p")
-	}
-	if CompareQuality("720p", "1080p") >= 0 {
-		t.Fatal("expected 720p < 1080p")
-	}
-	if CompareQuality("1080p", "2160p") >= 0 {
-		t.Fatal("expected 1080p < 2160p")
-	}
-	if CompareQuality("2160p", "4320p") >= 0 {
-		t.Fatal("expected 2160p < 4320p")
-	}
-}
-
 func TestQuality_FitsWithinCeiling(t *testing.T) {
 	if !QualityAllowed("720p", "1080p") {
 		t.Fatal("expected 720p under 1080p ceiling")

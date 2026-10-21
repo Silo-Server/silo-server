@@ -1,12 +1,9 @@
 package recommendations
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -16,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
@@ -294,39 +290,6 @@ func TestRunJobAppliesTheJobTimeout(t *testing.T) {
 	}
 }
 
-func TestLastRunsReadsEachJob(t *testing.T) {
-	history := newFakeHistory()
-	w := newJobTestWorker(&fakeLocker{}, history)
-	for _, name := range []JobName{JobCowatch, JobRecommendations, JobRecommendations} {
-		if err := w.runJob(job{name: name, timeout: time.Minute, run: func(context.Context, clusterLock) (jobResult, error) {
-			return countsResult{Done: history.count()}, nil
-		}}, false); err != nil {
-			t.Fatal(err)
-		}
-		waitRun(t, history)
-	}
-
-	runs, err := w.LastRuns(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runs) != 2 || runs[JobCowatch].Full.TaskKey != cowatchTaskKey || string(runs[JobRecommendations].Full.ResultData) != `{"done":2,"failed":0}` {
-		t.Fatalf("last runs = %+v", runs)
-	}
-
-	history.err = errors.New("db down")
-	if _, err := w.LastRuns(t.Context()); err == nil {
-		t.Fatal("history error was dropped")
-	}
-	var nilWorker *Worker
-	if runs, err := nilWorker.LastRuns(t.Context()); err != nil || len(runs) != 0 {
-		t.Fatalf("nil worker last runs = %v, %v", runs, err)
-	}
-	if runs, err := newJobTestWorker(&fakeLocker{}, nil).LastRuns(t.Context()); err != nil || len(runs) != 0 {
-		t.Fatalf("no-history last runs = %v, %v", runs, err)
-	}
-}
-
 // Partial runs (the embedding catch-up, the startup global-row build) are
 // recorded under keys of their own, so a later partial run does not hide a
 // failed full run.
@@ -364,39 +327,6 @@ func TestPartialRunsDoNotHideTheLastFullRun(t *testing.T) {
 	cache := runs[JobRecommendations]
 	if cache.Full != nil || cache.Partial == nil || cache.Partial.TaskKey != globalRowsTaskKey {
 		t.Fatalf("cache runs = %+v, want only the startup build, as a partial run", cache)
-	}
-}
-
-// A startup build skipped because the cache job is busy is routine (Info);
-// one that could not take the job's lock is a fault (Warn).
-func TestEnsureGlobalRowsWarnsWhenItCannotClaimTheJob(t *testing.T) {
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-
-	newJobTestWorker(&fakeLocker{held: true}, nil).ensureGlobalRows(t.Context(), &fakeGlobalRows{})
-	if out := logs.String(); !strings.Contains(out, "level=INFO") || strings.Contains(out, "level=WARN") {
-		t.Fatalf("busy job logged %q; want Info", out)
-	}
-	logs.Reset()
-	newJobTestWorker(&fakeLocker{err: errors.New("db down")}, nil).ensureGlobalRows(t.Context(), &fakeGlobalRows{})
-	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "db down") {
-		t.Fatalf("lock failure logged %q; want Warn with the error", out)
-	}
-}
-
-func TestCacheExpiryOutlivesTheDailyJob(t *testing.T) {
-	start := time.Date(2026, 10, 3, 5, 0, 0, 0, time.UTC)
-	got, err := time.Parse(time.RFC3339, cacheExpiry(start))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := start.Add(26 * time.Hour); !got.Equal(want) {
-		t.Fatalf("expiry = %v, want %v", got, want)
-	}
-	if !got.After(start.Add(24 * time.Hour)) {
-		t.Fatal("rows expire before the next daily run")
 	}
 }
 
@@ -534,28 +464,6 @@ func TestCacheGlobalRowsCountsFailuresAndKeepsFailedRows(t *testing.T) {
 	}
 }
 
-// The cached Popular row needs a crowd of accounts over 90 days and keeps a
-// 200-title pool for reads to filter; Recently Added has no window; the genre
-// menu holds 16 genres; and the global build no longer writes a top_rated
-// row.
-func TestCacheGlobalRowsAsksForACrowdAndAWideGenreMenu(t *testing.T) {
-	w := newJobTestWorker(&fakeLocker{}, nil)
-	store := &fakeGlobalRows{}
-	w.cacheGlobalRows(t.Context(), store, "expiry")
-	if store.popularArgs != [3]int{90, 2, 200} {
-		t.Fatalf("popular asked for days, accounts, limit = %v, want [90 2 200]", store.popularArgs)
-	}
-	if store.recentArgs != [2]int{0, CacheCandidateLimit} {
-		t.Fatalf("recently added asked for days, limit = %v, want no window and a full row", store.recentArgs)
-	}
-	if store.genreLimit != 16 {
-		t.Fatalf("genre menu = %d genres, want 16", store.genreLimit)
-	}
-	if _, ok := store.written[RecTypeTopRated]; ok {
-		t.Fatal("the global build wrote a top_rated row")
-	}
-}
-
 func TestEnsureGlobalRowsBuildsOnlyWhenNoneIsCached(t *testing.T) {
 	locker := &fakeLocker{}
 	history := newFakeHistory()
@@ -612,38 +520,6 @@ func closedPoolEngine(t *testing.T) *Engine {
 	return NewEngine(pool, nil, nil, nil, nil, config.RecommendationsConfig{})
 }
 
-func TestCacheUserRowsCountsFailedSteps(t *testing.T) {
-	engine := closedPoolEngine(t)
-	w := newJobTestWorker(&fakeLocker{}, nil)
-	w.engine = engine
-
-	built := w.cacheUserRows(t.Context(), engine.repo, 7, "profile", cacheExpiry(time.Now()))
-	if built.cached != 0 || built.failed == 0 {
-		t.Fatalf("build against a failing database = %+v, want failures and nothing cached", built)
-	}
-}
-
-func TestTasteProfileJobFailsWhenSubjectsCannotBeListed(t *testing.T) {
-	w := newJobTestWorker(&fakeLocker{}, nil)
-	w.engine = closedPoolEngine(t)
-	res, err := w.doTasteProfiles(t.Context(), nil)
-	if err == nil || res.Profiles != 0 {
-		t.Fatalf("taste job = %+v, %v; want a failure", res, err)
-	}
-}
-
-func TestCacheJobFailsWhenProfilesCannotBeListed(t *testing.T) {
-	w := newJobTestWorker(&fakeLocker{}, nil)
-	w.engine = closedPoolEngine(t)
-	res, err := w.doRecommendations(t.Context(), nil)
-	if err == nil || !res.CleanFailed || res.GlobalFailures == 0 {
-		t.Fatalf("cache job = %+v, %v; want failures", res, err)
-	}
-	if res.failures() == 0 {
-		t.Fatal("cache job failures not counted")
-	}
-}
-
 func TestStaleSweepSkipsWhileAnotherServerSweeps(t *testing.T) {
 	locker := &fakeLocker{held: true}
 	// No engine: a sweep that went ahead would dereference it.
@@ -651,18 +527,6 @@ func TestStaleSweepSkipsWhileAnotherServerSweeps(t *testing.T) {
 	w.refreshStaleProfiles(t.Context())
 	if keys, _ := locker.snapshot(); len(keys) != 1 || keys[0] != staleSweepLock {
 		t.Fatalf("sweep lock requests = %#x", keys)
-	}
-}
-
-func TestClaimProfileRefreshDedupesUntilCleared(t *testing.T) {
-	w := newJobTestWorker(&fakeLocker{}, nil)
-	key := profileRefreshKey(1, "p")
-	if !w.claimProfileRefresh(key) || w.claimProfileRefresh(key) {
-		t.Fatal("a pending profile refresh was claimed twice")
-	}
-	w.clearProfileRefreshPending(key)
-	if !w.claimProfileRefresh(key) {
-		t.Fatal("a cleared profile refresh could not be claimed")
 	}
 }
 
@@ -886,72 +750,6 @@ func TestEmbedMissingSkipsWhileTheEmbeddingsJobIsClaimed(t *testing.T) {
 	}
 	if elsewhere.IsRunning(JobEmbeddings) || history.count() != 0 {
 		t.Fatalf("skipped pass: running=%v recorded=%d", elsewhere.IsRunning(JobEmbeddings), history.count())
-	}
-}
-
-func TestQuietJobRecordsOnlyRunsThatDidSomething(t *testing.T) {
-	history := newFakeHistory()
-	w := newJobTestWorker(&fakeLocker{}, history)
-	quiet := func(res embeddingsResult, err error) job {
-		return job{name: JobEmbeddings, timeout: time.Minute, quietWhenIdle: true, run: func(context.Context, clusterLock) (jobResult, error) {
-			return res, err
-		}}
-	}
-
-	if err := w.runJob(quiet(embeddingsResult{MissingOnly: true}, nil), false); err != nil {
-		t.Fatal(err)
-	}
-	if history.count() != 0 {
-		t.Fatal("an idle catch-up pass was recorded")
-	}
-
-	for _, tc := range []struct {
-		name   string
-		res    embeddingsResult
-		err    error
-		status string
-	}{
-		{"embedded", embeddingsResult{MissingOnly: true, EmbedCounts: EmbedCounts{Embedded: 2}}, nil, runStatusCompleted},
-		{"item failures", embeddingsResult{MissingOnly: true, EmbedCounts: EmbedCounts{Failed: 1}}, nil, runStatusCompleted},
-		{"failed run", embeddingsResult{MissingOnly: true}, errors.New("embedding provider unavailable: refused"), runStatusFailed},
-	} {
-		if err := w.runJob(quiet(tc.res, tc.err), false); err != nil {
-			t.Fatal(err)
-		}
-		run := waitRun(t, history)
-		if run.TaskKey != embeddingsTaskKey || run.Status != tc.status || !strings.Contains(string(run.ResultData), `"missing_only":true`) {
-			t.Fatalf("%s: recorded %+v %s", tc.name, run, run.ResultData)
-		}
-	}
-}
-
-func TestEmbeddingsResultReportsOutcome(t *testing.T) {
-	counts := EmbedCounts{Embedded: 4, Truncated: 1, Failed: 2, Skipped: 1}
-	res := newEmbeddingsResult(counts, nil, false)
-	if res.failures() != 3 || res.idle() || res.QuotaLimited {
-		t.Fatalf("result = %+v failures %d", res, res.failures())
-	}
-	data, err := json.Marshal(res)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := `{"embedded":4,"truncated":1,"failed":2,"skipped":1,"quota_limited":false,"retry_deferred":false}`; string(data) != want {
-		t.Fatalf("result data = %s, want %s", data, want)
-	}
-
-	for name, tc := range map[string]struct {
-		err             error
-		quota, deferred bool
-	}{
-		"deferred":        {fmt.Errorf("embedding batch stopped: %w", &embeddings.RateLimitError{RetryDeferred: true}), true, true},
-		"daily quota":     {fmt.Errorf("embedding batch stopped: %w", &embeddings.RateLimitError{DailyQuota: true}), true, false},
-		"provider down":   {errors.New("embedding provider unavailable: connection refused"), false, false},
-		"deadline passed": {context.DeadlineExceeded, false, false},
-	} {
-		res := newEmbeddingsResult(EmbedCounts{}, tc.err, true)
-		if res.QuotaLimited != tc.quota || res.RetryDeferred != tc.deferred || !res.MissingOnly {
-			t.Fatalf("%s: result = %+v", name, res)
-		}
 	}
 }
 

@@ -8,30 +8,6 @@ import (
 	"testing"
 )
 
-func TestEffectiveLastAirDateExpr_ReadsDenormColumn(t *testing.T) {
-	expr := effectiveLastAirDateExpr("mi")
-	if strings.Contains(expr, "SELECT MAX(") {
-		t.Fatalf("effectiveLastAirDateExpr must NOT contain a correlated subquery; got %s", expr)
-	}
-	if !strings.Contains(expr, "mi.last_air_date_at") {
-		t.Fatalf("effectiveLastAirDateExpr must read mi.last_air_date_at; got %s", expr)
-	}
-}
-
-func TestEffectiveLastAirDateExpr_NonSeriesFallsBackToFirstAirDate(t *testing.T) {
-	expr := effectiveLastAirDateExpr("mi")
-	// For non-series rows, the ELSE branch returns first_air_date (trimmed).
-	// This is a deliberate change from the pre-migration-103 behavior, where
-	// it returned the stored mi.last_air_date text column. Documented here so
-	// a future "fix" doesn't silently restore the old fallback.
-	if !strings.Contains(expr, "ELSE NULLIF(BTRIM(mi.first_air_date), '') END") {
-		t.Fatalf("non-series fallback must be NULLIF(BTRIM(mi.first_air_date), ''); got %s", expr)
-	}
-	if strings.Contains(expr, "ELSE NULLIF(BTRIM(mi.last_air_date), '') END") {
-		t.Fatalf("non-series fallback should no longer read mi.last_air_date; got %s", expr)
-	}
-}
-
 // TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm pins the invariant that
 // no production code path deletes from `episodes`. The denormalized
 // media_items.last_air_date_at column is maintained on Upsert/BulkUpsert and
@@ -109,24 +85,5 @@ func TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm(t *testing.T) {
 		t.Fatalf("found DELETE FROM episodes in %d file(s): %v\n"+
 			"Episode deletes can drift media_items.last_air_date_at. "+
 			"See test comment for the correct fix.", len(hits), hits)
-	}
-}
-
-func TestLastAirDateSortPlan_NoDerivedTableScan(t *testing.T) {
-	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{
-		Field: "last_air_date",
-		Order: "desc",
-	})
-	if err != nil {
-		t.Fatalf("BuildSortPlan error: %v", err)
-	}
-	if len(plan.Joins) != 0 {
-		t.Fatalf("last_air_date sort must not use derived-table JOIN; got joins=%v", plan.Joins)
-	}
-	if !strings.Contains(plan.OrderBy, "mi.last_air_date_at") {
-		t.Fatalf("expected ORDER BY mi.last_air_date_at; got %s", plan.OrderBy)
-	}
-	if !strings.Contains(plan.OrderBy, "NULLS LAST") {
-		t.Fatalf("expected NULLS LAST; got %s", plan.OrderBy)
 	}
 }

@@ -42,10 +42,10 @@ func publishUserSettingsEvent(
 
 // publishAdminDefaultEvent tells every connected client that the
 // administrator's default for a setting changed, so the viewers inheriting it
-// resolve again. It is addressed to no account because every viewer without a
-// stored choice is affected; like every settings event it names the key and
-// never the value. Server-settings keys that hold no administrator default are
-// ignored.
+// resolve again. It is addressed to every viewer rather than to an account,
+// because every viewer without a stored choice is affected; like every
+// settings event it names the key and never the value. Server-settings keys
+// that hold no administrator default are ignored.
 func publishAdminDefaultEvent(ctx context.Context, hub *evt.Hub, serverSettingKey string) {
 	if hub == nil {
 		return
@@ -61,5 +61,5 @@ func publishAdminDefaultEvent(ctx context.Context, hub *evt.Hub, serverSettingKe
 	_ = hub.PublishJSON(ctx, evt.ChannelUserSettings, userSettingsChangedEvent, userSettingsEventPayload{
 		Key:   def.Key,
 		Scope: string(settingscontract.ScopeDefault),
-	}, evt.PublishOptions{})
+	}, evt.PublishOptions{AllViewers: true})
 }

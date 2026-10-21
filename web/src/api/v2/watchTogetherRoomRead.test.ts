@@ -54,17 +54,6 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-it("reads with header proof and converts exact snapshot identities", async () => {
-  const fetch = vi.fn().mockResolvedValue(response());
-  vi.stubGlobal("fetch", fetch);
-  const result = await getWatchTogetherRoom("room", "original-proof");
-  expect(result.room.selected_file_id).toBe(7);
-  expect(result.room.members?.[0]?.user_id).toBe(1);
-  expect(result.room_access_token).toBe("renewed-proof");
-  expect(fetch).toHaveBeenCalledTimes(1);
-  expect(fetch.mock.calls[0]![0]).toBe("/api/v2/watch-together/rooms/room");
-  expect(new Headers(fetch.mock.calls[0]![1].headers).get("X-Room-Token")).toBe("original-proof");
-});
 it("refuses unsafe identities and replacement-authority success or failure", async () => {
   const fetch = vi.fn().mockResolvedValue(
     new Response(

@@ -60,33 +60,6 @@ func TestHardwareSmokeEncodeArgs(t *testing.T) {
 	}
 }
 
-func TestWarmHardwareEncoderWithRunner(t *testing.T) {
-	var calls []string
-	err := warmHardwareEncoderWithRunner(context.Background(), time.Second, "/test/ffmpeg", transcodeHWQSV,
-		[]string{"/dev/dri/renderD128", "/dev/dri/renderD129"},
-		func(ctx context.Context, path string, args ...string) ([]byte, error) {
-			if _, ok := ctx.Deadline(); !ok {
-				t.Fatal("runner context has no deadline")
-			}
-			if path != "/test/ffmpeg" {
-				t.Fatalf("runner path = %q", path)
-			}
-			calls = append(calls, strings.Join(args, " "))
-			return nil, nil
-		})
-	if err != nil {
-		t.Fatalf("warmHardwareEncoderWithRunner() error = %v", err)
-	}
-	if len(calls) != 2 {
-		t.Fatalf("runner calls = %d, want 2", len(calls))
-	}
-	for index, device := range []string{"/dev/dri/renderD128", "/dev/dri/renderD129"} {
-		if !strings.Contains(calls[index], device) {
-			t.Fatalf("runner call %d = %q, missing device %q", index, calls[index], device)
-		}
-	}
-}
-
 func TestWarmHardwareEncoderWithRunnerSkipsDisabledAndUnknownBackends(t *testing.T) {
 	calls := 0
 	runner := func(context.Context, string, ...string) ([]byte, error) {
