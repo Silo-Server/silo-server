@@ -46,10 +46,9 @@ const proxyRangeHeader = "Range"
 
 // Server is the HTTP handler for proxy mode.
 type Server struct {
-	probeLimiterOnce sync.Once
-	probeLimiter     *bandwidthprobe.Limiter
-	watcher          *nodeconfig.Watcher
-	tracker          *nodesessions.Tracker
+	probeLimiter *bandwidthprobe.Limiter
+	watcher      *nodeconfig.Watcher
+	tracker      *nodesessions.Tracker
 	// nodeRowID resolves this proxy's stable stream_nodes identity. Production
 	// uses the config watcher; tests replace it to model sibling proxies.
 	nodeRowID            func() (int, bool)
@@ -145,6 +144,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		subCache: playback.NewSubtitleCache(func() string {
 			return watcher.Config().Playback.TranscodeDir
 		}),
+		probeLimiter: bandwidthprobe.NewLimiter(),
 	}
 	if watcher != nil {
 		server.nodeRowID = watcher.NodeRowID

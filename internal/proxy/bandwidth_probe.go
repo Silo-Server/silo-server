@@ -36,7 +36,6 @@ func (s *Server) handleBandwidthProbe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid size", http.StatusBadRequest)
 		return
 	}
-	s.probeLimiterOnce.Do(func() { s.probeLimiter = bandwidthprobe.NewLimiter() })
 	admitted, window, wait := s.probeLimiter.Acquire(claims.UserID, size, time.Now())
 	if !admitted {
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(wait.Round(time.Second)/time.Second))))
