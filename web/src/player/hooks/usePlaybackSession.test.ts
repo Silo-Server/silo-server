@@ -3079,6 +3079,14 @@ describe("usePlaybackSession mid-stream reconnect", () => {
   });
 });
 
+async function startSession() {
+  const hook = renderHook(() => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"), {
+    wrapper,
+  });
+  await waitFor(() => expect(hook.result.current.planRevision).toBe(1));
+  return hook;
+}
+
 it("reports each adoption's summary once, with the estimate it was requested with", async () => {
   const plan = fixturePlanV3({ session_id: "session-1" });
   const summaries: Record<string, unknown>[] = [];
@@ -3104,11 +3112,7 @@ it("reports each adoption's summary once, with the estimate it was requested wit
       throw new Error(`Unexpected request: ${url}`);
     }),
   );
-  const { result, unmount } = renderHook(
-    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
-    { wrapper },
-  );
-  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  const { result, unmount } = await startSession();
   const adopted = vi.fn();
   act(() =>
     result.current.changeQuality(
@@ -3159,27 +3163,7 @@ it.each([
   // Unknown is not `never`: the start must not shut a learned limit out.
   [null, undefined],
 ] as const)("in %s mode sends learned_limit %s", async (mode, expected) => {
-  const plan = fixturePlanV3({ session_id: "session-1" });
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    if (url.endsWith("/playback/start") || url.endsWith("/replan")) {
-      return jsonResponse({
-        protocol_version: 3,
-        server_features: ["playback_plan_v3", "buffering_quality_v1"],
-        outcome: "playable",
-        session_id: "session-1",
-        playback_plan: plan,
-      });
-    }
-    if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-    if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
-    throw new Error(`Unexpected request: ${url}`);
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  const bodiesTo = (suffix: string) =>
-    fetchMock.mock.calls
-      .filter(([url]) => String(url).endsWith(suffix))
-      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+  const { bodiesTo } = recordingServer();
   const { result, unmount } = renderHook(
     () =>
       usePlaybackSession(
@@ -3209,32 +3193,9 @@ it.each([
 });
 
 it("repeats the kept step-down estimate, without a source, on later Auto replans", async () => {
-  const plan = fixturePlanV3({ session_id: "session-1" });
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    if (url.endsWith("/playback/start") || url.endsWith("/replan")) {
-      return jsonResponse({
-        protocol_version: 3,
-        server_features: ["playback_plan_v3", "buffering_quality_v1"],
-        outcome: "playable",
-        session_id: "session-1",
-        playback_plan: plan,
-      });
-    }
-    if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-    if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
-    throw new Error(`Unexpected request: ${url}`);
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  const replans = () =>
-    fetchMock.mock.calls
-      .filter(([url]) => String(url).endsWith("/replan"))
-      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
-  const { result, unmount } = renderHook(
-    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
-    { wrapper },
-  );
-  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  const server = recordingServer();
+  const replans = () => server.bodiesTo("/replan");
+  const { result, unmount } = await startSession();
 
   // The controller lowered Auto and reported its step-down estimate.
   act(() => result.current.setKeptEstimate(44100));
@@ -3255,8 +3216,8 @@ it("repeats the kept step-down estimate, without a source, on later Auto replans
   unmount();
 });
 
-/** A server whose first replan waits for `release`, and that records every body. */
-function holdingReplanServer() {
+/** Records every request body, optionally holding the first replan until release. */
+function recordingServer({ holdFirstReplan = false } = {}) {
   const plan = fixturePlanV3({ session_id: "session-1" });
   const decision = (planId: string) =>
     jsonResponse({
@@ -3275,7 +3236,7 @@ function holdingReplanServer() {
     if (url.endsWith("/playback/start")) return decision(plan.plan_id);
     if (url.endsWith("/replan")) {
       const count = fetchMock.mock.calls.filter(([u]) => String(u).endsWith("/replan")).length;
-      return count === 1 ? held : decision(`plan:next000${count}`);
+      return holdFirstReplan && count === 1 ? held : decision(`plan:next000${count}`);
     }
     if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
     if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
@@ -3303,26 +3264,17 @@ const restore = {
 
 // A start the player leaves still loading must not hold off speed tests.
 it("ends its start's hold on speed tests when the player goes away", async () => {
-  const server = holdingReplanServer();
-  const { result, unmount } = renderHook(
-    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
-    { wrapper },
-  );
-  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  recordingServer();
+  const { unmount } = await startSession();
   startEnded.mockClear();
   unmount();
   expect(startEnded).toHaveBeenCalledTimes(1);
-  server.release();
 });
 
 it("sends the speed-test reading on a start but never on a replan", async () => {
   speedReading.kbps = 48000;
-  const server = holdingReplanServer();
-  const { result, unmount } = renderHook(
-    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
-    { wrapper },
-  );
-  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  const server = recordingServer();
+  const { result, unmount } = await startSession();
   expect(server.bodiesTo("/playback/start")[0]).toMatchObject({
     bandwidth_estimate_kbps: 48000,
     bandwidth_estimate_source: "probe",
@@ -3331,17 +3283,12 @@ it("sends the speed-test reading on a start but never on a replan", async () => 
   await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
   expect(server.bodiesTo("/replan")[0]).not.toHaveProperty("bandwidth_estimate_kbps");
   expect(server.bodiesTo("/replan")[0]).not.toHaveProperty("bandwidth_estimate_source");
-  server.release();
   unmount();
 });
 
 it("refuses a lowering while another replan is in flight, and sends a Restore after it", async () => {
-  const server = holdingReplanServer();
-  const { result, unmount } = renderHook(
-    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
-    { wrapper },
-  );
-  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  const server = recordingServer({ holdFirstReplan: true });
+  const { result, unmount } = await startSession();
   act(() => result.current.changeSubtitleTrack(null, 120));
   await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
 
@@ -3364,12 +3311,8 @@ it("refuses a lowering while another replan is in flight, and sends a Restore af
 });
 
 it("sends a displaced Restore's clear on one start only", async () => {
-  const server = holdingReplanServer();
-  const { result, unmount } = renderHook(
-    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
-    { wrapper },
-  );
-  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  const server = recordingServer({ holdFirstReplan: true });
+  const { result, unmount } = await startSession();
   act(() => result.current.changeSubtitleTrack(null, 120));
   await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
   act(() => result.current.changeQuality("auto", 121, restore));
@@ -3388,12 +3331,8 @@ it("sends a displaced Restore's clear on one start only", async () => {
 });
 
 it("carries a displaced Restore's clear on the request that replaced it", async () => {
-  const server = holdingReplanServer();
-  const { result, unmount } = renderHook(
-    () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
-    { wrapper },
-  );
-  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  const server = recordingServer({ holdFirstReplan: true });
+  const { result, unmount } = await startSession();
   act(() => result.current.changeSubtitleTrack(null, 120));
   await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
   act(() => result.current.changeQuality("auto", 121, restore));
