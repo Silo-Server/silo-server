@@ -281,20 +281,12 @@ func TestPlaybackQualitiesDropsTheSourceEntry(t *testing.T) {
 	}
 }
 
-type connectionSpeedPlaybackService struct{ *fakePlaybackService }
-
-func (f connectionSpeedPlaybackService) PlaybackCapabilities(ctx context.Context, userID int, profileID string) (handlers.PlaybackCapabilitiesView, error) {
-	view, err := f.fakePlaybackService.PlaybackCapabilities(ctx, userID, profileID)
-	view.Features = append(view.Features, playback.FeatureConnectionSpeedV1)
-	return view, err
-}
-
 // TestPlaybackV2ProbeURLUsesForwardedOrigin: behind a TLS-terminating reverse
 // proxy the request's Host is the internal origin the proxy dialed, which a
 // client cannot reach. The advertised probe URL names the forwarded origin.
 func TestPlaybackV2ProbeURLUsesForwardedOrigin(t *testing.T) {
 	deps, _ := catalogDeps(t)
-	deps.Playback = connectionSpeedPlaybackService{&fakePlaybackService{}}
+	deps.Playback = &scheduleService{}
 	headers := with(with(viewerHeaders(), "X-Forwarded-Host", "media.example.test"), "X-Forwarded-Proto", "https")
 	response := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/playback/capabilities", "", headers)
 	var body PlaybackCapabilities
