@@ -497,6 +497,20 @@ describe("scheduleBandwidthProbe", () => {
     await expect(result).resolves.toBe("playing");
   });
 
+  it("runs no automatic test on a phone whose browser reports an unknown link", async () => {
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      userAgent:
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/128.0 Mobile Safari/537.36",
+      connection: { type: "unknown", saveData: false },
+    });
+    server({});
+    hangingProbe();
+    scheduleBandwidthProbe();
+    await readThenTest();
+    expect(fetchWithSession).not.toHaveBeenCalled();
+  });
+
   it("runs no automatic test on an iPad that asks for desktop sites", async () => {
     vi.stubGlobal("navigator", {
       ...navigator,

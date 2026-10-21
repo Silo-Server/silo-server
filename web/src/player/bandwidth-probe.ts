@@ -332,11 +332,12 @@ export function onMeteredConnection(): boolean {
 
 /**
  * Whether a phone or tablet cannot tell what link it is on (every browser on
- * iOS and iPadOS, and Firefox). It might be on mobile data, so it runs no
- * automatic test; Test speed stays available.
+ * iOS and iPadOS, Firefox, and Chromium when it reports "unknown"). It might
+ * be on mobile data, so it runs no automatic test; Test speed stays available.
  */
 function handheldOnUnknownLink(): boolean {
-  if (networkInformation()?.type !== undefined) return false;
+  const type = networkInformation()?.type;
+  if (type !== undefined && type !== "unknown") return false;
   const formFactor = detectFormFactor();
   if (formFactor === "phone" || formFactor === "tablet") return true;
   if (formFactor === "tv" || typeof navigator === "undefined") return false;
