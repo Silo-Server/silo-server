@@ -153,6 +153,15 @@ func (s *Store) Clear(ctx context.Context, user int, device, key string) error {
 	return err
 }
 
+// DeleteDevices deletes every row of the named devices on the account.
+func (s *Store) DeleteDevices(ctx context.Context, user int, devices []string) error {
+	if s == nil || len(devices) == 0 {
+		return nil
+	}
+	_, err := s.Pool.Exec(ctx, `DELETE FROM playback_connections WHERE user_id = $1 AND device_id = ANY($2)`, user, devices)
+	return err
+}
+
 // Cleanup deletes rows that have not been updated within Retention.
 func (s *Store) Cleanup(ctx context.Context) error {
 	if s == nil {

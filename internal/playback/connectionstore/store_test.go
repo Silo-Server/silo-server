@@ -92,15 +92,18 @@ func TestStoreLifecycle(t *testing.T) {
 	if err := s.Observe(ctx, user, "device", "local", 44100); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO user_devices(user_id,profile_id,device_id) VALUES($1,'profile-1','device')`, user); err != nil {
+	if err := s.Observe(ctx, user, "other", "local", 44100); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `DELETE FROM user_devices WHERE user_id=$1`, user); err != nil {
+	if err := s.DeleteDevices(ctx, user, []string{"device"}); err != nil {
 		t.Fatal(err)
 	}
 	limit, err = s.Get(ctx, user, "device", "local")
 	if err != nil || limit != nil {
 		t.Fatal("device deletion retained limit")
+	}
+	if other, err := s.Get(ctx, user, "other", "local"); err != nil || other == nil {
+		t.Fatal("device deletion removed another device's limit", err)
 	}
 }
 

@@ -422,12 +422,12 @@
 ./internal/historyimport TestImportRunFailsOnExpandingSourceListing
 
 # Buffering quality: a learned limit expires after seven days, a reset keeps the
-# probe and plan summary, rows go with the device's last registration and after
-# 30 days without an update, a seek replay never records a limit, a later
-# replan plans under the stored limit, a start reports the limit only when it
-# lowered the plan, the connection budget honours the administrator cap, and a
-# plan summary keeps the delivery of the plan it reports after a replan
-# replaced it.
+# probe and plan summary, rows go with the device's last registration (in either
+# user store, also when two deletions race) and after 30 days without an
+# update, a seek replay never records a limit, a later replan plans under the
+# stored limit, a start reports the limit only when it lowered the plan, the
+# connection budget honours the administrator cap, and a plan summary keeps the
+# delivery of the plan it reports after a replan replaced it.
 ./internal/playback/connectionstore TestStoreLifecycle
 ./internal/playback/connectionstore TestReadingsDB
 ./internal/catalog TestSourceBitratePercentileDB
@@ -437,6 +437,9 @@
 ./internal/api/handlers TestLearnedLimitMarksOnlyAStartItLoweredDB
 ./internal/api/handlers TestConnectionReadingsDB
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
+./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
+./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB
+./internal/api/handlers TestSQLiteRegistrationRemovalDropsConnectionsDB
 # Explore all on a row the catalog cannot express as a query pages the row's
 # own fetch past its item limit, on Home and on its library page.
 ./internal/api/handlers TestCatalogRowBackedSectionBrowseDB

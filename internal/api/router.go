@@ -1178,6 +1178,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			profileHandler.RecommendationsPurger = recommendations.NewRepo(deps.DB)
 			// Ebook reading data lives there too.
 			profileHandler.EbookReaderPurger = handlers.NewPGEbookReaderProgressStore(deps.DB)
+			profileHandler.Connections = &connectionstore.Store{Pool: deps.DB}
 		}
 		if watchlistRequestWithdrawer != nil {
 			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
@@ -1282,6 +1283,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
 		deviceHandler.EventsHub = deps.EventsHub
 		deviceHandler.ProfileTokens = profileTokenService
+		if deps.DB != nil {
+			deviceHandler.Connections = &connectionstore.Store{Pool: deps.DB}
+		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
 		if deps.DB != nil {

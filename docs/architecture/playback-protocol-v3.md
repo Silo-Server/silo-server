@@ -2012,9 +2012,9 @@ connection. A request without a device ID neither records nor applies one. The
 connection is the trusted network-access provider, `local` for a private or
 loopback client, or an HMAC of the public IPv4 address or IPv6 /64 keyed by
 the server secret. Raw public addresses are never stored. Rows are deleted 30
-days after their last update and when the device's last registration is
-deleted. With the legacy SQLite user store, forgetting a device does not reach
-these rows, and only the 30-day retention removes them.
+days after their last update and when the device's last registration on the
+account is deleted, in either user store: forgetting the device and deleting a
+profile check the account's registry after their delete commits.
 
 Only a start or replan that the client sent with
 `bandwidth_estimate_source: "observed_rebuffer"` on Auto records a limit, and
