@@ -5993,6 +5993,50 @@ describe("VideoPlayer hls.js request timeouts", () => {
     expect(await stallAfterTimeout(0)).toBeNull();
   });
 
+  it("ends the outage once media data arrives again", async () => {
+    hlsJS.supported = true;
+    const rendered = renderPlayer({
+      bufferingMode: "ask",
+      qualityPreference: "auto",
+      plan: fixturePlanV3({
+        stream: {
+          url: "/playback/transcode/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+        available_qualities: [
+          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
+          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
+        ],
+        source: { ...directPlan.source, bitrate_kbps: 20_000 },
+      }),
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    const video = rendered.container.querySelector("video");
+    if (!video || !hlsJS.latest) throw new Error("expected hls.js on a video element");
+    // Too little ahead of the playhead to be the renderer's wait.
+    let end = 0.2;
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      get: () => ({ length: 1, start: () => 0, end: () => end }),
+    });
+    markPlaying(video);
+    fireEvent.playing(video);
+    act(() => vi.advanceTimersByTime(20_000));
+    act(() =>
+      hlsJS.latest?.emit("error", { type: "networkError", details: "fragLoadError", fatal: false }),
+    );
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(2_000));
+    // A segment arrives, too slowly to play: from now it is a stall, well
+    // before the outage window would lapse on its own.
+    end = 0.4;
+    fireEvent(video, new Event("progress"));
+    act(() => vi.advanceTimersByTime(6_200));
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+  });
+
   it("treats a timeout on a request that was still receiving as a slow link", async () => {
     expect(await stallAfterTimeout(2_000_000)).not.toBeNull();
   });
