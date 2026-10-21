@@ -843,7 +843,8 @@ func moveCollectionsOffFolder(ctx context.Context, tx pgx.Tx, folderID int) erro
 	}
 	shared, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (sharedCollection, error) {
 		var c sharedCollection
-		return c, row.Scan(&c.id, &c.slug, &c.libraries)
+		err := row.Scan(&c.id, &c.slug, &c.libraries)
+		return c, err
 	})
 	if err != nil {
 		return fmt.Errorf("listing collections to move: %w", err)
