@@ -191,7 +191,7 @@ func registerAdminDevices(reg *Registry) {
 			for _, c := range connections {
 				item := AdminDeviceConnection{ID: c.ID, Connection: c.Connection, Probe: NullableObject[PlaybackProbe]{playbackProbeOf(c.Probe)}, PlaybackSample: NullableObject[PlaybackSample]{playbackSampleOf(c.PlaybackSample)}, LearnedLimit: NullableObject[PlaybackLearnedLimit]{playbackLimitOf(c.LearnedLimit)}}
 				if c.PlanSummary != nil {
-					item.PlanSummary.Value = &PlaybackPlanSummary{PlanID: c.PlanSummary.PlanID, ReportedAt: c.PlanSummary.ReportedAt, Diagnostics: c.PlanSummary.Diagnostics}
+					item.PlanSummary.Value = &PlaybackPlanSummary{PlanID: c.PlanSummary.PlanID, ReportedAt: NewInstant(c.PlanSummary.ReportedAt), Diagnostics: c.PlanSummary.Diagnostics}
 				}
 				out.Connections = append(out.Connections, item)
 			}
@@ -240,6 +240,6 @@ type AdminDeviceConnection struct {
 }
 type PlaybackPlanSummary struct {
 	PlanID      string            `json:"plan_id"`
-	ReportedAt  time.Time         `json:"reported_at"`
+	ReportedAt  Instant           `json:"reported_at"`
 	Diagnostics map[string]string `json:"diagnostics"`
 }

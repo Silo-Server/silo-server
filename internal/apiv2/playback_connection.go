@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -19,9 +18,9 @@ type PlaybackConnectionInput struct {
 	DeviceID string `header:"X-Silo-Device-Id" maxLength:"128"`
 }
 type PlaybackLearnedLimit struct {
-	Kbps       int       `json:"kbps"`
-	ObservedAt time.Time `json:"observed_at"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	Kbps       int     `json:"kbps"`
+	ObservedAt Instant `json:"observed_at"`
+	ExpiresAt  Instant `json:"expires_at"`
 }
 type PlaybackConnection struct {
 	Probe          *PlaybackProbe                       `json:"probe,omitempty"`
@@ -71,7 +70,7 @@ func registerPlaybackConnection(reg *Registry) {
 		}
 		body := PlaybackConnection{Connection: state.Connection, Probe: playbackProbeOf(state.Probe), PlaybackSample: playbackSampleOf(state.PlaybackSample), AutoBudgetKbps: state.AutoBudgetKbps}
 		if limit := state.LearnedLimit; limit != nil {
-			body.LearnedLimit.Value = &PlaybackLearnedLimit{Kbps: limit.Kbps, ObservedAt: limit.ObservedAt, ExpiresAt: limit.ExpiresAt}
+			body.LearnedLimit.Value = &PlaybackLearnedLimit{Kbps: limit.Kbps, ObservedAt: NewInstant(limit.ObservedAt), ExpiresAt: NewInstant(limit.ExpiresAt)}
 		}
 		return &PlaybackConnectionOutput{CacheControl: playbackCacheControl, Body: body}, nil
 	})
@@ -117,33 +116,33 @@ func registerPlaybackProbeResults(reg *Registry) {
 }
 
 type PlaybackProbe struct {
-	Kbps       int       `json:"kbps"`
-	LowerBound bool      `json:"lower_bound" doc:"The test proved only that the link carries at least kbps."`
-	MeasuredAt time.Time `json:"measured_at"`
-	Transport  string    `json:"transport"`
+	Kbps       int     `json:"kbps"`
+	LowerBound bool    `json:"lower_bound" doc:"The test proved only that the link carries at least kbps."`
+	MeasuredAt Instant `json:"measured_at"`
+	Transport  string  `json:"transport"`
 }
 
 func playbackProbeOf(p *connectionstore.Probe) *PlaybackProbe {
 	if p == nil {
 		return nil
 	}
-	return &PlaybackProbe{Kbps: p.Kbps, LowerBound: p.LowerBound, MeasuredAt: p.MeasuredAt, Transport: p.Transport}
+	return &PlaybackProbe{Kbps: p.Kbps, LowerBound: p.LowerBound, MeasuredAt: NewInstant(p.MeasuredAt), Transport: p.Transport}
 }
 
 type PlaybackSample struct {
-	Kbps       int       `json:"kbps"`
-	MeasuredAt time.Time `json:"measured_at"`
+	Kbps       int     `json:"kbps"`
+	MeasuredAt Instant `json:"measured_at"`
 }
 
 func playbackSampleOf(s *connectionstore.Sample) *PlaybackSample {
 	if s == nil {
 		return nil
 	}
-	return &PlaybackSample{Kbps: s.Kbps, MeasuredAt: s.MeasuredAt}
+	return &PlaybackSample{Kbps: s.Kbps, MeasuredAt: NewInstant(s.MeasuredAt)}
 }
 func playbackLimitOf(p *connectionstore.Limit) *PlaybackLearnedLimit {
 	if p == nil {
 		return nil
 	}
-	return &PlaybackLearnedLimit{Kbps: p.Kbps, ObservedAt: p.ObservedAt, ExpiresAt: p.ExpiresAt}
+	return &PlaybackLearnedLimit{Kbps: p.Kbps, ObservedAt: NewInstant(p.ObservedAt), ExpiresAt: NewInstant(p.ExpiresAt)}
 }

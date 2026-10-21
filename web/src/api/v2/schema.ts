@@ -14252,11 +14252,17 @@ export interface components {
       connection: string;
       id: string;
       learned_limit: {
-        /** Format: date-time */
+        /**
+         * Format: date-time
+         * @description RFC 3339 instant in UTC with millisecond precision
+         */
         expires_at: string;
         /** Format: int64 */
         kbps: number;
-        /** Format: date-time */
+        /**
+         * Format: date-time
+         * @description RFC 3339 instant in UTC with millisecond precision
+         */
         observed_at: string;
       } | null;
       plan_summary: {
@@ -14264,13 +14270,19 @@ export interface components {
           [key: string]: string;
         };
         plan_id: string;
-        /** Format: date-time */
+        /**
+         * Format: date-time
+         * @description RFC 3339 instant in UTC with millisecond precision
+         */
         reported_at: string;
       } | null;
       playback_sample: {
         /** Format: int64 */
         kbps: number;
-        /** Format: date-time */
+        /**
+         * Format: date-time
+         * @description RFC 3339 instant in UTC with millisecond precision
+         */
         measured_at: string;
       } | null;
       probe: {
@@ -14278,7 +14290,10 @@ export interface components {
         kbps: number;
         /** @description The test proved only that the link carries at least kbps. */
         lower_bound: boolean;
-        /** Format: date-time */
+        /**
+         * Format: date-time
+         * @description RFC 3339 instant in UTC with millisecond precision
+         */
         measured_at: string;
         transport: string;
       } | null;
@@ -27246,11 +27261,17 @@ export interface components {
       connection: string;
       /** @description The learned limit on this connection; null when there is none. */
       learned_limit: {
-        /** Format: date-time */
+        /**
+         * Format: date-time
+         * @description RFC 3339 instant in UTC with millisecond precision
+         */
         expires_at: string;
         /** Format: int64 */
         kbps: number;
-        /** Format: date-time */
+        /**
+         * Format: date-time
+         * @description RFC 3339 instant in UTC with millisecond precision
+         */
         observed_at: string;
       } | null;
       /** @description The best recent playback throughput on this connection, a lower bound on its speed. */
@@ -27306,11 +27327,17 @@ export interface components {
       terminal?: components["schemas"]["TerminalV3"];
     };
     PlaybackLearnedLimit: {
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
       expires_at: string;
       /** Format: int64 */
       kbps: number;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
       observed_at: string;
     };
     PlaybackMutation: {
@@ -27369,7 +27396,10 @@ export interface components {
         [key: string]: string;
       };
       plan_id: string;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
       reported_at: string;
     };
     PlaybackProbe: {
@@ -27377,7 +27407,10 @@ export interface components {
       kbps: number;
       /** @description The test proved only that the link carries at least kbps. */
       lower_bound: boolean;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
       measured_at: string;
       transport: string;
     };
@@ -27513,7 +27546,10 @@ export interface components {
     PlaybackSample: {
       /** Format: int64 */
       kbps: number;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
       measured_at: string;
     };
     PlaybackSession: {

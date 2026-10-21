@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
@@ -13,12 +14,33 @@ type connectionPlaybackFake struct {
 	fakePlaybackService
 	device string
 	clear  bool
+	state  connectionstore.State
 }
 
 func (f *connectionPlaybackFake) PlaybackConnection(_ context.Context, device string, reset bool) (connectionstore.State, error) {
 	f.device = device
 	f.clear = reset
-	return connectionstore.State{Connection: "remote"}, nil
+	if f.state.Connection == "" {
+		return connectionstore.State{Connection: "remote"}, nil
+	}
+	return f.state, nil
+}
+
+// The connection's times are v2 instants: UTC with exactly three fractional digits.
+func TestPlaybackConnectionTimesAreInstants(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	at := time.Date(2026, 10, 21, 16, 21, 40, 123456789, time.FixedZone("EDT", -4*3600))
+	deps.Playback = &connectionPlaybackFake{state: connectionstore.State{
+		Connection:     "remote",
+		Probe:          &connectionstore.Probe{Kbps: 48000, MeasuredAt: at, Transport: "wifi"},
+		PlaybackSample: &connectionstore.Sample{Kbps: 20000, MeasuredAt: at},
+		LearnedLimit:   &connectionstore.Limit{Kbps: 4200, ObservedAt: at, ExpiresAt: at.Add(7 * 24 * time.Hour)},
+	}}
+	response := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/playback/connection", "", viewerHeaders())
+	body := response.Body.String()
+	if response.Code != 200 || strings.Count(body, `"2026-10-21T20:21:40.123Z"`) != 3 || !strings.Contains(body, `"expires_at":"2026-10-28T20:21:40.123Z"`) {
+		t.Fatalf("get %d %s", response.Code, body)
+	}
 }
 func TestPlaybackConnectionUsesDeclaredDevice(t *testing.T) {
 	deps, _ := catalogDeps(t)

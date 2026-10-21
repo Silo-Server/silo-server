@@ -5020,7 +5020,10 @@
             "additionalProperties": false,
             "properties": {
               "expires_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
                 "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
                 "type": "string"
               },
               "kbps": {
@@ -5028,7 +5031,10 @@
                 "type": "integer"
               },
               "observed_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
                 "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
                 "type": "string"
               }
             },
@@ -5055,7 +5061,10 @@
                 "type": "string"
               },
               "reported_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
                 "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
                 "type": "string"
               }
             },
@@ -5077,7 +5086,10 @@
                 "type": "integer"
               },
               "measured_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
                 "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
                 "type": "string"
               }
             },
@@ -5102,7 +5114,10 @@
                 "type": "boolean"
               },
               "measured_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
                 "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
                 "type": "string"
               },
               "transport": {
@@ -38627,7 +38642,10 @@
             "description": "The learned limit on this connection; null when there is none.",
             "properties": {
               "expires_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
                 "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
                 "type": "string"
               },
               "kbps": {
@@ -38635,7 +38653,10 @@
                 "type": "integer"
               },
               "observed_at": {
+                "description": "RFC 3339 instant in UTC with millisecond precision",
                 "format": "date-time",
+                "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+                "patternDescription": "a non-zero RFC 3339 instant",
                 "type": "string"
               }
             },
@@ -38784,7 +38805,10 @@
         "additionalProperties": false,
         "properties": {
           "expires_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "kbps": {
@@ -38792,7 +38816,10 @@
             "type": "integer"
           },
           "observed_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           }
         },
@@ -38975,7 +39002,10 @@
             "type": "string"
           },
           "reported_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           }
         },
@@ -38998,7 +39028,10 @@
             "type": "boolean"
           },
           "measured_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
           "transport": {
@@ -39370,7 +39403,10 @@
             "type": "integer"
           },
           "measured_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           }
         },
