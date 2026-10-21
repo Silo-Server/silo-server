@@ -69,12 +69,8 @@ import ServerNotificationChannels from "./ServerNotificationChannels";
  */
 const PIPELINE_KEYS = ["notifications.release_events_enabled", "notifications.fanout_enabled"];
 
-/** Batching and flood control; all advanced. */
-const FANOUT_KEYS = [
-  "notifications.fanout.settle_seconds",
-  "notifications.fanout.max_series_burst",
-  "notifications.fanout.max_event_age_hours",
-];
+/** Stale-content cutoff; advanced. */
+const FANOUT_KEYS = ["notifications.fanout.max_event_age_hours"];
 
 /** Inbox and event cleanup; all advanced. */
 const RETENTION_KEYS = [
@@ -1287,24 +1283,7 @@ export default function NotificationsAdminSettings() {
                 restartRequired={needsRestart("notifications.fanout_enabled")}
               />
             </AdvancedCluster>
-            <AdvancedCluster label="Grouping and flood control">
-              <SettingField
-                label="Settle window"
-                description="Items that finish scanning together arrive as one notification."
-                unit="seconds"
-                type="number"
-                value={numberValue("notifications.fanout.settle_seconds", "30")}
-                onChange={(v) => form.setValue("notifications.fanout.settle_seconds", v)}
-                restartRequired={needsRestart("notifications.fanout.settle_seconds")}
-              />
-              <SettingField
-                label="Max messages per show"
-                description="Anything past this is skipped for that batch."
-                type="number"
-                value={numberValue("notifications.fanout.max_series_burst", "3")}
-                onChange={(v) => form.setValue("notifications.fanout.max_series_burst", v)}
-                restartRequired={needsRestart("notifications.fanout.max_series_burst")}
-              />
+            <AdvancedCluster label="Stale content">
               <SettingField
                 label="Max content age"
                 description="Older items are dropped instead of arriving as stale news."

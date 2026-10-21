@@ -102,9 +102,9 @@ series, or a series the viewer may not see, is 404.
 
 `DELETE /series/{series_id}/mute` (`unmuteNotificationSeries`) lifts the mute.
 The series notifies again for its active reasons. Fanout reads the mute when it
-evaluates a new episode, after the release settle delay (30 seconds by
-default): an episode it evaluated while the series was muted is not announced
-later, and one still waiting for fanout when the profile unmutes is announced.
+evaluates a new episode, normally within seconds of the episode arriving: an
+episode it evaluated while the series was muted is not announced later, and one
+still waiting for fanout when the profile unmutes is announced.
 The same holds the other way: a mute made just after an episode arrives can
 still stop its notification. Unmuting a series that is not muted succeeds. Unmute runs no access check, so a
 profile can lift a mute on a series it can no longer open.
@@ -244,6 +244,13 @@ the administrator turn it off before finishing setup. When delivery is on and no
 is stored, the push sender self-registers with the configured relay on the
 first send; the explicit register endpoint remains for choosing a relay origin
 or rotating the credential.
+
+Not every inbox row is pushed. A new-episode notification reaches mobile push
+and web push only when the profile had no other new-episode notification for
+the same series in the previous 12 hours, so a season that arrives together
+pushes its first new episode once. The other episodes are ordinary inbox rows
+and appear on the next sync; clients that show an unread count should read it
+from the inbox, not count pushes.
 
 The relay credential maintains itself. The sender renews a capability before
 it expires. When the relay rejects the stored capability for any reason other

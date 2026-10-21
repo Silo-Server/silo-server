@@ -43,11 +43,23 @@ Event kinds:
   feed the server-channel broadcast feed; they do not fan out per profile.
 
 Events can be suppressed instead of fanned out, with the reason recorded on
-the row: `series_burst` when the per-series burst cap consumed the event
-(bulk imports fan out only the highest few episode keys per series per
-batch), or `stale` when the event aged past the fanout staleness horizon
+the row: `stale` when the event aged past the fanout staleness horizon
 (extended downtime, fanout disabled for a stretch) — delivering it long after
-the fact would be noise.
+the fact would be noise. Older rows may carry `series_burst` from the removed
+per-series burst cap.
+
+Fanout claims events as soon as they are recorded and runs each series'
+events in ascending episode-key order, so the notified cursor never skips a
+lower episode of the same batch. Every new episode gets its own delivery, and
+the inbox, email and webhooks see each one. Push is rate-limited per series:
+a delivery reaches the profile's mobile push devices and web push
+subscriptions only when the profile had no other `episode.available`
+delivery for that series in the last 12 hours (`pushSeriesCooldown`). A
+season that lands together therefore pushes its lowest new episode once and
+fills the inbox with the rest. The window is measured from the latest
+delivery, so a season that trickles in over hours still pushes once. The
+check runs under the inbox locks, so concurrent fanout on two nodes cannot
+both push.
 
 Server channels read the event feed directly, suppressed events included, and
 skip a title that a different, still existing library had made available
@@ -124,10 +136,10 @@ release event's episode key:
   profile's notification cursor does not move. The mute is read when fanout
   evaluates a release, not when the episode arrives: unmuting does not
   announce episodes fanout already evaluated during the mute, since their
-  release events are processed, but an event still inside the settle delay at
+  release events are processed, but an event fanout has not claimed yet at
   unmute is fanned out to the profile. No suppression state is kept per
-  release; the window is the settle delay plus one claim pass, and it applies
-  symmetrically to a mute made just after a release. A mute follows its series through a
+  release; the window is one claim pass, and it applies symmetrically to a
+  mute made just after a release. A mute follows its series through a
   catalog merge or split like other per-profile series state, and profile
   deletion removes it.
 - Profile-level notification preferences are a hard gate: a reason disabled

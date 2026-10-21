@@ -1,7 +1,9 @@
 package notifications
 
 import (
-	"sort"
+	"cmp"
+	"slices"
+	"strings"
 )
 
 // EvaluateRecipient applies the eligibility rules for one candidate recipient
@@ -71,46 +73,16 @@ func PartitionEventsByKind(events []ReleaseEvent) (episodes, others []ReleaseEve
 	return episodes, others
 }
 
-// ApplyBurstCap groups claimed events by (library, series) and bounds fanout
-// per group: only the maxPerSeries events with the highest episode_key fan
-// out; the rest are suppressed (processed without deliveries). This bounds
-// the blast radius of bulk additions (back-catalog season packs) to seeded
-// libraries. The cap is per claim batch and therefore approximate across
-// batches, which is acceptable.
-func ApplyBurstCap(events []ReleaseEvent, maxPerSeries int) (fanout, suppressed []ReleaseEvent) {
-	if maxPerSeries <= 0 {
-		maxPerSeries = 1
-	}
-	type groupKey struct {
-		libraryID int
-		seriesID  string
-	}
-	groups := make(map[groupKey][]ReleaseEvent)
-	order := make([]groupKey, 0)
-	for _, event := range events {
-		key := groupKey{event.LibraryID, event.SeriesID}
-		if _, ok := groups[key]; !ok {
-			order = append(order, key)
-		}
-		groups[key] = append(groups[key], event)
-	}
-
-	fanout = make([]ReleaseEvent, 0, len(events))
-	suppressed = make([]ReleaseEvent, 0)
-	for _, key := range order {
-		group := groups[key]
-		sort.Slice(group, func(i, j int) bool {
-			return group[i].EpisodeKey > group[j].EpisodeKey
-		})
-		keep := min(maxPerSeries, len(group))
-		suppressed = append(suppressed, group[keep:]...)
-		// Emit the kept events in ascending key order: fanout raises
-		// last_notified_episode_key as it processes each event, so a higher
-		// key processed first would make EvaluateRecipient suppress every
-		// remaining lower-key event in the group.
-		for i := keep - 1; i >= 0; i-- {
-			fanout = append(fanout, group[i])
-		}
-	}
-	return fanout, suppressed
+// sortForFanout orders episode events so each (library, series) group runs
+// in ascending episode_key order. Fanout raises last_notified_episode_key as
+// it processes each event inside one transaction, so a higher key processed
+// first would make EvaluateRecipient skip every lower-key event of the group.
+func sortForFanout(events []ReleaseEvent) {
+	slices.SortStableFunc(events, func(a, b ReleaseEvent) int {
+		return cmp.Or(
+			cmp.Compare(a.LibraryID, b.LibraryID),
+			strings.Compare(a.SeriesID, b.SeriesID),
+			cmp.Compare(a.EpisodeKey, b.EpisodeKey),
+		)
+	})
 }

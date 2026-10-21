@@ -432,8 +432,6 @@ var adminSettingDefaults = map[string]string{
 	"notifications.release_events_enabled":                     "true",
 	"notifications.fanout_enabled":                             "true",
 	"notifications.ui_enabled":                                 "true",
-	"notifications.fanout.settle_seconds":                      "30",
-	"notifications.fanout.max_series_burst":                    "3",
 	"notifications.fanout.max_event_age_hours":                 "72",
 	"notifications.retention.read_days":                        "90",
 	"notifications.retention.unread_days":                      "180",
@@ -726,10 +724,6 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 60000)
 	case "email.smtp_port":
 		return normalizeAdminInt(key, value, 1, 65535)
-	case "notifications.fanout.settle_seconds":
-		return normalizeAdminInt(key, value, 0, 3600)
-	case "notifications.fanout.max_series_burst":
-		return normalizeAdminInt(key, value, 1, 1000)
 	case "notifications.fanout.max_event_age_hours":
 		return normalizeAdminInt(key, value, 1, 24*365)
 	case "notifications.retention.read_days", "notifications.retention.unread_days",

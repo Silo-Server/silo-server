@@ -302,6 +302,83 @@ func TestFanoutResolvesOnlyEligibleRecipients(t *testing.T) {
 	}
 }
 
+// TestFanoutPushesOnlyTheFirstEpisodeOfASeriesBurst covers a season that
+// lands out of order and an episode that follows within the push cooldown:
+// every episode gets an inbox row, but only the lowest episode of the burst
+// reaches the profile's phone.
+func TestFanoutPushesOnlyTheFirstEpisodeOfASeriesBurst(t *testing.T) {
+	pool := inboxPageDB(t)
+	ctx := t.Context()
+	c := seedAccessCatalog(t, pool)
+	seedFanoutEvent(t, pool, c, []string{"viewer"})
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE push_devices (LIKE public.push_devices INCLUDING ALL);
+		CREATE TABLE push_delivery_attempts (LIKE public.push_delivery_attempts INCLUDING ALL);
+		INSERT INTO push_devices
+			(id, user_id, profile_id, device_id, platform, provider, apns_environment, apns_topic,
+			 apns_token_ciphertext, apns_token_hash, server_device_id, push_mode, enabled)
+		VALUES ('device-1', 1, 'viewer', 'local-1', 'apple', 'silo_relay', 'sandbox',
+			'org.siloserver.silo', 'ciphertext', 'hash-1', 'server-1', 'private_push', true)`); err != nil {
+		t.Fatalf("create push tables: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM episodes WHERE series_id = $1 AND content_id <> $2`, c.series, c.episode)
+	})
+	// seedFanoutEvent queued E2; E3 and E4 were queued before it, so the
+	// claim returns the season newest first.
+	seedEpisode := func(episode int, queuedAgo string) {
+		t.Helper()
+		episodeID := fmt.Sprintf("%s-e%d", c.series, episode)
+		key := EpisodeKey(1, episode)
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title)
+			VALUES ($1, $2, $2 || '-s1', 1, $3, 'E')`, episodeID, c.series, episode); err != nil {
+			t.Fatalf("seed episode %d: %v", episode, err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO release_events (id, library_id, series_id, episode_id, season_number, episode_number,
+				episode_key, available_at, dedupe_key, created_at)
+			VALUES ($1, $2, $3, $4, 1, $5, $6, now(), $7, now() - $8::interval)`,
+			episodeID, c.library, c.series, episodeID, episode, key, EpisodeDedupeKey(c.library, c.series, key), queuedAgo); err != nil {
+			t.Fatalf("seed release event %d: %v", episode, err)
+		}
+	}
+	seedEpisode(4, "2 seconds")
+	seedEpisode(3, "1 second")
+
+	worker := newAccessFanoutWorker(pool, scopeByProfile{"viewer": {}})
+	worker.settings = NewSettings(mapSettingReader{SettingApplePushDeliveryEnabled: "true"})
+	worker.SetPushOutbox(NewPushDeviceRepository(pool))
+	if processed, err := worker.processBatch(ctx); err != nil || processed != 3 {
+		t.Fatalf("processBatch = %d, %v; want 3 events", processed, err)
+	}
+	seedEpisode(5, "0 seconds")
+	if processed, err := worker.processBatch(ctx); err != nil || processed != 1 {
+		t.Fatalf("processBatch within the cooldown = %d, %v; want 1 event", processed, err)
+	}
+
+	var inbox int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notification_deliveries WHERE profile_id = 'viewer'`).Scan(&inbox); err != nil {
+		t.Fatal(err)
+	}
+	if inbox != 4 {
+		t.Fatalf("inbox rows = %d; want one per episode", inbox)
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT d.episode_id FROM push_delivery_attempts a
+		JOIN notification_deliveries d ON d.id = a.notification_delivery_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pushed, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(pushed, []string{c.episode}) {
+		t.Fatalf("pushed %v; want only %s", pushed, c.episode)
+	}
+}
+
 // TestNotifyFulfilledRetriesWhenRecipientScopeFails returns the scope error,
 // so the caller retries the request instead of stamping it notified.
 func TestNotifyFulfilledRetriesWhenRecipientScopeFails(t *testing.T) {
@@ -423,7 +500,7 @@ func seedFanoutEvent(t *testing.T, pool *pgxpool.Pool, c accessCatalog, profiles
 func newAccessFanoutWorker(pool *pgxpool.Pool, scopes ScopeResolver) *FanoutWorker {
 	worker := NewFanoutWorker(pool, NewReleaseRepository(pool), NewInterestRepository(pool),
 		NewDeliveryRepository(pool), NewPreferencesRepository(pool),
-		NewSettings(mapSettingReader{SettingFanoutSettleSeconds: "0"}), scopes, NewMultiDispatcher())
+		NewSettings(mapSettingReader{}), scopes, NewMultiDispatcher())
 	worker.logger = slog.New(slog.DiscardHandler)
 	return worker
 }
