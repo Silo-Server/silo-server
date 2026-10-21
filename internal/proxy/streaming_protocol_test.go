@@ -37,10 +37,7 @@ func TestStreamingProtocolOriginResponses(t *testing.T) {
 				_, _ = io.WriteString(w, "origin refusal")
 			}))
 			defer origin.Close()
-			token, err := streamtoken.Sign(streamtoken.Claims{SessionID: "session", TranscodeTransportID: "transport", PlayMethod: "transcode", TranscodeNode: origin.URL}, secret, time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
+			token := signToken(t, streamtoken.Claims{SessionID: "session", TranscodeTransportID: "transport", PlayMethod: "transcode", TranscodeNode: origin.URL}, secret, time.Minute)
 			server := httptest.NewServer(newSocketProxyServer(t, secret, clientip.NewResolver(nil)).Handler())
 			defer server.Close()
 			response := socketProxyRequest(t, server.Client(), tc.method, server.URL+"/stream/transcode/"+token+"/"+tc.suffix+"?opaque=1", map[string]string{"Range": "bytes=0-2"})
@@ -78,10 +75,7 @@ func TestStreamingProtocolLocalRemuxHeadStartsWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	proxy.watcher.Config().Playback.FFmpegPath = binary
-	token, err := streamtoken.Sign(streamtoken.Claims{SessionID: "remux", MediaPath: writeSocketProxyMedia(t), PlayMethod: "remux"}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := signToken(t, streamtoken.Claims{SessionID: "remux", MediaPath: writeSocketProxyMedia(t), PlayMethod: "remux"}, secret, time.Minute)
 	server := httptest.NewServer(proxy.Handler())
 	defer server.Close()
 	response := socketProxyRequest(t, server.Client(), http.MethodHead, server.URL+"/stream/remux/"+token, nil)

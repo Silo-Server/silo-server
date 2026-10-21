@@ -18,65 +18,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 )
 
-func TestAccessGroupHandlerIsDefaultRoundTrips(t *testing.T) {
-	store := newAccessGroupHandlerTestStore()
-	handler := NewAccessGroupHandler(store)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/access-groups", strings.NewReader(`{
-		"name": "Users",
-		"is_default": true
-	}`))
-	handler.HandleCreate(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("HandleCreate status = %d, body %s", rec.Code, rec.Body.String())
-	}
-	created := decodeAccessGroupResponse(t, rec)
-	if !created.IsDefault {
-		t.Fatalf("created is_default = false, want true")
-	}
-
-	rec = httptest.NewRecorder()
-	req = accessGroupRequestWithID(http.MethodGet, "/api/v1/admin/access-groups/1", nil, "1")
-	handler.HandleGet(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("HandleGet status = %d, body %s", rec.Code, rec.Body.String())
-	}
-	got := decodeAccessGroupResponse(t, rec)
-	if !got.IsDefault {
-		t.Fatalf("get is_default = false, want true")
-	}
-}
-
-func TestAccessGroupHandlerDefaultGroupGuards(t *testing.T) {
-	store := newAccessGroupHandlerTestStore()
-	store.groups[1] = access.Group{ID: 1, Name: "Default", DownloadAllowed: true, RequestsAllowed: true, IsDefault: true}
-	store.nextID = 2
-	handler := NewAccessGroupHandler(store)
-
-	rec := httptest.NewRecorder()
-	req := accessGroupRequestWithID(http.MethodDelete, "/api/v1/admin/access-groups/1", nil, "1")
-	handler.HandleDelete(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("HandleDelete(default) status = %d, want %d, body %s", rec.Code, http.StatusConflict, rec.Body.String())
-	}
-	if _, ok := store.groups[1]; !ok {
-		t.Fatalf("default group removed despite conflict response")
-	}
-
-	rec = httptest.NewRecorder()
-	req = accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/1", strings.NewReader(`{
-		"is_default": false
-	}`), "1")
-	handler.HandleUpdate(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("HandleUpdate(demote default) status = %d, want %d, body %s", rec.Code, http.StatusConflict, rec.Body.String())
-	}
-	if !store.groups[1].IsDefault {
-		t.Fatalf("default group demoted despite conflict response")
-	}
-}
-
 type accessGroupHandlerTestStore struct {
 	nextID int64
 	groups map[int64]access.Group

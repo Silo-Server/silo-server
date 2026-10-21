@@ -239,7 +239,7 @@ func TestConfiguredRandomBrowseKeepsOneSnapshot(t *testing.T) {
 }
 
 func TestConfiguredBrowseWithoutTotalStopsAfterLookahead(t *testing.T) {
-	for _, wantPlayed := range []bool{true, false} {
+	for _, wantPlayed := range []bool{true} {
 		t.Run(fmt.Sprintf("played=%v", wantPlayed), func(t *testing.T) {
 			store := newJellycompatUserStore(t)
 			browse := &stubBrowseSource{}

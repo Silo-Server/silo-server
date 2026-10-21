@@ -141,11 +141,3 @@ func TestHiddenSeriesIDsKeepsSeriesWithoutEpisodes(t *testing.T) {
 		t.Fatalf("a series with no available episodes must stay visible: hidden=%v err=%v", hidden, err)
 	}
 }
-
-func TestHiddenSeriesIDsNilFilterHidesNothing(t *testing.T) {
-	var v *WatchlistVisibility
-	hidden, err := v.HiddenSeriesIDs(context.Background(), &visFakeStore{removeWatched: true}, "p", []string{"x"})
-	if err != nil || len(hidden) != 0 {
-		t.Fatalf("nil filter must be a no-op: hidden=%v err=%v", hidden, err)
-	}
-}

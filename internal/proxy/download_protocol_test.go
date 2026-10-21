@@ -37,10 +37,7 @@ func TestDownloadProtocolRemoteStatusAndHead(t *testing.T) {
 				}
 			}))
 			defer origin.Close()
-			token, err := streamtoken.Sign(streamtoken.Claims{SessionID: "download-fixture", PlayMethod: streamtoken.PlayMethodDownload, TranscodeNode: origin.URL, DownloadArtifactID: "fixture"}, secret, time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
+			token := signToken(t, streamtoken.Claims{SessionID: "download-fixture", PlayMethod: streamtoken.PlayMethodDownload, TranscodeNode: origin.URL, DownloadArtifactID: "fixture"}, secret, time.Minute)
 			server := httptest.NewServer(newDownloadProxyServer(t, secret).Handler())
 			defer server.Close()
 			req, err := http.NewRequestWithContext(t.Context(), tc.method, server.URL+"/downloads/file/"+token, nil)

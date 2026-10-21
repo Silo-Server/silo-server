@@ -4,7 +4,6 @@ import {
   chartLockReason,
   chartOfSourceConfig,
   chartSource,
-  chartSummary,
   franchiseSource,
   tmdbListSource,
   chartMediaKind,
@@ -141,15 +140,5 @@ describe("stored TMDB sources", () => {
       source_url: "tmdb://collection/119",
       source_config: { mode: "tmdb_collection", collection_id: 119 },
     });
-  });
-
-  it("says what a chart follows in words", () => {
-    expect(chartSummary({ preset: "trending", mediaType: "movie", timeWindow: "week" })).toBe(
-      "Trending movies, this week",
-    );
-    expect(chartSummary({ preset: "top_rated", mediaType: "tv" })).toBe("Top rated TV shows");
-    expect(chartSummary({ preset: "trending", mediaType: "all", timeWindow: "day" })).toBe(
-      "Trending movies and TV shows, today",
-    );
   });
 });

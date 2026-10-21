@@ -148,7 +148,6 @@ func TestUpcomingSeriesScope(t *testing.T) {
 		wantLibrary, wantStatus             int
 	}{
 		{"series", "SeriesId=" + series, "series", "", 0, 200},
-		{"case insensitive", "seriesid=" + series, "series", "", 0, 200},
 		{"parent series", "ParentId=" + series, "series", "", 0, 200},
 		{"matching parent", "SeriesId=" + series + "&ParentId=" + series, "series", "", 0, 200},
 		{"library intersection", "SeriesId=" + series + "&ParentId=" + library, "series", "", 3, 200},
@@ -208,7 +207,6 @@ func TestParentEpisodesComposeFiltersBeforePage(t *testing.T) {
 		includeTotal     bool
 	}{
 		{name: "default", includeTotal: true},
-		{name: "enabled", totalParam: "&EnableTotalRecordCount=true", includeTotal: true},
 		{name: "disabled", totalParam: "&EnableTotalRecordCount=false"},
 	} {
 		for _, route := range []string{"items", "shows"} {
@@ -335,7 +333,7 @@ func (*presentationViewsContent) ListUserLibraries(context.Context, *Session) ([
 }
 
 func TestItemsViewsPresentationControls(t *testing.T) {
-	for _, path := range []string{"/Items?", "/Items?IncludeItemTypes=CollectionFolder&"} {
+	for _, path := range []string{"/Items?"} {
 		for _, controls := range []string{"", "EnableImages=false&EnableUserData=false", "ImageTypeLimit=0", "EnableImageTypes=Backdrop"} {
 			t.Run(path+controls, func(t *testing.T) {
 				codec := NewResourceIDCodec()

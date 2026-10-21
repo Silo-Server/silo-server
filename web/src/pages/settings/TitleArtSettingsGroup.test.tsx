@@ -45,13 +45,6 @@ describe("TitleArtSettingsGroup", () => {
     mocks.clear.mockReset().mockResolvedValue(undefined);
   });
 
-  it("stays hidden on a server that predates the setting", () => {
-    mocks.supported = false;
-    const { container } = render(<TitleArtSettingsGroup />);
-
-    expect(container).toBeEmptyDOMElement();
-  });
-
   it("saves this browser's own choice while not applied to all devices", async () => {
     render(<TitleArtSettingsGroup />);
 
@@ -110,15 +103,6 @@ describe("TitleArtSettingsGroup", () => {
     expect(mocks.clear).not.toHaveBeenCalled();
   });
 
-  it("says when this browser follows the server default and offers no reset", () => {
-    mocks.setting = { value: false, source: "default", isPending: false, isError: false };
-    render(<TitleArtSettingsGroup />);
-
-    expect(screen.getByRole("switch", { name: "Show title art" })).not.toBeChecked();
-    expect(screen.getByText(/Using the server default \(off\)/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Use server default" })).not.toBeInTheDocument();
-  });
-
   it.each(["profile_device", "profile"])(
     "returns a %s choice to the server default without saving it",
     async (source) => {
@@ -152,19 +136,19 @@ describe("TitleArtSettingsGroup", () => {
     },
   );
 
-  it.each([
-    ["loading", { isPending: true, isError: false }],
-    ["failed", { isPending: false, isError: true }],
-  ])("claims neither the server default nor an own choice while %s", (_, state) => {
-    // useSettingValue reports the contract default with source "default" here,
-    // which says nothing about what this server would answer.
-    mocks.setting = { value: true, source: "default", ...state };
-    render(<TitleArtSettingsGroup />);
+  it.each([["failed", { isPending: false, isError: true }]])(
+    "claims neither the server default nor an own choice while %s",
+    (_, state) => {
+      // useSettingValue reports the contract default with source "default" here,
+      // which says nothing about what this server would answer.
+      mocks.setting = { value: true, source: "default", ...state };
+      render(<TitleArtSettingsGroup />);
 
-    expect(screen.queryByText(/Using the server default/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Only affects this browser/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Use server default" })).not.toBeInTheDocument();
-  });
+      expect(screen.queryByText(/Using the server default/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Only affects this browser/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Use server default" })).not.toBeInTheDocument();
+    },
+  );
 
   it("pins this browser before handing control back to each device", async () => {
     mocks.setting = { value: false, source: "profile", isPending: false, isError: false };

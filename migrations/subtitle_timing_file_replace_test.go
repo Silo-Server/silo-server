@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -89,4 +91,8 @@ func TestSubtitleTimingFileReplacePostgres(t *testing.T) {
 
 	migrationExec(t, tx, fmtFileID(`UPDATE media_files SET file_size = 2000 WHERE id = $1`, other))
 	kept(otherSubtitle, false)
+}
+
+func fmtFileID(sql string, file int) string {
+	return strings.ReplaceAll(sql, "$1", strconv.Itoa(file))
 }

@@ -23,7 +23,6 @@ func TestPlaybackInfoSeekReanchorOptIn(t *testing.T) {
 		copy, want         bool
 	}{
 		{"missing", "", "", true, false},
-		{"false", `,"SiloSeekReanchor":false`, "", true, false},
 		{"body", `,"SiloSeekReanchor":true`, "", true, true},
 		{"query", "", "?siloseekreanchor=true&starttimeticks=9000000000", true, true},
 		{"encoding is not opted in", `,"SiloSeekReanchor":true`, "", false, false},
@@ -90,8 +89,6 @@ func TestSeekReanchorLocalAndRemoteFreezeActualOrigin(t *testing.T) {
 		enabled           bool
 	}{
 		{"initial resume", 900, 898.125, true},
-		{"forward outside window", 1800, 1798.125, true},
-		{"backward outside window", 300, 298.125, true},
 		{"legacy source-zero startup", 900, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

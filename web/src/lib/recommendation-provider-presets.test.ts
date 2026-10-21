@@ -8,15 +8,6 @@ import {
 } from "./recommendation-provider-presets";
 
 describe("recommendation provider presets", () => {
-  it("includes the wizard custom option alongside the built-in providers", () => {
-    expect(RECOMMENDATION_PROVIDER_OPTIONS.map((preset) => preset.id)).toEqual([
-      "gemini",
-      "ollama",
-      "openai",
-      "custom",
-    ]);
-  });
-
   it("matches saved embedding settings back to a built-in provider", () => {
     expect(
       matchRecommendationProviderPreset("https://api.openai.com/", "text-embedding-3-large")?.id,

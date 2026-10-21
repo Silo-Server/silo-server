@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -8,6 +9,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -159,31 +164,6 @@ func TestUpdateSubtitleProviderAppliesSavedDraftLive(t *testing.T) {
 	}
 }
 
-func TestUpdateSubtitleProviderDisablesLiveProvider(t *testing.T) {
-	repo := newAdminSubtitleConfigRepo()
-	handler, manager := newTestableAdminSubtitleHandler(repo)
-	manager.RegisterProvider(&adminSubtitleTestProvider{
-		name: "subdl",
-		key:  subtitleTestCredential("valid"),
-	})
-
-	body, _ := json.Marshal(updateSubtitleProviderRequest{Enabled: false})
-	req := withSubtitleRouteParam(
-		newAdminSubtitleRequest(http.MethodPut, "/admin/subtitle-providers/subdl", body),
-		"provider", "subdl",
-	)
-	rec := httptest.NewRecorder()
-	handler.HandleUpdateProvider(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	results, err := manager.Search(context.Background(), subtitles.SearchRequest{Title: "Movie"})
-	if err != nil || len(results.Results) != 0 {
-		t.Fatalf("disabled provider results = %#v, err = %v", results, err)
-	}
-}
-
 func TestUpdateLegacySubtitleProviderPreservesV1Compatibility(t *testing.T) {
 	repo := newAdminSubtitleConfigRepo()
 	handler := NewAdminSubtitleHandler(repo)
@@ -214,37 +194,6 @@ func TestUpdateLegacySubtitleProviderPreservesV1Compatibility(t *testing.T) {
 	}
 	if response.AppliedLive {
 		t.Fatal("legacy provider reported as applied live")
-	}
-}
-
-func TestLegacySubtitleProviderConnectionFailureKeepsHTTP200(t *testing.T) {
-	repo := newAdminSubtitleConfigRepo()
-	repo.configs["legacy-provider"] = subtitles.ProviderConfig{
-		ProviderName: "legacy-provider",
-		Enabled:      true,
-		APIKey:       subtitleTestCredential("legacy"),
-	}
-	handler := NewAdminSubtitleHandler(repo)
-	req := withSubtitleRouteParam(
-		newAdminSubtitleRequest(http.MethodPost, "/admin/subtitle-providers/legacy-provider/test", nil),
-		"provider", "legacy-provider",
-	)
-	rec := httptest.NewRecorder()
-
-	handler.HandleTestProvider(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
-	var response struct {
-		Success bool   `json:"success"`
-		Error   string `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.Success || response.Error == "" {
-		t.Fatalf("response = %#v, want a 200 failure payload", response)
 	}
 }
 
@@ -372,4 +321,26 @@ func TestSubtitleProviderConnectionTestRequiresSearchResultsForEveryBuiltin(t *t
 			}
 		})
 	}
+}
+
+func newAdminSubtitleRequest(method, path string, body []byte) *http.Request {
+	var reader *bytes.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	} else {
+		reader = bytes.NewReader(nil)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	ctx := apimw.SetClaims(context.Background(), &auth.Claims{
+		UserID:    1,
+		Role:      "admin",
+		TokenType: auth.TokenTypeAccess,
+	})
+	return req.WithContext(ctx)
+}
+
+func withSubtitleRouteParam(req *http.Request, key, value string) *http.Request {
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add(key, value)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 }

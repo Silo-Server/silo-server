@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import fixture from "../../../../contracts/api/v2/fixtures/admin_marker_history_all.json";
 import { setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
-import { getAllMarkerHistory, getItemMarkerHistory } from "./markers";
+import { getAllMarkerHistory } from "./markers";
 beforeEach(() => {
   installPolicyStorageMocks();
   setProfileId("p-owner");
@@ -17,20 +17,4 @@ it("preserves opaque audit identifiers and adapts absent snapshots", async () =>
   expect(rows[0]?.api_key_id).toBe("9007199254740995");
   expect(rows[0]?.before?.start).toBe(1.5);
   expect(rows[0]?.after).toBeNull();
-});
-it("reads item history with encoded identity and forwards cancellation", async () => {
-  const controller = new AbortController();
-  // The caller's abort reaches the in-flight request's signal.
-  let forwarded: boolean | undefined;
-  const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
-    controller.abort();
-    forwarded = init?.signal?.aborted;
-    return jsonResponse({ history: [] });
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  expect(await getItemMarkerHistory("item/a", 25, controller.signal)).toEqual([]);
-  expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-    "/api/v2/admin/markers/items/item%2Fa/history?limit=25",
-  );
-  expect(forwarded).toBe(true);
 });

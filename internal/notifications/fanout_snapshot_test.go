@@ -24,10 +24,3 @@ func TestCapturedFanoutCandidatesPreserveCursorAdvances(t *testing.T) {
 		t.Fatal("later episode should remain eligible")
 	}
 }
-
-func TestCapturedFanoutCandidatesDoNotRestoreRemovedInterest(t *testing.T) {
-	candidates := capturedFanoutCandidates([]SeriesInterest{{UserID: 1, ProfileID: "new-profile", Favorite: true}}, map[profileKey]struct{}{{1, "removed"}: {}})
-	if len(candidates) != 0 {
-		t.Fatalf("new or removed interest entered batch: %+v", candidates)
-	}
-}

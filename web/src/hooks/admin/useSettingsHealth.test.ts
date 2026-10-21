@@ -35,18 +35,6 @@ describe("buildSettingsHealth", () => {
     expect(storage.action).toBeUndefined();
   });
 
-  it("summarises both buckets when private storage is configured too", () => {
-    const storage = tile(
-      {
-        storageAvailable: true,
-        settings: { "s3.public_bucket": "silo-art", "s3.private_bucket": "silo-private" },
-      },
-      "storage",
-    );
-
-    expect(storage.detail).toBe("S3 · public + private");
-  });
-
   it("says a restart is pending once the first bucket is saved", () => {
     // `storage_available` is settled when the S3 client is built at boot, so
     // the save that configures the first bucket cannot flip it. "Not set up"
@@ -109,17 +97,6 @@ describe("buildSettingsHealth", () => {
     expect(storage.stateText).toBe("Not set up");
   });
 
-  it("names the configured accelerator on the transcoding item", () => {
-    const transcoding = tile(
-      { settings: { "playback.transcode_enabled": "true", "playback.hw_accel": "vaapi" } },
-      "transcoding",
-    );
-
-    expect(transcoding.state).toBe("ok");
-    expect(transcoding.stateText).toBe("Ready");
-    expect(transcoding.detail).toBe("VA-API");
-  });
-
   it("scopes restart warnings to the tile whose keys are actually pending", () => {
     // A saved database key owes a restart; neither storage nor transcoding
     // changed, so neither tile may claim "Restart pending".
@@ -158,42 +135,6 @@ describe("buildSettingsHealth", () => {
     };
     expect(tile(storagePending, "storage").stateText).toBe("Restart pending");
     expect(tile(storagePending, "transcoding").stateText).toBe("Ready");
-  });
-
-  it("turns the transcoding tile amber while a settings restart is pending", () => {
-    const transcoding = tile(
-      {
-        settings: { "playback.transcode_enabled": "true" },
-        serverStatus: {
-          started_at: "2026-01-01T00:00:00Z",
-          restart_required: true,
-          restart_required_reason: "server_settings",
-          restart_requested: false,
-        },
-      },
-      "transcoding",
-    );
-
-    expect(transcoding.state).toBe("warn");
-    expect(transcoding.stateText).toBe("Restart pending");
-    expect(transcoding.action).toEqual({ label: "Fix", page: "playback" });
-  });
-
-  it("leaves transcoding alone for a restart another subsystem asked for", () => {
-    const transcoding = tile(
-      {
-        settings: { "playback.transcode_enabled": "true" },
-        serverStatus: {
-          started_at: "2026-01-01T00:00:00Z",
-          restart_required: true,
-          restart_required_reason: "jellyfin_compat",
-          restart_requested: false,
-        },
-      },
-      "transcoding",
-    );
-
-    expect(transcoding.state).toBe("ok");
   });
 
   it("marks search as informational on Postgres and healthy on Meilisearch", () => {

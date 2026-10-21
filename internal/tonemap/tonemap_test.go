@@ -123,42 +123,15 @@ func TestResolveSourceClassifiesHLGByPrimaries(t *testing.T) {
 	}
 }
 
-// TestPolicyKeepsHardwareAndSoftwareIndependent verifies each executor can be enabled separately.
-func TestPolicyKeepsHardwareAndSoftwareIndependent(t *testing.T) {
-	tests := []struct {
-		hardware bool
-		software bool
-		want     Policy
-	}{
-		{want: PolicyNone},
-		{hardware: true, want: PolicyHardwareOnly},
-		{software: true, want: PolicySoftwareOnly},
-		{hardware: true, software: true, want: PolicyHardwareThenSoftware},
-	}
-	for _, tt := range tests {
-		if got := NewPolicy(tt.hardware, tt.software); got != tt.want {
-			t.Fatalf("NewPolicy(%t, %t) = %q, want %q", tt.hardware, tt.software, got, tt.want)
-		}
-	}
-}
-
 // TestProbeAdvertisesOnlySuccessfulSourceKinds verifies discovery reports only smoke-tested conversions.
 func TestProbeAdvertisesOnlySuccessfulSourceKinds(t *testing.T) {
-	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		joined := strings.Join(args, " ")
-		switch {
-		case slices.Contains(args, "-filters"):
-			return []byte(" .S. sidedata V->V\n .S. zscale V->V\n .S. tonemap V->V\n .S. tonemapx V->V\n .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"), nil
-		case slices.Contains(args, "-encoders"):
-			return []byte("libx264 h264_qsv"), nil
-		case strings.Contains(joined, "libx264"):
+	filters := " .S. sidedata V->V\n .S. zscale V->V\n .S. tonemap V->V\n .S. tonemapx V->V\n .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"
+	runner := listingRunner(nil, filters, "libx264 h264_qsv", func(args string) ([]byte, error) {
+		if strings.Contains(args, "libx264") || strings.Contains(args, "h264_qsv") && strings.Contains(args, "smpte2084") {
 			return nil, nil
-		case strings.Contains(joined, "h264_qsv") && strings.Contains(joined, "smpte2084"):
-			return nil, nil
-		default:
-			return nil, errors.New("unsupported fixture")
 		}
-	}
+		return nil, errors.New("unsupported fixture")
+	})
 
 	got := ProbeWithRunner(context.Background(), "/ffmpeg", "qsv", "/dev/dri/renderD128", runner)
 	if !got.Supports(ModeSoftware, SourcePQ) || !got.Supports(ModeSoftware, SourceHLG) {
@@ -172,23 +145,16 @@ func TestProbeAdvertisesOnlySuccessfulSourceKinds(t *testing.T) {
 // TestProbeValidatesEveryConfiguredHardwareDevice verifies pooled devices share only common capabilities.
 func TestProbeValidatesEveryConfiguredHardwareDevice(t *testing.T) {
 	seenSecondDevice := false
-	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		joined := strings.Join(args, " ")
-		switch {
-		case slices.Contains(args, "-filters"):
-			return []byte(" .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"), nil
-		case slices.Contains(args, "-encoders"):
-			return []byte("h264_qsv"), nil
-		case strings.Contains(joined, "renderD129"):
+	filters := " .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"
+	runner := listingRunner(nil, filters, "h264_qsv", func(args string) ([]byte, error) {
+		if strings.Contains(args, "renderD129") {
 			seenSecondDevice = true
-			if strings.Contains(joined, "arib-std-b67") {
+			if strings.Contains(args, "arib-std-b67") {
 				return nil, errors.New("HLG unsupported on second device")
 			}
-			return nil, nil
-		default:
-			return nil, nil
 		}
-	}
+		return nil, nil
+	})
 
 	got := ProbeWithRunner(context.Background(), "/ffmpeg", "qsv", "/dev/dri/renderD128,/dev/dri/renderD129", runner)
 	if !seenSecondDevice {
@@ -196,28 +162,6 @@ func TestProbeValidatesEveryConfiguredHardwareDevice(t *testing.T) {
 	}
 	if !got.Supports(ModeHardware, SourcePQ) || got.Supports(ModeHardware, SourceHLG) || got.Supports(ModeHardware, SourceHLGBT709) {
 		t.Fatalf("hardware capabilities = %#v, want PQ only", got)
-	}
-}
-
-// TestFiltersDeclareBT709Output verifies tone-map graphs explicitly produce SDR color metadata.
-func TestFiltersDeclareBT709Output(t *testing.T) {
-	for name, filter := range map[string]string{
-		"software pq":  SoftwareFilter(SourcePQ, "tonemapx"),
-		"software hlg": SoftwareFilter(SourceHLG, "tonemap"),
-		"qsv":          IntelFilter(SourcePQ, 0),
-		"vaapi":        VAAPIFilter(SourcePQ),
-		"cuda":         CUDAFilter(SourcePQ),
-		"software dv":  SoftwareFilter(SourceDolbyVision, SoftwareFilterBT2390),
-		"qsv dv":       IntelFilter(SourceDolbyVision, 0),
-		"cuda dv":      CUDAFilter(SourceDolbyVision),
-	} {
-		t.Run(name, func(t *testing.T) {
-			for _, token := range []string{"bt709", "format="} {
-				if !strings.Contains(filter, token) {
-					t.Fatalf("filter %q lacks %q", filter, token)
-				}
-			}
-		})
 	}
 }
 

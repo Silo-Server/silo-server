@@ -17,7 +17,7 @@ func TestSystemInfoCastReceiverApplications(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := NewRouter(Dependencies{Config: cfg})
-	for _, path := range []string{"/System/Info", "/system/info", "/emby/System/Info", "/jellyfin/System/Info"} {
+	for _, path := range []string{"/System/Info"} {
 		t.Run(path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

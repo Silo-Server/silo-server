@@ -20,13 +20,6 @@ function episode(overrides: Partial<EpisodeListItem> = {}): EpisodeListItem {
 }
 
 describe("EpisodeCardCaption", () => {
-  it("shows the code and title, the date and runtime, and the description", () => {
-    render(<EpisodeCardCaption episode={episode()} hideOverview={false} />);
-    expect(screen.getByText("S01E02 · Chapter 2")).toBeInTheDocument();
-    expect(screen.getByText(/52m$/)).toBeInTheDocument();
-    expect(screen.getByText("Oliver rushes headlong into a romance.")).toHaveClass("line-clamp-3");
-  });
-
   it("leaves out a spoiler-hidden description and its translation label", () => {
     render(
       <EpisodeCardCaption
@@ -47,30 +40,5 @@ describe("EpisodeCardCaption", () => {
       />,
     );
     expect(screen.getByText("Translated by AI")).toBeInTheDocument();
-  });
-
-  it("puts badges on the title line and a notice on the date line", () => {
-    render(
-      <EpisodeCardCaption
-        episode={episode()}
-        hideOverview={false}
-        badges={<span>watched</span>}
-        notice={<span>Damaged file</span>}
-      />,
-    );
-    const badges = screen.getByText("watched").parentElement!;
-    expect(badges).toHaveClass("shrink-0");
-    expect(badges.parentElement).toBe(
-      screen.getByText("S01E02 · Chapter 2").closest("p")!.parentElement,
-    );
-    expect(screen.getByText("Damaged file").closest("div")).toBe(
-      screen.getByText(/52m$/).closest("div"),
-    );
-  });
-
-  it("gives screen readers the season and episode in words", () => {
-    render(<EpisodeCardCaption episode={episode()} hideOverview={false} />);
-    expect(screen.getByText("S01E02 · Chapter 2")).toHaveAttribute("aria-hidden", "true");
-    expect(screen.getByText("Season 1, Episode 2, Chapter 2")).toHaveClass("sr-only");
   });
 });

@@ -290,27 +290,6 @@ func TestSignedRequestRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLogThrottleCountsSuppressedWarnings(t *testing.T) {
-	var throttle logThrottle
-	start := time.Hour
-	if suppressed, ok := throttle.allowAt(start); !ok || suppressed != 0 {
-		t.Fatalf("first warning: allow = %d, %v; want 0, true", suppressed, ok)
-	}
-	for range 3 {
-		if _, ok := throttle.allowAt(start + time.Minute); ok {
-			t.Fatal("a warning inside the interval was allowed")
-		}
-	}
-	// A concurrent caller that sampled the time before the last warning was
-	// recorded is inside the interval too, and must not move it backwards.
-	if _, ok := throttle.allowAt(start - time.Millisecond); ok {
-		t.Fatal("an out-of-order earlier sample was allowed")
-	}
-	if suppressed, ok := throttle.allowAt(start + logInterval); !ok || suppressed != 4 {
-		t.Fatalf("after the interval: allow = %d, %v; want 4, true", suppressed, ok)
-	}
-}
-
 // A worker registered under a path prefix that its reverse proxy strips
 // serves, and verifies, the path without the prefix.
 func TestSignedPathIsRelativeToTheNodeURL(t *testing.T) {

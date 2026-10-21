@@ -1,7 +1,6 @@
 package userdb
 
 import (
-	"database/sql"
 	"slices"
 	"testing"
 )
@@ -9,14 +8,7 @@ import (
 // An existing v28 store loses every stored profile theme choice at every scope
 // and keeps every other setting value.
 func TestMigrateToV29RetiresProfileThemes(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	const now = "2026-09-26T00:00:00Z"
 	for _, row := range []struct{ key, scope, profile, device, value string }{

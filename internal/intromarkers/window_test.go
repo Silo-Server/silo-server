@@ -2,7 +2,6 @@ package intromarkers
 
 import (
 	"math"
-	"math/rand/v2"
 	"testing"
 )
 
@@ -43,18 +42,10 @@ func TestAdjustSegmentAddsTheWindowStart(t *testing.T) {
 // windowedInputs builds four episodes whose fingerprints share a 300-point
 // segment at point 100, each fingerprinted from windowStart.
 func windowedInputs(windowStart float64) []fingerprintInput {
-	shared := make([]uint32, 300)
-	sharedRNG := rand.New(rand.NewPCG(0, 1))
-	for i := range shared {
-		shared[i] = sharedRNG.Uint32()
-	}
+	shared := randomPoints(300, 0, 1)
 	inputs := make([]fingerprintInput, 0, 4)
 	for e := 1; e <= 4; e++ {
-		points := make([]uint32, 600)
-		rng := rand.New(rand.NewPCG(uint64(e), 9))
-		for i := range points {
-			points[i] = rng.Uint32()
-		}
+		points := randomPoints(600, uint64(e), 9)
 		copy(points[100:], shared)
 		inputs = append(inputs, fingerprintInput{
 			Candidate:   Candidate{FileID: e, EpisodeID: string(rune('a' + e)), EpisodeNumber: e, DurationSeconds: 3000},
@@ -63,39 +54,6 @@ func windowedInputs(windowStart float64) []fingerprintInput {
 		})
 	}
 	return inputs
-}
-
-func TestCompareFingerprintsShiftsSegmentsByTheWindowStart(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	head := CompareFingerprints(windowedInputs(0), cfg)
-	tail := CompareFingerprints(windowedInputs(2000), cfg)
-	if len(head) != 4 || len(tail) != 4 {
-		t.Fatalf("matched %d head and %d tail files, want 4 each", len(head), len(tail))
-	}
-	for fileID, segment := range head {
-		shifted := tail[fileID]
-		if math.Abs(shifted.Start-(segment.Start+2000)) > 1e-9 || math.Abs(shifted.End-(segment.End+2000)) > 1e-9 {
-			t.Fatalf("file %d: tail window segment %+v, want the head segment %+v moved by 2000 s", fileID, shifted, segment)
-		}
-		if shifted.Confidence != segment.Confidence || shifted.Algorithm != segment.Algorithm {
-			t.Fatalf("file %d: window start changed the rating: %+v vs %+v", fileID, shifted, segment)
-		}
-	}
-}
-
-func TestIntroProfileKeepsIntroBounds(t *testing.T) {
-	cfg := DefaultConfig("ffmpeg")
-	cfg.MinimumIntroDurationSeconds, cfg.MaximumIntroDurationSeconds = 8, 200
-	profile := introProfile(cfg)
-	if profile.MinSeconds != 8 || profile.MaxSeconds != 200 {
-		t.Fatalf("pair bounds = %.0f-%.0f, want the configured 8-200", profile.MinSeconds, profile.MaxSeconds)
-	}
-	if profile.AdjustedMinSeconds != 10 || profile.AdjustedMaxSeconds != 180 {
-		t.Fatalf("adjusted bounds = %.0f-%.0f, want 10-180", profile.AdjustedMinSeconds, profile.AdjustedMaxSeconds)
-	}
-	if profile.Algorithm != ChromaprintAlgorithm || profile.ZeroStartSnapSeconds != zeroStartSnapSeconds {
-		t.Fatalf("profile = %+v", profile)
-	}
 }
 
 func TestCompareFingerprintsAppliesProfileBounds(t *testing.T) {

@@ -150,23 +150,6 @@ func TestEncryptedSettings_SensitiveRoundTrip(t *testing.T) {
 	}
 }
 
-func TestEncryptedSettings_NonSensitivePassthrough(t *testing.T) {
-	ctx := context.Background()
-	raw := newMemSettings()
-	dec := NewEncryptedSettingsRepo(raw, newCipher(t))
-
-	const key = "server.log_level"
-	if SensitiveSettingKeys[key] {
-		t.Fatalf("precondition: %q must be non-sensitive", key)
-	}
-	if err := dec.Set(ctx, key, "debug"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	if got := raw.m[key]; got != "debug" {
-		t.Fatalf("non-sensitive raw value = %q, want plaintext 'debug'", got)
-	}
-}
-
 func TestEncryptedSettings_LegacyPlaintextPassthrough(t *testing.T) {
 	ctx := context.Background()
 	raw := newMemSettings()

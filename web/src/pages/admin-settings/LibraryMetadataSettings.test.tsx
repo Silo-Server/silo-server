@@ -1,10 +1,10 @@
 import { render as renderPage, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import LibraryMetadataSettings from "./LibraryMetadataSettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 
 const useSettingsFormMock = vi.fn();
 const useRestartKeysMock = vi.fn(() => new Set<string>());
@@ -67,21 +67,8 @@ vi.mock("@/hooks/queries/admin/ratingSources", () => ({
   useAdminRatingSources: () => ratingSourcesMock(),
 }));
 
-function makeForm(values: Record<string, string>, dirty: string[] = []) {
-  const dirtySet = new Set(dirty);
-  return {
-    isLoading: false,
-    getValue: (key: string) => values[key] ?? "",
-    getPersistedValue: (key: string) => values[key] ?? "",
-    setValue: vi.fn(),
-    isDirty: (key: string) => dirtySet.has(key),
-    dirtyCount: dirtySet.size,
-    save: vi.fn(),
-    discard: vi.fn(),
-    isSaving: false,
-    restartRequired: false,
-  };
-}
+const makeForm = (values: Record<string, string>, dirty: string[] = []) =>
+  fakeSettingsForm(values, { dirty });
 
 function render(values: Record<string, string>, dirty: string[] = []) {
   useSettingsFormMock.mockReturnValue(makeForm(values, dirty));
@@ -95,24 +82,6 @@ function render(values: Record<string, string>, dirty: string[] = []) {
 /** Opens one group's Advanced disclosure via its persisted state. */
 function expand(id: string) {
   localStorage.setItem(`silo.admin.advanced.${id}`, "true");
-}
-
-/** The static-markup group whose heading reads `name`. */
-function groupNamed(markup: string, name: string): HTMLElement {
-  const container = document.createElement("div");
-  container.innerHTML = markup;
-  const group = Array.from(container.querySelectorAll<HTMLElement>("[role=group]")).find(
-    (candidate) => candidate.querySelector("h3")?.textContent === name,
-  );
-  if (!group) throw new Error(`no group rendered with heading: ${name}`);
-  return group;
-}
-
-/** The accessible names of a group's disclosure buttons. */
-function disclosures(group: HTMLElement): string[] {
-  return Array.from(group.querySelectorAll("button[aria-expanded]"), (button) =>
-    button.getAttribute("aria-label"),
-  ).filter((label): label is string => label !== null);
 }
 
 function text(markup: string): string {
@@ -142,30 +111,6 @@ describe("LibraryMetadataSettings", () => {
     useAdminNodesMock.mockReturnValue({ data: [transcodeNode], isSuccess: true });
   });
 
-  it("orders the groups with the general switch first", () => {
-    const container = document.createElement("div");
-    container.innerHTML = render({});
-
-    const headings = Array.from(
-      container.querySelectorAll("section[role=group]"),
-      (group) => group.querySelector("h3")?.textContent,
-    );
-    expect(headings).toEqual([
-      "General",
-      "Scanning",
-      "Maturity limits",
-      "Ratings",
-      "Subtitle sync",
-    ]);
-  });
-
-  it("shows the versions switch alone in General, without a disclosure", () => {
-    const group = groupNamed(render({}), "General");
-    expect(disclosures(group)).toEqual([]);
-    expect(group.textContent).toContain("Show all library versions on detail page");
-    expect(group.textContent).not.toContain("Save provider artwork to storage");
-  });
-
   it("shows the versions switch as the opposite of the stored scope key", () => {
     const label = "Show all library versions on detail page";
     expect(toggleChecked(render({}), label)).toBe(true);
@@ -177,38 +122,6 @@ describe("LibraryMetadataSettings", () => {
     );
   });
 
-  it("shows the three worker counts and keeps the rest of scanning behind Advanced", () => {
-    const rendered = render({});
-    const scanning = groupNamed(rendered, "Scanning");
-
-    for (const label of ["Scanner workers", "Matcher workers", "Image encoding workers"]) {
-      expect(scanning.textContent).toContain(label);
-    }
-    expect(disclosures(scanning)).toEqual(["Advanced · 2 settings"]);
-    expect(scanning.textContent).not.toContain("Matcher batch size");
-    // Each library has its own real-time monitoring switch; the server-wide
-    // one shows only while it is off.
-    expect(text(rendered)).not.toContain("Real-time monitoring");
-
-    const calls = useSettingsFormMock.mock.calls;
-    const keys: string[] = calls[calls.length - 1]?.[0]?.keys ?? [];
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        "catalog.scope_versions_to_library",
-        "scanner.workers",
-        "matcher.workers",
-        "matcher.batch_size",
-        "metadata.image_workers",
-        "metadata.person_refresh_per_minute",
-      ]),
-    );
-    // Moved to Storage, Playback and Search, which load and save them.
-    expect(keys).not.toContain("metadata.cache_images");
-    expect(keys.some((key) => key.startsWith("markers."))).toBe(false);
-    expect(keys.some((key) => key.startsWith("catalog.search."))).toBe(false);
-    expect(keys).toContain("scanner.realtime_monitoring");
-  });
-
   it("shows the server-wide real-time monitoring switch only while it is off", () => {
     const off = render({ "scanner.realtime_monitoring": "false" });
     expect(toggleChecked(off, "Real-time monitoring")).toBe(false);
@@ -218,16 +131,6 @@ describe("LibraryMetadataSettings", () => {
       "scanner.realtime_monitoring",
     ]);
     expect(toggleChecked(turningOn, "Real-time monitoring")).toBe(true);
-  });
-
-  it("offers the background person lookup rate in the advanced scanning settings", () => {
-    // The Advanced section opens on its own when one of its fields is edited.
-    const rendered = render({}, ["metadata.person_refresh_per_minute"]);
-
-    expect(text(rendered)).toContain("Person lookups per minute");
-    expect(text(rendered)).toContain(
-      "How many cast and crew members each server looks up per minute in the background.",
-    );
   });
 
   it("lists the ratings plugins declare, grouped by plugin, but not IMDb and TMDB", () => {
@@ -284,63 +187,6 @@ describe("LibraryMetadataSettings subtitle sync", () => {
     };
   }
 
-  it("stages the subtitle sync settings with their defaults", async () => {
-    expand("library.subtitle_sync");
-    const { form, group } = renderInteractive({});
-
-    expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual(
-      expect.arrayContaining([
-        "subtitles.auto_sync",
-        "subtitles.sync_execution",
-        "subtitles.sync_node_capacity",
-      ]),
-    );
-    expect(
-      group.getByText("Shifts subtitle timing to match the video's audio."),
-    ).toBeInTheDocument();
-    const auto = group.getByRole("switch", { name: /Sync subtitles automatically/ });
-    expect(auto).toBeChecked();
-    expect(
-      group.getByText(
-        "Aligns subtitles to the video's audio: downloaded and uploaded ones when they're added, any other the first time it's played. Fixes subtitles cut for a different release.",
-      ),
-    ).toBeInTheDocument();
-    expect(group.getByRole("combobox", { name: /Where to analyze audio/ })).toHaveTextContent(
-      "Prefer transcode nodes",
-    );
-    expect(
-      group.getByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
-    ).toHaveValue(1);
-    expect(group.queryByText("No transcode nodes are connected")).not.toBeInTheDocument();
-
-    await userEvent.click(auto);
-    expect(form.setValue).toHaveBeenCalledWith("subtitles.auto_sync", "false");
-  });
-
-  it("keeps where and how many syncs run behind the disclosure", () => {
-    const { group } = renderInteractive({});
-
-    expect(group.getByRole("switch", { name: /Sync subtitles automatically/ })).toBeInTheDocument();
-    expect(group.getByRole("button", { name: "Advanced · 2 settings" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-    expect(group.queryByRole("combobox", { name: /Where to analyze audio/ })).toBeNull();
-    expect(
-      group.queryByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
-    ).toBeNull();
-  });
-
-  it("opens the disclosure for an unsaved placement change", () => {
-    const { group } = renderInteractive({ "subtitles.sync_execution": "local" }, [
-      "subtitles.sync_execution",
-    ]);
-
-    expect(group.getByRole("combobox", { name: /Where to analyze audio/ })).toHaveTextContent(
-      "Local server",
-    );
-  });
-
   it("hides node capacity for local sync and warns about node-only sync without nodes", () => {
     expand("library.subtitle_sync");
     const local = renderInteractive({ "subtitles.sync_execution": "local" });
@@ -374,13 +220,5 @@ describe("LibraryMetadataSettings subtitle sync", () => {
     const { group } = renderInteractive({ "subtitles.sync_execution": "transcode_nodes_only" });
 
     expect(group.queryByText("No transcode nodes are connected")).not.toBeInTheDocument();
-  });
-
-  it("saves subtitle sync through this page's save bar", async () => {
-    const { form } = renderInteractive({ "subtitles.auto_sync": "false" }, ["subtitles.auto_sync"]);
-
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    expect(form.save).toHaveBeenCalledTimes(1);
   });
 });

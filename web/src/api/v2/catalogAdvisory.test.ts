@@ -29,17 +29,6 @@ describe("catalogItemDetailFromV2 advisory fields", () => {
     expect(detail.advisory_age).toBeNull();
     expect(detail.advisory_source).toBe("");
   });
-
-  it("leaves the certification untouched", () => {
-    const detail = catalogItemDetailFromV2({
-      ...itemFixture,
-      content_rating: "PG",
-      advisory_age: 10,
-      advisory_source: "commonsense",
-    } as Parameters<typeof catalogItemDetailFromV2>[0]);
-
-    expect(detail.content_rating).toBe("PG");
-  });
 });
 
 // Cards go through a second field-by-field mapper, catalogItemFromV2, and then

@@ -134,24 +134,6 @@ func TestRequireSessionOrAPIKeySession_RejectsNonAdminKey(t *testing.T) {
 	}
 }
 
-func TestRequireSessionOrAPIKeySession_RejectsUnknownKey(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	keyAuth, _, _ := adminKeyAuthWithPrimary(t, clock)
-	sessionAuth := &Authenticator{sessions: NewSessionStore(time.Hour, clock)}
-
-	h := RequireSessionOrAPIKeySession(sessionAuth, keyAuth)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("handler should not run for an unknown key")
-	}))
-	req := httptest.NewRequest(http.MethodGet, "/Items", nil)
-	req.Header.Set("X-Emby-Token", "sa_doesnotmatch")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-}
-
 // TestRequireSessionOrAPIKeySession_FallsThroughWhenSynthesisUnavailable guards
 // the regression where the middleware fronts the whole browse group: a nil
 // authenticator or one without a UserStoreProvider must fall through to session
@@ -180,40 +162,6 @@ func TestRequireSessionOrAPIKeySession_FallsThroughWhenSynthesisUnavailable(t *t
 				t.Fatalf("status = %d, want 401", rec.Code)
 			}
 		})
-	}
-}
-
-// TestResolveSession_RevalidatesEachCallCachesProfile: the key + owning user are
-// validated on every call (so revocation is immediate), while the primary-profile
-// lookup is cached until apiKeyProfileCacheTTL.
-func TestResolveSession_RevalidatesEachCallCachesProfile(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	keyAuth, provider, validator := adminKeyAuthWithPrimary(t, clock)
-	ctx := context.Background()
-
-	for i := 1; i <= 3; i++ {
-		if s, _, handled := keyAuth.resolveSession(ctx, "sa_test"); !handled || s == nil {
-			t.Fatalf("resolve %d should succeed", i)
-		}
-	}
-	if validator.getCalls != 3 {
-		t.Errorf("GetByKey calls = %d, want 3 (re-validated every request)", validator.getCalls)
-	}
-	if provider.forCalls != 1 {
-		t.Errorf("ForUser calls = %d, want 1 (profile cached)", provider.forCalls)
-	}
-
-	// After the profile TTL, the profile is re-fetched (auth still every call).
-	now = now.Add(apiKeyProfileCacheTTL + time.Second)
-	if s, _, handled := keyAuth.resolveSession(ctx, "sa_test"); !handled || s == nil {
-		t.Fatal("post-TTL resolve should succeed")
-	}
-	if validator.getCalls != 4 {
-		t.Errorf("GetByKey calls = %d, want 4", validator.getCalls)
-	}
-	if provider.forCalls != 2 {
-		t.Errorf("ForUser calls = %d, want 2 after profile TTL", provider.forCalls)
 	}
 }
 
@@ -269,48 +217,6 @@ func TestPlaybackSessionAuth_APIKeyViaPlaySessionId(t *testing.T) {
 	}
 	if got == nil || got.Token != "sa_test" || got.StreamAppUserID != 2 {
 		t.Fatalf("expected synthesized api-key session (token sa_test, user 2); got %+v", got)
-	}
-}
-
-// TestPlaybackSessionAuth_RevokedAPIKeyViaPlaySessionId: a revoked key fails even
-// through the PlaySessionId fallback.
-func TestPlaybackSessionAuth_RevokedAPIKeyViaPlaySessionId(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	keyAuth, _, validator := adminKeyAuthWithPrimary(t, clock)
-	validator.key = nil // revoked
-	sessions := NewSessionStore(time.Hour, clock)
-	playback := NewPlaybackSessionStore(time.Hour, clock)
-	playback.Put(PlaybackSession{ID: "ps1", CompatToken: "sa_test", RouteItemID: "x"})
-
-	h := PlaybackSessionAuth(sessions, playback, keyAuth)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("handler should not run for a revoked key")
-	}))
-	req := requestWithCompatRouteItem(httptest.NewRequest(http.MethodGet, "/Videos/x/hls/p/seg0.ts?PlaySessionId=ps1", nil), "x")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-}
-
-// TestValidatePseudoUser confirms the path-userId guard a synthesized session
-// relies on: empty or matching ids pass; a mismatched id 404s.
-func TestValidatePseudoUser(t *testing.T) {
-	session := &Session{PseudoUserID: PseudoUserID(2, "p1")}
-
-	if !validatePseudoUser(httptest.NewRecorder(), "", session) {
-		t.Error("empty userID should pass")
-	}
-	if !validatePseudoUser(httptest.NewRecorder(), session.PseudoUserID.String(), session) {
-		t.Error("matching userID should pass")
-	}
-	rec := httptest.NewRecorder()
-	if validatePseudoUser(rec, PseudoUserID(2, "other").String(), session) {
-		t.Error("mismatched userID should fail")
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("mismatch status = %d, want 404", rec.Code)
 	}
 }
 

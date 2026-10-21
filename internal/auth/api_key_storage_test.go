@@ -1,13 +1,18 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Exercise the real repository against a task-owned schema. Do not print the
@@ -285,4 +290,67 @@ func TestAPIKeyVerifierDownSeesConcurrentInsert(t *testing.T) {
 	if _, err := repo.GetByKey(ctx, "sa_in_flight"); err != nil {
 		t.Fatal("refused downgrade damaged the in-flight credential")
 	}
+}
+
+func apiKeyMetadataRepository(t *testing.T) *APIKeyRepository {
+	t.Helper()
+	repo := apiKeyLegacyRepository(t)
+	up, _ := apiKeyVerifierMigration(t)
+	if _, err := repo.pool.Exec(t.Context(), up); err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
+func apiKeyVerifierMigration(t *testing.T) (up, down string) {
+	t.Helper()
+	migration, err := os.ReadFile("../../migrations/sql/20261019181724_hash_api_key_verifiers.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, down, _ = strings.Cut(string(migration), "-- +goose Down")
+	return up, down
+}
+
+func apiKeyLegacyRepository(t *testing.T) *APIKeyRepository {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	admin, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(admin.Close)
+	schema := fmt.Sprintf("api_key_metadata_%d", time.Now().UnixNano())
+	quoted := pgx.Identifier{schema}.Sanitize()
+	if _, err = admin.Exec(t.Context(), `CREATE SCHEMA `+quoted); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = admin.Exec(context.Background(), `DROP SCHEMA `+quoted+` CASCADE`) })
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err = pool.Exec(t.Context(), `CREATE TABLE users(id integer PRIMARY KEY,username text); INSERT INTO users VALUES(1,'one'),(2,'two');
+ CREATE TABLE api_keys(id bigserial PRIMARY KEY,user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,label text NOT NULL,api_key text NOT NULL UNIQUE,rate_tier text NOT NULL DEFAULT 'standard' CHECK(rate_tier IN ('standard','elevated')),scopes text[],created_at timestamptz NOT NULL DEFAULT now(),last_used_at timestamptz);
+ INSERT INTO api_keys(user_id,label,api_key) VALUES(1,'Existing','sa_existing_credential_kept_unchanged')`); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../../migrations/sql/20260905214731_add_api_key_configuration_revisions.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, _, _ := strings.Cut(string(migration), "-- +goose Down")
+	if _, err = pool.Exec(t.Context(), up); err != nil {
+		t.Fatal(err)
+	}
+	return NewAPIKeyRepository(pool)
 }

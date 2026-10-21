@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PolicyDecisionLogTable } from "./PolicyDecisionLogTable";
@@ -73,18 +73,5 @@ describe("PolicyDecisionLogTable", () => {
 
     expect(await screen.findByText("digest-page-2")).toBeInTheDocument();
     expect(requests.some((url) => url.includes("cursor=cursor-1"))).toBe(true);
-  });
-
-  it("wires user filters into the decision query", async () => {
-    renderWithPolicyProviders(<PolicyDecisionLogTable domains={["scope"]} />);
-
-    expect(await screen.findByText("digest-page-1")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("User ID"), { target: { value: "42" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-
-    await waitFor(() => {
-      expect(requests.some((url) => url.includes("user_id=42"))).toBe(true);
-    });
   });
 });

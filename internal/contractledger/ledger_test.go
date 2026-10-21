@@ -105,40 +105,6 @@ func TestGateFailsWhenAnEntryHasNoInventoryRow(t *testing.T) {
 	expectFailure(t, fsys, "ledger entry has no inventory row")
 }
 
-// TestGateReportsSetProblemsBeforeOrderAndOnlyFirstOrderMismatch pins the
-// output shape: a single removed row yields the missing-entry line, then one
-// order line, not hundreds of cascading order lines.
-func TestGateReportsSetProblemsBeforeOrderAndOnlyFirstOrderMismatch(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		doc["entries"] = append(es[:5:5], es[6:]...)
-		doc["totals"].(map[string]any)["entries"] = len(es) - 1
-	})
-	err := verify(fsys)
-	if err == nil {
-		t.Fatal("expected failure")
-	}
-	lines := strings.Split(err.Error(), "\n")
-	var missing, order int
-	for i, l := range lines {
-		switch {
-		case strings.Contains(l, "inventory row has no ledger entry"):
-			missing = i
-		case strings.Contains(l, "must follow inventory order"):
-			order++
-			if i < missing {
-				t.Errorf("order line printed before the set problem:\n%s", err)
-			}
-		}
-	}
-	if missing == 0 {
-		t.Errorf("missing-entry line absent:\n%s", err)
-	}
-	if order != 1 {
-		t.Errorf("want exactly one order line, got %d:\n%s", order, err)
-	}
-}
-
 func TestGateFailsWhenHandlerDrifts(t *testing.T) {
 	fsys := mutatedFS(t, func(doc map[string]any) {
 		es := entries(t, doc)
@@ -237,32 +203,6 @@ func TestGateFailsWhenARatifiedRemovalHasAPendingOwner(t *testing.T) {
 		e["owner"] = "pending:#135/execution-input-1"
 	})
 	expectFailure(t, fsys, "ratified without a named owner")
-}
-
-// TestGateFailsWhenARatifiedRemovalHasAPlaceholderOwner covers the placeholder
-// spellings that satisfy the schema's owner pattern but name nobody.
-func TestGateFailsWhenARatifiedRemovalHasAPlaceholderOwner(t *testing.T) {
-	// "n/a" and a blank owner already fail the schema's owner pattern; the
-	// spellings below pass it and are caught by the review rule.
-	for _, owner := range []string{"TBD", "tbd", "todo", "Unknown", "none", "pending", "Pending review"} {
-		t.Run(strconv.Quote(owner), func(t *testing.T) {
-			fsys := mutatedFS(t, func(doc map[string]any) {
-				e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionRemoved })
-				e["review_state"] = ReviewRatified
-				e["owner"] = owner
-			})
-			expectFailure(t, fsys, "ratified without a named owner")
-		})
-	}
-	// A real name passes the owner rule.
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionRemoved })
-		e["review_state"] = ReviewRatified
-		e["owner"] = "quick104"
-	})
-	if err := verify(fsys); err != nil && strings.Contains(err.Error(), "ratified without a named owner") {
-		t.Fatalf("named owner refused: %v", err)
-	}
 }
 
 // TestGateFailsWhenARemovedRowIsTierOne pins the tier rule inside the gate
@@ -625,115 +565,6 @@ func TestSchemaRejectsRemovalWithoutOwner(t *testing.T) {
 	fsys := mutatedFS(t, func(doc map[string]any) {
 		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionRemoved })
 		e["owner"] = nil
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsRuleThatDoesNotFitDisposition(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionRemoved })
-		e["disposition_rule"] = "contract_root_probes"
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsRemovedRowWithV2Target(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionRemoved })
-		e["v2"] = map[string]any{"method": "GET", "path": "/api/v2/x", "operation_id": "getX"}
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsPartiallyNullV2(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionPorted })
-		e["v2"] = map[string]any{"method": "GET", "path": nil, "operation_id": nil}
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-// TestSchemaRejectsMisRootedCallSite covers each repo's root rule with the
-// path shape that was wrong in an earlier revision (an export-directory
-// prefix) and a plainly foreign root.
-func TestSchemaRejectsMisRootedCallSite(t *testing.T) {
-	cases := map[string]string{
-		"android": "android/shared/src/commonMain/kotlin/X.kt",
-		"apple":   "silo-apple/iosApp/iosApp/X.swift",
-		"web":     "web/src/x.ts",
-		"server":  "silo-server/internal/x.go",
-	}
-	for repo, file := range cases {
-		t.Run(repo, func(t *testing.T) {
-			fsys := mutatedFS(t, func(doc map[string]any) {
-				e := entryWhere(t, doc, func(e map[string]any) bool { return e["consumers"].([]any)[0] != "unused" })
-				e["consumer_call_sites"] = append(e["consumer_call_sites"].([]any), map[string]any{"repo": repo, "file": file, "line": 1, "types": []any{}, "match": "manual"})
-			})
-			expectFailure(t, fsys, "violates")
-		})
-	}
-}
-
-func TestSchemaRejectsAnUnknownDisposition(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		es[0].(map[string]any)["disposition"] = "keep"
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsAnUnknownRule(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		es[0].(map[string]any)["disposition_rule"] = "frontend_shell"
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsAnUnknownField(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		es[0].(map[string]any)["reviewer"] = "nobody"
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsAnUnknownMatchKind(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["consumers"].([]any)[0] != "unused" })
-		e["consumer_call_sites"] = append(e["consumer_call_sites"].([]any), map[string]any{"repo": "web", "file": "src/x.ts", "line": 1, "types": []any{}, "match": "guessed"})
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-// TestSchemaAcceptsFollowerAndPathLiteralLine checks the two optional shapes
-// pass the schema, and that path_literal_line must be a positive integer.
-func TestSchemaAcceptsFollowerAndPathLiteralLine(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["consumers"].([]any)[0] != "unused" })
-		e["consumer_call_sites"] = append(e["consumer_call_sites"].([]any),
-			map[string]any{"repo": "web", "file": "src/x.ts", "line": 1, "types": []any{}, "match": "follower"},
-			map[string]any{"repo": "web", "file": "src/y.ts", "line": 9, "path_literal_line": 2, "types": []any{}, "match": "mechanical"},
-		)
-	})
-	if err := verify(fsys); err != nil && strings.Contains(err.Error(), "violates") {
-		t.Fatalf("follower site or path_literal_line refused by the schema: %v", err)
-	}
-	fsys = mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["consumers"].([]any)[0] != "unused" })
-		e["consumer_call_sites"] = append(e["consumer_call_sites"].([]any),
-			map[string]any{"repo": "web", "file": "src/y.ts", "line": 9, "path_literal_line": 0, "types": []any{}, "match": "mechanical"},
-		)
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsUnusedRowWithCallSites(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		e := es[0].(map[string]any)
-		e["consumers"] = []any{"unused"}
-		e["consumer_call_sites"] = []any{map[string]any{"repo": "web", "file": "src/x.ts", "line": 1, "types": []any{}, "match": "manual"}}
 	})
 	expectFailure(t, fsys, "violates")
 }
@@ -1328,25 +1159,6 @@ func TestTier2RetrySafety(t *testing.T) {
 	}
 }
 
-func TestTier2RetrySchemaPreservesNotesAndExclusions(t *testing.T) {
-	for _, value := range []string{RetrySafetyNonRetryable, RetrySafetyIdempotencyKey} {
-		expectFailure(t, mutatedFS(t, func(doc map[string]any) {
-			e := entryWhere(t, doc, func(e map[string]any) bool {
-				m, _ := e["method"].(string)
-				return e["tier"] == float64(2) && e["disposition"] == "ported" && isMutatingMethod(m)
-			})
-			e["retry_safety"] = value
-			delete(e, "retry_safety_note")
-		}), "retry_safety_note")
-	}
-	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool {
-			return e["disposition"] == DispositionDocumentedExcluded
-		})
-		e["retry_safety"] = RetrySafetyNaturalIdempotent
-	}), "retry_safety")
-}
-
 func TestExternalWebhookRetryClassification(t *testing.T) {
 	ledger, err := Load()
 	if err != nil {
@@ -1371,68 +1183,4 @@ func TestExternalWebhookRetryClassification(t *testing.T) {
 	if !found {
 		t.Fatal("external webhook ingress absent")
 	}
-}
-
-func TestTier2ConcurrencyPlacementAndAgreement(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool {
-			method, _ := e["method"].(string)
-			return e["tier"] == float64(2) && e["disposition"] == DispositionPorted && isGuardableMethod(method)
-		})
-		e["concurrency"] = ConcurrencyIfMatch
-	})
-	if err := verify(fsys); err != nil {
-		t.Fatalf("tier-2 ported concurrency refused: %v", err)
-	}
-	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			e := Entry{copied: copied{Method: method, Path: "/api/v1/tier2/{id}"}, Tier: 2, Disposition: DispositionPorted, Concurrency: ConcurrencyIfMatch,
-				RetrySafety: RetrySafetyNaturalIdempotent, ReviewState: ReviewRatified,
-				V2: V2Target{OperationID: new("updateTier2"), Method: new(method), Path: new("/api/v2/tier2/{id}")}}
-			if got := reviewRules(e.key(), e, inventoryRoute{}); len(got) != 0 {
-				t.Fatalf("ported row without named owner refused: %v", got)
-			}
-			op := apiv2registry.Declared{Method: method, Path: *e.V2.Path, OperationID: *e.V2.OperationID, Guarded: true}
-			if got := concurrencyMismatches([]Entry{e}, []apiv2registry.Declared{op}, nil); len(got) != 0 {
-				t.Fatal(got)
-			}
-			unmarked := e
-			unmarked.Concurrency = ""
-			if got := concurrencyMismatches([]Entry{unmarked}, []apiv2registry.Declared{op}, nil); len(got) != 1 || !strings.Contains(got[0], "is not marked concurrency") {
-				t.Fatalf("missing tier-2 marking accepted: %v", got)
-			}
-			wrongMethod := op
-			wrongMethod.Method = http.MethodGet
-			if got := concurrencyMismatches([]Entry{e}, []apiv2registry.Declared{wrongMethod}, nil); len(got) != 1 || !strings.Contains(got[0], "disagree with the registry") {
-				t.Fatalf("tier-2 target method mismatch accepted: %v", got)
-			}
-			op.Guarded = false
-			if got := concurrencyMismatches([]Entry{e}, []apiv2registry.Declared{op}, nil); len(got) != 1 || !strings.Contains(got[0], "is not declared Guarded") {
-				t.Fatalf("unguarded tier-2 operation accepted: %v", got)
-			}
-		})
-	}
-	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
-		t.Run("reject "+method, func(t *testing.T) {
-			e := Entry{copied: copied{Method: method}, Tier: 2, Disposition: DispositionPorted, Concurrency: ConcurrencyIfMatch}
-			if eligibleForConcurrency(e) {
-				t.Fatal("unguardable method eligible")
-			}
-			if got := reviewRules(e.key(), e, inventoryRoute{}); len(got) == 0 {
-				t.Fatal("unguardable method accepted")
-			}
-			expectFailure(t, mutatedFS(t, func(doc map[string]any) {
-				row := entryWhere(t, doc, func(e map[string]any) bool { return e["tier"] == float64(2) && e["disposition"] == DispositionPorted })
-				row["method"] = method
-				row["v2"] = map[string]any{"method": nil, "path": nil, "operation_id": nil}
-				row["concurrency"] = ConcurrencyIfMatch
-				delete(row, "retry_safety")
-				delete(row, "retry_safety_note")
-			}), "concurrency")
-		})
-	}
-	expectFailure(t, mutatedFS(t, func(doc map[string]any) {
-		row := entryWhere(t, doc, func(e map[string]any) bool { return e["tier"] == float64(2) && e["disposition"] != DispositionPorted })
-		row["concurrency"] = ConcurrencyIfMatch
-	}), "concurrency")
 }

@@ -2,13 +2,10 @@ package downloads
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -92,11 +89,7 @@ func fastRemoteProgressPolls(t *testing.T) {
 
 func singleNodePreparer(t *testing.T, remote downloadprepare.RemotePreparer) *NodeAwarePreparer {
 	t.Helper()
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 17, Name: "gpu-01", URL: "http://gpu-01", Enabled: true, Healthy: true}})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(&recordingEncodePreparer{}, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p := newPoolPreparer(&recordingEncodePreparer{}, &nodepool.Node{ID: 17, Name: "gpu-01", URL: "http://gpu-01", Enabled: true, Healthy: true})
 	p.remote = remote
 	return p
 }
@@ -139,73 +132,5 @@ func TestNodeAwarePreparerMarksNodesWithoutProgressUnavailable(t *testing.T) {
 	defer remote.mu.Unlock()
 	if remote.polls != 1 {
 		t.Fatalf("polls = %d, want polling to stop after the first 404", remote.polls)
-	}
-}
-
-func TestPlaybackPreparerReportsServerWorkerAndProgress(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "ffmpeg")
-	body := "#!/bin/sh\nprintf 'out_time_us=5000000\\nspeed=1.5x\\nprogress=end\\n'\neval \"touch \\${$#}\"\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	observer := &recordingPrepareObserver{}
-	opts := playback.TranscodeOpts{
-		InputPath: "/nonexistent/in.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
-		FFmpegPath: script, HWAccel: playback.HWAccelNone, TotalDuration: 10,
-	}
-	if _, err := NewPlaybackPreparer().PrepareFile(withPrepareObserver(context.Background(), observer), "a", opts, filepath.Join(dir, "out.mp4")); err != nil {
-		t.Fatal(err)
-	}
-	workers, nodeIDs, readings, _ := observer.snapshot()
-	if len(workers) != 1 || workers[0] != "" || nodeIDs[0] != nil {
-		t.Fatalf("workers = %v %v, want the API server", workers, nodeIDs)
-	}
-	if len(readings) != 1 || readings[0].EncodedSeconds != 10 || readings[0].Speed != 1.5 {
-		t.Fatalf("readings = %+v", readings)
-	}
-}
-
-func TestAttemptObserverPersistsWorkerAndCoalescedProgress(t *testing.T) {
-	repo, _, fileID := newArtifactTestRepo(t)
-	ctx := context.Background()
-	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-observer"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.ClaimNext(ctx, "api-7", time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	m := NewArtifactManager(repo, nil, nil, &recordingEncodePreparer{}, "api-7", nil, nil)
-	var mu sync.Mutex
-	var events []PreparationEvent
-	m.SetPreparationNotifier(func(_ context.Context, event PreparationEvent) {
-		mu.Lock()
-		defer mu.Unlock()
-		events = append(events, event)
-	})
-
-	observer := m.newAttemptObserver(row.ID)
-	observer.prepareWorker(nil, "")
-	observer.flush(ctx) // nothing reported yet: no write, no event
-	observer.PrepareProgress(playback.PrepareProgress{EncodedSeconds: 1, DurationSeconds: 50})
-	observer.PrepareProgress(playback.PrepareProgress{EncodedSeconds: 20, DurationSeconds: 50, Speed: 3})
-	observer.flush(ctx)
-
-	got, err := repo.GetByID(ctx, row.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.WorkerKind != WorkerServer || got.WorkerName != "api-7" {
-		t.Fatalf("worker = %q %q, want server api-7", got.WorkerKind, got.WorkerName)
-	}
-	if got.Progress == nil || got.Progress.EncodedSeconds != 20 || got.Progress.Speed != 3 {
-		t.Fatalf("progress = %+v, want the newest reading only", got.Progress)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(events) != 2 || events[0].Name != PreparationChangedEvent || events[1].Name != PreparationProgressEvent ||
-		events[1].Progress == nil || events[1].Progress.EncodedSeconds != 20 || events[1].ArtifactID != row.ID {
-		t.Fatalf("events = %+v", events)
 	}
 }

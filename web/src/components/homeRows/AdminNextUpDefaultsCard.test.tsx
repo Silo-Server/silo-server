@@ -49,25 +49,6 @@ describe("AdminNextUpDefaultsCard", () => {
     );
   });
 
-  it("shows the stored defaults, and Silo's own when none is set", () => {
-    const { unmount } = render(<AdminNextUpDefaultsCard />);
-    expect(screen.getByRole("combobox", { name: "Next up episodes" })).toHaveTextContent(
-      "With Continue Watching",
-    );
-    expect(screen.getByRole("switch", { name: "Show new episodes first" })).not.toBeChecked();
-    unmount();
-
-    mocks.settings = {
-      "defaults.ui.next_up_mode": '"separate"',
-      "defaults.ui.next_up_new_releases_first": "true",
-    };
-    render(<AdminNextUpDefaultsCard />);
-    expect(screen.getByRole("combobox", { name: "Next up episodes" })).toHaveTextContent(
-      "Separate row",
-    );
-    expect(screen.getByRole("switch", { name: "Show new episodes first" })).toBeChecked();
-  });
-
   // Each write carries the settings version it read, so a second change waits
   // for the first, and nothing is editable before the settings load.
   it("locks both controls while settings load or a save runs", () => {

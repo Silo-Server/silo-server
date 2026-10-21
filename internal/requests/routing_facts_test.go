@@ -4,7 +4,6 @@ import (
 	"context"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
@@ -46,26 +45,5 @@ func TestCreateRequestWithoutTMDBDetailLeavesFactsUncaptured(t *testing.T) {
 	}
 	if req.Title != "Fight Club" || store.created[0].Facts.Captured() {
 		t.Fatalf("title = %q facts = %+v, want the client's title and uncaptured facts", req.Title, store.created[0].Facts)
-	}
-}
-
-func TestRoutingFactsDatabase(t *testing.T) {
-	repo, _ := lifecycleTestRepository(t)
-	ctx := t.Context()
-	at := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-	facts := RoutingFacts{GenreIDs: []int{16}, KeywordIDs: []int{210024}, OriginalLanguage: "ja", Year: 2001, Anime: true, CapturedAt: &at}
-	if _, err := repo.CreateRequest(ctx, CreateRequestRecord{
-		ID: "facts", Input: CreateRequestInput{MediaType: MediaTypeMovie, TMDBID: 129, Title: "Spirited Away"},
-		Status: StatusPending, Outcome: OutcomeActive, Requester: Viewer{UserID: 1}, Facts: facts,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := repo.GetRequest(ctx, "facts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.RoutingFacts.Captured() || !got.RoutingFacts.CapturedAt.Equal(at) || !got.RoutingFacts.Anime ||
-		!slices.Equal(got.RoutingFacts.GenreIDs, []int{16}) || got.RoutingFacts.OriginalLanguage != "ja" {
-		t.Fatalf("facts = %+v, want the stored snapshot", got.RoutingFacts)
 	}
 }

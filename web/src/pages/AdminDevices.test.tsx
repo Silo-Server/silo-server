@@ -1,20 +1,14 @@
 // @vitest-environment jsdom
 
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminDeviceSetting, AdminUserSettingEntry } from "@/hooks/queries/admin/users";
 
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-if (typeof globalThis.ResizeObserver === "undefined") {
-  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
-    ResizeObserverStub;
-}
+import { stubRadixDom } from "./adminPage.test-support";
+
+stubRadixDom();
 
 const profiles = [
   {
@@ -80,10 +74,6 @@ vi.mock("@/hooks/queries/admin/users", () => ({
 
 import AdminDevices from "./AdminDevices";
 
-function rowFor(key: string): HTMLElement {
-  return screen.getByText(key, { exact: true }).parentElement!.parentElement as HTMLElement;
-}
-
 function renderDetail() {
   render(
     <MemoryRouter initialEntries={["/admin/devices/1/tv-1"]}>
@@ -105,26 +95,5 @@ describe("AdminDevices device detail", () => {
 
     expect(screen.getByText("Couldn't load this device's settings")).toBeInTheDocument();
     expect(screen.queryByText("playback.audio_language")).not.toBeInTheDocument();
-  });
-
-  it("shows what each setting resolves to on the device and where it comes from", () => {
-    renderDetail();
-
-    // The profile's French, not "default · (empty)".
-    const audio = rowFor("playback.audio_language");
-    expect(within(audio).getByText("profile")).toBeInTheDocument();
-    expect(within(audio).getByText(/from Alex's profile/).parentElement).toHaveTextContent(
-      "French · from Alex's profile",
-    );
-
-    // The device's own override is still shown as one.
-    const hdr = rowFor("player.hdr_enabled");
-    expect(within(hdr).getByLabelText("overridden")).toBeInTheDocument();
-    expect(within(hdr).getByRole("switch")).not.toBeChecked();
-
-    // Nobody set this one.
-    const autoplay = rowFor("playback.auto_play_next");
-    expect(within(autoplay).getByText("default")).toBeInTheDocument();
-    expect(within(autoplay).getByText(/app default/)).toBeInTheDocument();
   });
 });

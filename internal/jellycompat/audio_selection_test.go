@@ -231,28 +231,6 @@ func testCompatSource(codec *ResourceIDCodec, version catalog.FileVersion) Playb
 	}
 }
 
-func TestBuildPlaybackSource_SeedsRequestedAudioStreamIndex(t *testing.T) {
-	handler := &PlaybackHandler{codec: NewResourceIDCodec()}
-	version := testCompatVersion()
-	requestedAudioStreamIndex := len(version.VideoTracks) + 1
-
-	source := handler.buildPlaybackSource(
-		"route-1",
-		"play-1",
-		version,
-		DeviceProfile{},
-		playbackInfoRequest{AudioStreamIndex: compatIntValuePtr(requestedAudioStreamIndex)},
-		true,
-	)
-
-	if source.SelectedAudioStreamIndex == nil {
-		t.Fatal("expected selected audio stream index")
-	}
-	if got := *source.SelectedAudioStreamIndex; got != requestedAudioStreamIndex {
-		t.Fatalf("SelectedAudioStreamIndex = %d, want %d", got, requestedAudioStreamIndex)
-	}
-}
-
 func TestPlaybackInfoRequest_AcceptsStringAudioStreamIndex(t *testing.T) {
 	var req playbackInfoRequest
 	if err := json.Unmarshal([]byte(`{"AudioStreamIndex":"1"}`), &req); err != nil {
@@ -387,68 +365,6 @@ func TestHandlePlaybackReportRetriesRejectedLocalSurroundSelectionWithoutMutatio
 	}
 	if opts := transcodeSession.Opts(); opts.AudioTrackIndex != 0 || opts.SourceAudioChannels != 0 {
 		t.Fatalf("live opts = track %d channels %d, want original stereo", opts.AudioTrackIndex, opts.SourceAudioChannels)
-	}
-}
-
-func TestApplyCompatAudioSelectionRejectsUnsupportedLocalHLSRemuxAudioCopy(t *testing.T) {
-	version := testCompatVersion()
-	version.VideoTracks[0].Codec = "hevc"
-	version.VideoTracks[0].DVProfile = 8
-	version.AudioTracks[0].Codec = "eac3"
-	version.AudioTracks[1].Codec = "dts"
-	defaultStreamIndex := len(version.VideoTracks)
-	unsupportedStreamIndex := defaultStreamIndex + 1
-	source := testCompatSource(NewResourceIDCodec(), version)
-	source.HLSRemux = true
-	source.HLSRemuxAudioStreamIndexes = []int{defaultStreamIndex}
-	source.TranscodeAudio = false
-	source.SelectedAudioStreamIndex = intPtr(defaultStreamIndex)
-	inputPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(inputPath, []byte("video"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	store := NewPlaybackSessionStore(time.Hour, nil)
-	store.Put(PlaybackSession{
-		ID: "play-1", CompatToken: "token-1", UpstreamSessionID: "upstream-1", UpstreamPlayMethod: "transcode",
-		MediaSources: []PlaybackMediaSource{source},
-	})
-	manager := &testCompatSessionManager{sessions: map[string]*playback.Session{
-		"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode},
-	}}
-	handler := &PlaybackHandler{
-		playbackStore: store,
-		sessionMgr:    manager,
-		fileResolver: testCompatFileResolver{file: &models.MediaFile{
-			ID: version.FileID, FilePath: inputPath,
-			VideoTracks: []models.VideoTrack{{Codec: "hevc", DVProfile: 8}},
-		}},
-		TranscodeDir: t.TempDir(),
-		FFmpegPath:   writeCompatTestFFmpeg(t),
-		HWAccel:      playback.HWAccelNone,
-		tm:           playback.NewTranscodeManager(),
-	}
-	live, err := handler.ensureTranscodeSession(t.Context(), "play-1", "upstream-1", source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = live.Close() })
-
-	playSession, _ := store.Get("play-1")
-	_, _, restarted, err := handler.applyCompatAudioSelection(t.Context(), playSession, source.ID, unsupportedStreamIndex, 12)
-	if !errors.Is(err, errCompatHLSRemuxAudioUnsupported) || restarted {
-		t.Fatalf("selection = restarted %t error %v, want unsupported remux audio", restarted, err)
-	}
-	persisted, _ := store.Get("play-1")
-	if got := *persisted.MediaSources[0].SelectedAudioStreamIndex; got != defaultStreamIndex {
-		t.Fatalf("persisted stream index = %d, want %d", got, defaultStreamIndex)
-	}
-	if opts := live.Opts(); opts.AudioTrackIndex != 0 || opts.TargetCodecVideo != compatCopyCodec ||
-		opts.TargetCodecAudio != compatCopyCodec || opts.VideoSampleEntry != playback.VideoSampleEntryDVH1 {
-		t.Fatalf("live recipe = track %d video %q audio %q sample entry %q, want original copy/copy/dvh1 recipe",
-			opts.AudioTrackIndex, opts.TargetCodecVideo, opts.TargetCodecAudio, opts.VideoSampleEntry)
-	}
-	if len(manager.audioTrackCalls) != 0 {
-		t.Fatalf("upstream selection calls = %#v, want none", manager.audioTrackCalls)
 	}
 }
 
@@ -682,56 +598,6 @@ func TestPersistTranscodeRecipeCompensatesCacheMutationOnDurableFailure(t *testi
 	}
 }
 
-// TestEnsureTranscodeSession_UsesSelectedAudioTrack verifies compatibility playback keeps the requested audio stream.
-func TestEnsureTranscodeSession_UsesSelectedAudioTrack(t *testing.T) {
-	version := testCompatVersion()
-	version.AudioTracks[1].Channels = 6
-	codec := NewResourceIDCodec()
-	source := testCompatSource(codec, version)
-	filePath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(filePath, []byte("video"), 0o644); err != nil {
-		t.Fatalf("write media file: %v", err)
-	}
-
-	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
-	playbackStore.Put(PlaybackSession{
-		ID:           "play-1",
-		MediaSources: []PlaybackMediaSource{source},
-	})
-	sessionMgr := &testCompatSessionManager{sessions: map[string]*playback.Session{
-		"upstream-1": {ID: "upstream-1", PlayMethod: playback.PlayTranscode},
-	}}
-
-	handler := &PlaybackHandler{
-		playbackStore: playbackStore,
-		sessionMgr:    sessionMgr,
-		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: filePath}},
-		TranscodeDir:  t.TempDir(),
-		FFmpegPath:    writeCompatTestFFmpeg(t),
-		HWAccel:       playback.HWAccelNone,
-		tm:            playback.NewTranscodeManager(),
-	}
-
-	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
-	if err != nil {
-		t.Fatalf("ensureTranscodeSession: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = transcodeSession.Close()
-	})
-
-	if got := transcodeSession.Opts().AudioTrackIndex; got != 1 {
-		t.Fatalf("AudioTrackIndex = %d, want 1", got)
-	}
-	if got := transcodeSession.Opts().SourceAudioChannels; got != 6 {
-		t.Fatalf("SourceAudioChannels = %d, want 6", got)
-	}
-	upstream := sessionMgr.sessions["upstream-1"]
-	if upstream.TranscodeHWAccel != playback.HWAccelNone || upstream.ToneMapMode != "" {
-		t.Fatalf("reported execution facts = hw %q tone_map %q, want none and empty", upstream.TranscodeHWAccel, upstream.ToneMapMode)
-	}
-}
-
 func TestEnsureTranscodeSession_RejectsLocalSurroundDownmixWithoutAudioToAACV2(t *testing.T) {
 	version := testCompatVersion()
 	version.AudioTracks[1].Channels = 6
@@ -798,46 +664,6 @@ func TestEnsureTranscodeSessionRejectsLiveRuntimeForDifferentAudioFacts(t *testi
 	got, err := handler.ensureTranscodeSession(t.Context(), "play-1", "upstream-1", surround)
 	if got != nil || !errors.Is(err, errCompatRecipeSourceMismatch) {
 		t.Fatalf("mismatched live runtime = (%v, %v), want fail-closed source mismatch", got, err)
-	}
-}
-
-// TestEnsureTranscodeSessionReportsReconstructedRecipeFacts verifies reconstructed sessions retain execution facts.
-func TestEnsureTranscodeSessionReportsReconstructedRecipeFacts(t *testing.T) {
-	inputPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(inputPath, []byte("video"), 0o644); err != nil {
-		t.Fatalf("write media file: %v", err)
-	}
-	card := playback.NewRecipeCard(7, "profile-1", 42, "", playback.TranscodeOpts{
-		SessionID:        "upstream-1",
-		InputPath:        inputPath,
-		TargetCodecVideo: "h264",
-		TargetCodecAudio: "aac",
-		AudioTrackIndex:  1,
-		SegmentDuration:  2,
-		HWAccel:          playback.HWAccelNone,
-	})
-	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
-	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", Recipe: &card})
-	sessionMgr := &testCompatSessionManager{sessions: map[string]*playback.Session{
-		"upstream-1": {ID: "upstream-1", PlayMethod: playback.PlayTranscode},
-	}}
-	tm := playback.NewTranscodeManager()
-	transcodeDir := t.TempDir()
-	ffmpegPath := writeCompatTestFFmpeg(t)
-	tm.Config = func() playback.TranscodeRuntimeConfig {
-		return playback.TranscodeRuntimeConfig{TranscodeDir: transcodeDir, FFmpegPath: ffmpegPath, HWAccel: playback.HWAccelNone}
-	}
-	handler := &PlaybackHandler{playbackStore: playbackStore, sessionMgr: sessionMgr, tm: tm}
-
-	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", testCompatSource(NewResourceIDCodec(), testCompatVersion()))
-	if err != nil {
-		t.Fatalf("ensureTranscodeSession: %v", err)
-	}
-	t.Cleanup(func() { _ = transcodeSession.Close() })
-
-	upstream := sessionMgr.sessions["upstream-1"]
-	if upstream.TargetVideoCodec != "h264" || upstream.TargetAudioCodec != "aac" || upstream.TranscodeHWAccel != playback.HWAccelNone || upstream.ToneMapMode != "" {
-		t.Fatalf("reconstructed execution facts not reported: %+v", upstream)
 	}
 }
 

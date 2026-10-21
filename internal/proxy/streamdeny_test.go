@@ -35,12 +35,9 @@ func TestStreamDenyRefusesTokenRoutesBeforeServing(t *testing.T) {
 	srv.SetStreamDeny(deny)
 	deny.Deny(t.Context(), "denied-session")
 
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	token := signToken(t, streamtoken.Claims{
 		SessionID: "denied-session", MediaPath: path, PlayMethod: string(playback.PlayDirect),
 	}, grantTestSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	req := httptest.NewRequest(http.MethodGet, "/stream/direct/"+token, nil)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -52,12 +49,9 @@ func TestStreamDenyRefusesTokenRoutesBeforeServing(t *testing.T) {
 	}
 
 	// An undenied session with an unreachable Redis fails open and streams.
-	live, err := streamtoken.Sign(streamtoken.Claims{
+	live := signToken(t, streamtoken.Claims{
 		SessionID: "live-session", MediaPath: path, PlayMethod: string(playback.PlayDirect),
 	}, grantTestSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
 	rr = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/stream/direct/"+live, nil))
 	if rr.Code != http.StatusOK || rr.Body.String() != "0123456789" {

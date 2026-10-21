@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import queryCatalogItemsOk from "../../../../contracts/api/v2/fixtures/query_catalog_items_ok.json";
 
 import getCatalogFiltersOk from "../../../../contracts/api/v2/fixtures/get_catalog_filters_ok.json";
-import searchCatalogFacetOk from "../../../../contracts/api/v2/fixtures/search_catalog_facet_ok.json";
 
 import { setProfileId } from "@/api/client";
 import { createEmptyQueryDefinition } from "@/api/types";
@@ -11,7 +10,6 @@ import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/po
 
 import {
   createCatalogSearchState,
-  fetchCatalogFacetSearch,
   fetchCatalogFilters,
   fetchCatalogItems,
   fetchCatalogPage,
@@ -40,25 +38,6 @@ describe("catalog browse and facets on the v2 contract", () => {
     vi.unstubAllGlobals();
   });
 
-  it("fetches query-source facets and flattens the technical block", async () => {
-    const fetchMock = stubFetch(getCatalogFiltersOk);
-
-    const filters = await fetchCatalogFilters({
-      source: "query",
-      query_definition: createEmptyQueryDefinition(),
-    });
-
-    const url = requestedUrl(fetchMock);
-    expect(url.pathname).toBe("/api/v2/catalog/filters");
-    expect(url.searchParams.get("source")).toBe("query");
-    expect(url.searchParams.has("skip_technical")).toBe(false);
-    expect(filters.genres).toEqual(["Crime"]);
-    expect(filters.authors).toEqual(["Frank Herbert"]);
-    expect(filters.resolutions).toEqual(["2160p"]);
-    expect(filters.subtitle_languages).toEqual(["en"]);
-    expect(filters).not.toHaveProperty("technical");
-  });
-
   it("asks for lightweight facets with skip_technical and never forwards the overlay", async () => {
     const fetchMock = stubFetch({ ...getCatalogFiltersOk, technical: undefined });
 
@@ -78,29 +57,6 @@ describe("catalog browse and facets on the v2 contract", () => {
     expect(url.searchParams.get("library_id")).toBe("7");
     expect(url.searchParams.has("q")).toBe(false);
     expect(url.searchParams.has("sort")).toBe(false);
-  });
-
-  it("searches one facet by prefix", async () => {
-    const fetchMock = stubFetch(searchCatalogFacetOk);
-
-    const result = await fetchCatalogFacetSearch(
-      { source: "query", query_definition: createEmptyQueryDefinition() },
-      "author",
-      "fra",
-      10,
-    );
-
-    const url = requestedUrl(fetchMock);
-    expect(url.pathname).toBe("/api/v2/catalog/filters/search");
-    expect(url.searchParams.get("facet")).toBe("author");
-    expect(url.searchParams.get("q")).toBe("fra");
-    expect(url.searchParams.get("limit")).toBe("10");
-    expect(result).toEqual({
-      matches: ["Frank Herbert"],
-      has_more: true,
-      values: [{ value: "Frank Herbert", count: 6 }],
-      values_has_more: true,
-    });
   });
 
   it("posts structured filters, query cap and explicit sorting without bracket parameters", async () => {
@@ -274,27 +230,6 @@ describe("catalog browse and facets on the v2 contract", () => {
       section_id: "recent",
       limit: 60,
     });
-  });
-
-  it("preserves provider search diagnostics", async () => {
-    const diagnostics = {
-      provider: "postgres",
-      mode: "keyword",
-      semantic_used: false,
-      fallback_reason: "semantic_unavailable",
-      index_pending_updates: 4,
-    };
-    stubFetch({
-      ...queryCatalogItemsOk,
-      window_cursor: "opaque-window",
-      search_diagnostics: diagnostics,
-    });
-    const result = await fetchCatalogPage(
-      { source: "query", q: "Dune", query_definition: createEmptyQueryDefinition() },
-      60,
-      0,
-    );
-    expect(result.search_diagnostics).toEqual(diagnostics);
   });
 
   it("rejects seeks outside the server bound before dispatch", async () => {

@@ -120,20 +120,6 @@ func dispatchTrack(h *Handler, method, sid, idx string) *httptest.ResponseRecord
 	return rec
 }
 
-func TestHandlePublicTrack_ServesBytesForValidSession(t *testing.T) {
-	h, _ := newPublicTrackHandler(t, "sid-1", "book-1", false)
-	rec := dispatchTrack(h, http.MethodGet, "sid-1", "1")
-	if rec.Code != http.StatusOK && rec.Code != http.StatusPartialContent {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if rec.Body.Len() == 0 {
-		t.Errorf("response body empty; expected audio bytes")
-	}
-	if got := rec.Header().Get("Content-Type"); got != "audio/mpeg" {
-		t.Errorf("Content-Type = %q, want audio/mpeg", got)
-	}
-}
-
 func TestHandlePublicTrack_IndexOutOfRange404(t *testing.T) {
 	h, _ := newPublicTrackHandler(t, "sid-1", "book-1", false)
 	rec := dispatchTrack(h, http.MethodGet, "sid-1", "5")

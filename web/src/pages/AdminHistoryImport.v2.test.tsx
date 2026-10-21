@@ -185,6 +185,8 @@ describe("admin history import editors", () => {
   it.each([
     ["Delete server", "DELETE /api/v2/admin/history-import-sources/{id}", "Delete"],
     ["Remove mapping", "DELETE /api/v2/admin/history-imports/mappings/{id}", "Remove"],
+    // Clearing the token confirms inside the Set API key dialog.
+    ["Set API key", "DELETE /api/v2/admin/history-imports/sources/{id}/token", "Remove"],
   ])("keeps %s confirmation after412", async (title, operation, button) => {
     vi.mocked(v2).mockImplementation((op, options) =>
       op === operation ? Promise.reject(stale()) : baseline(op, options),
@@ -283,25 +285,6 @@ describe("admin history import editors", () => {
       .mocked(v2)
       .mock.calls.filter(([op]) => op === "GET /api/v2/admin/history-imports/runs");
     expect(calls[1]![1]).toMatchObject({ query: { limit: 50, cursor: "older" } });
-  });
-  it("keeps the token-clear confirmation open on412", async () => {
-    vi.mocked(v2).mockImplementation((op, options) =>
-      op === "DELETE /api/v2/admin/history-imports/sources/{id}/token"
-        ? Promise.reject(stale())
-        : baseline(op, options),
-    );
-    mount();
-    fireEvent.click(await screen.findByTitle("Set API key"));
-    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
-    await screen.findByRole("alert");
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(
-      vi
-        .mocked(v2)
-        .mock.calls.filter(
-          ([op]) => op === "DELETE /api/v2/admin/history-imports/sources/{id}/token",
-        ),
-    ).toHaveLength(1);
   });
   it("requires legacy source reconfiguration before imports", async () => {
     vi.mocked(v2).mockImplementation((op, options) =>

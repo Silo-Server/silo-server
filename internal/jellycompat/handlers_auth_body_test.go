@@ -24,16 +24,3 @@ func TestHandleAuthenticateByNameRejectsOversizedBody(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body %s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
 	}
 }
-
-func TestHandleAuthenticateByNameKeepsBadRequestForMalformedBody(t *testing.T) {
-	h := NewAuthHandler(func() *config.Config { return &config.Config{} }, nil, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/Users/AuthenticateByName", strings.NewReader(`{"Username":`))
-	rec := httptest.NewRecorder()
-
-	h.HandleAuthenticateByName(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-}

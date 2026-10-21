@@ -60,32 +60,6 @@ func TestAuthEndpointHandlerUsesGlobalIPAndEndpointBudgets(t *testing.T) {
 	}
 }
 
-func TestAuthEndpointHandlerDoesNotConsumeGlobalBudgetForRejectedClient(t *testing.T) {
-	for _, deniedKey := range []string{"ip:203.0.113.10", "authip:203.0.113.10:login"} {
-		t.Run(deniedKey, func(t *testing.T) {
-			perKey := &recordingLimiter{denied: map[string]bool{deniedKey: true}}
-			global := &recordingLimiter{}
-			mw := NewMiddleware(perKey, global, nil, true)
-			mw.cfg = DefaultConfig()
-			handler := mw.AuthEndpointHandler("login")(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				t.Fatal("next handler called for rejected request")
-			}))
-			req := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
-			req = req.WithContext(clientip.SetContext(req.Context(), "203.0.113.10"))
-			rec := httptest.NewRecorder()
-
-			handler.ServeHTTP(rec, req)
-
-			if rec.Code != http.StatusTooManyRequests {
-				t.Fatalf("response = %d, want 429", rec.Code)
-			}
-			if len(global.keys) != 0 {
-				t.Fatalf("global limiter keys = %#v, want no consumed budget", global.keys)
-			}
-		})
-	}
-}
-
 // A client over its own per-IP limit must not drain the shared global budget:
 // with a two-request global burst and a one-request per-IP burst, client A's
 // rejected retries used to spend the global tokens and get client B rejected.

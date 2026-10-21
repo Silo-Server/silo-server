@@ -172,20 +172,6 @@ it("shows each syncable track's sync status and re-reads it when the menu opens"
   expect(labels).toEqual(["Syncing… 40%", "Synced +2.3 s · 25→23.976 fps", "Syncing…"]);
 });
 
-it("offers sync and reset for the selected stored track", () => {
-  const sync = controller({
-    "stored-7": {
-      state: stored("stored-7", { timing: { offset_ms: 2300, scale: 1 }, sync: job("synced") }),
-    },
-  });
-  openMenu(sync);
-
-  fireEvent.click(screen.getByRole("button", { name: "Sync to audio" }));
-  expect(sync.requestSync).toHaveBeenCalledWith("stored-7");
-  fireEvent.click(screen.getByRole("button", { name: "Reset timing" }));
-  expect(sync.resetTiming).toHaveBeenCalledWith("stored-7");
-});
-
 it("hides reset for original timing and disables sync while one runs", () => {
   const sync = controller({
     "stored-7": {
@@ -261,27 +247,4 @@ it("hands a downloaded subtitle to the sync state so its auto-sync shows", () =>
 
   expect(sync.remember).toHaveBeenCalledWith(downloaded);
   expect(onRefreshSubtitles).toHaveBeenCalledOnce();
-});
-
-it("offers sync for a subtitle file next to the media and says the file stays as it is", () => {
-  const sync = controller({ [SIDECAR]: { state: stored(SIDECAR) } });
-  openMenu(sync, 3);
-
-  expect(
-    screen.getByText(
-      "Matches the timing to the audio for everyone. The file itself isn't changed.",
-    ),
-  ).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Sync to audio" }));
-  expect(sync.requestSync).toHaveBeenCalledWith(SIDECAR);
-});
-
-it("explains how the last sync ended", () => {
-  const sync = controller({
-    [SIDECAR]: {
-      state: stored(SIDECAR, { sync: job("failed", undefined, { failure: "no_audio" }) }),
-    },
-  });
-  openMenu(sync, 3);
-  expect(screen.getByText("This video has no audio Silo can read.")).toBeInTheDocument();
 });

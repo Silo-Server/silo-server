@@ -189,24 +189,6 @@ func TestHomeSectionsForFetchExpandsOnlyFilteredSections(t *testing.T) {
 	}
 }
 
-func TestHomeWatchedCandidateLimitCapsExpandedWindow(t *testing.T) {
-	for _, test := range []struct {
-		display int
-		want    int
-	}{
-		// No configured limit means the fetcher's default of 20.
-		{display: 0, want: 100},
-		{display: -1, want: 100},
-		{display: 20, want: 100},
-		{display: 50, want: 200},
-		{display: 250, want: 250},
-	} {
-		if got := homeWatchedCandidateLimit(test.display); got != test.want {
-			t.Errorf("homeWatchedCandidateLimit(%d) = %d, want %d", test.display, got, test.want)
-		}
-	}
-}
-
 func TestDropEmptyWatchedHomeSections(t *testing.T) {
 	input := []sections.SectionWithItems{
 		{

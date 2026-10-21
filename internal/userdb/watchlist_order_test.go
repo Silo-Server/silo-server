@@ -20,14 +20,7 @@ func watchlistIDs(t *testing.T, db *sql.DB, profileID string) []string {
 }
 
 func TestWatchlistOrderMirrorsProviderSequence(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer db.Close()
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	const profile = "profile-1"
 	// Add in one order (added_at ascending a, b, c).

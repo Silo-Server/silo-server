@@ -12,21 +12,9 @@ import (
 )
 
 func TestManagerCompletesChunkedUpload(t *testing.T) {
-	manager := NewManager(ManagerOptions{
-		RootDir:      t.TempDir(),
-		MaxSize:      16,
-		MaxChunkSize: 4,
-		Now:          fixedNow(),
-	})
+	manager := newTestManager(t, 16)
 
-	session, err := manager.Create(CreateRequest{
-		Filename:  "plugin.bin",
-		SizeBytes: 10,
-		ChunkSize: 4,
-	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	session := mustCreate(t, manager, 10)
 	if session.TotalChunks != 3 {
 		t.Fatalf("TotalChunks = %d, want 3", session.TotalChunks)
 	}
@@ -62,21 +50,9 @@ func TestManagerCompletesChunkedUpload(t *testing.T) {
 }
 
 func TestManagerRejectsWrongChunkSizeWithoutCorruptingExistingData(t *testing.T) {
-	manager := NewManager(ManagerOptions{
-		RootDir:      t.TempDir(),
-		MaxSize:      16,
-		MaxChunkSize: 4,
-		Now:          fixedNow(),
-	})
+	manager := newTestManager(t, 16)
 
-	session, err := manager.Create(CreateRequest{
-		Filename:  "plugin.bin",
-		SizeBytes: 8,
-		ChunkSize: 4,
-	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	session := mustCreate(t, manager, 8)
 	if _, err := manager.PutChunk(context.Background(), session.ID, 0, bytes.NewReader([]byte("abcd")), 4); err != nil {
 		t.Fatalf("PutChunk(0) error = %v", err)
 	}
@@ -103,21 +79,9 @@ func TestManagerRejectsWrongChunkSizeWithoutCorruptingExistingData(t *testing.T)
 }
 
 func TestManagerRequiresAllChunksBeforeComplete(t *testing.T) {
-	manager := NewManager(ManagerOptions{
-		RootDir:      t.TempDir(),
-		MaxSize:      16,
-		MaxChunkSize: 4,
-		Now:          fixedNow(),
-	})
+	manager := newTestManager(t, 16)
 
-	session, err := manager.Create(CreateRequest{
-		Filename:  "plugin.bin",
-		SizeBytes: 8,
-		ChunkSize: 4,
-	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	session := mustCreate(t, manager, 8)
 	if _, err := manager.PutChunk(context.Background(), session.ID, 0, bytes.NewReader([]byte("abcd")), 4); err != nil {
 		t.Fatalf("PutChunk(0) error = %v", err)
 	}
@@ -127,21 +91,9 @@ func TestManagerRequiresAllChunksBeforeComplete(t *testing.T) {
 }
 
 func TestManagerAcceptsDuplicateReceivedChunk(t *testing.T) {
-	manager := NewManager(ManagerOptions{
-		RootDir:      t.TempDir(),
-		MaxSize:      8,
-		MaxChunkSize: 4,
-		Now:          fixedNow(),
-	})
+	manager := newTestManager(t, 8)
 
-	session, err := manager.Create(CreateRequest{
-		Filename:  "plugin.bin",
-		SizeBytes: 4,
-		ChunkSize: 4,
-	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	session := mustCreate(t, manager, 4)
 	if _, err := manager.PutChunk(context.Background(), session.ID, 0, bytes.NewReader([]byte("abcd")), 4); err != nil {
 		t.Fatalf("PutChunk(0) error = %v", err)
 	}
@@ -178,10 +130,7 @@ func TestManagerChunkActivityRefreshesExpiry(t *testing.T) {
 		Now:          func() time.Time { return now },
 	})
 
-	session, err := manager.Create(CreateRequest{Filename: "plugin.bin", SizeBytes: 8, ChunkSize: 4})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	session := mustCreate(t, manager, 8)
 
 	// 9 minutes per chunk: an absolute deadline would expire before the
 	// second chunk; an idle timeout refreshed by chunk arrivals must not.
@@ -211,10 +160,7 @@ func TestManagerReclaimsOrphanedDirsFromPreviousProcess(t *testing.T) {
 	// A "restarted" manager knows nothing about the stale dir; reclaim must
 	// remove it while leaving live sessions untouched.
 	manager := NewManager(ManagerOptions{RootDir: root, MaxSize: 16, MaxChunkSize: 4, Now: fixedNow()})
-	session, err := manager.Create(CreateRequest{Filename: "plugin.bin", SizeBytes: 4, ChunkSize: 4})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	session := mustCreate(t, manager, 4)
 
 	if removed := manager.ReclaimOrphanedDirs(); removed != 1 {
 		t.Fatalf("ReclaimOrphanedDirs() = %d, want 1", removed)
@@ -228,16 +174,8 @@ func TestManagerReclaimsOrphanedDirsFromPreviousProcess(t *testing.T) {
 }
 
 func TestManagerRejectsConcurrentWritesToSameChunk(t *testing.T) {
-	manager := NewManager(ManagerOptions{
-		RootDir:      t.TempDir(),
-		MaxSize:      16,
-		MaxChunkSize: 4,
-		Now:          fixedNow(),
-	})
-	session, err := manager.Create(CreateRequest{Filename: "plugin.bin", SizeBytes: 4, ChunkSize: 4})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	manager := newTestManager(t, 16)
+	session := mustCreate(t, manager, 4)
 
 	// First writer blocks mid-body (outside the manager lock); a second
 	// writer for the same chunk must be turned away, and writers for other
@@ -310,16 +248,8 @@ func (g *gatedReader) Read(p []byte) (int, error) {
 }
 
 func TestManagerCountsDetachedWritersUntilTheyFinish(t *testing.T) {
-	manager := NewManager(ManagerOptions{
-		RootDir:      t.TempDir(),
-		MaxSize:      16,
-		MaxChunkSize: 4,
-		Now:          fixedNow(),
-	})
-	session, err := manager.Create(CreateRequest{Filename: "plugin.bin", SizeBytes: 4, ChunkSize: 4})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	manager := newTestManager(t, 16)
+	session := mustCreate(t, manager, 4)
 
 	// Stall a chunk write, then cancel the session out from under it — the
 	// cancel-and-recreate pattern a client uses to replace an upload. The
@@ -352,6 +282,23 @@ func TestManagerCountsDetachedWritersUntilTheyFinish(t *testing.T) {
 	if got := manager.DetachedWriterSessions(); got != 0 {
 		t.Fatalf("DetachedWriterSessions() after writer drained = %d, want 0", got)
 	}
+}
+
+// newTestManager returns a manager on a fresh root that takes chunks of up to
+// 4 bytes and a fixed clock.
+func newTestManager(t *testing.T, maxSize int64) *Manager {
+	t.Helper()
+	return NewManager(ManagerOptions{RootDir: t.TempDir(), MaxSize: maxSize, MaxChunkSize: 4, Now: fixedNow()})
+}
+
+// mustCreate starts an upload of sizeBytes in 4-byte chunks.
+func mustCreate(t *testing.T, manager *Manager, sizeBytes int64) SessionInfo {
+	t.Helper()
+	session, err := manager.Create(CreateRequest{Filename: "plugin.bin", SizeBytes: sizeBytes, ChunkSize: 4})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	return session
 }
 
 func fixedNow() func() time.Time {

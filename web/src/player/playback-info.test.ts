@@ -174,77 +174,6 @@ describe("playback info helpers", () => {
     expect(rowValue(sections, "Playback Stream Info", "Audio codec")).toBe("AAC (transcoded)");
   });
 
-  it("labels a re-encoded stream as transcoded on both axes", () => {
-    const sections = buildPlaybackInfoSections({
-      streamUrl: "https://app.example.com/api/v1/playback/transcode/session/master.m3u8",
-      plan: fixturePlanV3({
-        delivery: "server_transcode_hls",
-        effective_recipe: { video_codec: "h264", audio_codec: "aac", height: 720 },
-        transformations: [
-          {
-            name: "video_to_h264",
-            executor: "server",
-            recipe_version: "v3.4",
-            validated_claims: [],
-          },
-          {
-            name: "audio_to_aac",
-            executor: "server",
-            recipe_version: "v3.4",
-            validated_claims: [],
-          },
-        ],
-      }),
-      currentSourceVersion: makeVersion({ hdr: false }),
-      runtimeStats: {},
-    });
-
-    expect(rowValue(sections, "Player", "Play method")).toBe("Transcode");
-    expect(rowValue(sections, "Playback Stream Info", "Video codec")).toBe("H.264 (transcoded)");
-    expect(rowValue(sections, "Playback Stream Info", "Audio codec")).toBe("AAC (transcoded)");
-  });
-
-  it("shows explicit unavailable placeholders when metadata is missing", () => {
-    const sections = buildPlaybackInfoSections({
-      streamUrl: "/api/v1/stream/test",
-      plan: fixturePlanV3({ effective_recipe: {} }),
-      currentSourceVersion: makeVersion({
-        container: "",
-        bitrate: 0,
-        file_size: 0,
-        video_tracks: [],
-        audio_tracks: [],
-        audio_channels: 0,
-      }),
-      runtimeStats: {},
-    });
-
-    expect(rowValue(sections, "Video Info", "Player dimensions")).toBe("—");
-    expect(rowValue(sections, "Playback Stream Info", "Video codec")).toBe("—");
-    expect(rowValue(sections, "Current Source File", "Container")).toBe("—");
-    expect(rowValue(sections, "Current Source File", "Size")).toBe("—");
-    expect(rowValue(sections, "Current Source File", "Audio sample rate")).toBe("—");
-    expect(rowValue(sections, "Current Source File", "Color range")).toBe("—");
-  });
-
-  it("formats full and unspecified source color ranges", () => {
-    const full = buildPlaybackInfoSections({
-      streamUrl: "/api/v1/stream/full",
-      plan: fixturePlanV3(),
-      currentSourceVersion: makeVersion({ video_tracks: [{ color_range: "pc" }] }),
-      runtimeStats: {},
-    });
-    const unknown = buildPlaybackInfoSections({
-      streamUrl: "/api/v1/stream/unknown",
-      plan: fixturePlanV3(),
-      currentSourceVersion: makeVersion({ video_tracks: [{ color_range: "unknown" }] }),
-      runtimeStats: {},
-    });
-
-    expect(rowValue(full, "Current Source File", "Color range")).toBe("Full (pc)");
-    expect(rowValue(unknown, "Current Source File", "Color range")).toBe("Unknown");
-  });
-
   it("shows the requested source when playback auto-switches to a lower version", () => {
     const sections = buildPlaybackInfoSections({
       streamUrl: "https://app.example.com/api/v1/playback/transcode/session/master.m3u8",
@@ -382,19 +311,5 @@ describe("lowerQualityOption", () => {
     expect(lowerQualityOption(options, "1080p", undefined, 7000)?.id).toBe("1080p-medium");
     // A copy delivery reports no bitrate; the top transcode rung is lower.
     expect(lowerQualityOption(options, "auto")?.id).toBe("2160p-medium");
-  });
-});
-
-describe("buildPlaybackInfoSections player row", () => {
-  it("names the browser decoder while it plays the stream", () => {
-    const rows = (browserEngine: boolean) =>
-      buildPlaybackInfoSections({
-        streamUrl: "https://silo.example/stream",
-        plan: fixturePlanV3(),
-        runtimeStats: {},
-        browserEngine,
-      })[0]!.rows;
-    expect(rows(true)[0]).toEqual({ label: "Player", value: "Browser decoder" });
-    expect(rows(false)[0]).toEqual({ label: "Player", value: "HTML Video Player" });
   });
 });

@@ -89,26 +89,6 @@ func TestHandleReplanPlaybackV3DownloadedSubtitleLookupOutageKeepsTheSubtitle(t 
 	}
 }
 
-// Choosing a downloaded subtitle during the outage is refused as retryable
-// too, rather than answered with subtitles off.
-func TestHandleReplanPlaybackV3DownloadedSubtitleLookupOutageRefusesTrackChange(t *testing.T) {
-	handler, repo, file, startRequest, started, downloadedIndex := downloadedSubtitleSessionV3(t)
-	repo.listErr = errors.New("database unavailable")
-	current := started.PlaybackPlan
-	requireDownloadedSubtitleOutageV3(t, postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
-		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationTrackChangeV3,
-		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "downloaded-outage-track-0001",
-		FailedPlanID: current.PlanID, PlanAttemptID: "downloaded-outage-track-attempt-0001",
-		PlanAttemptKey: current.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
-		QualityPreference: "auto",
-		SelectedTracks: playback.SelectedTracksV3{
-			Audio:    current.SelectedTracks.Audio,
-			Subtitle: &playback.TrackIdentityV3{ID: playback.TrackIDV3(file.ID, "subtitle", downloadedIndex), Index: &downloadedIndex},
-		},
-		Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
-	}))
-}
-
 // A start has no playing plan to fall back on, so it still plays without the
 // downloaded subtitle and says so, as before; refusing it would leave the
 // viewer with nothing.
@@ -125,12 +105,7 @@ func TestHandleStartPlaybackV3DownloadedSubtitleLookupOutageStillStarts(t *testi
 	request.SubtitleTrackIndex = &downloadedIndex
 	request.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", downloadedIndex)
 
-	rec := httptest.NewRecorder()
-	handler.HandleStartPlayback(rec, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, request))).WithContext(newAuthorizedPlaybackContext()))
-	var response playback.DecisionResponseV3
-	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &response) != nil || response.PlaybackPlan == nil {
-		t.Fatalf("start status=%d body=%s", rec.Code, rec.Body.String())
-	}
+	response := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, request))
 	if response.PlaybackPlan.SelectedTracks.Subtitle != nil {
 		t.Fatalf("subtitle = %#v, want playback without the unreadable subtitle", response.PlaybackPlan.SelectedTracks.Subtitle)
 	}

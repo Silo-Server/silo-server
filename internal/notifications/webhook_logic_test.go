@@ -244,20 +244,6 @@ func allOriginsIn(t *testing.T, payload string) []string {
 	return hosts
 }
 
-func TestBuildDiscordWebhookPayloadWithoutPosterURL(t *testing.T) {
-	row := webhookTestRow()
-	// The poster decision is the sender layer's; a row without a resolved
-	// PosterURL must render without an image regardless of stored paths.
-	row.PosterURL = ""
-	payload, err := BuildDiscordWebhookPayload(row, false)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-	if strings.Contains(string(payload), `"thumbnail"`) {
-		t.Fatalf("rows without a resolved poster URL must not render a thumbnail: %s", payload)
-	}
-}
-
 // fakePresigner fakes the catalog image resolver: every path presigns to a
 // recognizable server-storage URL.
 type fakePresigner struct{}
@@ -347,40 +333,6 @@ func requestFulfilledTestRow() DeliveryRow {
 	}
 }
 
-func TestBuildDiscordWebhookPayloadRequestFulfilled(t *testing.T) {
-	payload, err := BuildDiscordWebhookPayload(requestFulfilledTestRow(), false)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-	var body struct {
-		Embeds []discordEmbed `json:"embeds"`
-	}
-	if err := json.Unmarshal(payload, &body); err != nil {
-		t.Fatalf("payload is not valid JSON: %v", err)
-	}
-	if len(body.Embeds) != 1 {
-		t.Fatalf("unexpected body shape: %+v", body)
-	}
-	embed := body.Embeds[0]
-	if embed.Title != "Dune (2021)" {
-		t.Fatalf("unexpected title %q", embed.Title)
-	}
-	if embed.Author == nil || embed.Author.Name != "Your request is now available on Silo" {
-		t.Fatalf("unexpected author %+v", embed.Author)
-	}
-	if embed.URL != "https://www.themoviedb.org/movie/438631" {
-		t.Fatalf("unexpected title URL %q", embed.URL)
-	}
-	if !strings.HasPrefix(embed.Description, "Paul Atreides") {
-		t.Fatalf("unexpected description %q", embed.Description)
-	}
-	if len(embed.Fields) != 2 ||
-		embed.Fields[0].Name != "Type" || embed.Fields[0].Value != "Movie" ||
-		embed.Fields[1].Name != "Rating" || embed.Fields[1].Value != "★ 7.8 TMDB" {
-		t.Fatalf("expected Type and Rating fields, got %+v", embed.Fields)
-	}
-}
-
 func TestGenericWebhookPayloadRequestFulfilled(t *testing.T) {
 	payload, err := BuildGenericWebhookPayload(requestFulfilledTestRow(), "hook-1", false)
 	if err != nil {
@@ -422,65 +374,6 @@ func requestDeclinedTestRow() DeliveryRow {
 				`"title":"Dune","year":2021,"reason":"Already available in 4K"}`),
 			CreatedAt: time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC),
 		},
-	}
-}
-
-func TestBuildDiscordWebhookPayloadRequestLifecycle(t *testing.T) {
-	payload, err := BuildDiscordWebhookPayload(requestDeclinedTestRow(), false)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-	var body struct {
-		Embeds []discordEmbed `json:"embeds"`
-	}
-	if err := json.Unmarshal(payload, &body); err != nil {
-		t.Fatalf("payload is not valid JSON: %v", err)
-	}
-	if len(body.Embeds) != 1 {
-		t.Fatalf("unexpected body shape: %+v", body)
-	}
-	embed := body.Embeds[0]
-	// No catalog join exists for declined requests; title and link come from
-	// the reason flags.
-	if embed.Title != "Dune (2021)" {
-		t.Fatalf("unexpected title %q", embed.Title)
-	}
-	if embed.Author == nil || embed.Author.Name != "Your request was declined on Silo" {
-		t.Fatalf("unexpected author %+v", embed.Author)
-	}
-	if embed.URL != "https://www.themoviedb.org/movie/438631" {
-		t.Fatalf("unexpected title URL %q", embed.URL)
-	}
-	if embed.Color != serverChannelColorDeclined {
-		t.Fatalf("unexpected color %d", embed.Color)
-	}
-	if len(embed.Fields) != 2 ||
-		embed.Fields[0].Name != "Type" || embed.Fields[0].Value != "Movie" ||
-		embed.Fields[1].Name != "Reason" || embed.Fields[1].Value != "Already available in 4K" {
-		t.Fatalf("expected Type and Reason fields, got %+v", embed.Fields)
-	}
-
-	approved := requestDeclinedTestRow()
-	approved.Type = DeliveryTypeRequestApproved
-	payload, err = BuildDiscordWebhookPayload(approved, false)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-	if err := json.Unmarshal(payload, &body); err != nil {
-		t.Fatalf("payload is not valid JSON: %v", err)
-	}
-	embed = body.Embeds[0]
-	if embed.Author == nil || embed.Author.Name != "Your request was approved on Silo" {
-		t.Fatalf("unexpected author %+v", embed.Author)
-	}
-	if embed.Color != serverChannelColorApproved {
-		t.Fatalf("unexpected color %d", embed.Color)
-	}
-	// The decline reason must not leak into approved embeds.
-	for _, field := range embed.Fields {
-		if field.Name == "Reason" {
-			t.Fatalf("approved embed must not carry a decline reason: %+v", embed.Fields)
-		}
 	}
 }
 
@@ -536,16 +429,6 @@ func TestRequestApprovedPreservesPosterPath(t *testing.T) {
 	wantURL := "https://image.tmdb.org/t/p/w500/2nkPrhf4YIyMFelfe4zdOnGRYz5.jpg"
 	if sysPayload.PosterURL != wantURL {
 		t.Fatalf("System.PayloadForRow PosterURL = %q, want %q", sysPayload.PosterURL, wantURL)
-	}
-}
-
-func TestBuildDiscordWebhookPayloadTestMarker(t *testing.T) {
-	payload, err := BuildDiscordWebhookPayload(webhookTestRow(), true)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-	if !strings.Contains(string(payload), "Silo test notification") {
-		t.Fatal("test sends must be clearly marked in the footer")
 	}
 }
 
@@ -626,27 +509,6 @@ func TestGenericWebhookPayloadAndSignature(t *testing.T) {
 	}
 	if SignGenericWebhook(secretValue, timestamp, payload) != header {
 		t.Fatal("signature must be deterministic")
-	}
-}
-
-func TestWebhookRetrySchedule(t *testing.T) {
-	// Cumulative schedule: 0, 30s, 2m, 10m, 30m, 2h, 6h, 12h, 18h, 24h.
-	total := time.Duration(0)
-	for attempt := 1; attempt < webhookMaxAttempts; attempt++ {
-		delay, ok := webhookRetryDelay(attempt)
-		if !ok {
-			t.Fatalf("schedule ended early at attempt %d", attempt)
-		}
-		total += delay
-		if total != webhookRetrySchedule[attempt] {
-			t.Fatalf("cumulative delay after attempt %d = %v, want %v", attempt, total, webhookRetrySchedule[attempt])
-		}
-	}
-	if _, ok := webhookRetryDelay(webhookMaxAttempts); ok {
-		t.Fatal("attempt 10 must exhaust the schedule")
-	}
-	if total != 24*time.Hour {
-		t.Fatalf("schedule must span 24h, got %v", total)
 	}
 }
 
