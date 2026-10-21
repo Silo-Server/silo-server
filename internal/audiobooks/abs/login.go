@@ -1,6 +1,7 @@
 package abs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -210,7 +211,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, principa
 		setRefreshCookie(w, r, refresh, refreshTTL)
 	}
 
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, userID, displayName, access, refresh, returnRefreshInBody))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r.Context(), now, ctxAuth{UserID: userID, ProfileID: profileID}, displayName, access, refresh, returnRefreshInBody))
 }
 
 // handleABSPing — GET /ping (mounted also as /healthcheck). Wire shape
@@ -300,8 +301,8 @@ func absUserObject(userID, displayName, token, defaultLibraryID string, now time
 	}
 }
 
-// loginEnvelope builds the response body shared by /login and /authorize.
-// Both endpoints must return the identical shape so the iOS client's
+// loginEnvelope builds the response body shared by /login, /auth/refresh and /authorize.
+// All three endpoints must return the identical shape so the iOS client's
 // resume-on-launch flow validates the same way as fresh login.
 // accessToken/refreshToken may be empty for /authorize (client already has
 // them); in that case the top-level fields are still included as empty
@@ -311,16 +312,28 @@ func absUserObject(userID, displayName, token, defaultLibraryID string, now time
 // timestamps share a single instant with the token ExpiresAt the caller
 // persisted — avoids two near-simultaneous time.Now() calls drifting apart.
 func (h *Handler) loginEnvelope(
-	r *http.Request,
+	ctx context.Context,
 	now time.Time,
-	userID, displayName, accessToken, refreshToken string,
+	a ctxAuth,
+	displayName, accessToken, refreshToken string,
 	returnRefreshInBody bool,
 ) map[string]any {
 	// displayName falls back to userID when the validator didn't supply one.
 	libraryMaps := make([]map[string]any, 0)
 	defaultLibraryID := VirtualLibraryID
-	access, _, _ := h.accessFilterFromRequest(r)
-	libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
+	// Fresh authentication has an explicit principal, without bearer middleware
+	// context. Resolve that principal and omit metadata when its scope is unknown.
+	access, err := h.accessFilterForAuth(ctx, a)
+	var libs []AudiobookLibrary
+	if err == nil {
+		libs, err = h.deps.MediaStore.ListAudiobookLibraries(ctx, access)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "abs login envelope: library metadata unavailable", "component", "audiobooks",
+			"user_id", a.UserID, "profile_id", a.ProfileID, "err", err)
+		// Drop any partial listing so an unknown scope never widens the result.
+		libs = nil
+	}
 	for i, lib := range libs {
 		if i == 0 {
 			defaultLibraryID = audiobookLibraryID(lib)
@@ -328,7 +341,7 @@ func (h *Handler) loginEnvelope(
 		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
-	user := absUserObject(userID, displayName, accessToken, defaultLibraryID, now)
+	user := absUserObject(a.UserID, displayName, accessToken, defaultLibraryID, now)
 
 	// Real ABS (v2.26+) ALWAYS sets user.accessToken; modern clients read it
 	// from exactly res.user.accessToken. The x-return-tokens header gates ONLY
@@ -470,7 +483,7 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 			displayName = resolved
 		}
 	}
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, time.Now(), a.UserID, displayName, access, "", false))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r.Context(), time.Now(), a, displayName, access, "", false))
 }
 
 // setRefreshCookie writes the ABS refresh_token cookie exactly as real ABS
@@ -637,7 +650,7 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 			displayName = resolved
 		}
 	}
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, claims.UserID, displayName, access, refresh, returnRefreshInBody))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r.Context(), now, ctxAuth{UserID: claims.UserID, ProfileID: claims.ProfileID}, displayName, access, refresh, returnRefreshInBody))
 }
 
 // handleLogout — POST /logout (and /api/logout, /abs/api/logout, /abs/api/auth/logout)
