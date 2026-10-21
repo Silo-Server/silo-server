@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -334,8 +335,10 @@ func TestCatalogInvalidDownloadAddressIsPackageError(t *testing.T) {
 }
 
 // A plugin built on a newer SDK prints manifest fields this server doesn't
-// know. They are dropped, as for an archive's manifest, and the plugin
-// installs; output that isn't a manifest at all is still refused.
+// know. They are ignored, as for an archive's manifest, and the plugin
+// installs; output that isn't a manifest at all is still refused. The stored
+// manifest keeps them, so a later server that knows them reads the same
+// manifest the plugin reports.
 func TestLoadManifestFromBinaryIgnoresUnknownFields(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses shell scripts")
@@ -348,6 +351,8 @@ func TestLoadManifestFromBinaryIgnoresUnknownFields(t *testing.T) {
 	if err := json.Unmarshal(known, &fields); err != nil {
 		t.Fatal(err)
 	}
+	// The plugin reports its own checksum, as the SDK computes it at run time.
+	fields["checksum"] = "CHECKSUM"
 	fields["fieldFromANewerSdk"] = true
 	fields["capabilities"].([]any)[0].(map[string]any)["descriptorFromANewerSdk"] = map[string]any{"flag": true}
 	newer, err := json.Marshal(fields)
@@ -355,18 +360,29 @@ func TestLoadManifestFromBinaryIgnoresUnknownFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := func(output string) []byte {
-		return []byte("#!/bin/sh\ncat <<'MANIFEST'\n" + output + "\nMANIFEST\n")
+		return []byte("#!/bin/sh\nsum=$( (sha256sum \"$0\" 2>/dev/null || shasum -a 256 \"$0\") | cut -d' ' -f1)\n" +
+			"sed \"s/CHECKSUM/$sum/\" <<'MANIFEST'\n" + output + "\nMANIFEST\n")
 	}
 
-	manifest, err := loadManifestFromBinary(context.Background(), script(string(newer)))
+	store := newRecordingInstallationStore()
+	result, err := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()}).InstallBinaryUpload(context.Background(), script(string(newer)))
 	if err != nil {
-		t.Fatalf("loadManifestFromBinary() error = %v, want the unknown fields ignored", err)
+		t.Fatalf("InstallBinaryUpload() error = %v, want the unknown fields ignored", err)
 	}
-	if manifest.GetPluginId() != "test.plugin" || len(manifest.GetCapabilities()) != 1 {
-		t.Fatalf("manifest = %v, want the known fields kept", manifest)
+	if result.Manifest.GetPluginId() != "test.plugin" || len(result.Manifest.GetCapabilities()) != 1 {
+		t.Fatalf("manifest = %v, want the known fields kept", result.Manifest)
+	}
+	installed, err := os.ReadFile(result.ManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, stored := range map[string][]byte{"manifest.json": installed, "archive manifest": store.saveArchiveManifest} {
+		if !bytes.Contains(stored, []byte("descriptorFromANewerSdk")) {
+			t.Fatalf("%s = %s, want the plugin's own manifest with the newer fields", name, stored)
+		}
 	}
 
-	_, err = loadManifestFromBinary(context.Background(), script("not a manifest"))
+	_, _, err = loadManifestFromBinary(context.Background(), script("not a manifest"))
 	requirePackageError(t, err, "manifest couldn't be read")
 }
 
@@ -376,15 +392,15 @@ func TestLoadManifestFromBinaryClassifiesRunFailures(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses shell scripts")
 	}
-	_, err := loadManifestFromBinary(context.Background(), []byte("#!/bin/sh\nexit 3\n"))
+	_, _, err := loadManifestFromBinary(context.Background(), []byte("#!/bin/sh\nexit 3\n"))
 	requirePackageError(t, err, "couldn't run the plugin")
 
-	_, err = loadManifestFromBinary(context.Background(), []byte("not an executable"))
+	_, _, err = loadManifestFromBinary(context.Background(), []byte("not an executable"))
 	requirePackageError(t, err, "couldn't run the plugin")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = loadManifestFromBinary(ctx, []byte("#!/bin/sh\nexit 0\n"))
+	_, _, err = loadManifestFromBinary(ctx, []byte("#!/bin/sh\nexit 0\n"))
 	if _, ok := AsPackageError(err); ok || !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled manifest read = %v, want context.Canceled and no PackageError", err)
 	}

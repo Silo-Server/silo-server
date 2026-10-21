@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
@@ -409,7 +410,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("binary data is required")
 	}
 
-	manifest, err := loadManifestFromBinary(ctx, binaryData)
+	manifest, manifestJSON, err := loadManifestFromBinary(ctx, binaryData)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +419,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	var result *InstallResult
 	if s.installations == nil {
-		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, nil)
+		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -431,7 +432,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("list existing plugin installations for %q: %w", manifest.GetPluginId(), err)
 	}
 	if len(existing) == 0 {
-		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, nil)
+		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -444,7 +445,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	oldInstallation := existing[0]
 	result, err = s.replaceStopped(ctx, oldInstallation, func() (*InstallResult, error) {
-		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, nil)
+		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, manifestJSON, nil)
 	})
 	if err != nil {
 		return nil, err

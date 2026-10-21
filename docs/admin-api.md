@@ -3117,9 +3117,9 @@ repeat finds no row, so a later 404 is not this caller's receipt; non-retryable.
 `archive` part, capped at 256 MiB; JSON on this operation is 415, a missing part 422 at
 `body.archive`, an oversize body 413. A zip archive is installed from its manifest; any
 other file is treated as a plugin binary whose manifest the server obtains by executing
-it, exactly as v1 does. Either way, manifest fields and enum values this server doesn't
-know, such as ones a newer SDK added, are dropped when the manifest is read, and the plugin
-still starts. Success is 201 with the installation. Non-retryable: the same
+it, exactly as v1 does. Either way, the server ignores manifest fields and enum values it
+doesn't know, such as ones a newer SDK added, so such a plugin still installs and starts;
+the stored manifest keeps them as the plugin wrote them. Success is 201 with the installation. Non-retryable: the same
 plugin_id is replaced, so a delayed retry can replace a newer installation. The frozen
 bridge route keeps its own answers (an oversize or malformed form is 400 `bad_request`).
 
