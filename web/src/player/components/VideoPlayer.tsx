@@ -142,6 +142,7 @@ import {
 import { toast } from "sonner";
 import { MIN_PROBE_KBPS } from "../probe-meter";
 import { cancelBandwidthProbe, mediaElementReleased } from "../bandwidth-probe";
+import { networkInformation, type NetworkInformationLike } from "../network-information";
 
 let hlsJSModule: Promise<typeof HlsType> | null = null;
 
@@ -587,6 +588,31 @@ export function VideoPlayer({
   useEffect(() => {
     planRevisionForThroughputRef.current = planRevision;
   }, [planRevision]);
+  // The plan during which the browser last changed networks: its summary
+  // sends no throughput, since the server files a sample under the
+  // connection of the request that delivers it.
+  const networkChangedInRevisionRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const connection = networkInformation() as (NetworkInformationLike & EventTarget) | undefined;
+    let type = connection?.type;
+    const changed = () => {
+      networkChangedInRevisionRef.current = planRevisionForThroughputRef.current;
+    };
+    // The browser also fires `change` when only its downlink estimate moves.
+    const onConnectionChange = () => {
+      if (connection?.type === type) return;
+      type = connection?.type;
+      changed();
+    };
+    window.addEventListener("online", changed);
+    window.addEventListener("offline", changed);
+    connection?.addEventListener?.("change", onConnectionChange);
+    return () => {
+      window.removeEventListener("online", changed);
+      window.removeEventListener("offline", changed);
+      connection?.removeEventListener?.("change", onConnectionChange);
+    };
+  }, []);
   const hlsStartupGuardRef = useRef<HlsStartupGuard | null>(null);
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
@@ -4452,6 +4478,7 @@ export function VideoPlayer({
       const kbps =
         fragments &&
         String(fragments.planRevision) === summaryPlan.adoption_id &&
+        String(networkChangedInRevisionRef.current) !== summaryPlan.adoption_id &&
         ms >= MIN_THROUGHPUT_SAMPLE_MS
           ? Math.min(Math.floor((fragments.bytes * 8) / ms), 1_000_000)
           : 0;

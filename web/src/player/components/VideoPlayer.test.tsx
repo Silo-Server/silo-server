@@ -6082,6 +6082,7 @@ describe("VideoPlayer playback throughput", () => {
       loading: { start: number; first: number; end: number };
       type?: string;
     }[],
+    whilePlaying?: () => void,
   ) {
     hlsJS.supported = true;
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
@@ -6098,6 +6099,7 @@ describe("VideoPlayer playback throughput", () => {
     await waitFor(() => expect(hlsJS.latest).not.toBeNull());
     for (const { type = "main", ...stats } of fragments)
       act(() => hlsJS.latest?.emit("fragLoaded", { frag: { type, stats } }));
+    if (whilePlaying) act(whilePlaying);
     unmount();
     expect(onBufferingSummary).toHaveBeenCalled();
     return onBufferingSummary.mock.calls.at(-1)![1] as Record<string, unknown>;
@@ -6121,6 +6123,18 @@ describe("VideoPlayer playback throughput", () => {
       { loaded: 900_000, loading: { start: 2000, first: 2000, end: 3500 }, type: "subtitle" },
     ]);
     expect(summary.throughput_kbps).toBe(22_857);
+  });
+
+  // D1: the server files a sample under the connection that delivers it.
+  it("reports no throughput when the network changed while the plan played", async () => {
+    const summary = await summaryAfterFragments(
+      [{ loaded: 3_000_000, loading: { start: 900, first: 1000, end: 2200 } }],
+      () => {
+        window.dispatchEvent(new Event("offline"));
+        window.dispatchEvent(new Event("online"));
+      },
+    );
+    expect(summary).not.toHaveProperty("throughput_kbps");
   });
 
   it("reports no throughput when every fragment arrived in under a second", async () => {
