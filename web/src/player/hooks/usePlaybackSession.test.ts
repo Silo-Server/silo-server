@@ -3160,8 +3160,8 @@ it("reports each adoption's summary once, with the estimate it was requested wit
 it.each([
   ["never", "ignore"],
   ["always", undefined],
-  // Unknown is not `never`: the start must not shut a learned limit out.
-  [null, undefined],
+  // An omitted mode uses the default and does not exclude learned limits.
+  [undefined, undefined],
 ] as const)("in %s mode sends learned_limit %s", async (mode, expected) => {
   const { bodiesTo } = recordingServer();
   const { result, unmount } = renderHook(

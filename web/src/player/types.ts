@@ -297,8 +297,8 @@ export interface WatchPageProps {
   intro: PlayerTimeRange | null;
   /** null while the connected server's answer is still unknown; see VideoPlayer. */
   introSkipMode?: IntroSkipMode | null;
-  /** null while the connected server's answer is still unknown; see VideoPlayer. */
-  bufferingMode?: BufferingMode | null;
+  /** Effective profile mode, seeded by the host before its settings read resolves. */
+  bufferingMode?: BufferingMode;
   credits: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;

@@ -271,11 +271,8 @@ interface VideoPlayerProps {
    * server to leave alone.
    */
   introSkipMode?: IntroSkipMode | null;
-  /**
-   * null means the connected server's answer is not in yet. The controller
-   * then only watches, as in `never`, rather than lower quality on a guess.
-   */
-  bufferingMode?: BufferingMode | null;
+  /** Effective profile mode, seeded by the host before its settings read resolves. */
+  bufferingMode?: BufferingMode;
   /**
    * The bitrate cap the session's replans send. It changes when the link
    * turns metered or unmetered and the other quality pair applies: a quality
@@ -4448,7 +4445,7 @@ export function VideoPlayer({
     suspended: watchTogetherRoomActive || !!watchTogetherRoomId,
     sessionId: bufferingTitleId ?? sessionId,
     attemptId: playbackAttemptId,
-    mode: bufferingMode ?? "always",
+    mode: bufferingMode,
     plan: bufferingPlan,
     // Pills also wait while nobody can see them: a minimized player, a hidden
     // tab, or iPhone's native fullscreen view.
