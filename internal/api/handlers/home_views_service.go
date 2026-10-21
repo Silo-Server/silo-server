@@ -51,6 +51,7 @@ func (h *SectionHandler) homeSections(ctx context.Context, viewer SectionViewer,
 		// Filter before the cross-section diversity pass so a watched item
 		// cut here can't suppress the same title in a later section.
 		withItems, userStates = h.filterWatchedHomeSections(ctx, withItems, resolved)
+		withItems = dropEmptyWatchedHomeSections(withItems)
 	}
 	withItems = applyDiversityFilter(withItems)
 	if keepEmptyRows {

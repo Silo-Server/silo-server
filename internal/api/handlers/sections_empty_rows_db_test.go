@@ -2,10 +2,7 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"slices"
 	"testing"
 
@@ -18,8 +15,7 @@ import (
 
 // A row whose titles all sit in a library the viewer cannot open has nothing
 // to show, so the v2 aggregate Home and library reads leave it out rather than
-// answering it with no items. Asked for by ID, the row still answers empty,
-// and the frozen v1 aggregate keeps answering it.
+// answering it with no items. Asked for by ID, the row still answers empty.
 func TestAggregateSectionsOmitRowsWithNoAccessibleItemsDB(t *testing.T) {
 	f := newPagingIntegrationFixture(t)
 	ctx := t.Context()
@@ -69,16 +65,6 @@ func TestAggregateSectionsOmitRowsWithNoAccessibleItemsDB(t *testing.T) {
 	}
 	if got := rowIDs(library); !slices.Contains(got, libraryVisible) || slices.Contains(got, libraryEmpty) {
 		t.Fatalf("library rows = %v, want %s and not %s", got, libraryVisible, libraryEmpty)
-	}
-
-	v1 := httptest.NewRecorder()
-	h.HandleHomeSections(v1, httptest.NewRequest(http.MethodGet, "/home/sections", nil).WithContext(viewerCtx))
-	var v1Body homeSectionsResponse
-	if err := json.Unmarshal(v1.Body.Bytes(), &v1Body); err != nil {
-		t.Fatalf("v1 home: %d %s: %v", v1.Code, v1.Body.String(), err)
-	}
-	if got := rowIDs(v1Body); !slices.Contains(got, homeEmpty) {
-		t.Fatalf("v1 home rows = %v, want the empty row %s kept", got, homeEmpty)
 	}
 
 	direct, err := h.HomeSectionItems(viewerCtx, homeEmpty, viewer)

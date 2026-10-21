@@ -1620,7 +1620,7 @@ whose titles all sit outside the viewer's library access or rating limits, an of
 row, and a row whose fetch failed are left out, so every client gets the same rows. The layout
 still lists every resolved row, because it is built before any row is fetched, and
 `getHomeSectionItems` answers an empty row asked for by ID. The frozen v1 aggregate reads keep
-answering empty rows other than an off-season seasonal row.
+answering empty rows other than an off-season seasonal row and one emptied by hiding watched titles.
 Because v2 rejects unknown query parameters, a client sends `include_items` only after
 `getHomeCapabilities` (`GET /api/v2/home/capabilities`, v2-only) reports `include_items_max`, the
 largest value the layout accepts (4); the document is `not_configured`, without the field, when the
