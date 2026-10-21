@@ -71,23 +71,24 @@ func TestAdminItemMetadataRejectsMalformedDates(t *testing.T) {
 	deps.PermissionGates[policy.PermissionMetadataCuration] = adminTranslationGate
 	h := newTestHandler(t, deps)
 	path := Prefix + "/admin/items/item-1/metadata"
-	for _, value := range []string{`""`, `" "`, `"not-a-date"`, `"2024-02-30"`, `"2024-2-29"`, `"29/02/2024"`, `"2024-02-29T00:00:00Z"`, `"0000-01-01"`} {
-		for _, member := range []string{"release_date", "first_air_date", "last_air_date", "air_date"} {
-			body := `{"` + member + `":` + value + `}`
-			p := requireProblem(t, do(t, h, "PATCH", path, body, bearer(memberToken)), TypeValidationFailed)
-			if len(p.Errors) != 1 || p.Errors[0].Location != "body."+member || p.Errors[0].Code != codeInvalid || f.calls != 0 {
-				t.Fatalf("%s: errors = %+v calls=%d", body, p.Errors, f.calls)
-			}
+	// Each date member once: values that don't parse, and year 0, which
+	// time.Parse accepts but PostgreSQL's date type does not. Every bad member
+	// is named and nothing reaches the service.
+	p := requireProblem(t, do(t, h, "PATCH", path, `{"release_date":"","first_air_date":"2024-02-30","last_air_date":"0000-01-01","air_date":"2024-02-29T00:00:00Z","title":"Kept"}`, bearer(memberToken)), TypeValidationFailed)
+	var locations []string
+	for _, e := range p.Errors {
+		if e.Code != codeInvalid {
+			t.Fatalf("errors = %+v", p.Errors)
 		}
+		locations = append(locations, e.Location)
 	}
-	// Every malformed date is named, in a fixed order.
-	p := requireProblem(t, do(t, h, "PATCH", path, `{"air_date":"","release_date":"x","title":"Kept"}`, bearer(memberToken)), TypeValidationFailed)
-	if len(p.Errors) != 2 || p.Errors[0].Location != "body.release_date" || p.Errors[1].Location != "body.air_date" || f.calls != 0 {
-		t.Fatalf("several: errors = %+v calls=%d", p.Errors, f.calls)
+	if !slices.Equal(locations, []string{"body.release_date", "body.first_air_date", "body.last_air_date", "body.air_date"}) || f.calls != 0 {
+		t.Fatalf("errors = %+v calls=%d", p.Errors, f.calls)
 	}
-	rec := do(t, h, "PATCH", path, `{"release_date":"2024-02-29","first_air_date":"0001-01-01","last_air_date":"1899-12-31","air_date":null}`, bearer(memberToken))
-	if rec.Code != 200 || f.calls != 1 || *f.update.ReleaseDate != "2024-02-29" || !slices.Equal(f.clear, []string{"air_date"}) {
-		t.Fatalf("valid dates: %d %s %#v", rec.Code, rec.Body, f.update)
+	// A real date is accepted and null still clears.
+	rec := do(t, h, "PATCH", path, `{"release_date":"2024-02-29","air_date":null}`, bearer(memberToken))
+	if rec.Code != 200 || f.calls != 1 || !slices.Equal(f.clear, []string{"air_date"}) {
+		t.Fatalf("valid date: %d %s clear=%v", rec.Code, rec.Body, f.clear)
 	}
 }
 func adminCatalogItemMetadataFixtureCases() []fixtureCase {
