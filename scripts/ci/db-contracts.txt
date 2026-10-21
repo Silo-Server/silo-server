@@ -24,6 +24,7 @@
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
 ./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
+./internal/scanner TestScanKeepsFileRowAcrossRenameDB
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
 # Series air-date sort keys advance when a known episode airs.
