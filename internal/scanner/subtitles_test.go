@@ -253,3 +253,27 @@ func TestExternalSubtitleDirCacheReadsSubtitleFolders(t *testing.T) {
 		}
 	}
 }
+
+func TestExternalSubtitleDirCacheKeepsSidecarsWhenASubtitleFolderFails(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"Movie.mkv", "Movie.en.srt", "Subs/English.srt"} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(filepath.Join(dir, "Subs"), 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, "Subs"), 0700) })
+	if _, err := os.ReadDir(filepath.Join(dir, "Subs")); err == nil {
+		t.Skip("an unreadable directory is still readable here (running as root)")
+	}
+	got, err := newExternalSubtitleDirCache("movies").Detect(filepath.Join(dir, "Movie.mkv"))
+	if err == nil || len(got) != 1 || got[0].Title != "Movie.en.srt" {
+		t.Fatalf("Detect = %#v, %v; want the sidecar beside the video and an error", got, err)
+	}
+}

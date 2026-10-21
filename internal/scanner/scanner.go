@@ -3009,8 +3009,10 @@ func (s *Scanner) processFile(
 		var subErr error
 		externalSubs, subErr = subtitleCache.Detect(filePath)
 		if subErr != nil {
+			// Keep what was found (sidecars beside the video when only a
+			// Subs/ folder failed), but leave the set unchecked so the
+			// failure never reads as a change to the stored sidecars.
 			slog.WarnContext(ctx, "scanner: subtitle detection failed", "component", "scanner", "path", filePath, "error", subErr)
-			externalSubs = nil
 			externalSubsChecked = false
 			return externalSubs
 		}

@@ -124,7 +124,8 @@ func (c *externalSubtitleDirCache) listing(dir string) (externalSubtitleDirListi
 //     season folder of episodes leave such a file without an owner.
 //
 // The language and flags come from the name, as ParseSubtitleSuffix reads
-// them.
+// them. When a subtitle folder can't be read, Detect returns the error with
+// the sidecars it found before it.
 func (c *externalSubtitleDirCache) Detect(mediaFilePath string) ([]ExternalSubtitleInfo, error) {
 	dir := filepath.Dir(mediaFilePath)
 	mediaBase := stripExtension(filepath.Base(mediaFilePath))
@@ -163,7 +164,7 @@ func (c *externalSubtitleDirCache) Detect(mediaFilePath string) ([]ExternalSubti
 		subsDir := filepath.Join(dir, name)
 		subs, err := c.listing(subsDir)
 		if err != nil {
-			return nil, err
+			return results, err
 		}
 		for _, candidate := range addNamed(subsDir, subs.candidates) {
 			if !soleFeature {
@@ -180,7 +181,7 @@ func (c *externalSubtitleDirCache) Detect(mediaFilePath string) ([]ExternalSubti
 			videoDir := filepath.Join(subsDir, child)
 			named, err := c.listing(videoDir)
 			if err != nil {
-				return nil, err
+				return results, err
 			}
 			for _, candidate := range addNamed(videoDir, named.candidates) {
 				// Every file here is the video's; a name that isn't a
