@@ -3769,7 +3769,7 @@ func validatePseudoUser(w http.ResponseWriter, userID string, session *Session) 
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		return false
 	}
-	if userID == "" || userID == session.PseudoUserID.String() {
+	if userID == "" || isPseudoUser(userID, session.PseudoUserID) {
 		return true
 	}
 	writeError(w, http.StatusNotFound, "NotFound", "User not found")

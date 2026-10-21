@@ -130,8 +130,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Rate limiting mirrors the native API: credential endpoints spend their
 	// per-endpoint budget, and authenticated routes, media included, run the
 	// generic limiter after auth, as the native authenticated group does.
-	// Anonymous artwork, avatars, web assets, and public server info stay
-	// unlimited like native public artwork and server reads.
+	// Anonymous artwork, web assets, and public server info stay unlimited
+	// like native public artwork and server reads. User avatars spend the
+	// per-IP budget: each one reads the session, profile, and blob stores.
 	rateLimit := compatRateLimit(deps.RateLimit)
 	autoscanVirtualFoldersRegistered := false
 	if deps.Authenticator != nil && adminAPIKeyAuth != nil && autoscanHandler != nil {
@@ -211,6 +212,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	imagesHandler.keyAuth = adminAPIKeyAuth
 	imagesHandler.frontendFS = deps.FrontendFS
 	imagesHandler.artworkStore = deps.ArtworkStore
+	userAvatars := newCompatUserAvatars(deps.SessionStore, deps.UserStoreProvider, deps.AvatarStore)
+	imagesHandler.userAvatars = userAvatars
+	authHandler.avatars = userAvatars
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.RecommendationReader, deps.ItemRepo, deps.DetailSvc, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
@@ -231,12 +235,13 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
 	// <img> tags that carry no auth, so the route is registered top-level rather
 	// than inside the session-auth group.
-	r.Get(compatUserImageRoute, imagesHandler.HandleUserImage)
-	r.Method(http.MethodHead, compatUserImageRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
+	userImage := r.With(rateLimit)
+	userImage.Get(compatUserImageRoute, imagesHandler.HandleUserImage)
+	userImage.Method(http.MethodHead, compatUserImageRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	// Modern Jellyfin clients fetch the current user's avatar via /UserImage?userId=
-	// (the path form above is [Obsolete] upstream). Same anonymous palette handler.
-	r.Get(compatUserImageQueryRoute, imagesHandler.HandleUserImage)
-	r.Method(http.MethodHead, compatUserImageQueryRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
+	// (the path form above is [Obsolete] upstream). Same anonymous handler.
+	userImage.Get(compatUserImageQueryRoute, imagesHandler.HandleUserImage)
+	userImage.Method(http.MethodHead, compatUserImageQueryRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	webHandler := http.StripPrefix("/web", newDynamicCompatWebHandler(deps))
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusFound)

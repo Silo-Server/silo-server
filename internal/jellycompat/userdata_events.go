@@ -108,7 +108,7 @@ func userDataChangedFor(env evt.Envelope, session *Session, codec *ResourceIDCod
 	}
 	itemID := codec.EncodeStringID(EncodedIDItem, payload.ContentID)
 	data, err := json.Marshal(userDataChangedMessage{
-		UserID: session.PseudoUserID.String(),
+		UserID: compatUserID(session.PseudoUserID),
 		UserDataList: []userDataChangedEntry{{
 			ItemID:     itemID,
 			Key:        itemID,

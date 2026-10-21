@@ -442,55 +442,6 @@ func TestHandleItemImagePrimaryCacheHitRedirectsWithoutSession(t *testing.T) {
 	assertImageRedirect(t, rec, upstreamURL)
 }
 
-// serveUserImage issues an avatar request for pathID with the chi "id" route
-// param and no session in context.
-func serveUserImage(h *ImagesHandler, method, pathID string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, "/Users/"+pathID+"/Images/Primary", nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("id", pathID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-	rec := httptest.NewRecorder()
-	h.HandleUserImage(rec, req)
-	return rec
-}
-
-// TestHandleUserImageServesPlaceholderWithoutSession verifies the user-avatar
-// route serves a placeholder PNG without a session: it is byte-stable per id and
-// the palette varies across ids (the avatar is now drawn from a bounded fixed
-// palette, so two distinct ids may collide — variety is asserted over a sample).
-func TestHandleUserImageServesPlaceholderWithoutSession(t *testing.T) {
-	h := &ImagesHandler{codec: NewResourceIDCodec()}
-	id := PseudoUserID(1, "profile-1").String()
-
-	rec := serveUserImage(h, http.MethodGet, id)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
-	}
-	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
-		t.Fatalf("Content-Type = %q, want image/png", ct)
-	}
-	body := rec.Body.Bytes()
-	if len(body) == 0 {
-		t.Fatal("expected a non-empty avatar body")
-	}
-
-	again := serveUserImage(h, http.MethodGet, id)
-	if got := again.Body.Bytes(); string(got) != string(body) {
-		t.Fatal("avatar bytes for the same path id must be stable across calls")
-	}
-
-	// The palette is bounded, so individual ids may collide; assert variety over
-	// a sample instead of strict per-id divergence.
-	distinct := map[string]struct{}{}
-	for i := 0; i < 12; i++ {
-		out := serveUserImage(h, http.MethodGet, PseudoUserID(i+10, "profile").String())
-		distinct[out.Body.String()] = struct{}{}
-	}
-	if len(distinct) < 2 {
-		t.Fatalf("expected the avatar palette to vary across ids; got %d distinct outputs", len(distinct))
-	}
-}
-
 type recordingImageResolver struct {
 	path    string
 	variant string

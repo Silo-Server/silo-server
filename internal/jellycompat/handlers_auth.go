@@ -70,6 +70,7 @@ type userDTOResponse struct {
 	HasPassword               bool                      `json:"HasPassword"`
 	HasConfiguredPassword     bool                      `json:"HasConfiguredPassword"`
 	HasConfiguredEasyPassword bool                      `json:"HasConfiguredEasyPassword"`
+	PrimaryImageTag           string                    `json:"PrimaryImageTag,omitempty"`
 	Policy                    userPolicyResponse        `json:"Policy"`
 	Configuration             userConfigurationResponse `json:"Configuration"`
 }
@@ -139,6 +140,8 @@ type AuthHandler struct {
 	loginResolver loginResolver
 	authenticator *Authenticator
 	storeProvider userstore.UserStoreProvider
+	// avatars decides the PrimaryImageTag; nil reports no user avatars.
+	avatars *compatUserAvatars
 }
 
 // NewAuthHandler creates a new auth handler. The config provider is invoked
@@ -289,7 +292,7 @@ func (h *AuthHandler) HandleUserByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if chi.URLParam(r, "id") != session.PseudoUserID.String() {
+	if !isPseudoUser(chi.URLParam(r, "id"), session.PseudoUserID) {
 		writeError(w, http.StatusNotFound, "NotFound", "User not found")
 		return
 	}
@@ -316,7 +319,7 @@ func (h *AuthHandler) userDTO(session *Session) userDTOResponse {
 	name := session.Username
 
 	return userDTOResponse{
-		ID:                        session.PseudoUserID.String(),
+		ID:                        compatUserID(session.PseudoUserID),
 		Name:                      name,
 		ServerID:                  h.cfg().JellyfinCompat.ServerID,
 		HasPassword:               true,
@@ -383,7 +386,7 @@ func (h *AuthHandler) sessionInfo(session *Session) *sessionInfoResponse {
 
 	return &sessionInfoResponse{
 		PlayableMediaTypes:    []string{},
-		UserID:                session.PseudoUserID.String(),
+		UserID:                compatUserID(session.PseudoUserID),
 		UserName:              name,
 		LastActivityDate:      now,
 		LastPlaybackCheckIn:   now,

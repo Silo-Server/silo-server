@@ -14,8 +14,8 @@ import (
 // the full NewRouter/ServeHTTP stack — registration, chi static-vs-{id} ordering,
 // and auth-group placement that the per-handler tests cannot see. Auth-group
 // routes must answer 401 (registered + behind auth) rather than 404 (route
-// dropped) or 2xx (accidentally anonymous); /UserImage must serve its anonymous
-// avatar; and an authenticated Filters2/Sessions request must reach the right
+// dropped) or 2xx (accidentally anonymous); /UserImage must reach its anonymous
+// handler; and an authenticated Filters2/Sessions request must reach the right
 // handler with the right shape.
 func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 	cfg, err := config.LoadFromDB(map[string]string{})
@@ -48,15 +48,15 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 		}
 	}
 
-	// (2) /UserImage is anonymous-by-design (PR #158 palette): serves with no auth.
+	// (2) /UserImage is anonymous by design: with no auth it reaches the
+	// handler, which answers a user without an uploaded avatar 404 as in
+	// Jellyfin, never 401. The handler's JSON body tells that 404 apart from
+	// an unregistered route's.
 	{
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/UserImage?userId=router-test", nil))
-		if rec.Code != http.StatusOK {
-			t.Errorf("GET /UserImage = %d, want 200", rec.Code)
-		}
-		if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
-			t.Errorf("GET /UserImage Content-Type = %q, want image/png", ct)
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/UserImage?userId="+compatUserID(PseudoUserID(1, "p1")), nil))
+		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"Error":"NotFound"`) {
+			t.Errorf("GET /UserImage = %d %q, want the handler's 404", rec.Code, rec.Body.String())
 		}
 	}
 

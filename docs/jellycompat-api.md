@@ -23,6 +23,30 @@ The route inventory is maintained in
 `internal/jellycompat/testdata/media_routes.txt`. `internal/jellycompat/router.go`
 owns registration; the native `/api/v1` contract is separate.
 
+## Users and avatars
+
+A Jellyfin user is one household profile on one account. Its `Id` is a
+deterministic UUID derived from the account and profile. It is sent the way
+Jellyfin serializes a Guid: 32 lowercase hex digits without dashes, in the user
+DTO, `SessionInfo.UserId`, `/Sessions`, and `UserDataChanged` socket messages.
+Seerr's avatar proxy rejects any other shape. Routes and queries that take a
+user ID also accept the dashed form, which clients that signed in before this
+format still send. Item, library, and server IDs keep the dashed form.
+
+The user DTO carries `PrimaryImageTag` when the profile has an uploaded avatar
+and the caller signed in (a session for an `sa_` API key is never stored, so
+its avatar could not be served).
+The tag changes whenever the profile row changes, so a new upload busts client
+caches. Preset avatars are SVGs that most Jellyfin clients cannot draw, so they
+get no tag. `GET`/`HEAD /UserImage?userId=` and `/Users/{id}/Images/Primary`
+are anonymous, as in Jellyfin. They resolve the ID through the stored compat
+sessions, so any replica answers. They return the 256px WebP with
+`Last-Modified`, or `404` for a user with no uploaded avatar, an unknown ID, or
+no live session. A compat session whose login session was signed out or
+expired does not count as live. Seerr falls back to its default avatar on that
+`404`. Unlike item artwork, these routes spend the per-IP rate-limit budget,
+because each request reads the session, profile, and blob stores.
+
 ## Viewer state and preferences
 
 | Routes | Behavior |

@@ -3712,6 +3712,7 @@ func main() {
 			RecWorker:            recWorker,
 			FrontendFS:           deps.FrontendFS,
 			ArtworkStore:         deps.Blobs.Assets,
+			AvatarStore:          handlers.NewProfileAvatarStore(deps.Blobs),
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
 			RecipeNodeStore:  noderecipe.NewStore(apiRedisClient, 0),

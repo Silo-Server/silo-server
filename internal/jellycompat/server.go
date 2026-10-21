@@ -92,6 +92,9 @@ type Dependencies struct {
 	// the server's local network only when it is a direct URL to this store
 	// (artworkurl.FetchContext); every other URL reaches public addresses only.
 	ArtworkStore blobstore.Store
+	// AvatarStore holds uploaded profile avatars (the native API's
+	// ProfileHandler.AvatarStore). Nil serves no user avatars.
+	AvatarStore blobstore.Store
 
 	// Direct service dependencies (replaces Client)
 	ContentService  ContentService

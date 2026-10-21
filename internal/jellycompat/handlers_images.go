@@ -56,6 +56,8 @@ type ImagesHandler struct {
 	presignTTL   time.Duration
 	imageTags    *imageTagSigner
 	httpClient   *http.Client
+	// userAvatars serves Jellyfin user avatars; nil answers every user 404.
+	userAvatars *compatUserAvatars
 	// collections is optional; when set, BoxSet (library collection) artwork
 	// resolves durably instead of depending on the in-memory image cache.
 	collections collectionSource
@@ -903,27 +905,4 @@ func parseRemoteImageURL(imageURL string) (*url.URL, error) {
 		return nil, errors.New("invalid remote image URL")
 	}
 	return target, nil
-}
-
-// HandleUserImage returns a deterministic placeholder avatar.
-//
-// Jellyfin user-image GETs are anonymous (200/404 only): clients fetch avatars
-// via plain <img> tags that carry no auth. The response is selected from a
-// precomputed palette by hashing the path pseudo-user id, so it stays
-// deterministic per id without per-request PNG generation (which an anonymous
-// varying-{id} flood would otherwise turn into a CPU DoS amplifier).
-func (h *ImagesHandler) HandleUserImage(w http.ResponseWriter, r *http.Request) {
-	id := chiURLParam(r, "id")
-	if id == "" {
-		// The modern /UserImage route carries the id as a ?userId= query param
-		// rather than a path segment. Fall back to it so each user still hashes
-		// to a stable palette entry instead of every caller sharing the empty-id
-		// avatar.
-		id = firstNonEmpty(r.URL.Query().Get("userId"), r.URL.Query().Get("UserId"))
-	}
-
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(avatarPalette[avatarPaletteIndex(id)])
 }
