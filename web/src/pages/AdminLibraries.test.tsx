@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   useUploadLibraryPoster: vi.fn(),
   useDeleteLibraryPoster: vi.fn(),
   useUnmatchedLibraryItems: vi.fn(),
+  useSetUnmatchedItemIgnored: vi.fn(),
   useAdminPlugins: vi.fn(),
   useCancelLibraryScans: vi.fn(),
   useCancelAdminJob: vi.fn(),
@@ -76,6 +77,7 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useUploadLibraryPoster: (...args: unknown[]) => mocks.useUploadLibraryPoster(...args),
   useDeleteLibraryPoster: (...args: unknown[]) => mocks.useDeleteLibraryPoster(...args),
   useUnmatchedLibraryItems: (...args: unknown[]) => mocks.useUnmatchedLibraryItems(...args),
+  useSetUnmatchedItemIgnored: (...args: unknown[]) => mocks.useSetUnmatchedItemIgnored(...args),
   useCancelLibraryScans: (...args: unknown[]) => mocks.useCancelLibraryScans(...args),
   useCancelAdminJob: (...args: unknown[]) => mocks.useCancelAdminJob(...args),
   useLibraryRoots: (...args: unknown[]) => mocks.useLibraryRoots(...args),
@@ -251,6 +253,7 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
     mocks.useUnmatchedLibraryItems.mockReturnValue(unmatchedItemsResult([]));
+    mocks.useSetUnmatchedItemIgnored.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useCancelLibraryScans.mockReturnValue(queryState);
     mocks.useCancelAdminJob.mockReturnValue(queryState);
     mocks.useLibraryRoots.mockReturnValue({
@@ -674,6 +677,107 @@ describe("AdminLibraries", () => {
     };
     view.rerender(page());
     expect(titles()).toEqual(["Zulu", "Middle", "Alpha"]);
+  });
+
+  it("ignores an unmatched item and restores an ignored one", async () => {
+    const item = {
+      content_id: "movie:special",
+      library_id: 1,
+      title: "Bonus Disc Featurette",
+      year: 2003,
+      content_type: "movie",
+      library_name: "Movies",
+      status: "unmatched",
+    };
+    const ignored = {
+      ...item,
+      content_id: "movie:reel",
+      title: "Family Holiday Reel",
+      ignored_at: "2026-01-02T03:04:05.678Z",
+    };
+    const book = {
+      ...item,
+      content_id: "audiobook:pending",
+      title: "Pending Audiobook",
+      content_type: "audiobook",
+      status: "pending",
+    };
+    mocks.useUnmatchedLibraryItems.mockImplementation((_search: string, ignoredView: boolean) =>
+      unmatchedItemsResult(ignoredView ? [ignored] : [item, book]),
+    );
+    const mutate = vi.fn();
+    mocks.useSetUnmatchedItemIgnored.mockReturnValue({ mutate, isPending: false });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AdminLibraries />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByText("Unmatched Items"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Ignore Bonus Disc Featurette" }));
+    // Books keep their own enrichment, so they offer no Ignore.
+    expect(screen.queryByRole("button", { name: "Ignore Pending Audiobook" })).toBeNull();
+    expect(mutate).toHaveBeenLastCalledWith({
+      contentId: "movie:special",
+      title: "Bonus Disc Featurette",
+      ignored: true,
+    });
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Unmatched item view" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Ignored" }));
+    expect(screen.getByText("Family Holiday Reel")).toBeInTheDocument();
+    expect(screen.queryByText("Bonus Disc Featurette")).toBeNull();
+    expect(
+      screen.getByPlaceholderText("Search ignored items by title, library, or type..."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore Family Holiday Reel" }));
+    expect(mutate).toHaveBeenLastCalledWith({
+      contentId: "movie:reel",
+      title: "Family Holiday Reel",
+      ignored: false,
+    });
+  });
+
+  it("keeps the unmatched section while every item is ignored", () => {
+    const ignored = {
+      content_id: "movie:reel",
+      library_id: 1,
+      title: "Family Holiday Reel",
+      year: 2011,
+      content_type: "movie",
+      library_name: "Movies",
+      status: "unmatched",
+      ignored_at: "2026-01-02T03:04:05.678Z",
+    };
+    mocks.useUnmatchedLibraryItems.mockImplementation((_search: string, ignoredView: boolean) =>
+      unmatchedItemsResult(ignoredView ? [ignored] : []),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AdminLibraries />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByText("Unmatched Items"));
+    expect(screen.getByText("No items are awaiting a match.")).toBeInTheDocument();
+  });
+
+  it("hides the unmatched section when nothing is unmatched or ignored", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AdminLibraries />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByText("Unmatched Items")).toBeNull();
   });
 
   it.each(["search", "first", "previous"])(

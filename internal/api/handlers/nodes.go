@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -63,7 +64,7 @@ type NodeHandler struct {
 	lister            NodeListEnabled
 	eventBus          cache.EventBus
 	redisClient       *redis.Client // for reading session keys
-	jwtSecret         string        // for bearer auth when calling force-reload on nodes
+	jwtSecret         string        // signs calls to nodes (see nodeauth)
 	// capabilities refreshes a node's stored inventory on demand; nil in a
 	// deployment with no health checker, where a re-probe still runs on the node
 	// and the stored row catches up on the next sweep.
@@ -415,7 +416,9 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 	if err != nil {
 		return false
 	}
-	req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
+	if nodeauth.Sign(req, node.URL, h.jwtSecret) != nil {
+		return false
+	}
 	resp, err := telemetry.DoTrustedNode(&http.Client{Timeout: nodeConfigReloadTimeout}, req, "reload")
 	if err != nil {
 		slog.WarnContext(ctx, "node did not reload after an acceleration override change; it will pick it up on its next config poll",
@@ -767,7 +770,7 @@ type nodeReprobeResponse struct {
 	CapabilityHash string `json:"capability_hash"`
 }
 
-// reprobeNode performs the bearer-authenticated re-probe call against one node,
+// reprobeNode performs the signed re-probe call against one node,
 // mirroring the force-reload client.
 func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nodeReprobeResponse, error) {
 	timeout := h.nodeReprobeTimeout(node)
@@ -779,7 +782,9 @@ func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nod
 	if err != nil {
 		return nodeReprobeResponse{}, err
 	}
-	req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
+	if err := nodeauth.Sign(req, node.URL, h.jwtSecret); err != nil {
+		return nodeReprobeResponse{}, err
+	}
 
 	resp, err := telemetry.DoTrustedNode(client, req, "reprobe")
 	if err != nil {

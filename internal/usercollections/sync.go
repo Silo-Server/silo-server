@@ -35,10 +35,8 @@ type Service struct {
 	httpClient    *http.Client
 	logger        *slog.Logger
 
-	TMDBCollections    catalog.TMDBCollectionFetcher
-	TMDBLists          catalog.TMDBListFetcher
-	TraktCollections   catalog.TraktCollectionFetcher
-	TraktTokenResolver catalog.TraktAccessTokenResolver
+	TMDBCollections catalog.TMDBCollectionFetcher
+	TMDBLists       catalog.TMDBListFetcher
 
 	// Collages builds the collage of a synced collection without an uploaded
 	// or imported poster; nil when artwork storage is not configured.
@@ -117,8 +115,6 @@ func (s *Service) RunSync(ctx context.Context, userID int, store userstore.UserS
 		match = s.matchTMDB
 	case SourceModeTMDBList:
 		match = s.matchTMDBList
-	case SourceModeTraktPreset:
-		match = s.matchTrakt
 	default:
 		return nil, nil, ErrSyncUnsupported
 	}
@@ -264,7 +260,7 @@ func (s *Service) matchMDBList(ctx context.Context, collection *userstore.Collec
 		if entry.ID > 0 {
 			tmdb = fmt.Sprintf("%d", entry.ID)
 		}
-		return resolveCandidate(lookup, itemType, tvdb, tmdb, entry.IMDbID)
+		return lookup.Resolve(itemType, tvdb, tmdb, entry.IMDbID)
 	}), nil
 }
 
@@ -275,30 +271,6 @@ func mdbListItemType(entry mdblistEntry) string {
 	default:
 		return "movie"
 	}
-}
-
-// resolveCandidate picks a content_id from a batch lookup using the standard
-// TVDB → TMDB → IMDb priority shared with admin sync.
-func resolveCandidate(lookup *catalog.ExternalIDLookup, itemType, tvdbID, tmdbID, imdbID string) string {
-	if lookup == nil {
-		return ""
-	}
-	if itemType == "series" && tvdbID != "" {
-		if id := lookup.ByTVDB[tvdbID]; id != "" {
-			return id
-		}
-	}
-	if tmdbID != "" {
-		if id := lookup.ByTMDB[tmdbID]; id != "" {
-			return id
-		}
-	}
-	if imdbID != "" {
-		if id := lookup.ByIMDb[imdbID]; id != "" {
-			return id
-		}
-	}
-	return ""
 }
 
 // matchEntries resolves each of total source entries to its catalog
@@ -408,7 +380,7 @@ func (s *Service) matchTMDB(ctx context.Context, _ *userstore.Collection, cfg So
 		// transport error embeds the request URL, which carries the API key.
 		return nil, fmt.Errorf("fetching TMDB preset: %w", logredact.SanitizeURLError(err))
 	}
-	return s.matchTMDBEntries(ctx, results)
+	return catalog.MatchTMDBEntries(ctx, s.items, s.TMDBCollections, results)
 }
 
 // ── TMDB lists ───────────────────────────────────────────────────────────────
@@ -429,129 +401,7 @@ func (s *Service) matchTMDBList(ctx context.Context, collection *userstore.Colle
 	if err != nil {
 		return nil, fmt.Errorf("fetching TMDB list %d: %w", listID, logredact.SanitizeURLError(err))
 	}
-	return s.matchTMDBEntries(ctx, results)
-}
-
-// matchTMDBEntries matches fetched TMDB entries against the catalog in source
-// order. Shared by the TMDB preset and list sources.
-func (s *Service) matchTMDBEntries(ctx context.Context, results []catalog.TMDBCollectionEntry) ([]string, error) {
-	// TMDB returns mixed-media-type results (the "trending all" preset and
-	// user lists can emit both movie and tv). Batch by item type so each gets
-	// a single catalog lookup instead of N round-trips through GetByExternalID.
-	var movieBatch, seriesBatch catalog.ExternalIDBatch
-	for _, entry := range results {
-		batch := &movieBatch
-		if entry.MediaType == "tv" {
-			batch = &seriesBatch
-		}
-		if entry.ID > 0 {
-			batch.TMDBIDs = append(batch.TMDBIDs, fmt.Sprintf("%d", entry.ID))
-		}
-		if entry.IMDbID != "" {
-			batch.IMDbIDs = append(batch.IMDbIDs, entry.IMDbID)
-		}
-		if entry.TVDBID > 0 && entry.MediaType == "tv" {
-			batch.TVDBIDs = append(batch.TVDBIDs, fmt.Sprintf("%d", entry.TVDBID))
-		}
-	}
-	movieLookup, err := s.items.GetByExternalIDs(ctx, movieBatch, "movie")
-	if err != nil {
-		return nil, err
-	}
-	seriesLookup, err := s.items.GetByExternalIDs(ctx, seriesBatch, "series")
-	if err != nil {
-		return nil, err
-	}
-
-	return matchEntries(len(results), func(i int) string {
-		entry := results[i]
-		itemType := "movie"
-		lookup := movieLookup
-		if entry.MediaType == "tv" {
-			itemType = "series"
-			lookup = seriesLookup
-		}
-		var tmdb string
-		if entry.ID > 0 {
-			tmdb = fmt.Sprintf("%d", entry.ID)
-		}
-		var tvdb string
-		if entry.TVDBID > 0 {
-			tvdb = fmt.Sprintf("%d", entry.TVDBID)
-		}
-		return resolveCandidate(lookup, itemType, tvdb, tmdb, entry.IMDbID)
-	}), nil
-}
-
-// ── Trakt presets ────────────────────────────────────────────────────────────
-
-func (s *Service) matchTrakt(ctx context.Context, collection *userstore.Collection, cfg SourceConfig) ([]string, error) {
-	if s.TraktCollections == nil {
-		return nil, errors.New("Trakt sync requires configured Trakt access") //nolint:staticcheck // ST1005: user-facing sync status, matches library collection wording
-	}
-	preset := strings.TrimSpace(cfg.Preset)
-	mediaType := strings.TrimSpace(cfg.MediaType)
-	if mediaType == "" {
-		mediaType = "movie"
-	}
-	if preset != "trending" && preset != "popular" && preset != "recommended" {
-		return nil, fmt.Errorf("unsupported Trakt preset: %s", preset)
-	}
-
-	accessToken := ""
-	if preset == "recommended" {
-		profileID := strings.TrimSpace(cfg.ProfileID)
-		if profileID == "" {
-			profileID = collection.CreatorProfileID
-		}
-		if profileID == "" || s.TraktTokenResolver == nil {
-			return nil, errors.New("Trakt recommendations require a profile binding") //nolint:staticcheck // ST1005: user-facing sync status, matches library collection wording
-		}
-		token, err := s.TraktTokenResolver.ResolveTraktAccessToken(ctx, profileID)
-		if err != nil {
-			return nil, fmt.Errorf("resolving Trakt access token: %w", err)
-		}
-		accessToken = token
-	}
-
-	limit := collectionutil.SourceFetchLimit(cfg.Limit)
-	results, err := s.TraktCollections.GetCollectionPreset(ctx, preset, mediaType, limit, accessToken)
-	if err != nil {
-		return nil, fmt.Errorf("fetching Trakt preset: %w", err)
-	}
-
-	itemType := "movie"
-	if mediaType == "tv" {
-		itemType = "series"
-	}
-	var batch catalog.ExternalIDBatch
-	for _, entry := range results {
-		if entry.TMDBID > 0 {
-			batch.TMDBIDs = append(batch.TMDBIDs, fmt.Sprintf("%d", entry.TMDBID))
-		}
-		if entry.IMDbID != "" {
-			batch.IMDbIDs = append(batch.IMDbIDs, entry.IMDbID)
-		}
-		if entry.TVDBID > 0 && itemType == "series" {
-			batch.TVDBIDs = append(batch.TVDBIDs, fmt.Sprintf("%d", entry.TVDBID))
-		}
-	}
-	lookup, err := s.items.GetByExternalIDs(ctx, batch, itemType)
-	if err != nil {
-		return nil, err
-	}
-
-	return matchEntries(len(results), func(i int) string {
-		entry := results[i]
-		var tmdb, tvdb string
-		if entry.TMDBID > 0 {
-			tmdb = fmt.Sprintf("%d", entry.TMDBID)
-		}
-		if entry.TVDBID > 0 {
-			tvdb = fmt.Sprintf("%d", entry.TVDBID)
-		}
-		return resolveCandidate(lookup, itemType, tvdb, tmdb, entry.IMDbID)
-	}), nil
+	return catalog.MatchTMDBEntries(ctx, s.items, s.TMDBLists, results)
 }
 
 // ── Result application ───────────────────────────────────────────────────────

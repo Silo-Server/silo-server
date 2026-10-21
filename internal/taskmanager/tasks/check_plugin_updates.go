@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -59,5 +60,11 @@ func (t *CheckPluginUpdatesTask) Execute(ctx context.Context, progress taskmanag
 		summary.UpdatesApplied,
 		summary.UpdatesAvailable,
 	))
+	// A refused update leaves the old version running, but the admin still has
+	// to see it: report the run as failed with each plugin's reason.
+	if summary.FailedOperations > 0 {
+		return fmt.Errorf("%d plugin update operation(s) failed: %s",
+			summary.FailedOperations, strings.Join(summary.Failures, "; "))
+	}
 	return nil
 }

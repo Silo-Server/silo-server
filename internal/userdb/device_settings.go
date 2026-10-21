@@ -16,10 +16,10 @@ func (s *SQLiteUserStore) ListDeviceSettingsPage(ctx context.Context, opts users
 	if err := opts.Validate(); err != nil {
 		return nil, err
 	}
-	args := []any{opts.ProfileID, opts.ProfileID}
-	sqlText := `SELECT d.profile_id,d.device_id,d.device_name,d.device_platform,d.last_seen_at,COALESCE(p.name,''),COALESCE((SELECT json_group_array(k.key) FROM user_setting_values k WHERE k.scope='profile_device' AND k.profile_id=d.profile_id AND k.device_id=d.device_id), '[]')
+	args := []any{opts.ProfileID, opts.ProfileID, opts.DeviceID, opts.DeviceID}
+	sqlText := `SELECT d.profile_id,d.device_id,d.device_name,COALESCE(d.custom_name,''),d.device_platform,d.last_seen_at,COALESCE(p.name,''),COALESCE((SELECT json_group_array(k.key) FROM user_setting_values k WHERE k.scope='profile_device' AND k.profile_id=d.profile_id AND k.device_id=d.device_id), '[]')
  FROM user_devices d LEFT JOIN profiles p ON p.id=d.profile_id
- WHERE (?='' OR d.profile_id=?)`
+ WHERE (?='' OR d.profile_id=?) AND (?='' OR d.device_id=?)`
 	if opts.After != nil {
 		sqlText += ` AND (d.last_seen_at < ? OR (d.last_seen_at = ? AND (d.profile_id,d.device_id) > (?,?)))`
 		args = append(args, opts.After.LastSeenAt, opts.After.LastSeenAt, opts.After.ProfileID, opts.After.DeviceID)
@@ -35,7 +35,7 @@ func (s *SQLiteUserStore) ListDeviceSettingsPage(ctx context.Context, opts users
 	for rows.Next() {
 		var entry userstore.DeviceSettingsEntry
 		var raw []byte
-		if err := rows.Scan(&entry.ProfileID, &entry.DeviceID, &entry.DeviceName, &entry.DevicePlatform, &entry.LastSeenAt, &entry.ProfileName, &raw); err != nil {
+		if err := rows.Scan(&entry.ProfileID, &entry.DeviceID, &entry.DeviceName, &entry.CustomName, &entry.DevicePlatform, &entry.LastSeenAt, &entry.ProfileName, &raw); err != nil {
 			return nil, err
 		}
 		var keys []string
@@ -64,14 +64,15 @@ func (s *SQLiteUserStore) RemoveDeviceSettings(ctx context.Context, profileID, d
 		if err != nil {
 			return err
 		}
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var key string
 			if err := rows.Scan(&key); err != nil {
-				_ = rows.Close()
 				return err
 			}
 			keys = append(keys, key)
 		}
+		// Close before the deletes below; the deferred Close is then a no-op.
 		if err := rows.Close(); err != nil {
 			return err
 		}
@@ -95,4 +96,19 @@ func (s *SQLiteUserStore) RemoveDeviceSettings(ctx context.Context, profileID, d
 		return nil, err
 	}
 	return keys, nil
+}
+
+func (s *SQLiteUserStore) RenameDevice(ctx context.Context, profileID, deviceID, name string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE user_devices SET custom_name=NULLIF(?,'') WHERE profile_id=? AND device_id=?`, name, profileID, deviceID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return userstore.ErrDeviceNotFound
+	}
+	return nil
 }

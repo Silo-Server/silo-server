@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -64,7 +65,7 @@ func (h *AdminSubtitleHandler) TestSubtitleProvider(ctx context.Context, provide
 		Languages: []string{"en"},
 	})
 	if err != nil {
-		return SubtitleProviderTestView{Error: err.Error()}
+		return SubtitleProviderTestView{Error: logredact.SanitizeText(logredact.SanitizeURLError(err).Error())}
 	}
 
 	if len(results) == 0 {

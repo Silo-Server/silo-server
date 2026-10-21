@@ -9,8 +9,8 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Git, Make, and OpenSSL
 - Docker Engine or Docker Desktop with Docker Compose 2.24+ (local services and testcontainers)
 - Go 1.26.4+
-- Node.js 22+ with pnpm 10.32.1. The managed Jellyfin Web installer (`make jellyfin-web`,
-  `silo compat-web install`, or the admin settings) needs Node.js 24+ for Jellyfin Web 12.x.
+- Node.js 24+ with pnpm 10.32.1. The managed Jellyfin Web installer (`make jellyfin-web`,
+  `silo compat-web install`, or the admin settings) also needs Node.js 24+ for Jellyfin Web 12.x.
 - PostgreSQL 18 with pgvector
 - Redis
 - FFmpeg (transcoding). On macOS, install Homebrew's keg-only full build so
@@ -142,6 +142,11 @@ that can hold millions of rows. Keep locks on existing tables short:
   before creating a new index: a copy left by an interrupted run is invalid, and
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS` would keep it, so the planner would
   never use the index.
+- When a migration replaces one index with another, a retry must not drop the
+  replacement: goose records the version only after the last statement, so a
+  run that already dropped the old index can run again. Use a Go migration
+  that builds through `ensureIndexConcurrently` in `internal/database`, which
+  drops only an invalid copy (`internal/database/push_attempt_key_migration.go`).
 - Add foreign keys and `CHECK` constraints to existing tables as `NOT VALID`,
   and run `VALIDATE CONSTRAINT` only after that commits: in a later migration,
   or as a separate statement in a `NO TRANSACTION` file. Inside one

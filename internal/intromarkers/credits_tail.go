@@ -173,14 +173,14 @@ func (e *ChromaprintExtractor) SampleCreditsTail(ctx context.Context, candidate 
 	}
 	req := creditsTailRequest(ctx, candidate, window, fingerprint)
 	runner := e.tailRunner(ctx, &req)
-	result, err := runner.Run(ctx, req)
+	result, err := runAnalysis(ctx, e.config, runner, req)
 	if err != nil && req.Audio != nil && req.Stats != nil && mediasample.Classify(err) == mediasample.ReasonNoStream {
 		// ffmpeg fails the whole run when any output lacks its stream, and
 		// probe metadata can name audio the file cannot give. Run the video
 		// alone: when that succeeds, the audio was missing and the tail has
 		// no silences or fingerprint.
 		req.Audio = nil
-		result, err = runner.Run(ctx, req)
+		result, err = runAnalysis(ctx, e.config, runner, req)
 	}
 	if err != nil {
 		return creditsTailSample{}, fmt.Errorf("sampling the credits tail of file %d: %w", candidate.FileID, err)

@@ -114,7 +114,7 @@ func TestHardwareSmokeFilterNVENCPreservesSourceBitDepth(t *testing.T) {
 		{name: "10-bit", bitDepth: 10, want: "hwdownload,format=p010le", reject: "hwdownload,format=nv12"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			filter := hardwareSmokeFilter(BackendNVENC, SourceSDRBT2020, test.bitDepth)
+			filter := hardwareSmokeFilter(BackendNVENC, "", SourceSDRBT2020, test.bitDepth)
 			if !strings.Contains(filter, test.want) || strings.Contains(filter, test.reject) {
 				t.Fatalf("hardwareSmokeFilter() = %q, want %q without %q", filter, test.want, test.reject)
 			}
@@ -123,7 +123,7 @@ func TestHardwareSmokeFilterNVENCPreservesSourceBitDepth(t *testing.T) {
 }
 
 func TestVideoToolboxSmokeUsesHardwareFramesAndEightBitOutput(t *testing.T) {
-	args := hardwareSmokeArgs("/tmp/probe.hevc", BackendVideoToolbox, "", SourcePQ)
+	args := hardwareSmokeArgs("/tmp/probe.hevc", BackendVideoToolbox, HardwareFilterVideoToolbox, "", SourcePQ)
 	joined := strings.Join(args, " ")
 	for _, token := range []string{
 		"-hwaccel videotoolbox",
@@ -143,7 +143,7 @@ func TestVideoToolboxSmokeUsesHardwareFramesAndEightBitOutput(t *testing.T) {
 func TestVideoToolboxSmokeDeclaresEverySourceSignal(t *testing.T) {
 	for _, kind := range AllSourceKinds() {
 		t.Run(string(kind), func(t *testing.T) {
-			filter := hardwareSmokeFilter(BackendVideoToolbox, kind, decodeProbeFixtureBitDepth)
+			filter := hardwareSmokeFilter(BackendVideoToolbox, "", kind, decodeProbeFixtureBitDepth)
 			if !strings.HasPrefix(filter, SourceParameters(kind)+",") {
 				t.Fatalf("hardwareSmokeFilter() = %q, want source declaration %q first", filter, SourceParameters(kind))
 			}
@@ -154,11 +154,24 @@ func TestVideoToolboxSmokeDeclaresEverySourceSignal(t *testing.T) {
 func TestVideoToolboxListingGateRequiresCompletePipeline(t *testing.T) {
 	filters := []byte("scale_vt hwdownload sidedata")
 	encoders := []byte("h264_videotoolbox")
-	if !hardwareProbeAvailable(BackendVideoToolbox, filters, encoders) {
+	if !hardwareProbeAvailable(BackendVideoToolbox, HardwareFilterVideoToolbox, filters, encoders) {
 		t.Fatal("complete VideoToolbox pipeline was not accepted")
 	}
-	if hardwareProbeAvailable(BackendVideoToolbox, []byte("scale_vt hwdownload"), encoders) {
+	if hardwareProbeAvailable(BackendVideoToolbox, HardwareFilterVideoToolbox, []byte("scale_vt hwdownload"), encoders) {
 		t.Fatal("VideoToolbox pipeline without metadata removal was accepted")
+	}
+}
+
+func TestQSVListingGateRequiresOpenCLBitmapSubtitleFilters(t *testing.T) {
+	filters := "tonemap_opencl hwmap scale_vaapi"
+	encoders := []byte("h264_qsv")
+	if !hardwareProbeAvailable(BackendQSV, HardwareFilterOpenCL, []byte(filters+" overlay_opencl scale_opencl"), encoders) {
+		t.Fatal("complete QSV pipeline was not accepted")
+	}
+	for _, missing := range []string{" scale_opencl", " overlay_opencl"} {
+		if hardwareProbeAvailable(BackendQSV, HardwareFilterOpenCL, []byte(filters+missing), encoders) {
+			t.Fatalf("QSV pipeline with only%s was accepted", missing)
+		}
 	}
 }
 
@@ -172,7 +185,8 @@ func TestProbeTotalTimeoutCoversBoundedCommandMatrix(t *testing.T) {
 	}{
 		{name: "software", backend: BackendSoftware, expected: 41 * time.Second},
 		{name: "one QSV device", backend: BackendQSV, device: "/dev/dri/renderD128", expected: 71 * time.Second},
-		{name: "two VAAPI devices", backend: BackendVAAPI, device: "/dev/dri/renderD128,/dev/dri/renderD129", expected: 91 * time.Second},
+		// VAAPI counts the Dolby Vision smoke its OpenCL path on Intel runs.
+		{name: "two VAAPI devices", backend: BackendVAAPI, device: "/dev/dri/renderD128,/dev/dri/renderD129", expected: 101 * time.Second},
 		{name: "one NVENC device", backend: BackendNVENC, device: "0", expected: 221 * time.Second},
 		{name: "VideoToolbox", backend: BackendVideoToolbox, expected: 66 * time.Second},
 	}
@@ -627,7 +641,7 @@ func TestProbeSmokesDolbyVisionOnlyOnRPUExecutors(t *testing.T) {
 		wantSoftware bool
 		wantHardware bool
 	}{
-		{name: "tonemapx and QSV OpenCL", backend: BackendQSV, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n", encoders: "libx264 h264_qsv", wantSoftware: true, wantHardware: true},
+		{name: "tonemapx and QSV OpenCL", backend: BackendQSV, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n", encoders: "libx264 h264_qsv", wantSoftware: true, wantHardware: true},
 		{name: "tonemapx and NVENC CUDA", backend: BackendNVENC, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. tonemap_cuda V->V\n .S. scale_cuda V->V\n", encoders: "libx264 h264_nvenc", wantSoftware: true, wantHardware: true},
 		{name: "Hable and VAAPI", backend: BackendVAAPI, filters: " .S. zscale V->V\n .S. tonemap V->V\n .S. sidedata V->V\n .S. tonemap_vaapi V->V\n .S. scale_vaapi V->V\n", encoders: "libx264 h264_vaapi"},
 		{name: "tonemapx and VideoToolbox", backend: BackendVideoToolbox, filters: " .S. zscale V->V\n .S. tonemapx V->V\n .S. sidedata V->V\n .S. scale_vt V->V\n .S. hwdownload V->V\n", encoders: "libx264 h264_videotoolbox", wantSoftware: true},

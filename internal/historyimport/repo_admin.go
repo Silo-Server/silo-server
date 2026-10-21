@@ -194,16 +194,10 @@ func (r *Repository) ListAllRuns(ctx context.Context, sourceID *int, limit int) 
 		limit = 200
 	}
 
-	var rows interface {
-		Close()
-		Next() bool
-		Scan(dest ...any) error
-		Err() error
-	}
-	var err error
-
+	var query string
+	var args []any
 	if sourceID != nil {
-		rows, err = r.pool.Query(ctx, `
+		query = `
 			SELECT r.id, r.user_id, r.profile_id, r.source_type, r.connection_mode, r.status,
 			       r.mapping_id,
 			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.favorites_imported, r.skipped,
@@ -213,9 +207,10 @@ func (r *Repository) ListAllRuns(ctx context.Context, sourceID *int, limit int) 
 			LEFT JOIN history_import_user_mappings m ON r.mapping_id = m.id
 			WHERE COALESCE(r.dispatch_source_id,m.source_id) = $1
 			ORDER BY r.created_at DESC, r.id DESC
-			LIMIT $2`, *sourceID, limit)
+			LIMIT $2`
+		args = []any{*sourceID, limit}
 	} else {
-		rows, err = r.pool.Query(ctx, `
+		query = `
 			SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			       mapping_id,
 			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
@@ -223,8 +218,10 @@ func (r *Repository) ListAllRuns(ctx context.Context, sourceID *int, limit int) 
 			       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
 			FROM history_import_runs
 			ORDER BY created_at DESC, id DESC
-			LIMIT $1`, limit)
+			LIMIT $1`
+		args = []any{limit}
 	}
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing all history import runs: %w", err)
 	}
@@ -253,16 +250,10 @@ func (r *Repository) GetRunByID(ctx context.Context, runID string) (*Run, error)
 }
 
 func (r *Repository) ListActiveRuns(ctx context.Context, sourceID *int) ([]Run, error) {
-	var rows interface {
-		Close()
-		Next() bool
-		Scan(dest ...any) error
-		Err() error
-	}
-	var err error
-
+	var query string
+	var args []any
 	if sourceID != nil {
-		rows, err = r.pool.Query(ctx, `
+		query = `
 			SELECT r.id, r.user_id, r.profile_id, r.source_type, r.connection_mode, r.status,
 			       r.mapping_id,
 			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.favorites_imported, r.skipped,
@@ -272,9 +263,10 @@ func (r *Repository) ListActiveRuns(ctx context.Context, sourceID *int) ([]Run, 
 			LEFT JOIN history_import_user_mappings m ON r.mapping_id = m.id
 			WHERE COALESCE(r.dispatch_source_id,m.source_id) = $1
 			  AND r.status IN ($2, $3)
-			ORDER BY r.created_at DESC, r.id DESC`, *sourceID, RunStatusQueued, RunStatusRunning)
+			ORDER BY r.created_at DESC, r.id DESC`
+		args = []any{*sourceID, RunStatusQueued, RunStatusRunning}
 	} else {
-		rows, err = r.pool.Query(ctx, `
+		query = `
 			SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			       mapping_id,
 			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
@@ -282,8 +274,10 @@ func (r *Repository) ListActiveRuns(ctx context.Context, sourceID *int) ([]Run, 
 			       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL
 			FROM history_import_runs
 			WHERE status IN ($1, $2)
-			ORDER BY created_at DESC, id DESC`, RunStatusQueued, RunStatusRunning)
+			ORDER BY created_at DESC, id DESC`
+		args = []any{RunStatusQueued, RunStatusRunning}
 	}
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing active history import runs: %w", err)
 	}
@@ -372,14 +366,7 @@ func scanAdminRun(s adminRunScanner) (*Run, error) {
 	return scanRunWithMappingID(s)
 }
 
-type adminRunsRowSet interface {
-	Close()
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-}
-
-func scanAdminRuns(rows adminRunsRowSet) ([]Run, error) {
+func scanAdminRuns(rows pgx.Rows) ([]Run, error) {
 	var runs []Run
 	for rows.Next() {
 		run, err := scanRunWithMappingID(rows)

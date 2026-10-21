@@ -49,8 +49,10 @@ import {
   canEditMarkers as canEditMarkersForUser,
 } from "@/lib/permissions";
 import { isEpisodeUnwatched } from "@/lib/episodeSpoilers";
+import { formatDate } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 export default function EpisodeContent({ item }: { item: ItemDetail & { type: "episode" } }) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
@@ -315,16 +317,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
               />
               {item.air_date && (
                 <span className="metadata-badge">
-                  {(() => {
-                    const d = new Date(item.air_date);
-                    return Number.isNaN(d.getTime())
-                      ? item.air_date
-                      : new Intl.DateTimeFormat(undefined, {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        }).format(d);
-                  })()}
+                  {formatDate(item.air_date, "medium") || item.air_date}
                 </span>
               )}
               <QualityBadges summary={selectedMediaSummary} />
@@ -334,6 +327,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
           overview={item.overview}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
+          overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
           overviewHidden={overviewHidden}
           onRevealOverview={() => setRevealedOverviewId(item.content_id)}
           crewLine={<HeroCrewLine crew={item.crew ?? []} />}

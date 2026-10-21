@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -36,11 +37,27 @@ type Session struct {
 	StreamAppAccessToken  string
 	StreamAppRefreshToken string
 	StreamAppTokenExpiry  time.Time
-	CreatedAt             time.Time
-	ExpiresAt             time.Time
+	// LoginSessionID is the Silo login session the sign-in opened. The
+	// compat session ends with it. Empty for a session synthesized for an
+	// sa_ API key, which has no login session and is never stored.
+	LoginSessionID string
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
 }
 
-// SessionStore keeps compat sessions in memory.
+// signedOutDeleteTimeout bounds deleting the stored row of a compat session
+// whose login session ended, so the request it refuses is not held up.
+const signedOutDeleteTimeout = 2 * time.Second
+
+// loginSessionChecker reports whether a Silo login session is live (not
+// revoked, not expired); *auth.Service implements it. An error means it could
+// not be checked.
+type loginSessionChecker interface {
+	LoginSessionActive(ctx context.Context, sessionID string) (bool, error)
+}
+
+// SessionStore keeps compat sessions in memory or validates them against a
+// persistent repository. Persistent lookups never authorize from memory alone.
 type SessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]Session
@@ -49,6 +66,9 @@ type SessionStore struct {
 	ttl       time.Duration
 	now       func() time.Time
 	repo      sessionPersistence
+	// loginSessions, when set, is asked on every lookup whether the
+	// session's login session is still live.
+	loginSessions loginSessionChecker
 }
 
 // NewSessionStore creates a new in-memory session store.
@@ -71,6 +91,14 @@ func newSessionStore(ttl time.Duration, now func() time.Time, repo sessionPersis
 		now:      now,
 		repo:     repo,
 	}
+}
+
+// WithLoginSessions additionally checks the login session a compat session's
+// sign-in opened on every lookup. Its revocation or expiry ends the compat
+// session on every replica. It returns s.
+func (s *SessionStore) WithLoginSessions(c loginSessionChecker) *SessionStore {
+	s.loginSessions = c
+	return s
 }
 
 // Put stores or replaces a compat session.
@@ -129,10 +157,15 @@ func (s *SessionStore) withLifetime(session Session) Session {
 // that cannot be read reports the session as missing; callers that must tell
 // the two apart use Lookup.
 func (s *SessionStore) Get(token string) (*Session, bool) {
-	session, err := s.Lookup(context.Background(), token)
+	return s.GetContext(context.Background(), token)
+}
+
+// GetContext is Get bounded by ctx.
+func (s *SessionStore) GetContext(ctx context.Context, token string) (*Session, bool) {
+	session, err := s.Lookup(ctx, token)
 	if err != nil {
 		if !errors.Is(err, ErrSessionNotFound) {
-			slog.Warn("jellycompat session store load failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
+			slog.WarnContext(ctx, "jellycompat session store load failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
 		}
 		return nil, false
 	}
@@ -140,18 +173,24 @@ func (s *SessionStore) Get(token string) (*Session, bool) {
 }
 
 // Lookup is Get that reports why no session came back: ErrSessionNotFound
-// for a token with no live session (or one whose stored tokens cannot be
-// decrypted), any other error for a persistent store that could not be read,
+// for a token with no live session (or one whose stored row cannot be read,
+// or whose login session was signed out or expired), any other error for a
+// store that could not be read or a login session that could not be checked,
 // which judges nothing about the token.
+// Persistent lookups always read the stored row, so a completed durable token
+// deletion is observed on every replica, regardless of cached copies or events.
 func (s *SessionStore) Lookup(ctx context.Context, token string) (*Session, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[token]
 	evictions := s.evictions
 	s.mu.RUnlock()
-	if ok {
+	if ok && s.repo == nil {
 		if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(s.now()) {
 			s.Delete(token)
 			return nil, ErrSessionNotFound
+		}
+		if err := s.checkLoginSession(ctx, &session); err != nil {
+			return nil, err
 		}
 		if err := s.maybeExtendSession(&session, token, evictions); err != nil {
 			return nil, err
@@ -166,12 +205,11 @@ func (s *SessionStore) Lookup(ctx context.Context, token string) (*Session, erro
 		return nil, ErrSessionNotFound
 	}
 
-	persisted, err := s.repo.GetByToken(ctx, token, s.now())
-	if errors.Is(err, errSessionUnreadable) {
-		slog.WarnContext(ctx, "jellycompat session cannot be decrypted; treating it as signed out", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
-		return nil, ErrSessionNotFound
-	}
+	persisted, err := s.loadStored(ctx, token)
 	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			s.uncache(token)
+		}
 		return nil, err
 	}
 
@@ -184,11 +222,67 @@ func (s *SessionStore) Lookup(ctx context.Context, token string) (*Session, erro
 	return &sessionCopy, nil
 }
 
+// Recheck reads a session for a long-lived connection that must notice a
+// sign-out made on any replica. A persistent store reads the stored row past
+// this replica's memory, checks its login session, and neither caches nor
+// extends it; a memory-only store answers as Lookup. Errors are Lookup's.
+func (s *SessionStore) Recheck(ctx context.Context, token string) (*Session, error) {
+	if s.repo == nil {
+		return s.Lookup(ctx, token)
+	}
+	if !auth.ValidTextKey(token) {
+		return nil, ErrSessionNotFound
+	}
+	return s.loadStored(ctx, token)
+}
+
+// loadStored reads token's stored session and checks its login session. A
+// row that cannot be read, such as one whose tokens cannot be decrypted,
+// counts as signed out.
+func (s *SessionStore) loadStored(ctx context.Context, token string) (*Session, error) {
+	session, err := s.repo.GetByToken(ctx, token, s.now())
+	if errors.Is(err, errSessionUnreadable) {
+		slog.WarnContext(ctx, "jellycompat session cannot be read; treating it as signed out", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
+		return nil, ErrSessionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkLoginSession(ctx, session); err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+// checkLoginSession ends a compat session whose login session was signed out
+// or expired: it deletes the session and returns ErrSessionNotFound. When the
+// login session cannot be checked it returns that error and keeps the
+// session, so the client retries instead of signing in again. A session with
+// no login session is not checked.
+func (s *SessionStore) checkLoginSession(ctx context.Context, session *Session) error {
+	if s.loginSessions == nil || session.LoginSessionID == "" {
+		return nil
+	}
+	active, err := s.loginSessions.LoginSessionActive(ctx, session.LoginSessionID)
+	if err != nil {
+		return fmt.Errorf("check login session: %w", err)
+	}
+	if !active {
+		// A row the bounded delete leaves behind is refused again on its
+		// next lookup.
+		deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signedOutDeleteTimeout)
+		defer cancel()
+		s.delete(deleteCtx, session.Token)
+		return ErrSessionNotFound
+	}
+	return nil
+}
+
 // maybeExtendSession extends the session's ExpiresAt if more than half the TTL
 // has elapsed. The stored row is updated, never re-created: when it is gone,
-// the session was signed out, possibly by an account-wide revocation this
-// replica has not evicted yet, so the copy is dropped and ErrSessionNotFound
-// returned. Any other store error keeps the session and is only logged.
+// the session was signed out, possibly after the lookup read it, so the copy
+// is dropped and ErrSessionNotFound returned. Any other store error keeps
+// the session and is only logged.
 func (s *SessionStore) maybeExtendSession(session *Session, token string, evictions uint64) error {
 	if s.ttl <= 0 || session.ExpiresAt.IsZero() {
 		return nil
@@ -216,6 +310,7 @@ func (s *SessionStore) maybeExtendSession(session *Session, token string, evicti
 // cache stores a session read when EvictUser had run evictions times. If it
 // has run since, the copy may predate the revocation that evicted the
 // account, so it is left out and the next request reads the stored row.
+// Persistent Lookup always reads that row even when a copy is cached here.
 func (s *SessionStore) cache(token string, session Session, evictions uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -232,10 +327,14 @@ func (s *SessionStore) uncache(token string) {
 
 // Delete removes a compat session.
 func (s *SessionStore) Delete(token string) {
+	s.delete(context.Background(), token)
+}
+
+func (s *SessionStore) delete(ctx context.Context, token string) {
 	s.uncache(token)
 	if s.repo != nil {
-		if err := s.repo.DeleteByToken(context.Background(), token); err != nil && !errors.Is(err, ErrSessionNotFound) {
-			slog.Warn("jellycompat session store delete failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
+		if err := s.repo.DeleteByToken(ctx, token); err != nil && !errors.Is(err, ErrSessionNotFound) {
+			slog.WarnContext(ctx, "jellycompat session store delete failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
 		}
 	}
 }
@@ -243,7 +342,8 @@ func (s *SessionStore) Delete(token string) {
 // EvictUser drops a Silo account's compat sessions from this store's memory.
 // Signing an account out deletes its stored sessions in the revoking
 // transaction (auth.RevokeSignInsInTransaction); each replica then calls
-// EvictUser so the copies it already loaded stop working too.
+// EvictUser to discard its copies. Persistent lookups independently validate
+// the stored row even if the eviction event is missed.
 func (s *SessionStore) EvictUser(userID int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

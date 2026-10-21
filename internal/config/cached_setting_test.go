@@ -22,7 +22,7 @@ func TestCachedSettingFailedReadAnswersWithTheLatestCachedValue(t *testing.T) {
 		c.value, c.read = "fresh", true
 		c.mu.Unlock()
 		return "", errors.New("boom")
-	}}, "k", unratedContentCacheTTL, parse)
+	}}, "k", UnratedContentCacheTTL, parse)
 
 	if got := c.Get(context.Background()); got != "fresh" {
 		t.Fatalf("Get = %q, want the value the concurrent read cached", got)
@@ -49,7 +49,7 @@ func TestCachedSettingKeepsTheNewerOfTwoOverlappingReads(t *testing.T) {
 			return "old", nil
 		}
 		return "new", nil
-	}}, "k", unratedContentCacheTTL, parse)
+	}}, "k", UnratedContentCacheTTL, parse)
 
 	if got := c.Get(context.Background()); got != "new" {
 		t.Fatalf("older read answered %q, want the newer cached value", got)

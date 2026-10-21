@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -293,10 +294,10 @@ func TestRoomSocketV2MalformedBeforeConsume(t *testing.T) {
 }
 func TestRoomSocketV2MintValidatesRoomAndCurrentPIN(t *testing.T) {
 	h, _, _ := roomSocketHandler(t)
-	sessions := &socketSessionFixture{valid: true}
 	users := &socketUserFixture{user: models.User{ID: 7, Role: "user", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users}
 	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, PolicyRevision: 1}}
-	h.Validate = newSocketAuthorityValidator(sessions, users, viewer, func(context.Context, int, string) (bool, bool, error) { return false, true, nil })
+	h.Validate = newSocketAuthorityValidator(sessions, users, viewer, apimw.NewActingAdminDecider(func(context.Context, int, string) (bool, bool, error) { return false, true, nil }, nil))
 	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "profile", ProfileToken: "original-pin", AccessExpiresAt: time.Now().Add(time.Minute)}
 	proof, _, err := h.Room.TokenService.Mint(watchtogether.RoomTokenClaims{RoomID: "room", UserID: 7, ProfileID: "profile"})
 	if err != nil {

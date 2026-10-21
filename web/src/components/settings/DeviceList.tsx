@@ -8,7 +8,11 @@ import {
   PlatformIcon,
   platformKindLabel,
 } from "@/components/admin/deviceOverrides";
-import { deviceRecencyGroup, type DeviceRecencyGroup } from "@/hooks/queries/devices";
+import {
+  deviceDisplayName,
+  deviceRecencyGroup,
+  type DeviceRecencyGroup,
+} from "@/hooks/queries/devices";
 import { cn } from "@/lib/utils";
 
 const GROUP_TITLES: Record<DeviceRecencyGroup, string> = {
@@ -106,6 +110,7 @@ export function DeviceList({
       const platform = platformKindLabel(classifyPlatform(device.device_platform));
       return (
         device.device_name.toLowerCase().includes(query) ||
+        (device.custom_name ?? "").toLowerCase().includes(query) ||
         device.device_platform.toLowerCase().includes(query) ||
         platform.toLowerCase().includes(query) ||
         device.profile_name.toLowerCase().includes(query)
@@ -213,7 +218,7 @@ export function DeviceList({
       <div className="overlay-scroll -mr-1.5 max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain pr-1.5 xl:max-h-[calc(100vh-16rem)]">
         {sections.map((section) => (
           <section key={section.title}>
-            <h3 className="text-muted-foreground bg-surface sticky top-0 z-10 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.09em] uppercase">
+            <h3 className="text-muted-foreground bg-surface sticky top-0 z-10 px-2 pt-3 pb-1 text-xs font-semibold tracking-[0.09em] uppercase">
               {section.title}
             </h3>
             <ul>
@@ -311,11 +316,7 @@ function ProfileChip({
       )}
     >
       {label}
-      <span
-        className={cn("text-[11px]", active ? "text-muted-foreground" : "text-muted-foreground/70")}
-      >
-        {count}
-      </span>
+      <span className="text-muted-foreground text-xs">{count}</span>
     </button>
   );
 }
@@ -350,12 +351,10 @@ function DeviceRow({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium xl:text-[13px]">
-          {device.device_name || "Unknown device"}
+          {deviceDisplayName(device)}
         </span>
-        <span className="text-muted-foreground block truncate text-[12.5px] xl:text-[11.5px]">
-          {device.is_current_device
-            ? "This is the device you're on"
-            : lastSeenLabel(device.last_seen_at, now)}
+        <span className="text-muted-foreground block truncate text-[13px]">
+          {device.is_current_device ? "This device" : lastSeenLabel(device.last_seen_at, now)}
         </span>
       </span>
       {device.is_current_device ? (
@@ -374,14 +373,14 @@ function DeviceRow({
 function ChangedCount({ count }: { count: number }) {
   if (count <= 0) {
     return (
-      <span className="text-muted-foreground/50 shrink-0 text-[11px]" aria-label="Nothing changed">
+      <span className="text-muted-foreground shrink-0 text-xs" aria-label="Nothing changed">
         —
       </span>
     );
   }
   return (
     <span
-      className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-[11px] font-semibold text-amber-300"
+      className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-xs font-semibold text-amber-300"
       aria-label={`${count} ${count === 1 ? "setting" : "settings"} changed here`}
     >
       {count}

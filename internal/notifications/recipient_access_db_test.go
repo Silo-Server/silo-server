@@ -195,7 +195,7 @@ func TestFanoutResolvesOnlyEligibleRecipients(t *testing.T) {
 	pool := inboxPageDB(t)
 	c := seedAccessCatalog(t, pool)
 	seedFanoutEvent(t, pool, c, []string{"open", "muted"})
-	muted := DefaultPreferences("muted")
+	muted := DefaultPreferences(1, "muted")
 	muted.Enabled = false
 	if err := NewPreferencesRepository(pool).Upsert(t.Context(), muted); err != nil {
 		t.Fatalf("mute profile: %v", err)
@@ -304,7 +304,8 @@ func TestDispatchOperationalResolvesBeforeHoldingConnection(t *testing.T) {
 	}
 }
 
-// seedFanoutEvent creates the fanout tables in the test schema, an interest
+// seedFanoutEvent creates the fanout tables in the test schema (series mutes
+// included, empty), an interest
 // row on account 1 favoriting c's series for each profile, and release event
 // "event-1" for c's episode. It returns the episode key.
 func seedFanoutEvent(t *testing.T, pool *pgxpool.Pool, c accessCatalog, profiles []string) int {
@@ -312,7 +313,8 @@ func seedFanoutEvent(t *testing.T, pool *pgxpool.Pool, c accessCatalog, profiles
 	ctx := t.Context()
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE release_events (LIKE public.release_events INCLUDING ALL);
-		CREATE TABLE profile_series_interest (LIKE public.profile_series_interest INCLUDING ALL)`); err != nil {
+		CREATE TABLE profile_series_interest (LIKE public.profile_series_interest INCLUDING ALL);
+		CREATE TABLE profile_series_notification_mutes (LIKE public.profile_series_notification_mutes INCLUDING ALL)`); err != nil {
 		t.Fatalf("create fanout tables: %v", err)
 	}
 	for _, profile := range profiles {

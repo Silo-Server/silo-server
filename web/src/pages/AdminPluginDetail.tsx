@@ -155,11 +155,7 @@ export default function AdminPluginDetail() {
 }
 
 function PageLoading() {
-  return (
-    <div className="page-shell text-muted-foreground py-16 text-center text-sm">
-      Loading plugin...
-    </div>
-  );
+  return <div className="text-muted-foreground pb-16 text-center text-sm">Loading plugin...</div>;
 }
 
 function AllPluginsLink() {
@@ -188,7 +184,7 @@ function BackLink({ fallback }: { fallback: string }) {
   );
 }
 
-function PageHeader({
+function PluginPageHeader({
   name,
   meta,
   actions,
@@ -201,7 +197,9 @@ function PageHeader({
     <div className="flex flex-wrap items-center gap-4">
       <PluginMonogram name={name} size="lg" />
       <div className="min-w-[220px] flex-1">
-        <h1 className="page-title text-3xl">{name}</h1>
+        <h1 className="text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance sm:text-[2rem]">
+          {name}
+        </h1>
         <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13.5px]">
           {meta}
         </div>
@@ -284,8 +282,7 @@ function InstalledPluginPage({
   const jobs = capabilityListLabel(capabilities);
   const runtimeProblem =
     installation.enabled &&
-    runtime.resident &&
-    (runtime.state === "failed" || runtime.state === "backoff");
+    (runtime.state === "failed" || (runtime.resident && runtime.state === "backoff"));
 
   const restartButton = (
     <Button
@@ -300,10 +297,10 @@ function InstalledPluginPage({
   );
 
   return (
-    <div className="page-shell space-y-5 py-4 sm:py-6">
+    <div className="space-y-5 pb-4 sm:pb-6">
       <BackLink fallback="/admin/plugins" />
 
-      <PageHeader
+      <PluginPageHeader
         name={name}
         meta={
           <>
@@ -402,24 +399,31 @@ function InstalledPluginPage({
             <AlertTriangle aria-hidden="true" className="text-warning mt-0.5 size-4 shrink-0" />
           }
         >
-          <p>
-            <strong className="font-semibold">
-              {runtime.state === "failed"
-                ? `${name} stopped and won't restart on its own.`
-                : `${name} keeps stopping.`}
-            </strong>{" "}
-            Silo has restarted it {runtime.restart_count}{" "}
-            {runtime.restart_count === 1 ? "time" : "times"}
-            {runtime.state === "backoff" && runtime.next_restart_at
-              ? `. The next attempt is at ${formatDateTime(runtime.next_restart_at)}.`
-              : "."}
-          </p>
+          {runtime.resident ? (
+            <p>
+              <strong className="font-semibold">
+                {runtime.state === "failed"
+                  ? `${name} stopped and won't restart on its own.`
+                  : `${name} keeps stopping.`}
+              </strong>{" "}
+              Silo has restarted it {runtime.restart_count}{" "}
+              {runtime.restart_count === 1 ? "time" : "times"}
+              {runtime.state === "backoff" && runtime.next_restart_at
+                ? `. The next attempt is at ${formatDateTime(runtime.next_restart_at)}.`
+                : "."}
+            </p>
+          ) : (
+            <p>
+              <strong className="font-semibold">{name} failed to start.</strong> Silo tries again
+              the next time it needs the plugin.
+            </p>
+          )}
           {runtime.last_error ? (
             <pre className="bg-background/60 rounded-lg border px-3 py-2 font-mono text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
               {runtime.last_error}
             </pre>
           ) : null}
-          <div>{restartButton}</div>
+          {canRestart ? <div>{restartButton}</div> : null}
         </Banner>
       ) : null}
 
@@ -498,9 +502,9 @@ function CatalogPluginPreview({ entry }: { entry: PluginCatalogEntry }) {
   const jobs = capabilityListLabel(entry.capabilities ?? []);
 
   return (
-    <div className="page-shell space-y-5 py-4 sm:py-6">
+    <div className="space-y-5 pb-4 sm:pb-6">
       <BackLink fallback="/admin/plugins?tab=catalog" />
-      <PageHeader
+      <PluginPageHeader
         name={name}
         meta={
           <>

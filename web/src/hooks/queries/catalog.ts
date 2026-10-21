@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient, type Query } from "@tanstack/react-query";
 
 import type { CatalogFiltersResponse, CatalogResponse } from "@/api/types";
 import { catalogFiltersFromV2, catalogItemFromV2 } from "@/api/v2/catalog";
@@ -266,48 +266,118 @@ export function useCatalogWindow(
     return Array.from(indices).sort((a, b) => a - b);
   }, [endPage, startPage, lastKnownPage]);
 
+  const remainingPageOptions = {
+    staleTime: 10 * 60 * 1000,
+    ...(isInteractiveSearch
+      ? { gcTime: INTERACTIVE_SEARCH_GC_TIME_MS, retry: false as const }
+      : {}),
+  };
+  const pageKey = (pageIndex: number) =>
+    pageIndex === 0
+      ? page0Key
+      : catalogKeys.list({ ...remainingPageParams, limit, offset: pageIndex * limit, snapshot });
+  // Every page past the first is keyed by page 0's snapshot, so each page 0
+  // refetch (a realtime event invalidating the list, say) re-keys them all.
+  // Until a page loads under the new snapshot, show what it held under an
+  // earlier one instead of dropping the grid back to skeletons.
+  const earlierSnapshotPage = (pageIndex: number) => {
+    let newest: Query<CatalogPage>["state"] | undefined;
+    // The key without a snapshot matches this page under every snapshot.
+    const samePage = catalogKeys.list({ ...remainingPageParams, limit, offset: pageIndex * limit });
+    for (const query of queryClient.getQueryCache().findAll({ queryKey: samePage })) {
+      const { state } = query as Query<CatalogPage>;
+      if (
+        state.data !== undefined &&
+        state.data.snapshot !== snapshot &&
+        state.dataUpdatedAt > (newest?.dataUpdatedAt ?? 0)
+      ) {
+        newest = state;
+      }
+    }
+    return newest?.data;
+  };
+  const continuationCursor = (page: CatalogPage | undefined) =>
+    snapshot !== undefined &&
+    page?.snapshot === snapshot &&
+    page.items.length === limit &&
+    page.has_more
+      ? page.next_cursor
+      : undefined;
+  // A continuation is cheap only where the server can start an index scan at
+  // the cursor: title order over the catalog's own titles, not episodes or
+  // search. Elsewhere it scans from the first row like a seek does.
+  const apiParams = buildCatalogApiSearchParams(state);
+  const continuationIsIndexed =
+    state.source === "query" &&
+    !state.q &&
+    apiParams.get("type") !== "episode" &&
+    (apiParams.get("sort") ?? page0Result.data?.effective_sort?.field) === "title";
+  // Reuse a completed previous page. Where continuations are cheap, a jump
+  // seeks only for the first visible page and each later window page waits
+  // for the one before it; elsewhere every page of a jump seeks in parallel.
+  const fetchRemainingPage = async (pageIndex: number, signal: AbortSignal) => {
+    const previous = queryClient.getQueryState<CatalogPage>(pageKey(pageIndex - 1));
+    let nextCursor: string | undefined;
+    if (
+      previous?.status === "success" &&
+      previous.fetchStatus === "idle" &&
+      !previous.isInvalidated
+    ) {
+      nextCursor = continuationCursor(previous.data);
+    } else if (
+      continuationIsIndexed &&
+      pageIndex > visibleStartPage &&
+      remainingPageIndices.includes(pageIndex - 1) &&
+      (previous === undefined ||
+        previous.status === "pending" ||
+        previous.fetchStatus === "fetching")
+    ) {
+      nextCursor = continuationCursor(await awaitPage(pageIndex - 1, signal));
+    }
+    return fetchCatalogPage(
+      state,
+      limit,
+      pageIndex * limit,
+      { signal },
+      false,
+      snapshot,
+      nextCursor,
+    );
+  };
+  // Joins the previous page's request (or starts it); resolves undefined when
+  // it fails, so the caller seeks instead.
+  const awaitPage = (pageIndex: number, signal: AbortSignal) => {
+    const previous = queryClient
+      .fetchQuery({
+        ...remainingPageOptions,
+        queryKey: pageKey(pageIndex),
+        queryFn: ({ signal: previousSignal }) => fetchRemainingPage(pageIndex, previousSignal),
+      })
+      .catch(() => undefined);
+    const aborted = new Promise<never>((_, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+    return Promise.race([previous, aborted]);
+  };
+  // The page above a jump can't continue from anything, so it seeks too; when
+  // the rest of the jump seeks once, start it after the first visible page
+  // settles rather than alongside it.
+  const firstVisiblePage = queryClient.getQueryState(pageKey(visibleStartPage));
+  const firstVisiblePageSettled =
+    !remainingPageIndices.includes(visibleStartPage) ||
+    (firstVisiblePage !== undefined && firstVisiblePage.status !== "pending");
+
   const remainingResults = useQueries({
     queries: remainingPageIndices.map((pageIndex) => {
-      const offset = pageIndex * limit;
       return {
-        queryKey: catalogKeys.list({
-          ...remainingPageParams,
-          limit,
-          offset,
-          snapshot,
-        }),
-        queryFn: ({ signal }: { signal: AbortSignal }) => {
-          // Reuse a completed adjacent page without waiting for other window
-          // requests. Distant windows and missing/refreshing boundaries seek
-          // independently, so a random jump never loads intermediate pages.
-          const previousKey =
-            pageIndex === 1
-              ? page0Key
-              : catalogKeys.list({
-                  ...remainingPageParams,
-                  limit,
-                  offset: offset - limit,
-                  snapshot,
-                });
-          const previous = queryClient.getQueryState<CatalogPage>(previousKey);
-          const previousPage = previous?.data;
-          const nextCursor =
-            snapshot !== undefined &&
-            previous?.status === "success" &&
-            previous.fetchStatus === "idle" &&
-            !previous.isInvalidated &&
-            previousPage?.snapshot === snapshot &&
-            previousPage.items.length === limit &&
-            previousPage.has_more
-              ? previousPage.next_cursor
-              : undefined;
-          return fetchCatalogPage(state, limit, offset, { signal }, false, snapshot, nextCursor);
-        },
-        staleTime: 10 * 60 * 1000,
-        ...(isInteractiveSearch
-          ? { gcTime: INTERACTIVE_SEARCH_GC_TIME_MS, retry: false as const }
-          : {}),
-        enabled: canFetchRemainingPages,
+        queryKey: pageKey(pageIndex),
+        queryFn: ({ signal }: { signal: AbortSignal }) => fetchRemainingPage(pageIndex, signal),
+        ...remainingPageOptions,
+        placeholderData: () => earlierSnapshotPage(pageIndex),
+        enabled:
+          canFetchRemainingPages &&
+          (!continuationIsIndexed || pageIndex >= visibleStartPage || firstVisiblePageSettled),
       };
     }),
   });

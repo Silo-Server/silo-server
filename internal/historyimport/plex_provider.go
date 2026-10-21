@@ -118,6 +118,11 @@ func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, err
 			if ctx.Err() != nil {
 				return nil, warnings, ctx.Err()
 			}
+			// A source over the size limits fails the run rather than
+			// importing without the section.
+			if errors.Is(err, ErrUpstreamResponseTooLarge) {
+				return nil, warnings, err
+			}
 			warnings = append(warnings, fmt.Sprintf("failed to fetch watched %s from section %q: %v", kind.noun, section.Title, err))
 		}
 		allItems = append(allItems, watched...)
@@ -125,6 +130,9 @@ func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, err
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, warnings, ctx.Err()
+			}
+			if errors.Is(err, ErrUpstreamResponseTooLarge) {
+				return nil, warnings, err
 			}
 			warnings = append(warnings, fmt.Sprintf("failed to fetch in-progress %s from section %q: %v", kind.noun, section.Title, err))
 		}
@@ -165,6 +173,9 @@ func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, err
 	// watch-history import still completes (issue #245).
 	if p.accountToken != "" {
 		items, watchlistWarnings, err := p.client.FetchWatchlist(ctx, p.accountToken)
+		if errors.Is(err, ErrUpstreamResponseTooLarge) {
+			return nil, warnings, err
+		}
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("watchlist fetch failed: %v", err))
 		} else {

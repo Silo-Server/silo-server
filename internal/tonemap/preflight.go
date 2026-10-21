@@ -475,6 +475,7 @@ func sourceConversionPreflightArgs(request SourcePreflightRequest, position floa
 				device = defaultDRIRenderDevice
 			}
 			args = append(args, VAAPIInitDeviceArgs("va", device)...)
+			args = append(args, VAAPIOpenCLInitArgs("va", request.Filter, request.Kind)...)
 			args = append(args, "-filter_hw_device", "va")
 			if !request.SoftwareVideoDecode {
 				args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
@@ -527,21 +528,31 @@ func sourceConversionPreflightFilter(request SourcePreflightRequest) string {
 		}
 		return SourceParameters(request.Kind) + "," + CUDAFilter(request.Kind) + "," + HDRMetadataRemovalFilter()
 	}
+	if request.Backend == BackendQSV || request.Filter == HardwareFilterOpenCL {
+		filter := IntelFilter(request.Kind, 0)
+		if request.Backend == BackendQSV {
+			filter += "," + QSVInteropFilter()
+		}
+		return intelOpenCLPreflightUpload(request) + filter + "," + HDRMetadataRemovalFilter()
+	}
 	filter := VAAPIFilter(request.Kind)
-	if request.SoftwareVideoDecode && (request.Backend == BackendQSV || request.Backend == BackendVAAPI) {
+	if request.SoftwareVideoDecode {
 		filter = "format=nv12,hwupload," + filter
 	}
-	if request.Backend == BackendQSV {
-		filter = QSVFilter(request.Kind) + "," + QSVInteropFilter()
-		if request.SoftwareVideoDecode {
-			format := "nv12"
-			if !IsSDRSource(request.Kind) {
-				format = "p010le"
-			}
-			filter = "format=" + format + ",hwupload," + filter
-		}
-	}
 	return filter + "," + HDRMetadataRemovalFilter()
+}
+
+// intelOpenCLPreflightUpload uploads CPU-decoded frames for IntelFilter at the
+// depth playback uploads them: 10-bit for HDR, which the OpenCL tone mapper
+// reads, and 8-bit for SDR bases.
+func intelOpenCLPreflightUpload(request SourcePreflightRequest) string {
+	if !request.SoftwareVideoDecode {
+		return ""
+	}
+	if IsSDRSource(request.Kind) {
+		return "format=nv12,hwupload,"
+	}
+	return "format=p010le,hwupload,"
 }
 
 // sourcePreflightEncoder returns the encoder paired with the selected mode.

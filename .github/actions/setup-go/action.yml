@@ -1,6 +1,6 @@
 name: Set up Go for this repository
 description: >-
-  Installs the latest available Go 1.26 toolchain, a shared module cache, a
+  Installs the latest Go 1.26 patch, a shared module cache, a
   per-commit build cache, and the stub frontend bundle that cmd/silo embeds,
   then waits for the libvips install the job started before checkout.
 
@@ -28,23 +28,13 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Restore the shared Go module cache
-      if: runner.environment == 'github-hosted'
-      id: modules
-      uses: actions/cache/restore@v4
-      with:
-        path: ~/go/pkg/mod
-        key: go-mod-${{ runner.os }}-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          go-mod-${{ runner.os }}-
-
     # setup-go's own cache is keyed on go.mod and written only on a
     # miss, so between dependency bumps every run restored a build cache
     # from weeks ago and recompiled the tree. The cache below is keyed on the
     # commit and restored by prefix, so each run starts from the newest
     # cache any earlier run saved.
     - name: Set up Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version: '>=1.26 <1.27'
         cache: false
@@ -53,6 +43,16 @@ runs:
       id: go
       shell: bash
       run: echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the shared Go module cache
+      if: runner.environment == 'github-hosted'
+      id: modules
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/go/pkg/mod
+        key: go-mod-${{ runner.os }}-${{ steps.go.outputs.version }}-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          go-mod-${{ runner.os }}-${{ steps.go.outputs.version }}-
 
     # The restore below unpacks the build cache while libvips installs in the
     # background. On tmpfs, those writes and the job's compile output stay off
@@ -67,7 +67,7 @@ runs:
     - name: Restore the Go build cache
       if: runner.environment == 'github-hosted'
       id: cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/go-build
         key: go-${{ inputs.cache-name }}-${{ runner.os }}-${{ steps.go.outputs.version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}

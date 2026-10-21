@@ -62,9 +62,14 @@ type CatalogItem struct {
 	SortMetrics            *CatalogItemSortMetrics   `json:"sort_metrics,omitempty" doc:"The values the listing was sorted by"`
 	UserState              *CatalogItemUserState     `json:"user_state,omitempty" doc:"The viewer's flags; absent without a profile"`
 	UpcomingEvent          *CatalogItemUpcomingEvent `json:"upcoming_event,omitempty"`
-	WorkID                 string                    `json:"work_id,omitempty" doc:"The work (book) an audiobook or ebook edition belongs to"`
-	WorkTitle              string                    `json:"work_title,omitempty"`
-	WorkFormats            []CatalogWorkFormat       `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
+	// PendingTranslationLanguage and MachineTranslatedFields are set on
+	// detail documents, the cards built from them, and section cards; other
+	// listings leave them absent.
+	PendingTranslationLanguage string              `json:"pending_translation_language,omitempty" doc:"The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language."`
+	MachineTranslatedFields    []string            `json:"machine_translated_fields,omitempty" enum:"overview,tagline" doc:"Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards. A card shows no tagline, so a card's overview label depends on overview alone."`
+	WorkID                     string              `json:"work_id,omitempty" doc:"The work (book) an audiobook or ebook edition belongs to"`
+	WorkTitle                  string              `json:"work_title,omitempty"`
+	WorkFormats                []CatalogWorkFormat `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
 }
 
 // CatalogItemOverlay is the technical summary a card overlays.
@@ -84,9 +89,10 @@ type CatalogItemOverlay struct {
 
 // CatalogItemUserState is the viewer's flags on an item.
 type CatalogItemUserState struct {
-	Played      bool `json:"played" example:"false"`
-	IsFavorite  bool `json:"is_favorite" example:"false"`
-	InWatchlist bool `json:"in_watchlist" example:"false"`
+	Played        bool `json:"played" example:"false"`
+	IsFavorite    bool `json:"is_favorite" example:"false"`
+	InWatchlist   bool `json:"in_watchlist" example:"false"`
+	NotInterested bool `json:"not_interested" doc:"The profile marked the movie or series Not interested: recommendations leave it out and rank similar titles lower" example:"false"`
 }
 
 // CatalogItemUpcomingEvent is the next airing a card announces.
@@ -133,7 +139,7 @@ func catalogUserStateOf(s *handlers.ItemUserStateView) *CatalogItemUserState {
 	if s == nil {
 		return nil
 	}
-	return &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist}
+	return &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist, NotInterested: s.NotInterested}
 }
 
 // instantOfRFC3339 parses a stored RFC 3339 stamp; an unparseable one is
@@ -164,6 +170,7 @@ func catalogItemOfSection(v handlers.SectionItemView, sel ratingsources.Selectio
 		PosterIsEpisodeStill: v.PosterIsEpisodeStill, BackdropIsEpisodeStill: v.BackdropIsEpisodeStill,
 		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash, LogoURL: v.LogoURL,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), Badges: v.Badges, ItemSource: v.ItemSource, UserState: catalogUserStateOf(v.UserState),
+		PendingTranslationLanguage: v.PendingTranslationLanguage, MachineTranslatedFields: v.MachineTranslatedFields,
 	}
 	if e := v.UpcomingEvent; e != nil {
 		item.UpcomingEvent = &CatalogItemUpcomingEvent{Type: e.Type, AirDate: e.AirDate, AirTime: e.AirTime, EpisodeTitle: e.EpisodeTitle,

@@ -26,6 +26,32 @@ func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
 	}
 }
 
+func TestAdminCollectionServiceRejectsUnknownVisibility(t *testing.T) {
+	h := &LibraryCollectionHandler{}
+	_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "repro", Visibility: "public"})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "visibility" {
+		t.Fatalf("create: expected visibility field error, got %v", err)
+	}
+	_, err = h.UpdateAdminCollection(t.Context(), "collection", AdminCollectionUpdate{Visibility: new("public")})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "visibility" {
+		t.Fatalf("update: expected visibility field error, got %v", err)
+	}
+	for _, v := range []string{"", "visible", "hidden"} {
+		if err := validateCollectionVisibility(v); err != nil {
+			t.Fatalf("%q rejected: %v", v, err)
+		}
+	}
+	if got, err := normalizeCollectionVisibilityUpdate(nil); err != nil || got != nil {
+		t.Fatalf("nil update: got %v, %v", got, err)
+	}
+	for in, want := range map[string]string{"": adminCollectionVisible, adminCollectionHidden: adminCollectionHidden, adminCollectionVisible: adminCollectionVisible} {
+		got, err := normalizeCollectionVisibilityUpdate(new(in))
+		if err != nil || got == nil || *got != want {
+			t.Fatalf("%q: got %v, %v, want %q", in, got, err, want)
+		}
+	}
+}
+
 func TestAdminCollectionLookupAPIErrorPreservesFailureClass(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -40,52 +66,6 @@ func TestAdminCollectionLookupAPIErrorPreservesFailureClass(t *testing.T) {
 			apiErr, ok := errors.AsType[*APIError](adminCollectionLookupAPIError(tc.err))
 			if !ok || apiErr.Status != tc.wantStatus || apiErr.Code != tc.wantCode {
 				t.Fatalf("error = %#v, want status=%d code=%s", apiErr, tc.wantStatus, tc.wantCode)
-			}
-		})
-	}
-}
-
-func TestLegacyTraktAdminCollectionLibraryScopeIsImmutable(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		existing   *models.LibraryCollection
-		libraryIDs []int
-		wantError  bool
-	}{
-		{
-			name: "collection type changed scope",
-			existing: &models.LibraryCollection{
-				CollectionType: "trakt", LibraryIDs: []int{1, 2},
-			},
-			libraryIDs: []int{2, 3}, wantError: true,
-		},
-		{
-			name: "source config changed scope",
-			existing: &models.LibraryCollection{
-				CollectionType: "manual", LibraryIDs: []int{1, 2},
-				SourceConfig: json.RawMessage(`{"provider":"trakt","mode":"trakt_list"}`),
-			},
-			libraryIDs: []int{2, 3}, wantError: true,
-		},
-		{
-			name: "reordered duplicate scope is unchanged",
-			existing: &models.LibraryCollection{
-				CollectionType: "trakt", LibraryIDs: []int{1, 2},
-			},
-			libraryIDs: []int{2, 1, 2},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateAdminCollectionSourceUpdate(tc.existing, AdminCollectionUpdate{LibraryIDs: &tc.libraryIDs})
-			if tc.wantError {
-				apiErr, ok := errors.AsType[*APIError](err)
-				if !ok || apiErr.Code != "legacy_source_immutable" {
-					t.Fatalf("error = %#v, want legacy_source_immutable", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
 			}
 		})
 	}

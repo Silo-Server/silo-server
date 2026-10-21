@@ -131,7 +131,9 @@ Stored subtitle IDs and file IDs are strings. Search result IDs remain opaque
 provider identifiers. Timestamps use UTC with millisecond precision; an unknown
 search upload date is omitted. Arrays are empty rather than null. Stored object
 keys and uploader identities are not exposed. Provider failures preserve partial
-results with a generic warning; their raw error details are not part of v2.
+results with a generic warning; their raw error details are not part of v2. The
+`/api/v1` bridge names each failed provider as `<provider>: search failed`, and
+the server log keeps the cause with credentials masked.
 
 Search accepts compatibility inputs including ISO 639-2 aliases (`ara`), case
 and underscore variants, and legacy English display names (`Arabic`). The
@@ -163,7 +165,10 @@ Success returns `200` with `subtitle`, using the same public stored-track fields
 as `GET /api/v2/subtitles/{media_file_id}`. Stored IDs are strings and timestamps
 are canonical instants. Object keys, uploader identity, and upstream failure
 diagnostics are not returned. Failures use the standard native Problem Details
-contract.
+contract. A `subtitle_id` that is not in the shape the provider's search returns
+is refused with `422` `validation_failed` at `body.subtitle_id` before the
+provider is contacted. SubDL result files are fetched only from the SubDL
+download host, and SubDL requests do not follow redirects to another host.
 
 This operation is `non_retryable`. Each request contacts the provider before
 stored-content deduplication. Deduplication can reuse identical content but does
@@ -442,7 +447,7 @@ before ordinary ratification.
 
 ### Viewer stored subtitle deletion
 
-`GET /api/v2/subtitles/stored/{id}/metadata` (`getViewerSubtitleMetadata`) supplies the safe stored-subtitle representation and a strong validator bound to the account, optional profile, subtitle ID and revision. This is distinct from the file-scoped list at `GET /api/v2/subtitles/{media_file_id}`. Both the metadata read and `DELETE /api/v2/subtitles/stored/{id}` (`deleteStoredSubtitle`) require file/parent access plus either the original downloading account or effective administrator authority. A primary household profile alone grants no administrator permission. Storage keys and downloading-account identities are omitted.
+`GET /api/v2/subtitles/stored/{id}/metadata` (`getViewerSubtitleMetadata`) supplies the safe stored-subtitle representation and a strong validator bound to the account, optional profile, subtitle ID and revision. This is distinct from the file-scoped list at `GET /api/v2/subtitles/{media_file_id}`. Both the metadata read and `DELETE /api/v2/subtitles/stored/{id}` (`deleteStoredSubtitle`) require file/parent access plus either the original downloading account or the acting admin (see [api-contract.md](architecture/api-contract.md)): an admin account acting through its primary profile, an admin API key, or an admin login session with no profile while no profile on the account has a PIN or an access limit. A primary household profile alone grants no administrator permission, and another profile on an admin's account has none either. `DELETE /api/v1/subtitles/{id}` applies the same rule. Storage keys and downloading-account identities are omitted.
 
 DELETE requires `If-Match`: missing validators return 428, stale validators or a revision race return 412, and absent metadata returns 404. Authority is checked again before deletion. Even explicit `If-Match: *` retains the freshly authorized revision in the SQL comparison; a concurrent replacement requires a fresh authorized observation. Reads support `If-Match` and `If-None-Match` with 304 for an unchanged representation.
 
@@ -558,8 +563,9 @@ subtitle menu can still show the result and offer a reset.
 Corrected bytes reach every delivery path: playback subtitle routes, the
 Jellyfin subtitle stream, offline downloads (see [downloads](downloads-api.md)),
 and AI translation sources. Those responses are `Cache-Control: private,
-no-cache`, since the bytes change behind the same URL. Device delays
-(`player.subtitle_sync_ms`) still apply on top. The frozen v1 bridge exposes
+no-cache`, since the bytes change behind the same URL. The player's subtitle
+offset (`player.subtitle_sync_ms`, a profile value a device can override from
+settings manifest revision 19) still applies on top. The frozen v1 bridge exposes
 neither timing nor sync but serves corrected bytes.
 
 Replacing the media file (a new file hash or size at the same path) resets the

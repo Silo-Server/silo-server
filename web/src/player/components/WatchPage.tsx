@@ -674,8 +674,11 @@ function WatchPagePlayer({
       streamUrl={session.streamUrl}
       plan={session.plan}
       planRevision={session.planRevision}
+      browserEngine={session.browserEngine}
+      nativeOriginalSupport={session.nativeOriginalSupport}
       shouldAutoPlay={session.shouldAutoPlay}
       replanning={session.replanning}
+      replacing={session.replacing}
       replanError={fallingBack ? null : session.error}
       replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}

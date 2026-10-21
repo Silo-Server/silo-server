@@ -52,7 +52,7 @@ func TestParentUserDataResponsesRollUpChildren(t *testing.T) {
 				if err := store.SetProgressAt(t.Context(), session.ProfileID, "episode-1", 0, 100, true, time.Now()); err != nil {
 					t.Fatal(err)
 				}
-				if err := store.AddFavorite(t.Context(), session.ProfileID, kind); err != nil {
+				if _, err := store.AddFavorite(t.Context(), session.ProfileID, kind); err != nil {
 					t.Fatal(err)
 				}
 				run := func(handler http.HandlerFunc, body string, played bool, unplayed int, favorite bool) {

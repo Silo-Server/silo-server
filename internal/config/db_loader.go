@@ -224,6 +224,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	// config snapshot so the nodeconfig watcher hot-reloads the resolver.
 	cfg.ClientIP.TrustedProxies = stringOr(m, "clientip.trusted_proxies", "")
 	cfg.Server.PublicURL = stringOr(m, "server.public_url", "")
+	cfg.Server.LocalURL = stringOr(m, ServerLocalURLSettingKey, "")
 	lanDiscovery, err := boolOr(m, ServerLANDiscoverySettingKey, true)
 	if err != nil {
 		return nil, err
@@ -357,6 +358,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, fmt.Errorf("%s must be 0 or between 120 and 86400", playbackSegmentRetentionSettingKey)
 	}
 	cfg.Playback.SegmentRetentionSeconds = segmentRetentionSeconds
+	keyframePlaylist, err := boolOr(m, PlaybackKeyframePlaylistSettingKey, false)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Playback.KeyframePlaylist = keyframePlaylist
 	cfg.Playback.HWAccel = stringOr(m, "playback.hw_accel", "auto")
 	cfg.Playback.HWDevice = stringOr(m, "playback.hw_device", "")
 	chapterThumbnailWorkers, err := intOr(m, "playback.chapter_thumbnail_workers", 1)

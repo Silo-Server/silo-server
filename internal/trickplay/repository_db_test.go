@@ -121,6 +121,9 @@ func (f *fixture) queued(t *testing.T, fileID int) []string {
 		}
 		prefixes = append(prefixes, prefix)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	return prefixes
 }
 

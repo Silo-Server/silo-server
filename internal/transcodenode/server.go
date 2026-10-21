@@ -28,6 +28,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -65,6 +66,7 @@ type TranscodeStartRequest struct {
 	VideoBitstreamFilter       string                 `json:"video_bitstream_filter,omitempty"`
 	VideoSampleEntry           string                 `json:"video_sample_entry,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
+	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
 	StreamOriginSeconds        float64                `json:"stream_origin_seconds,omitempty"`
 	CopySeekAnchorResolved     bool                   `json:"copy_seek_anchor_resolved,omitempty"`
@@ -81,8 +83,12 @@ type TranscodeStartRequest struct {
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
 	SubtitleBurnIn             bool                   `json:"subtitle_burn_in"`
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
-	TotalDuration              float64                `json:"total_duration"`
-	RequireReady               bool                   `json:"require_ready,omitempty"`
+	// SubtitleRendition asks the executor to emit the selected text track as
+	// the playlist's WebVTT subtitle rendition. Only nodes advertising
+	// playback.TransportFeatureHLSSubtitleRenditionV1 receive it.
+	SubtitleRendition bool    `json:"subtitle_rendition,omitempty"`
+	TotalDuration     float64 `json:"total_duration"`
+	RequireReady      bool    `json:"require_ready,omitempty"`
 	// AutoFallbackReady asks the node to wait for the first manifest only when
 	// its own hw_accel=auto fallback is enabled for this start, so an early
 	// hardware failure can move to a safer path. The node decides from its
@@ -116,11 +122,24 @@ type TranscodeStartResponse struct {
 	// decoder failed to start. Older nodes omit it, so callers OR it with the
 	// requested value.
 	SoftwareVideoDecode bool `json:"software_video_decode,omitempty"`
+	// KeyframePlaylist attests that the executor understood a requested
+	// keyframe playlist. Older nodes omit it and are rejected before they
+	// serve FFmpeg's growing playlist under a recipe that records the planned
+	// one.
+	KeyframePlaylist bool `json:"keyframe_playlist,omitempty"`
+	// SubtitleRendition attests that the executor emits the requested subtitle
+	// rendition. Older nodes omit it and are rejected before the plan
+	// promises a rendition their playlist does not carry.
+	SubtitleRendition bool `json:"subtitle_rendition,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
 var ErrCopyFMP4RecipeAttestationMismatch = errors.New("transcode node copy-fmp4 recipe attestation mismatch")
 var ErrThrottleAttestationMismatch = errors.New("transcode node throttle attestation mismatch")
+
+// ErrKeyframePlaylistAttestationMismatch reports an executor that ignored a
+// requested keyframe playlist.
+var ErrKeyframePlaylistAttestationMismatch = errors.New("transcode node keyframe playlist attestation mismatch")
 
 func validateAudioRecipeRequest(req TranscodeStartRequest) error {
 	if req.SourceAudioChannels == 0 && req.AudioRecipeVersion == "" {
@@ -170,6 +189,30 @@ func ValidateCopyFMP4RecipeAttestation(req TranscodeStartRequest, response Trans
 	if req.CopyFMP4RecipeVersion != "" && response.CopyFMP4RecipeVersion != req.CopyFMP4RecipeVersion {
 		return fmt.Errorf("%w: got %q, want %q",
 			ErrCopyFMP4RecipeAttestationMismatch, response.CopyFMP4RecipeVersion, req.CopyFMP4RecipeVersion)
+	}
+	return nil
+}
+
+// ValidateKeyframePlaylistAttestation rejects an executor that silently
+// ignored a requested keyframe playlist. Requests without one stay compatible
+// with older nodes, which omit the field.
+func ValidateKeyframePlaylistAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	if req.KeyframePlaylist && !response.KeyframePlaylist {
+		return ErrKeyframePlaylistAttestationMismatch
+	}
+	return nil
+}
+
+// ErrSubtitleRenditionAttestationMismatch reports an executor that ignored a
+// requested subtitle rendition.
+var ErrSubtitleRenditionAttestationMismatch = errors.New("transcode node subtitle rendition attestation mismatch")
+
+// ValidateSubtitleRenditionAttestation rejects an executor that silently
+// ignored a requested subtitle rendition. Requests without one stay compatible
+// with older nodes, which omit the field.
+func ValidateSubtitleRenditionAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	if req.SubtitleRendition && !response.SubtitleRendition {
+		return ErrSubtitleRenditionAttestationMismatch
 	}
 	return nil
 }
@@ -916,7 +959,7 @@ func (s *Server) router() chi.Router {
 	s.startIdleReaper()
 	r := chi.NewRouter()
 	r.Get("/api/v1/health", s.handleHealth)
-	// Unauthenticated, matching the API listener's own /metrics posture: a
+	// Unauthenticated, matching the main server's dedicated metrics listener: a
 	// scrape target that needs a credential is a scrape target that goes
 	// unmonitored, and the exposure is host resource counters, not media.
 	r.Method(http.MethodGet, "/metrics", promhttp.Handler())
@@ -1427,7 +1470,9 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 			}
 		}
 	}
-	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1, playback.TransportFeatureTrickplayExtractV1)
+	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1,
+		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2,
+		playback.TransportFeatureHLSSubtitleRenditionV1)
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
 }
@@ -1563,7 +1608,9 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 	})
 }
 
-// requireBearer is middleware that checks for Authorization: Bearer {secret}.
+// requireBearer is middleware that admits only API servers and proxies: it
+// checks the request's node signature (see nodeauth). The name predates
+// signing and is kept because the route inventory classifies by it.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
 	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1572,8 +1619,7 @@ func (s *Server) requireBearer(next http.Handler) http.Handler {
 			http.Error(w, "node not configured", http.StatusServiceUnavailable)
 			return
 		}
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != cfg.Auth.JWTSecret {
+		if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -1656,6 +1702,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		VideoBitstreamFilter:       req.VideoBitstreamFilter,
 		VideoSampleEntry:           req.VideoSampleEntry,
 		CopyVideoMPEGTS:            req.CopyVideoMPEGTS,
+		KeyframePlaylist:           req.KeyframePlaylist,
 		SeekSeconds:                req.SeekSeconds,
 		StreamOriginSeconds:        req.StreamOriginSeconds,
 		CopySeekAnchorResolved:     req.CopySeekAnchorResolved,
@@ -1678,6 +1725,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		SubtitleTrackIndex: req.SubtitleTrackIndex,
 		SubtitleBurnIn:     req.SubtitleBurnIn,
 		SubtitleCodec:      req.SubtitleCodec,
+		SubtitleRendition:  req.SubtitleRendition,
 		TotalDuration:      req.TotalDuration,
 		FastStart:          true,
 		NodeType:           "transcode",
@@ -1832,6 +1880,8 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
 		ThrottleSeconds:       req.ThrottleSeconds,
 		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,
+		KeyframePlaylist:      session.Opts().KeyframePlaylist,
+		SubtitleRendition:     session.HasSubtitleRendition(),
 	})
 }
 
@@ -1867,7 +1917,7 @@ func (s *Server) requireApprovedInputPath(w http.ResponseWriter, r *http.Request
 // identity-only by design (see internal/noderecipe), and a header-authenticated
 // (tokenless) attempt, where no client-visible URL carries a credential and the
 // relayed request therefore has no token to forward. The token was never this
-// route's authorization — the static bearer already authenticated the caller —
+// route's authorization — the node signature already authenticated the caller —
 // so its absence only removes a recipe source, never a permission.
 //
 // Returns nil when no source yields a complete transcode recipe for the session
@@ -1998,6 +2048,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	outputDir := s.sessionOutputDir(sessionID)
 	opts := card.TranscodeOpts(outputDir, cfg.Playback.FFmpegPath, s.ffmpegSink)
 	opts.SessionID = sessionID
+	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but reconstruction must
 	// retain the normal manifest cushion rather than the fresh-start fast path.
 	opts.FastStart = false
@@ -2230,7 +2281,7 @@ func (s *Server) acquireReconstructSlot(ctx context.Context) (func(), bool) {
 	}
 }
 
-// handleRemux executes a progressive remux on demand. The static bearer
+// handleRemux executes a progressive remux on demand. The node signature
 // authenticates the proxy process; the independently verified stream token
 // binds the media recipe and the exact transcode-execution/proxy-egress route.
 func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
@@ -2662,6 +2713,8 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		requestedSegment := -1
 		if n, parseErr := playback.ParseSegmentNumber(name); parseErr == nil {
 			requestedSegment = n
+		} else if n, ok := playback.ParseSubtitleSegmentNumber(name); ok {
+			requestedSegment = n
 		}
 		var reconstructErr error
 		session, reconstructErr = s.reconstructFromToken(r, sessionID, requestedSegment)
@@ -2679,8 +2732,14 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 	}
 	s.attachTelemetrySession(r, sessionID)
 
+	if subtitleSegment, ok := playback.ParseSubtitleSegmentNumber(name); ok {
+		// Subtitle rendition segments never wait out or restart the video
+		// pipeline: they are answered from the cues already on disk.
+		session.ServeSubtitleSegment(w, r, subtitleSegment)
+		return
+	}
 	segmentLease, err := session.OpenSegment(name)
-	if err != nil && err == playback.ErrSegmentNotFound {
+	if errors.Is(err, playback.ErrSegmentNotFound) { //nolint:nestif // pre-existing depth; splitting the segment recovery path is a separate change
 		segNum, parseErr := playback.ParseSegmentNumber(name)
 		if parseErr == nil {
 			now := time.Now()
@@ -2715,7 +2774,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 					"playback_session_id", sessionID,
 				)
 				segmentLease, err = session.WaitForOpenSegment(name, decision.WaitTimeout)
-				if err != nil && err == playback.ErrSegmentNotFound {
+				if errors.Is(err, playback.ErrSegmentNotFound) {
 					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "transcodenode",
 						"segment", name,
 						"requested_segment", segNum,
@@ -2731,7 +2790,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			if err != nil && err == playback.ErrSegmentNotFound && decision.RestartOnTimeout {
+			if errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
 				target, ok, restartErr := s.restartSegmentLocked(
 					r.Context(),
 					sessionID,

@@ -44,6 +44,13 @@ type QueryExecutor struct {
 	// this timestamp.  This prevents offset-based pagination drift when new
 	// items are inserted between page fetches (e.g. during a scan).
 	SnapshotAt *time.Time
+	// SeekAnchors, when set, lets SeekCursor start from a cached anchor
+	// instead of numbering every row before the target. Set it only with a
+	// SnapshotAt the caller keeps across requests: anchors are cached per
+	// snapshot.
+	SeekAnchors *seekAnchorCache
+	// LetterIndexes, when set, caches LetterIndex answers per query.
+	LetterIndexes *letterIndexCache
 }
 
 func (e *QueryExecutor) Preview(ctx context.Context, def QueryDefinition, access AccessFilter, limit int) ([]*models.MediaItem, int, error) {
@@ -339,7 +346,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		libraryScopeHandledInBaseRelation = handled
 	}
 	if strings.TrimSpace(baseRelation) == "" {
-		baseRelation = "media_items mi"
+		baseRelation = mediaItemsBaseRelation
 	}
 
 	builder := NewQueryBuilder("mi").
@@ -347,6 +354,9 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		WithUserScope(access.UserID, access.ProfileID).
 		WithMediaScope(effectiveScope).
 		WithLibraryScope(libraryIDs)
+	if baseRelation == mediaItemsBaseRelation {
+		builder.WithMediaItemsRelation()
+	}
 	filterWhere, filterArgs, err := builder.Build(def)
 	if err != nil {
 		return previewPagePlan{}, err

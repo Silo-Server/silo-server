@@ -223,10 +223,10 @@ func TestLibraryCapabilities(t *testing.T) {
 	}
 	var got map[string]any
 	decodeJSON(t, rec.Body, &got)
-	if got["realtime_monitoring"] != true || got["trickplay"] != true || got["trickplay_supported"] != false || got["state"] != StateAvailable || got["allowed"] != true || got["revision"] == "" {
+	if got["realtime_monitoring"] != true || got["trickplay"] != true || got["trickplay_supported"] != false || got["ignore_unmatched"] != true || got["state"] != StateAvailable || got["allowed"] != true || got["revision"] == "" {
 		t.Fatalf("body = %v", got)
 	}
-	if len(got) != 6 {
+	if len(got) != 7 {
 		t.Fatalf("unexpected members: %v", got)
 	}
 	etag := rec.Header().Get("ETag")

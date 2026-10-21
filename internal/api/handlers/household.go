@@ -68,6 +68,11 @@ func canManageHouseholdAs(
 	activeProfileID string,
 	verify func(profileID string) error,
 ) (bool, error) {
+	// A remote-playback handoff never manages the household, even when it is
+	// bound to the primary profile.
+	if apimw.GetClaims(ctx).IsRemotePlayback() {
+		return false, nil
+	}
 	if activeProfileID == "" {
 		return profileLessAdminMayManage(ctx, store)
 	}
@@ -88,6 +93,33 @@ func canManageHouseholdAs(
 		return false, err
 	}
 	return true, nil
+}
+
+// mayManageHouseholdOf is canManageHouseholdAs for a caller that holds only
+// the account ID: it opens that account's store first. It fails closed when
+// the stores are not wired or the account has no store, and a nil verify
+// treats a PIN-locked primary profile as unverified.
+func mayManageHouseholdOf(
+	ctx context.Context,
+	stores userstore.UserStoreProvider,
+	userID int,
+	activeProfileID string,
+	verify func(profileID string) error,
+) (bool, error) {
+	if stores == nil {
+		return false, nil
+	}
+	store, err := stores.ForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("opening user store: %w", err)
+	}
+	if store == nil {
+		return false, nil
+	}
+	if verify == nil {
+		verify = func(string) error { return access.ErrProfileUnverified }
+	}
+	return canManageHouseholdAs(ctx, store, activeProfileID, verify)
 }
 
 // profileLessAdminMayManage is the household rule for a request that names no

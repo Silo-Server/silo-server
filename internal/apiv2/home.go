@@ -85,8 +85,8 @@ type HomeDismissalUpsertInput struct {
 type HomeLayoutInput struct {
 	// The maximum must equal handlers.MaxHomeLayoutIncludedSections, which
 	// getHomeCapabilities advertises; TestHomeCapabilities pins the two.
-	IncludeItems int    `query:"include_items" default:"0" minimum:"0" maximum:"4" doc:"Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter" example:"2"`
-	ImageSize    string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign for included_sections, as on getHomeSectionItems; absent picks each surface's default" example:"medium"`
+	IncludeItems int `query:"include_items" default:"0" minimum:"0" maximum:"4" doc:"Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter" example:"2"`
+	ArtworkQuery
 }
 
 // HomeLayout is the home page's sections in display order and, on request,
@@ -117,13 +117,13 @@ type HomeCapabilitiesOutput struct {
 
 // HomeSectionsInput is the listHomeSections query.
 type HomeSectionsInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 }
 
 // HomeSectionItemsInput is the getHomeSectionItems query.
 type HomeSectionItemsInput struct {
-	ID        string `path:"id" minLength:"1" doc:"Section identifier from the home layout" example:"continue_watching"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ID string `path:"id" minLength:"1" doc:"Section identifier from the home layout" example:"continue_watching"`
+	ArtworkQuery
 }
 
 // RecipePreset is one gallery preset: a recipe plus the config it starts from.
@@ -156,6 +156,38 @@ type RecipeCategory struct {
 // grouped by category, categories in key order.
 type RecipeCatalog struct {
 	Categories []RecipeCategory `json:"categories" doc:"Empty, never null"`
+}
+
+// SeasonalVibe is one curated take on a holiday: a public MDBList list whose
+// titles a Seasonal Picks row shows, most popular on IMDb first.
+type SeasonalVibe struct {
+	Key         string `json:"key" doc:"Stored in the row's vibes config; stable" example:"family"`
+	Name        string `json:"name" example:"Family Halloween"`
+	Title       string `json:"title" doc:"The row's title while this vibe is in season, unless the row sets its own" example:"Family Halloween"`
+	Description string `json:"description" example:"Spooky fun for all ages."`
+	ListURL     string `json:"list_url" doc:"The MDBList list behind the vibe" example:"https://mdblist.com/lists/purple_smurf/halloween-family2"`
+}
+
+// SeasonalTheme is one holiday a Seasonal Picks row can follow.
+type SeasonalTheme struct {
+	Key           string         `json:"key" doc:"Stored in the row's enabled_themes config; stable" example:"halloween"`
+	Name          string         `json:"name" example:"Halloween"`
+	When          string         `json:"when" doc:"When the holiday is in season by default, for display" example:"October"`
+	Start         string         `json:"start,omitempty" doc:"First day of the default window, MM-DD. Absent when the holiday moves (Easter) or recurs weekly." example:"10-01"`
+	End           string         `json:"end,omitempty" doc:"Last day of the default window, MM-DD, inclusive; before start when the window wraps across New Year" example:"10-31"`
+	DatesEditable bool           `json:"dates_editable" doc:"Whether a row may set its own yearly window for this holiday in theme_dates. False for weekly themes."`
+	Vibes         []SeasonalVibe `json:"vibes" doc:"The first vibe is the default; never empty"`
+}
+
+// SeasonalThemeCatalog is the listSeasonalThemes response.
+type SeasonalThemeCatalog struct {
+	Themes            []SeasonalTheme `json:"themes" doc:"In calendar order, for display: dated holidays by their usual start, then the weekly ones"`
+	MaxCustomHolidays int             `json:"max_custom_holidays" doc:"The most custom holidays one row may define" example:"12"`
+}
+
+// SeasonalThemeCatalogOutput wraps SeasonalThemeCatalog.
+type SeasonalThemeCatalogOutput struct {
+	Body SeasonalThemeCatalog
 }
 
 // RecipeCatalogOutput is the listSectionRecipes response.
@@ -197,6 +229,7 @@ const (
 	opGetHomeSectionItems         = "getHomeSectionItems"
 	opListSectionRecipes          = "listSectionRecipes"
 	opListSectionRecipeCandidates = "listSectionRecipeCandidates"
+	opListSeasonalThemes          = "listSeasonalThemes"
 )
 
 func registerHome(reg *Registry) {
@@ -235,6 +268,8 @@ func registerHome(reg *Registry) {
 		"The section recipe gallery: every visible recipe with its presets, grouped by category.")), reg.listSectionRecipes)
 	Register(reg, gallery(humaOp(http.MethodGet, Prefix+"/sections/recipes/{type}/candidates", opListSectionRecipeCandidates, "home",
 		"The values a parameterized recipe offers for its parameter.")), reg.listSectionRecipeCandidates)
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/sections/seasonal-themes", opListSeasonalThemes, "home",
+		"The holidays a Seasonal Picks row can follow, with the curated vibes each offers."), Class: ClassProfileScoped, ProfileOptional: true}, reg.listSeasonalThemes)
 }
 
 func (reg *Registry) recipes() (RecipeService, *Problem) {
@@ -408,7 +443,7 @@ func (reg *Registry) getHomeLayout(ctx context.Context, in *HomeLayoutInput) (*H
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeLayoutWithItems(ctx, sectionViewer(ctx, in.ImageSize), in.IncludeItems)
+	view, err := svc.HomeLayoutWithItems(ctx, sectionViewer(ctx, in.Artwork()), in.IncludeItems)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -430,7 +465,7 @@ func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSections(ctx, sectionViewer(ctx, in.ImageSize))
+	view, err := svc.HomeSections(ctx, sectionViewer(ctx, in.Artwork()))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -450,7 +485,7 @@ func (reg *Registry) getHomeSectionItems(ctx context.Context, in *HomeSectionIte
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewer(ctx, in.ImageSize))
+	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewer(ctx, in.Artwork()))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -495,6 +530,32 @@ func (reg *Registry) listSectionRecipes(ctx context.Context, _ *struct{}) (*Reci
 		out.Categories = append(out.Categories, RecipeCategory{Category: cat.Category, Recipes: defs})
 	}
 	return &RecipeCatalogOutput{Body: out}, nil
+}
+
+func (reg *Registry) listSeasonalThemes(ctx context.Context, _ *struct{}) (*SeasonalThemeCatalogOutput, error) {
+	if claimsFrom(ctx) == nil {
+		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	}
+	out := SeasonalThemeCatalog{Themes: []SeasonalTheme{}, MaxCustomHolidays: recipes.MaxSeasonalCustomHolidays}
+	themes := reg.deps.SeasonalThemes
+	if themes == nil {
+		themes = recipes.SeasonalThemes
+	}
+	for _, theme := range themes {
+		if theme.Hidden {
+			continue
+		}
+		vibes := make([]SeasonalVibe, 0, len(theme.Vibes))
+		for _, v := range theme.Vibes {
+			vibes = append(vibes, SeasonalVibe{Key: v.Key, Name: v.Name, Title: v.Title, Description: v.Description, ListURL: v.ListURL})
+		}
+		out.Themes = append(out.Themes, SeasonalTheme{
+			Key: theme.Key, Name: theme.Name, When: theme.When,
+			Start: theme.Start, End: theme.End, DatesEditable: !theme.Weekly,
+			Vibes: vibes,
+		})
+	}
+	return &SeasonalThemeCatalogOutput{Body: out}, nil
 }
 
 func (reg *Registry) listSectionRecipeCandidates(ctx context.Context, in *RecipeCandidatesInput) (*RecipeCandidateCollectionOutput, error) {

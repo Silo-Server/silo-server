@@ -8,7 +8,6 @@ import { matchRecipePreset } from "@/lib/recipes";
 import {
   buildHomeLayoutFile,
   importPage,
-  legacyTraktSectionIds,
   mergeImportedPage,
   parseHomeLayoutFile,
   planHomeLayoutImport,
@@ -297,7 +296,6 @@ describe("planHomeLayoutImport on the same server", () => {
                 title: "Staff picks",
                 config: { item_ids: ["x"] },
               },
-              { user_section_type: "trending_discover", user_config: { source: "trakt" } },
               { user_section_type: "hidden_gems", removed: true },
             ],
           },
@@ -313,7 +311,6 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan.skippedSections).toEqual([
       { page: "Home", title: "collection", reason: "collection" },
       { page: "Home", title: "Staff picks", reason: "custom_disabled" },
-      { page: "Home", title: "trending_discover", reason: "trakt" },
     ]);
   });
 
@@ -477,6 +474,26 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan.pages[0]?.overrides).toEqual([
       { id: "new-1", user_section_type: "award_winners", user_title: "Awards" },
     ]);
+  });
+
+  it("skips a Next up row, which the server adds only itself", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [{ user_section_type: "next_up", user_title: "On deck" }],
+          },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.skippedSections).toEqual([
+      { page: "Home", title: "On deck", reason: "unknown_recipe" },
+    ]);
+    expect(plan.pages).toEqual([]);
   });
 
   it("skips sections limited to libraries this profile can't open", () => {
@@ -708,8 +725,6 @@ describe("planHomeLayoutImport on another server", () => {
 });
 
 describe("mergeImportedPage", () => {
-  const noTrakt = new Set<string>();
-
   it("replaces the whole page on the same server, reusing the saved override IDs the server resolves", () => {
     const page = {
       scope: "home" as const,
@@ -728,68 +743,10 @@ describe("mergeImportedPage", () => {
       stored({ id: "old-custom", user_section_type: "hidden_gems", is_user_added: true }),
     ];
 
-    expect(mergeImportedPage(page, existing, true, noTrakt, sequentialIds())).toEqual([
+    expect(mergeImportedPage(page, existing, true, sequentialIds())).toEqual([
       { id: "saved-1", section_id: "admin-1", position: 0, hidden: true },
       { id: "new-1", section_id: "admin-2", position: 1 },
       { id: "new-custom", user_section_type: "hidden_gems", position: 2 },
-    ]);
-  });
-
-  it("leaves legacy Trakt admin sections as the profile saved them", () => {
-    const trakt = new Set([
-      "trakt-saved",
-      "trakt-unsaved-hidden",
-      "trakt-unsaved-shown",
-      "trakt-omitted",
-    ]);
-    const page = {
-      scope: "home" as const,
-      label: "Home",
-      overrides: [
-        { section_id: "trakt-saved", position: 0 },
-        { section_id: "trakt-unsaved-hidden", hidden: true },
-        { section_id: "trakt-unsaved-shown", position: 3 },
-      ],
-    };
-    const existing = [
-      stored({ id: "saved-a", section_id: "trakt-saved", hidden: true }),
-      stored({ id: "saved-b", section_id: "trakt-omitted", removed: true }),
-    ];
-
-    expect(mergeImportedPage(page, existing, true, trakt, sequentialIds())).toEqual([
-      { id: "saved-a", section_id: "trakt-saved", hidden: true },
-      { id: "new-1", section_id: "trakt-unsaved-hidden", hidden: true },
-      { id: "saved-b", section_id: "trakt-omitted", removed: true },
-    ]);
-  });
-
-  it("keeps saved profile-built Trakt sections on either server", () => {
-    const page = {
-      scope: "home" as const,
-      label: "Home",
-      overrides: [{ id: "new-1", user_section_type: "hidden_gems" }],
-    };
-    const existing = [
-      stored({
-        id: "trakt-row",
-        user_section_type: "trending_discover",
-        user_config: { source: "trakt" },
-      }),
-      stored({ id: "plain-row", user_section_type: "hidden_gems", user_config: {} }),
-    ];
-    const kept = {
-      id: "trakt-row",
-      user_section_type: "trending_discover",
-      user_config: { source: "trakt" },
-    };
-
-    expect(mergeImportedPage(page, existing, true, noTrakt, sequentialIds())).toEqual([
-      { id: "new-1", user_section_type: "hidden_gems" },
-      kept,
-    ]);
-    expect(mergeImportedPage(page, existing, false, noTrakt, sequentialIds())).toEqual([
-      kept,
-      { id: "new-1", user_section_type: "hidden_gems" },
     ]);
   });
 
@@ -804,7 +761,7 @@ describe("mergeImportedPage", () => {
       stored({ id: "old-custom", user_section_type: "hidden_gems", is_user_added: true }),
     ];
 
-    expect(mergeImportedPage(page, existing, false, noTrakt, sequentialIds())).toEqual([
+    expect(mergeImportedPage(page, existing, false, sequentialIds())).toEqual([
       { id: "keep", section_id: "admin-1", position: 3, hidden: true },
       { id: "new-1", user_section_type: "hidden_gems" },
     ]);
@@ -832,24 +789,6 @@ describe("fileReferences", () => {
   });
 });
 
-describe("legacyTraktSectionIds", () => {
-  it("finds Trakt-sourced admin sections in the page view and saved overrides", () => {
-    const settings = [
-      { id: "trending", is_custom: false, config: { source: "trakt", window: "week" } },
-      { id: "list", is_custom: false, config: { source_provider: "trakt" } },
-      { id: "tmdb", is_custom: false, config: { source: "tmdb" } },
-      { id: "custom", is_custom: true, config: { source: "trakt" } },
-    ];
-    const existing = [
-      stored({ id: "o1", section_id: "removed-trakt", config: { source: "trakt" } }),
-    ];
-
-    expect(legacyTraktSectionIds(settings, existing)).toEqual(
-      new Set(["trending", "list", "removed-trakt"]),
-    );
-  });
-});
-
 describe("importPage", () => {
   const page = {
     scope: "home" as const,
@@ -864,60 +803,15 @@ describe("importPage", () => {
       if (result instanceof Error) throw result;
       return result;
     });
-    return {
-      listSaved: vi.fn(async () => [removedUnlisted]),
-      listView: vi.fn(async () => [{ id: "shown", is_custom: false }]),
-      save,
-    };
+    return { listSaved: vi.fn(async () => [removedUnlisted]), save };
   }
 
-  it("saves the merged page once when the server accepts it", async () => {
+  it("saves the merged page once", async () => {
     const api = fakeApi([undefined]);
 
-    await expect(importPage(page, true, api, sequentialIds())).resolves.toEqual({
-      keptSavedChanges: false,
-    });
+    await importPage(page, true, api, sequentialIds());
     expect(api.save).toHaveBeenCalledTimes(1);
     expect(api.save).toHaveBeenCalledWith([{ id: "new-custom", user_section_type: "hidden_gems" }]);
-  });
-
-  it("retries a refused same-server save with every saved admin-section change kept", async () => {
-    const api = fakeApi([
-      v2Problem(422, "validation_failed", "The request did not pass validation; see errors."),
-      undefined,
-    ]);
-
-    await expect(importPage(page, true, api, sequentialIds())).resolves.toEqual({
-      keptSavedChanges: true,
-    });
-    expect(api.save).toHaveBeenCalledTimes(2);
-    expect(api.save).toHaveBeenLastCalledWith([
-      { id: "new-custom", user_section_type: "hidden_gems" },
-      { id: "saved-gone", section_id: "gone", removed: true },
-    ]);
-  });
-
-  it("keeps a saved override whose config masks a legacy Trakt source", async () => {
-    const masking = stored({ id: "saved-mask", section_id: "masked", config: { source: "tmdb" } });
-    const api = {
-      listSaved: vi.fn(async () => [masking]),
-      listView: vi.fn(async () => [{ id: "masked", is_custom: false, config: { source: "tmdb" } }]),
-      save: vi
-        .fn()
-        .mockRejectedValueOnce(v2Problem(422, "validation_failed", "invalid"))
-        .mockResolvedValueOnce(undefined),
-    };
-
-    await expect(importPage(page, true, api, sequentialIds())).resolves.toEqual({
-      keptSavedChanges: true,
-    });
-    expect(api.save).toHaveBeenNthCalledWith(1, [
-      { id: "new-custom", user_section_type: "hidden_gems" },
-    ]);
-    expect(api.save).toHaveBeenLastCalledWith([
-      { id: "new-custom", user_section_type: "hidden_gems" },
-      { id: "saved-mask", section_id: "masked", config: { source: "tmdb" } },
-    ]);
   });
 
   it("refuses a page over the save endpoint's override limit", async () => {
@@ -937,18 +831,12 @@ describe("importPage", () => {
     expect(api.save).not.toHaveBeenCalled();
   });
 
-  it("doesn't retry other failures", async () => {
+  it("passes a refused save through without retrying", async () => {
     const refused = v2Problem(422, "validation_failed", "invalid");
-    const unavailable = v2Problem(503, "dependency_unavailable", "down");
+    const api = fakeApi([refused]);
 
-    const other = fakeApi([unavailable]);
-    await expect(importPage(page, true, other, sequentialIds())).rejects.toBe(unavailable);
-    expect(other.save).toHaveBeenCalledTimes(1);
-
-    const otherServer = fakeApi([refused]);
-    await expect(importPage(page, false, otherServer, sequentialIds())).rejects.toBe(refused);
-    expect(otherServer.save).toHaveBeenCalledTimes(1);
-    expect(otherServer.listView).not.toHaveBeenCalled();
+    await expect(importPage(page, true, api, sequentialIds())).rejects.toBe(refused);
+    expect(api.save).toHaveBeenCalledTimes(1);
   });
 });
 

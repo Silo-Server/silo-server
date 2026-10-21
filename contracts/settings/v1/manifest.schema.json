@@ -333,6 +333,10 @@
           "type": "string",
           "minLength": 1
         },
+        "admin_default": {
+          "description": "The server administrator may replace default_value for the whole server. A viewer with no stored value at any allowed scope inherits the administrator's value, still reported with source \"default\". Remote settings only.",
+          "type": "boolean"
+        },
         "deprecated": { "type": "boolean", "default": false },
         "notes": {
           "description": "Maintainer commentary. Not served in the public manifest.",

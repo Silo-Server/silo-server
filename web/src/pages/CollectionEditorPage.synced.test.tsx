@@ -339,7 +339,7 @@ describe("Synced list step, server", () => {
     const search = screen.getByRole("searchbox", { name: "Search lists" });
     expect(search).toBeDisabled();
     expect(search).toHaveAccessibleDescription(/Searching MDBList needs an API key/);
-    expect(screen.getByRole("link", { name: "Settings › Subtitles & Metadata" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Settings › Providers" })).toHaveAttribute(
       "href",
       "/admin/settings/providers",
     );
@@ -391,7 +391,7 @@ describe("Synced list step, server", () => {
     expect(screen.getByText("Pick its libraries, then create it.")).toBeInTheDocument();
   });
 
-  it("caps Max titles at 500 and labels the schedule with the server's offset", async () => {
+  it("keeps Max titles above 500 and labels the schedule with the server's offset", async () => {
     showPage(SERVER_NEW);
     await pick("IMDb Top 250 Movies");
     expect(screen.getByText("Server time (UTC−5)")).toBeInTheDocument();
@@ -401,7 +401,7 @@ describe("Synced list step, server", () => {
     choose(screen.getByRole("combobox", { name: "Sync schedule" }), "Every 6 hours");
     await create();
     expect(imports("/api/v2/admin/collections/import/mdblist")[0]?.body).toMatchObject({
-      limit: 500,
+      limit: 900,
       sync_schedule: "0 */6 * * *",
       featured: false,
       poster_url: "/images/collection-templates/mdblist_imdb_top_250_movies.jpg",

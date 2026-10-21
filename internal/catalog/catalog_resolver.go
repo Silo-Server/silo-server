@@ -172,6 +172,11 @@ type CatalogResolver struct {
 	// collectionOwners limits another profile's shared personal collection
 	// to its owner's access. Without it such a collection cannot be read.
 	collectionOwners PersonalCollectionAccess
+	// seekAnchors serves window jumps into a browse snapshot; see
+	// seekAnchorCache.
+	seekAnchors *seekAnchorCache
+	// letterIndexes serves the A-Z bar; see letterIndexCache.
+	letterIndexes *letterIndexCache
 }
 
 // WatchlistPromoter moves a profile's watchlist entries for titles the
@@ -196,6 +201,8 @@ func NewCatalogResolver(browseRepo *BrowseRepository, itemRepo *ItemRepository) 
 		browseRepo:     browseRepo,
 		itemRepo:       itemRepo,
 		searchProvider: NewPostgresSearchProvider(itemRepo),
+		seekAnchors:    newSeekAnchorCache(),
+		letterIndexes:  newLetterIndexCache(),
 	}
 	if browseRepo != nil {
 		r.facets = browseRepo.facetFetcher()
@@ -217,6 +224,12 @@ type SectionDefinition struct {
 	Title       string
 	ItemLimit   int
 	Config      json.RawMessage
+	// FetchItems answers a row the catalog cannot express as a query
+	// (recommendations, trending, Continue Watching, ...) by building the
+	// row itself with up to limit items. The list starts with the items the
+	// row shows and is already scoped to the acting profile. Nil when the
+	// resolver cannot build rows.
+	FetchItems func(ctx context.Context, limit int) ([]*models.MediaItem, error)
 }
 
 // SectionResolver shares the page's visibility and configuration with catalog
@@ -224,6 +237,11 @@ type SectionDefinition struct {
 type SectionResolver interface {
 	ResolveCatalogSection(context.Context, CatalogRequest) (SectionDefinition, error)
 }
+
+// SectionBrowseItemCap is the most items Explore all lists for a row-backed
+// section. Those rows are built whole on every page request, and several of
+// their engines stop well short of it anyway (recommendations at 60).
+const SectionBrowseItemCap = 200
 
 func (r *CatalogResolver) WithSectionResolver(resolver SectionResolver) *CatalogResolver {
 	if r != nil {
@@ -426,6 +444,11 @@ func (r *CatalogResolver) previewQuerySource(ctx context.Context, req CatalogReq
 		}
 		pager := r.queryExecutorForScope(req.Query.MediaScope, &snapshot)
 		pager.GroupByWork = req.GroupByWork
+		if req.SnapshotAt != nil {
+			// The client pins this snapshot for the whole browse, so its
+			// later jumps reuse the anchors.
+			pager.SeekAnchors = r.seekAnchors
+		}
 		if req.Seek != nil {
 			after, err := pager.SeekCursor(ctx, req.Query, access, *req.Seek)
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -536,7 +559,7 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 	case "genre", "custom_filter":
 		def, err := parseCatalogSectionQueryDefinition(section.Config)
 		if err != nil {
-			return nil, fmt.Errorf("%w: parsing section query definition: %v", ErrInvalidCatalogRequest, err)
+			return nil, fmt.Errorf("%w: parsing section query definition: %w", ErrInvalidCatalogRequest, err)
 		}
 		if section.Scope == "library" && section.LibraryID != nil {
 			def.LibraryIDs = []int{*section.LibraryID}
@@ -550,8 +573,33 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 			SkipTotal: req.SkipTotal,
 		}, stripCatalogUserScope(access))
 	default:
+		return resolveRowBackedSectionSource(ctx, req, section)
+	}
+}
+
+// resolveRowBackedSectionSource pages a row built by its section fetcher. The
+// frozen v1 catalog keeps answering these rows with no items.
+func resolveRowBackedSectionSource(ctx context.Context, req CatalogRequest, section catalogPageSection) (*CatalogResult, error) {
+	if !req.CursorPaging || section.FetchItems == nil {
 		return &CatalogResult{Items: []*models.MediaItem{}, Total: 0, HasMore: false, TotalExact: true}, nil
 	}
+	snapshot := time.Now().UTC()
+	if req.SnapshotAt != nil {
+		snapshot = req.SnapshotAt.UTC()
+	}
+	items, err := section.FetchItems(ctx, SectionBrowseItemCap)
+	if err != nil {
+		return nil, err
+	}
+	paged := paginateCatalogItems(items, req.Offset, req.Limit)
+	return &CatalogResult{
+		Items:   paged,
+		Total:   len(items),
+		HasMore: req.Offset+len(paged) < len(items),
+		// A row cut at the cap may hold more than it lists.
+		TotalExact: len(items) < SectionBrowseItemCap,
+		SnapshotAt: snapshot,
+	}, nil
 }
 
 func (r *CatalogResolver) resolveRecentTVSectionSource(
@@ -849,7 +897,7 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 	if IsLiveQueryType(collection.CollectionType) {
 		def, err := parseCatalogCollectionQueryDefinition([]byte(collection.QueryDefinition))
 		if err != nil {
-			return nil, fmt.Errorf("%w: parsing user collection query_definition: %v", ErrInvalidCatalogRequest, err)
+			return nil, fmt.Errorf("%w: parsing user collection query_definition: %w", ErrInvalidCatalogRequest, err)
 		}
 		def = ApplySmartCollectionItemLimit(def)
 		if catalogRequestHasOverlay(req) || strings.TrimSpace(collection.DisplayQueryDefinition) != "" {
@@ -1975,6 +2023,8 @@ type catalogPageSection struct {
 	Config           json.RawMessage
 	CollectionID     string // library collection ID
 	UserCollectionID string // personal user collection ID
+	// FetchItems builds a row-backed section; see SectionDefinition.
+	FetchItems func(ctx context.Context, limit int) ([]*models.MediaItem, error)
 }
 
 type catalogSectionFilters struct {
@@ -2033,7 +2083,7 @@ func (r *CatalogResolver) loadCatalogSection(ctx context.Context, req CatalogReq
 		}
 		section = catalogPageSection{ID: req.SectionID, Scope: req.Scope,
 			SectionType: definition.SectionType, Title: definition.Title,
-			ItemLimit: definition.ItemLimit, Config: definition.Config}
+			ItemLimit: definition.ItemLimit, Config: definition.Config, FetchItems: definition.FetchItems}
 		if req.Scope == "library" {
 			section.LibraryID = new(req.LibraryID)
 		}

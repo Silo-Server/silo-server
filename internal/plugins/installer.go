@@ -72,7 +72,7 @@ type Installer struct {
 func NewInstaller(installations installationStore, opts InstallerOptions) *Installer {
 	httpClient := opts.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = newPackageFetchClient(defaultPackageFetchTimeouts)
 	}
 	baseDir := opts.BaseDir
 	if baseDir == "" {
@@ -465,7 +465,7 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 
 	if err := i.installations.SaveArchive(ctx, installation.ID, manifestBytes, checksum, archiveBytes); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr)
+			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
 		}
 		return nil, fmt.Errorf("persist plugin archive: %w", err)
 	}
@@ -475,7 +475,7 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 		Enabled: &enabled,
 	}); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr)
+			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
 		}
 		return nil, fmt.Errorf("enable plugin installation: %w", err)
 	}
@@ -540,14 +540,14 @@ func (i *Installer) installArchive(ctx context.Context, data []byte, req Install
 
 	if err := i.installations.SaveArchive(ctx, installation.ID, manifestBytes, manifest.GetChecksum(), data); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr)
+			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
 		}
 		return nil, fmt.Errorf("persist plugin archive: %w", err)
 	}
 
 	if err := extractArchiveFiles(reader, installDir); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("extract plugin archive: %w (cleanup failed: %v)", err, deleteErr)
+			return nil, fmt.Errorf("extract plugin archive: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
 		}
 		return nil, err
 	}
@@ -557,7 +557,7 @@ func (i *Installer) installArchive(ctx context.Context, data []byte, req Install
 		Enabled: &enabled,
 	}); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr)
+			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
 		}
 		return nil, fmt.Errorf("enable plugin installation: %w", err)
 	}

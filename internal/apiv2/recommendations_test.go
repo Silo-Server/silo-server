@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
 
@@ -30,6 +31,7 @@ type fakeRecommendations struct {
 	lastExclude         map[string]struct{}
 	cardsHasMore        bool
 	swipePool           int
+	lastFilter          catalogpkg.AccessFilter
 }
 
 func fakeRecommendationRow() handlers.DiscoverRowView {
@@ -49,8 +51,8 @@ func (f *fakeRecommendations) BecauseWatchedCards(_ context.Context, _ int, _, i
 	return f.cards(limit)
 }
 
-func (f *fakeRecommendations) PopularCards(_ context.Context, _ int, _ string, days, limit int, _ catalogpkg.AccessFilter) ([]handlers.SectionItemView, error) {
-	f.lastItemID, f.lastDays = "", days
+func (f *fakeRecommendations) PopularCards(_ context.Context, _ int, _ string, days, limit int, filter catalogpkg.AccessFilter) ([]handlers.SectionItemView, error) {
+	f.lastItemID, f.lastDays, f.lastFilter = "", days, filter
 	return f.cards(limit)
 }
 
@@ -137,8 +139,11 @@ func (f *fakeRecommendations) WatchTonight(_ context.Context, _ int, _ string, _
 	return handlers.WatchTonightView{Items: []handlers.WatchTonightItemView{fakeWatchTonightItem()}, IsCold: true}, nil
 }
 
-func (f *fakeRecommendations) WatchTonightCards(_ context.Context, _ int, _ string, _ catalogpkg.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) handlers.WatchTonightCardsView {
+func (f *fakeRecommendations) WatchTonightCards(_ context.Context, _ int, _ string, _ catalogpkg.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) (handlers.WatchTonightCardsView, error) {
 	f.lastMode, f.lastGenres, f.lastExclude, f.lastLimit = mode, genres, excludeIDs, limit
+	if f.err != nil {
+		return handlers.WatchTonightCardsView{}, f.err
+	}
 	if f.swipePool > 0 {
 		cards := make([]handlers.WatchTonightCardView, 0, limit)
 		more := false
@@ -155,9 +160,9 @@ func (f *fakeRecommendations) WatchTonightCards(_ context.Context, _ int, _ stri
 			card.ContentID = id
 			cards = append(cards, card)
 		}
-		return handlers.WatchTonightCardsView{Cards: cards, HasMore: more}
+		return handlers.WatchTonightCardsView{Cards: cards, HasMore: more}, nil
 	}
-	return handlers.WatchTonightCardsView{Cards: []handlers.WatchTonightCardView{fakeWatchTonightCard()}, HasMore: f.cardsHasMore}
+	return handlers.WatchTonightCardsView{Cards: []handlers.WatchTonightCardView{fakeWatchTonightCard()}, HasMore: f.cardsHasMore}, nil
 }
 
 func recommendationDeps(t *testing.T) (Dependencies, *fakeRecommendations) {
@@ -178,7 +183,7 @@ type recommendationRowDoc struct {
 
 func requireFakeCard(t *testing.T, card map[string]json.RawMessage) {
 	t.Helper()
-	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true}`} {
+	for k, want := range map[string]string{tiebreakerContentID: `"movie:heat-1995"`, "keywords": `[]`, "progress_updated_at": `"2026-01-02T03:04:05.000Z"`, "overlay_summary": `{"resolution":"4K","hdr":"Dolby Vision"}`, "user_state": `{"played":false,"is_favorite":false,"in_watchlist":true,"not_interested":false}`} {
 		if string(card[k]) != want {
 			t.Errorf("%s = %s, want %s", k, card[k], want)
 		}
@@ -233,6 +238,24 @@ func TestRecommendationCardLists(t *testing.T) {
 	}
 	deps.Recommendations = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/recommendations/popular", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+// Recommendation reads take the request's artwork sizes like every other
+// card surface: image_size and the per-slot widths reach the card builder.
+func TestRecommendationCardsTakeArtworkSizes(t *testing.T) {
+	deps, fake := recommendationDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/recommendations/popular?image_size=medium&backdrop_width=2688&logo_width=1760", "", viewerHeaders())
+	if rec.Code != 200 {
+		t.Fatalf("popular: %d %s", rec.Code, rec.Body.String())
+	}
+	want := imagesize.Request{Size: imagesize.Medium, Widths: imagesize.Widths{Backdrop: 2688, Logo: 1760}}
+	if got := fake.lastFilter.Artwork(); got != want {
+		t.Fatalf("seam artwork = %+v, want %+v", got, want)
+	}
+	for _, query := range []string{"image_size=huge", "backdrop_width=0", "poster_width=7681"} {
+		requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/popular?"+query, "", viewerHeaders()), TypeValidationFailed)
+	}
 }
 
 func TestRecommendationRows(t *testing.T) {
@@ -306,6 +329,14 @@ func TestRecommendationSection(t *testing.T) {
 	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/cluster", "", viewerHeaders()), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "query.key" || p.Errors[0].Code != codeRequired {
 		t.Fatalf("errors = %+v", p.Errors)
+	}
+	// A key that cannot name a section is a validation failure, not a
+	// server error.
+	for _, path := range []string{"/section/cluster?key=abc", "/section/cluster?key=-1", "/section/cluster?key=%FF%FE", "/section/genre?key=%FF", "/section/genre?key=Drama%00"} {
+		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations"+path, "", viewerHeaders()), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "query.key" || p.Errors[0].Code != codeInvalid {
+			t.Fatalf("%s: errors = %+v", path, p.Errors)
+		}
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/nope", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/popular?limit=61", "", viewerHeaders()), TypeValidationFailed)
@@ -493,6 +524,11 @@ func TestRecommendationWatchTonightCards(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover&limit=21", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", bearer(memberToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", nil), TypeAuthenticationRequired)
+	// A failed item lookup is a 500, not an empty page that looks like the
+	// end of the deck.
+	fake.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to fetch item details"}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", viewerHeaders()), TypeInternalError)
+	fake.err = nil
 	deps.Recommendations = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/recommendations/watch-tonight/cards?mode=discover", "", viewerHeaders()), TypeDependencyUnavailable)
 }

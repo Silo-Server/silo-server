@@ -26,13 +26,14 @@ func TestOwnerChecks(t *testing.T) {
 	disable := models.UpdateUserInput{Enabled: new(false)}
 	rename := models.UpdateUserInput{Username: new("renamed")}
 	// A non-Owner admin the Owner restricted.
-	limited := &models.User{ID: 5, Role: models.RoleAdmin, Enabled: true, MaxStreams: new(2), LibraryIDs: []int{2, 1}, DownloadTranscodeAllowed: new(false)}
+	limited := &models.User{ID: 5, Role: models.RoleAdmin, Enabled: true, MaxStreams: new(2), LibraryIDs: []int{2, 1}, DownloadTranscodeAllowed: new(false), MaxProfiles: new(2)}
 	resend := models.UpdateUserInput{
 		MaxStreams:               models.SetValue(2),
 		LibraryIDs:               models.SetValue([]int{1, 2}),
 		DownloadTranscodeAllowed: models.SetValue(false),
 		MaxTranscodes:            models.ClearValue[int](),
 		RequestsAllowed:          models.ClearValue[bool](),
+		MaxProfiles:              models.SetValue(2),
 	}
 
 	cases := []struct {
@@ -81,6 +82,8 @@ func TestOwnerChecks(t *testing.T) {
 		{"admin sets own override", CheckOwnerUpdate(OwnerActor{ID: admin.ID}, admin, models.UpdateUserInput{DownloadTranscodeAllowed: models.SetValue(false)}), ErrAdminPolicyProtected},
 		{"admin widens own libraries", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{LibraryIDs: models.SetValue([]int{1, 2, 3})}), ErrAdminPolicyProtected},
 		{"admin clears own libraries", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{LibraryIDs: models.ClearValue[[]int]()}), ErrAdminPolicyProtected},
+		{"admin raises own profile limit", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{MaxProfiles: models.SetValue(10)}), ErrAdminPolicyProtected},
+		{"admin clears own profile limit", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{MaxProfiles: models.ClearValue[int]()}), ErrAdminPolicyProtected},
 		{"admin resends own policy", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, resend), nil},
 		{"admin edits own email beside policy", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{Email: new("new@example.test"), MaxStreams: models.SetValue(2)}), nil},
 		{"owner limits admin", CheckOwnerUpdate(asOwner, admin, models.UpdateUserInput{MaxStreams: models.SetValue(2)}), nil},
@@ -278,8 +281,8 @@ func TestOwnershipMoveRevokesPendingAdminInvitationsPostgres(t *testing.T) {
 func issueTestCredentials(t *testing.T, r *UserRepository, id int) {
 	t.Helper()
 	if _, err := r.pool.Exec(t.Context(), `
-		INSERT INTO api_keys (id, user_id, label, api_key, revision) VALUES ($1, $2, 'held', $3, 1)`,
-		time.Now().UnixNano(), id, uuid.NewString()); err != nil {
+		INSERT INTO api_keys (id, user_id, label, key_hash, revision) VALUES ($1, $2, 'held', $3, 1)`,
+		time.Now().UnixNano(), id, HashLinkToken(uuid.NewString())); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.pool.Exec(t.Context(), `
@@ -323,6 +326,9 @@ func requireOwner(t *testing.T, r *UserRepository, id int) {
 			t.Fatal(err)
 		}
 		owners = append(owners, owner)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	if len(owners) != 1 || owners[0] != id {
 		t.Fatalf("owners = %v, want [%d]", owners, id)

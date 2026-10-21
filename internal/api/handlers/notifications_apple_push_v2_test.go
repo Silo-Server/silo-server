@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -54,10 +55,10 @@ func TestOrderedAppleDisplayRenewalAndAuthority(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := &appleFinalizerFixture{receipt: notifications.ApplePushReceipt{Generation: 1, RegistrationID: "registration", ServerDeviceID: "server-device", Enabled: true}}
 			issuer := new(appleIssuerFixture)
-			sessions := &socketSessionFixture{valid: true}
 			users := &socketUserFixture{user: models.User{ID: 7, Enabled: true, Role: "user"}}
+			sessions := &socketSessionFixture{valid: true, account: users}
 			viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, PolicyRevision: 1}}
-			h := NewOrderedApplePushV2(notifications.NewPushDeviceService(store, handlerPushCipher(t)), issuer, sessions, users, viewer, func(context.Context, int, string) (bool, bool, error) { return false, true, nil })
+			h := NewOrderedApplePushV2(notifications.NewPushDeviceService(store, handlerPushCipher(t)), issuer, sessions, users, viewer, apimw.NewActingAdminDecider(func(context.Context, int, string) (bool, bool, error) { return false, true, nil }, nil))
 			cmd := notifications.ApplePushCommand{UserID: 7, ProfileID: "profile", Generation: 1}
 			identity := evt.SocketIdentity{UserID: 7, ProfileID: "profile", SessionID: "session", Role: "user", ProfileToken: "original-pin", AccessExpiresAt: time.Now().Add(time.Minute)}
 			wantErr, wantMint := false, true

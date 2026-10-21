@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/watchlist"
@@ -159,11 +160,14 @@ func (reg *Registry) watchlistTitleViewer(ctx context.Context) (handlers.Persona
 	if reg.deps.WatchlistRequests == nil {
 		return handlers.PersonalListViewer{}, mediarequests.Viewer{}, "", unavailable("requests")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return handlers.PersonalListViewer{}, mediarequests.Viewer{}, "", p
 	}
-	rv := lifecycleViewer(ctx)
+	rv, p := lifecycleViewer(ctx)
+	if p != nil {
+		return handlers.PersonalListViewer{}, mediarequests.Viewer{}, "", p
+	}
 	ceiling, err := reg.deps.WatchlistRequests.WatchlistCeiling(ctx, rv)
 	if err != nil {
 		return handlers.PersonalListViewer{}, mediarequests.Viewer{}, "", requestProblem(err)
@@ -421,7 +425,7 @@ func (reg *Registry) markInWatchlist(ctx context.Context, marks []watchlistMark)
 	if reg.deps.WatchlistTitles == nil || len(marks) == 0 {
 		return
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return
 	}

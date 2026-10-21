@@ -14,11 +14,13 @@ import {
   PlayerFetchError,
 } from "../player-fetch";
 import { useCodecDetection } from "./useCodecDetection";
+import { useBrowserEngineCapabilities } from "./useBrowserEngine";
+import type { EngineCapabilities } from "../engine/capabilities";
+import type { NativeOriginalSupport } from "../engine/routing";
 import {
   buildClientCapabilitiesV3,
   buildClientPlaybackContextV3,
   detectBandwidthEstimateKbpsV3,
-  detectMeteredV3,
 } from "../client-context-v3";
 import { buildRouteEventV3 } from "../route-events-v3";
 import { reportSessionRouteEventV2 } from "../route-events-v2";
@@ -30,7 +32,7 @@ import {
   FEATURE_OUTPUT_CHANGE_V3,
   MAX_ATTEMPT_COUNT_V3,
   MAX_ATTEMPTED_PLAN_KEYS_V3,
-  QUALITY_ORIGINAL_V3,
+  normalizeQualityPreferenceV3,
   type DecisionResponseV3,
   type FailureV3,
   type PlanV3,
@@ -165,6 +167,13 @@ interface PlaybackSessionErrorState {
 }
 
 export interface UsePlaybackSessionResult extends PlaybackSessionState {
+  /**
+   * The browser decode engine's capabilities, when browser decoding is on and
+   * this browser can run it. The player routes `original_http` plans with it.
+   */
+  browserEngine: EngineCapabilities | null;
+  /** What the media element itself plays from an untouched original. */
+  nativeOriginalSupport: NativeOriginalSupport;
   /** Starts a fresh session against another file (edition/version switch). */
   switchVersion: (fileId: number, currentPosition: number) => void;
   /** `track_change` replan selecting another audio track by combined index. */
@@ -382,9 +391,24 @@ export function usePlaybackSession(
 ): UsePlaybackSessionResult {
   const config = usePlayerConfig();
   const probe = useCodecDetection();
-  const capabilitiesSettled = probe.settled;
-  const clientCapabilities = useMemo(() => buildClientCapabilitiesV3(probe), [probe]);
-  const clientPlaybackContext = useMemo(() => buildClientPlaybackContextV3(probe), [probe]);
+  const browserEngine = useBrowserEngineCapabilities();
+  const capabilitiesSettled = probe.settled && browserEngine.settled;
+  const clientCapabilities = useMemo(
+    () => buildClientCapabilitiesV3(probe, browserEngine.capabilities),
+    [probe, browserEngine.capabilities],
+  );
+  const clientPlaybackContext = useMemo(
+    () => buildClientPlaybackContextV3(probe, browserEngine.capabilities),
+    [probe, browserEngine.capabilities],
+  );
+  const nativeOriginalSupport = useMemo<NativeOriginalSupport>(
+    () => ({
+      containers: probe.containers,
+      videoCodecs: probe.codecsVideo,
+      audioCodecs: probe.codecsAudio,
+    }),
+    [probe.codecsAudio, probe.codecsVideo, probe.containers],
+  );
   const capabilityRequestKey = useMemo(
     () => JSON.stringify([clientCapabilities, clientPlaybackContext]),
     [clientCapabilities, clientPlaybackContext],
@@ -401,7 +425,7 @@ export function usePlaybackSession(
     audioTrackIndex: 0,
     durationSeconds: null,
     subtitleUrls: [],
-    qualityPreference: qualityPreference?.trim() || "auto",
+    qualityPreference: normalizeQualityPreferenceV3(qualityPreference),
     shouldAutoPlay: true,
     loading: true,
     replacing: false,
@@ -421,6 +445,10 @@ export function usePlaybackSession(
   const planRevisionRef = useRef(0);
   const serverFeaturesRef = useRef<string[]>([]);
   const stateRef = useRef(state);
+  // Set as soon as the server says an administrator ended the session, before
+  // the state carrying it renders, so a caller acting on an older render
+  // cannot start a reconnect against it.
+  const sessionEndedRef = useRef(false);
   const activeRequestKeyRef = useRef<string | null>(null);
   const activeCapabilityRequestKeyRef = useRef<string | null>(null);
   const playbackPositionRef = useRef(initialPosition);
@@ -491,7 +519,7 @@ export function usePlaybackSession(
       reconnect?: boolean,
     ) => Promise<boolean>
   >(async () => false);
-  const qualityRef = useRef(qualityPreference?.trim() || "auto");
+  const qualityRef = useRef(normalizeQualityPreferenceV3(qualityPreference));
   // The running mid-stream reconnect, if any. `generation` invalidates the
   // timer and any request of a cycle that has ended, so nothing it started can
   // act after the viewer left, a new start took over, or a plan was adopted.
@@ -647,6 +675,7 @@ export function usePlaybackSession(
       const sessionId = plan.session_id ?? decision.session_id ?? sessionIdRef.current;
       planAttemptIdRef.current = randomUUID();
       planRef.current = plan;
+      sessionEndedRef.current = false;
       sessionIdRef.current = sessionId ?? null;
       planRevisionRef.current += 1;
       hasAdoptedPlanRef.current = true;
@@ -706,7 +735,6 @@ export function usePlaybackSession(
         forceStartPosition,
         explicitAudioTrackIndex: audioTrackIndex,
         subtitleTrackIndex,
-        metered: detectMeteredV3(),
         bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
         bandwidthCapKbps: maxBitrateKbps,
         clientCapabilities,
@@ -1035,7 +1063,7 @@ export function usePlaybackSession(
     }
     activeRequestKeyRef.current = requestKey;
     activeCapabilityRequestKeyRef.current = capabilityRequestKey;
-    qualityRef.current = qualityPreference?.trim() || "auto";
+    qualityRef.current = normalizeQualityPreferenceV3(qualityPreference);
     playbackPositionRef.current = initialPosition;
     const intentAt = takePlaybackIntent(requestKey);
     startIntentRef.current = {
@@ -1191,7 +1219,6 @@ export function usePlaybackSession(
         qualityPreference: qualityRef.current,
         attemptedPlanKeys,
         attemptCount,
-        metered: detectMeteredV3(),
         bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
         bandwidthCapKbps: maxBitrateKbps,
         clientCapabilities,
@@ -1265,6 +1292,7 @@ export function usePlaybackSession(
         if (isPlaybackSessionEndedError(err)) {
           // An administrator ended the session: leave rather than show an
           // error or recover into a fresh session.
+          sessionEndedRef.current = true;
           setState((current) => ({
             ...current,
             replanning: false,
@@ -1423,7 +1451,7 @@ export function usePlaybackSession(
 
   const changeQuality = useCallback(
     (label: string, currentPosition: number) => {
-      const normalized = label.trim() || QUALITY_ORIGINAL_V3;
+      const normalized = normalizeQualityPreferenceV3(label);
       const previousPreference = qualityRef.current;
       qualityRef.current = normalized;
       setState((current) => ({ ...current, qualityPreference: normalized }));
@@ -1554,6 +1582,7 @@ export function usePlaybackSession(
       } catch (error) {
         if (!isCurrent()) return;
         if (isPlaybackSessionEndedError(error)) {
+          sessionEndedRef.current = true;
           endReconnect(false);
           setState((current) => ({
             ...current,
@@ -1605,8 +1634,9 @@ export function usePlaybackSession(
 
   const recoverConnection = useCallback(
     (positionSeconds: number, resume: boolean) => {
-      // Only a stream that exists can lose its connection.
-      if (!planRef.current || !sessionIdRef.current) return;
+      // Only a stream that exists can lose its connection, and a session an
+      // administrator ended stays ended.
+      if (!planRef.current || !sessionIdRef.current || sessionEndedRef.current) return;
       beginReconnect(positionSeconds, resume, false);
     },
     [beginReconnect],
@@ -1789,6 +1819,8 @@ export function usePlaybackSession(
 
   return {
     ...state,
+    browserEngine: browserEngine.capabilities,
+    nativeOriginalSupport,
     switchVersion,
     switchAudioTrack,
     changeSubtitleTrack,

@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -241,6 +242,28 @@ func TestEnsureClientLaunchIsolatedFromLeaderCancellation(t *testing.T) {
 	}
 	if host.canceledDuringLaunch() {
 		t.Fatalf("launch ctx was canceled by the leader; expected isolation")
+	}
+}
+
+// TestEnsureClientLaunchWithoutClientFails pins that a Host reporting a
+// successful start with no client fails the caller instead of panicking on
+// the shared launch result.
+func TestEnsureClientLaunchWithoutClientFails(t *testing.T) {
+	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
+	installPath := writeInstalledPluginManifest(t, manifest)
+	store := newFakeServiceInstallationStore(&Installation{
+		ID: 7, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
+		InstallPath: installPath, Enabled: true,
+	})
+	host := &countingHerdHost{} // Start returns (nil, nil)
+	service := &Service{installations: store, host: host}
+
+	client, err := service.ensureClient(context.Background(), 7)
+	if !errors.Is(err, pluginhost.ErrPluginUnhealthy) {
+		t.Fatalf("ensureClient err = %v, want ErrPluginUnhealthy", err)
+	}
+	if client != nil {
+		t.Fatalf("ensureClient client = %#v, want nil", client)
 	}
 }
 

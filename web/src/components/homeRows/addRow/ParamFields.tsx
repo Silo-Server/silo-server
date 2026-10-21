@@ -1,6 +1,5 @@
-import { useId, useState, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import LibraryMultiSelect from "@/components/LibraryMultiSelect";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -13,7 +12,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { sectionLibraryFilterIds, withSectionLibraryFilterIds } from "@/lib/sectionLibraryFilter";
 import { hasParamFields } from "@/lib/homeRows/paramFields";
-import { SEASONAL_THEME_LABELS } from "@/lib/homeRows/variants";
+import { variantOf } from "@/lib/homeRows/variants";
+import { FamilyNightFields, HolidayFields } from "./SeasonalFields";
 
 type Config = Record<string, unknown>;
 
@@ -271,113 +271,6 @@ function SpotlightFields({ config, onChange }: FieldProps) {
   );
 }
 
-// Order matches SeasonalThemeOrder on the server: earlier holidays win when
-// several are in season at once. Family movie night is its own variant, so it
-// isn't offered here; a stored one stays in the list.
-const HOLIDAYS = [
-  { key: "valentines", when: "Feb 7–14" },
-  { key: "st_patricks", when: "Mar 15–17" },
-  { key: "thanksgiving", when: "Nov 22–30" },
-  { key: "christmas", when: "December" },
-  { key: "halloween", when: "October" },
-  { key: "saturday_morning", when: "Saturdays before 1pm" },
-  { key: "summer_blockbuster", when: "June to August" },
-].map((holiday) => ({ ...holiday, label: SEASONAL_THEME_LABELS[holiday.key]! }));
-
-function enabledHolidays(config: Config): string[] {
-  if (Array.isArray(config.enabled_themes)) {
-    return config.enabled_themes.filter((value): value is string => typeof value === "string");
-  }
-  // A legacy single-holiday row starts from its one holiday.
-  return typeof config.theme === "string" && config.theme ? [config.theme] : [];
-}
-
-function HolidayChecklist({ config, onChange }: FieldProps) {
-  const id = useId();
-  // The name box being typed in, as typed: the draft gets it trimmed, so a
-  // space typed between words would otherwise vanish before the next word.
-  const [typed, setTyped] = useState<{ key: string; text: string } | null>(null);
-  const enabled = new Set(enabledHolidays(config));
-  const titles: Record<string, string> = {};
-  if (config.theme_titles && typeof config.theme_titles === "object") {
-    for (const [key, value] of Object.entries(config.theme_titles)) {
-      if (typeof value === "string") titles[key] = value;
-    }
-  }
-
-  function commit(nextEnabled: Set<string>, nextTitles: Record<string, string>) {
-    // Keep only titles for holidays that are on, so the saved config stays tidy.
-    const kept = Object.fromEntries(
-      Object.entries(nextTitles)
-        .filter(([key]) => nextEnabled.has(key))
-        .map(([key, value]) => [key, value.trim()] as const)
-        .filter(([, value]) => value !== ""),
-    );
-    onChange({
-      ...config,
-      enabled_themes: Array.from(nextEnabled),
-      theme_titles: Object.keys(kept).length > 0 ? kept : undefined,
-      // Legacy single-theme keys would shadow the list on the server.
-      theme: "",
-      mode: "",
-    });
-  }
-
-  return (
-    <fieldset className="grid gap-2">
-      <legend className="mb-2 text-sm font-medium">Holidays</legend>
-      <div className="border-border divide-border/70 divide-y rounded-xl border">
-        {HOLIDAYS.map((holiday) => {
-          const on = enabled.has(holiday.key);
-          const checkboxId = `${id}-${holiday.key}`;
-          return (
-            <div key={holiday.key} className="grid gap-2 px-3.5 py-2.5">
-              <div className="flex items-center gap-3">
-                <Checkbox
-                  id={checkboxId}
-                  checked={on}
-                  onCheckedChange={(checked) => {
-                    const next = new Set(enabled);
-                    if (checked === true) next.add(holiday.key);
-                    else next.delete(holiday.key);
-                    commit(next, titles);
-                  }}
-                />
-                <Label htmlFor={checkboxId} className="font-normal">
-                  {holiday.label}
-                </Label>
-                <span className="text-muted-foreground ml-auto text-xs">{holiday.when}</span>
-              </div>
-              {on ? (
-                <Input
-                  aria-label={`Row name during ${holiday.label}`}
-                  placeholder={`Name in season (defaults to "${holiday.label}")`}
-                  className="h-8 text-[13px]"
-                  value={typed?.key === holiday.key ? typed.text : (titles[holiday.key] ?? "")}
-                  onChange={(event) => {
-                    setTyped({ key: holiday.key, text: event.target.value });
-                    commit(enabled, { ...titles, [holiday.key]: event.target.value });
-                  }}
-                  onBlur={() => setTyped(null)}
-                />
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-      {HOLIDAYS.some((holiday) => enabled.has(holiday.key)) ? (
-        <p className="text-muted-foreground text-[13px]">
-          The row shows whichever holiday is in season and hides itself when none is.
-        </p>
-      ) : (
-        <p role="status" className="text-destructive text-[13px]">
-          Pick at least one holiday.
-        </p>
-      )}
-    </fieldset>
-  );
-}
-
 /**
  * The plain settings a ready-made row keeps, in one of two places: next to
  * the variant ("primary") or under More options ("more"). The raw Anchor item
@@ -399,11 +292,14 @@ export function ParamFields({
   if (!hasParamFields(sectionType, slot, config, onLibraryPage)) return null;
   const props = { config, onChange };
   if (slot === "primary") {
-    return sectionType === "seasonal_themed" ? (
-      <HolidayChecklist {...props} />
-    ) : (
-      <LibraryFilterField {...props} libraries={libraries} />
-    );
+    if (sectionType === "seasonal_themed") {
+      return variantOf(sectionType, config) === "se_family_movie_night" ? (
+        <FamilyNightFields {...props} />
+      ) : (
+        <HolidayFields {...props} />
+      );
+    }
+    return <LibraryFilterField {...props} libraries={libraries} />;
   }
   switch (sectionType) {
     case "watchlist":

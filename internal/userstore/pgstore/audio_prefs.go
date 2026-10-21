@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -75,7 +76,7 @@ func getAudioPreference(ctx context.Context, exec preferenceSettingsExecutor, us
 		&signatureJSON,
 		&updatedAt,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

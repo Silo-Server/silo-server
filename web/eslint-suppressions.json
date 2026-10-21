@@ -1,0 +1,250 @@
+{
+  "src/components/ContinueWatchingCard.tsx": {
+    "react-hooks/preserve-manual-memoization": {
+      "count": 2
+    }
+  },
+  "src/components/GlobalSearch.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/ItemGrid.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 2
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/Layout.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/MediaItemMenu.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/MetadataTranslatePanel.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/RealtimeEventsProvider.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 2
+    },
+    "react-hooks/refs": {
+      "count": 3
+    }
+  },
+  "src/components/ServerActivity.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/SplitItemDialog.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/admin/plugins/PluginConfigForm.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/components/subtitles/SubtitleUploadForm.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 2
+    }
+  },
+  "src/components/ui/facet-search-select.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 1
+    }
+  },
+  "src/hooks/AuthProvider.sessionRestore.test.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "src/hooks/admin/useAdminLogStream.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/hooks/queries/admin/nodes.ts": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "src/hooks/queries/catalog.ts": {
+    "react-hooks/exhaustive-deps": {
+      "count": 1
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 2
+    }
+  },
+  "src/hooks/queries/notInterested.test.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "src/hooks/queries/useRequests.test.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "src/hooks/useIntersectionObserver.ts": {
+    "react-hooks/refs": {
+      "count": 1
+    }
+  },
+  "src/hooks/useOnViewTranslation.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 3
+    }
+  },
+  "src/hooks/useTheme.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/pages/AdminCollections.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "src/pages/AdminLibraries.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 1
+    }
+  },
+  "src/pages/AdminTasks.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/pages/Catalog.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/pages/LibraryRecommended.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 2
+    }
+  },
+  "src/pages/audiobooks/player/AudiobookPlayer.tsx": {
+    "react-hooks/refs": {
+      "count": 5
+    }
+  },
+  "src/pages/audiobooks/player/SpeedControl.tsx": {
+    "react-hooks/refs": {
+      "count": 1
+    }
+  },
+  "src/pages/audiobooks/player/audiobookPlaybackContext.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/pages/settings/DeviceSettings.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/pages/settings/HistoryImportSettings.test.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "src/pages/setup-wizard/steps/SubtitlesStep.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/pages/watchtogether/StartPartySheet.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 1
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/pages/watchtogether/hooks/useRecentRooms.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/pages/watchtogether/room/browse/BrowseShelf.test.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "src/pages/watchtogether/room/picker/SeriesDrilldown.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/playback/WatchPlaybackChrome.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 2
+    }
+  },
+  "src/player/components/AudioTrackMenu.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 4
+    },
+    "react-hooks/preserve-manual-memoization": {
+      "count": 3
+    }
+  },
+  "src/player/components/ChaptersMenu.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 3
+    },
+    "react-hooks/preserve-manual-memoization": {
+      "count": 2
+    }
+  },
+  "src/player/components/PlayingNextScreen.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/player/components/SubtitleSearchModal.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 1
+    }
+  },
+  "src/player/components/SubtitleTranslateModal.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 1
+    }
+  },
+  "src/player/hooks/useASSSubtitles.test.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "src/player/hooks/useNextEpisode.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/player/hooks/usePGSSubtitles.ts": {
+    "react-hooks/refs": {
+      "count": 4
+    }
+  },
+  "src/player/hooks/useWatchProgress.ts": {
+    "react-hooks/refs": {
+      "count": 1
+    }
+  }
+}

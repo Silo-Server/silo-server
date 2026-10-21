@@ -11,6 +11,7 @@ package abs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -51,10 +52,6 @@ type MediaStore interface {
 	// query (Filter{} for none) so per-author syncs avoid a full-library scan.
 	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, filter Filter) ([]*models.MediaItem, int, error)
 	GetMediaFiles(ctx context.Context, contentID string, access catalog.AccessFilter) ([]*models.MediaFile, error)
-	// GetMediaFileByID fetches a single media file by its integer PK.
-	// Used by the ABS file-streaming handler when a caller supplies a
-	// raw file ID instead of an ino.
-	GetMediaFileByID(ctx context.Context, fileID int) (*models.MediaFile, error)
 	// ListAudiobookLibraries returns media_folder rows with type='audiobooks'.
 	ListAudiobookLibraries(ctx context.Context, access catalog.AccessFilter) ([]AudiobookLibrary, error)
 	// SearchAudiobooks does a fuzzy title/author/narrator match for the ABS
@@ -170,17 +167,60 @@ type ABSToken struct {
 	RevokedAt *time.Time
 }
 
+// Principal is who an ABS sign-in authenticated.
+type Principal struct {
+	UserID string
+	// ProfileID is empty only for an account that has no profiles.
+	ProfileID   string
+	DisplayName string
+	// PINRevision is the profile's PIN revision, read before its PIN was
+	// checked. Tokens carry it so a later PIN change ends them (see
+	// ProfileVerifier).
+	PINRevision int64
+}
+
+// Sign-in refusals for a profile's PIN. "username#profile" names the profile
+// and "password#pin" carries its PIN, as on the Jellyfin-compatible listener.
+var (
+	// ErrProfilePINRequired: the sign-in selects a PIN-protected profile
+	// without its PIN, or picks a PIN-protected primary without naming it.
+	ErrProfilePINRequired = errors.New("profile PIN required")
+	// ErrProfilePINIncorrect: the PIN given does not match the profile's.
+	ErrProfilePINIncorrect = errors.New("incorrect profile PIN")
+	// ErrProfilePINLocked: the profile is locked after too many incorrect
+	// PINs, on any sign-in surface.
+	ErrProfilePINLocked = errors.New("profile locked after too many incorrect PINs")
+	// ErrTokenProfileUnverified: the token's profile no longer accepts it.
+	ErrTokenProfileUnverified = errors.New("token no longer valid for its profile")
+)
+
+// ErrOwnerUnavailable: the stored owner of a capability such as a public RSS
+// feed no longer exists, is disabled, or has lost its profile.
+var ErrOwnerUnavailable = errors.New("owner unavailable")
+
 // ProfileCredentialValidator validates a (username, password) pair against
-// silo's auth backend. Implemented by an adapter over internal/auth in a
-// later stage.
+// silo's auth backend, including the selected profile's PIN.
 type ProfileCredentialValidator interface {
-	Validate(ctx context.Context, username, password string) (userID string, profileID string, displayName string, err error)
+	Validate(ctx context.Context, username, password string) (Principal, error)
+}
+
+// ProfileVerifier checks that the profile an ABS token names still accepts
+// it: the profile exists, and when it has a PIN, pinRevision (nil for a token
+// minted before tokens carried one) is its current PIN revision. A token
+// naming no profile is accepted only while the account has no profiles.
+// Returns ErrTokenProfileUnverified when it does not.
+type ProfileVerifier interface {
+	VerifyTokenProfile(ctx context.Context, userID, profileID string, pinRevision *int64) error
 }
 
 // AccessResolver resolves the ABS-authenticated user/profile into the same
 // effective catalog access filter used by silo's native API.
 type AccessResolver interface {
 	ResolveABSAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error)
+	// ResolveABSOwnerAccess resolves a stored owner that is not the caller,
+	// such as a public feed's owner. It returns ErrOwnerUnavailable when the
+	// owner's account is missing or disabled or its profile is gone.
+	ResolveABSOwnerAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error)
 }
 
 // EventPublisher delivers a realtime event to Socket.io clients. May be nil;
@@ -228,10 +268,14 @@ type ConfigProvider interface {
 
 // Dependencies bundles everything the Handler needs at construction time.
 type Dependencies struct {
-	MediaStore     MediaStore
-	TokenStore     TokenStore
-	CredValidator  ProfileCredentialValidator
-	AccessResolver AccessResolver
+	MediaStore    MediaStore
+	TokenStore    TokenStore
+	CredValidator ProfileCredentialValidator
+	// ProfileVerifier rechecks a token's profile on every authenticated
+	// request and on refresh. BuildABSHandler sets it with CredValidator;
+	// nil skips the check.
+	ProfileVerifier ProfileVerifier
+	AccessResolver  AccessResolver
 	// UsernameResolver returns the display username for an ABS principal
 	// (userID, profileID) without re-authenticating. Optional; token-based
 	// endpoints fall back to the userID when this is nil or returns "". Login
@@ -615,8 +659,10 @@ type ctxKey struct{}
 type ctxAuth struct {
 	UserID    string
 	ProfileID string
-	JTI       string
-	Token     string // raw bearer token
+	// PINRevision is the token's pin_rev claim; nil when it has none.
+	PINRevision *int64
+	JTI         string
+	Token       string // raw bearer token
 }
 
 // absAuthFrom extracts ABS auth from the request context. Returns (zero, false)
@@ -729,15 +775,42 @@ func (h *Handler) bearerAuth(next http.Handler) http.Handler {
 			http.Error(w, "token expired", http.StatusUnauthorized)
 			return
 		}
+		if !h.verifyTokenProfile(w, r, claims) {
+			return
+		}
 		_ = h.deps.TokenStore.TouchToken(r.Context(), claims.JTI)
 		ctx := context.WithValue(r.Context(), ctxKey{}, ctxAuth{
-			UserID:    claims.UserID,
-			ProfileID: claims.ProfileID,
-			JTI:       claims.JTI,
-			Token:     raw,
+			UserID:      claims.UserID,
+			ProfileID:   claims.ProfileID,
+			PINRevision: claims.PINRevision,
+			JTI:         claims.JTI,
+			Token:       raw,
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// verifyTokenProfile runs the ProfileVerifier for an access or refresh
+// token's claims. On refusal it writes the 401 (or 500 when the check could
+// not run) and returns false.
+func (h *Handler) verifyTokenProfile(w http.ResponseWriter, r *http.Request, claims *Claims) bool {
+	if h.deps.ProfileVerifier == nil {
+		return true
+	}
+	err := h.deps.ProfileVerifier.VerifyTokenProfile(r.Context(), claims.UserID, claims.ProfileID, claims.PINRevision)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, ErrTokenProfileUnverified) {
+		slog.DebugContext(r.Context(), "abs token refused for its profile", "component", "audiobooks",
+			"jti", claims.JTI, "type", claims.Type, "path", r.URL.Path)
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return false
+	}
+	slog.ErrorContext(r.Context(), "abs token profile check failed", "component", "audiobooks",
+		"jti", claims.JTI, "type", claims.Type, "path", r.URL.Path, "err", err)
+	http.Error(w, "profile check unavailable", http.StatusInternalServerError)
+	return false
 }
 
 // ---------------------------------------------------------------------------

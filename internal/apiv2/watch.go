@@ -8,7 +8,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -22,7 +21,7 @@ type WatchDetailInput struct {
 	ID        ID     `path:"id" doc:"A movie, episode, audiobook or ebook; a series is not directly playable" example:"movie:heat-1995"`
 	FileID    ID     `query:"file_id" doc:"Prefer this file when the item has several versions" example:"42"`
 	LibraryID ID     `query:"library_id" doc:"Present the item as a member of this library" example:"1"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 }
 
 // WatchDetailOutput is the getWatchState response.
@@ -58,6 +57,10 @@ type WatchDetail struct {
 	EffectiveVersionHDR             *bool                   `json:"effective_version_hdr,omitempty"`
 	EffectiveVersionCodecVideo      *string                 `json:"effective_version_codec_video,omitempty"`
 	EffectiveVersionEditionKey      *string                 `json:"effective_version_edition_key,omitempty"`
+	PosterURL                       string                  `json:"poster_url,omitempty" doc:"The item's poster, an episode's still, or a local extra's still (its parent's poster when it has none), sized by image_size; for system media controls"`
+	PosterThumbhash                 string                  `json:"poster_thumbhash,omitempty"`
+	BackdropURL                     string                  `json:"backdrop_url,omitempty" doc:"The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size"`
+	BackdropThumbhash               string                  `json:"backdrop_thumbhash,omitempty"`
 }
 
 // WatchFileVersion is one playable file of the item.
@@ -303,9 +306,8 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 		}
 		opts.PresentationLibraryID = &n
 	}
-	if size, err := imagesize.Parse(in.ImageSize); err == nil {
-		opts.ImageSize = size
-	}
+	art := in.Artwork()
+	opts.ImageSize, opts.ImageWidths = art.Size, art.Widths
 	filter, err := reg.deps.Watch.ContextAccessFilter(ctx, opts)
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
@@ -320,9 +322,15 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 // watchDetailProblem maps a watch detail error to its problem: a target that
 // is not directly playable fails validation of the path.
 func watchDetailProblem(err error) error {
+	return watchTargetProblem(err, locationPathID)
+}
+
+// watchTargetProblem maps a watch-state error to its problem: a target the
+// operation cannot act on fails validation of the path parameter at location.
+func watchTargetProblem(err error, location string) error {
 	if apiErr, ok := errors.AsType[*handlers.APIError](err); ok && apiErr.Code == "invalid_watch_target" {
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-			WithErrors(ProblemError{Location: locationPathID, Code: codeInvalid, Detail: apiErr.Message})
+			WithErrors(ProblemError{Location: location, Code: codeInvalid, Detail: apiErr.Message})
 	}
 	return serviceProblem(err)
 }
@@ -369,6 +377,10 @@ func watchDetailOf(d *catalogpkg.WatchDetail) WatchDetail {
 		EffectiveVersionHDR:        d.EffectiveVersionHDR,
 		EffectiveVersionCodecVideo: d.EffectiveVersionCodecVideo,
 		EffectiveVersionEditionKey: d.EffectiveVersionEditionKey,
+		PosterURL:                  d.PosterURL,
+		PosterThumbhash:            d.PosterThumbhash,
+		BackdropURL:                d.BackdropURL,
+		BackdropThumbhash:          d.BackdropThumbhash,
 	}
 	for _, s := range d.Subtitles {
 		out.Subtitles = append(out.Subtitles, WatchSubtitle{Source: s.Source, Language: s.Language, Codec: s.Codec, Forced: s.Forced, HearingImpaired: s.HearingImpaired, Title: s.Title})
@@ -516,4 +528,5 @@ type WatchService interface {
 	ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error)
 	WatchDetail(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) (*catalogpkg.WatchDetail, error)
 	SetWatchedState(ctx context.Context, userID int, profileID, contentID string, played bool, filter catalogpkg.AccessFilter) (handlers.WatchedStateView, error)
+	ClearResumePosition(ctx context.Context, userID int, profileID, contentID string, filter catalogpkg.AccessFilter) error
 }

@@ -78,13 +78,15 @@ approvals that were not yet collected.
 ## Who decides
 
 Approve, approve-handoff and deny need a login session of the account. An
-API key or an impersonation session is refused with 403 (v2
-`permission_denied`, v1 `forbidden`) before the code is looked at. An
+API key, an impersonation session or a
+[remote-playback handoff](#remote-playback-handoff) session is refused with 403
+(v2 `permission_denied`, v1 `forbidden`) before the code is looked at. An
 approval gives the device a login session of the account: from an API key
 that would turn a credential no refresh re-checks into a refreshing session,
-and from an impersonation session it would give the device a session with no
-trace of the impersonator. Deny follows the same rule, so only the people who
-can approve decide. A device approved from a session opened through an
+from an impersonation session it would give the device a session with no
+trace of the impersonator, and from a handoff it would turn a day on one
+profile into an ordinary sign-in. Deny follows the same rule, so only the
+people who can approve decide. A device approved from a session opened through an
 external sign-in provider inherits that session's provider chain
 ([external-sign-in.md](external-sign-in.md#provider-re-check)).
 
@@ -95,6 +97,92 @@ authenticated before its session was revoked cannot approve afterwards.
 Provider refusal withdraws approvals made through that identity, including
 those from a break-glass account; its approvals made through local login stay
 independent of the provider.
+
+## Remote-playback handoff
+
+A phone sends playback to a TV that is not signed in to the account, such as a
+friend's or a hotel's, with a `remote_playback` request (`temporary` must be
+true). The phone approves it with `approve-handoff`, which binds it to the
+phone's verified profile. Collecting it gives the TV a temporary login session
+of that one profile. The poll answer is unchanged: `tokens` (access and
+refresh), `profile_id`, `profile_token`, `temporary: true` and
+`session_expires_at`. The Apple and Android TV apps require the refresh token.
+
+The session row (`auth_sessions`) records what the session is, and every node
+enforces it from the row rather than from the tokens, so a token issued before
+the session was bound is held to the same rules:
+
+- `purpose` is `remote_playback` (`account` for every other sign-in).
+- `bound_profile_id` is the approved profile.
+- `absolute_expires_at` is when the session ends: 24 hours after collection,
+  or `auth.refresh_token_expiry` when that is shorter. `session_expires_at`
+  reports it.
+
+**Lifetime.** A refresh issues a new access and refresh token as for any
+session but never moves `expires_at` past `absolute_expires_at`; a database
+trigger holds the same limit for every writer. Both tokens expire no later
+than the session's end, and `expires_in` counts down to it when that is
+sooner than the usual access lifetime. Once it passes, refresh answers 401 on
+v1 and v2, and the TV apps end the handoff.
+
+**One profile.** A request that names no profile acts as the bound profile, so
+the viewer gate resolves its limits and, for a PIN profile, checks the
+`profile_token`. A request naming another profile is refused with 403.
+`GET /profiles` lists only the bound profile. Tickets for the events and
+playback-control sockets carry the bound profile, and the socket refuses a
+ticket for any other. The events socket delivers only the bound profile's
+events and account-wide ones, and offers no history-import channel.
+
+**No account powers.** The session acts with the account role `user` whatever
+the account's role is, and is not the account's own login session. `GET
+/account/me` still describes the account itself. It reaches
+only the v2 routes in `remotePlaybackRoutes`
+(`internal/api/middleware/remote_playback.go`): the session itself (`GET
+/account/me`, logout), playback and its control socket and media, next-up
+and browsing reads for the bound profile, its track choices, subtitles and
+their sync and timing, the settings reads the player makes and the events
+socket. Every other route answers 403
+(v2 `permission_denied`), so a route added later stays closed to handoffs
+until it is listed, and so is a path whose encoding the router would read
+differently. That shuts out:
+
+- admin routes, including on an admin account;
+- account management: password, API keys, login sessions, linked sign-ins,
+  provider logout, plugin launch;
+- household management, even when the bound profile is the primary one;
+- device approvals of every kind, Quick Connect included;
+- settings writes, downloads and download links, Apple push registration,
+  Watch Together and plugin pages;
+- every frozen `/api/v1` route except the public refresh.
+
+The checks that do not run behind `RequireAuth` refuse a handoff too: Apple
+notification display tokens and direct-download links an older release minted
+for one, a Watch Together socket ticket minted before the session was bound,
+plugin access, and approvals (the approving session must be
+`purpose = 'account'` while the account is locked).
+
+Stream tokens already in media URLs are not tied to the login session, as for
+any sign-in: once a handoff ends it cannot start or replan playback, and the
+API's media routes refuse its bearer, but a proxy or transcode-node URL minted
+for a playback it already started stays usable until that token expires.
+
+**Sessions issued before this rule.** The migration binds each handoff whose
+device request is still stored and ends it 24 hours after it was created; one
+already older than that ends at once. Device requests are deleted a day after
+they expire, so a handoff collected before then cannot be told apart from an
+ordinary sign-in and keeps the lifetime and powers it had. The account owner
+can find it in the session list and revoke it.
+
+**Rolling deploys.** While nodes from an older release still run, a trigger on
+`device_login_requests` binds the session such a node creates when it collects
+a handoff, in the same transaction, and the `expires_at` trigger holds the
+limit when such a node refreshes one. An older node does not check the
+session's purpose on requests. It serves a handoff's tokens with the old powers
+when their role matches the account's. On an admin account it refuses this
+release's tokens, which say `user`, as tokens to refresh, so until every node
+runs this release that handoff's requests fail on older nodes. Rolling the
+migration back ends every handoff session rather than leaving it readable as an
+ordinary sign-in.
 
 ## Rate limits and guessing
 

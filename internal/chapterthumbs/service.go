@@ -694,6 +694,41 @@ func (s *Service) applyFileFailure(
 	return err
 }
 
+// ExtractStill failure classes. Any other error may pass for that file (a
+// timeout, a file missing for now or on one node, tone mapping turned off)
+// and is worth trying again later.
+var (
+	// ErrExtractionUnavailable: no transcode node could be reserved, so no
+	// file can be extracted until one can.
+	ErrExtractionUnavailable = errors.New("frame extraction unavailable")
+	// ErrUndecodableFile: ffmpeg could not decode the file's data; trying
+	// again only helps once the file changes.
+	ErrUndecodableFile = errors.New("file cannot be decoded")
+)
+
+// errNoTranscodeNode marks extractFrame failing before any request, because
+// no transcode node could be reserved. A node's own failure response, even
+// one naming the node as unavailable, can be specific to one file.
+var errNoTranscodeNode = errors.New("no transcode node available")
+
+// ExtractStill returns one JPEG frame of file at seekSeconds, through the same
+// local or transcode-node routing, hardware decode and HDR policy as chapter
+// thumbnails. Local extras use it for their card image.
+func (s *Service) ExtractStill(ctx context.Context, file *models.MediaFile, seekSeconds float64) ([]byte, error) {
+	data, reason, err := s.extractFrame(ctx, file, seekSeconds, s.chapterThumbnailHDRPolicy(ctx))
+	if err == nil {
+		return data, nil
+	}
+	switch {
+	case errors.Is(err, errNoTranscodeNode):
+		return nil, fmt.Errorf("%w: %w", ErrExtractionUnavailable, err)
+	case reason == reasonDecodeInvalidData:
+		return nil, fmt.Errorf("%w: %w", ErrUndecodableFile, err)
+	default:
+		return nil, err
+	}
+}
+
 func (s *Service) extractFrame(
 	ctx context.Context,
 	file *models.MediaFile,
@@ -722,7 +757,7 @@ func (s *Service) extractFrame(
 			)
 			return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap, allowSoftwareToneMap)
 		}
-		return nil, nodeReason, wrapReason(nodeReason, fmt.Errorf("no transcode node available for chapter thumbnail extraction"))
+		return nil, nodeReason, wrapReason(nodeReason, fmt.Errorf("%w for chapter thumbnail extraction", errNoTranscodeNode))
 	}
 	defer release()
 
@@ -993,7 +1028,7 @@ func (s *Service) enqueue(req ChapterThumbnailRequest, priority bool) bool {
 
 	s.mu.Lock()
 	enqueued := false
-	action := ""
+	var action string
 
 	if priority {
 		if existing, ok := s.queuedPriority[req.FileID]; ok {

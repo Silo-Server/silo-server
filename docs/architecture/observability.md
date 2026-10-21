@@ -360,7 +360,8 @@ application listener; the API process serves it only on `SILO_METRICS_LISTEN`.
   `mount="library-1"`), never by path, so an unauthenticated scrape cannot
   enumerate media locations. A node's unauthenticated `/api/v1/health` withholds paths
   on the same terms. Paths appear only in the admin resources response and a
-  node's bearer-authenticated `/status`.
+  node's `/status`, which needs a
+  [signed request](worker-http-protocol.md#authentication).
 - **Probing is bounded.** Each process's sampler checks at most eight mounts:
   the transcode scratch directory first, then library roots in order. The
   process logs how many go unsampled. The cap is per process, not per host, so
@@ -509,6 +510,63 @@ reports exporter outcomes; `silo_otel_finished_spans_total` counts sampled spans
 that ended. Their difference includes queued, exporting and dropped spans, so
 it is not an instantaneous drop count. Inspect it after a drain and monitor
 collector/backend self-metrics. There is no OTel MeterProvider.
+
+## Query attribution
+
+Attribution is opt-in during the initial soak. `SILO_QUERY_ATTRIBUTION_ENABLED` defaults to `false`, read once at startup.
+The `silo starting` line records `query_attribution` (`on`/`off`) and a `query_run` UUID.
+Off adds no `db_*` request fields, events, summaries, metrics or span attributes.
+
+SQL enters only the shape function inside `queryattr`; the normalized text is hashed and discarded; no log, span, or metric carries SQL text, table or column names, argument values, or error text.
+
+A site is the first Silo function and line outside `internal/database` and its subpackages; `main` qualifies.
+Names omit module and `internal/` prefixes; no eligible frame in 32 frames gives `unknown`.
+Shapes are 16 lowercase hex digits from FNV-64a of `go-sqllexer` normalized text. Each site holds eight shapes,
+then a ninth `other` row for further shapes or normalization errors. Fixed `batch` and `copy` shapes count toward eight.
+
+The `api request`, `apiv2 request` and `jellycompat request` lines add, in order, `db_queries`, `db_query_ns`,
+`db_acquire_wait_ns`, `db_slowest_site`, `db_slowest_shape`, `db_slowest_ns`, `db_top_site`, `db_top_shape`, `db_top_count`.
+Times are nanoseconds; summed operation time is not wall time. One traced query (`Query`, `QueryRow`, `Exec`), batch
+or copy counts as one operation, regardless of statement count. `Query` ends at `Rows.Close`, including row processing;
+a no-row `QueryRow` is a success. Acquires add only wait time. Rankings use (site, shape) pairs; ties choose the smaller pair.
+A request with no operation and no acquire wait adds none of these fields; an acquire-only request gives four `none`
+strings and zero operation numbers. The first `LogAttrs` closes and caches the snapshot;
+later completions count only in site totals. `queryattr.Detach` hides the request, preserving cancellation, deadlines
+and other values. It applies at `workmetrics.Start`, sections trending refresh, both asynchronous subtitle-sync launches,
+and metadata auto-translation. Shared cache and singleflight fills keep the waiting request's attribution.
+A request line can include background work that overlaps it before the line is written.
+
+The Info event `slow or large database query` holds `site`, `shape`, `ns`, `statements`, `args`, `max_array` (`-1` if
+unavailable), allowlisted `outcome`, and `request` (whether it entered an open snapshot). `cause` is `slow`, `large`
+or `slow,large`. The node-wide limiter drops excess events; the next allowed event reports their count in `suppressed`.
+Log-drain inserts use `queryattr.Quiet`: they count in totals and metrics, emit no events and add no suppression count.
+
+Every enabled mode emits the Info `database query summary` each interval and once on shutdown, before the operational
+log drains and the pool closes. It holds window deltas (`queries`, `query_ns`, `errors`, `events_suppressed`), `interval_ns`,
+and up to ten (site, shape) rows each in `top_time` and `top_count`; rows hold `site`, `shape`, `calls`, `ns`, `errors`.
+`run` maps to a node only through the private startup line's `query_run`; `build` is the current build display.
+Enabled full nodes register `silo_postgres_queries_total` and `silo_postgres_query_seconds_total`, labeled only by `site`
+(at most two series per site); proxy and transcode nodes do not. Recording query, batch and copy dependency spans add
+`silo.db.site` and `silo.db.shape`.
+
+Memory is bounded by compiled pgx call lines (about 2,847 static sites), nine rows and two metric children per site,
+a 4,096-entry cache of site pointers and SQL hashes, and one PC-cache entry per walked PC in the binary.
+A request map holds one entry per touched row until the snapshot. Nothing retains SQL, arguments or errors.
+All defaults and caps are provisional:
+
+| Setting | Default |
+|---|---|
+| Slow operation | > 100 ms |
+| Arguments or array elements | > 1,000 |
+| Batch statements | > 100 |
+| Event limiter | 1 per second, burst 10 |
+| Summary interval and each top list | 15 minutes; 10 rows |
+| Shapes per site | 8 plus `other` |
+| Shape cache and stack buffer | 4,096 entries; 32 frames |
+
+Window cuts are approximate: concurrent completions can land in either window. Late work is absent from a closed
+request line; work begun before `Detach` keeps its request. Batch statements share one envelope time and outcome.
+Empty batches, copy setup failures and pgx `Exec` early returns after a failed deallocate are uncounted.
 
 ## Client experience and plugin coordination
 

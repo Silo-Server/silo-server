@@ -984,16 +984,26 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickC
 		IdentityID:    record.ApprovedIdentityID,
 		ProviderSince: record.ApprovedProviderSince,
 	}
-	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
-		return nil, err
-	}
-
-	pair, err := s.generateTokenPair(Claims{
+	claims := Claims{
 		UserID:                 user.ID,
 		Role:                   user.Role,
 		SessionID:              sessionID,
 		PasswordChangeRequired: user.PasswordChangeRequired,
-	})
+	}
+	if record.ClientPurpose == DeviceLoginPurposeRemote {
+		// The handoff is a session of the approved profile alone that ends
+		// at sessionExpiresAt; refresh cannot extend it, and it carries no
+		// admin or account-management powers.
+		session.Purpose = models.SessionPurposeRemotePlayback
+		session.BoundProfileID = profileID
+		session.AbsoluteExpiresAt = &sessionExpiresAt
+		claims = remotePlaybackClaims(claims, &session)
+	}
+	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
+		return nil, err
+	}
+
+	pair, err := s.generateTokenPair(claims)
 	if err != nil {
 		return nil, err
 	}
@@ -1067,7 +1077,8 @@ func (s *DeviceLoginService) generateTokenPair(claims Claims) (*TokenPair, error
 	return &TokenPair{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    int(s.jwt.AccessExpiry().Seconds()),
+		ExpiresIn:    s.jwt.accessExpiresIn(claims),
+		SessionID:    claims.SessionID,
 	}, nil
 }
 

@@ -14,6 +14,7 @@ import {
   fetchAdminSectionCapabilities,
   deleteAdminSection,
   restoreAdminSections,
+  restoreLibraryPages,
   type AdminSectionDeleteTarget,
 } from "@/api/adminSections";
 import { sectionFromV2 } from "@/api/v2/catalog";
@@ -329,12 +330,22 @@ export function resetProfileSectionOverrides(params: {
   });
 }
 
+/**
+ * Restores one page over its captured version; a 412 there stops before any
+ * other page changes. Then restores `alsoLibraryIds` and returns their failures.
+ */
 export function useRestoreDefaultSections() {
   const qc = useQueryClient();
   return useMutation({
     retry: false,
     mutationKey: sectionKeys.adminWrite(),
-    mutationFn: restoreAdminSections,
+    mutationFn: async ({
+      alsoLibraryIds = [],
+      ...page
+    }: Parameters<typeof restoreAdminSections>[0] & { alsoLibraryIds?: readonly number[] }) => {
+      await restoreAdminSections(page);
+      return restoreLibraryPages(alsoLibraryIds, page.reset_profiles);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: sectionKeys.all });
     },

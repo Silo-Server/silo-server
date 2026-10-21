@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
 // fakeProviderHost stands in for the plugin service: one provider, "stub",
@@ -68,7 +69,7 @@ func networkAccessRequest(t *testing.T, server *Server, method, path, secret str
 	t.Helper()
 	request := httptest.NewRequest(method, path, nil)
 	if secret != "" {
-		request.Header.Set("Authorization", "Bearer "+secret)
+		nodeauthtest.Sign(t, request, secret)
 	}
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
@@ -216,7 +217,7 @@ func TestProxyNetworkAccessProviderStatusDoesNotWaitForOtherProviders(t *testing
 	go func() {
 		defer close(slowDone)
 		request := httptest.NewRequest(http.MethodGet, "/network-access/slow/status", nil).WithContext(ctx)
-		request.Header.Set("Authorization", "Bearer "+secret)
+		nodeauthtest.Sign(t, request, secret)
 		router.ServeHTTP(httptest.NewRecorder(), request)
 	}()
 	select {
@@ -225,7 +226,7 @@ func TestProxyNetworkAccessProviderStatusDoesNotWaitForOtherProviders(t *testing
 		t.Fatal("slow provider status was not requested")
 	}
 	request := httptest.NewRequest(http.MethodGet, "/network-access/stub/status", nil)
-	request.Header.Set("Authorization", "Bearer "+secret)
+	nodeauthtest.Sign(t, request, secret)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {

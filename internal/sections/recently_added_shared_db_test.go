@@ -137,8 +137,8 @@ func TestGeneratedHomeRowsSkipVideoLibrariesWithSharedRowDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasEnabledSharedHomeRecentlyAdded(home) {
-		// Older homes have no shared row, and a disabled shared row shows
+	if !hasEnabledHomeRecentlyAddedCovering(home, "movies") {
+		// Older homes have no covering row, and a disabled covering row shows
 		// nothing; both keep per-library rows.
 		disabled, err := f.repo.Create(ctx, &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Title: f.app + "-disabled", ItemLimit: DefaultItemLimit, Config: defaultMediaScopeConfig(catalog.MediaScopeVideo), Enabled: false})
 		if err != nil {
@@ -184,24 +184,33 @@ func TestGeneratedHomeRowsSkipVideoLibrariesWithSharedRowDB(t *testing.T) {
 	}
 }
 
-func TestHasEnabledSharedHomeRecentlyAdded(t *testing.T) {
-	shared := func(enabled bool) *PageSection {
-		return &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: defaultMediaScopeConfig(catalog.MediaScopeVideo), Enabled: enabled}
+func TestHasEnabledHomeRecentlyAddedCovering(t *testing.T) {
+	row := func(scope string, enabled bool) *PageSection {
+		return &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: defaultMediaScopeConfig(scope), Enabled: enabled}
 	}
-	movieOnly := &PageSection{Scope: "home", SectionType: SectionRecentlyAdded, Config: defaultMediaScopeConfig("movie"), Enabled: true}
+	shared := func(enabled bool) *PageSection { return row(catalog.MediaScopeVideo, enabled) }
+	movieOnly := row("movie", true)
+	seriesOnly := row("series", true)
 	tests := []struct {
-		name string
-		home []*PageSection
-		want bool
+		name        string
+		home        []*PageSection
+		libraryType string
+		want        bool
 	}{
-		{"enabled shared row", []*PageSection{movieOnly, shared(true)}, true},
-		{"disabled shared row", []*PageSection{movieOnly, shared(false)}, false},
-		{"no shared row", []*PageSection{movieOnly}, false},
+		{"enabled shared row covers movies", []*PageSection{movieOnly, shared(true)}, "movies", true},
+		{"enabled shared row covers mixed", []*PageSection{shared(true)}, "mixed", true},
+		{"disabled shared row covers nothing", []*PageSection{shared(false)}, "series", false},
+		{"movie row covers movies", []*PageSection{movieOnly}, "movies", true},
+		{"movie row misses series", []*PageSection{movieOnly}, "series", false},
+		{"split rows cover mixed", []*PageSection{movieOnly, seriesOnly}, "mixed", true},
+		{"movie row alone misses mixed", []*PageSection{movieOnly}, "mixed", false},
+		{"disabled split row misses mixed", []*PageSection{movieOnly, row("series", false)}, "mixed", false},
+		{"no rows", nil, "movies", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasEnabledSharedHomeRecentlyAdded(tt.home); got != tt.want {
-				t.Fatalf("hasEnabledSharedHomeRecentlyAdded = %v, want %v", got, tt.want)
+			if got := hasEnabledHomeRecentlyAddedCovering(tt.home, tt.libraryType); got != tt.want {
+				t.Fatalf("hasEnabledHomeRecentlyAddedCovering(%q) = %v, want %v", tt.libraryType, got, tt.want)
 			}
 		})
 	}
@@ -274,5 +283,55 @@ func TestScopeTVLibraries(t *testing.T) {
 				t.Fatalf("scopeTVLibraries = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// The default home Recently Added TV row is scoped to series. A TV library
+// typed with an alias such as "tv" counts as covered by that row, so the row
+// has to show it.
+func TestSeriesRecentlyAddedIncludesTVAliasLibrariesDB(t *testing.T) {
+	pool := openRecentlyAddedTestPool(t)
+	ctx := t.Context()
+	suffix := time.Now().UnixNano()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	var showsID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('tv', $1, true) RETURNING id`, fmt.Sprintf("alias-recent-tv-%d", suffix)).Scan(&showsID); err != nil {
+		t.Fatalf("seed tv folder: %v", err)
+	}
+	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	seriesID := fmt.Sprintf("alias-recent-series-%d", suffix)
+	episodeID := fmt.Sprintf("alias-recent-episode-%d", suffix)
+	runID := fmt.Sprintf("alias-recent-run-%d", suffix)
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
+		_, _ = pool.Exec(bg, `DELETE FROM media_folders WHERE id = $1`, showsID)
+	})
+	exec(`INSERT INTO media_items (content_id, type, title, status, genres, created_at) VALUES ($1, 'series', 'Alias Show', 'matched', '{}'::text[], $2)`, seriesID, base)
+	exec(`INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, $3)`, seriesID, showsID, base)
+	exec(`INSERT INTO scan_runs (id, media_folder_id, mode, status) VALUES ($1, $2, 'library', 'completed')`, runID, showsID)
+	exec(`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview, runtime, rating_imdb) VALUES ($1, $2, 1, 1, 'Pilot', '', 45, 0)`, episodeID, seriesID)
+	exec(`INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at, first_seen_scan_run_id) VALUES ($1, $2, $3, $4)`, episodeID, showsID, base.Add(time.Minute), runID)
+	exec(`INSERT INTO media_files (episode_id, media_folder_id, file_path) VALUES ($1, $2, $3)`, episodeID, showsID, "/alias-recent/"+episodeID+".mkv")
+
+	items, _, err := NewFetcher(pool).fetchRecentlyAdded(ctx, ResolvedSection{
+		SectionType: SectionRecentlyAdded,
+		ItemLimit:   20,
+		Config:      defaultMediaScopeConfig("series"),
+	}, nil, []int{showsID}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("fetch series row: %v", err)
+	}
+	got := make([]string, len(items))
+	for i, item := range items {
+		got[i] = item.Type + ":" + item.ContentID
+	}
+	if want := []string{"episode:" + episodeID}; !slices.Equal(got, want) {
+		t.Fatalf("series row over a tv-typed library = %v, want %v", got, want)
 	}
 }

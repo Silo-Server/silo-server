@@ -557,7 +557,7 @@ func TestInterestTrackingStoreConditionalCapabilities(t *testing.T) {
 			if err := wrapped.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := wrapped.AddFavorite(ctx, "p1", "series-1"); err != nil {
+			if _, err := wrapped.AddFavorite(ctx, "p1", "series-1"); err != nil {
 				t.Fatal(err)
 			}
 			if _, queued := updater.pending[interestMutation{userID: 7, profileID: "p1", itemID: "series-1"}]; !queued {

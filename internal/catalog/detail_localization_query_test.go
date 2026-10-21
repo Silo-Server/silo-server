@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -152,6 +153,10 @@ func TestBuildMediaItemDetailLocalizationErrors(t *testing.T) {
 	t.Run("advisory language error remains suppressed before required retry", func(t *testing.T) {
 		folder := &failingDetailFolder{delegate: NewFolderRepository(pool), err: errors.New("transient folder failure"), once: true}
 		service.folderRepo = folder
+		if _, err := service.PendingTranslationLanguageChecked(t.Context(), item, filter); err == nil {
+			t.Fatal("checked pending language hid a transient folder failure")
+		}
+		folder.calls = 0
 		detail, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, filter, nil)
 		if err != nil || detail == nil || detail.Title != item.Title || detail.PendingTranslationLanguage != "" || folder.calls != 2 {
 			t.Fatalf("detail=%#v error=%v folder calls=%d", detail, err, folder.calls)
@@ -162,6 +167,10 @@ func TestBuildMediaItemDetailLocalizationErrors(t *testing.T) {
 		service.folderRepo = folder
 		if got := service.PendingTranslationLanguage(t.Context(), item, filter); got != "" {
 			t.Fatalf("pending language on failure = %q", got)
+		}
+		// A presentation library that no longer exists has nothing missing.
+		if got, err := service.PendingTranslationLanguageChecked(t.Context(), item, filter); got != "" || err != nil {
+			t.Fatalf("checked pending language for a missing library = %q, %v", got, err)
 		}
 		folder.calls = 0
 		_, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, filter, nil)
@@ -182,6 +191,9 @@ func TestBuildMediaItemDetailLocalizationErrors(t *testing.T) {
 		}
 		if got := service.PendingTranslationLanguage(t.Context(), item, filter); got != "" {
 			t.Fatalf("pending language on localization failure = %q", got)
+		}
+		if _, err := service.PendingTranslationLanguageChecked(t.Context(), item, filter); err == nil {
+			t.Fatal("checked pending language hid a localization failure")
 		}
 		*tracer = detailLocalizationTracer{}
 		_, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, filter, nil)
@@ -217,5 +229,30 @@ func BenchmarkBuildMediaItemDetailLocalization(b *testing.B) {
 			b.ReportMetric(float64(tracer.localizations)/float64(b.N), "localization-queries/op")
 			b.ReportMetric(float64(tracer.folders+tracer.folderPaths+tracer.localizations)/float64(b.N), "SQL-queries/op")
 		})
+	}
+}
+
+// The Jellyfin-compatible surface seeds an item's image tags from its stored
+// artwork paths, thumbhashes and modification time, as list rows do, so
+// detail carries them.
+func TestBuildMediaItemDetailCarriesImageTagSeeds(t *testing.T) {
+	service, _, _ := detailLocalizationFixture(t)
+	item := localizationDetailItem("translated", "Base overview")
+	item.PosterPath = "local/series/translated/aa/poster/original.r1.webp"
+	item.PosterThumbhash = "poster-th"
+	item.BackdropPath = "local/series/translated/aa/backdrop/original.r1.webp"
+	item.BackdropThumbhash = "backdrop-th"
+	item.LogoPath = "local/series/translated/aa/logo/original.r1.webp"
+	item.UpdatedAt = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+
+	detail, err := service.buildMediaItemDetail(t.Context(), item, item.ContentID, AccessFilter{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.PosterPath != item.PosterPath || detail.PosterThumbhash != item.PosterThumbhash ||
+		detail.BackdropPath != item.BackdropPath || detail.BackdropThumbhash != item.BackdropThumbhash ||
+		detail.LogoPath != item.LogoPath || !detail.UpdatedAt.Equal(item.UpdatedAt) {
+		t.Fatalf("image seeds = poster (%q, %q) backdrop (%q, %q) logo %q updated %v; want the item's",
+			detail.PosterPath, detail.PosterThumbhash, detail.BackdropPath, detail.BackdropThumbhash, detail.LogoPath, detail.UpdatedAt)
 	}
 }

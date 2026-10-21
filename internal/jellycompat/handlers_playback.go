@@ -2,7 +2,6 @@ package jellycompat
 
 import (
 	"context"
-	crand "crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -10,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,7 +20,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 
@@ -327,8 +327,7 @@ type PlaybackHandler struct {
 	ScopeResolver           ScopeResolver
 	NodePlanner             nodepool.SessionPlanner
 	JWTSecret               string
-	profileStaler           profileStaler
-	profileRefreshRequester profileRefreshRequester
+	signalsNotifier         signalsChangedNotifier
 	FFmpegPath              string
 	HWAccel                 string
 	TranscodeDir            string
@@ -1450,6 +1449,7 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		claims.PlayMethod = streamtoken.PlayMethodCopyFMP4Transcode
 		claims.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
 		claims.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
+		claims.KeyframePlaylist = source.KeyframePlaylist
 	}
 	if compatSession != nil {
 		claims.UserID = compatSession.StreamAppUserID
@@ -1751,6 +1751,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		reqBody.TargetCodecVideo = compatCopyCodec
 		reqBody.VideoSampleEntry, reqBody.VideoBitstreamFilter = compatCopyVideoRecipe(source, file.PrimaryDVProfile())
 		reqBody.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
+		reqBody.KeyframePlaylist = source.KeyframePlaylist
 		reqBody.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
 	}
 	if !compatHLSTranscodesAudio(source) {
@@ -1772,7 +1773,9 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("build transcode request: %w", logredact.SanitizeURLError(err))
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+h.JWTSecret)
+		if err := nodeauth.Sign(httpReq, transcodeNodeURL, h.JWTSecret); err != nil {
+			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("sign transcode request: %w", err)
+		}
 		resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), httpReq, "transcode_start")
 		if err != nil {
 			nodepool.ReportConnectFailure(h.NodePlanner, transcodeNodeURL, err)
@@ -1899,6 +1902,10 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
 	}
+	if err := transcodenode.ValidateKeyframePlaylistAttestation(reqBody, nodeResponse); err != nil {
+		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
+	}
 	if reqBody.ToneMapMode != "" && nodeResponse.ToneMapMode != reqBody.ToneMapMode {
 		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		err := errors.New("remote transcode node did not confirm tone-map mode")
@@ -1964,6 +1971,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		VideoSampleEntry:       reqBody.VideoSampleEntry,
 		VideoBitstreamFilter:   reqBody.VideoBitstreamFilter,
 		CopyVideoMPEGTS:        reqBody.CopyVideoMPEGTS,
+		KeyframePlaylist:       reqBody.KeyframePlaylist,
 		SegmentDuration:        reqBody.SegmentDuration,
 		AudioTrackIndex:        reqBody.AudioTrackIndex,
 		SourceAudioChannels:    reqBody.SourceAudioChannels,
@@ -2158,7 +2166,7 @@ func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Reque
 	size := 102400
 	if raw := firstQueryValue(r.URL.Query(), "Size"); raw != "" {
 		value, err := strconv.Atoi(raw)
-		if err != nil || value < 1 || value > 100000000 {
+		if err != nil || value < 1 || value > bandwidthprobe.MaxSize {
 			writeError(w, http.StatusBadRequest, "BadRequest", "Size must be between 1 and 100000000")
 			return
 		}
@@ -2166,21 +2174,7 @@ func (h *PlaybackHandler) HandleBitrateTest(w http.ResponseWriter, r *http.Reque
 	}
 	w.Header().Set("Content-Length", strconv.Itoa(size))
 	w.WriteHeader(http.StatusOK)
-	// Random bytes, as Jellyfin sends: a compressing proxy would shrink a
-	// constant payload and inflate the measured bandwidth.
-	var seed [32]byte
-	_, _ = crand.Read(seed[:])
-	source := rand.NewChaCha8(seed)
-	block := make([]byte, min(size, 32768))
-	for size > 0 {
-		chunk := block[:min(size, len(block))]
-		_, _ = source.Read(chunk)
-		n, err := w.Write(chunk)
-		if err != nil || n == 0 {
-			return
-		}
-		size -= n
-	}
+	_ = bandwidthprobe.Write(w, size)
 }
 
 // HandlePlaybackInfo negotiates media sources for a Jellyfin item.
@@ -2327,6 +2321,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source)
 		applyCompatSubtitleDelivery(&source, profile, req.AlwaysBurnInSubtitleWhenTranscoding)
 		applyCompatDownloadedSubtitleDelivery(&source, profile, downloaded)
+		// Only a copy stream is served from a keyframe playlist; subtitle
+		// delivery above can turn a copy into a transcode.
+		source.KeyframePlaylist = compatHLSCopiesVideo(source) && h.PlaybackConfig != nil && h.PlaybackConfig().KeyframePlaylist
 		if source.SupportsTranscoding && !compatHLSCopiesVideo(source) && compatVersionRequiresToneMap(version) {
 			if !toneMapPolicyLoaded {
 				var policyErr error
@@ -2439,10 +2436,18 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		newCaseInsensitiveQuery(r.URL.Query()).Get("DeviceId"),
 	)
 	clientDeviceID = stripCompatNUL(clientDeviceID)
+	// Cleaned and clamped like every other client identity, since the stream
+	// request that starts the native session may reuse these values.
+	negotiatedClient := playback.ClientInfo{
+		Name:    firstMediaBrowserAuthorizationValue(r, "Client"),
+		Version: firstMediaBrowserAuthorizationValue(r, "Version"),
+	}.Normalized()
 	h.playbackStore.PutNegotiated(PlaybackSession{
 		ID:                 playSessionID,
 		CompatToken:        session.Token,
 		ClientDeviceID:     clientDeviceID,
+		ClientName:         negotiatedClient.Name,
+		ClientVersion:      negotiatedClient.Version,
 		ClientIP:           clientip.FromContext(r.Context()),
 		ClientPeer:         requestPeerHost(r),
 		ItemID:             detail.ContentID,
@@ -3002,7 +3007,7 @@ var compatFallbackCodecRank = map[string]int{
 func preferredAudioStreamIndex(version catalog.FileVersion, profile DeviceProfile) *int {
 	defaultIdx := defaultAudioStreamIndex(version)
 	if defaultIdx == nil {
-		return defaultIdx
+		return nil
 	}
 
 	defaultTrackIdx := *defaultIdx - len(version.VideoTracks)

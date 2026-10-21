@@ -172,10 +172,48 @@ describe("AISettings", () => {
     Object.assign(values, DEFAULT_VALUES);
   });
 
+  it("keeps the reasoning level in the text model tile's Advanced section", async () => {
+    const user = userEvent.setup();
+    render(<AISettings />);
+    const tile = await openTile(user, "Text model");
+
+    expect(
+      within(tile).queryByRole("combobox", { name: "Reasoning level" }),
+    ).not.toBeInTheDocument();
+    await user.click(within(tile).getByRole("button", { name: "Advanced · 1 setting" }));
+    expect(within(tile).getByRole("combobox", { name: "Reasoning level" })).toBeInTheDocument();
+  });
+
+  it("opens the text model's Advanced section for a staged reasoning level", () => {
+    values["ai.reasoning_effort"] = "high";
+    dirtyKeys = ["ai.reasoning_effort"];
+    dirtyCount = 1;
+    render(<AISettings />);
+
+    // The staged edit holds the tile open, and the section with it.
+    const tile = screen.getByRole("group", { name: "Text model" });
+    expect(within(tile).getByRole("combobox", { name: "Reasoning level" })).toBeInTheDocument();
+  });
+
+  it("opens the text model's Advanced section when the model drops the saved level", () => {
+    values["ai.reasoning_effort"] = "high";
+    dirtyKeys = ["ai.chat_model"];
+    dirtyCount = 1;
+    reasoningLevels = [];
+    render(<AISettings />);
+
+    // Save refuses this level, so the field it names has to be on screen.
+    const tile = screen.getByRole("group", { name: "Text model" });
+    expect(within(tile).getByRole("combobox", { name: "Reasoning level" })).toHaveTextContent(
+      "high (unsupported by this model)",
+    );
+  });
+
   it("stages reasoning effort and clears it for the model default", async () => {
     const user = userEvent.setup();
     const view = render(<AISettings />);
     await openTile(user, "Text model");
+    await user.click(screen.getByRole("button", { name: "Advanced · 1 setting" }));
     await user.click(screen.getByRole("combobox", { name: "Reasoning level" }));
     await user.click(screen.getByRole("option", { name: "High" }));
     expect(mocks.setValue).toHaveBeenCalledWith("ai.reasoning_effort", "high");
@@ -358,6 +396,111 @@ describe("AISettings", () => {
 
     expect(mocks.setValue).toHaveBeenCalledWith("ai.asr_base_url", "https://api.groq.com/openai");
     expect(mocks.setValue).toHaveBeenCalledWith("ai.asr_model", "whisper-large-v3-turbo");
+  });
+
+  it("does not call a fresh install's default OpenAI endpoint configured without a key", () => {
+    // What a fresh install reads: the server defaults, and no key anywhere.
+    values["ai.base_url"] = "https://api.openai.com";
+    values["ai.chat_model"] = "gpt-4o-mini";
+    values["ai.asr_model"] = "whisper-1";
+    values["subtitle_ai.enabled"] = "false";
+    sensitiveConfigured = [];
+
+    render(<AISettings />);
+
+    const text = screen.getByRole("group", { name: "Text model" });
+    expect(within(text).queryByText("Configured")).not.toBeInTheDocument();
+    expect(within(text).getByText("API key required")).toBeInTheDocument();
+    expect(within(text).getByRole("button", { name: "Connect" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Translate descriptions" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Create subtitles from audio" })).toBeDisabled();
+  });
+
+  it("counts the default endpoint ready once a key is saved", () => {
+    values["ai.base_url"] = "https://api.openai.com";
+    values["subtitle_ai.enabled"] = "false";
+    sensitiveConfigured = ["ai.api_key"];
+
+    render(<AISettings />);
+
+    const text = screen.getByRole("group", { name: "Text model" });
+    expect(within(text).getByText("Configured")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Create subtitles from audio" })).toBeEnabled();
+  });
+
+  it("lets a local endpoint run without a key, as the server does", () => {
+    values["ai.base_url"] = "http://ollama:11434";
+    values["subtitle_ai.enabled"] = "false";
+    sensitiveConfigured = [];
+
+    render(<AISettings />);
+
+    expect(
+      within(screen.getByRole("group", { name: "Text model" })).getByText("Configured"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeEnabled();
+  });
+
+  it.each([
+    ["Groq", "https://api.groq.com/openai"],
+    ["OpenRouter", "https://openrouter.ai/api/v1"],
+    ["Mistral", "https://api.mistral.ai/v1"],
+    ["an Azure OpenAI resource", "https://example-resource.openai.azure.com/openai"],
+  ])("does not count %s ready for transcription without a key", (_name, url) => {
+    values["ai.base_url"] = "http://ollama:11434";
+    values["ai.asr_base_url"] = url;
+    values["ai.asr_model"] = "whisper-large-v3";
+    values["subtitle_ai.enabled"] = "false";
+    sensitiveConfigured = [];
+
+    render(<AISettings />);
+
+    expect(screen.getByRole("switch", { name: "Create subtitles from audio" })).toBeDisabled();
+    // The local text endpoint still runs without one.
+    expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeEnabled();
+  });
+
+  it("stops counting the default endpoint ready while its key's clear is staged", () => {
+    values["ai.base_url"] = "https://api.openai.com";
+    values["ai.api_key"] = "";
+    values["subtitle_ai.enabled"] = "false";
+    sensitiveConfigured = ["ai.api_key"];
+    dirtyKeys = ["ai.api_key"];
+    dirtyCount = 1;
+
+    render(<AISettings />);
+
+    expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeDisabled();
+  });
+
+  it("refuses to save a feature switch for the default endpoint without a key", async () => {
+    values["ai.base_url"] = "https://api.openai.com";
+    values["metadata_ai.enabled"] = "true";
+    sensitiveConfigured = [];
+    dirtyKeys = ["metadata_ai.enabled"];
+    dirtyCount = 1;
+
+    render(<AISettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      "Add an API key for the text model, or point it at an endpoint that needs none.",
+    );
+  });
+
+  it("says the concurrent job budget is per server process", async () => {
+    const user = userEvent.setup();
+    render(<AISettings />);
+    await user.click(screen.getByRole("button", { name: "Advanced · 6 settings" }));
+
+    expect(
+      screen.getByText(
+        "Shared by every AI job in one server process; each process gets its own budget.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("blocks turning on a feature whose model cannot serve it", () => {

@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -112,7 +113,7 @@ func TestBuildBrowseFavoritesSQL_EmptyAllowedLibrariesEarlyEmpty(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error or sentinel for empty allowed libraries; got nil")
 	}
-	if err != errBrowseFavoritesEmpty {
+	if !errors.Is(err, errBrowseFavoritesEmpty) {
 		t.Fatalf("expected errBrowseFavoritesEmpty; got %v", err)
 	}
 }

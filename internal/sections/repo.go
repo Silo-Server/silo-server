@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -161,14 +160,14 @@ func (r *Repository) ListTrendingDiscoverConfigs(ctx context.Context) ([]json.Ra
 	return out, rows.Err()
 }
 
-// ListTrendingDiscoverSections returns enabled trending sections with their
-// identities so profile overrides can contribute their effective configs.
-func (r *Repository) ListTrendingDiscoverSections(ctx context.Context) ([]*PageSection, error) {
+// ListEnabledSections returns the enabled sections of one type with their
+// identities, so profile overrides can contribute their effective configs.
+func (r *Repository) ListEnabledSections(ctx context.Context, sectionType SectionType) ([]*PageSection, error) {
 	rows, err := r.query(ctx).Query(ctx, fmt.Sprintf(`
 		SELECT %s FROM page_sections
-		WHERE section_type = 'trending_discover' AND enabled = true`, sectionColumns))
+		WHERE section_type = $1 AND enabled = true`, sectionColumns), string(sectionType))
 	if err != nil {
-		return nil, fmt.Errorf("listing trending_discover sections: %w", err)
+		return nil, fmt.Errorf("listing %s sections: %w", sectionType, err)
 	}
 	defer rows.Close()
 	return scanSections(rows)
@@ -496,24 +495,17 @@ func (r *Repository) nextHomePosition(ctx context.Context) (int, error) {
 	return maxPosition + 1, nil
 }
 
-// hasEnabledSharedHomeRecentlyAdded reports whether home has an enabled
-// Recently Added row that covers every video library.
-func hasEnabledSharedHomeRecentlyAdded(home []*PageSection) bool {
-	return slices.ContainsFunc(home, func(s *PageSection) bool {
-		return s.Enabled && IsSharedHomeRecentlyAddedSection(s)
-	})
-}
-
 func (r *Repository) createGeneratedHomeLibraryRecentSections(ctx context.Context, libraryID int, libraryName, libraryType string) ([]*PageSection, error) {
 	if IsVideoLibraryType(libraryType) {
 		home, err := r.ListByScopeAll(ctx, "home", nil)
 		if err != nil {
 			return nil, fmt.Errorf("listing home sections: %w", err)
 		}
-		// An enabled shared Recently Added row already shows the new library.
-		// Homes from older defaults, or whose admin disabled the shared row,
-		// still get per-library rows.
-		if hasEnabledSharedHomeRecentlyAdded(home) {
+		// Enabled home Recently Added rows covering this library's types
+		// (the split default rows, or a combined row from older defaults)
+		// already show the new library. Homes without them, or whose admin
+		// disabled them, still get per-library rows.
+		if hasEnabledHomeRecentlyAddedCovering(home, libraryType) {
 			return nil, nil
 		}
 	}

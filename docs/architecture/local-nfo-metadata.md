@@ -309,7 +309,8 @@ Sidecar images are discovered by the provider's `GetImages`
 always receive the normal presigned `poster_url`/`backdrop_url`/`logo_url`
 (and, on `/api/v2` movie and series detail, `banner_url`, `thumb_url`,
 `clearart_url`, `disc_url` and `backdrop_urls`); library files are never served
-directly, and API nodes never need filesystem access to libraries.
+directly. The admin image picker (below) is the only API path that reads
+sidecar files.
 
 Discovery lists each folder once per request and matches names ignoring case,
 so `Poster.JPG` and `Folder.jpg` count on case-sensitive filesystems; an entry
@@ -335,7 +336,34 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
 | Disc art (movies only) | `<basename>-disc`, `<basename>-cdart`, `<basename>-discart`, then `disc`, `cdart`, `discart` |
 | Season poster | `poster`, `folder`, `cover` in the season folder, then `seasonNN-poster` (`season-specials-poster` for season 0) in the series root |
 | Episode still | `<basename>-thumb`, then `<basename>` |
+| Local extra still | `<basename>-thumb`, then `<basename>`, beside the extra's own file (below) |
 
+- A local extra (a trailer or featurette file, `media_extras`) has no metadata
+  refresh, so the scanner reads its image instead
+  (`internal/scanner/extra_stills.go`): every scan that walks the extra checks
+  the folder listing the walk already read (a single-file scan reads the
+  folder), copies a new or changed sidecar into the image cache as a 16:9
+  still, and clears the image when the sidecar is gone. A folder that cannot
+  be read leaves the stored image alone. `media_extras.still_source` records
+  the sidecar's path, size and mtime, so an unchanged image is not read again,
+  and an image that cannot be decoded is recorded without a still until it
+  changes. When the scanner or a library delete removes an extra's last file
+  row, the extra's image is cleared for the artwork revision GC. Adding or replacing the image starts a
+  subtree scan of its folder, like any sidecar change. API v2 detail returns it
+  as `extras[].still_url`, and Jellyfin clients get it as the extra's Primary
+  image.
+- An extra without a sidecar gets a frame of its video instead
+  (`internal/extrastills`, the hidden `generate_extra_stills` task, at startup
+  and every 15 minutes, in every library): a tenth of the way in, between 5
+  seconds and a minute, taken through the chapter-thumbnail extractor and its
+  local or transcode-node routing. The frame is keyed to the file's size and
+  mtime, so a replaced file gets a new one. A file ffmpeg cannot decode is
+  skipped until it changes; other failures are tried again after six hours, and
+  a run stops early when no transcode node can be reserved. Extras in disabled
+  libraries, and files not yet probed, wait. A sidecar always wins: a scan
+  replaces a frame with it, and the task never overwrites one. An extra whose
+  sidecar cannot be decoded gets no frame either; it shows no image until the
+  sidecar is fixed or removed.
 - Basename names attach to one of the item's own media files and beat generic
   names, as in Kodi. A series has no media file of its own (its request lists
   every episode file), so a series uses generic names only and
@@ -401,7 +429,11 @@ Caching and refresh:
   processor confines each read to the owning library's `media_folders` roots:
   a lexical check on the logical path, then a symlink-resolving re-check (both
   path and roots are resolved, so a legitimately symlinked root stays valid
-  while an intermediate directory symlink escaping a root is rejected). When
+  while an intermediate directory symlink escaping a root is rejected). Each
+  library root is opened as an `os.Root` before the path is resolved, and the
+  file is opened through the handle that is the same directory as the resolved
+  root, so a root or folder swapped for a symlink after that point cannot lead
+  the open out of the library. When
   the re-check or the read fails, the processor probes, through
   `internal/rootcheck`, the nearest folder that exists at or above the file's
   folder, searching no higher than the library root: unless it lists entries
@@ -433,14 +465,17 @@ Caching and refresh:
   that offers no artwork at all leaves the slot, local source included, as it
   is. Locked artwork gets no stand-in, and neither does an image URL an NFO
   names: its slot stays empty until the image cache has downloaded it.
-- `metadata.cache_images` governs remote artwork only. With it off, local art
-  files are still selected, copied, and served: the drain claims local jobs
-  only (through the partial index `metadata_image_cache_jobs_local_due_idx`, so
-  remote jobs left queued are not read), a manual refresh waits for local jobs
-  only, and the provider-artwork backfill stays off. An image URL an NFO names
-  is a download, never served directly, so with caching off it is not selected
-  (`localSourceUsable`) and the slot takes provider artwork, as it does for
-  person photos.
+- With `metadata.cache_images` off, clients load artwork straight from the
+  providers, so no local artwork is used (`localArtworkUsable`): refreshes,
+  targeted season and episode refreshes, scan re-applies, and person photos
+  drop local candidates, items keep no extra backdrops, and the image cache
+  claims, copies, and downloads nothing. NFO text still applies. A refresh
+  also stops keeping stored copies: `preserveCachedArtwork` lets a provider
+  path replace one unless the artwork is locked, and an unlocked item's stored
+  poster, backdrop, and logo count as empty for `applyBestImages`, so even a
+  fill-empty refresh takes an unrated provider image. Artwork stored before the
+  setting went off is released by `StoredArtworkReleaser` (see
+  [settings-api.md](../settings-api.md)).
 
 Precedence: local artwork beats remote providers wherever the NFO provider
 sits in the chain.
@@ -515,8 +550,8 @@ reference is a path relative to the NFO or an http(s) URL:
   sidecar file: `isLocalImageSourcePath` counts it, it waits in
   `*_source_path` until the image cache downloads it through its
   public-address guard, it is never served to clients or fetched by
-  jellycompat's image proxy, and it is not used while
-  `metadata.cache_images` is off. Like a sidecar, it is re-copied by a
+  jellycompat's image proxy, and, like all local artwork, it is not used
+  while `metadata.cache_images` is off. Like a sidecar, it is re-copied by a
   refresh or the ladder backfill, not by the provider-artwork sweeps. Its
   copy is attributed to the `nfo` provider and keyed like a provider's
   (`nfo/{contentType}/{contentID}/{imageType}/...`); only `file://` copies
@@ -544,8 +579,45 @@ still waiting for its copy, stays. It queues a person image-cache job whose `ser
 title, so the processor confines a local read to that title's library roots;
 a title's interactive artwork refresh leaves those person jobs out of its
 scope. A person refresh keeps a cached NFO photo over a provider's. Like other
-local artwork, a sidecar photo is copied whatever `metadata.cache_images` says;
-a photo URL an NFO names is used only while the setting is on.
+local artwork, NFO photos are used only while `metadata.cache_images` is on;
+photos already copied stay (the stored-artwork release leaves people alone).
+
+### Admin image picker
+
+`GET /api/v2/admin/items/{id}/images` also offers a movie's or series' local
+sidecar artwork. The built-in sidecar discovery runs with the item's media files
+and sidecar directories, so it finds the same files a refresh would, and it runs
+whether or not the library's metadata chain uses the NFO provider: choosing an
+image is an explicit admin action. Local choices come only from that discovery;
+a `file://` URL returned by any provider in the chain is dropped, so a provider
+cannot get another library file offered as this item's artwork. Only sidecar
+files (including files an NFO names by relative path) for the slots an admin can
+apply (poster, backdrop, logo) are offered: an image URL an NFO names has no file
+to read here, and banner, thumb, clear art and disc art cannot be applied. Each
+local choice has the provider ID `local`, keeps its fingerprinted `file://`
+source as `original_url`, and shows a 300-pixel-wide WebP preview as an inline
+`data:` URI (the web client authenticates with a bearer token, so an `<img>`
+cannot fetch an authenticated preview route). Local choices lead the list, ahead
+of every provider's, in discovery order, so each slot's first local choice is
+the sidecar file a refresh uses when it takes local artwork. The preview is read under the same
+root confinement, symlink and size checks as the processor; a file that fails
+them is left out of the list, and the list's `provider_errors` reports it under
+`local`. Only the movie and series list does this: any other list treats a
+provider's `file://` URL as an ordinary provider choice and never reads it.
+
+`POST .../images/apply` with a `file://` `original_url` caches the file only
+when the item's sidecar discovery offers that exact source for that image type,
+so a file replaced since the list (a new fingerprint) must be picked again. It
+reads the file under the same checks, stores it under the same `local/...` key
+the processor would use, and publishes the fingerprinted source with the images
+lock like any other choice. Seasons, episodes and frozen v1 keep provider-only
+choices. The server answering the admin API reads the file, so it needs the
+library mounted, like a server that copies local artwork; on a server without
+the mount discovery finds nothing and local choices are not offered.
+
+The reads open each library root as an `os.Root`, which needs read (list)
+permission on the root directory, not only search permission. The scanner lists
+the roots, so a server that scans a library already has it.
 
 ## Series depth and mixed libraries
 
@@ -681,8 +753,8 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
 
 ## Known limitations
 
-- The admin image picker does not surface local art (automatic chain path
-  only).
+- The admin image picker offers local art for movies and series only, not
+  for seasons or episodes.
 - Seasons have no banner, thumb or extra backdrops (`seasonNN-fanart`,
   `seasonNN-banner`, `seasonNN-landscape` and their season-folder forms are not
   read).

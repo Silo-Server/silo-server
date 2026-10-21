@@ -45,7 +45,7 @@ const maxCacheEntries = 256
 // and a one- or two-digit number), at the start of the name or after a
 // separator. Group 1 is the title, group 2 the part number, and group 3 the
 // text after the token, which Kodi keeps in the stack name.
-var stackPartRe = regexp.MustCompile(`(?i)^(.*?)(?:^|[ _.-]+)(?:cd|disc|part|pt)[ _.-]*(\d{1,2})([ _.-].*)?$`)
+var stackPartRe = regexp.MustCompile(`(?i)^(.*?)(?:^|[ _.-]+)(?:cd|disc|part|pt)[ _.-]*(\d{1,2})([ _.-].*)?$`) //nolint:gocritic // the inner ^ matches a part token at the start of the name
 
 // stackPart splits a stacked part's base name into the name its parts share
 // (Movie-cd1 → Movie, CD1.Feature → Feature) and its part number, or returns

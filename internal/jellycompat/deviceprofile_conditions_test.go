@@ -540,10 +540,15 @@ func TestCodecProfileAVCRefFramesConstraint(t *testing.T) {
 	if !source.SupportsTranscoding {
 		t.Fatal("SupportsTranscoding = false for an optional unknown output value")
 	}
+	// A required limit is an encode target too: the encoder chooses the
+	// output's reference frames, as Jellyfin's StreamBuilder treats them.
 	profile.CodecProfiles[0].Conditions[0].IsRequired = true
 	source = (&PlaybackHandler{codec: NewResourceIDCodec()}).buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{}, true)
-	if source.SupportsTranscoding {
-		t.Fatal("SupportsTranscoding = true for a required unknown output value")
+	if source.SupportsDirectPlay || source.SupportsDirectStream {
+		t.Fatalf("a known eight reference frames passed a required limit of four: direct=%v stream=%v", source.SupportsDirectPlay, source.SupportsDirectStream)
+	}
+	if !source.SupportsTranscoding {
+		t.Fatal("SupportsTranscoding = false for a required limit the encode meets")
 	}
 }
 

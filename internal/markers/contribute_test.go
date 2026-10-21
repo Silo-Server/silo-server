@@ -186,33 +186,46 @@ func TestContributeAutoGatesOnThresholdAndKind(t *testing.T) {
 	}
 }
 
-// Local credits detection writes scanner credits, but automatic contribution
-// stays intro-only: detected credits are submitted only on request.
-func TestContributeAutoSubmitsOnlyScannerIntros(t *testing.T) {
-	cfg := fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.5}}
+// Automatic contribution shares the two kinds the scanner detects, intros and
+// credits, each against the provider's minimum confidence. Other local
+// segments are submitted only on request.
+func TestContributeAutoSubmitsScannerIntrosAndCredits(t *testing.T) {
+	cfg := fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.9}}
 	file := newContribFile()
 	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
 	file.IntroMarkersSource = strPtr(models.MarkerSourceScanner)
-	file.IntroMarkersConfidence = floatPtr(0.9)
+	file.IntroMarkersConfidence = floatPtr(0.92)
 	file.CreditsStart, file.CreditsEnd = floatPtr(1500), floatPtr(1800)
 	file.CreditsMarkersSource = strPtr(models.MarkerSourceScanner)
 	file.CreditsMarkersConfidence = floatPtr(0.95)
 	file.CreditsMarkersAlgorithm = strPtr("credits-chapter:v1")
+	file.PreviewStart, file.PreviewEnd = floatPtr(1790), floatPtr(1800)
+	file.PreviewMarkersSource = strPtr(models.MarkerSourceScanner)
+	file.PreviewMarkersConfidence = floatPtr(0.99)
 
 	sub := &fakeSubmitter{id: "introdb"}
 	if _, err := newContribService(sub, cfg, &fakeRecorder{}).ContributeFile(context.Background(), file, ContributeOptions{Auto: true}); err != nil {
 		t.Fatalf("ContributeFile: %v", err)
 	}
-	if len(sub.submitted) != 1 || sub.submitted[0].Segment != MarkerKindIntro {
-		t.Fatalf("automatic contribution submitted %+v, want only the scanner intro", sub.submitted)
+	if len(sub.submitted) != 2 || sub.submitted[0].Segment != MarkerKindIntro || sub.submitted[1].Segment != MarkerKindCredits {
+		t.Fatalf("automatic contribution submitted %+v, want the scanner intro and credits", sub.submitted)
+	}
+
+	file.CreditsMarkersConfidence = floatPtr(0.85)
+	lowCredits := &fakeSubmitter{id: "introdb"}
+	if _, err := newContribService(lowCredits, cfg, &fakeRecorder{}).ContributeFile(context.Background(), file, ContributeOptions{Auto: true}); err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	if len(lowCredits.submitted) != 1 || lowCredits.submitted[0].Segment != MarkerKindIntro {
+		t.Fatalf("automatic contribution submitted %+v, want only the intro: the credits are below the minimum confidence", lowCredits.submitted)
 	}
 
 	onRequest := &fakeSubmitter{id: "introdb"}
 	if _, err := newContribService(onRequest, cfg, &fakeRecorder{}).ContributeFile(context.Background(), file, ContributeOptions{}); err != nil {
 		t.Fatalf("ContributeFile: %v", err)
 	}
-	if len(onRequest.submitted) != 2 {
-		t.Fatalf("contribution on request submitted %+v, want the intro and the credits", onRequest.submitted)
+	if len(onRequest.submitted) != 3 {
+		t.Fatalf("contribution on request submitted %+v, want the intro, the credits and the preview", onRequest.submitted)
 	}
 }
 
@@ -315,26 +328,53 @@ func TestContributeSettlesInvalidRefusal(t *testing.T) {
 	}
 }
 
-func TestContributeSkipsEpisodesWithoutSeasonAndEpisode(t *testing.T) {
-	sub := &fakeSubmitter{id: "introdb"}
-	file := newContribFile()
-	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
-	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
-	reg := NewRegistry(nil)
-	_ = reg.Register(sub)
-	resolver := fakeResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 0, EpisodeNumber: 3}}
-	rec := &fakeRecorder{}
-	svc := NewContributionService(reg, resolver, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec, nil)
+func TestContributeSubmitsSpecialsButSkipsUnnumberedEpisodes(t *testing.T) {
+	tests := []struct {
+		name            string
+		season, episode int
+		wantSubmitted   bool
+	}{
+		{name: "special", season: 0, episode: 3, wantSubmitted: true},
+		{name: "unnumbered episode", season: 1, episode: 0},
+		{name: "unknown season", season: -1, episode: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sub := &fakeSubmitter{id: "introdb"}
+			file := newContribFile()
+			file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+			file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+			reg := NewRegistry(nil)
+			_ = reg.Register(sub)
+			resolver := fakeResolver{ids: ExternalIDs{
+				Kind: ItemKindEpisode, TvdbID: "121361", SeasonNumber: tt.season, EpisodeNumber: tt.episode,
+				Episode: EpisodeIDs{TvdbID: "4242"}, EpisodeTitle: "Inside the Episode",
+			}}
+			rec := &fakeRecorder{}
+			svc := NewContributionService(reg, resolver, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec, nil)
 
-	outcomes, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
-	if err != nil {
-		t.Fatalf("ContributeFile: %v", err)
-	}
-	if len(sub.submitted) != 0 || len(rec.recorded) != 0 {
-		t.Fatalf("season 0 must not reach the provider or the ledger: submitted=%d recorded=%d", len(sub.submitted), len(rec.recorded))
-	}
-	if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped {
-		t.Fatalf("outcomes = %+v, want skipped", outcomes)
+			outcomes, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+			if err != nil {
+				t.Fatalf("ContributeFile: %v", err)
+			}
+			if !tt.wantSubmitted {
+				if len(sub.submitted) != 0 || len(rec.recorded) != 0 {
+					t.Fatalf("must not reach the provider or the ledger: submitted=%d recorded=%d", len(sub.submitted), len(rec.recorded))
+				}
+				if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped {
+					t.Fatalf("outcomes = %+v, want skipped", outcomes)
+				}
+				return
+			}
+			if len(sub.submitted) != 1 {
+				t.Fatalf("submitted = %d, want 1 (outcomes %+v)", len(sub.submitted), outcomes)
+			}
+			got := sub.submitted[0]
+			if got.SeasonNumber != tt.season || got.EpisodeNumber != tt.episode ||
+				got.EpisodeExternalIDs[ExternalIDKeyTVDB] != "4242" || got.EpisodeTitle != "Inside the Episode" {
+				t.Fatalf("submission = %+v, want the special with its episode identity", got)
+			}
+		})
 	}
 }
 

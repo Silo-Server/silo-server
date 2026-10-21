@@ -20,14 +20,11 @@ import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
-const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
 function formatDate(value?: string | null) {
   if (!value) {
     return null;
   }
-  const date = new Date(DATE_ONLY_PATTERN.test(value) ? `${value}T00:00:00` : value);
-  return formatPreferredDate(date, "medium") || null;
+  return formatPreferredDate(value, "medium") || null;
 }
 
 function formatRuntime(minutes?: number | null) {

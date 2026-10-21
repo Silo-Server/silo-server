@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
@@ -129,15 +130,11 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 			return
 		}
 
-		// Check global limiter (per-second only — spec says no per-minute global limit).
-		// Setting RequestsPerMinute = RPS*60 makes the per-minute limiter a mathematical
-		// no-op: it never triggers before the per-second limiter does.
-		globalRate := globalRateFor(cfg)
-		globalResult := mw.global.Allow(r.Context(), "global", globalRate)
-		if !globalResult.Allowed {
-			writeRateLimitResponse(w, globalResult, reject)
-			return
-		}
+		// The narrower per-IP and per-key budgets run before the shared
+		// global one, as in AuthEndpointHandler, so a client over its own
+		// limit cannot spend server-wide capacity and get unrelated clients
+		// rejected. A request the global check then rejects keeps the
+		// narrower tokens it spent; that only charges the client that sent it.
 
 		// Check per-IP limiter
 		if clientIP := clientip.FromContext(r.Context()); clientIP != "" {
@@ -186,6 +183,15 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 				writeRateLimitResponse(w, result, reject)
 				return
 			}
+		}
+
+		// Check global limiter (per-second only — spec says no per-minute global limit).
+		// Setting RequestsPerMinute = RPS*60 makes the per-minute limiter a mathematical
+		// no-op: it never triggers before the per-second limiter does.
+		globalResult := mw.global.Allow(r.Context(), "global", globalRateFor(cfg))
+		if !globalResult.Allowed {
+			writeRateLimitResponse(w, globalResult, reject)
+			return
 		}
 
 		next.ServeHTTP(w, r)
@@ -247,6 +253,21 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 						writeRateLimitResponse(w, epResult, reject)
 						return
 					}
+
+					// A client IP taken from forwarding headers is a new
+					// budget whenever the sender names a new client, and every
+					// private address is a trusted proxy by default. The
+					// connection's own address also spends a looser budget
+					// that all clients behind it share. Network access ingress
+					// writes the header itself and needs no such cap.
+					if peer := clientip.PeerIP(r.Context()); peer != "" && peer != clientIP && netaccess.PathFromContext(r.Context()).IsDefault() {
+						peerKey := fmt.Sprintf("authpeer:%s:%s", peer, endpoint)
+						peerResult := mw.perKey.Allow(r.Context(), peerKey, authPeerRate(epRate))
+						if !peerResult.Allowed {
+							writeRateLimitResponse(w, peerResult, reject)
+							return
+						}
+					}
 				}
 			}
 
@@ -259,6 +280,20 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+// authPeerBudgetMultiplier sizes the budget that every forwarded client behind
+// one transport peer shares, relative to one client's endpoint budget. A
+// reverse proxy fronting many users needs more than one client's allowance;
+// a client rotating forwarding headers gets no more than this.
+const authPeerBudgetMultiplier = 10
+
+func authPeerRate(endpointRate Rate) Rate {
+	return Rate{
+		RequestsPerSecond: min(endpointRate.RequestsPerSecond*authPeerBudgetMultiplier, MaxRequestsPerWindow),
+		RequestsPerMinute: min(endpointRate.RequestsPerMinute*authPeerBudgetMultiplier, MaxRequestsPerWindow),
+		Burst:             min(endpointRate.Burst, MaxBurst/authPeerBudgetMultiplier) * authPeerBudgetMultiplier,
 	}
 }
 

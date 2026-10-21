@@ -73,12 +73,29 @@ func (p *PlexProvider) DiscoverUsers(ctx context.Context, conn *Connection, mapp
 	return result, true, nil
 }
 
+type webhookReceivedAtKey struct{}
+
+// withWebhookReceivedAt records when a delivery started arriving.
+func withWebhookReceivedAt(ctx context.Context, at time.Time) context.Context {
+	return context.WithValue(ctx, webhookReceivedAtKey{}, at)
+}
+
+// webhookReceivedAt returns when the delivery started arriving, or now when
+// the caller did not record it.
+func webhookReceivedAt(ctx context.Context) time.Time {
+	if at, ok := ctx.Value(webhookReceivedAtKey{}).(time.Time); ok {
+		return at
+	}
+	return time.Now()
+}
+
 func (p *PlexProvider) ParseWebhook(ctx context.Context, conn *Connection, r *http.Request) (*CanonicalEvent, error) {
-	// Plex events carry no timestamp. The receipt time is taken before any
-	// lookup so lookup latency cannot reorder events or let a delivery look
-	// newer than Silo activity written while it waited.
-	occurredAt := time.Now().UTC().Truncate(time.Microsecond)
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
+	// Plex events carry no timestamp. The receipt time is taken before the
+	// body is read and before any metadata lookup, so upload or lookup latency
+	// cannot reorder events or let a delivery look newer than Silo activity
+	// written while it waited.
+	occurredAt := webhookReceivedAt(ctx).UTC().Truncate(time.Microsecond)
+	if err := r.ParseMultipartForm(MaxWebhookDeliveryBytes); err != nil {
 		return nil, fmt.Errorf("invalid multipart request")
 	}
 	payloadRaw := r.FormValue("payload")
@@ -100,7 +117,7 @@ func (p *PlexProvider) ParseWebhook(ctx context.Context, conn *Connection, r *ht
 	if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
 		return nil, fmt.Errorf("invalid Plex payload")
 	}
-	if payload.Event == "" || payload.Account.ID == 0 || payload.Metadata.RatingKey == "" || payload.Metadata.Type == "" {
+	if payload.Event == "" {
 		return nil, fmt.Errorf("invalid Plex webhook payload")
 	}
 	action, completed, ok := plexWebhookAction(payload.Event)
@@ -110,6 +127,11 @@ func (p *PlexProvider) ParseWebhook(ctx context.Context, conn *Connection, r *ht
 			Summary:   "Ignored unsupported Plex event type",
 			Apply:     false,
 		}, nil
+	}
+	// Only the events Silo applies need an account and an item. Plex sends
+	// every event to every webhook, including server events without an item.
+	if payload.Account.ID == 0 || payload.Metadata.RatingKey == "" || payload.Metadata.Type == "" {
+		return nil, fmt.Errorf("invalid Plex webhook payload")
 	}
 	userID := strconv.FormatInt(payload.Account.ID, 10)
 	// A playback start only needs the account and item IDs, so it is recorded
@@ -227,7 +249,7 @@ func (p *EmbyProvider) ParseWebhook(_ context.Context, conn *Connection, r *http
 		return nil, err
 	}
 	eventName := strings.ToLower(strings.TrimSpace(payload.Event))
-	if eventName == "" || payload.User.ID == "" || payload.Item.ID == "" || payload.Item.Type == "" {
+	if eventName == "" {
 		return nil, fmt.Errorf("invalid Emby webhook payload")
 	}
 	action, ok := embyWebhookAction(eventName)
@@ -237,6 +259,11 @@ func (p *EmbyProvider) ParseWebhook(_ context.Context, conn *Connection, r *http
 			Summary:   "Ignored unsupported Emby event type",
 			Apply:     false,
 		}, nil
+	}
+	// Only the events Silo applies need a user and an item. The Test
+	// Notification and server events carry neither.
+	if payload.User.ID == "" || payload.Item.ID == "" || payload.Item.Type == "" {
+		return nil, fmt.Errorf("invalid Emby webhook payload")
 	}
 	record, mediaKind, ok := embyLikeRecord(payload.Item.Type, payload.Item.Name, payload.Item.SeriesName, payload.Item.ProductionYear, payload.Item.IndexNumber, payload.Item.ParentIndexNumber, payload.Item.RunTimeTicks, payload.PlaybackInfo.PositionTicks, payload.PlaybackInfo.PlayedToCompletion || action == ActionImportProgress && isEmbyMarkPlayedEvent(eventName), payload.Item.ProviderIDs, payload.Item.ID, payload.Date, actionAllowsSeries(action))
 	if !ok {
@@ -362,7 +389,7 @@ func decodeEmbyMultipart(body []byte, boundary string, payload *embyWebhookPaylo
 	var fallback []byte
 	for {
 		part, err := reader.NextPart()
-		if err == io.EOF {
+		if err == io.EOF { //nolint:errorlint // NextPart returns a bare io.EOF only at the closing boundary; a wrapped one means a truncated body
 			break
 		}
 		if err != nil {

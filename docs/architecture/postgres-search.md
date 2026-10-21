@@ -23,8 +23,12 @@ refreshes update an existing entry in place and reuse its text documents. An
 upsert would fire the BEFORE INSERT trigger, which rebuilds both documents before
 ON CONFLICT discards them, so only a new entry builds documents. A moved file
 refreshes both entry identities; an attribute edit within one identity refreshes
-it once. Re-ID, membership, and parent changes must keep the entry's documents
-and access fields current.
+it once. A refresh writes nothing when the entry already holds the refreshed
+values and both documents, so a watched change the entry does not store (a
+re-probed track, a series runtime the episode overrides) costs no row or index
+write. Entries store no still image; reads join it from `episodes`, so still
+edits do not refresh entries. Re-ID, membership, and parent changes must keep
+the entry's documents and access fields current.
 
 The stored media document migration adds nullable columns, installs maintenance
 before backfill, commits batches of 1,000 rows, then builds GIN indexes
@@ -36,15 +40,30 @@ stored representation.
 
 ## Ranking, counts, and continuation
 
-The relevance order is exact title, contiguous title, year hint, phrase rank,
-title prefix rank, overview rank, lower title, and content ID. A media title
-also counts as exact when it is the query followed by the item's own year, as
-providers title remakes and reboots ("Castle (2009)"); short whole-title
-admission accepts that form too. Episode titles have no year of their own and
-do not use this rule. Access filtering
-precedes results, and any accessible title or alias match suppresses the entire
-overview family. Overview matches must meet the existing rank floor. This gate
-applies to the complete family, including on later cursor pages.
+The relevance order is exact title, title position, year hint, phrase rank,
+title prefix rank, overview rank, lower title, and content ID. Title position
+is 2 when a title, original title, sort title, or alias starts with the query,
+1 when it contains the query, and 0 otherwise. When a title variant contains
+the query, title prefix rank is `1 / (1 + words)` of the shortest such variant,
+so shorter titles rank first. Otherwise it is `ts_rank_cd` divided by document
+length (normalization 2), as is phrase rank. Cover density adds a cover for
+each repeat of a query word, so it ranked "From Star Wars to Star Wars" above
+the films and an alias "The Godfather & the Lady" above "The Godfather 2". The
+episode exact tier computes the same rank for its constant prefix score. A
+media title also counts as exact when it is the query followed by the item's
+own year, as providers title remakes and reboots ("Castle (2009)"); short
+whole-title admission accepts that form too. Episode titles have no year of
+their own and do not use this rule. Access filtering precedes results, and any
+accessible title or alias match suppresses the entire overview family.
+Overview matches must meet the existing rank floor. This gate applies to the
+complete family, including on later cursor pages.
+
+Ranks are `float8`. A cursor carries each key as text and seeks with it cast
+to `numeric`; PostgreSQL compares that with a `real` rank as `float8`, so a
+`real` key such as 2.4 never equals itself, and continuation skipped or
+repeated rank ties. `postgresCursorConfig` names the meaning of the keys;
+change it with any ranking change so older cursors are rejected
+(`invalid_cursor` in `/api/v2`, `catalog_cursor_changed` in `/api/v1`).
 
 Title and alias lookups produce an indexed union of candidate IDs before media
 policy checks and scoring. Media library checks remain correlated with those
@@ -100,6 +119,33 @@ Adjacent pages use `page.next_cursor` without `seek`. Distant virtualized window
 use the root `window_cursor` with `seek`, which may scan the ordered prefix and
 requires another boundary query. The wire contract and live-data continuation
 rules are documented in `docs/catalog-api.md`.
+
+## Typo fallback
+
+A first page with fewer than five FTS hits adds trigram typo candidates for
+queries with a word of four or more characters. PostgreSQL matches the query's
+words other than stopwords (the whole query when none has four characters)
+against title and alias trigrams and returns up to 500 candidates by trigram
+rank. With "the", "the godfathr" admitted a quarter of a 190,000-title catalog
+and ran close to the three-second search deadline. Whole-query similarity
+favors short titles, so a long title containing every word can rank in the
+hundreds. The whole-title similarity floor below still compares the full query.
+The server scores each candidate's title and up to eight aliases word by word:
+the four most similar to the query and the four covering the most query words,
+since similarity also ranks a long alias with every word below short aliases
+with one. It allows 0 edits for words of up to two characters, 1 for three to
+five, and 2 for longer words (Elasticsearch's fuzziness AUTO). A word may also
+match two adjacent title words joined, at one extra edit for ranking only.
+Stopwords ("the", "a", "of", and similar) take no edits and need not appear. A
+candidate is kept only when it matches every other query word, as
+Elasticsearch's AND operator and Meilisearch's `all` strategy require. When no
+candidate matches every word and FTS found nothing, the candidates missing the
+fewest words remain, as Typesense's token dropping does; a candidate matching
+only stopwords never does. When FTS found hits, candidates also need
+whole-title similarity of at least 0.45, and none is kept unless it matches
+every word. At most 50 typo rows follow the FTS hits; the total is inexact when
+candidates or kept rows were capped. The offset and cursor paths share this
+scoring and admission.
 
 ## Card enrichment
 

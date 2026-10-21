@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -79,7 +80,7 @@ func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 	server.nodeRowID = func() (int, bool) { return 42, true }
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, request, testSecret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
@@ -99,6 +100,9 @@ func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
 		t.Fatalf("transport features = %v, want progressive remux execution", info.TransportFeatures)
 	}
+	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureHLSSubtitleRenditionV1) {
+		t.Fatalf("transport features = %v, want the HLS subtitle rendition", info.TransportFeatures)
+	}
 	// The hash must describe this payload, not some earlier one.
 	served := info
 	served.CapabilityHash = ""
@@ -114,7 +118,7 @@ func TestHWCapabilitiesWithholdsProgressiveRemuxWithoutNodeIdentity(t *testing.T
 	server := newTestServer(t)
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	request.Header.Set("Authorization", "Bearer "+testSecret)
+	nodeauthtest.Sign(t, request, testSecret)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 

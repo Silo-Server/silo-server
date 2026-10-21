@@ -62,7 +62,7 @@ func TestFetchWatchlistPaginatesDiscoverAPI(t *testing.T) {
 		}
 		gotToken = r.Header.Get("X-Plex-Token")
 		start := r.URL.Query().Get("X-Plex-Container-Start")
-		page := map[string]any{}
+		var page map[string]any
 		if start == "0" {
 			page = map[string]any{"MediaContainer": map[string]any{
 				"totalSize": 2,

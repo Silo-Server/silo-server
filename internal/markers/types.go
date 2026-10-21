@@ -110,7 +110,13 @@ type Request struct {
 	ExternalIDs   map[string]string
 	SeasonNumber  int
 	EpisodeNumber int
-	Duration      time.Duration
+	// EpisodeExternalIDs, EpisodeNumbering, and EpisodeTitle describe the
+	// episode itself (see ExternalIDs); for an episode, ExternalIDs names its
+	// series. They are empty for movies.
+	EpisodeExternalIDs map[string]string
+	EpisodeNumbering   string
+	EpisodeTitle       string
+	Duration           time.Duration
 }
 
 type Result struct {
@@ -140,16 +146,20 @@ type Marker struct {
 
 // SubmissionRequest is a single-segment contribution to an online marker
 // source. Start is nil when the segment begins at the start of the file
-// (intro/recap); End is nil when it runs to the end (credits/preview).
+// (intro/recap); End is nil when it runs to the end (credits/preview). The
+// item fields follow Request.
 type SubmissionRequest struct {
-	Kind          ItemKind
-	ExternalIDs   map[string]string
-	SeasonNumber  int
-	EpisodeNumber int
-	Segment       MarkerKind
-	Start         *time.Duration
-	End           *time.Duration
-	Duration      time.Duration
+	Kind               ItemKind
+	ExternalIDs        map[string]string
+	SeasonNumber       int
+	EpisodeNumber      int
+	EpisodeExternalIDs map[string]string
+	EpisodeNumbering   string
+	EpisodeTitle       string
+	Segment            MarkerKind
+	Start              *time.Duration
+	End                *time.Duration
+	Duration           time.Duration
 }
 
 // SubmissionStatus values returned by a Submitter.

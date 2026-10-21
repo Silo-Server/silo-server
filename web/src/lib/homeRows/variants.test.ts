@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { everyRecipe } from "./recipeCatalogFixture.test-support";
-import {
-  applyVariant,
-  kindLocked,
-  showsLabel,
-  VARIANT_FAMILIES,
-  variantLocked,
-  variantOf,
-} from "./variants";
+import { applyVariant, showsLabel, VARIANT_FAMILIES, variantLocked, variantOf } from "./variants";
 
 describe("variant families", () => {
   it("covers every catalog kind that offers more than one preset", () => {
@@ -73,6 +66,19 @@ describe("strict inference", () => {
     expect(variantOf("format_showcase", { format: "4k", sort: "title" })).toBeNull();
     expect(variantOf("continue_watching", { continue_type: "reading" })).toBeNull();
     expect(variantOf("seasonal_themed", { theme: "christmas" })).toBeNull();
+    // A row with only custom holidays is Holidays, the variant that edits them.
+    expect(
+      variantOf("seasonal_themed", {
+        custom_holidays: [
+          {
+            name: "Fourth",
+            start: "07-01",
+            end: "07-04",
+            list_url: "https://mdblist.com/lists/a/b",
+          },
+        ],
+      }),
+    ).toBe("se_auto");
     expect(variantOf("recently_added", {})).toBeNull();
   });
 
@@ -153,6 +159,27 @@ describe("seasonal themes", () => {
       ),
     ).toEqual({ enabled_themes: ["family_movie_night"], theme_titles: { x: "y" } });
   });
+
+  it("leaves no hidden custom holidays or holiday dates on a Family movie night row", () => {
+    const holiday = {
+      name: "Fourth",
+      start: "07-01",
+      end: "07-04",
+      list_url: "https://mdblist.com/lists/a/b",
+    };
+    expect(
+      applyVariant(
+        "seasonal_themed",
+        {
+          enabled_themes: ["halloween"],
+          custom_holidays: [holiday],
+          theme_dates: { halloween: { start: "10-20", end: "11-02" } },
+          source: "lists",
+        },
+        "se_family_movie_night",
+      ),
+    ).toEqual({ enabled_themes: ["family_movie_night"], source: "lists" });
+  });
 });
 
 describe("Shows line", () => {
@@ -163,10 +190,8 @@ describe("Shows line", () => {
     expect(showsLabel("seasonal_themed", { theme: "unknown_day" })).toBe("Seasonal picks");
   });
 
-  it("locks the kind only for legacy Trakt rows; Continue Reading can still change kind", () => {
-    const reading = { continue_type: "reading" };
-    expect(variantLocked("continue_watching", reading)).toBe(true);
-    expect(kindLocked(reading)).toBe(false);
-    expect(kindLocked({ source: "trakt", window: "week" })).toBe(true);
+  it("locks the variant of Continue Reading rows only", () => {
+    expect(variantLocked("continue_watching", { continue_type: "reading" })).toBe(true);
+    expect(variantLocked("continue_watching", {})).toBe(false);
   });
 });
