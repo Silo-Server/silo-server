@@ -304,10 +304,18 @@ func (e *transportErrorV3) Error() string {
 }
 
 func (h *PlaybackHandler) transformationRegistryV3(ctx context.Context) *playback.TransformationRegistryV3 {
+	registry, _ := h.probedTransformationRegistryV3(ctx)
+	return registry
+}
+
+// probedTransformationRegistryV3 also returns the error of a probe that just
+// failed. That probe's registry reports what it couldn't read as unavailable,
+// which a later probe may clear.
+func (h *PlaybackHandler) probedTransformationRegistryV3(ctx context.Context) (*playback.TransformationRegistryV3, error) {
 	h.v3RegistryMu.Lock()
 	defer h.v3RegistryMu.Unlock()
 	if !h.v3Registry.NeedsRefresh(time.Now()) {
-		return h.v3Registry
+		return h.v3Registry, nil
 	}
 	probe := playback.ProbeTransformationRegistryWithToneMapV3Result
 	if h.v3RegistryProbe != nil {
@@ -317,7 +325,7 @@ func (h *PlaybackHandler) transformationRegistryV3(ctx context.Context) *playbac
 	if err == nil {
 		h.v3Registry = registry
 	}
-	return registry
+	return registry, err
 }
 
 // localToneMapCapabilitiesV3 returns a defensive copy of the capabilities
@@ -2580,7 +2588,7 @@ func (h *PlaybackHandler) validateLocalTransportCapabilitiesV3(ctx context.Conte
 	// is checked against the base registry, so an SDR transcode never waits on
 	// a cold probe or fails when one times out.
 	requiresToneMap := planRequiresToneMapV3(result.Plan)
-	localRegistry := h.transformationRegistryV3(ctx)
+	localRegistry, registryErr := h.probedTransformationRegistryV3(ctx)
 	if requiresToneMap {
 		var capabilityErr error
 		localRegistry, capabilityErr = h.localHLSExecutionRegistryV3(ctx)
@@ -2589,7 +2597,8 @@ func (h *PlaybackHandler) validateLocalTransportCapabilitiesV3(ctx context.Conte
 		}
 	}
 	if err := validateAdvertisedTransformationsV3(result.Plan, localRegistry.Advertised()); err != nil {
-		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected playback recipe.", retryable: true, cause: err, executorIneligible: true}
+		// A mismatch read from a failed probe may clear on a retry.
+		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected playback recipe.", retryable: true, cause: errors.Join(err, registryErr), executorIneligible: registryErr == nil}
 	}
 	if !requiresToneMap {
 		return nil
@@ -4082,9 +4091,10 @@ func manifestStartupTransportErrorV3(running bool, cause error) *transportErrorV
 }
 
 // sourcePreflightRejectedMessageV3 tells the viewer, and an admin reading the
-// log, that the file itself failed the tone-map check, so a retry gets the
-// same answer.
-const sourcePreflightRejectedMessageV3 = "This file's HDR video failed Silo's conversion check, so trying again won't help. Its HDR metadata may not match the video."
+// log, that the file failed the tone-map check, so a retry gets the same
+// answer. The check also rejects an executor's bad output, so the message
+// names both causes.
+const sourcePreflightRejectedMessageV3 = "This file's HDR video failed Silo's conversion check, so trying again won't help. Its HDR metadata may not match the video, or the transcoder may not convert it correctly."
 
 func toneMapExecutionTransportErrorV3(cause error, message string) *transportErrorV3 {
 	if errors.Is(cause, tonemap.ErrSourcePreflightRejected) {

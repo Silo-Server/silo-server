@@ -116,8 +116,9 @@ func TestValidateLocalTransportCapabilitiesV3MarksOnlyDefiniteMismatchIneligible
 		ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourcePQ,
 	}
 	for name, tc := range map[string]struct {
-		probe          func(context.Context, string, string, string) (tonemap.Capabilities, error)
-		wantIneligible bool
+		probe            func(context.Context, string, string, string) (tonemap.Capabilities, error)
+		registryProbeErr error
+		wantIneligible   bool
 	}{
 		"executor lacks the source kind": {
 			probe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
@@ -133,15 +134,30 @@ func TestValidateLocalTransportCapabilitiesV3MarksOnlyDefiniteMismatchIneligible
 				return nil, context.DeadlineExceeded
 			},
 		},
+		"transformation probe timed out": {
+			probe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
+				return tonemap.Capabilities{{
+					Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
+					SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+				}}, nil
+			},
+			registryProbeErr: context.DeadlineExceeded,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 			handler.PlaybackConfig = func() config.PlaybackConfig {
 				return config.PlaybackConfig{HWAccel: playback.HWAccelNone, TranscodeEnabled: true}
 			}
-			presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
-				Name: playback.TransformationHDRToSDRToneMapV3, RecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3, Available: true,
-			}}))
+			if tc.registryProbeErr != nil {
+				handler.v3RegistryProbe = func(context.Context, string, tonemap.Capabilities) (*playback.TransformationRegistryV3, error) {
+					return playback.NewTransformationRegistryV3(nil), tc.registryProbeErr
+				}
+			} else {
+				presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
+					Name: playback.TransformationHDRToSDRToneMapV3, RecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3, Available: true,
+				}}))
+			}
 			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{
 				config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
 				config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
