@@ -1078,6 +1078,7 @@ const (
 	// detectContainer passes these format names through unchanged.
 	containerMPEGPS    = "mpeg"
 	containerMPEGVideo = "mpegvideo"
+	containerM4V       = "m4v"
 )
 
 // detectContainer maps ffprobe format names to common container names.
