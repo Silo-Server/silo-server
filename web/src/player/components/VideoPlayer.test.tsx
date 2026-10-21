@@ -5863,14 +5863,19 @@ describe("VideoPlayer buffering pill", () => {
 
   it("ignores a pick of the quality already playing, and hides the pill on another", () => {
     const onQualitySelect = vi.fn();
-    askPlayer({ onQualitySelect, qualityPreference: "auto" });
+    const { video } = askPlayer({ onQualitySelect });
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
     const qualityControls = controls.current as unknown as {
       onQualitySelect: (id: string) => void;
     };
     act(() => qualityControls.onQualitySelect("auto"));
     expect(onQualitySelect).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
     act(() => qualityControls.onQualitySelect("1080p-high"));
     expect(onQualitySelect).toHaveBeenCalledWith("1080p-high", expect.any(Number));
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
   });
 
   it("starts over when the cap its replans send changes", () => {
