@@ -14,6 +14,7 @@ import {
   ProbeNotSaved,
   readMeasuredBandwidthKbps,
   scheduleBandwidthProbe,
+  sourceLoadStarted,
   stopBandwidthProbes,
 } from "./bandwidth-probe";
 import { v2 } from "@/api/v2/request";
@@ -275,6 +276,46 @@ describe("media holds", () => {
     expect(locks.held.map((lock) => lock.name)).toEqual(["silo-media-active"]);
     playbackStartEnded();
     await vi.waitFor(() => expect(locks.held).toEqual([]));
+  });
+
+  // A source that loaded and stays paused no longer loads anything.
+  it("lets Test speed run here and in other tabs once a paused source has loaded", async () => {
+    vi.useFakeTimers();
+    try {
+      server({});
+      const locks = fakeLocks();
+      hangingProbe();
+      scheduleBandwidthProbe();
+      await vi.advanceTimersByTimeAsync(0);
+      pageVideo();
+      const sourceLoaded = sourceLoadStarted();
+      expect(await testConnectionSpeed()).toBe("playing");
+
+      sourceLoaded();
+      await vi.waitFor(() => expect(locks.held).toEqual([]));
+      // An automatic test still waits out the quiet period.
+      await vi.advanceTimersByTimeAsync(TEST_DELAY_MS);
+      expect(fetchWithSession).not.toHaveBeenCalled();
+      const result = testConnectionSpeed();
+      await vi.waitFor(() => expect(fetchWithSession).toHaveBeenCalledTimes(1));
+      stopBandwidthProbes();
+      await expect(result).rejects.toThrow("could not be measured");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the hold of a start that followed a source that loaded paused", async () => {
+    server({});
+    const locks = fakeLocks();
+    hangingProbe();
+    const sourceLoaded = sourceLoadStarted();
+    cancelBandwidthProbe();
+    sourceLoaded();
+    // A released lock is gone by the next task.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(locks.held.map((lock) => lock.name)).toEqual(["silo-media-active"]);
+    expect(await testConnectionSpeed()).toBe("playing");
   });
 
   it("holds only automatic tests in the quiet period after a start that played", async () => {

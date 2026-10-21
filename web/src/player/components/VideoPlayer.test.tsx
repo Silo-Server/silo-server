@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext";
@@ -64,6 +64,8 @@ const hlsJS = vi.hoisted(() => ({
   startLoad: vi.fn(),
   stopLoad: vi.fn(),
   latest: null as null | { emit: (event: string, data: unknown) => void },
+  // Seconds buffered past the playhead, as hls.js measures them.
+  forwardBufferSeconds: 0,
 }));
 
 vi.mock("sonner", () => ({
@@ -106,9 +108,9 @@ vi.mock("../bandwidth-probe", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../bandwidth-probe")>();
   return {
     ...actual,
-    cancelBandwidthProbe: () => {
+    sourceLoadStarted: () => {
       sourceLoads();
-      actual.cancelBandwidthProbe();
+      return actual.sourceLoadStarted();
     },
     mediaElementReleased: (element: HTMLMediaElement) => {
       releasedMedia(element, element.isConnected);
@@ -160,6 +162,8 @@ vi.mock("hls.js", () => ({
       MANIFEST_PARSED: "manifestParsed",
       BUFFER_APPENDED: "bufferAppended",
       FRAG_LOADED: "fragLoaded",
+      FRAG_BUFFERED: "fragBuffered",
+      BUFFER_EOS: "bufferEos",
     };
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
     static isSupported = () => hlsJS.supported;
@@ -168,9 +172,17 @@ vi.mock("hls.js", () => ({
     startLoad = hlsJS.startLoad;
     stopLoad = hlsJS.stopLoad;
 
-    constructor(config?: unknown) {
+    bufferedToEnd = false;
+    maxBufferLength: number;
+
+    constructor(config?: { maxBufferLength?: number }) {
       hlsJS.constructed(config);
       hlsJS.latest = this;
+      this.maxBufferLength = config?.maxBufferLength ?? 30;
+    }
+
+    get mainForwardBufferInfo() {
+      return { len: hlsJS.forwardBufferSeconds };
     }
 
     on(event: string, handler: (event: string, data: unknown) => void) {
@@ -6154,6 +6166,110 @@ describe("VideoPlayer speed test media hold", () => {
     releasedMedia.mockClear();
     unmount();
     expect(releasedMedia).toHaveBeenCalledWith(video, false);
+  });
+
+  /** The tab's shared media lock, as other tabs see it. */
+  function heldLocks() {
+    const held: string[] = [];
+    const locks = {
+      request: async (name: string, _options: unknown, callback: () => Promise<unknown>) => {
+        held.push(name);
+        try {
+          return await callback();
+        } finally {
+          held.splice(held.indexOf(name), 1);
+        }
+      },
+    };
+    Object.defineProperty(navigator, "locks", { configurable: true, value: locks });
+    onTestFinished(() => {
+      Reflect.deleteProperty(navigator, "locks");
+    });
+    return held;
+  }
+
+  function settlePaused(video: HTMLVideoElement) {
+    Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    fireEvent.canPlay(video);
+  }
+
+  // A source that loads and stays paused, as when autoplay is refused or a
+  // track changes while paused, holds tests off only while it still loads.
+  it("holds speed tests off until a paused hls.js source has filled its buffer", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    hlsJS.supported = true;
+    hlsJS.forwardBufferSeconds = 10;
+    onTestFinished(() => {
+      hlsJS.supported = false;
+      hlsJS.latest = null;
+    });
+    const held = heldLocks();
+    const { container } = renderPlayer({
+      shouldAutoPlay: false,
+      plan: fixturePlanV3({
+        delivery: "server_remux_hls",
+        stream: {
+          url: "/stream/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+      }),
+    });
+    const video = container.querySelector("video")!;
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+    settlePaused(video);
+    act(() => hlsJS.latest?.emit("fragBuffered", {}));
+    expect(held).toEqual(["silo-media-active"]);
+
+    hlsJS.forwardBufferSeconds = 120;
+    act(() => hlsJS.latest?.emit("fragBuffered", {}));
+    await waitFor(() => expect(held).toEqual([]));
+  });
+
+  it("holds speed tests off until a paused element stops fetching its source", async () => {
+    const held = heldLocks();
+    const { container } = renderPlayer({ shouldAutoPlay: false });
+    const video = container.querySelector("video")!;
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    Object.defineProperty(video, "networkState", {
+      configurable: true,
+      value: HTMLMediaElement.NETWORK_LOADING,
+    });
+    settlePaused(video);
+    expect(held).toEqual(["silo-media-active"]);
+
+    Object.defineProperty(video, "networkState", {
+      configurable: true,
+      value: HTMLMediaElement.NETWORK_IDLE,
+    });
+    fireEvent(video, new Event("suspend"));
+    await waitFor(() => expect(held).toEqual([]));
+  });
+
+  // The browser decoder reads only what it decodes, which stops while paused.
+  it("lets speed tests run once a paused browser-decoder source can play", async () => {
+    attachBrowserEngine.mockClear();
+    engineRoute.chosen = true;
+    onTestFinished(() => {
+      engineRoute.chosen = false;
+    });
+    const held = heldLocks();
+    const { container } = renderPlayer({
+      shouldAutoPlay: false,
+      browserEngine: {
+        containers: ["mkv"],
+        videoCodecs: ["h264"],
+        audioCodecs: ["aac"],
+        hdr: false,
+      },
+    });
+    const video = container.querySelector("video")!;
+    await waitFor(() => expect(attachBrowserEngine).toHaveBeenCalled());
+    expect(held).toEqual(["silo-media-active"]);
+
+    settlePaused(video);
+    await waitFor(() => expect(held).toEqual([]));
   });
 
   // A replan's source loads paused, like a start's, and holds tests off too.

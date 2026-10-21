@@ -145,7 +145,7 @@ import {
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
 import { MAX_PROBE_KBPS, MIN_PROBE_KBPS } from "../probe-meter";
-import { cancelBandwidthProbe, mediaElementReleased } from "../bandwidth-probe";
+import { mediaElementReleased, sourceLoadStarted } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
 
 function pillKey(
@@ -2452,7 +2452,7 @@ export function VideoPlayer({
     transportStartupPendingRef.current = true;
     // A source is loading, a replan's as well as the first: speed tests wait
     // for it as for a start.
-    cancelBandwidthProbe();
+    const sourceLoaded = sourceLoadStarted();
 
     let hls: HlsType | null = null;
     let engineSession: BrowserEngineSession | null = null;
@@ -2491,6 +2491,25 @@ export function VideoPlayer({
       directPlayOriginPendingRef.current = false;
     };
 
+    // A source settled paused holds speed tests off only while it still
+    // loads: hls.js until its buffer is full or reaches the end, the browser
+    // decoder until it can play, since it reads only what it decodes, and the
+    // element until it suspends its fetch.
+    let pausedSourceLoading = false;
+    const endHoldOnceLoaded = () => {
+      if (destroyed || !pausedSourceLoading) return;
+      const loaded = hls
+        ? hls.bufferedToEnd || (hls.mainForwardBufferInfo?.len ?? 0) >= hls.maxBufferLength
+        : engineSession
+          ? video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA
+          : video.networkState === HTMLMediaElement.NETWORK_IDLE;
+      if (!loaded) return;
+      pausedSourceLoading = false;
+      sourceLoaded();
+    };
+    video.addEventListener("suspend", endHoldOnceLoaded);
+    video.addEventListener("canplay", endHoldOnceLoaded);
+
     // Settles the player into a deliberate paused state: the startup guard is
     // told playback is viable so it does not report a bogus startup timeout,
     // and the first frame is shown with the controls up.
@@ -2501,6 +2520,8 @@ export function VideoPlayer({
       transportIdleSinceRef.current = Date.now();
       setAwaitingFirstFrame(false);
       setPlaying(false);
+      pausedSourceLoading = true;
+      endHoldOnceLoaded();
     };
 
     const attemptAutoplayWhenReady = () => {
@@ -2766,6 +2787,8 @@ export function VideoPlayer({
               }
               attemptAutoplayWhenReady();
             });
+            hls.on(Hls.Events.FRAG_BUFFERED, endHoldOnceLoaded);
+            hls.on(Hls.Events.BUFFER_EOS, endHoldOnceLoaded);
 
             hls.loadSource(effectiveStreamUrl);
             hls.attachMedia(video);
@@ -2903,6 +2926,8 @@ export function VideoPlayer({
     return () => {
       destroyed = true;
       cleanupStartupListeners();
+      video.removeEventListener("suspend", endHoldOnceLoaded);
+      video.removeEventListener("canplay", endHoldOnceLoaded);
       if (engineSession) {
         // Restores the element's own media pipeline before it is reset below.
         engineSession.destroy();

@@ -697,6 +697,21 @@ export function cancelBandwidthProbe(): () => void {
 }
 
 /**
+ * Called when a player loads a new source: holds tests off as
+ * cancelBandwidthProbe does, and returns the function to call once the
+ * source has loaded and stays paused. That ends the hold, so Test speed may
+ * run here and in other tabs, but neither the quiet period that holds
+ * automatic tests nor the hold of a later start or source load.
+ */
+export function sourceLoadStarted(): () => void {
+  cancelBandwidthProbe();
+  const generation = startGeneration;
+  return () => {
+    if (generation === startGeneration) releaseStartHold?.();
+  };
+}
+
+/**
  * Stops the schedule and any running test, e.g. on sign-out or a profile
  * switch. The next schedule reads the server before starts send its reading
  * again. A 429's hold stays, since it is the server's.
