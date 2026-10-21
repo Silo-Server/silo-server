@@ -189,8 +189,9 @@ measured and where it came from, and never do Auto's arithmetic.
 - **Quality change**: a pick from the quality menu, a switch between Wi-Fi and
   cellular quality, or a version switch the viewer chooses. A pick the player
   refuses is not one, and neither is picking the quality already playing. A
-  network change counts only when it changes the quality preference or cap a
-  replan sends.
+  pick counts when its plan is adopted; until then it is pending. A network
+  change counts only when it changes the quality preference or cap a replan
+  sends.
 - **Clock**: stalls, pill timers and summary durations use elapsed real time
   from a monotonic clock. "Wall-clock time" below means real time rather than
   media time, not the system clock.
@@ -276,6 +277,7 @@ The prompt has a title, **"Playback keeps buffering"**, a primary action,
 | Event | Outcome |
 | --- | --- |
 | Pause while a pill shows | The timer freezes, and resumes on play. |
+| The viewer picks a quality from the menu | Any pill hides as the pick is sent. The answer, stall history and kept estimate change only when the pick's plan is adopted, and not at all if the pick is refused. A controller lowering adopted while the pick is pending shows no undo pill and no notice. |
 | The viewer changes quality (see *Quality change*), or a replan the controller did not send is adopted | Any pill hides and stall history clears. An adoption the controller did not request also drops a pending lowering, with no notice. A quality change also clears the answer and ends the re-offer wait. |
 | The plan adopted after a lowering is no lower, or carries `quality_reduction_unavailable` | Show **"Can't lower quality for this video"**. Leave this plan alone for `NO_LOWER_COOLDOWN_MS = 300000`. |
 | The replan fails, or its plan is never adopted | Keep playing the current plan. Watch it again after `REARM_AFTER_UNADOPTED_MS = 60000`. Rearming starts fresh stall history without startup grace; an in-progress stall is timed from the rearm. If the player cannot send the replan now, because another replan is in flight, the replan fails: the client does not queue it. |
