@@ -5828,6 +5828,20 @@ describe("VideoPlayer buffering pill", () => {
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
   });
 
+  it("leaves Enter on a focused Keep quality to its own click", () => {
+    const onQualitySelect = vi.fn();
+    const { video } = askPlayer({ onQualitySelect });
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    const keep = screen.getByRole("button", { name: "Keep quality" });
+    keep.focus();
+    expect(fireEvent.keyDown(keep, { key: "Enter" })).toBe(true);
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+    fireEvent.click(keep);
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+    expect(onQualitySelect).not.toHaveBeenCalled();
+  });
+
   it("ignores a pick of the quality already playing, and hides the pill on another", () => {
     const onQualitySelect = vi.fn();
     const { video } = askPlayer({ onQualitySelect });

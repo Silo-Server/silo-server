@@ -148,6 +148,34 @@ import { MIN_PROBE_KBPS } from "../probe-meter";
 import { cancelBandwidthProbe, mediaElementReleased } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
 
+function pillKey(
+  event: KeyboardEvent,
+  promptSelector: string,
+  root: HTMLElement | null,
+): "select" | "back" | null {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  const targetInPrompt = target?.closest(promptSelector) != null;
+  const isEditingOrInMenu =
+    !targetInPrompt &&
+    target?.closest(
+      'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]',
+    ) != null;
+  if (isEditingOrInMenu) return null;
+
+  const isSelect = event.key === "Enter" || event.key === " ";
+  const isBack = event.key === "Escape" || event.key === "BrowserBack";
+  if (!isSelect && !isBack) return null;
+
+  // Select belongs to the focused control: Space on Play/Pause or Seek must
+  // not activate this pill. Claim it only for pill focus or unclaimed focus
+  // at the document/player root. Back remains global for the pill.
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const promptHasFocus = targetInPrompt || active?.closest(promptSelector) != null;
+  const focusIsUnclaimed = active === null || active === document.body || active === root;
+  if (isSelect && !promptHasFocus && !focusIsUnclaimed) return null;
+  return isSelect ? "select" : "back";
+}
+
 let hlsJSModule: Promise<typeof HlsType> | null = null;
 
 function loadHLSJS(): Promise<typeof HlsType> {
@@ -3291,33 +3319,10 @@ export function VideoPlayer({
 
     const handlePromptKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      const targetInPrompt = target?.closest(promptSelector) != null;
-      const isEditingOrInMenu =
-        !targetInPrompt &&
-        target?.closest(
-          'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]',
-        ) != null;
-      if (isEditingOrInMenu) return;
+      const key = pillKey(event, promptSelector, containerRef.current);
+      if (!key) return;
 
-      const isSelect = event.key === "Enter" || event.key === " ";
-      const isBack = event.key === "Escape" || event.key === "BrowserBack";
-      if (!isSelect && !isBack) return;
-
-      // Enter and Space belong to whatever control has focus: taking them at
-      // the document would make Space on Play/Pause or on the seek slider skip
-      // the intro and swallow the press. So Select is only claimed when the
-      // pill itself is focused, or when no control is — the case the spec's
-      // "handled at the player root" rule exists for. Back stays global: it has
-      // no competing meaning on the transport, and it must reach the pill
-      // whether or not the pill is in the focus tree.
-      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      const promptHasFocus = targetInPrompt || active?.closest(promptSelector) != null;
-      const focusIsUnclaimed =
-        active === null || active === document.body || active === containerRef.current;
-      if (isSelect && !promptHasFocus && !focusIsUnclaimed) return;
-
-      const handled = isSelect ? selectIntroPrompt() : dismissIntroPrompt();
+      const handled = key === "select" ? selectIntroPrompt() : dismissIntroPrompt();
       if (!handled) return;
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -4517,30 +4522,15 @@ export function VideoPlayer({
       if (event.defaultPrevented) return;
       // The reconnect overlay covers the pill and takes Back first.
       if (connectionStatusRef.current !== "connected") return;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      const targetInPill = target?.closest(promptSelector) != null;
-      const isEditingOrInMenu =
-        !targetInPill &&
-        target?.closest(
-          'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]',
-        ) != null;
-      if (isEditingOrInMenu) return;
-      const isSelect = event.key === "Enter" || event.key === " ";
-      const isBack = event.key === "Escape" || event.key === "BrowserBack";
-      if (!isSelect && !isBack) return;
-      // Select belongs to the focused control unless that is the pill or
-      // nothing; Back stays global, like the intro pill's.
+      const key = pillKey(event, promptSelector, containerRef.current);
+      if (!key) return;
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      const pillHasFocus = targetInPill || active?.closest(promptSelector) != null;
-      const focusIsUnclaimed =
-        active === null || active === document.body || active === containerRef.current;
-      if (isSelect && !pillHasFocus && !focusIsUnclaimed) return;
       // Keep quality answers through its own click.
-      if (isSelect && active?.dataset.bufferingKeep === "true") return;
+      if (key === "select" && active?.dataset.bufferingKeep === "true") return;
       event.preventDefault();
       event.stopImmediatePropagation();
       answerBuffering(
-        isBack ? "back" : bufferingPillKind === "undo" ? "select_restore" : "select_lower",
+        key === "back" ? "back" : bufferingPillKind === "undo" ? "select_restore" : "select_lower",
       );
     };
     document.addEventListener("keydown", keydown, true);
