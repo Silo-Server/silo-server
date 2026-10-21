@@ -23,9 +23,9 @@ func providerErr(status int) error {
 
 func provider(err error) error { return &providerError{err: err} }
 
-// unreachableErr is what an HTTP client returns when nothing answers; S3
+// errUnreachable is what an HTTP client returns when nothing answers; S3
 // and the AI provider client both return it.
-var unreachableErr = &url.Error{Op: "Post", URL: "http://10.0.0.5:8000/v1/chat/completions", Err: syscall.ECONNREFUSED}
+var errUnreachable = &url.Error{Op: "Post", URL: "http://10.0.0.5:8000/v1/chat/completions", Err: syscall.ECONNREFUSED}
 
 func TestFailureReasonNamesTheCauseWithoutProviderDetails(t *testing.T) {
 	cases := []struct {
@@ -49,8 +49,8 @@ func TestFailureReasonNamesTheCauseWithoutProviderDetails(t *testing.T) {
 		{"plan ineligible", JobKindTranslate, provider(llm.ErrPlanIneligible), failurePlanIneligible},
 		{"rate limit beats joined deadline", JobKindTranslate, errors.Join(providerErr(429), context.DeadlineExceeded), failureRateLimited},
 		{"deadline", JobKindTranscribe, fmt.Errorf("transcribe chunk 1/2: %w", provider(context.DeadlineExceeded)), failureTimeout},
-		{"unreachable", JobKindTranslate, provider(fmt.Errorf("chat API request failed: %w", unreachableErr)), failureUnreachable},
-		{"storage unreachable", JobKindTranslate, fmt.Errorf("store translated subtitle: %w", unreachableErr), failureGeneric},
+		{"unreachable", JobKindTranslate, provider(fmt.Errorf("chat API request failed: %w", errUnreachable)), failureUnreachable},
+		{"storage unreachable", JobKindTranslate, fmt.Errorf("store translated subtitle: %w", errUnreachable), failureGeneric},
 		{"deadline outside a provider request", JobKindTranscribe, fmt.Errorf("extract audio: %w", context.DeadlineExceeded), failureGeneric},
 		{"unusable transcription", JobKindTranscribe, provider(fmt.Errorf("transcription endpoint returned text without timed segments (model %q): %w", "x", llm.ErrUnusableResponse)), failureUnusableOutput},
 		{"unusable translation", JobKindTranslate, fmt.Errorf("translate cues 1-12: %w after 3 attempts: model omitted one or more cues", aitranslate.ErrInvalidModelResponse), failureUnusableOutput},

@@ -9,11 +9,11 @@ import (
 	"testing"
 )
 
-type timeoutErr struct{}
+type timeoutError struct{}
 
-func (timeoutErr) Error() string   { return "i/o timeout" }
-func (timeoutErr) Timeout() bool   { return true }
-func (timeoutErr) Temporary() bool { return true }
+func (timeoutError) Error() string   { return "i/o timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
 
 func TestClassify(t *testing.T) {
 	cases := []struct {
@@ -33,7 +33,7 @@ func TestClassify(t *testing.T) {
 		{"500", &HTTPError{StatusCode: 500}, FailureUnavailable},
 		{"422", &HTTPError{StatusCode: 422}, FailureRejected},
 		{"deadline", fmt.Errorf("transcribe: %w", context.DeadlineExceeded), FailureTimeout},
-		{"transport timeout", &url.Error{Op: "Post", URL: "http://x", Err: timeoutErr{}}, FailureTimeout},
+		{"transport timeout", &url.Error{Op: "Post", URL: "http://x", Err: timeoutError{}}, FailureTimeout},
 		{"connection refused", fmt.Errorf("chat API request failed: %w", &url.Error{Op: "Post", URL: "http://x", Err: syscall.ECONNREFUSED}), FailureUnreachable},
 		{"unusable", fmt.Errorf("chat API returned no choices: %w", ErrUnusableResponse), FailureUnusableResponse},
 		{"plan not eligible", fmt.Errorf("wrapped: %w", ErrPlanIneligible), FailureForbidden},
