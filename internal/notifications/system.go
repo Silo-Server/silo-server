@@ -80,6 +80,8 @@ type System struct {
 	// fallback for tokenized email links (see SetPublicURL).
 	publicURL string
 
+	// outbox enqueues operational deliveries' channel attempts.
+	outbox            channelOutbox
 	webhookRepo       *WebhookRepository
 	webhookDispatcher *WebhookDispatcher
 	webhookRetry      *WebhookRetryWorker
@@ -214,16 +216,10 @@ func NewSystem(
 	dispatchers = append(dispatchers, newNudgeDispatcher(discordWorker))
 
 	multiDispatcher := NewMultiDispatcher(dispatchers...)
+	outbox := channelOutbox{settings: settings, webhooks: webhookRepo, webPush: webPushRepo, pushDevices: pushDeviceRepo}
 	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, scopes, multiDispatcher)
-	if webhookRepo != nil {
-		fanout.SetWebhookOutbox(webhookRepo, newProfileRateLimiter())
-	}
-	if webPushRepo != nil {
-		fanout.SetWebPushOutbox(webPushRepo)
-	}
-	if pushDeviceRepo != nil {
-		fanout.SetPushOutbox(pushDeviceRepo)
-	}
+	fanout.outbox = outbox
+	fanout.rateLimiter = newProfileRateLimiter()
 	detector := NewAvailabilityDetector(releases)
 	detector.SetFanoutNudge(func() {
 		fanout.Nudge()
@@ -252,6 +248,7 @@ func NewSystem(
 		emailWorker:         emailWorker,
 		discordWorker:       discordWorker,
 		discordClient:       discordClient,
+		outbox:              outbox,
 		webhookRepo:         webhookRepo,
 		webhookDispatcher:   webhookDispatcher,
 		webhookRetry:        webhookRetry,
@@ -358,8 +355,8 @@ func (s *System) PayloadsForRows(ctx context.Context, rows []DeliveryRow) []Deli
 	return payloads
 }
 
-// Start launches the fanout worker, interest updater, and (when configured)
-// the webhook dispatch pool and retry worker under ctx.
+// Start launches the fanout worker, the interest updater, and every
+// configured channel's dispatch and retry loops under ctx; Wait drains them.
 func (s *System) Start(ctx context.Context) {
 	if s == nil {
 		return

@@ -95,15 +95,16 @@ func TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID(t *testing.T) {
 		t.Fatalf("create push tables: %v", err)
 	}
 	catalogItem := seedAccessCatalog(t, p).series
+	settings := NewSettings(mapSettingReader{SettingApplePushDeliveryEnabled: "true"})
 	system := &System{
-		pool:           p,
-		Settings:       NewSettings(mapSettingReader{SettingApplePushDeliveryEnabled: "true"}),
-		Deliveries:     NewDeliveryRepository(p),
-		Preferences:    NewPreferencesRepository(p),
-		pushDeviceRepo: NewPushDeviceRepository(p),
-		dispatcher:     NewMultiDispatcher(),
-		scopes:         scopeByProfile{"default": {}},
-		logger:         slog.New(slog.DiscardHandler),
+		pool:        p,
+		Settings:    settings,
+		Deliveries:  NewDeliveryRepository(p),
+		Preferences: NewPreferencesRepository(p),
+		outbox:      channelOutbox{settings: settings, pushDevices: NewPushDeviceRepository(p)},
+		dispatcher:  NewMultiDispatcher(),
+		scopes:      scopeByProfile{"default": {}},
+		logger:      slog.New(slog.DiscardHandler),
 	}
 	notifier := NewRequestFulfillmentNotifier(system)
 	req := fulfilledRequest(requests.Follower{UserID: 2, ProfileID: "default"})

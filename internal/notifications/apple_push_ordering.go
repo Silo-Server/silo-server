@@ -30,20 +30,7 @@ type ApplePushReceipt struct {
 	Enabled        bool
 	Removed        bool
 }
-type orderedApplePushStore interface {
-	ApplyApplePush(context.Context, ApplePushCommand, *secret.Cipher) (ApplePushReceipt, error)
-}
 
-func (s *PushDeviceService) ApplyApplePush(ctx context.Context, cmd ApplePushCommand) (ApplePushReceipt, error) {
-	if !s.Available() {
-		return ApplePushReceipt{}, ErrPushDeviceUnavailable
-	}
-	store, ok := s.store.(orderedApplePushStore)
-	if !ok {
-		return ApplePushReceipt{}, ErrPushDeviceUnavailable
-	}
-	return store.ApplyApplePush(ctx, cmd, s.cipher)
-}
 func validateApplePushCommand(cmd ApplePushCommand) (ApplePushDeviceRegistration, error) {
 	if cmd.UserID <= 0 || strings.TrimSpace(cmd.ProfileID) == "" || cmd.Generation <= 0 || cmd.DeviceID != strings.TrimSpace(cmd.DeviceID) {
 		return ApplePushDeviceRegistration{}, ErrPushDeviceInvalid
@@ -68,13 +55,9 @@ func lockApplePushInstallation(ctx context.Context, tx pgx.Tx, device string) (i
 	return generation, err
 }
 
-// ApplyApplePush commits each newer APNs intent and row replacement atomically.
-// Exact replay preserves provider outcomes and does not resurrect a deleted row.
-func (r *PushDeviceRepository) ApplyApplePush(ctx context.Context, cmd ApplePushCommand, cipher *secret.Cipher) (ApplePushReceipt, error) {
-	return r.ApplyApplePushAndFinalize(ctx, cmd, cipher, nil)
-}
-
-// ApplyApplePushAndFinalize invokes finalize while installation and device locks
+// ApplyApplePushAndFinalize commits each newer APNs intent and row
+// replacement atomically. Exact replay preserves provider outcomes and does
+// not resurrect a deleted row. finalize, when set, runs while installation and device locks
 // are held. It must not perform external delivery or publish a result before
 // this method successfully commits. An error rolls back the registration.
 func (r *PushDeviceRepository) ApplyApplePushAndFinalize(ctx context.Context, cmd ApplePushCommand, cipher *secret.Cipher, finalize func(ApplePushReceipt) error) (ApplePushReceipt, error) {

@@ -15,10 +15,9 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// webhookRetrySchedule holds the cumulative delay since the first attempt
-// (docs/architecture/notifications.md, "Retry schedule and auto-disable").
-// Index N is the delay before attempt N+1; after the last attempt fails, the
-// webhook is auto-disabled.
+// webhookRetrySchedule is the webhook retry schedule
+// (docs/architecture/notifications.md, "Retry schedule and auto-disable");
+// after the last attempt fails, the webhook is auto-disabled.
 var webhookRetrySchedule = []time.Duration{
 	0,
 	30 * time.Second,
@@ -30,18 +29,6 @@ var webhookRetrySchedule = []time.Duration{
 	12 * time.Hour,
 	18 * time.Hour,
 	24 * time.Hour,
-}
-
-const webhookMaxAttempts = 10
-
-// webhookRetryDelay returns how long to wait after a retryable failure of
-// attempt N (1-based) before the next attempt, or ok=false when the schedule
-// is exhausted.
-func webhookRetryDelay(completedAttempt int) (time.Duration, bool) {
-	if completedAttempt < 1 || completedAttempt >= webhookMaxAttempts {
-		return 0, false
-	}
-	return webhookRetrySchedule[completedAttempt] - webhookRetrySchedule[completedAttempt-1], true
 }
 
 // retryableHTTPStatus reports whether an HTTP failure status is worth
@@ -230,7 +217,7 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		return
 	}
 
-	delay, more := webhookRetryDelay(attemptNumber)
+	delay, more := retryDelay(webhookRetrySchedule, attemptNumber)
 	if result.RetryAfter > 0 {
 		delay = result.RetryAfter
 	}
