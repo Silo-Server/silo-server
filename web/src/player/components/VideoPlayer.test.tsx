@@ -5908,6 +5908,34 @@ describe("VideoPlayer buffering pill", () => {
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
   });
 
+  it("keeps an offline outage going after the device is back online until data arrives", () => {
+    const { video } = askPlayer();
+    let end = 0.2;
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      get: () => ({ length: 1, start: () => 0, end: () => end }),
+    });
+    let online = false;
+    vi.spyOn(navigator, "onLine", "get").mockImplementation(() => online);
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+    fireEvent.waiting(video);
+    // Offline for longer than a failure's outage window.
+    act(() => vi.advanceTimersByTime(20_000));
+    // The network is back, but no media data has arrived yet.
+    online = true;
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    act(() => vi.advanceTimersByTime(6_200));
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+    end = 0.4;
+    fireEvent(video, new Event("progress"));
+    act(() => vi.advanceTimersByTime(6_200));
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+  });
+
   it("shows the buffering notice for five seconds", async () => {
     const rendered = renderPlayer({
       bufferingMode: "always",

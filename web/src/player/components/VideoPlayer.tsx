@@ -3059,6 +3059,12 @@ export function VideoPlayer({
         watchTogetherSync.reportBuffering();
       }
     };
+    // Going offline fails the media requests; coming back online does not
+    // bring their data yet. Either way the outage lasts until data arrives.
+    const onNetworkChange = () => {
+      lastTransportErrorAtRef.current = Date.now();
+      troubleBufferedEndRef.current = bufferedEndSeconds(video);
+    };
     const onError = () => {
       if (video.error) {
         if (video.error.code === MEDIA_ERR_NETWORK) {
@@ -3102,8 +3108,12 @@ export function VideoPlayer({
     video.addEventListener("playing", onPlaying);
     video.addEventListener("error", onError);
     video.addEventListener("ended", onVideoEnded);
+    window.addEventListener("offline", onNetworkChange);
+    window.addEventListener("online", onNetworkChange);
 
     return () => {
+      window.removeEventListener("offline", onNetworkChange);
+      window.removeEventListener("online", onNetworkChange);
       video.removeEventListener("play", onPlay);
       video.removeEventListener("pause", onPause);
       video.removeEventListener("timeupdate", onTimeUpdate);
