@@ -132,6 +132,9 @@ export function useAutoQualityDownshift(options: Options) {
   const attempt = useRef<string | null | undefined>(undefined);
   // The adopted plan is starting with play intent and has not played yet.
   const starting = useRef(false);
+  // The adopted plan has played. Until it has, a seek, the player's own
+  // start-position seek included, does not end the start's wait.
+  const planRan = useRef(false);
   // The page is closing, so the playing plan's summary is its last word.
   const pageEnding = useRef(false);
   const [pill, setPill] = useState<BufferingPillState | null>(null);
@@ -215,12 +218,16 @@ export function useAutoQualityDownshift(options: Options) {
     );
     if (isNewPlan) requestedPlan.current = undefined;
     const video = options.videoRef.current;
-    if (isNewPlan) starting.current = false;
+    if (isNewPlan) {
+      starting.current = false;
+      planRan.current = false;
+    }
     if (isNewPlan && video) {
       // A plan adopted while the element is already playing fires no `playing`.
-      if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA)
+      if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+        planRan.current = true;
         c.event({ type: "playing" }, now());
-      else if (
+      } else if (
         latest.current.playIntent?.() &&
         video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
       ) {
@@ -274,17 +281,18 @@ export function useAutoQualityDownshift(options: Options) {
       seekSincePlaying = false;
       reloadSincePlaying = false;
       starting.current = false;
+      planRan.current = true;
       send("playing");
     };
     const rendererBusy = () =>
       decoderRecovering(video) || bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS;
     const waitCause = (): BufferingEvent["cause"] => {
-      if (video.seeking || seekSincePlaying) return "seek";
       // Until its first frame, a start the viewer means to play is the plan's
-      // wait, though the transport emptied the element on the way and it has
-      // not begun to play yet; an explicit pause ends the start. A renderer
-      // that is behind is still not the network.
+      // wait, though the transport emptied the element or a seek moved it on
+      // the way and it has not begun to play yet; an explicit pause ends the
+      // start. A renderer that is behind is still not the network.
       if (starting.current) return rendererBusy() ? "renderer" : undefined;
+      if (planRan.current && (video.seeking || seekSincePlaying)) return "seek";
       if (reloadSincePlaying) return "reload";
       if (video.paused) return "pause";
       if (rendererBusy()) return "renderer";
@@ -303,6 +311,9 @@ export function useAutoQualityDownshift(options: Options) {
     };
     const play = () => send("play");
     const seek = () => {
+      // Before the plan first runs, buffering after a seek, the player's
+      // start-position seek included, still belongs to the start.
+      if (!planRan.current) return;
       const forward = video.currentTime - (stalledAt ?? lastPosition);
       if (stalledAt !== undefined && forward >= 0 && forward <= GAP_SKIP_MAX_SECONDS) return;
       stalledAt = undefined;

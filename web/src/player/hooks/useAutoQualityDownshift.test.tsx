@@ -287,6 +287,63 @@ it("does not count a slow start's wait while the renderer, not the network, is b
   expect(onReplan).not.toHaveBeenCalled();
 });
 
+it("keeps timing a slow start through a seek before its first frame", () => {
+  const video = document.createElement("video");
+  Object.defineProperty(video, "paused", { value: true, configurable: true });
+  const onReplan = vi.fn();
+  renderHook((props) => useAutoQualityDownshift(props), {
+    initialProps: {
+      videoRef: { current: video },
+      enabled: true,
+      sessionId: "title",
+      plan,
+      planRevision: 1,
+      mode: "always" as const,
+      obscured: false,
+      playIntent: () => true,
+      onReplan,
+      onNotice: vi.fn(),
+    },
+  });
+  // The player applies the resume position before anything has played.
+  act(() => {
+    video.dispatchEvent(new Event("seeking"));
+    video.dispatchEvent(new Event("waiting"));
+  });
+  act(() => vi.advanceTimersByTime(16_100));
+  expect(onReplan).toHaveBeenCalledTimes(1);
+});
+
+it("counts the wait after a seek made before a paused plan first played", () => {
+  const video = document.createElement("video");
+  let paused = true;
+  Object.defineProperty(video, "paused", { get: () => paused, configurable: true });
+  const onReplan = vi.fn();
+  renderHook((props) => useAutoQualityDownshift(props), {
+    initialProps: {
+      videoRef: { current: video },
+      enabled: true,
+      sessionId: "title",
+      plan,
+      planRevision: 1,
+      mode: "always" as const,
+      obscured: false,
+      playIntent: () => false,
+      onReplan,
+      onNotice: vi.fn(),
+    },
+  });
+  // Opened paused: the viewer seeks, then plays, and nothing arrives.
+  act(() => {
+    video.dispatchEvent(new Event("seeking"));
+    paused = false;
+    video.dispatchEvent(new Event("play"));
+    video.dispatchEvent(new Event("waiting"));
+  });
+  act(() => vi.advanceTimersByTime(16_100));
+  expect(onReplan).toHaveBeenCalledTimes(1);
+});
+
 it("does not time a start the player will not play", () => {
   const video = document.createElement("video");
   Object.defineProperty(video, "paused", { value: true, configurable: true });
