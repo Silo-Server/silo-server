@@ -366,13 +366,20 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	// A subtree scan under a skipped library root would walk nothing and
 	// retire the subtree piece by piece, bypassing the empty-root guard. Only
 	// a full library scan decides what happens to a skipped root's catalog.
-	if root := scopeLibraryRoot(cleanSubtree, folder.Paths); root != "" && libraryRootSkipped(root) {
-		slog.InfoContext(ctx, "scanner: library root is skipped by its ignore files; leaving subtree to a full library scan", "component", "scanner",
-			"folder_id", folder.ID,
-			"root", root,
-			"scope", cleanSubtree,
-		)
-		return &ScanResult{}, nil
+	if root := scopeLibraryRoot(cleanSubtree, folder.Paths); root != "" {
+		skipped, err := libraryRootSkipped(root)
+		if err != nil {
+			// Without the root's rules the scope cannot tell what it excludes.
+			return nil, fmt.Errorf("library root %s: %w", root, err)
+		}
+		if skipped {
+			slog.InfoContext(ctx, "scanner: library root is skipped by its ignore files; leaving subtree to a full library scan", "component", "scanner",
+				"folder_id", folder.ID,
+				"root", root,
+				"scope", cleanSubtree,
+			)
+			return &ScanResult{}, nil
+		}
 	}
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
@@ -635,7 +642,12 @@ func walkLogicalTree(
 		sidecars.record(logicalPath, entries)
 	}
 
-	childRules, skip := dirIgnoreRules(ignoreRulesStack, logicalPath, physicalPath, entries)
+	childRules, skip, err := dirIgnoreRules(ignoreRulesStack, logicalPath, physicalPath, entries)
+	if err != nil {
+		slog.WarnContext(ctx, "scanner: ignore file read failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		recordWalkFailure(walkFailures, logicalPath)
+		return nil
+	}
 	if skip {
 		return nil
 	}
