@@ -11,10 +11,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
-// ContributionRunner submits a file's eligible markers (satisfied by
+// ContributionRunner submits a file's eligible markers and reports which
+// providers accept submissions (satisfied by
 // *markers.ContributionService).
 type ContributionRunner interface {
 	ContributeFile(ctx context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error)
+	AcceptsContributions(provider string) bool
 }
 
 // AutoContributeConfigReader exposes per-provider contribution config (satisfied
@@ -97,7 +99,9 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 	minConfidence := 0.0
 	var providers []string
 	for _, c := range t.config.List() {
-		if !c.ContributeEnabled || !c.ContributeAutoLocal {
+		// A provider's saved flags outlive its submit support, for example when
+		// a plugin update declares supports_contribution=false.
+		if !c.ContributeEnabled || !c.ContributeAutoLocal || !t.service.AcceptsContributions(c.Provider) {
 			continue
 		}
 		if len(providers) == 0 || c.ContributeMinConfidence < minConfidence {

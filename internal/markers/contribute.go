@@ -129,6 +129,11 @@ func (s *ContributionService) submitters() []Submitter {
 	return out
 }
 
+// AcceptsContributions reports whether provider is registered as a Submitter.
+func (s *ContributionService) AcceptsContributions(provider string) bool {
+	return slices.ContainsFunc(s.submitters(), func(sub Submitter) bool { return sub.ID() == provider })
+}
+
 // ContributeFile submits the file's eligible markers and returns one outcome
 // per (provider, segment) attempted (including explicit skips).
 func (s *ContributionService) ContributeFile(ctx context.Context, file *models.MediaFile, opts ContributeOptions) ([]ContributionOutcome, error) {
