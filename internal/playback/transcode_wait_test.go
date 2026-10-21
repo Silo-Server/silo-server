@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -73,12 +74,14 @@ func TestWaitsReturnOutputWrittenDuringTheWait(t *testing.T) {
 		// A running session's playlist is ready once it lists the startup
 		// segments and each of them is on disk.
 		var files [][2]string
-		playlist := "#EXTM3U\n#EXT-X-TARGETDURATION:2\n"
+		var playlistBuilder strings.Builder
+		playlistBuilder.WriteString("#EXTM3U\n#EXT-X-TARGETDURATION:2\n")
 		for i := range startupSegmentRequirement(opts) {
 			name := fmt.Sprintf("seg_%05d.ts", i)
 			files = append(files, [2]string{name, "segment"})
-			playlist += "#EXTINF:2,\n" + name + "\n"
+			playlistBuilder.WriteString("#EXTINF:2,\n" + name + "\n")
 		}
+		playlist := playlistBuilder.String()
 		files = append(files, [2]string{"stream.m3u8", playlist})
 		written := writeAfterWaitStarts(t, dir, files)
 
