@@ -276,16 +276,18 @@ export function useAutoQualityDownshift(options: Options) {
       starting.current = false;
       send("playing");
     };
+    const rendererBusy = () =>
+      decoderRecovering(video) || bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS;
     const waitCause = (): BufferingEvent["cause"] => {
       if (video.seeking || seekSincePlaying) return "seek";
       // Until its first frame, a start the viewer means to play is the plan's
       // wait, though the transport emptied the element on the way and it has
-      // not begun to play yet; an explicit pause ends the start.
-      if (starting.current) return undefined;
+      // not begun to play yet; an explicit pause ends the start. A renderer
+      // that is behind is still not the network.
+      if (starting.current) return rendererBusy() ? "renderer" : undefined;
       if (reloadSincePlaying) return "reload";
       if (video.paused) return "pause";
-      if (decoderRecovering(video) || bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS)
-        return "renderer";
+      if (rendererBusy()) return "renderer";
       return undefined;
     };
     const waiting = () => {
@@ -337,11 +339,7 @@ export function useAutoQualityDownshift(options: Options) {
     if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) playing();
     const timer = setInterval(() => {
       syncTrouble();
-      if (
-        rendererWait &&
-        !decoderRecovering(video) &&
-        bufferedAheadMs(video) <= RENDERER_WAIT_BUFFER_MS
-      ) {
+      if (rendererWait && !rendererBusy()) {
         rendererWait = false;
         c.event({ type: "waiting" }, now());
       }

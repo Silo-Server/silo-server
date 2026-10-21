@@ -257,6 +257,36 @@ it("keeps timing a slow start through the waiting that follows its reload", () =
   expect(onReplan).toHaveBeenCalledTimes(1);
 });
 
+it("does not count a slow start's wait while the renderer, not the network, is behind", () => {
+  const video = document.createElement("video");
+  Object.defineProperty(video, "paused", { value: true, configurable: true });
+  // Five seconds are buffered from the start, but no frame has shown yet.
+  Object.defineProperty(video, "buffered", {
+    configurable: true,
+    get: () => ({ length: 1, start: () => 0, end: () => 5 }),
+  });
+  const onReplan = vi.fn();
+  renderHook((props) => useAutoQualityDownshift(props), {
+    initialProps: {
+      videoRef: { current: video },
+      enabled: true,
+      sessionId: "title",
+      plan,
+      planRevision: 1,
+      mode: "always" as const,
+      obscured: false,
+      playIntent: () => true,
+      onReplan,
+      onNotice: vi.fn(),
+    },
+  });
+  act(() => {
+    video.dispatchEvent(new Event("waiting"));
+  });
+  act(() => vi.advanceTimersByTime(30_000));
+  expect(onReplan).not.toHaveBeenCalled();
+});
+
 it("does not time a start the player will not play", () => {
   const video = document.createElement("video");
   Object.defineProperty(video, "paused", { value: true, configurable: true });
