@@ -724,7 +724,7 @@ func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID string, ar
 	}
 	filter.ImageSize = art.Size
 	filter.ImageWidths = art.Widths
-	return handlers.ItemViewer{Access: filter, ProfileID: profileID}, nil
+	return handlers.ItemViewer{Access: filter, ProfileID: profileID, IncludeCardAvailability: true}, nil
 }
 
 // versionsScopedToLibrary reads catalog.scope_versions_to_library. A read

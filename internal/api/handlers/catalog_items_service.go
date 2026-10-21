@@ -548,7 +548,9 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 				resp = append(resp, sr)
 			}
 			h.items.enrichSeasonPlayTargets(ctx, v, id, resp)
-			h.items.attachSeasonListAvailability(ctx, filter, id, resp)
+			if v.IncludeCardAvailability {
+				h.items.attachSeasonListAvailability(ctx, filter, id, resp)
+			}
 			return resp, nil
 		}
 	}
@@ -573,7 +575,9 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 		})
 	}
 	h.items.enrichSeasonPlayTargets(ctx, v, id, resp)
-	h.items.attachSeasonListAvailability(ctx, filter, id, resp)
+	if v.IncludeCardAvailability {
+		h.items.attachSeasonListAvailability(ctx, filter, id, resp)
+	}
 	return resp, nil
 }
 
@@ -610,7 +614,7 @@ func (h *CatalogResourceHandler) SeriesSeason(ctx context.Context, v ItemViewer,
 			h.items.maybeRequestStaleSeasonMetadataRefresh(ctx, season.ContentID, episodes)
 			resp := h.items.toSeasonResponseFromEpisodes(ctx, v, id, season, episodes, userData, v.Access.ImageSizeFor(imagesize.SlotPoster))
 			h.items.resolveSeasonPlayTarget(ctx, v, id, &resp)
-			return h.withSeasonAvailability(ctx, v.Access, id, resp), nil
+			return h.withSeasonAvailability(ctx, v, id, resp), nil
 		case !errors.Is(err, catalog.ErrSeasonNotFound):
 			return SeasonView{}, apiError(http.StatusInternalServerError, "internal_error", failed)
 		}
@@ -635,14 +639,18 @@ func (h *CatalogResourceHandler) SeriesSeason(ctx context.Context, v ItemViewer,
 		UserData:     h.items.getAggregateUserData(ctx, v, episodes),
 	}
 	h.items.resolveSeasonPlayTarget(ctx, v, id, &resp)
-	return h.withSeasonAvailability(ctx, v.Access, id, resp), nil
+	return h.withSeasonAvailability(ctx, v, id, resp), nil
 }
 
 // withSeasonAvailability fills Availability the same way the season list does,
-// so opening one season keeps the badge the collection already showed.
-func (h *CatalogResourceHandler) withSeasonAvailability(ctx context.Context, access catalog.AccessFilter, seriesID string, season seasonResponse) seasonResponse {
+// so opening one season keeps the badge the collection already showed. It is a
+// no-op for v1 viewers: Availability is json:"-" there.
+func (h *CatalogResourceHandler) withSeasonAvailability(ctx context.Context, v ItemViewer, seriesID string, season seasonResponse) seasonResponse {
+	if !v.IncludeCardAvailability {
+		return season
+	}
 	seasons := []seasonResponse{season}
-	h.items.attachSeasonListAvailability(ctx, access, seriesID, seasons)
+	h.items.attachSeasonListAvailability(ctx, v.Access, seriesID, seasons)
 	return seasons[0]
 }
 

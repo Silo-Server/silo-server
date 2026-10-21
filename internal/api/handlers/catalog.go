@@ -218,7 +218,7 @@ func (h *CatalogHandler) catalogItemResponses(ctx context.Context, v ItemViewer,
 		resp.SortMetrics = sortMetrics[item.ContentID]
 		items = append(items, resp)
 	}
-	if h.itemsH != nil {
+	if h.itemsH != nil && v.IncludeCardAvailability {
 		h.itemsH.attachItemListAvailability(ctx, accessFilter, items)
 	}
 	return items

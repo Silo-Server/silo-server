@@ -95,6 +95,14 @@ func TestSeriesSeasonAvailabilityDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for season := range want {
+		if _, ok := scoped[series][season]; !ok {
+			t.Fatalf("allowlist missing season %d", season)
+		}
+	}
+	if scoped[series][1].Total != 2 {
+		t.Fatalf("allowlist: season 1 total = %d, want 2", scoped[series][1].Total)
+	}
 	if scoped[series][1].Have != 0 {
 		t.Fatalf("allowlist excluding enabled library: season 1 have = %d, want 0", scoped[series][1].Have)
 	}

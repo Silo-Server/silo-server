@@ -2390,6 +2390,10 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 type ItemViewer struct {
 	Access    catalog.AccessFilter
 	ProfileID string
+	// IncludeCardAvailability runs the season/series presence lookup for
+	// poster badges. Only /api/v2 sets it: Availability is json:"-" on the
+	// frozen v1 card and season shapes, so v1 must not pay for the aggregation.
+	IncludeCardAvailability bool
 }
 
 // viewerFromRequest pairs an already-resolved access filter with the
