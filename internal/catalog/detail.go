@@ -393,6 +393,11 @@ type ItemExtraInfo struct {
 	Title           string `json:"title,omitempty"`
 	DurationSeconds int    `json:"duration_seconds,omitempty"`
 	FileID          int    `json:"file_id,omitempty"`
+	// The extra's 16:9 card image. Only the V2 and Jellyfin surfaces carry
+	// it; the frozen V1 detail gains no field.
+	StillPath      string `json:"-"`
+	StillURL       string `json:"-"`
+	StillThumbhash string `json:"-"`
 }
 
 type AudiobookDetailExtension struct {
@@ -2258,7 +2263,7 @@ func (s *DetailService) fetchItemRatingSources(ctx context.Context, contentID st
 
 // fetchItemExtras returns the item's local extras in API shape, honoring a
 // batch prefetch when present. Lookup failures degrade to an empty section.
-func (s *DetailService) fetchItemExtras(ctx context.Context, contentID string, pf *itemDetailPrefetch) []ItemExtraInfo {
+func (s *DetailService) fetchItemExtras(ctx context.Context, contentID string, filter AccessFilter, pf *itemDetailPrefetch) []ItemExtraInfo {
 	var extras []ExtraWithFile
 	if pf != nil && pf.haveExtras {
 		extras = pf.extras
@@ -2273,15 +2278,26 @@ func (s *DetailService) fetchItemExtras(ctx context.Context, contentID string, p
 	if len(extras) == 0 {
 		return nil
 	}
+	stillPaths := make([]string, 0, len(extras))
+	for _, e := range extras {
+		stillPaths = append(stillPaths, e.StillPath)
+	}
+	stillURLs := s.PresignImageURLs(ctx, stillPaths, "still", string(filter.ImageSizeFor(imagesize.SlotStill)))
 	infos := make([]ItemExtraInfo, 0, len(extras))
 	for _, e := range extras {
-		infos = append(infos, ItemExtraInfo{
+		info := ItemExtraInfo{
 			ContentID:       e.ContentID,
 			Kind:            string(e.Kind),
 			Title:           e.Title,
 			DurationSeconds: e.Duration,
 			FileID:          e.FileID,
-		})
+			StillPath:       e.StillPath,
+			StillURL:        stillURLs[e.StillPath],
+		}
+		if info.StillURL != "" {
+			info.StillThumbhash = e.StillThumbhash
+		}
+		infos = append(infos, info)
 	}
 	return infos
 }
@@ -2456,7 +2472,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	if item.Type == "movie" || item.Type == "series" {
 		detail.Videos = s.fetchItemVideos(ctx, contentID, pf)
 		detail.RatingSources = s.fetchItemRatingSources(ctx, contentID, pf)
-		detail.Extras = s.fetchItemExtras(ctx, contentID, pf)
+		detail.Extras = s.fetchItemExtras(ctx, contentID, filter, pf)
 	}
 
 	if item.Type == detailTypeAudiobook {
@@ -3557,9 +3573,14 @@ func (s *DetailService) buildExtraWatchDetail(ctx context.Context, contentID str
 		}
 		detail.Year = parent.Year
 		if !filter.OmitWatchArtwork {
+			// Like an episode's still, the extra's own image is its poster
+			// when it has one.
 			detail.PosterThumbhash = parent.PosterThumbhash
-			detail.BackdropThumbhash = parent.BackdropThumbhash
 			detail.PosterURL = s.PresignImageURL(ctx, parent.PosterPath, "poster", string(filter.ImageSizeFor(imagesize.SlotPoster)))
+			if stillURL := s.PresignImageURL(ctx, extra.StillPath, "still", string(filter.ImageSizeFor(imagesize.SlotPoster))); stillURL != "" {
+				detail.PosterURL, detail.PosterThumbhash = stillURL, extra.StillThumbhash
+			}
+			detail.BackdropThumbhash = parent.BackdropThumbhash
 			detail.BackdropURL = s.PresignImageURL(ctx, parent.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))
 		}
 	}

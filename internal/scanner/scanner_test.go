@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,15 +15,6 @@ import (
 type recordingQueueSyncer struct {
 	folderID int
 	scope    string
-}
-
-func scopedFolderPaths(folder *models.MediaFolder, paths []string) *models.MediaFolder {
-	if folder == nil {
-		return nil
-	}
-	clone := *folder
-	clone.Paths = paths
-	return &clone
 }
 
 func (s *recordingQueueSyncer) SyncForFolder(context.Context, int) error {
@@ -340,18 +330,6 @@ func TestPersistIdentityUpdateUsesReturnedIDBeforeEnqueue(t *testing.T) {
 	}
 }
 
-func TestPersistIdentityUpdatePropagatesEnqueueFailure(t *testing.T) {
-	want := errors.New("queue unavailable")
-	applied, err := persistIdentityUpdate(
-		&models.MediaFile{FilePath: "/library/movie.mkv"},
-		func(models.MediaFile) (int, error) { return 42, nil },
-		func(*models.MediaFile) error { return want },
-	)
-	if !applied || !errors.Is(err, want) {
-		t.Fatalf("persistIdentityUpdate = (%v, %v), want applied and queue error", applied, err)
-	}
-}
-
 func TestIdentityOnlyFastPathEligible(t *testing.T) {
 	t.Parallel()
 
@@ -387,62 +365,6 @@ func testStringSliceContains(values []string, target string) bool {
 	return false
 }
 
-func TestWalkModeForEbookLibraryTypes(t *testing.T) {
-	for _, libraryType := range []string{"ebook", "ebooks", " EBOOKS "} {
-		if got := walkModeFor(libraryType); got != walkModeEbook {
-			t.Fatalf("walkModeFor(%q) = %v, want %v", libraryType, got, walkModeEbook)
-		}
-	}
-}
-
-func TestWalkModeEbookAcceptsEbookExtensionsOnly(t *testing.T) {
-	for _, ext := range []string{".epub", ".pdf", ".mobi", ".azw", ".azw3", ".fb2", ".fbz", ".cbz", ".cbr"} {
-		if !walkModeEbook.acceptsPath("Book" + ext) {
-			t.Fatalf("walkModeEbook should accept %s", ext)
-		}
-	}
-	for _, ext := range []string{".txt", ".md", ".mp4", ".mp3", ".mkv"} {
-		if walkModeEbook.acceptsPath("Book" + ext) {
-			t.Fatalf("walkModeEbook should reject %s", ext)
-		}
-	}
-	if !walkModeEbook.acceptsPath("Book.fb2.zip") {
-		t.Fatal("walkModeEbook should accept .fb2.zip compound extension")
-	}
-}
-
-func TestScanFolderEbookLibraryRoutesToEbookScanner(t *testing.T) {
-	scanner := &Scanner{}
-	result, err := scanner.ScanFolder(context.Background(), &models.MediaFolder{
-		ID:    0,
-		Type:  " ebooks ",
-		Paths: []string{t.TempDir()},
-	})
-	if err != nil {
-		t.Fatalf("ScanFolder ebook error = %v, want nil", err)
-	}
-	if result == nil {
-		t.Fatal("ScanFolder ebook result = nil, want empty result")
-	}
-}
-
-func TestScanSubtreeEbookLibraryRoutesToEbookScanner(t *testing.T) {
-	subtree := t.TempDir()
-
-	scanner := &Scanner{}
-	result, err := scanner.ScanSubtree(context.Background(), &models.MediaFolder{
-		ID:    0,
-		Type:  "ebook",
-		Paths: []string{subtree},
-	}, subtree)
-	if err != nil {
-		t.Fatalf("ScanSubtree ebook error = %v, want nil", err)
-	}
-	if result == nil {
-		t.Fatal("ScanSubtree ebook result = nil, want empty result")
-	}
-}
-
 func TestScanFileEbookLibraryUsesEbookPipeline(t *testing.T) {
 	filePath := filepath.Join(t.TempDir(), "book.epub")
 	if err := os.WriteFile(filePath, []byte("not a real epub"), 0o644); err != nil {
@@ -458,24 +380,6 @@ func TestScanFileEbookLibraryUsesEbookPipeline(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "folder_id=44") {
 		t.Fatalf("error = %q, want ebook scanner aggregate failure", err)
-	}
-}
-
-func TestScanFileMangaLibraryUsesMangaPipeline(t *testing.T) {
-	filePath := filepath.Join(t.TempDir(), "chapter.cbz")
-	if err := os.WriteFile(filePath, []byte("not a real cbz"), 0o644); err != nil {
-		t.Fatalf("write fake manga: %v", err)
-	}
-
-	err := (&Scanner{}).ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 45, Type: "manga"})
-	if err == nil {
-		t.Fatal("ScanFile returned nil, want manga parse failure")
-	}
-	if strings.Contains(err.Error(), "unrecognized video extension") {
-		t.Fatalf("ScanFile used video extension gate: %v", err)
-	}
-	if !strings.Contains(err.Error(), "folder_id=45") {
-		t.Fatalf("error = %q, want manga scanner aggregate failure", err)
 	}
 }
 

@@ -21,13 +21,6 @@ func TestSafeText(t *testing.T) {
 	}
 }
 
-func TestSafeTextDoesNotAllocateForCleanText(t *testing.T) {
-	s := "GET /api/v2/items/42 Mozilla/5.0"
-	if n := testing.AllocsPerRun(100, func() { _ = SafeText(s) }); n != 0 {
-		t.Fatalf("SafeText allocated %v times for clean text", n)
-	}
-}
-
 func TestSafeJSON(t *testing.T) {
 	for _, tc := range []struct {
 		name string

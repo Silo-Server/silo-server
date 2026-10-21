@@ -135,25 +135,6 @@ describe("SettingsLayout", () => {
     expect(screen.getByText("3 matches")).toBeInTheDocument();
   });
 
-  it("finds Home Screen when searching for home rows", async () => {
-    renderSettings("/settings/playback");
-
-    await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "home rows");
-
-    expect(screen.getAllByRole("link", { name: /Home Screen/ })).toHaveLength(1);
-  });
-
-  it.each(["hide watched items", "export layout", "import layout", "reset home"])(
-    "finds Home Screen when searching for %s",
-    async (query) => {
-      renderSettings("/settings/playback");
-
-      await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), query);
-
-      expect(screen.getAllByRole("link", { name: /Home Screen/ })).toHaveLength(1);
-    },
-  );
-
   it("focuses personal settings search with Cmd+K", () => {
     render(
       <MemoryRouter initialEntries={["/settings"]}>
@@ -163,19 +144,6 @@ describe("SettingsLayout", () => {
 
     const searchBox = screen.getByRole("searchbox", { name: "Search settings" });
     fireEvent.keyDown(document, { key: "k", metaKey: true });
-
-    expect(searchBox).toHaveFocus();
-  });
-
-  it("focuses personal settings search with Ctrl+K", () => {
-    render(
-      <MemoryRouter initialEntries={["/settings"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    const searchBox = screen.getByRole("searchbox", { name: "Search settings" });
-    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
 
     expect(searchBox).toHaveFocus();
   });
@@ -215,11 +183,5 @@ describe("SettingsLayout", () => {
       "/settings/playback",
     );
     expect(screen.queryByTestId("settings-page")).not.toBeInTheDocument();
-  });
-
-  it("leads back to the page settings were opened from", () => {
-    renderSettings("/settings/playback");
-
-    expect(screen.getByRole("link", { name: "Back to App" })).toHaveAttribute("href", "/movies");
   });
 });

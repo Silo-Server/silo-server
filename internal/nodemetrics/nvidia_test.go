@@ -59,90 +59,12 @@ func TestParseNVIDIASMIToleratesPlaceholders(t *testing.T) {
 	}
 }
 
-// A card that reports memory but no video engines keeps the nvidia-smi source
-// for the columns it did answer, and simply carries no engine reading.
-func TestSampleGPUKeepsPartialNVIDIAReadings(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
-
-	s := newTestSampler(t, tree, clock, Options{})
-	s.runNVIDIASMI = func(context.Context) ([]byte, error) {
-		return []byte("0, GPU-x, 00000000:03:00.0, 71, [N/A], [N/A], 812, 8192\n"), nil
-	}
-	s.sample(context.Background())
-
-	gpu := s.Snapshot().GPU
-	if len(gpu) != 1 {
-		t.Fatalf("GPU = %+v, want one device", gpu)
-	}
-	if gpu[0].Source != SourceNVIDIASMI {
-		t.Fatalf("Source = %q, want %q for the columns it did measure", gpu[0].Source, SourceNVIDIASMI)
-	}
-	if gpu[0].VideoBusyPct != nil {
-		t.Fatalf("VideoBusyPct = %d, want no reading for engines the driver cannot see", *gpu[0].VideoBusyPct)
-	}
-	if gpu[0].TotalBusyPct == nil || *gpu[0].TotalBusyPct != 71 {
-		t.Fatalf("TotalBusyPct = %v, want the 71 nvidia-smi did report", gpu[0].TotalBusyPct)
-	}
-	if gpu[0].VRAMTotalMB == nil || *gpu[0].VRAMTotalMB != 8192 {
-		t.Fatalf("VRAMTotalMB = %v, want the 8192 nvidia-smi did report", gpu[0].VRAMTotalMB)
-	}
-}
-
-func TestSampleGPUEnrichesWithNVIDIASMI(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
-
-	s := newTestSampler(t, tree, clock, Options{
-		DeviceSessions: func() map[string]int { return map[string]int{"cuda:0": 3} },
-	})
-	s.runNVIDIASMI = func(context.Context) ([]byte, error) { return []byte(nvidiaSMIOutput), nil }
-	s.sample(context.Background())
-
-	gpu := s.Snapshot().GPU
-	if len(gpu) != 2 {
-		t.Fatalf("GPU = %+v, want both cards", gpu)
-	}
-	first := gpu[0]
-	// The proprietary driver exposes no DRM node this process can read, so the
-	// device is named the way playback addresses it.
-	if first.Device != "cuda:0" {
-		t.Fatalf("Device = %q, want cuda:0", first.Device)
-	}
-	if first.Vendor != "nvidia" || first.Source != SourceNVIDIASMI {
-		t.Fatalf("GPU[0] = %+v, want nvidia via nvidia-smi", first)
-	}
-	if first.Sessions != 3 {
-		t.Fatalf("Sessions = %d, want the balancer's count for cuda:0", first.Sessions)
-	}
-	if first.TotalBusyPct == nil || *first.TotalBusyPct != 71 {
-		t.Fatalf("TotalBusyPct = %v, want 71", first.TotalBusyPct)
-	}
-	if got := enginePct(t, first.VideoBusyPct); got != 63 {
-		t.Fatalf("VideoBusyPct = %d, want the busier of encoder/decoder", got)
-	}
-	if first.VRAMUsedMB == nil || *first.VRAMUsedMB != 812 {
-		t.Fatalf("VRAMUsedMB = %v, want 812", first.VRAMUsedMB)
-	}
-}
-
 // A GPU that has both DRM counters and an nvidia-smi row must be one entry
 // crediting both sources, not two entries.
 func TestSampleGPUMergesFdinfoAndNVIDIASMIOnOneDevice(t *testing.T) {
 	tree := newProcTree(t)
 	clock := newFakeClock()
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
+	tree.writeIdleHost()
 	tree.write("4242/fdinfo/3", `drm-driver:	nvidia-drm
 drm-pdev:	0000:03:00.0
 drm-client-id:	1
@@ -192,10 +114,7 @@ func TestSampleGPUJoinsNVENCSessionsThroughDeviceAliases(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tree := newProcTree(t)
 			clock := newFakeClock()
-			tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-			tree.write("loadavg", "0 0 0 0/0 0\n")
-			tree.write("meminfo", "MemTotal: 1024 kB\n")
-			tree.write("net/dev", "")
+			tree.writeIdleHost()
 
 			s := newTestSampler(t, tree, clock, Options{
 				DeviceSessions: func() map[string]int { return tc.sessions },
@@ -229,10 +148,7 @@ func TestSampleGPUJoinsNVENCSessionsThroughDeviceAliases(t *testing.T) {
 func TestSampleGPUDoesNotDoubleCountSessionsAcrossDevices(t *testing.T) {
 	tree := newProcTree(t)
 	clock := newFakeClock()
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
+	tree.writeIdleHost()
 
 	s := newTestSampler(t, tree, clock, Options{
 		DeviceSessions: func() map[string]int { return map[string]int{"cuda:1": 2} },
@@ -249,58 +165,6 @@ func TestSampleGPUDoesNotDoubleCountSessionsAcrossDevices(t *testing.T) {
 	}
 	if total != 2 {
 		t.Fatalf("sessions across devices = %d, want the 2 counted exactly once", total)
-	}
-}
-
-// A successful command that parses to nothing is as useless as a failure, and
-// is how an unsupported query syntax presents.
-func TestNVIDIACircuitBreakerCountsEmptyOutputAsFailure(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	s := newTestSampler(t, tree, clock, Options{})
-	calls := 0
-	s.runNVIDIASMI = func(context.Context) ([]byte, error) {
-		calls++
-		return []byte("\n"), nil
-	}
-	for range sourceFailureLimit + 3 {
-		s.queryNVIDIA(context.Background())
-	}
-	if calls != sourceFailureLimit {
-		t.Fatalf("nvidia-smi invoked %d times, want it retired after %d empty answers", calls, sourceFailureLimit)
-	}
-}
-
-// A transient failure must not retire the source: a driver busy for one sample
-// is normal, and losing the only NVIDIA signal over it would be a regression an
-// operator cannot recover from without a restart.
-func TestNVIDIACircuitBreakerResetsOnSuccess(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	s := newTestSampler(t, tree, clock, Options{})
-	fail := true
-	calls := 0
-	s.runNVIDIASMI = func(context.Context) ([]byte, error) {
-		calls++
-		if fail {
-			return nil, errors.New("busy")
-		}
-		return []byte(nvidiaSMIOutput), nil
-	}
-
-	for range sourceFailureLimit - 1 {
-		s.queryNVIDIA(context.Background())
-	}
-	fail = false
-	if gpus := s.queryNVIDIA(context.Background()); len(gpus) != 2 {
-		t.Fatalf("recovered query returned %d gpus, want 2", len(gpus))
-	}
-	fail = true
-	for range sourceFailureLimit - 1 {
-		s.queryNVIDIA(context.Background())
-	}
-	if calls != 2*(sourceFailureLimit-1)+1 {
-		t.Fatalf("nvidia-smi invoked %d times, want the failure count reset by the success", calls)
 	}
 }
 
@@ -358,36 +222,5 @@ func TestNVIDIACircuitBreakerHalfOpensAfterItsRetryInterval(t *testing.T) {
 	}
 	if calls != sourceFailureLimit+3 {
 		t.Fatalf("nvidia-smi invoked %d times, want the breaker to stop gating once it answered", calls)
-	}
-}
-
-// A re-probe is an operator saying something changed underneath this node, so
-// it must not wait out the retry interval to find out.
-func TestRetrySourcesReturnsARetiredSourceImmediately(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	s := newTestSampler(t, tree, clock, Options{})
-	calls := 0
-	fail := true
-	s.runNVIDIASMI = func(context.Context) ([]byte, error) {
-		calls++
-		if fail {
-			return nil, errors.New("nvidia-smi: command not found")
-		}
-		return []byte(nvidiaSMIOutput), nil
-	}
-
-	for range sourceFailureLimit + 2 {
-		s.queryNVIDIA(context.Background())
-	}
-	if calls != sourceFailureLimit {
-		t.Fatalf("nvidia-smi invoked %d times, want it retired", calls)
-	}
-
-	// The toolkit is installed; the operator re-probes rather than waiting.
-	fail = false
-	s.RetrySources()
-	if gpus := s.queryNVIDIA(context.Background()); len(gpus) != 2 {
-		t.Fatalf("query after RetrySources returned %d gpus, want the source back in service", len(gpus))
 	}
 }

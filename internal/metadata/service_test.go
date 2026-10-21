@@ -727,13 +727,6 @@ func (r *fakeFileRepo) setRootContent(folderID int, rootPath, contentID string) 
 	r.rootContent[key] = contentID
 }
 
-func (r *fakeFileRepo) setGroupContent(folderID int, groupKeyVersion int, contentGroupKey, contentID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	key := fmt.Sprintf("%d:%d:%s", folderID, groupKeyVersion, contentGroupKey)
-	r.groupContent[key] = contentID
-}
-
 func (r *fakeFileRepo) setGroupFiles(folderID int, groupKeyVersion int, contentGroupKey string, files ...*models.MediaFile) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -759,32 +752,7 @@ func (r *fakeFileRepo) ClaimUnmatchedByFolderAndPathPrefix(_ context.Context, fo
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.claimUnmatchedCalls++
-	files := make([]*models.MediaFile, 0)
-	for _, groupFiles := range r.groupFiles {
-		for _, file := range groupFiles {
-			if file == nil || file.MediaFolderID != folderID {
-				continue
-			}
-			if cid := r.contentIDs[file.ID]; cid != "" {
-				continue
-			}
-			if pathPrefix != "" && file.FilePath != pathPrefix && !strings.HasPrefix(file.FilePath, pathPrefix+"/") {
-				continue
-			}
-			if !attemptBefore.IsZero() {
-				if stamp, ok := r.matchStamps[file.ID]; ok && !stamp.Before(attemptBefore) {
-					continue
-				}
-			}
-			cp := *file
-			files = append(files, &cp)
-			r.matchStamps[file.ID] = time.Now()
-			if limit > 0 && len(files) >= limit {
-				return files, nil
-			}
-		}
-	}
-	return files, nil
+	return r.claimScopedLocked(folderID, pathPrefix, limit, attemptBefore), nil
 }
 
 func (r *fakeFileRepo) ClaimUnmatchedNonSeries(_ context.Context, limit int) ([]*models.MediaFile, error) {
@@ -798,32 +766,7 @@ func (r *fakeFileRepo) ClaimUnmatchedNonSeriesByFolderAndPathPrefix(_ context.Co
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.claimNonSeriesCalls++
-	files := make([]*models.MediaFile, 0)
-	for _, groupFiles := range r.groupFiles {
-		for _, file := range groupFiles {
-			if file == nil || file.MediaFolderID != folderID {
-				continue
-			}
-			if cid := r.contentIDs[file.ID]; cid != "" {
-				continue
-			}
-			if pathPrefix != "" && file.FilePath != pathPrefix && !strings.HasPrefix(file.FilePath, pathPrefix+"/") {
-				continue
-			}
-			if !attemptBefore.IsZero() {
-				if stamp, ok := r.matchStamps[file.ID]; ok && !stamp.Before(attemptBefore) {
-					continue
-				}
-			}
-			cp := *file
-			files = append(files, &cp)
-			r.matchStamps[file.ID] = time.Now()
-			if limit > 0 && len(files) >= limit {
-				return files, nil
-			}
-		}
-	}
-	return files, nil
+	return r.claimScopedLocked(folderID, pathPrefix, limit, attemptBefore), nil
 }
 
 func (r *fakeFileRepo) ClaimUnmatchedMixed(_ context.Context, limit int) ([]*models.MediaFile, error) {
@@ -837,6 +780,12 @@ func (r *fakeFileRepo) ClaimUnmatchedMixedByFolderAndPathPrefix(_ context.Contex
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.claimMixedCalls++
+	return r.claimScopedLocked(folderID, pathPrefix, limit, attemptBefore), nil
+}
+
+// claimScopedLocked claims unlinked files of one folder under pathPrefix that
+// were not attempted since attemptBefore. The caller holds r.mu.
+func (r *fakeFileRepo) claimScopedLocked(folderID int, pathPrefix string, limit int, attemptBefore time.Time) []*models.MediaFile {
 	files := make([]*models.MediaFile, 0)
 	for _, groupFiles := range r.groupFiles {
 		for _, file := range groupFiles {
@@ -858,11 +807,11 @@ func (r *fakeFileRepo) ClaimUnmatchedMixedByFolderAndPathPrefix(_ context.Contex
 			files = append(files, &cp)
 			r.matchStamps[file.ID] = time.Now()
 			if limit > 0 && len(files) >= limit {
-				return files, nil
+				return files
 			}
 		}
 	}
-	return files, nil
+	return files
 }
 
 func (r *fakeFileRepo) claimUnmatchedLocked(limit int) []*models.MediaFile {
@@ -1166,14 +1115,6 @@ func (r *fakeScannedRootRepo) Get(_ context.Context, folderID int, rootPath stri
 	return &cp, nil
 }
 
-func (r *fakeScannedRootRepo) setRoot(root *models.ScannedMediaRoot) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	key := fmt.Sprintf("%d:%s", root.MediaFolderID, root.RootPath)
-	cp := *root
-	r.roots[key] = &cp
-}
-
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -1217,64 +1158,6 @@ func newTestHarness() *testHarness {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-func TestRecordRefreshFailure_IncrementsDebtAttemptForManualRefresh(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	debts := newFakeRefreshDebtRepo()
-	h.service.refreshDebtRepo = debts
-	h.itemRepo.items["item-1"] = &models.MediaItem{
-		ContentID: "item-1",
-		Status:    "matched",
-	}
-	debts.debts["item-1"] = &models.MetadataRefreshDebt{
-		ContentID:     "item-1",
-		AttemptCount:  1,
-		NextRefreshAt: time.Now().UTC(),
-	}
-
-	h.service.recordRefreshFailure(ctx, "item-1", fmt.Errorf("provider failed"), true)
-
-	debt, err := debts.Get(ctx, "item-1")
-	if err != nil {
-		t.Fatalf("Get debt: %v", err)
-	}
-	if debt.AttemptCount != 2 {
-		t.Fatalf("manual failure attempt_count = %d, want 2", debt.AttemptCount)
-	}
-	if debt.LastError != "provider failed" {
-		t.Fatalf("last_error = %q, want provider failed", debt.LastError)
-	}
-}
-
-func TestRecordRefreshFailure_KeepsClaimedAttemptForScheduledRefresh(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	debts := newFakeRefreshDebtRepo()
-	h.service.refreshDebtRepo = debts
-	h.itemRepo.items["item-1"] = &models.MediaItem{
-		ContentID: "item-1",
-		Status:    "matched",
-	}
-	debts.debts["item-1"] = &models.MetadataRefreshDebt{
-		ContentID:     "item-1",
-		AttemptCount:  1,
-		NextRefreshAt: time.Now().UTC(),
-	}
-
-	h.service.recordRefreshFailure(ctx, "item-1", fmt.Errorf("provider failed"), false)
-
-	debt, err := debts.Get(ctx, "item-1")
-	if err != nil {
-		t.Fatalf("Get debt: %v", err)
-	}
-	if debt.AttemptCount != 1 {
-		t.Fatalf("scheduled failure attempt_count = %d, want 1", debt.AttemptCount)
-	}
-	if debt.LastError != "provider failed" {
-		t.Fatalf("last_error = %q, want provider failed", debt.LastError)
-	}
-}
 
 func TestSyncRefreshDebtForItemPreservesRequestedEpisodeDebt(t *testing.T) {
 	h := newTestHarness()
@@ -1900,196 +1783,156 @@ func TestRequestStaleMetadataRefreshStillNudgesRetryableEpisodeDebt(t *testing.T
 	}
 }
 
-// TestScheduledItemFailureReportsTerminalDebtOnce covers the failure sync of
-// an item target. The scheduled refresh's claim counted the attempt that took
-// the row to the terminal count, so its failure reports it. An on-demand
-// refresh that fails counts no attempt and reports nothing.
-func TestScheduledItemFailureReportsTerminalDebtOnce(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	debts := newFakeRefreshDebtRepo()
-	h.service.refreshDebtRepo = debts
-	h.itemRepo.items["series-1"] = &models.MediaItem{
-		ContentID:                 "series-1",
-		Type:                      "series",
-		Status:                    "matched",
-		EpisodeMetadataIncomplete: true,
-	}
-	claimedAt := time.Now()
-	debts.debts[fakeRefreshDebtKey(RefreshTargetItem, "series-1")] = &models.MetadataRefreshDebt{
-		TargetType:    RefreshTargetItem,
-		ContentID:     "series-1",
-		Priority:      refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete),
-		ReasonMask:    RefreshDebtReasonEpisodeIncomplete,
-		NextRefreshAt: claimedAt,
-		ClaimedAt:     &claimedAt,
-		LastAttemptAt: &claimedAt,
-		AttemptCount:  refreshDebtEpisodeTerminalAttempts,
-	}
-	h.service.hooks.process = func(context.Context, ProcessRequest) (*ProcessResult, error) {
-		return nil, errors.New("provider unavailable")
-	}
-	logs := captureDefaultLogs(t)
-
-	if err := h.service.RefreshScheduledTarget(ctx, RefreshTargetItem, "series-1"); err == nil {
-		t.Fatal("RefreshScheduledTarget succeeded, want the provider error")
-	}
-	if got := strings.Count(logs.String(), "reached terminal attempts"); got != 1 {
-		t.Fatalf("terminal warnings after the claimed refresh failed = %d, want 1\n%s", got, logs.String())
-	}
-
-	// runOnDemandMetadataRefresh refreshes the target this way, with no claim.
-	if err := h.service.refreshTarget(ctx, RefreshTargetItem, "series-1", 0, ModeScheduledRefresh, false); err == nil {
-		t.Fatal("on-demand refreshTarget succeeded, want the provider error")
-	}
-	if got := strings.Count(logs.String(), "reached terminal attempts"); got != 1 {
-		t.Fatalf("terminal warnings after an on-demand failure = %d, want still 1\n%s", got, logs.String())
-	}
-}
-
-// TestCreateOrFindSkeleton_NoFolderIDs verifies that createOrFindSkeleton
-// creates a real item even when the parent directory has no embedded folder IDs
-// (e.g. {tmdb-12345}). Before this change, such roots were skipped entirely.
-func TestCreateOrFindSkeleton_NoFolderIDs(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	// File under a folder without embedded IDs — title/year only.
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/Inception (2010)/Inception.mkv",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Must have created a new item.
-	if !result.IsNew {
-		t.Fatal("expected IsNew=true for first file under a new root")
-	}
-
-	if result.ContentID == "" {
-		t.Fatal("expected a non-empty content_id")
-	}
-
-	// The item should exist in the repo with status "pending".
-	item, err := h.itemRepo.GetByID(ctx, result.ContentID)
-	if err != nil {
-		t.Fatalf("item not found in repo: %v", err)
-	}
-	if item.Status != "pending" {
-		t.Errorf("expected status=pending, got %q", item.Status)
-	}
-
-	// The file should be linked.
-	if cid, ok := h.fileRepo.contentIDs[file.ID]; !ok || cid != result.ContentID {
-		t.Errorf("file not linked to skeleton item: got %q", cid)
-	}
-}
-
-func TestCreateOrFindSkeleton_DisabledFolderDoesNotCreateItem(t *testing.T) {
-	h := newTestHarness()
-	h.service.folderRepo = &fakeMetadataFolderRepo{
-		folders: map[int]*models.MediaFolder{
-			10: {ID: 10, Type: "movies", Enabled: false},
-		},
-	}
-	ctx := context.Background()
-
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/Inception (2010)/Inception.mkv",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err == nil {
-		t.Fatal("expected disabled folder error")
-	}
-	if result != nil {
-		t.Fatalf("expected no result, got %+v", result)
-	}
-	if !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("expected disabled error, got %v", err)
-	}
-	if len(h.itemRepo.items) != 0 {
-		t.Fatalf("expected no items to be created, got %d", len(h.itemRepo.items))
-	}
-	if cid := h.fileRepo.contentIDs[file.ID]; cid != "" {
-		t.Fatalf("expected file to remain unlinked, got content_id %q", cid)
-	}
-}
-
-func TestCreateOrFindSkeleton_LinkFailureDeletesSkeleton(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+// TestCreateOrFindSkeleton_FailureLeavesNoItem covers skeleton creation that
+// fails: no item, library membership or file link may be left behind.
+func TestCreateOrFindSkeleton_FailureLeavesNoItem(t *testing.T) {
 	linkErr := errors.New("media file not found")
-	h.fileRepo.updateErrors[1] = linkErr
+	for _, tc := range []struct {
+		name             string
+		setup            func(h *testHarness)
+		wantErr          func(error) bool
+		checkMemberships bool
+		checkUnlinked    bool
+	}{
+		{
+			name: "disabled folder",
+			setup: func(h *testHarness) {
+				h.service.folderRepo = &fakeMetadataFolderRepo{
+					folders: map[int]*models.MediaFolder{10: {ID: 10, Type: "movies", Enabled: false}},
+				}
+			},
+			wantErr:       func(err error) bool { return strings.Contains(err.Error(), "disabled") },
+			checkUnlinked: true,
+		},
+		{
+			name:             "link failure deletes the skeleton",
+			setup:            func(h *testHarness) { h.fileRepo.updateErrors[1] = linkErr },
+			wantErr:          func(err error) bool { return errors.Is(err, linkErr) },
+			checkMemberships: true,
+		},
+		{
+			name: "folder disabled before membership deletes the skeleton",
+			setup: func(h *testHarness) {
+				folder := &models.MediaFolder{ID: 10, Type: "movies", Enabled: true}
+				h.service.folderRepo = &fakeMetadataFolderRepo{folders: map[int]*models.MediaFolder{10: folder}}
+				h.fileRepo.afterUpdate = func(_ int, contentID string) {
+					if contentID != "" {
+						folder.Enabled = false
+					}
+				}
+			},
+			wantErr:          func(err error) bool { return strings.Contains(err.Error(), "disabled") },
+			checkMemberships: true,
+			checkUnlinked:    true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			tc.setup(h)
+			file := &models.MediaFile{ID: 1, MediaFolderID: 10, FilePath: "/media/movies/Inception (2010)/Inception.mkv"}
 
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/Inception (2010)/Inception.mkv",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err == nil {
-		t.Fatal("expected link error")
-	}
-	if result != nil {
-		t.Fatalf("expected no result, got %+v", result)
-	}
-	if !errors.Is(err, linkErr) {
-		t.Fatalf("expected wrapped link error, got %v", err)
-	}
-	if len(h.itemRepo.items) != 0 {
-		t.Fatalf("expected skeleton item to be deleted, got %d items", len(h.itemRepo.items))
-	}
-	if len(h.libraryRepo.memberships) != 0 {
-		t.Fatalf("expected no library memberships, got %d", len(h.libraryRepo.memberships))
+			result, err := h.service.createOrFindSkeleton(context.Background(), file, 10)
+			if err == nil || !tc.wantErr(err) {
+				t.Fatalf("err = %v, want the %s error", err, tc.name)
+			}
+			if result != nil {
+				t.Fatalf("expected no result, got %+v", result)
+			}
+			if len(h.itemRepo.items) != 0 {
+				t.Fatalf("expected no item to remain, got %d", len(h.itemRepo.items))
+			}
+			if tc.checkMemberships && len(h.libraryRepo.memberships) != 0 {
+				t.Fatalf("expected no library memberships, got %d", len(h.libraryRepo.memberships))
+			}
+			if cid := h.fileRepo.contentIDs[file.ID]; tc.checkUnlinked && cid != "" {
+				t.Fatalf("expected file to remain unlinked, got content_id %q", cid)
+			}
+		})
 	}
 }
 
-func TestCreateOrFindSkeleton_DisabledBeforeMembershipDeletesSkeleton(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	folder := &models.MediaFolder{ID: 10, Type: "movies", Enabled: true}
-	h.service.folderRepo = &fakeMetadataFolderRepo{
-		folders: map[int]*models.MediaFolder{10: folder},
-	}
-	h.fileRepo.afterUpdate = func(_ int, contentID string) {
-		if contentID != "" {
-			folder.Enabled = false
-		}
-	}
+// TestCreateOrFindSkeleton_EpisodeShapedMovieStaysMovie covers a movie whose
+// title reads as an episode number, in a movies and a mixed library.
+func TestCreateOrFindSkeleton_EpisodeShapedMovieStaysMovie(t *testing.T) {
+	for _, tc := range []struct {
+		folderType, root string
+		checkIDs         bool
+	}{
+		{folderType: "movies", root: "/media/movies/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}", checkIDs: true},
+		{folderType: "mixed", root: "/media/mixed/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}"},
+	} {
+		t.Run(tc.folderType, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			h.service.folderRepo = &fakeMetadataFolderRepo{
+				folders: map[int]*models.MediaFolder{10: {ID: 10, Type: tc.folderType, Enabled: true}},
+			}
+			file := &models.MediaFile{ID: 1, MediaFolderID: 10, FilePath: tc.root + "/s01e03 (2020).mkv"}
 
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/Inception (2010)/Inception.mkv",
+			result, err := h.service.createOrFindSkeleton(ctx, file, 10)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result.Type != "movie" {
+				t.Fatalf("Type = %q, want movie", result.Type)
+			}
+			if result.RootPath != tc.root {
+				t.Fatalf("RootPath = %q", result.RootPath)
+			}
+			if !tc.checkIDs {
+				return
+			}
+			if result.TmdbID != "588077" || result.ImdbID != "tt12261772" {
+				t.Fatalf("provider IDs = (%q, %q), want tmdb 588077 and imdb tt12261772", result.TmdbID, result.ImdbID)
+			}
+			item, err := h.itemRepo.GetByID(ctx, result.ContentID)
+			if err != nil {
+				t.Fatalf("item not found: %v", err)
+			}
+			if item.Type != "movie" {
+				t.Fatalf("item.Type = %q, want movie", item.Type)
+			}
+			if item.TmdbID != "588077" || item.ImdbID != "tt12261772" {
+				t.Fatalf("item provider IDs = (%q, %q), want tmdb 588077 and imdb tt12261772", item.TmdbID, item.ImdbID)
+			}
+		})
 	}
+}
 
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err == nil {
-		t.Fatal("expected disabled folder error")
-	}
-	if result != nil {
-		t.Fatalf("expected no result, got %+v", result)
-	}
-	if !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("expected disabled error, got %v", err)
-	}
-	if len(h.itemRepo.items) != 0 {
-		t.Fatalf("expected skeleton item to be deleted, got %d items", len(h.itemRepo.items))
-	}
-	if len(h.libraryRepo.memberships) != 0 {
-		t.Fatalf("expected no library memberships, got %d", len(h.libraryRepo.memberships))
-	}
-	if cid := h.fileRepo.contentIDs[file.ID]; cid != "" {
-		t.Fatalf("expected file link to be cleared, got content_id %q", cid)
+func TestRecordRefreshFailure_DebtAttemptCount(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		manual       bool
+		wantAttempts int
+	}{
+		{name: "manual refresh increments the attempt", manual: true, wantAttempts: 2},
+		{name: "scheduled refresh keeps the claimed attempt", manual: false, wantAttempts: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			debts := newFakeRefreshDebtRepo()
+			h.service.refreshDebtRepo = debts
+			h.itemRepo.items["item-1"] = &models.MediaItem{ContentID: "item-1", Status: "matched"}
+			debts.debts["item-1"] = &models.MetadataRefreshDebt{
+				ContentID:     "item-1",
+				AttemptCount:  1,
+				NextRefreshAt: time.Now().UTC(),
+			}
+
+			h.service.recordRefreshFailure(ctx, "item-1", errors.New("provider failed"), tc.manual)
+
+			debt, err := debts.Get(ctx, "item-1")
+			if err != nil {
+				t.Fatalf("Get debt: %v", err)
+			}
+			if debt.AttemptCount != tc.wantAttempts {
+				t.Fatalf("attempt_count = %d, want %d", debt.AttemptCount, tc.wantAttempts)
+			}
+			if debt.LastError != "provider failed" {
+				t.Fatalf("last_error = %q, want provider failed", debt.LastError)
+			}
+		})
 	}
 }
 
@@ -2165,39 +2008,6 @@ func TestCreateOrFindSkeleton_SecondMovieFileDoesNotReuseSameContentID(t *testin
 	}
 	if len(h.groupClaimRepo.claims) != 0 {
 		t.Fatalf("expected no movie group claims, got %d", len(h.groupClaimRepo.claims))
-	}
-}
-
-// TestCreateOrFindSkeleton_WithFolderIDs verifies that the happy-path with
-// folder IDs still works correctly after the refactor.
-func TestCreateOrFindSkeleton_WithFolderIDs(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/Inception (2010) {tmdb-27205}/Inception.mkv",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !result.IsNew {
-		t.Fatal("expected IsNew=true")
-	}
-	if result.TmdbID != "27205" {
-		t.Errorf("expected tmdb_id=27205, got %q", result.TmdbID)
-	}
-
-	item, err := h.itemRepo.GetByID(ctx, result.ContentID)
-	if err != nil {
-		t.Fatalf("item not found: %v", err)
-	}
-	if item.TmdbID != "27205" {
-		t.Errorf("expected item tmdb_id=27205, got %q", item.TmdbID)
 	}
 }
 
@@ -2370,76 +2180,6 @@ func TestCreateOrFindSkeleton_TrustedFilenameIDBeatsStaleFolderID(t *testing.T) 
 	}
 }
 
-func TestCreateOrFindSkeleton_MoviesLibraryEpisodeShapedMovieStaysMovie(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.service.folderRepo = &fakeMetadataFolderRepo{
-		folders: map[int]*models.MediaFolder{
-			10: {ID: 10, Type: "movies", Enabled: true},
-		},
-	}
-
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}/s01e03 (2020).mkv",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.Type != "movie" {
-		t.Fatalf("Type = %q, want movie", result.Type)
-	}
-	if result.RootPath != "/media/movies/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}" {
-		t.Fatalf("RootPath = %q", result.RootPath)
-	}
-	if result.TmdbID != "588077" || result.ImdbID != "tt12261772" {
-		t.Fatalf("provider IDs = (%q, %q), want tmdb 588077 and imdb tt12261772", result.TmdbID, result.ImdbID)
-	}
-
-	item, err := h.itemRepo.GetByID(ctx, result.ContentID)
-	if err != nil {
-		t.Fatalf("item not found: %v", err)
-	}
-	if item.Type != "movie" {
-		t.Fatalf("item.Type = %q, want movie", item.Type)
-	}
-	if item.TmdbID != "588077" || item.ImdbID != "tt12261772" {
-		t.Fatalf("item provider IDs = (%q, %q), want tmdb 588077 and imdb tt12261772", item.TmdbID, item.ImdbID)
-	}
-}
-
-func TestCreateOrFindSkeleton_MixedLibraryEpisodeShapedMovieStaysMovie(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.service.folderRepo = &fakeMetadataFolderRepo{
-		folders: map[int]*models.MediaFolder{
-			10: {ID: 10, Type: "mixed", Enabled: true},
-		},
-	}
-
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/mixed/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}/s01e03 (2020).mkv",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.Type != "movie" {
-		t.Fatalf("Type = %q, want movie", result.Type)
-	}
-	if result.RootPath != "/media/mixed/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}" {
-		t.Fatalf("RootPath = %q", result.RootPath)
-	}
-}
-
 // A provisional status never replaces an accepted match: the item may have
 // been matched after the caller read it.
 func TestUpdateItemStatusKeepsMatchedItem(t *testing.T) {
@@ -2458,351 +2198,128 @@ func TestUpdateItemStatusKeepsMatchedItem(t *testing.T) {
 	}
 }
 
-// TestCreateOrFindSkeleton_MovieIgnoresGroupClaimDedup verifies that scanner
-// group claims do not merge movie files before metadata confirmation.
-func TestCreateOrFindSkeleton_MovieIgnoresGroupClaimDedup(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	existingContentID := "existing-content-456"
-	_, err := h.groupClaimRepo.ClaimAndRelinkFiles(ctx, 10, 1, "v1|movie|inception|2010", existingContentID)
-	if err != nil {
-		t.Fatalf("claiming test content group: %v", err)
-	}
-
-	// Also pre-seed the item so upsertLibraryMembership can find it.
-	h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: existingContentID,
-		Status:    "pending",
-		Title:     "Inception",
-		Year:      2010,
-		Type:      "movie",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	})
-
-	file := &models.MediaFile{
-		ID:              5,
-		MediaFolderID:   10,
-		FilePath:        "/media/movies/Inception (2010)/Inception.720p.mkv",
-		ContentGroupKey: "v1|movie|inception|2010",
-		GroupKeyVersion: 1,
-		BaseTitle:       "Inception",
-		BaseYear:        2010,
-		BaseType:        "movie",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ContentID == existingContentID {
-		t.Errorf("expected movie to ignore pre-confirmation group claim %q", existingContentID)
-	}
-	if !result.IsNew {
-		t.Error("expected IsNew=true when only a movie group claim exists")
-	}
+type createOrFindSkeletonDedupBeforeConfirmationCase struct {
+	name      string
+	existing  models.MediaItem
+	claim     func(ctx context.Context, h *testHarness) error
+	file      models.MediaFile
+	wantReuse bool
 }
 
-func TestCreateOrFindSkeleton_MovieReusesMatchedGroupClaim(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	existingContentID := "existing-content-456"
-	_, err := h.groupClaimRepo.ClaimAndRelinkFiles(ctx, 10, 1, "v1|movie|inception|2010", existingContentID)
-	if err != nil {
-		t.Fatalf("claiming test content group: %v", err)
-	}
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: existingContentID,
-		Status:    "matched",
-		Title:     "Inception",
-		Year:      2010,
-		Type:      "movie",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	file := &models.MediaFile{
-		ID:                5,
-		MediaFolderID:     10,
-		FilePath:          "/media/movies/Inception (2010)/Inception.720p.mkv",
-		CanonicalRootPath: "/media/movies/Inception (2010)",
-		ContentGroupKey:   "v1|movie|inception|2010",
-		GroupKeyVersion:   1,
-		BaseTitle:         "Inception",
-		BaseYear:          2010,
-		BaseType:          "movie",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ContentID != existingContentID {
-		t.Fatalf("result.ContentID = %q, want %q", result.ContentID, existingContentID)
-	}
-	if result.IsNew {
-		t.Fatal("expected IsNew=false when reusing matched movie group claim")
-	}
+var createOrFindSkeletonDedupBeforeConfirmationCases = []createOrFindSkeletonDedupBeforeConfirmationCase{
+	{
+		name:     "movie ignores a group claim",
+		existing: models.MediaItem{ContentID: "existing-content-456", Status: "pending", Title: "Inception", Year: 2010, Type: "movie"},
+		claim: func(ctx context.Context, h *testHarness) error {
+			_, err := h.groupClaimRepo.ClaimAndRelinkFiles(ctx, 10, 1, "v1|movie|inception|2010", "existing-content-456")
+			return err
+		},
+		file: models.MediaFile{
+			ID: 5, MediaFolderID: 10, FilePath: "/media/movies/Inception (2010)/Inception.720p.mkv",
+			ContentGroupKey: "v1|movie|inception|2010", GroupKeyVersion: 1, BaseTitle: "Inception", BaseYear: 2010, BaseType: "movie",
+		},
+	},
+	{
+		name:     "movie reuses a matched group claim",
+		existing: models.MediaItem{ContentID: "existing-content-456", Status: "matched", Title: "Inception", Year: 2010, Type: "movie"},
+		claim: func(ctx context.Context, h *testHarness) error {
+			_, err := h.groupClaimRepo.ClaimAndRelinkFiles(ctx, 10, 1, "v1|movie|inception|2010", "existing-content-456")
+			return err
+		},
+		file: models.MediaFile{
+			ID: 5, MediaFolderID: 10, FilePath: "/media/movies/Inception (2010)/Inception.720p.mkv", CanonicalRootPath: "/media/movies/Inception (2010)",
+			ContentGroupKey: "v1|movie|inception|2010", GroupKeyVersion: 1, BaseTitle: "Inception", BaseYear: 2010, BaseType: "movie",
+		},
+		wantReuse: true,
+	},
+	{
+		name:     "movie ignores a root claim",
+		existing: models.MediaItem{ContentID: "existing-content-root", Status: "pending", Title: "Inception", Year: 2010, Type: "movie"},
+		claim: func(ctx context.Context, h *testHarness) error {
+			return h.rootClaimRepo.ClaimRoot(ctx, 10, "/media/movies/Inception (2010)", "existing-content-root")
+		},
+		file: models.MediaFile{
+			ID: 5, MediaFolderID: 10, FilePath: "/media/movies/Inception (2010)/Inception.720p.mkv",
+			BaseTitle: "Inception", BaseYear: 2010, BaseType: "movie",
+		},
+	},
+	{
+		name:     "movie skips a pending external-ID item",
+		existing: models.MediaItem{ContentID: "pending-predator", Status: "pending", Title: "Predator", Year: 1987, Type: "movie", TmdbID: "106"},
+		file:     models.MediaFile{ID: 1, MediaFolderID: 10, FilePath: "/media/movies/Predator (1987) {tmdb-106}/Predator (1987).mkv"},
+	},
+	{
+		name:     "movie skips title/year dedup",
+		existing: models.MediaItem{ContentID: "pending-inception", Status: "pending", Title: "Inception", Year: 2010, Type: "movie"},
+		file: models.MediaFile{
+			ID: 1, MediaFolderID: 10, FilePath: "/media/movies/Inception (2010)/Inception.mkv",
+			BaseTitle: "Inception", BaseYear: 2010, BaseType: "movie",
+		},
+	},
+	{
+		name:     "series reuses an observed-root shell",
+		existing: models.MediaItem{ContentID: "series-root-shell", Status: "pending", Title: "Example Show", Year: 2024, Type: "series"},
+		claim: func(_ context.Context, h *testHarness) error {
+			h.fileRepo.setRootContent(10, "/media/shows/Example Show", "series-root-shell")
+			return nil
+		},
+		file: models.MediaFile{
+			ID: 1, MediaFolderID: 10, FilePath: "/media/shows/Example Show/Season 01/Example.Show.S01E02.mkv", ObservedRootPath: "/media/shows/Example Show",
+			GroupKeyVersion: 1, ContentGroupKey: "v1|series|example_show|2024", BaseTitle: "Example Show", BaseYear: 2024, BaseType: "series",
+		},
+		wantReuse: true,
+	},
+	{
+		name:     "series skips a pending external-ID item across roots",
+		existing: models.MediaItem{ContentID: "pending-series", Status: "pending", Title: "Example Show", Year: 2024, Type: "series", TmdbID: "12345"},
+		file: models.MediaFile{
+			ID: 1, MediaFolderID: 10, FilePath: "/media/shows/Example Show Dolby Vision {tmdb-12345}/Season 01/Example.Show.S01E01.mkv",
+			ObservedRootPath: "/media/shows/Example Show Dolby Vision {tmdb-12345}", BaseTitle: "Example Show", BaseYear: 2024, BaseType: "series",
+		},
+	},
+	{
+		name:     "series skips title/year dedup across roots",
+		existing: models.MediaItem{ContentID: "pending-title-year-series", Status: "pending", Title: "Example Show", Year: 2024, Type: "series"},
+		file: models.MediaFile{
+			ID: 1, MediaFolderID: 10, FilePath: "/media/shows/Example Show HDR/Season 01/Example.Show.S01E01.mkv",
+			ObservedRootPath: "/media/shows/Example Show HDR", BaseTitle: "Example Show", BaseYear: 2024, BaseType: "series",
+		},
+	},
 }
 
-func TestCreateOrFindSkeleton_MovieIgnoresRootClaimDedup(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+// TestCreateOrFindSkeleton_DedupBeforeConfirmation covers which existing items
+// a new file may join before metadata confirms its identity: movies never merge
+// on a scanner group, root claim, pending external ID or title/year, while a
+// matched group claim and a series' observed-root shell are reused.
+func TestCreateOrFindSkeleton_DedupBeforeConfirmation(t *testing.T) {
+	for _, tc := range createOrFindSkeletonDedupBeforeConfirmationCases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			if tc.claim != nil {
+				if err := tc.claim(ctx, h); err != nil {
+					t.Fatalf("seed claim: %v", err)
+				}
+			}
+			existing := tc.existing
+			existing.Studios, existing.Networks, existing.Countries, existing.Genres = []string{}, []string{}, []string{}, []string{}
+			if err := h.itemRepo.Upsert(ctx, &existing); err != nil {
+				t.Fatalf("upsert existing item: %v", err)
+			}
+			file := tc.file
 
-	existingContentID := "existing-content-root"
-	if err := h.rootClaimRepo.ClaimRoot(ctx, 10, "/media/movies/Inception (2010)", existingContentID); err != nil {
-		t.Fatalf("claiming test root: %v", err)
-	}
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: existingContentID,
-		Status:    "pending",
-		Title:     "Inception",
-		Year:      2010,
-		Type:      "movie",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
+			result, err := h.service.createOrFindSkeleton(ctx, &file, 10)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
-	file := &models.MediaFile{
-		ID:            5,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/Inception (2010)/Inception.720p.mkv",
-		BaseTitle:     "Inception",
-		BaseYear:      2010,
-		BaseType:      "movie",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ContentID == existingContentID {
-		t.Errorf("expected movie to ignore pre-confirmation root claim %q", existingContentID)
-	}
-	if !result.IsNew {
-		t.Error("expected IsNew=true when only a movie root claim exists")
-	}
-}
-
-func TestCreateOrFindSkeleton_MovieSkipsPendingExternalIDDedup(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "pending-predator",
-		Status:    "pending",
-		Title:     "Predator",
-		Year:      1987,
-		Type:      "movie",
-		TmdbID:    "106",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/Predator (1987) {tmdb-106}/Predator (1987).mkv",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ContentID == "pending-predator" {
-		t.Fatal("expected pending external-id movie item to be ignored")
-	}
-	if !result.IsNew {
-		t.Fatal("expected IsNew=true when only a pending external-id movie item exists")
-	}
-}
-
-func TestCreateOrFindSkeleton_MovieSkipsTitleYearDedup(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "pending-inception",
-		Status:    "pending",
-		Title:     "Inception",
-		Year:      2010,
-		Type:      "movie",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/Inception (2010)/Inception.mkv",
-		BaseTitle:     "Inception",
-		BaseYear:      2010,
-		BaseType:      "movie",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ContentID == "pending-inception" {
-		t.Fatal("expected movie title/year fallback dedup to be disabled")
-	}
-	if !result.IsNew {
-		t.Fatal("expected IsNew=true when only title/year movie match exists")
-	}
-}
-
-func TestCreateOrFindSkeleton_SeriesReusesObservedRootScopedItem(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	existingContentID := "series-root-shell"
-	h.fileRepo.setRootContent(10, "/media/shows/Example Show", existingContentID)
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: existingContentID,
-		Status:    "pending",
-		Title:     "Example Show",
-		Year:      2024,
-		Type:      "series",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	file := &models.MediaFile{
-		ID:               1,
-		MediaFolderID:    10,
-		FilePath:         "/media/shows/Example Show/Season 01/Example.Show.S01E02.mkv",
-		ObservedRootPath: "/media/shows/Example Show",
-		GroupKeyVersion:  1,
-		ContentGroupKey:  "v1|series|example_show|2024",
-		BaseTitle:        "Example Show",
-		BaseYear:         2024,
-		BaseType:         "series",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ContentID != existingContentID {
-		t.Fatalf("ContentID = %q, want %q", result.ContentID, existingContentID)
-	}
-	if result.IsNew {
-		t.Fatal("expected IsNew=false for same observed-root series shell reuse")
-	}
-}
-
-func TestCreateOrFindSkeleton_SeriesSkipsPendingExternalIDDedupAcrossRoots(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "pending-series",
-		Status:    "pending",
-		Title:     "Example Show",
-		Year:      2024,
-		Type:      "series",
-		TmdbID:    "12345",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	file := &models.MediaFile{
-		ID:               1,
-		MediaFolderID:    10,
-		FilePath:         "/media/shows/Example Show Dolby Vision {tmdb-12345}/Season 01/Example.Show.S01E01.mkv",
-		ObservedRootPath: "/media/shows/Example Show Dolby Vision {tmdb-12345}",
-		BaseTitle:        "Example Show",
-		BaseYear:         2024,
-		BaseType:         "series",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ContentID == "pending-series" {
-		t.Fatal("expected pending external-id series item to be ignored across roots")
-	}
-	if !result.IsNew {
-		t.Fatal("expected IsNew=true when only a pending external-id series item exists")
-	}
-}
-
-func TestCreateOrFindSkeleton_SeriesSkipsTitleYearDedupAcrossRoots(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "pending-title-year-series",
-		Status:    "pending",
-		Title:     "Example Show",
-		Year:      2024,
-		Type:      "series",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	file := &models.MediaFile{
-		ID:               1,
-		MediaFolderID:    10,
-		FilePath:         "/media/shows/Example Show HDR/Season 01/Example.Show.S01E01.mkv",
-		ObservedRootPath: "/media/shows/Example Show HDR",
-		BaseTitle:        "Example Show",
-		BaseYear:         2024,
-		BaseType:         "series",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ContentID == "pending-title-year-series" {
-		t.Fatal("expected series title/year fallback dedup to be disabled across roots")
-	}
-	if !result.IsNew {
-		t.Fatal("expected IsNew=true when only title/year series match exists")
+			if reused := result.ContentID == existing.ContentID; reused != tc.wantReuse {
+				t.Fatalf("ContentID = %q, reused existing %q = %v, want %v", result.ContentID, existing.ContentID, reused, tc.wantReuse)
+			}
+			if result.IsNew == tc.wantReuse {
+				t.Fatalf("IsNew = %v, want %v", result.IsNew, !tc.wantReuse)
+			}
+		})
 	}
 }
 

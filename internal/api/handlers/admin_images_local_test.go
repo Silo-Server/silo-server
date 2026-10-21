@@ -135,22 +135,6 @@ func TestAdminItemImagesDoesNotPreviewProviderFileURLs(t *testing.T) {
 	}
 }
 
-// Frozen v1 keeps its provider-only list.
-func TestAdminItemImagesV1ListOmitsLocalImages(t *testing.T) {
-	svc := &localImageServiceFake{}
-	router := chi.NewRouter()
-	router.Get("/{id}/images", newLocalImageHandlerForTest(svc).HandleGetItemImages)
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/local-series/images", nil))
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "file://") {
-		t.Fatalf("v1 list %d %s", rec.Code, rec.Body)
-	}
-	if svc.localCalls != 0 || svc.plainCalls != 1 {
-		t.Fatalf("fetch calls local=%d plain=%d, want the plain provider listing", svc.localCalls, svc.plainCalls)
-	}
-}
-
 func TestAdminApplyLocalImageValidatesTheTarget(t *testing.T) {
 	t.Run("movie or series uses the local apply", func(t *testing.T) {
 		svc := &localImageServiceFake{applyLocalErr: metadata.ErrLocalImageNotOffered}

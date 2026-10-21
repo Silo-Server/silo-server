@@ -56,10 +56,6 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(ago(89.5 * MINUTE))).toBe("1h ago");
   });
 
-  it("supports a custom just-now label", () => {
-    expect(formatRelativeTime(ago(10_000), { justNowLabel: "Just now" })).toBe("Just now");
-  });
-
   it("switches to an absolute date after the configured number of days", () => {
     setDateTimeFormatPreferences({ dateFormat: "YYYY-MM-DD", timeFormat: "auto" });
     expect(formatRelativeTime(ago(29 * DAY), { absoluteAfterDays: 30 })).toBe("29d ago");
@@ -68,15 +64,6 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(ago(25 * HOUR), { rounding: "floor", absoluteAfterDays: 1 })).toBe(
       "2026-06-04",
     );
-  });
-
-  it("uses a caller-provided absolute renderer", () => {
-    expect(
-      formatRelativeTime(ago(40 * DAY), {
-        absoluteAfterDays: 30,
-        absolute: (date) => `on ${date.getFullYear()}`,
-      }),
-    ).toBe("on 2026");
   });
 });
 

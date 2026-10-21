@@ -162,22 +162,7 @@ func TestPluginProviderSubmitMapsConflicts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &fakePluginMarkerClient{submitErr: tt.err}
-			provider, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
-				InstallationID: 12,
-				CapabilityID:   "markers",
-			}, func(context.Context, int, string) (pluginMarkerClient, error) {
-				return client, nil
-			})
-			if err != nil {
-				t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
-			}
-
-			_, err = provider.SubmitMarker(context.Background(), SubmissionRequest{
-				Kind:        ItemKindMovie,
-				ExternalIDs: map[string]string{ExternalIDKeyTMDB: "123"},
-				Segment:     MarkerKindIntro,
-			})
+			_, err := submitWithPluginError(t, tt.err)
 			var conflict *SubmissionConflictError
 			if !errors.As(err, &conflict) {
 				t.Fatalf("error = %T %v, want SubmissionConflictError", err, err)

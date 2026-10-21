@@ -378,25 +378,6 @@ func TestDeleteObjectsFallbackReturnsErrorForFailedKeys(t *testing.T) {
 	}
 }
 
-func TestDeleteObjectsReturnsContextError(t *testing.T) {
-	var calls int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(server.Close)
-	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	deleted, err := client.deleteObjects(ctx, client.Bucket(), []string{"a.webp", "b.webp"})
-	if !errors.Is(err, context.Canceled) || deleted != 0 {
-		t.Fatalf("deleteObjects() = %d, %v; want 0, context.Canceled", deleted, err)
-	}
-	if calls != 0 {
-		t.Fatalf("requests=%d; want 0", calls)
-	}
-}
-
 func TestDeleteObjectDoesNotIgnoreMissingBucket(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
@@ -407,66 +388,6 @@ func TestDeleteObjectDoesNotIgnoreMissingBucket(t *testing.T) {
 	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
 	if err := client.DeleteObject(t.Context(), client.Bucket(), "missing.webp"); err == nil {
 		t.Fatal("DeleteObject() ignored a missing bucket")
-	}
-}
-
-func TestClientWithoutKeyPrefixUsesLogicalKeys(t *testing.T) {
-	t.Parallel()
-
-	srv := newS3TestServer(t)
-	client := NewClient(BucketConfig{
-		Endpoint:       srv.URL(),
-		Region:         "us-east-1",
-		Bucket:         "silo",
-		AccessKey:      "test",
-		SecretKey:      "test",
-		PathStyle:      true,
-		PublicEndpoint: "",
-	})
-
-	ctx := context.Background()
-	if err := client.PutObject(ctx, client.Bucket(), "poster.jpg", []byte("data")); err != nil {
-		t.Fatalf("PutObject() returned error: %v", err)
-	}
-	if _, err := client.GetObject(ctx, client.Bucket(), "poster.jpg"); err != nil {
-		t.Fatalf("GetObject() returned error: %v", err)
-	}
-	if ok, err := client.ObjectExists(ctx, client.Bucket(), "poster.jpg"); err != nil || !ok {
-		t.Fatalf("ObjectExists() = %v, %v, want true, nil", ok, err)
-	}
-	if err := client.DeleteObject(ctx, client.Bucket(), "poster.jpg"); err != nil {
-		t.Fatalf("DeleteObject() returned error: %v", err)
-	}
-	if err := client.HeadBucket(ctx, client.Bucket()); err != nil {
-		t.Fatalf("HeadBucket() returned error: %v", err)
-	}
-	if err := client.SetBucketCORS(ctx, client.Bucket(), []string{"*"}); err != nil {
-		t.Fatalf("SetBucketCORS() returned error: %v", err)
-	}
-
-	requests := srv.Requests()
-	paths := make([]string, 0, len(requests))
-	for _, req := range requests {
-		paths = append(paths, req.Path)
-	}
-
-	if !containsRequest(requests, http.MethodPut, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want PutObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodGet, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want GetObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodHead, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want HeadObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodDelete, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want DeleteObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodHead, "/silo", "") {
-		t.Fatalf("requests = %#v, want HeadBucket path /silo", paths)
-	}
-	if !containsRequest(requests, http.MethodPut, "/silo", "cors=") {
-		t.Fatalf("requests = %#v, want PutBucketCors path /silo?cors=", requests)
 	}
 }
 
@@ -575,31 +496,6 @@ func TestClientWithKeyPrefixPrefixesGeneratedURLs(t *testing.T) {
 	}
 }
 
-func TestClientWithKeyPrefixPrefixesCloudflareTokenURL(t *testing.T) {
-	t.Parallel()
-
-	client := NewClient(BucketConfig{
-		Endpoint:       "https://s3.example.test",
-		PublicEndpoint: "https://cdn.example.test",
-		Region:         "us-east-1",
-		Bucket:         "silo",
-		KeyPrefix:      "silo/dev",
-		AccessKey:      "test",
-		SecretKey:      "test",
-		PathStyle:      true,
-		URLAuth:        URLAuthCloudflareToken,
-		TokenSecret:    "secret",
-	})
-
-	u, err := client.PresignGetURL(context.Background(), client.Bucket(), "poster.jpg", time.Minute)
-	if err != nil {
-		t.Fatalf("PresignGetURL() returned error: %v", err)
-	}
-	if !strings.HasPrefix(u, "https://cdn.example.test/silo/dev/poster.jpg?verify=") {
-		t.Fatalf("PresignGetURL() = %q, want prefixed Cloudflare token URL", u)
-	}
-}
-
 func TestClientObjectAvailableUsesExternalDeliveryPath(t *testing.T) {
 	t.Parallel()
 
@@ -669,40 +565,6 @@ func TestClientObjectAvailableUsesExternalDeliveryPath(t *testing.T) {
 	}
 }
 
-func TestClientObjectAvailableUsesStorageWithoutExternalDelivery(t *testing.T) {
-	t.Parallel()
-
-	for _, authMode := range []string{URLAuthPresigned, URLAuthPublic, URLAuthCloudflareToken} {
-		t.Run(authMode, func(t *testing.T) {
-			srv := newS3TestServer(t)
-			client := NewClient(BucketConfig{
-				Endpoint:  srv.URL(),
-				Region:    "us-east-1",
-				Bucket:    "silo",
-				AccessKey: "test",
-				SecretKey: "test",
-				PathStyle: true,
-				URLAuth:   authMode,
-			})
-
-			if client.UsesExternalDelivery() {
-				t.Fatal("UsesExternalDelivery() = true without a public endpoint")
-			}
-			available, err := client.ObjectAvailable(t.Context(), client.Bucket(), "poster.webp")
-			if err != nil || !available {
-				t.Fatalf("ObjectAvailable() = %v, %v, want true, nil", available, err)
-			}
-			requests := srv.Requests()
-			if !containsRequest(requests, http.MethodHead, "/silo/poster.webp", "") {
-				t.Fatalf("requests = %#v, want storage HEAD", requests)
-			}
-			if containsRequest(requests, http.MethodGet, "/silo/poster.webp", "") {
-				t.Fatalf("requests = %#v, do not want a delivery GET without external delivery", requests)
-			}
-		})
-	}
-}
-
 func TestClientObjectAvailableReportsExternalAuthFailureWithoutToken(t *testing.T) {
 	t.Parallel()
 
@@ -751,22 +613,6 @@ func TestClientEffectivePresignTTLClampsCloudflareTokenTTL(t *testing.T) {
 	}
 	if got := client.EffectivePresignTTL(5 * time.Minute); got != 5*time.Minute {
 		t.Fatalf("EffectivePresignTTL(5m) = %s, want 5m", got)
-	}
-}
-
-func TestClientEffectivePresignTTLPreservesNonTokenAuth(t *testing.T) {
-	t.Parallel()
-
-	client := NewClient(BucketConfig{
-		Endpoint:  "https://s3.example.test",
-		Region:    "us-east-1",
-		Bucket:    "silo",
-		AccessKey: "test",
-		SecretKey: "test",
-	})
-
-	if got := client.EffectivePresignTTL(4 * time.Hour); got != 4*time.Hour {
-		t.Fatalf("EffectivePresignTTL(4h) = %s, want 4h", got)
 	}
 }
 

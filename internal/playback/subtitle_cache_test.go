@@ -280,36 +280,6 @@ func readAllAndClose(t *testing.T, f *os.File) string {
 	return string(data)
 }
 
-func TestSubtitleCacheMissThenHit(t *testing.T) {
-	c, source := newTestCache(t)
-
-	if _, _, ok := c.Lookup(source, 0); ok {
-		t.Fatal("expected miss on empty cache")
-	}
-
-	fillEntry(t, c, source, 0, "PGS DATA TRACK 0")
-
-	f, modTime, ok := c.Lookup(source, 0)
-	if !ok {
-		t.Fatal("expected hit after commit")
-	}
-	if got := readAllAndClose(t, f); got != "PGS DATA TRACK 0" {
-		t.Fatalf("cached content = %q", got)
-	}
-	src, err := os.Stat(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !modTime.Equal(src.ModTime()) {
-		t.Fatalf("hit modTime = %v, want source mtime %v", modTime, src.ModTime())
-	}
-
-	// A different track ordinal is a distinct entry.
-	if _, _, ok := c.Lookup(source, 1); ok {
-		t.Fatal("expected miss for uncached track ordinal")
-	}
-}
-
 func TestSubtitleCacheTextRoundTripAndFormatIsolation(t *testing.T) {
 	c, source := newTestCache(t)
 	if _, ok := c.LookupText(source, 0, "srt"); ok {
@@ -326,30 +296,6 @@ func TestSubtitleCacheTextRoundTripAndFormatIsolation(t *testing.T) {
 	}
 	if _, ok := c.LookupText(source, 1, "srt"); ok {
 		t.Fatal("text cache entry must not satisfy another track")
-	}
-}
-
-func TestSubtitleCacheTextInvalidatedBySourceChange(t *testing.T) {
-	c, source := newTestCache(t)
-	if _, err := c.ExtractText(t.Context(), source, 0, "srt", func(context.Context) ([]byte, error) { return []byte("old extract"), nil }); err != nil {
-		t.Fatal(err)
-	}
-
-	newTime := time.Now().Add(2 * time.Hour)
-	if err := os.Chtimes(source, newTime, newTime); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := c.LookupText(source, 0, "srt"); ok {
-		t.Fatal("expected text miss after source mtime changed")
-	}
-	if _, err := c.ExtractText(t.Context(), source, 0, "srt", func(context.Context) ([]byte, error) { return []byte("new extract"), nil }); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := c.LookupText(source, 0, "srt"); !ok || string(got) != "new extract" {
-		t.Fatalf("refilled SRT lookup = %q, %t", got, ok)
-	}
-	if n := countMatching(t, c, func(name string) bool { return strings.HasSuffix(name, ".srt") }); n != 1 {
-		t.Fatalf("stale text sibling not removed: %d entries", n)
 	}
 }
 

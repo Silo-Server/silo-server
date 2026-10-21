@@ -1598,6 +1598,22 @@ does not publish its preimage.
 selection, sends a `quality_change` replan with the entry's `label`. It does not
 compute rungs.
 
+On `/api/v2`, `playback_plan.active_quality` names the entry the plan delivers,
+so the client marks that row instead of re-deriving the planner's choice from
+its own request. A rung that `quality_preference` named is active while the
+plan keeps its resolution: by an encode a bandwidth cap or server limit may have
+lowered, or by a source that already fits the rung. Otherwise an encode names the
+rung of its own resolution class and bitrate, so a plain `1080p`, or a
+`1080p-medium` that the client's decoder held, encoded at 720p and 2000 kbps
+names `720p-medium`, and a lower version played unchanged names its
+plain resolution entry. The field is absent when the plan delivers no entry: the
+source plays unchanged, or a cap set the encode of a plain resolution or `auto`
+between two rungs. The client
+marks Auto while the session's preference is `auto`, whatever `active_quality`
+says. Servers that publish the field advertise `plan_active_quality_v1`; without
+that feature an absent field says nothing. The frozen `/api/v1` response never
+carries it.
+
 On `/api/v2` the menu lists only fixed rungs. The source is not an entry,
 because `auto` already returns to it. The frozen `/api/v1` response still leads
 with an unnamed source entry labelled `original` (`preserves_source: true`),
@@ -1826,6 +1842,13 @@ pooled executors. The generic tone-map transformation does not reveal hardware
 selection policy; the server freezes a validated executor into each accepted
 recipe. Heterogeneous pools are filtered again at transport startup, and a stale
 or older node advertisement is rejected instead of silently changing modes.
+When its device list includes an Intel GPU (PCI vendor `0x8086` in sysfs), the
+VAAPI executor tone maps HDR with `tonemap_opencl`, the graph QSV uses, and
+hands the frames straight to the VAAPI encoder: Intel's `tonemap_vaapi` turns
+HLG teal and inverted and crushes PQ midtones. FFmpeg maps VAAPI frames to OpenCL only on Intel, so a
+non-Intel device in the same list fails the HDR smoke. Lists without an Intel
+GPU keep `tonemap_vaapi`, as does a device whose vendor can't be read. The
+executor's advertised filter names the choice.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
 legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
@@ -1833,9 +1856,9 @@ A plain HLG source resolves to BT.2100 HLG, or to the BT.709-gamut HLG kind
 when its primaries and matrix are both tagged BT.709.
 Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
 resolve to the `dolby_vision` source kind. Only executors that apply the RPU
-advertise it: software `tonemapx`, QSV `tonemap_opencl`, and NVENC
-`tonemap_cuda`. VAAPI `tonemap_vaapi` and VideoToolbox `scale_vt` cannot, so a
-pool of those executors still refuses these sources with
+advertise it: software `tonemapx`, `tonemap_opencl` on QSV and Intel VAAPI, and
+NVENC `tonemap_cuda`. VAAPI `tonemap_vaapi` and VideoToolbox `scale_vt` cannot,
+so a pool of those executors still refuses these sources with
 `hdr_transcode_unsupported`. A source without an RPU, or with a declared absent
 base layer, remains unsupported. Profile 5 is accepted from its configuration
 record. ID `0` on any other profile says nothing about the base, so it is

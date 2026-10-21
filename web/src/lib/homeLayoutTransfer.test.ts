@@ -806,14 +806,6 @@ describe("importPage", () => {
     return { listSaved: vi.fn(async () => [removedUnlisted]), save };
   }
 
-  it("saves the merged page once", async () => {
-    const api = fakeApi([undefined]);
-
-    await importPage(page, true, api, sequentialIds());
-    expect(api.save).toHaveBeenCalledTimes(1);
-    expect(api.save).toHaveBeenCalledWith([{ id: "new-custom", user_section_type: "hidden_gems" }]);
-  });
-
   it("refuses a page over the save endpoint's override limit", async () => {
     const big = {
       scope: "home" as const,

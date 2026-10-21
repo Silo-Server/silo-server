@@ -140,7 +140,9 @@ function DeviceSettingRow({
   // is the limit's (the badge names it) while `source` still names the choice
   // the limit capped.
   const inheritedFrom =
-    changedHere || profileWide || constrained ? null : sourceLabel(effective, ownerLabel);
+    changedHere || profileWide || constrained
+      ? null
+      : sourceLabel(effective, ownerLabel, definition.adminDefault === true);
   // A stored null is a value ("No limit"), not a missing one, so only a
   // missing answer falls back to the default.
   const value = displayedValue(settingKey, effective ? effective.value : definition.defaultValue);
@@ -242,12 +244,17 @@ function displayedValue(settingKey: SettingKey, value: unknown): unknown {
  * answer from the profile or the default for the keys this screen shows.
  * Anything else it might name is left unlabelled rather than guessed at.
  */
-function sourceLabel(effective: EffectiveSetting | undefined, ownerLabel: string): string | null {
+function sourceLabel(
+  effective: EffectiveSetting | undefined,
+  ownerLabel: string,
+  adminDefault: boolean,
+): string | null {
   switch (effective?.source) {
     case "profile":
       return `From ${ownerLabel} profile`;
     case "default":
-      return "App default";
+      // An administrator may have replaced this one's default for the server.
+      return adminDefault ? "Server default" : "App default";
     default:
       return null;
   }

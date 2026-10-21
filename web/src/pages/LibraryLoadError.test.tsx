@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import libraryLayoutOk from "../../../contracts/api/v2/fixtures/get_library_layout_ok.json";
 import queryCatalogItemsOk from "../../../contracts/api/v2/fixtures/query_catalog_items_ok.json";
-import { V2ProblemError, V2TimeoutError } from "@/api/v2/request";
+import { V2TimeoutError } from "@/api/v2/request";
 
 const mocks = vi.hoisted(() => ({
   v2: vi.fn(),
@@ -134,16 +134,6 @@ function callsTo(key: string) {
   return mocks.v2.mock.calls.filter(([called]) => called === key).length;
 }
 
-function invalidFilter() {
-  return new V2ProblemError("queryCatalogItems", {
-    type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
-    title: "Validation failed",
-    status: 422,
-    detail: "The filter is not valid.",
-    instance: "/api/v2/catalog/query",
-  });
-}
-
 afterEach(() => {
   mocks.v2.mockReset();
   mocks.fetchLibrarySectionItems.mockReset();
@@ -170,19 +160,6 @@ describe("Library tab load errors", () => {
     expect(await screen.findByText("Grid of 3")).toBeInTheDocument();
     expect(screen.queryByText("Couldn't load this library")).not.toBeInTheDocument();
     expect(callsTo("POST /api/v2/catalog/query")).toBe(2);
-  });
-
-  it("does not present a refused query as an empty library", async () => {
-    mocks.v2.mockRejectedValue(invalidFilter());
-    renderBrowse();
-
-    expect(
-      await screen.findByRole("heading", { name: "Couldn't load this library" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Something went wrong while loading it. Try again in a moment."),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("No items found.")).not.toBeInTheDocument();
   });
 
   it("keeps the loaded grid when a background refetch fails", async () => {

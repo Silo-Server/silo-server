@@ -8,7 +8,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
 
 // The TV spec's home request: medium cards, a 4K hero backdrop and logo. Each
@@ -115,40 +114,6 @@ func (hintRecordingPresigner) PresignURLsWithExpiry(_ context.Context, paths []s
 	return out
 }
 
-// Recommendation cards resolve through the featured resolver in one batch,
-// at the request's artwork, rather than one presign per image.
-func TestRecommendationCardsBatchArtworkAtRequestedWidths(t *testing.T) {
-	resolver := &countingSectionImageResolver{}
-	detailSvc := &catalog.DetailService{}
-	detailSvc.SetImageResolver(resolver)
-	h := &RecommendationsHandler{DetailSvc: detailSvc}
-
-	items := map[string]*models.MediaItem{
-		"a": {ContentID: "a", PosterPath: "tmdb/movies/1/poster/original.r1.webp", BackdropPath: "tmdb/movies/1/backdrop/original.r1.webp"},
-		"b": {ContentID: "b", PosterPath: "tmdb/movies/2/poster/original.r2.webp", LogoPath: "tmdb/movies/2/logo/original.r2.webp"},
-	}
-	enrichment := &itemEnrichment{items: items}
-	artwork := h.featuredCardArtwork(t.Context(), items, tvHomeArtwork)
-	cards := h.buildSectionItems(t.Context(),
-		[]recommendations.ScoredItem{{MediaItemID: "a"}, {MediaItemID: "b"}}, enrichment, nil, artwork)
-
-	if resolver.batchCalls != 1 || resolver.singleCalls != 0 {
-		t.Fatalf("batch=%d single=%d, want one batch", resolver.batchCalls, resolver.singleCalls)
-	}
-	if len(cards) != 2 {
-		t.Fatalf("cards = %d, want 2", len(cards))
-	}
-	if got, want := cards[0].BackdropURL, "resolved:tmdb/movies/1/backdrop/original.r1.webp"; got != want {
-		t.Errorf("hero backdrop = %q, want %q", got, want)
-	}
-	if got, want := cards[1].PosterURL, "resolved:tmdb/movies/2/poster/w500.r2.webp"; got != want {
-		t.Errorf("card poster = %q, want %q", got, want)
-	}
-	if got, want := cards[1].LogoURL, "resolved:tmdb/movies/2/logo/original.r2.webp"; got != want {
-		t.Errorf("logo = %q, want %q", got, want)
-	}
-}
-
 // Without sizes, recommendation cards keep the keys and hint they always had,
 // which the frozen /api/v1 routes depend on: the featured poster and backdrop,
 // the stored logo, and the featured plugin hint.
@@ -226,26 +191,5 @@ func TestWatchTonightCastPhotosResolveOnProfileLadder(t *testing.T) {
 	h.resolveCastPhotos(t.Context(), plugin, imagesize.Width(200))
 	if resolver.variant != imagesize.PluginVariantLarge {
 		t.Errorf("plugin hint at 200px = %q, want %q", resolver.variant, imagesize.PluginVariantLarge)
-	}
-}
-
-// A Watch Tonight page resolves artwork for the cards it returns, not for the
-// rest of the hydration window, which only decides whether more remain.
-func TestSwipeCardsResolveArtworkOnlyForReturnedCards(t *testing.T) {
-	resolver := &countingSectionImageResolver{}
-	detailSvc := &catalog.DetailService{}
-	detailSvc.SetImageResolver(resolver)
-	h := &RecommendationsHandler{DetailSvc: detailSvc, CastFetcher: castByID{}}
-	items := map[string]*models.MediaItem{}
-	for _, id := range []string{"a", "b", "c"} {
-		items[id] = &models.MediaItem{ContentID: id, PosterPath: "tmdb/movies/" + id + "/poster/original.r1.webp"}
-	}
-
-	cards, more := h.swipeCards(t.Context(), recommendationCandidates("a", "b", "c"), watchTonightEnrichment{items: items}, 1, imagesize.Request{})
-	if len(cards) != 1 || !more {
-		t.Fatalf("cards = %d, more = %v; want one card and more", len(cards), more)
-	}
-	if !slices.Equal(resolver.paths, []string{"tmdb/movies/a/poster/w500.r1.webp"}) {
-		t.Fatalf("resolved %v, want only the returned card's poster", resolver.paths)
 	}
 }

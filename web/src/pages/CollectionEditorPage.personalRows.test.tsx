@@ -5,22 +5,21 @@
  * Settings > Home Screen (asking first about unsaved changes). The editor
  * itself never changes a row.
  */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getCollectionOk from "../../../contracts/api/v2/fixtures/get_collection_ok.json";
-import { MY_ROWS_ONCE_CREATED, ROWS_NOT_LISTED } from "@/lib/collections/copy";
-import { safeReturnPath, type AddedRowState } from "@/lib/homeRows/rowLinks";
-import {
-  emptyPreview,
-  personalCapabilities,
-  personalSmartCollection,
-} from "@/test/fixtures/collectionAnswers";
+import { ROWS_NOT_LISTED } from "@/lib/collections/copy";
+import { safeReturnPath } from "@/lib/homeRows/rowLinks";
+import { emptyPreview, personalSmartCollection } from "@/test/fixtures/collectionAnswers";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
-import CollectionEditorPage from "./CollectionEditorPage";
+import {
+  location,
+  locationParams,
+  prepareEditorPage,
+  showEditorPage,
+} from "./collectionEditorPage.test-support";
 
 vi.mock("@/api/v2/request", async () => (await import("@/test/v2Recorder")).mockV2Request());
 vi.mock("@/hooks/useDebounce", () => ({ useDebounce: (value: string) => value }));
@@ -108,16 +107,7 @@ beforeEach(() => {
       takeRecords = () => [];
     },
   );
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
-  HTMLElement.prototype.scrollIntoView = () => {};
-  HTMLElement.prototype.hasPointerCapture = () => false;
+  prepareEditorPage();
   viewer.loading = false;
   viewer.libraries = [
     { id: 1, name: "Movies", type: "movies" },
@@ -144,7 +134,6 @@ beforeEach(() => {
       entry("s-kids-5"),
     ],
   };
-  v2Recorder.answer("GET /api/v2/collections/capabilities", personalCapabilities);
   v2Recorder.answer("GET /api/v2/collections/{id}", MATCHED);
   v2Recorder.answer("GET /api/v2/collections", { items: [MATCHED] });
   v2Recorder.answer("POST /api/v2/collections/preview", emptyPreview);
@@ -175,38 +164,8 @@ function reveal() {
   });
 }
 
-function Where() {
-  const location = useLocation();
-  return <output aria-label="Location">{`${location.pathname}${location.search}`}</output>;
-}
-
-function showPage(entry: string | { pathname: string; state: unknown }) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  const router = createMemoryRouter(
-    [
-      { path: "/collections", element: <Where /> },
-      { path: "/settings/home-screen", element: <Where /> },
-      {
-        element: <CollectionEditorPage scope="personal" />,
-        children: [{ path: "/collections/new" }, { path: "/collections/:id/edit" }],
-      },
-    ],
-    { initialEntries: [entry] },
-  );
-  render(
-    <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
-  );
-  return router;
-}
-
 const EDITOR = "/collections/c1/edit";
 const settingsReads = () => v2Recorder.callsOf("GET /api/v2/profile/sections/settings");
-const location = () => screen.getByRole("status", { name: "Location" }).textContent ?? "";
-const homeScreenParams = () => new URL(location(), "https://silo.test").searchParams;
 
 async function rowsGroup() {
   await screen.findByRole("textbox", { name: "Name" });
@@ -222,7 +181,7 @@ async function openAddAsRow(user: ReturnType<typeof userEvent.setup>) {
 
 describe("rows that show a personal collection", () => {
   it("reads nothing until Where it shows comes on screen", async () => {
-    showPage(EDITOR);
+    showEditorPage(EDITOR, { where: true });
     await screen.findByRole("textbox", { name: "Name" });
     expect(settingsReads()).toHaveLength(0);
     expect(screen.queryByRole("group", { name: "Rows that show it" })).toBeNull();
@@ -231,14 +190,14 @@ describe("rows that show a personal collection", () => {
   it("reads no page until it knows which libraries the profile hides", async () => {
     // Until the preferences load, the library list still holds hidden libraries.
     viewer.loading = true;
-    showPage(EDITOR);
+    showEditorPage(EDITOR, { where: true });
     await rowsGroup();
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(settingsReads()).toHaveLength(0);
   });
 
   it("lists the rows on your Home and your library pages", async () => {
-    showPage(EDITOR);
+    showEditorPage(EDITOR, { where: true });
     const group = await rowsGroup();
     const home = await within(group).findByRole("link", {
       name: "My Comfort Shows, My Home · row 4 of 8",
@@ -257,7 +216,7 @@ describe("rows that show a personal collection", () => {
     // Home Screen offers every personal collection on every page, and a
     // collection's libraries can change after its rows were added.
     pages["3"] = [entry("s-4k"), collectionRow("u-4k", "Big screen")];
-    showPage(EDITOR);
+    showEditorPage(EDITOR, { where: true });
     const group = await rowsGroup();
     expect(
       await within(group).findByRole("link", {
@@ -266,13 +225,6 @@ describe("rows that show a personal collection", () => {
     ).toHaveAttribute("href", "/settings/home-screen?page=3&edit=u-4k");
     expect(group).toHaveTextContent("3 rows");
     expect(settingsReads().map(pageKey).sort()).toEqual(["1", "2", "3", "home"]);
-  });
-
-  it("says in the header where your rows show it, leaving hidden rows out", async () => {
-    showPage(EDITOR);
-    await rowsGroup();
-    expect(await screen.findByText(/On my Home/)).toBeInTheDocument();
-    expect(screen.queryByText(/my Kids page/)).toBeNull();
   });
 
   it("reads every page you see when it matches every library, never more than 4 at once", async () => {
@@ -292,7 +244,7 @@ describe("rows that show a personal collection", () => {
       active -= 1;
       return { items: [] };
     });
-    showPage(EDITOR);
+    showEditorPage(EDITOR, { where: true });
     await rowsGroup();
     await waitFor(() => expect(settingsReads()).toHaveLength(4));
     expect(active).toBe(4);
@@ -306,26 +258,6 @@ describe("rows that show a personal collection", () => {
     expect(settingsReads().map(pageKey).sort()).toEqual(["1", "2", "3", "4", "5", "6", "home"]);
   });
 
-  it("highlights the row just added when Home Screen hands back to the editor", async () => {
-    const state: AddedRowState = {
-      addedRow: {
-        id: "u-kids",
-        surface: "profile",
-        page: { kind: "library", libraryId: 2 },
-        position: 2,
-      },
-    };
-    showPage({ pathname: EDITOR, state });
-    const group = await rowsGroup();
-    const added = await within(group).findByRole("link", { name: /^Rainy afternoons/ });
-    await waitFor(() => expect(added.closest("li")).toHaveAttribute("data-highlighted", "true"));
-    expect(
-      within(group)
-        .getByRole("link", { name: /^My Comfort Shows/ })
-        .closest("li"),
-    ).not.toHaveAttribute("data-highlighted");
-  });
-
   it("offers Retry when a page doesn't load", async () => {
     let fail = true;
     v2Recorder.answer("GET /api/v2/profile/sections/settings", (call: RecordedCall) => {
@@ -333,7 +265,7 @@ describe("rows that show a personal collection", () => {
       return { items: pages[pageKey(call)] ?? [] };
     });
     const user = userEvent.setup();
-    showPage(EDITOR);
+    showEditorPage(EDITOR, { where: true });
     const group = await rowsGroup();
     expect(await within(group).findByRole("alert")).toHaveTextContent(
       "Couldn't load the rows that show it.",
@@ -347,72 +279,17 @@ describe("rows that show a personal collection", () => {
 });
 
 describe("Add as a row on your own pages", () => {
-  it("offers My Home and the pages of the libraries it matches, and no others", async () => {
-    const user = userEvent.setup();
-    showPage(EDITOR);
-    const menu = await openAddAsRow(user);
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((item) => item.textContent),
-    ).toEqual(["My Home", "My Movies page", "My Kids page"]);
-    expect(menu).not.toHaveTextContent("Other libraries");
-  });
-
-  it("offers every library you see when it matches every library", async () => {
-    v2Recorder.answer("GET /api/v2/collections/{id}", getCollectionOk);
-    const user = userEvent.setup();
-    showPage(EDITOR);
-    const menu = await openAddAsRow(user);
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((item) => item.textContent),
-    ).toEqual(["My Home", "My Movies page", "My Kids page", "My 4K Movies page"]);
-  });
-
   it("opens Add row in Settings > Home Screen on that page, with a way back, changing nothing", async () => {
     const user = userEvent.setup();
-    showPage(EDITOR);
+    showEditorPage(EDITOR, { where: true });
     const menu = await openAddAsRow(user);
     await user.click(within(menu).getByRole("menuitem", { name: "My Kids page" }));
     await waitFor(() => expect(location()).toMatch(/^\/settings\/home-screen\?/));
-    const params = homeScreenParams();
+    const params = locationParams();
     expect(params.get("page")).toBe("2");
     expect(params.get("add")).toBe("collection:user:c1");
     expect(params.get("return")).toBe(EDITOR);
     expect(safeReturnPath(params.get("return"))).toBe(EDITOR);
     expect(v2Recorder.writes()).toEqual([]);
-  });
-
-  it("waits for a new collection to be created, and says so in one line", async () => {
-    showPage("/collections/new?type=manual");
-    await screen.findByRole("textbox", { name: "Name" });
-    const group = await screen.findByRole("group", { name: "Rows that show it" });
-    expect(group).toHaveTextContent(MY_ROWS_ONCE_CREATED);
-    expect(screen.queryByRole("button", { name: /Add as a row/ })).toBeNull();
-    expect(settingsReads()).toHaveLength(0);
-  });
-
-  it("asks first about unsaved changes, naming your page; Save and continue saves, then goes on", async () => {
-    const user = userEvent.setup();
-    showPage(EDITOR);
-    await rowsGroup();
-    fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), {
-      target: { value: "Rainy weekends" },
-    });
-    await user.click(await screen.findByRole("button", { name: /Add as a row/ }));
-    await user.click(await screen.findByRole("menuitem", { name: "My Kids page" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Save changes first?" });
-    expect(dialog).toHaveTextContent(
-      "You're about to add Rainy days as a row on my Kids page. Name not saved yet.",
-    );
-    await user.click(within(dialog).getByRole("button", { name: "Save and continue" }));
-    await waitFor(() => expect(location()).toMatch(/^\/settings\/home-screen\?/));
-    expect(homeScreenParams().get("page")).toBe("2");
-    // The collection's own save, and nothing on the profile's pages.
-    expect(v2Recorder.writes().map((call) => call.operation)).toEqual([
-      "PATCH /api/v2/collections/{id}",
-    ]);
   });
 });

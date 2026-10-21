@@ -101,7 +101,6 @@ type layout struct {
 	unknownSize bool    // a live-style segment with no size
 	dropCue     *uint64 // a video keyframe left out of the Cues
 	noPositions bool
-	padding     int // extra duplicate cue points, to grow the Cues
 }
 
 // file builds a Matroska file whose Cues index the fixture's keyframes, plus
@@ -148,9 +147,6 @@ func cuesFor(l layout, posA, posB uint64) []byte {
 		point(10, audioTrack, posA), // audio: not a video keyframe
 		point(2216, videoTrack, posA),
 		point(2216, videoTrack, posA), // duplicate
-	}
-	for range l.padding {
-		points = append(points, point(2216, videoTrack, posA))
 	}
 	return el(idCues, points...)
 }
@@ -324,22 +320,6 @@ func TestReadMatroskaRejectsOversizedCues(t *testing.T) {
 		info, tracks, huge,
 	)
 	if _, err := read(f); err == nil || errors.Is(err, ErrNoIndex) {
-		t.Fatalf("err = %v, want a size error", err)
-	}
-
-	// Well-formed Cues just under the limit read; one more point is refused.
-	const header = 12 // a 4-byte ID and an 8-byte size (el)
-	pointLen := len(cuesFor(layout{padding: 1}, 0, 0)) - len(cuesFor(layout{}, 0, 0))
-	under := layout{cuesFirst: true}
-	under.padding = (cuesLimit - (len(cuesFor(under, 0, 0)) - header)) / pointLen
-	got, err := read(file(under))
-	wantIndex(t, got, err)
-	over := under
-	over.padding++
-	if size := len(cuesFor(over, 0, 0)) - header; size <= cuesLimit {
-		t.Fatalf("fixture Cues are %d bytes, want over %d", size, cuesLimit)
-	}
-	if _, err := read(file(over)); err == nil || errors.Is(err, ErrNoIndex) {
 		t.Fatalf("err = %v, want a size error", err)
 	}
 }

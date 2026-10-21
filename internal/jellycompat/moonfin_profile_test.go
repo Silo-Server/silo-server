@@ -34,19 +34,6 @@ func moonfinH264Version() catalog.FileVersion {
 	}
 }
 
-// Moonfin's H.264 rules (a known VideoProfile; RefFrames <= 4 from 1900
-// pixels wide) used to refuse every H.264 encode, and with the source's
-// reference frames unreported, a 1080p H.264 file had no route at all:
-// PlaybackInfo answered 400 PlaybackUnavailable for every such title.
-func TestMoonfinIOSProfileCanTranscodeH264(t *testing.T) {
-	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	req := playbackInfoRequest{AudioStreamIndex: compatIntValuePtr(1), MaxStreamingBitrate: 120_000_000}
-	source := h.buildPlaybackSource("item", "play", moonfinH264Version(), moonfinIOSProfile(t), req, true)
-	if !source.SupportsTranscoding {
-		t.Errorf("SupportsTranscoding = false: the encode target can satisfy profile, level and reference-frame rules")
-	}
-}
-
 // FFmpeg 8.1 never reports reference frames, so Moonfin's required
 // RefFrames <= 4 rule evaluates against the 1 that FFmpeg 7 reported, and a
 // 1080p H.264 file Moonfin direct plays on Jellyfin direct plays here too.

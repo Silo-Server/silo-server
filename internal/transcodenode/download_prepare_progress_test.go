@@ -1,7 +1,6 @@
 package transcodenode
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -11,8 +10,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -39,10 +36,8 @@ func (s *recordingPrepareLogSink) WriteEvent(_ context.Context, sessionID string
 
 func readPrepareProgress(t *testing.T, server *Server, artifactID string) downloadprepare.Progress {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/downloads/prepare/"+artifactID+"/progress", nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("artifact_id", artifactID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	req := withNodeRouteParams(httptest.NewRequest(http.MethodGet, "/downloads/prepare/"+artifactID+"/progress", nil),
+		map[string]string{"artifact_id": artifactID})
 	rr := httptest.NewRecorder()
 	server.handleDownloadPrepareProgress(rr, req)
 	if rr.Code != http.StatusOK {
@@ -59,27 +54,18 @@ func TestDownloadPrepareProgressIsReadableWhileEncoding(t *testing.T) {
 	server := newTestServer(t)
 	logs := &recordingPrepareLogSink{}
 	server.SetFFmpegLogSink(logs)
-	dir := t.TempDir()
-	release := filepath.Join(dir, "release")
-	ffmpegPath := filepath.Join(dir, "ffmpeg.sh")
-	script := "#!/bin/sh\n" +
-		"printf 'out_time_us=30000000\\nspeed=2.0x\\nprogress=continue\\n'\n" +
-		"printf 'encoder warning\\n' >&2\n" +
-		"while [ ! -f " + release + " ]; do sleep 0.01; done\n" +
-		"for last; do :; done\nprintf artifact > \"$last\"\n"
-	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	release := filepath.Join(t.TempDir(), "release")
+	useFakeFFmpeg(t, server, "#!/bin/sh\n"+
+		"printf 'out_time_us=30000000\\nspeed=2.0x\\nprogress=continue\\n'\n"+
+		"printf 'encoder warning\\n' >&2\n"+
+		"while [ ! -f "+release+" ]; do sleep 0.01; done\n"+
+		"for last; do :; done\nprintf artifact > \"$last\"\n")
 	server.watcher.Config().Playback.HWAccel = "none"
-	body, err := json.Marshal(downloadprepare.Request{
+	prepare := jsonRequest(t, "/downloads/prepare", downloadprepare.Request{
 		ArtifactID: "attempt-1", InputPath: "/media/movie.mkv",
 		TargetCodecVideo: "copy", TargetCodecAudio: "copy", AudioTrackIndex: -1,
 		TotalDuration: 120, LogSessionID: playback.DownloadPrepareLogSessionID("art-1"),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	if got := readPrepareProgress(t, server, "attempt-1"); got.Running || got.ArtifactID != "attempt-1" {
 		t.Fatalf("progress before prepare = %+v, want not running", got)
@@ -87,7 +73,7 @@ func TestDownloadPrepareProgressIsReadableWhileEncoding(t *testing.T) {
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		rr := httptest.NewRecorder()
-		server.handleDownloadPrepare(rr, httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body)))
+		server.handleDownloadPrepare(rr, prepare)
 		done <- rr
 	}()
 

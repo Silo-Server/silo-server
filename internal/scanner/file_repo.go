@@ -3059,7 +3059,8 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // Returns the number of rows deleted.
 func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration, protectedRoots []string) (int, error) {
 	cutoff := time.Now().UTC().Add(-gracePeriod)
-	query := `DELETE FROM media_files mf
+	query := `WITH deleted AS (
+		DELETE FROM media_files mf
 		WHERE mf.media_folder_id = $1
 		  AND mf.missing_since IS NOT NULL
 		  AND mf.missing_since < $2
@@ -3073,11 +3074,15 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 		query += " AND NOT (" + strings.Join(clauses, " OR ") + ")"
 		args = append(args, clauseArgs...)
 	}
-	tag, err := r.pool.Exec(ctx, query, args...)
-	if err != nil {
+	query += `
+		RETURNING mf.id, mf.extra_id
+	)` + catalog.ClearEmptiedExtraStillsCTE + `
+	SELECT count(*) FROM deleted`
+	var deleted int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&deleted); err != nil {
 		return 0, fmt.Errorf("deleting missing files for folder %d: %w", folderID, err)
 	}
-	return int(tag.RowsAffected()), nil
+	return deleted, nil
 }
 
 // ListRootsWithCatalogedFiles returns the subset of roots (in input order)
@@ -3181,20 +3186,25 @@ func (r *FileRepository) ListRootsWithOnlyMissingFiles(ctx context.Context, fold
 	return suspect, nil
 }
 
-// DeleteByIDs removes specific media file rows by primary key.
+// DeleteByIDs removes specific media file rows by primary key, clearing the
+// image of any local extra left without a file
+// (catalog.ClearEmptiedExtraStillsCTE).
 func (r *FileRepository) DeleteByIDs(ctx context.Context, ids []int) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
 
-	tag, err := r.pool.Exec(ctx,
-		"DELETE FROM media_files WHERE id = ANY($1)",
+	var deleted int
+	err := r.pool.QueryRow(ctx, `WITH deleted AS (
+		DELETE FROM media_files WHERE id = ANY($1) RETURNING id, extra_id
+	)`+catalog.ClearEmptiedExtraStillsCTE+`
+	SELECT count(*) FROM deleted`,
 		ids,
-	)
+	).Scan(&deleted)
 	if err != nil {
 		return 0, fmt.Errorf("deleting media files by id: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	return deleted, nil
 }
 
 // ListIDsOutsideRoots returns file row ids for a folder whose paths are no
@@ -3883,15 +3893,29 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 // season/episode hints remain unlinked for the slower fallback path.
 func (r *FileRepository) BulkLinkEpisodesBySeries(ctx context.Context, seriesContentID string) (int, error) {
 	var linked int
+	// Lock the candidates in id order first, the order curated rebind,
+	// rename and split lock a series' files; the UPDATE alone locks them in
+	// plan order and can deadlock with those.
 	err := r.pool.QueryRow(ctx, `
-		WITH updated AS (
+		WITH locked AS (
+			SELECT id FROM media_files
+			WHERE content_id = $1
+			  AND episode_id IS NULL
+			  AND missing_since IS NULL
+			  AND season_number IS NOT NULL
+			  AND episode_number IS NOT NULL
+			ORDER BY id
+			FOR UPDATE
+		),
+		updated AS (
 			UPDATE media_files mf
 			SET episode_id = e.content_id,
 				season_number = e.season_number,
 				episode_number = e.episode_number,
 				updated_at = NOW()
 			FROM episodes e
-			WHERE mf.content_id = $1
+			WHERE mf.id IN (SELECT id FROM locked)
+			  AND mf.content_id = $1
 			  AND mf.episode_id IS NULL
 			  AND mf.missing_since IS NULL
 			  AND mf.season_number IS NOT NULL

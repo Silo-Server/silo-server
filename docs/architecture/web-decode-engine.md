@@ -7,8 +7,10 @@ a non-default audio track. The server then sends the untouched file
 (`original_http`) instead of converting it. Paths are repository-relative.
 
 The engine is a per-browser beta setting (Settings → Playback → This browser),
-stored in `localStorage` under `silo-player-browser-decoding`, off by default.
-With it off, nothing below loads and the player behaves as before.
+stored in `localStorage` under `silo-player-browser-decoding`. It is on unless
+the stored value is `"false"`, so a browser that never touched the switch uses
+the engine and one that turned it off keeps it off. With it off, nothing below
+loads and the player behaves as before.
 
 ## Capability contract
 

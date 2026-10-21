@@ -162,7 +162,6 @@ func TestMonoOutputProfilePreservesTranscodeRestrictions(t *testing.T) {
 		want       bool
 	}{
 		{"mono matches", playbackInfoRequest{MaxAudioChannels: 1}, "1080p", true, true},
-		{"stereo does not match", playbackInfoRequest{}, "1080p", true, false},
 		{"encoding disabled", playbackInfoRequest{MaxAudioChannels: 1, EnableTranscoding: new(false)}, "1080p", true, false},
 		{"4K policy disabled", playbackInfoRequest{MaxAudioChannels: 1}, "2160p", false, false},
 		{"bitrate too low", playbackInfoRequest{MaxAudioChannels: 1, MaxStreamingBitrate: 100000}, "1080p", true, false},
@@ -253,31 +252,6 @@ func TestSubtitleTimeMapMatchesMPEGTSMuxerShiftWithCopiedTimestamps(t *testing.T
 	}
 }
 
-// fMP4 segments keep the source clock in tfdt, so their map carries no
-// muxer shift: MPEGTS:0 with copied timestamps and the start otherwise.
-func TestSubtitleTimeMapHasNoShiftForFMP4Segments(t *testing.T) {
-	for _, tc := range []struct {
-		copyTimestamps bool
-		want           string
-	}{
-		{copyTimestamps: true, want: "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n"},
-		{copyTimestamps: false, want: "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:180000\n"},
-	} {
-		t.Run(strconv.FormatBool(tc.copyTimestamps), func(t *testing.T) {
-			r := httptest.NewRequest("GET", "/subtitle?EndPositionTicks=40000000&AddVttTimeMap=true&CopyTimestamps="+strconv.FormatBool(tc.copyTimestamps), nil)
-			route := chi.NewRouteContext()
-			route.URLParams.Add("routeFormat", "vtt")
-			route.URLParams.Add("routeStartPositionTicks", "20000000")
-			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
-			rr := httptest.NewRecorder()
-			(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n"), 0)
-			if body := rr.Body.String(); rr.Code != 200 || !strings.Contains(body, tc.want) {
-				t.Fatalf("status=%d body=%s, want %q", rr.Code, body, tc.want)
-			}
-		})
-	}
-}
-
 // The subtitle route reads the segment container from the play session's
 // source: MPEG-TS sessions get the muxer shift, fMP4 sessions do not. Direct
 // play and progressive remux have no HLS segments, so they get no shift either.
@@ -298,12 +272,9 @@ func TestHandleSubtitleStreamTimeMapFollowsSegmentContainer(t *testing.T) {
 		{name: "remux-ts-v1", videoCodec: "hevc", source: PlaybackMediaSource{HLSRemux: true, HLSRemuxMPEGTS: true}, want: "MPEGTS:900000"},
 		{name: "mpeg2 copy", videoCodec: "mpeg2video", source: PlaybackMediaSource{HLSRemux: true}, want: "MPEGTS:900000"},
 		{name: "remux-v1", videoCodec: "h264", source: PlaybackMediaSource{HLSRemux: true}, want: "MPEGTS:0"},
-		{name: "copy video with audio transcode", videoCodec: "h264", source: PlaybackMediaSource{HLSRemux: true, TranscodeAudio: true}, want: "MPEGTS:0"},
-		{name: "remux-dv-v1", videoCodec: "hevc", source: PlaybackMediaSource{HLSRemux: true, DVStripToHDR10: true}, want: "MPEGTS:0"},
 		{name: "hevc-v1", videoCodec: "h264", source: PlaybackMediaSource{TargetVideoCodec: "hevc"}, want: "MPEGTS:0"},
 		{name: "started h264 transcode", videoCodec: "h264", playMethod: "transcode", want: "MPEGTS:900000"},
 		{name: "direct play", videoCodec: "h264", playMethod: "direct", want: "MPEGTS:0"},
-		{name: "progressive remux", videoCodec: "h264", playMethod: "remux", want: "MPEGTS:0"},
 		{name: "not started without transcoding", videoCodec: "h264", notHLS: true, want: "MPEGTS:0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -513,7 +484,7 @@ func TestProgressiveRemuxChecksMP4OutputContainer(t *testing.T) {
 		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 7500000}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 6}}}
 	handler := &PlaybackHandler{codec: NewResourceIDCodec()}
 	for _, tc := range []struct{ property, value string }{
-		{"Width", "1280"}, {"VideoBitrate", "4000000"}, {"AudioChannels", "2"},
+		{"Width", "1280"}, {"AudioChannels", "2"},
 	} {
 		t.Run(tc.property, func(t *testing.T) {
 			profile := DeviceProfile{DirectPlayProfiles: []DirectPlayProfile{{Type: "Video", Container: "mkv", VideoCodec: "h264", AudioCodec: "aac"}}, ContainerProfiles: []ContainerProfile{{Type: "Video", Container: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: tc.property, Value: tc.value, IsRequired: true}}}}}

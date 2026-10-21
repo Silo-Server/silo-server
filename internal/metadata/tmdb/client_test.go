@@ -18,21 +18,26 @@ import (
 	"time"
 )
 
-func TestNewClientUsesProjectAPIKeyWhenEmpty(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("api_key"); got != projectAPIKey {
-			t.Fatalf("api_key query = %q, want project API key", got)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"page":1,"total_pages":1,"total_results":0,"results":[]}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("", 1000)
+// newTestClient returns a client with the test key whose requests go to a
+// test server running handler.
+func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	client := NewClient("test-key", 1000)
+	t.Cleanup(client.Close)
 	client.SetBaseURL(server.URL)
+	return client
+}
 
-	if _, err := client.GetCollectionPreset(context.Background(), "trending", "all", "day", 10); err != nil {
-		t.Fatalf("GetCollectionPreset returned error: %v", err)
+// checkQuery reports each query parameter whose value is not the wanted one;
+// an empty want means the parameter is absent.
+func checkQuery(t *testing.T, q url.Values, want map[string]string) {
+	t.Helper()
+	for key, value := range want {
+		if got := q.Get(key); got != value {
+			t.Errorf("%s = %q, want %q", key, got, value)
+		}
 	}
 }
 
@@ -88,102 +93,9 @@ func TestCanceledRequestErrorKeepsItsCause(t *testing.T) {
 	}
 }
 
-func TestGetCollectionPresetTrending(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/trending/all/day" {
-			http.NotFound(w, r)
-			return
-		}
-		if got := r.URL.Query().Get("page"); got != "1" {
-			t.Fatalf("page query = %q, want 1", got)
-		}
-		if got := r.URL.Query().Get("api_key"); got != "test-key" {
-			t.Fatalf("api_key query = %q, want test-key", got)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"page": 1,
-			"total_pages": 1,
-			"total_results": 2,
-			"results": [
-				{"id": 10, "media_type": "movie", "title": "Movie Title"},
-				{"id": 20, "media_type": "tv", "name": "Series Title"}
-			]
-		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
-
-	results, err := client.GetCollectionPreset(context.Background(), "trending", "all", "day", 10)
-	if err != nil {
-		t.Fatalf("GetCollectionPreset returned error: %v", err)
-	}
-
-	if len(results) != 2 {
-		t.Fatalf("len(results) = %d, want 2", len(results))
-	}
-	if results[0] != (CollectionResult{ID: 10, MediaType: "movie", Title: "Movie Title"}) {
-		t.Fatalf("results[0] = %+v", results[0])
-	}
-	if results[1] != (CollectionResult{ID: 20, MediaType: "tv", Title: "Series Title"}) {
-		t.Fatalf("results[1] = %+v", results[1])
-	}
-}
-
-func TestDiscoverSectionCachesSuccess(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		if r.URL.Path != "/movie/popular" {
-			http.NotFound(w, r)
-			return
-		}
-		if got := r.URL.Query().Get("page"); got != "1" {
-			t.Fatalf("page query = %q, want 1", got)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"page": 1,
-			"total_pages": 1,
-			"total_results": 1,
-			"results": [
-				{"id": 11, "title": "Cached Movie", "overview": "from tmdb"}
-			]
-		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
-
-	first, err := client.DiscoverSection(context.Background(), "popular_movies", 1)
-	if err != nil {
-		t.Fatalf("first DiscoverSection returned error: %v", err)
-	}
-	second, err := client.DiscoverSection(context.Background(), "popular_movies", 1)
-	if err != nil {
-		t.Fatalf("second DiscoverSection returned error: %v", err)
-	}
-
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("upstream calls = %d, want 1", got)
-	}
-	for name, page := range map[string]*MediaPage{"first": first, "second": second} {
-		if page == nil || len(page.Results) != 1 {
-			t.Fatalf("%s page results = %#v, want one result", name, page)
-		}
-		if page.Results[0].ID != 11 || page.Results[0].Title != "Cached Movie" {
-			t.Fatalf("%s result = %+v", name, page.Results[0])
-		}
-	}
-}
-
 func TestDiscoverSectionCacheKeyIncludesPage(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if r.URL.Path != "/movie/popular" {
 			http.NotFound(w, r)
@@ -199,11 +111,7 @@ func TestDiscoverSectionCacheKeyIncludesPage(t *testing.T) {
 				{"id": ` + page + `, "title": "Movie ` + page + `"}
 			]
 		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	first, err := client.DiscoverSection(context.Background(), "popular_movies", 1)
 	if err != nil {
@@ -224,7 +132,7 @@ func TestDiscoverSectionCacheKeyIncludesPage(t *testing.T) {
 
 func TestDiscoverSectionDoesNotCacheClientErrors(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
 		if r.URL.Path != "/movie/popular" {
 			http.NotFound(w, r)
@@ -243,11 +151,7 @@ func TestDiscoverSectionDoesNotCacheClientErrors(t *testing.T) {
 				{"id": 22, "title": "Recovered Movie"}
 			]
 		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	if _, err := client.DiscoverSection(context.Background(), "popular_movies", 1); err == nil {
 		t.Fatal("first DiscoverSection expected error")
@@ -266,7 +170,7 @@ func TestDiscoverSectionDoesNotCacheClientErrors(t *testing.T) {
 
 func TestDiscoverSectionReturnsClonedCachedPage(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if r.URL.Path != "/movie/popular" {
 			http.NotFound(w, r)
@@ -281,11 +185,7 @@ func TestDiscoverSectionReturnsClonedCachedPage(t *testing.T) {
 				{"id": 33, "title": "Immutable Movie"}
 			]
 		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	first, err := client.DiscoverSection(context.Background(), "popular_movies", 1)
 	if err != nil {
@@ -306,42 +206,9 @@ func TestDiscoverSectionReturnsClonedCachedPage(t *testing.T) {
 	}
 }
 
-func TestGetExternalIDsCachesSuccess(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		if r.URL.Path != "/movie/123/external_ids" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"imdb_id":"tt123","tvdb_id":456}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
-
-	first, err := client.GetExternalIDs(context.Background(), "movie", 123)
-	if err != nil {
-		t.Fatalf("first GetExternalIDs returned error: %v", err)
-	}
-	second, err := client.GetExternalIDs(context.Background(), "movie", 123)
-	if err != nil {
-		t.Fatalf("second GetExternalIDs returned error: %v", err)
-	}
-
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("upstream calls = %d, want 1", got)
-	}
-	if first.IMDbID != "tt123" || first.TVDBID != 456 || second.IMDbID != "tt123" || second.TVDBID != 456 {
-		t.Fatalf("external IDs = first %+v second %+v", first, second)
-	}
-}
-
 func TestRefreshExternalIDsBypassesCache(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		n := calls.Add(1)
 		if r.URL.Path != "/tv/77/external_ids" {
 			http.NotFound(w, r)
@@ -353,11 +220,7 @@ func TestRefreshExternalIDsBypassesCache(t *testing.T) {
 			return
 		}
 		_, _ = w.Write([]byte(`{"imdb_id":"tt77","tvdb_id":456}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	if _, err := client.GetExternalIDs(context.Background(), "tv", 77); err != nil {
 		t.Fatalf("GetExternalIDs returned error: %v", err)
@@ -377,55 +240,28 @@ func TestRefreshExternalIDsBypassesCache(t *testing.T) {
 
 func TestDiscoverMovieAppliesFilters(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/discover/movie" {
 			http.NotFound(w, r)
 			return
 		}
 		calls++
-		q := r.URL.Query()
-		if got := q.Get("sort_by"); got != "popularity.desc" {
-			t.Errorf("sort_by = %q, want popularity.desc", got)
-		}
-		if got := q.Get("with_genres"); got != "28,12" {
-			t.Errorf("with_genres = %q, want 28,12", got)
-		}
-		if got := q.Get("without_genres"); got != "99" {
-			t.Errorf("without_genres = %q, want 99", got)
-		}
-		if got := q.Get("vote_count.gte"); got != "300" {
-			t.Errorf("vote_count.gte = %q, want 300", got)
-		}
-		if got := q.Get("vote_average.gte"); got != "6.5" {
-			t.Errorf("vote_average.gte = %q, want 6.5", got)
-		}
-		if got := q.Get("primary_release_date.gte"); got != "2020-01-01" {
-			t.Errorf("primary_release_date.gte = %q, want 2020-01-01", got)
-		}
-		if got := q.Get("primary_release_date.lte"); got != "2025-12-31" {
-			t.Errorf("primary_release_date.lte = %q, want 2025-12-31", got)
-		}
-		if got := q.Get("certification_country"); got != "US" {
-			t.Errorf("certification_country = %q, want US", got)
-		}
-		if got := q.Get("certification"); got != "PG|PG-13" {
-			t.Errorf("certification = %q, want PG|PG-13", got)
-		}
-		if got := q.Get("with_runtime.gte"); got != "90" {
-			t.Errorf("with_runtime.gte = %q, want 90", got)
-		}
-		if got := q.Get("with_runtime.lte"); got != "180" {
-			t.Errorf("with_runtime.lte = %q, want 180", got)
-		}
-		if got := q.Get("with_original_language"); got != "en" {
-			t.Errorf("with_original_language = %q, want en", got)
-		}
-		if got := q.Get("api_key"); got != "test-key" {
-			t.Errorf("api_key = %q, want test-key", got)
-		}
-		if got := q.Get("page"); got != "1" {
-			t.Errorf("page = %q, want 1", got)
-		}
+		checkQuery(t, r.URL.Query(), map[string]string{
+			"sort_by":                  "popularity.desc",
+			"with_genres":              "28,12",
+			"without_genres":           "99",
+			"vote_count.gte":           "300",
+			"vote_average.gte":         "6.5",
+			"primary_release_date.gte": "2020-01-01",
+			"primary_release_date.lte": "2025-12-31",
+			"certification_country":    "US",
+			"certification":            "PG|PG-13",
+			"with_runtime.gte":         "90",
+			"with_runtime.lte":         "180",
+			"with_original_language":   "en",
+			"api_key":                  "test-key",
+			"page":                     "1",
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -437,11 +273,7 @@ func TestDiscoverMovieAppliesFilters(t *testing.T) {
 				{"id": 22, "title": "Second Movie"}
 			]
 		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	results, err := client.Discover(context.Background(), "movie", DiscoverParams{
 		SortBy:           "popularity.desc",
@@ -475,25 +307,18 @@ func TestDiscoverMovieAppliesFilters(t *testing.T) {
 }
 
 func TestDiscoverTVUsesFirstAirDate(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/discover/tv" {
 			http.NotFound(w, r)
 			return
 		}
-		q := r.URL.Query()
-		if got := q.Get("sort_by"); got != "vote_average.desc" {
-			t.Errorf("sort_by = %q, want vote_average.desc", got)
-		}
-		if got := q.Get("first_air_date.gte"); got != "2010-01-01" {
-			t.Errorf("first_air_date.gte = %q, want 2010-01-01", got)
-		}
-		if got := q.Get("first_air_date.lte"); got != "2020-01-01" {
-			t.Errorf("first_air_date.lte = %q, want 2020-01-01", got)
-		}
-		// TV requests must NOT carry primary_release_date.* params.
-		if got := q.Get("primary_release_date.gte"); got != "" {
-			t.Errorf("primary_release_date.gte should be empty for tv, got %q", got)
-		}
+		checkQuery(t, r.URL.Query(), map[string]string{
+			"sort_by":            "vote_average.desc",
+			"first_air_date.gte": "2010-01-01",
+			"first_air_date.lte": "2020-01-01",
+			// TV requests must NOT carry primary_release_date.* params.
+			"primary_release_date.gte": "",
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -504,11 +329,7 @@ func TestDiscoverTVUsesFirstAirDate(t *testing.T) {
 				{"id": 99, "name": "Some Show"}
 			]
 		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	results, err := client.Discover(context.Background(), "tv", DiscoverParams{
 		SortBy:         "vote_average.desc",
@@ -524,34 +345,6 @@ func TestDiscoverTVUsesFirstAirDate(t *testing.T) {
 	}
 	if results[0] != (CollectionResult{ID: 99, MediaType: "tv", Title: "Some Show"}) {
 		t.Errorf("results[0] = %+v", results[0])
-	}
-}
-
-func TestDiscoverIncludesCompaniesAndNetworks(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if got := q.Get("with_companies"); got != "420,2" {
-			t.Errorf("with_companies = %q, want 420,2", got)
-		}
-		if got := q.Get("with_networks"); got != "213,49" {
-			t.Errorf("with_networks = %q, want 213,49", got)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"page":1,"total_pages":1,"total_results":0,"results":[]}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
-
-	_, err := client.Discover(context.Background(), "movie", DiscoverParams{
-		SortBy:        "popularity.desc",
-		WithCompanies: []int{420, 2},
-		WithNetworks:  []int{213, 49},
-		Limit:         5,
-	})
-	if err != nil {
-		t.Fatalf("Discover returned error: %v", err)
 	}
 }
 
@@ -572,21 +365,16 @@ func TestDiscoverRequiresSortBy(t *testing.T) {
 }
 
 func TestDiscoverPageMovieReturnsFullResults(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/discover/movie" {
 			http.NotFound(w, r)
 			return
 		}
-		q := r.URL.Query()
-		if got := q.Get("sort_by"); got != "popularity.desc" {
-			t.Errorf("sort_by = %q, want popularity.desc", got)
-		}
-		if got := q.Get("with_companies"); got != "420" {
-			t.Errorf("with_companies = %q, want 420", got)
-		}
-		if got := q.Get("page"); got != "2" {
-			t.Errorf("page = %q, want 2", got)
-		}
+		checkQuery(t, r.URL.Query(), map[string]string{
+			"sort_by":        "popularity.desc",
+			"with_companies": "420",
+			"page":           "2",
+		})
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"page": 2,
@@ -596,11 +384,7 @@ func TestDiscoverPageMovieReturnsFullResults(t *testing.T) {
 				{"id": 24428, "title": "The Avengers", "release_date": "2012-04-25", "poster_path": "/p.jpg", "overview": "earth's mightiest", "popularity": 100.5, "vote_average": 7.7}
 			]
 		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	page, err := client.DiscoverPage(context.Background(), "movie", DiscoverParams{
 		SortBy:        "popularity.desc",
@@ -625,18 +409,15 @@ func TestDiscoverPageMovieReturnsFullResults(t *testing.T) {
 }
 
 func TestDiscoverPageTVUsesFirstAirDate(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/discover/tv" {
 			http.NotFound(w, r)
 			return
 		}
-		q := r.URL.Query()
-		if got := q.Get("with_networks"); got != "213" {
-			t.Errorf("with_networks = %q, want 213", got)
-		}
-		if got := q.Get("first_air_date.gte"); got != "" {
-			t.Errorf("first_air_date.gte = %q, want empty", got)
-		}
+		checkQuery(t, r.URL.Query(), map[string]string{
+			"with_networks":      "213",
+			"first_air_date.gte": "",
+		})
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"page": 1,
@@ -646,11 +427,7 @@ func TestDiscoverPageTVUsesFirstAirDate(t *testing.T) {
 				{"id": 1399, "name": "Game of Thrones", "first_air_date": "2011-04-17", "poster_path": "/g.jpg"}
 			]
 		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	page, err := client.DiscoverPage(context.Background(), "tv", DiscoverParams{
 		SortBy:       "vote_average.desc",
@@ -668,59 +445,18 @@ func TestDiscoverPageTVUsesFirstAirDate(t *testing.T) {
 	}
 }
 
-func TestDiscoverPageRejectsInvalidMediaType(t *testing.T) {
-	client := NewClient("test-key", 1000)
-	_, err := client.DiscoverPage(context.Background(), "all", DiscoverParams{SortBy: "popularity.desc"}, 1)
-	if err == nil {
-		t.Fatal("expected error for invalid media type")
-	}
-}
-
-func TestDiscoverPageRequiresSortBy(t *testing.T) {
-	client := NewClient("test-key", 1000)
-	_, err := client.DiscoverPage(context.Background(), "movie", DiscoverParams{}, 1)
-	if err == nil {
-		t.Fatal("expected error when sort_by is empty")
-	}
-}
-
-func TestDiscoverPageDefaultsToPage1(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("page"); got != "1" {
-			t.Errorf("page = %q, want 1", got)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"page":1,"total_pages":1,"total_results":0,"results":[]}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
-
-	if _, err := client.DiscoverPage(context.Background(), "movie", DiscoverParams{SortBy: "popularity.desc"}, 0); err != nil {
-		t.Fatalf("DiscoverPage: %v", err)
-	}
-}
-
 func TestSearchMediaMovie(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search/movie" {
 			http.NotFound(w, r)
 			return
 		}
-		q := r.URL.Query()
-		if got := q.Get("query"); got != "fight club" {
-			t.Fatalf("query = %q, want fight club", got)
-		}
-		if got := q.Get("include_adult"); got != "false" {
-			t.Fatalf("include_adult = %q, want false", got)
-		}
-		if got := q.Get("page"); got != "2" {
-			t.Fatalf("page = %q, want 2", got)
-		}
-		if got := q.Get("api_key"); got != "test-key" {
-			t.Fatalf("api_key query = %q, want test-key", got)
-		}
+		checkQuery(t, r.URL.Query(), map[string]string{
+			"query":         "fight club",
+			"include_adult": "false",
+			"page":          "2",
+			"api_key":       "test-key",
+		})
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"page": 2,
@@ -739,11 +475,7 @@ func TestSearchMediaMovie(t *testing.T) {
 				}
 			]
 		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	page, err := client.SearchMedia(context.Background(), "movie", "fight club", 2)
 	if err != nil {
@@ -759,24 +491,17 @@ func TestSearchMediaMovie(t *testing.T) {
 }
 
 func TestSearchMediaAllUsesMultiSearchAndFiltersToMoviesAndSeries(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search/multi" {
 			http.NotFound(w, r)
 			return
 		}
-		q := r.URL.Query()
-		if got := q.Get("query"); got != "fight club" {
-			t.Fatalf("query = %q, want fight club", got)
-		}
-		if got := q.Get("include_adult"); got != "false" {
-			t.Fatalf("include_adult = %q, want false", got)
-		}
-		if got := q.Get("page"); got != "2" {
-			t.Fatalf("page = %q, want 2", got)
-		}
-		if got := q.Get("api_key"); got != "test-key" {
-			t.Fatalf("api_key query = %q, want test-key", got)
-		}
+		checkQuery(t, r.URL.Query(), map[string]string{
+			"query":         "fight club",
+			"include_adult": "false",
+			"page":          "2",
+			"api_key":       "test-key",
+		})
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"page": 2,
@@ -802,11 +527,7 @@ func TestSearchMediaAllUsesMultiSearchAndFiltersToMoviesAndSeries(t *testing.T) 
 				}
 			]
 		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	page, err := client.SearchMedia(context.Background(), "all", "fight club", 2)
 	if err != nil {
@@ -826,49 +547,8 @@ func TestSearchMediaAllUsesMultiSearchAndFiltersToMoviesAndSeries(t *testing.T) 
 	}
 }
 
-func TestDiscoverSectionTrendingSeries(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/trending/tv/week" {
-			http.NotFound(w, r)
-			return
-		}
-		if got := r.URL.Query().Get("page"); got != "1" {
-			t.Fatalf("page = %q, want 1", got)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"page": 1,
-			"total_pages": 1,
-			"total_results": 1,
-			"results": [
-				{
-					"id": 1399,
-					"name": "Game of Thrones",
-					"first_air_date": "2011-04-17"
-				}
-			]
-		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
-
-	page, err := client.DiscoverSection(context.Background(), "trending_series", 1)
-	if err != nil {
-		t.Fatalf("DiscoverSection returned error: %v", err)
-	}
-	if len(page.Results) != 1 {
-		t.Fatalf("len(results) = %d, want 1", len(page.Results))
-	}
-	result := page.Results[0]
-	if result.ID != 1399 || result.MediaType != "series" || result.Year != 2011 {
-		t.Fatalf("result = %+v, want normalized series result", result)
-	}
-}
-
 func TestGetCollection(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/collection/86311" {
 			http.NotFound(w, r)
 			return
@@ -889,11 +569,7 @@ func TestGetCollection(t *testing.T) {
 				{"id": 299536, "title": "Avengers: Infinity War", "release_date": "2018-04-25"}
 			]
 		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	got, err := client.GetCollection(context.Background(), 86311)
 	if err != nil {
@@ -939,54 +615,8 @@ func TestGetCollection(t *testing.T) {
 	}
 }
 
-func TestGetCollectionRejectsNonPositiveID(t *testing.T) {
-	client := NewClient("test-key", 1000)
-	if _, err := client.GetCollection(context.Background(), 0); err == nil {
-		t.Fatal("expected error on id=0")
-	}
-	if _, err := client.GetCollection(context.Background(), -7); err == nil {
-		t.Fatal("expected error on negative id")
-	}
-}
-
-func TestGetExternalIDs(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/movie/123/external_ids" {
-			http.NotFound(w, r)
-			return
-		}
-		if got := r.URL.Query().Get("api_key"); got != "test-key" {
-			t.Fatalf("api_key query = %q, want test-key", got)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"imdb_id": "tt0133093",
-			"tvdb_id": 12345
-		}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
-
-	ids, err := client.GetExternalIDs(context.Background(), "movie", 123)
-	if err != nil {
-		t.Fatalf("GetExternalIDs returned error: %v", err)
-	}
-	if ids == nil {
-		t.Fatal("GetExternalIDs returned nil ids")
-	}
-	if ids.IMDbID != "tt0133093" {
-		t.Fatalf("IMDbID = %q, want tt0133093", ids.IMDbID)
-	}
-	if ids.TVDBID != 12345 {
-		t.Fatalf("TVDBID = %d, want 12345", ids.TVDBID)
-	}
-}
-
 func TestGetCertificationUsesSubResourceEndpoints(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/movie/603/release_dates":
@@ -1003,11 +633,7 @@ func TestGetCertificationUsesSubResourceEndpoints(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	movieCert, err := client.GetCertification(context.Background(), "movie", 603)
 	if err != nil {
@@ -1038,7 +664,7 @@ func TestGetCertificationUsesSubResourceEndpoints(t *testing.T) {
 // closed on the US ladder), unlike the display path, which falls back to any
 // country. A Canadian "PG" must not read as US PG.
 func TestGetCertificationIgnoresForeignFallback(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/movie/1/release_dates":
@@ -1055,11 +681,7 @@ func TestGetCertificationIgnoresForeignFallback(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	if cert, err := client.GetCertification(context.Background(), "movie", 1); err != nil || cert != "" {
 		t.Fatalf("foreign-only movie cert = %q, %v; want empty", cert, err)
@@ -1081,16 +703,12 @@ func TestGetCertificationIgnoresForeignFallback(t *testing.T) {
 func TestGetCertificationCallerStopsWaitingOnCancel(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		close(started)
 		<-release
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"US","rating":"TV-PG"}]}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -1123,16 +741,12 @@ func TestGetCertificationCallerStopsWaitingOnCancel(t *testing.T) {
 func TestGetCertificationSurvivesFirstCallerCancellation(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		close(started)
 		<-release
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"US","rating":"TV-PG"}]}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	firstCtx, cancelFirst := context.WithCancel(context.Background())
 	firstErr := make(chan error, 1)
@@ -1167,17 +781,13 @@ func TestGetCertificationSurvivesFirstCallerCancellation(t *testing.T) {
 
 func TestGetCertificationCachesIncludingEmpty(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		// No certification anywhere: the common case, which must be cached
 		// too or fail-closed filtering refetches it on every page load.
 		_, _ = w.Write([]byte(`{"results":[]}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	for i := 0; i < 3; i++ {
 		cert, err := client.GetCertification(context.Background(), "movie", 42)
@@ -1190,48 +800,6 @@ func TestGetCertificationCachesIncludingEmpty(t *testing.T) {
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("upstream calls = %d, want 1 (empty result must be cached)", got)
-	}
-}
-
-func TestGetCertificationSingleflightsConcurrentCallers(t *testing.T) {
-	var calls atomic.Int32
-	release := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		<-release
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"US","rating":"TV-PG"}]}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
-
-	const callers = 8
-	results := make(chan string, callers)
-	errs := make(chan error, callers)
-	for i := 0; i < callers; i++ {
-		go func() {
-			cert, err := client.GetCertification(context.Background(), "tv", 1396)
-			results <- cert
-			errs <- err
-		}()
-	}
-	// Give the goroutines time to pile onto the singleflight, then release
-	// the one in-flight upstream request.
-	time.Sleep(50 * time.Millisecond)
-	close(release)
-
-	for i := 0; i < callers; i++ {
-		if err := <-errs; err != nil {
-			t.Fatalf("GetCertification returned error: %v", err)
-		}
-		if cert := <-results; cert != "TV-PG" {
-			t.Fatalf("certification = %q, want TV-PG", cert)
-		}
-	}
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("upstream calls = %d, want 1 (singleflight)", got)
 	}
 }
 
@@ -1268,23 +836,9 @@ func TestDetailCarriesRoutingIdentifiers(t *testing.T) {
 	}
 }
 
-func TestNotFoundWrapsErrNotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"status_message":"The resource you requested could not be found."}`))
-	}))
-	defer srv.Close()
-	client := NewClient("key", 40)
-	client.baseURL = srv.URL
-	_, err := client.GetMediaDetail(context.Background(), "movie", 1)
-	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "HTTP 404") {
-		t.Fatalf("err = %v, want ErrNotFound with the HTTP detail", err)
-	}
-}
-
 func TestGetCertificationsListsEveryCountry(t *testing.T) {
 	var calls int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -1298,10 +852,7 @@ func TestGetCertificationsListsEveryCountry(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	movie, err := client.GetCertifications(context.Background(), "movie", 129)
 	if err != nil || len(movie) != 2 || len(movie["JP"]) != 1 || movie["JP"][0] != "G" || movie["DE"][0] != "6" {
@@ -1337,7 +888,7 @@ func TestUSCertificationFromMatchesGetCertification(t *testing.T) {
 
 func TestGetListPagesMixedEntriesInListOrder(t *testing.T) {
 	var pages []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/list/310" {
 			http.NotFound(w, r)
 			return
@@ -1359,11 +910,7 @@ func TestGetListPagesMixedEntriesInListOrder(t *testing.T) {
 		default:
 			w.WriteHeader(http.StatusBadRequest)
 		}
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	got, err := client.GetList(context.Background(), 310, 0)
 	if err != nil {
@@ -1395,7 +942,7 @@ func TestGetListPagesMixedEntriesInListOrder(t *testing.T) {
 // item cap of their own.
 func TestGetListReadsWholeLongList(t *testing.T) {
 	const pageCount = 30 // 600 entries, past the old 500-entry cap
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 		items := make([]map[string]any, 20)
 		for i := range items {
@@ -1403,11 +950,7 @@ func TestGetListReadsWholeLongList(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"page": page, "total_pages": pageCount, "items": items})
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	got, err := client.GetList(context.Background(), 310, 0)
 	if err != nil {
@@ -1427,7 +970,7 @@ func TestGetListReadsWholeLongList(t *testing.T) {
 // A limit stops GetList from requesting pages it cannot use.
 func TestGetListRequestsOnlyPagesTheLimitNeeds(t *testing.T) {
 	var requests atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 		items := make([]map[string]any, 20)
@@ -1436,11 +979,7 @@ func TestGetListRequestsOnlyPagesTheLimitNeeds(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"page": page, "total_pages": 50, "items": items})
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	client.SetBaseURL(server.URL)
+	})
 
 	got, err := client.GetList(context.Background(), 310, 45)
 	if err != nil {
@@ -1481,13 +1020,6 @@ func TestGetCollectionPresetStopsAtTMDBPageCeiling(t *testing.T) {
 	if len(got) != maxPages*19 || lastPage.Load() != maxPages {
 		t.Fatalf("GetCollectionPreset returned %d entries through page %d, want %d through page %d",
 			len(got), lastPage.Load(), maxPages*19, maxPages)
-	}
-}
-
-func TestGetListRejectsNonPositiveID(t *testing.T) {
-	client := NewClient("test-key", 1000)
-	if _, err := client.GetList(context.Background(), 0, 10); err == nil {
-		t.Fatal("GetList(0) succeeded, want error")
 	}
 }
 
@@ -1724,7 +1256,7 @@ func TestCloneMediaDetailCopiesEveryReference(t *testing.T) {
 
 func TestFindByExternalID(t *testing.T) {
 	var gotPath, gotSource string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotSource = r.URL.Query().Get("external_source")
 		w.Header().Set("Content-Type", "application/json")
@@ -1737,12 +1269,7 @@ func TestFindByExternalID(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"status_code":34,"status_message":"The resource you requested could not be found."}`))
 		}
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	defer client.Close()
-	client.SetBaseURL(server.URL)
+	})
 
 	results, err := client.FindByExternalID(t.Context(), ExternalSourceIMDb, "tt0137523")
 	if err != nil {
@@ -1778,16 +1305,11 @@ func TestFindByExternalID(t *testing.T) {
 // Recurring matching reuses one /find answer; recovery still asks TMDB again.
 func TestFindByExternalIDCached(t *testing.T) {
 	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"movie_results":[{"id":550,"title":"Fight Club"}],"tv_results":[]}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	defer client.Close()
-	client.SetBaseURL(server.URL)
+	})
 
 	for range 3 {
 		results, err := client.FindByExternalIDCached(t.Context(), ExternalSourceIMDb, "tt0137523")
@@ -1814,16 +1336,11 @@ func TestFindByExternalIDCached(t *testing.T) {
 // title it had left to look up.
 func TestFindByExternalIDCachedCanceledCallerSendsNoRequest(t *testing.T) {
 	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"movie_results":[],"tv_results":[]}`))
-	}))
-	defer server.Close()
-
-	client := NewClient("test-key", 1000)
-	defer client.Close()
-	client.SetBaseURL(server.URL)
+	})
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

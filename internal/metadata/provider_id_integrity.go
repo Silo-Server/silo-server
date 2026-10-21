@@ -387,11 +387,20 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 	if contentID == "" {
 		return fmt.Errorf("content_id is required")
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin provisional provider-id clear: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, contentID); err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			// A provisional owner that vanished leaves nothing to clear, as
+			// the status lookup below treats it; the caller retries persist.
+			return nil
+		}
+		return err
+	}
 
 	var status string
 	err = tx.QueryRow(ctx, `SELECT status FROM media_items WHERE content_id = $1 FOR UPDATE`, contentID).Scan(&status)
@@ -435,11 +444,15 @@ func canonicalizeProviderIDDuplicate(
 	if leftContentID == "" || rightContentID == "" || leftContentID == rightContentID {
 		return leftContentID, nil
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return "", fmt.Errorf("begin provider-id canonicalization: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, leftContentID, rightContentID); err != nil {
+		return "", err
+	}
 
 	canonical, source, err := chooseCanonicalProviderOwner(ctx, tx, leftContentID, rightContentID)
 	if err != nil {
@@ -495,11 +508,15 @@ func canonicalizeProviderIDDuplicateInto(
 	if sourceID == canonicalID {
 		return canonicalID, nil
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return "", fmt.Errorf("begin provider-id canonicalization: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, sourceID, canonicalID); err != nil {
+		return "", err
+	}
 
 	candidates := make(map[string]canonicalCandidate, 2)
 	rows, err := tx.Query(ctx, `

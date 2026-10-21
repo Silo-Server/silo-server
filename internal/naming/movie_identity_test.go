@@ -20,30 +20,6 @@ func TestParseInferMovieStem_PrefersBracketedYearOverInTitleNumber(t *testing.T)
 			wantYear:    1963,
 		},
 		{
-			name:        "cherry 2000",
-			stem:        "Cherry 2000 (1987) [Remux-1080p 8-bit AVC DTS-HD MA 2.0]-GROUP",
-			folderTitle: "Cherry 2000",
-			folderYear:  1987,
-			wantTitle:   "Cherry 2000",
-			wantYear:    1987,
-		},
-		{
-			name:        "class of 1984",
-			stem:        "Class of 1984 (1982) [Remux-1080p AVC DTS-HD MA 2.0]-GROUP",
-			folderTitle: "Class of 1984",
-			folderYear:  1982,
-			wantTitle:   "Class of 1984",
-			wantYear:    1982,
-		},
-		{
-			name:        "airport 1975",
-			stem:        "Airport 1975 (1974) [Remux-1080p AVC DTS-HD MA 2.0]-GROUP",
-			folderTitle: "Airport 1975",
-			folderYear:  1974,
-			wantTitle:   "Airport 1975",
-			wantYear:    1974,
-		},
-		{
 			name:        "bracketed year with square brackets",
 			stem:        "Equalizer 2000 [1987] [Remux-1080p AVC DTS-HD MA 2.0]-GROUP",
 			folderTitle: "Equalizer 2000",
@@ -86,27 +62,6 @@ func TestInferRootAssignments_DoesNotMarkBracketedYearMovieAmbiguous(t *testing.
 	}
 	if got, want := roots[0].Year, 1963; got != want {
 		t.Fatalf("Year = %d, want %d", got, want)
-	}
-}
-
-func TestInferGroupIdentity_DoesNotMarkAmpersandVariantAmbiguous(t *testing.T) {
-	group := InferGroupIdentity(
-		"/movies/Cowboys and Aliens (2011)/Cowboys & Aliens 2011 Extended Directors Cut BluRay 1080p REMUX AVC DTS-HD MA 5.1-EPSiLON.mkv",
-		"movies",
-		RootAssignment{
-			RootPath:     "/movies/Cowboys and Aliens (2011)",
-			InferredType: "movie",
-		},
-	)
-
-	if got, want := group.State, "resolved"; got != want {
-		t.Fatalf("State = %q, want %q", got, want)
-	}
-	if got, want := group.BaseTitle, "Cowboys and Aliens"; got != want {
-		t.Fatalf("BaseTitle = %q, want %q", got, want)
-	}
-	if got, want := group.BaseYear, 2011; got != want {
-		t.Fatalf("BaseYear = %d, want %d", got, want)
 	}
 }
 

@@ -22,7 +22,7 @@
     // Declined: optional-property and index-signature trials had about 990/897 diagnostics.
     // "exactOptionalPropertyTypes": true,
     // "noPropertyAccessFromIndexSignature": true,
-    "baseUrl": ".",
+    "types": ["node"],
     "paths": {
       "@/*": ["./src/*"]
     }

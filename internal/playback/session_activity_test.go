@@ -10,10 +10,7 @@ import (
 
 func TestCompatExpiryRechecksLocalActivityAfterSharedRead(t *testing.T) {
 	manager := NewSessionManager(0, 0)
-	session, err := manager.StartSession(1, "profile", 1, PlayDirect, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	session := startPlaybackTestSession(t, manager, 1, "profile", 1, PlayDirect)
 	session.IsJellyfinCompat = true
 	old := time.Now().Add(-time.Hour)
 	session.LastActivityAt = old
@@ -40,10 +37,7 @@ func TestCompatExpiryRechecksLocalActivityAfterSharedRead(t *testing.T) {
 func TestCompatExpiryClaimIsBoundedAndPreservesOverflow(t *testing.T) {
 	manager := NewSessionManager(0, 0)
 	for range 257 {
-		session, err := manager.StartSession(1, "profile", 1, PlayDirect, false)
-		if err != nil {
-			t.Fatal(err)
-		}
+		session := startPlaybackTestSession(t, manager, 1, "profile", 1, PlayDirect)
 		session.IsJellyfinCompat = true
 		session.LastActivityAt = time.Now().Add(-time.Hour)
 	}
@@ -81,10 +75,7 @@ func TestDurableCompatRetainsStreamAdmissionUntilExpiry(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manager := NewSessionManager(1, 0)
-			session, err := manager.StartSession(1, "profile", 1, PlayDirect, false)
-			if err != nil {
-				t.Fatal(err)
-			}
+			session := startPlaybackTestSession(t, manager, 1, "profile", 1, PlayDirect)
 			session.IsJellyfinCompat = tc.compat
 			session.LastActivityAt = time.Now().Add(-time.Hour)
 			if tc.shared {
@@ -92,7 +83,7 @@ func TestDurableCompatRetainsStreamAdmissionUntilExpiry(t *testing.T) {
 					return map[string]bool{session.ID: true}, nil
 				})
 			}
-			_, err = manager.StartSession(1, "other-profile", 2, PlayDirect, false)
+			_, err := manager.StartSession(1, "other-profile", 2, PlayDirect, false)
 			if tc.wantBlocked {
 				if !errors.Is(err, ErrTooManyStreams) {
 					t.Fatalf("start=%v", err)
@@ -136,10 +127,7 @@ func TestDurableCompatRetainsTranscodeAndReplacementCapacity(t *testing.T) {
 			manager.SetCompatExpiryClaimer(func(context.Context, []SessionExpiryCandidate) (map[string]bool, error) {
 				return map[string]bool{compat.ID: true}, claimErr
 			})
-			direct, err := manager.StartSession(1, "profile", 2, PlayDirect, false)
-			if err != nil {
-				t.Fatal(err)
-			}
+			direct := startPlaybackTestSession(t, manager, 1, "profile", 2, PlayDirect)
 			if _, err := manager.StartSession(1, "profile", 3, PlayTranscode, false); !errors.Is(err, ErrTooManyTranscodes) {
 				t.Fatalf("transcode start=%v", err)
 			}

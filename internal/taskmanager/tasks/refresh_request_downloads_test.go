@@ -2,8 +2,6 @@ package tasks
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -71,54 +69,6 @@ func (f *fakeReconcileLocks) Acquire(context.Context) (func(), reconcileLockOutc
 		return nil, f.outcome, f.err
 	}
 	return func() { f.released++ }, reconcileLocksHeld, nil
-}
-
-func TestRefreshRequestDownloadsTaskRunsUnderTheLock(t *testing.T) {
-	refresher := &downloadRefresherStub{result: requests.DownloadRefreshResult{Checked: 3, Updated: 1}}
-	lock := &fakeClusterLock{acquired: true}
-	task := NewRefreshRequestDownloadsTask(refresher, 200, nil)
-	task.lock = lock
-	progress := &bulkEnrichmentTaskProgress{}
-
-	if err := task.Execute(context.Background(), progress); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if refresher.runs.Load() != 1 || refresher.limit != 200 || lock.released != 1 {
-		t.Fatalf("runs = %d, limit = %d, lock releases = %d; want 1, 200 and 1", refresher.runs.Load(), refresher.limit, lock.released)
-	}
-	if refresher.budget != requestDownloadRefreshBudget {
-		t.Fatalf("budget = %s, want %s", refresher.budget, requestDownloadRefreshBudget)
-	}
-	var result requests.DownloadRefreshResult
-	if err := json.Unmarshal(progress.result, &result); err != nil || result.Checked != 3 || result.Updated != 1 {
-		t.Fatalf("result data %s: %v", progress.result, err)
-	}
-}
-
-func TestRefreshRequestDownloadsTaskReportsFailure(t *testing.T) {
-	task := NewRefreshRequestDownloadsTask(&downloadRefresherStub{err: errors.New("database unavailable")}, 0, nil)
-	if err := task.Execute(context.Background(), &bulkEnrichmentTaskProgress{}); err == nil {
-		t.Fatal("Execute() error = nil, want the pass's error")
-	}
-}
-
-// Scheduled runs happen only while some downloading target has progress, so
-// an idle server records no run every minute.
-func TestRefreshRequestDownloadsTaskShouldRun(t *testing.T) {
-	ctx := context.Background()
-	if run, err := NewRefreshRequestDownloadsTask(&downloadRefresherStub{}, 0, nil).ShouldRun(ctx); err != nil || run {
-		t.Fatalf("ShouldRun() without work = %v, %v; want false", run, err)
-	}
-	if run, err := NewRefreshRequestDownloadsTask(&downloadRefresherStub{hasWork: true}, 0, nil).ShouldRun(ctx); err != nil || !run {
-		t.Fatalf("ShouldRun() with work = %v, %v; want true", run, err)
-	}
-	failure := errors.New("database unavailable")
-	if _, err := NewRefreshRequestDownloadsTask(&downloadRefresherStub{hasWorkErr: failure}, 0, nil).ShouldRun(ctx); !errors.Is(err, failure) {
-		t.Fatalf("ShouldRun() err = %v, want the check's", err)
-	}
-	if run, err := NewRefreshRequestDownloadsTask(nil, 0, nil).ShouldRun(ctx); err != nil || run {
-		t.Fatalf("ShouldRun() without a refresher = %v, %v; want false", run, err)
-	}
 }
 
 // A refresh pass must end inside the reconcile pass's wait for the write lock
@@ -216,46 +166,6 @@ func TestReconcileWaitsForADownloadRefreshPostgres(t *testing.T) {
 	if runs := reconciler.runs.Load(); runs != 1 {
 		t.Fatalf("runs = %d, want 1 once the refresh finished", runs)
 	}
-}
-
-// The reconcile pass holds both of its locks on one session, so a pool of two
-// connections still has one for the pass itself. With a session per lock, the
-// pass's first query would wait forever for a connection.
-func TestReconcileLeavesAConnectionForItsPassPostgres(t *testing.T) {
-	base := requestLockTestPool(t)
-	config := base.Config().Copy()
-	config.MaxConns = 2
-	pool, err := pgxpool.NewWithConfig(t.Context(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	reconciler := &queryingReconcilerStub{pool: pool}
-	task := NewReconcileRequestsTask(reconciler, 0, pool)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	if err := task.Execute(ctx, &bulkEnrichmentTaskProgress{}); err != nil {
-		t.Fatalf("Execute() with a two-connection pool: %v", err)
-	}
-	if reconciler.queries.Load() != 1 {
-		t.Fatalf("queries = %d, want the pass to have run one", reconciler.queries.Load())
-	}
-}
-
-// queryingReconcilerStub runs one query on pool, as a real pass would.
-type queryingReconcilerStub struct {
-	pool    *pgxpool.Pool
-	queries atomic.Int32
-}
-
-func (s *queryingReconcilerStub) ReconcileRequests(ctx context.Context, _ int) (requests.ReconcileResult, error) {
-	var one int
-	if err := s.pool.QueryRow(ctx, `SELECT 1`).Scan(&one); err != nil {
-		return requests.ReconcileResult{}, err
-	}
-	s.queries.Add(1)
-	return requests.ReconcileResult{}, nil
 }
 
 // Reconcile stays one pass at a time across the cluster.

@@ -12,26 +12,16 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
-func writeSidecarTestFile(t *testing.T, path, contents string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-}
-
 func TestItemSidecarPathsReturnsTheAppliedFiles(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Film (2020)")
 	video := filepath.Join(dir, "Film (2020).mkv")
-	writeSidecarTestFile(t, video, "video")
-	writeSidecarTestFile(t, filepath.Join(dir, "movie.nfo"), `<movie><title>Film</title></movie>`)
+	writeFile(t, video, "video")
+	writeFile(t, filepath.Join(dir, "movie.nfo"), `<movie><title>Film</title></movie>`)
 	// A tvshow.nfo beside a movie is not applied, so it is not reported.
-	writeSidecarTestFile(t, filepath.Join(dir, "tvshow.nfo"), `<tvshow><title>Show</title></tvshow>`)
-	writeSidecarTestFile(t, filepath.Join(dir, "poster.jpg"), "poster")
-	writeSidecarTestFile(t, filepath.Join(dir, "Film (2020)-fanart.jpg"), "fanart")
-	writeSidecarTestFile(t, filepath.Join(dir, "notes.txt"), "not a sidecar")
+	writeFile(t, filepath.Join(dir, "tvshow.nfo"), `<tvshow><title>Show</title></tvshow>`)
+	writeFile(t, filepath.Join(dir, "poster.jpg"), "poster")
+	writeFile(t, filepath.Join(dir, "Film (2020)-fanart.jpg"), "fanart")
+	writeFile(t, filepath.Join(dir, "notes.txt"), "not a sidecar")
 
 	req := metadata.MetadataRequest{
 		ContentType:               typeMovie,
@@ -54,7 +44,7 @@ func TestItemSidecarPathsReturnsTheAppliedFiles(t *testing.T) {
 
 	// <basename>.nfo comes first; while it cannot be read, movie.nfo applies,
 	// as it does for GetMetadata.
-	writeSidecarTestFile(t, filepath.Join(dir, "Film (2020).nfo"), `<movie><title>Other</title></movie>`)
+	writeFile(t, filepath.Join(dir, "Film (2020).nfo"), `<movie><title>Other</title></movie>`)
 	denyReads(t, filepath.Join(dir, "Film (2020).nfo"))
 	if got := NewProvider().ItemSidecarPaths(context.Background(), req); got.MetadataErr != nil || !slices.Equal(got.Metadata, []string{filepath.Join(dir, "movie.nfo")}) {
 		t.Fatalf("ItemSidecarPaths beside an unreadable <basename>.nfo = %+v; want movie.nfo", got)
@@ -98,12 +88,12 @@ func TestSeasonAndEpisodeSidecarPathsReturnTheAppliedFiles(t *testing.T) {
 	season := filepath.Join(root, "Season 01")
 	e1 := filepath.Join(season, "Show S01E01.mkv")
 	e2 := filepath.Join(season, "Show S01E02.mkv")
-	writeSidecarTestFile(t, e1, "video")
-	writeSidecarTestFile(t, e2, "video")
-	writeSidecarTestFile(t, filepath.Join(season, "season.nfo"), `<season><title>One</title></season>`)
-	writeSidecarTestFile(t, filepath.Join(root, "season01-poster.jpg"), "poster")
-	writeSidecarTestFile(t, filepath.Join(season, "Show S01E01.nfo"), `<episodedetails><title>Pilot</title></episodedetails>`)
-	writeSidecarTestFile(t, filepath.Join(season, "Show S01E01-thumb.jpg"), "thumb")
+	writeFile(t, e1, "video")
+	writeFile(t, e2, "video")
+	writeFile(t, filepath.Join(season, "season.nfo"), `<season><title>One</title></season>`)
+	writeFile(t, filepath.Join(root, "season01-poster.jpg"), "poster")
+	writeFile(t, filepath.Join(season, "Show S01E01.nfo"), `<episodedetails><title>Pilot</title></episodedetails>`)
+	writeFile(t, filepath.Join(season, "Show S01E01-thumb.jpg"), "thumb")
 	provider := NewProvider()
 	ctx := context.Background()
 

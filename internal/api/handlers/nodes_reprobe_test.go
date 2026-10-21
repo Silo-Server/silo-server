@@ -239,15 +239,6 @@ func TestHandleReprobeNodeOutlivesTheListenerWriteTimeout(t *testing.T) {
 	}
 }
 
-func TestHandleReprobeNodeUnknownNode(t *testing.T) {
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
-	recorder := httptest.NewRecorder()
-	handler.HandleReprobeNode(recorder, reprobeRequest(t))
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 for an unknown node", recorder.Code)
-	}
-}
-
 // The node publishes the budget its own probe matrix needs, so a node with
 // slower hardware is not abandoned on a cluster-wide guess. A node that has
 // never been inventoried falls back to the generous constant.

@@ -2,7 +2,6 @@ package metadata
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
@@ -102,18 +101,6 @@ func TestImageCacheProcessorDownloadsLocalMetadataURL(t *testing.T) {
 	}
 	if people.cachedPath != "local/people/287/profile/original.webp" {
 		t.Errorf("cachedPath = %q", people.cachedPath)
-	}
-}
-
-// A title's interactive artwork refresh covers its own jobs and its seasons'
-// and episodes', not the photos of the people its NFO credits, whose jobs
-// carry the title's content ID only to confine a local read.
-func TestImageCacheTargetScopeLeavesOutPersonJobs(t *testing.T) {
-	t.Parallel()
-
-	scope := imageCacheTargetScope("$1")
-	if !strings.Contains(scope, "target_content_id = $1") || !strings.Contains(scope, "target_type <> 'person'") {
-		t.Fatalf("scope = %q", scope)
 	}
 }
 

@@ -296,10 +296,26 @@ removal remain separate bridge operations pending their durable dispatch and
 callback migration.
 
 `GET` and `PUT /api/v2/notifications/discord-preferences` read and set the login
-account's Discord mode. A selected profile is optional; when supplied, the
-existing viewer/PIN gate still validates it. Responses retain `linked`, optional
+account's Discord mode. Reads keep their optional-profile behavior; a supplied
+profile passes the existing viewer/PIN gate. Mode writes require the existing
+[household-manager authority](architecture/api-contract.md#credential-continuity):
+the primary profile, with PIN verification when it has a PIN. The account's admin
+role never widens a selected secondary profile's authority. Responses retain `linked`, optional
 `discord_username` and `link_failure`, and `mode`. The underlying Discord user
 identifier and credentials are not returned.
+
+The same admission applies to v1 and v2 link initiation, mode changes, and
+unlinking, before creating consent state or calling the mutation backend. A
+profile-less non-admin session is denied. A profile-less admin session is allowed
+only while its household has no PIN or stored access restriction; a profile-less
+admin API key keeps its documented scoped exception. A key declaring a locked
+primary profile cannot use its skipped PIN check as verification. Missing authority
+wiring fails closed. Refusals reuse v1 `403 forbidden` and v2 `403 permission_denied`
+or `profile_verification_required`; storage errors remain `500`. The web shows
+Discord settings as read-only unless the selected profile is primary.
+
+Delivery remains account-wide. The public callback and the existing consent-state
+lifetime are unchanged; this admission rule does not cancel previously issued state.
 
 Both mode writes accept only `mode`: `off`, `per_episode`, `daily_digest`, or
 `per_episode_and_digest`. Existing allowance, verified-address, and linked-account
@@ -409,8 +425,8 @@ has no corresponding operation.
 
 `POST /api/v2/notifications/discord/link/init` (`beginNotificationDiscordLink`)
 starts one consent flow for the authenticated login account. A supplied profile
-still passes viewer/PIN checks; no profile is required for this account-level
-operation. Demo restrictions apply. The response contains `url`, using Discord's
+still passes viewer/PIN checks, and initiation requires the same household-manager
+authority as Discord mode changes. Demo restrictions apply. The response contains `url`, using Discord's
 consent endpoint, the stored client ID, `identify` scope, a random one-time state,
 and the exact v2 callback URI. This operation is `non_retryable`; web captures
 authority, prevents overlapping initiation, disables authentication replay, and
@@ -442,6 +458,13 @@ an acting administrator. Both require `name` and `url`; optional type and event
 flags retain the existing service defaults. Creation validates and stores the
 destination through the same service as the bridge and does not send a message.
 
+Destinations require HTTPS without embedded credentials. Registration resolves
+the host with a two-second deadline and rejects failed, empty, or disallowed
+answers. The administrator's private-destination setting permits the shared
+Private class, while Blocked addresses remain refused. Delivery checks the
+resolved connection address again, including redirect hops; see
+[outbound address policy](architecture/outbound-address-guard.md).
+
 A successful response is `201` with `id`, `name`, `type`, `url_host`, and an
 optional one-time `signing_secret`. It never returns the destination URL or
 stored credential ciphertext. Responses use `Cache-Control: no-store`.
@@ -459,7 +482,7 @@ destination-management caller; Jellyfin compatibility has no matching operation.
 
 ### Unlink Discord
 
-`DELETE /api/v2/notifications/discord-link` (`unlinkNotificationDiscord`) unlinks the authenticated login account's Discord identity and turns its Discord delivery mode off. A profile header is optional; a supplied profile remains subject to the normal access checks. The demo guard applies. The operation returns bodyless `204`, including when there is no linked identity. An unavailable API service returns `503`; storage failure returns `500`.
+`DELETE /api/v2/notifications/discord-link` (`unlinkNotificationDiscord`) unlinks the authenticated login account's Discord identity and turns its Discord delivery mode off. Unlinking requires the same household-manager authority as Discord mode changes. The demo guard applies. The operation returns bodyless `204`, including when there is no linked identity. An unavailable API service returns `503`; storage failure returns `500`.
 
 Unlink is **non-retryable**: a delayed repeat can clear an identity established by a subsequent OAuth relink. No generation precondition or cancellation of in-flight OAuth/provider work is provided. The existing identity, DM-channel and mode clearing behavior remains unchanged. The settings action captures authority, sends once without authentication replay, rejects stale receipts, and invalidates only its exact Discord preferences cache. A successful receipt does not prove that an already-dispatched Discord message was cancelled. Native caller closure is separate from this server and web operation.
 

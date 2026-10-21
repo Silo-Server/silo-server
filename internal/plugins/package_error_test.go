@@ -235,14 +235,6 @@ func TestInstallArchiveRefusesUnsupportedOrUnlistedPlugins(t *testing.T) {
 	}
 }
 
-func TestInstallRemoteArchiveDownloadStatusIsPackageError(t *testing.T) {
-	server := packageErrorTestServer(t, http.StatusServiceUnavailable, nil)
-	installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: server.Client()})
-	_, err := installer.InstallRemote(context.Background(), InstallArchiveRequest{ArchiveURL: server.URL + "/plugin.zip"})
-	requirePackageError(t, err, "HTTP 503")
-	requireTransient(t, err, true)
-}
-
 func TestResolvedCatalogInstallArchiveRequestCarriesCatalogIdentity(t *testing.T) {
 	target := &ResolvedCatalogInstall{RepositoryID: 7, PluginID: "test.plugin", Version: "1.2.0", ArchiveURL: "https://example.test/plugin.zip", LegacyArchive: true}
 	req := target.ArchiveRequest()

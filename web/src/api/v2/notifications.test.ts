@@ -5,10 +5,16 @@ import {
   listNotifications,
   listNotificationSeries,
   markAllNotificationsRead,
-  markNotificationRead,
   setNotificationSeriesMuted,
   updateNotificationPreferences,
 } from "./notifications";
+import {
+  getNotificationDiscordPreferences,
+  getNotificationEmailPreferences,
+} from "./notificationChannels";
+import { testNotificationDestination } from "./notificationDestinationTests";
+import { testNotificationDiscord } from "./notificationDiscord";
+import { clearNotificationRelay } from "./notificationRelay";
 const row = {
   id: "delivery-1",
   type: "episode.available",
@@ -85,35 +91,30 @@ it("refuses a missing cutoff or malformed page instead of marking the current in
     await expect(listNotifications("all")).rejects.toThrow("page");
   }
 });
-it("never refreshes or replays inbox and preference mutations", async () => {
-  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () =>
-    response(
-      {
-        type: "https://example.invalid/problems/authentication_required",
-        title: "Unauthorized",
-        status: 401,
-      },
-      401,
-    ),
-  );
-  vi.stubGlobal("fetch", fetch);
-  for (const run of [
-    () => markNotificationRead("delivery-1"),
-    () => markAllNotificationsRead("cutoff"),
-    () => updateNotificationPreferences({ enabled: false }),
-    () => setNotificationSeriesMuted("series:bear", true),
-  ]) {
-    fetch.mockClear();
-    await expect(run()).rejects.toMatchObject({ status: 401 });
-    expect(fetch).toHaveBeenCalledTimes(1);
-  }
-});
-it("rejects a captured authority after profile replacement", async () => {
+// Each notification wrapper checks the captured profile itself; v2() compares
+// only the account, so every wrapper is its own row.
+it.each<[string, (authority: ReturnType<typeof captureNotificationAuthority>) => Promise<unknown>]>(
+  [
+    ["markAllNotificationsRead", (authority) => markAllNotificationsRead("cutoff", authority)],
+    ["getNotificationEmailPreferences", getNotificationEmailPreferences],
+    ["getNotificationDiscordPreferences", getNotificationDiscordPreferences],
+    ["testNotificationDiscord", testNotificationDiscord],
+    ["clearNotificationRelay", clearNotificationRelay],
+    [
+      "testNotificationDestination webhook",
+      (authority) => testNotificationDestination("webhook", "destination", authority),
+    ],
+    [
+      "testNotificationDestination server-channel",
+      (authority) => testNotificationDestination("server-channel", "destination", authority),
+    ],
+  ],
+)("%s refuses a captured authority after profile replacement", async (_name, call) => {
   const authority = captureNotificationAuthority();
   setProfileId("other");
   const fetch = vi.fn<typeof globalThis.fetch>();
   vi.stubGlobal("fetch", fetch);
-  await expect(markAllNotificationsRead("cutoff", authority)).rejects.toThrow();
+  await expect(call(authority)).rejects.toThrow();
   expect(fetch).not.toHaveBeenCalled();
 });
 it("preserves explicit false preferences and omits response-only profile identity", async () => {

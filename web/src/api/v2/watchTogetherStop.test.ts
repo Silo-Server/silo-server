@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { stopRoomPlayback } from "./watchTogetherStop";
+import { stubPendingFetch } from "./pendingFetch.test-support";
 
 const room = {
   room_id: "room",
@@ -50,14 +51,10 @@ describe("stopRoomPlayback", () => {
   });
 
   it("aborts silently when the profile authority is replaced mid-flight", async () => {
-    let resolve!: (r: Response) => void;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(() => new Promise<Response>((r) => (resolve = r))),
-    );
+    const { finish } = stubPendingFetch();
     const pending = stopRoomPlayback("room");
     setProfileToken("replacement");
-    resolve(
+    finish(
       new Response(JSON.stringify({ room, room_access_token: "renewed" }), {
         headers: { "Content-Type": "application/json" },
       }),

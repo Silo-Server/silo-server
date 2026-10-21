@@ -52,7 +52,7 @@ func Category(key string) string {
 		return workloadScan
 	case "match_media", "matcher":
 		return "matching"
-	case "cache_metadata_images", "backfill_metadata_images", "reconcile_artwork_cache", "verify_artwork_delivery", "cleanup_artwork_revisions", workloadImages:
+	case "cache_metadata_images", "backfill_metadata_images", "reconcile_artwork_cache", "verify_artwork_delivery", "cleanup_artwork_revisions", "generate_extra_stills", workloadImages:
 		return workloadImages
 	case "sync_catalog_search_index", "rebuild_catalog_search_index", workloadSearch:
 		return workloadSearch

@@ -67,6 +67,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/extrastills"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
@@ -927,6 +928,12 @@ func main() {
 	// the recommendations engine: forgetting the builder call at a construction
 	// site fails silently (unrated titles hidden, no error).
 	unratedContent := config.NewUnratedContentPolicy(settingsRepo)
+	// One snapshot of the administrator's setting defaults (the Next Up and
+	// title-art defaults), shared by every resolver on this node so Home,
+	// Jellyfin clients and the settings pages agree. Admin writes refresh it in
+	// the router; other nodes' writes refresh it from the settings-changed event
+	// subscribed below, before clients are told to re-read.
+	adminDefaults := config.NewAdminDefaults(settingsRepo)
 	nodeID := resolveNodeIdentity()
 	// Lease a Sonyflake machine ID before anything generates IDs, so replicas
 	// sharing this database never share one. Only primary nodes mint IDs, and
@@ -1215,6 +1222,11 @@ func main() {
 		return
 	}
 
+	// Keep the administrator defaults fresh without waiting for a request.
+	// Started past the proxy/transcode return: those nodes never resolve a
+	// viewer's settings, so polling there would read for nothing.
+	go adminDefaults.Run(appCtx)
+
 	// Hot-reload config watcher for integrated/api mode. Reloads on
 	// EventSettingsChanged (Redis) with a 60s poll fallback, so settings
 	// changes apply without restart even on Redis-less deployments. The
@@ -1298,6 +1310,7 @@ func main() {
 	var shuttingDown atomic.Bool
 	deps := api.Dependencies{
 		ShuttingDown:                 shuttingDown.Load,
+		AdminDefaults:                adminDefaults,
 		SubtitlePlaySync:             subtitlePlaySync,
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
@@ -2414,10 +2427,10 @@ func main() {
 		profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
 		var notificationScopes notifications.ScopeResolver
 		if policySystem != nil {
-			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 		} else {
 			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 		}
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
@@ -2718,10 +2731,10 @@ func main() {
 			// profile's own requests, so reads do not filter them down.
 			recUserRepo := auth.NewUserRepository(deps.DB)
 			if policySystem != nil {
-				recEngine.WithScopeResolver(policy.NewViewerResolver(recUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent))
+				recEngine.WithScopeResolver(policy.NewViewerResolver(recUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				recEngine.WithScopeResolver(access.NewResolver(recUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent))
+				recEngine.WithScopeResolver(access.NewResolver(recUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
 			}
 		}
 		deps.Recommender = recEngine
@@ -2787,6 +2800,16 @@ func main() {
 		}
 		if loadErr := ipResolver.ReloadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
 			slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", loadErr)
+		}
+	})
+	// Another node's admin write of an administrator default: reload this
+	// node's snapshot. Its own subscription, so a slow settings read never
+	// holds up the trusted-proxy reload above. The writing node reloads before
+	// it publishes the client event; here the two can race, which the TTL and
+	// the web client's second re-read cover.
+	_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+		if event.Type == cache.EventSettingsChanged {
+			adminDefaults.Changed(context.Background(), event.Payload)
 		}
 	})
 	// The config watcher covers the Redis-less poll/RequestReload path, so
@@ -2941,10 +2964,10 @@ func main() {
 			// so the owner resolver is wired here, not in the router.
 			var ownerScopes scopeResolver
 			if policySystem != nil {
-				ownerScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+				ownerScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				ownerScopes = access.NewResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+				ownerScopes = access.NewResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 			}
 			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, usercollections.NewOwnerAccess(ownerScopes), nil, slog.Default())
 			userSync.TMDBCollections = collectionService.TMDBCollections
@@ -3088,6 +3111,13 @@ func main() {
 		}
 		if chapterBackfiller, ok := deps.ChapterThumbnailQueuer.(*chapterthumbs.Service); ok {
 			taskMgr.Register(tasks.NewChapterThumbnailBackfillTask(chapterBackfiller, 25))
+			// Local extras without an image beside them get a frame through the
+			// same extractor, in every library.
+			stillCacher := imagecache.New(deps.Blobs.Assets)
+			stillCacher.SetArtworkRevisionTracker(catalog.NewArtworkRevisionTracker(deps.DB))
+			taskMgr.Register(tasks.NewGenerateExtraStillsTask(
+				extrastills.NewGenerator(deps.DB, deps.FileRepo, chapterBackfiller, stillCacher), 200,
+			))
 		}
 		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
@@ -3317,10 +3347,10 @@ func main() {
 			profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
 			var reconcileResolver scopeResolver
 			if policySystem != nil {
-				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 			}
 			requestReconcileSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: reconcileResolver})
 		}
@@ -3440,9 +3470,9 @@ func main() {
 		}
 		var absScopeResolver scopeResolver
 		if policySystem != nil {
-			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 		} else {
-			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 		}
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
@@ -3478,9 +3508,8 @@ func main() {
 		}
 	}
 	// The revoking transaction deletes the account's stored
-	// Jellyfin-compatible sessions, but every replica caches them in memory
-	// and serves a cached one without reading the database, so a revocation
-	// is announced on the admin channel for each replica to drop its copies.
+	// Jellyfin-compatible sessions. Persistent lookups always check those
+	// rows; the admin event also lets each replica discard its cached copies.
 	if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
 		if event.Type != cache.EventUserSessionsRevoked {
 			return
@@ -3656,6 +3685,7 @@ func main() {
 	var compatSrv *http.Server
 	if (mode == "integrated" || mode == "api") && cfg.JellyfinCompat.Enabled && cfg.JellyfinCompat.Listen != "" {
 		compatDeps := jellycompat.Dependencies{
+			AdminDefaults:        adminDefaults,
 			ArtworkHandler:       apiv2.NewArtworkHandler(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair),
 			Config:               cfg,
 			AppContext:           appCtx,
@@ -3821,7 +3851,7 @@ func main() {
 						nil, // profile tokens unused: compat login already verifies PINs
 						policySystem.PDP(),
 						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent)
+					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 				} else {
 					// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 					compatScopeResolver = access.NewResolver(
@@ -3829,7 +3859,7 @@ func main() {
 						userStoreProvider,
 						nil, // profile tokens unused: compat login already verifies PINs
 						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent)
+					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 				}
 				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
 				compatDeps.PlaybackScopeResolver = compatScopeResolver

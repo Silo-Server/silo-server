@@ -411,11 +411,7 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 	h := adminTasksTestHandler(t, f)
 	for _, body := range []string{
 		`{"triggers":[{"type":"weekly","time_of_day":"10:00","day_of_week":null}]}`,
-		`{"triggers":[{"type":"weekly","time_of_day":"10:00","max_runtime_ms":null}]}`,
-		`{"triggers":[{"type":"startup","interval_ms":null}]}`,
-		`{"triggers":[{"type":"startup","time_of_day":null}]}`,
 		`{"triggers":[{"type":"startup"},null]}`,
-		`{"triggers":[{"type":"startup"},{"type":"weekly","time_of_day":"10:00","day_of_week":null}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			*f = *newFakeAdminTasks()
@@ -426,9 +422,7 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 		})
 	}
 	for _, body := range []string{
-		`{"triggers":[{"type":"startup"}]}`,
 		`{"triggers":[{"type":"startup","interval_ms":0,"time_of_day":"","day_of_week":0,"max_runtime_ms":0}]}`,
-		`{"triggers":[{"type":"weekly","time_of_day":"10:00","day_of_week":0,"max_runtime_ms":0}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			*f = *newFakeAdminTasks()

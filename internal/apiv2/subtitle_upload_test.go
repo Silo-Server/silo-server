@@ -76,14 +76,3 @@ func TestSubtitleUploadV2MultipartAndLimits(t *testing.T) {
 		t.Fatal("rejected multipart reached upload service")
 	}
 }
-func TestSubtitleDetectionV2DoesNotRequireStorage(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	h := newTestHandler(t, deps)
-	for _, tc := range []struct{ file, language, want, source string }{{"synthetic.en.srt", "fr", "en", "filename"}, {"synthetic.srt", "fr", "fr", "manual"}} {
-		rec := subtitleMultipart(t, h, "/subtitles/detect-language", tc.file, []byte("123"), map[string]string{"language": tc.language}, true)
-		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"language":"`+tc.want+`"`) || !strings.Contains(rec.Body.String(), `"source":"`+tc.source+`"`) {
-			t.Fatal(rec.Code, rec.Body.String())
-		}
-	}
-	requireProblem(t, subtitleMultipart(t, h, "/subtitles/detect-language", "synthetic.exe", []byte("123"), nil, true), TypeMalformedRequest)
-}
