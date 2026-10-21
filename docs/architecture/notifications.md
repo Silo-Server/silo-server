@@ -353,7 +353,16 @@ Non-retryable 4xx responses (everything except 408, 425, and 429) are
 deterministic destination-side rejections: the attempt fails immediately
 without walking the schedule. Auto-disable on that path requires three
 *consecutive* deliveries to fail with a non-retryable 4xx, because
-destination-side WAF/CDN blips intermittently 4xx valid webhooks. 429 honors
-`Retry-After` when present. Auto-disable posts a `webhook.auto_disabled`
+destination-side WAF/CDN blips intermittently 4xx valid webhooks. The webhook
+row counts that streak (`consecutive_rejections`); a successful delivery,
+re-enabling the webhook, or a new URL resets it. Only the call that actually
+flips the webhook off posts the notice, so concurrent failures post one. 429
+honors `Retry-After` when present, as a minimum: the wait is the longer of
+`Retry-After` and the schedule's next delay.
+
+A retry sweep claims only as many attempts as it can send in half of the
+90-second claim lease if every send times out. A larger batch would let the
+lease on its tail expire while those attempts wait their turn, and another
+node would send them a second time. Auto-disable posts a `webhook.auto_disabled`
 notice to the profile's inbox — a type that is itself excluded from webhook
 dispatch so a broken webhook cannot loop.
