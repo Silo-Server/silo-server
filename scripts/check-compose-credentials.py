@@ -88,7 +88,7 @@ def unescape(value):
     return value.replace("$$", "$")
 
 
-def run_postgres_guard(service, password):
+def run_postgres_guard(service, password, extra_env=None):
     """Run the rendered postgres entrypoint against a stub image entrypoint."""
     entrypoint = [unescape(part) for part in service["entrypoint"]]
     command = [unescape(part) for part in service["command"]]
@@ -99,6 +99,7 @@ def run_postgres_guard(service, password):
         env = {"PATH": f"{bin_dir}:{os.defpath}"}
         if password is not None:
             env["POSTGRES_PASSWORD"] = password
+        env.update(extra_env or {})
         return subprocess.run(
             entrypoint + command, capture_output=True, text=True, env=env, timeout=30
         )
@@ -147,6 +148,13 @@ class ComposeCredentialsTest(unittest.TestCase):
                     guard = run_postgres_guard(postgres, password)
                     self.assertEqual(guard.returncode, 1, guard.stdout)
                     self.assertIn(GUARD_MESSAGE, guard.stderr)
+
+                    # The image reads a Docker secret instead when the
+                    # password itself is empty.
+                    guard = run_postgres_guard(
+                        postgres, password, {"POSTGRES_PASSWORD_FILE": "/run/secrets/pg"}
+                    )
+                    self.assertEqual(guard.returncode, 0, guard.stderr)
 
     def test_explicit_password_reaches_both_services_unchanged(self):
         for filename in COMPOSE_FILES:

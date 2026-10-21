@@ -64,6 +64,8 @@ fi
 umask 077
 tmp_file=$(mktemp "$(dirname "$env_file")/.env.init.XXXXXX")
 trap 'rm -f "$tmp_file"' EXIT
+# dash skips the EXIT trap when a signal kills the shell.
+trap 'exit 1' HUP INT TERM
 cp "$root/.env.example" "$tmp_file"
 chmod 600 "$tmp_file"
 printf "\nPOSTGRES_PASSWORD='%s'\nSECRET_KEY='%s'\nDATABASE_URL='%s'\nREDIS_URL='%s'\n" \
@@ -72,7 +74,11 @@ printf "\nPOSTGRES_PASSWORD='%s'\nSECRET_KEY='%s'\nDATABASE_URL='%s'\nREDIS_URL=
 	"postgres://silo:${encoded_password}@localhost:5432/silo?sslmode=disable" \
 	'redis://localhost:6379' >>"$tmp_file"
 if ! ln "$tmp_file" "$env_file" 2>/dev/null; then
-	echo "$env_file already exists; add POSTGRES_PASSWORD to it or move it aside" >&2
+	if [ -e "$env_file" ]; then
+		echo "$env_file already exists; add POSTGRES_PASSWORD to it or move it aside" >&2
+	else
+		echo "could not create $env_file: its directory must support hard links" >&2
+	fi
 	exit 1
 fi
 echo "Created $env_file"

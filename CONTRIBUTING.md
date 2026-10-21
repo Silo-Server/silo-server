@@ -211,11 +211,12 @@ belongs in the budget list, added in the same change. Run this target when you
 change database or query code or add a pin. It needs a disposable, migrated
 database; with the PostgreSQL service from
 [DEVELOPMENT.md](DEVELOPMENT.md#local-development)
-running under the Compose defaults:
+running, and `<password>` replaced by the password in the `DATABASE_URL` of your
+`.env`:
 
 ```sh
 docker compose exec postgres createdb -U silo silo_pins
-export SILO_TEST_DATABASE_URL='postgres://silo:silo@localhost:5432/silo_pins?sslmode=disable'
+export SILO_TEST_DATABASE_URL='postgres://silo:<password>@localhost:5432/silo_pins?sslmode=disable'
 DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" \
   go run ./cmd/silo/ --migrate-only
 make test-db-pins

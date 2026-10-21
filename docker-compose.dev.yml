@@ -25,8 +25,8 @@ services:
       - /bin/sh
       - -euc
       - |
-        if [ -z "$${POSTGRES_PASSWORD:-}" ]; then
-          echo "POSTGRES_PASSWORD is required: set it in .env" >&2
+        if [ -z "$${POSTGRES_PASSWORD:-}" ] && [ -z "$${POSTGRES_PASSWORD_FILE:-}" ]; then
+          echo "POSTGRES_PASSWORD is required: set it in .env. An existing database needs its current password, which is silo if it was never set." >&2
           exit 1
         fi
         exec docker-entrypoint.sh "$$@"

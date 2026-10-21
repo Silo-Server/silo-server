@@ -85,6 +85,11 @@ unavailable.
   SQLite-to-Postgres import reads this data; losing the directory loses profiles and per-user
   state. Confirm the path is persisted by the deployment — the default Compose file does not
   persist it (see the deployment guide).
+- [ ] For a Compose deployment with the bundled PostgreSQL, confirm `.env` sets
+  `POSTGRES_PASSWORD` to the database's current password. The Compose files no longer fall back
+  to `silo`, and the bundled PostgreSQL refuses to start without a password. An installation that
+  never set one uses `silo`; write `POSTGRES_PASSWORD='silo'`. A new value in `.env` does not
+  change the password stored in the database.
 - [ ] Preserve the current server configuration, secret material, deployment manifests, and the
   exact bridge server image or binary needed for the documented recovery procedure.
 - [ ] Record the public Silo URL and every reverse-proxy or load-balancer route that refers to
