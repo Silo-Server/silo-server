@@ -1234,13 +1234,14 @@ func identityArgs(key any, mf models.MediaFile, externalSubtitlesJSON []byte) []
 	}
 }
 
-// MovedFileCandidates returns the rows in a folder, other than the one at
-// filePath, that recorded the same size and OSHash: the rows a file that
-// appeared at filePath may have moved from.
+// MovedFileCandidates returns the rows in a folder that recorded the same size
+// and OSHash as the file that appeared at filePath, the rows it may have moved
+// from, along with any row already at filePath. A scan whose snapshot predates
+// another scan's write finds that row here and leaves it alone.
 func (r *FileRepository) MovedFileCandidates(ctx context.Context, folderID int, filePath string, fileSize int64, fileHash string) ([]*scanStateFile, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+scanStateColumns+` FROM media_files
-		WHERE file_hash = $1 AND file_size = $2 AND media_folder_id = $3
-		  AND file_path <> $4 AND extra_id IS NULL`,
+		WHERE media_folder_id = $3
+		  AND (file_path = $4 OR (file_hash = $1 AND file_size = $2 AND extra_id IS NULL))`,
 		fileHash, fileSize, folderID, filePath,
 	)
 	if err != nil {

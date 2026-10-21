@@ -71,6 +71,12 @@ func (s *Scanner) tryRelinkMovedFile(
 	if err != nil {
 		return false, err
 	}
+	if slices.ContainsFunc(candidates, func(candidate *scanStateFile) bool { return candidate.FilePath == filePath }) {
+		// Another scan wrote this path after this scan read its snapshot,
+		// possibly by relinking a moved file here. Inserting it as new would
+		// overwrite that row's chapters and edition with a fresh probe.
+		return true, nil
+	}
 	candidates = slices.DeleteFunc(candidates, func(candidate *scanStateFile) bool {
 		return !sameFileModifiedAt(candidate.FileModifiedAt, fileModifiedAt) ||
 			candidate.ContentGroupKey != groupAssignment.ContentGroupKey ||
@@ -86,17 +92,9 @@ func (s *Scanner) tryRelinkMovedFile(
 	}
 	newIdentity := pathMatchIdentityOf(filePath, folder.Type, assignment.LibraryRootPath)
 	var moved *scanStateFile
-	var mf models.MediaFile
 	for _, candidate := range candidates {
 		libraryRoot := scopeLibraryRoot(candidate.FilePath, configuredPaths)
 		if libraryRoot == "" || pathMatchIdentityOf(candidate.FilePath, folder.Type, libraryRoot) != newIdentity {
-			continue
-		}
-		// A changed episode range (S01E01 renamed to S01E01-E02) links to
-		// other episodes, so it is matched afresh like any other new title.
-		relinked := models.MediaFile{MediaFolderID: folder.ID, FilePath: filePath}
-		populateScanIdentity(&relinked, filePath, folder.Type, assignment, groupAssignment, candidate)
-		if relinked.MultiEpisodeStart != candidate.MultiEpisodeStart || relinked.MultiEpisodeEnd != candidate.MultiEpisodeEnd {
 			continue
 		}
 		if !fileGoneFromHealthyRoot(ctx, candidate.FilePath, libraryRoot) {
@@ -107,12 +105,14 @@ func (s *Scanner) tryRelinkMovedFile(
 			// hand one file's state to the other.
 			return false, nil
 		}
-		moved, mf = candidate, relinked
+		moved = candidate
 	}
 	if moved == nil {
 		return false, nil
 	}
 
+	mf := models.MediaFile{MediaFolderID: folder.ID, FilePath: filePath}
+	populateScanIdentity(&mf, filePath, folder.Type, assignment, groupAssignment, moved)
 	mf.ExternalSubtitles = externalSubtitleModels(loadExternalSubs())
 	relinked, err := s.fileRepo.RelinkMovedFile(ctx, moved, mf)
 	if err != nil {
@@ -148,18 +148,24 @@ func (s *Scanner) tryRelinkMovedFile(
 }
 
 // pathMatchIdentity is what the metadata matchers read from a file's path
-// besides its content group: the parsed filename hints and the provider ID
-// tags on the path below the library root. Two paths with the same value match
-// to the same title, so a file moving between them can keep its links.
+// besides its content group: the parsed filename hints, the episode range, and
+// the provider ID tags on the path below the library root. Two paths with the
+// same value match to the same title, so a file moving between them can keep
+// its links. The range is parsed from the path alone: a range an import
+// recorded on the old row says nothing about what the new name declares.
 type pathMatchIdentity struct {
-	hints naming.FilenameHints
-	ids   string
+	hints                    naming.FilenameHints
+	episodeStart, episodeEnd int
+	ids                      string
 }
 
 func pathMatchIdentityOf(filePath, folderType, libraryRoot string) pathMatchIdentity {
 	var identity pathMatchIdentity
 	if hints := naming.ParseFilename(filePath, folderType, libraryRoot); hints != nil {
 		identity.hints = *hints
+	}
+	if variant := naming.ParseVariantHints(filePath, folderType, libraryRoot); variant != nil {
+		identity.episodeStart, identity.episodeEnd = variant.MultiEpisodeStart, variant.MultiEpisodeEnd
 	}
 	rel, err := filepath.Rel(libraryRoot, filePath)
 	if err != nil {
@@ -180,11 +186,21 @@ func pathMatchIdentityOf(filePath, folderType, libraryRoot string) pathMatchIden
 // fileGoneFromHealthyRoot reports whether filePath no longer exists under a
 // library root that answers and still holds entries. An unreachable root, or
 // an empty one (the signature of a lost mount), says nothing about whether the
-// file is still there, so it never counts as gone. The root is probed first
-// so the stat of a path on a dead mount cannot hang the scan.
+// file is still there, so it never counts as gone. The root and then the
+// file's directory are probed with a timeout first, so a dead mount anywhere
+// on the path cannot hang the scan; the final stat is of an entry in a
+// directory that was just listed.
 func fileGoneFromHealthyRoot(ctx context.Context, filePath, libraryRoot string) bool {
-	probe := rootcheck.ProbeWithTimeout(ctx, libraryRoot, rootcheck.DefaultProbeTimeout)
-	if !probe.Reachable || probe.Empty {
+	root := rootcheck.ProbeWithTimeout(ctx, libraryRoot, rootcheck.DefaultProbeTimeout)
+	if !root.Reachable || root.Empty {
+		return false
+	}
+	dir := rootcheck.ProbeWithTimeout(ctx, filepath.Dir(filePath), rootcheck.DefaultProbeTimeout)
+	if dir.ErrorCode == rootcheck.ErrCodeNotFound {
+		// The whole directory went, as when a title's folder is moved.
+		return true
+	}
+	if !dir.Reachable {
 		return false
 	}
 	_, err := os.Lstat(filePath)
