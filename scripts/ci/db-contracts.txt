@@ -36,6 +36,8 @@
 ./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
+./internal/scanner TestScanSkipsVideoLibraryFilesWithoutVideoDB
+./internal/scanner TestPodcastSubtreeScanKeepsAudioFilesDB
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
 ./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
