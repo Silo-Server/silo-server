@@ -69,7 +69,8 @@ func TestBandwidthProbeLimiterBoundsBytesPerWindow(t *testing.T) {
 func TestBandwidthProbeLimiterRefundsUnsentBytes(t *testing.T) {
 	limiter := &Limiter{accounts: map[int]*bandwidthProbeAccount{}}
 	now := time.Unix(1_000_000, 0)
-	for range 50 {
+	// One probe more than the window holds unrefunded.
+	for range bandwidthProbeWindowBytes/40_000_000 + 1 {
 		ok, window, _ := limiter.Acquire(1, 40_000_000, now)
 		if !ok {
 			t.Fatal("refused a probe the client cut short")
