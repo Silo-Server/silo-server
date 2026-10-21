@@ -40,7 +40,8 @@ import {
 import { accessGroupsKey } from "@/hooks/queries/admin/accessGroups";
 import { adminUsersKey, useAdminUsers } from "@/hooks/queries/admin/users";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
-import { useRequestGroupLimits, useRequestSettings } from "@/hooks/queries/admin/requests";
+import { useRequestSettings } from "@/hooks/queries/admin/requests";
+import { useRequestGroupLimits } from "@/hooks/queries/admin/requestGroupLimits";
 import {
   NO_GROUP_POLICY,
   groupPolicyChanges,
