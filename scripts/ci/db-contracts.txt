@@ -424,3 +424,9 @@
 # Explore all on a row the catalog cannot express as a query pages the row's
 # own fetch past its item limit, on Home and on its library page.
 ./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
+
+# A worker's reported encoding ceiling lowers the stored node cap without
+# clearing its drain state; default, older and invalid reports leave the
+# customer's cap alone, and an automatic change bumps the admin revision once.
+./internal/nodepool TestRepositoryEncodingCeilingPreservesDrainState
+./internal/nodepool TestRepositoryHealthReconcilesWorkerCeilingAndRevision

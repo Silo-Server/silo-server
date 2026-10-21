@@ -4195,6 +4195,12 @@ export interface HostGPUStats {
  * predating resource sampling.
  */
 export interface NodeLastStats {
+  /** Process capacity set by the node operator; customer settings cannot raise it. */
+  encoding_capacity?: {
+    max_jobs: number;
+    active_jobs: number;
+    available_jobs: number | null;
+  } | null;
   sampled_at?: string;
   attribution?: ResourceAttribution | null;
   system?: HostSystemStats | null;
@@ -4342,6 +4348,17 @@ export interface CreateNodeRequest {
   group?: string;
   max_jobs?: number;
   max_bandwidth_kbps?: number;
+}
+
+export interface EnrollNodeRequest {
+  name: string;
+  type: "transcode";
+  url: string;
+  group?: string;
+  max_jobs?: number;
+  enrollment_token: string;
+  worker_database_url?: string;
+  worker_redis_url?: string;
 }
 
 export interface UpdateNodeRequest {

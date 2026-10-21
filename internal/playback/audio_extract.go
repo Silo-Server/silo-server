@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 )
 
 // AudioChunk is one extracted piece of an audio track. Start is the chunk's
@@ -50,7 +52,7 @@ func ExtractAudioChunks(ctx context.Context, filePath string, audioTrackIndex in
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	if err := encodinglimit.Run(cmd); err != nil {
 		return nil, fmt.Errorf("ffmpeg audio extraction failed: %w (stderr: %s)",
 			err, truncateStderr(stderr.String()))
 	}
@@ -119,13 +121,13 @@ func ExtractAudioChunksFrom(
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Start(); err != nil {
+	if err := encodinglimit.Start(cmd); err != nil {
 		return fmt.Errorf("start ffmpeg audio extraction: %w", err)
 	}
 
 	waitCh := make(chan error, 1)
 	go func() {
-		waitCh <- cmd.Wait()
+		waitCh <- encodinglimit.Wait(cmd)
 	}()
 
 	seen := map[string]bool{}

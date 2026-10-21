@@ -966,6 +966,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"cancelLibraryMetadataTranslation":         "V2-only cancellation of a library prewarm (v1 is frozen). Canceling a terminal job is a no-op, so a replay converges on the same state.",
 	"drainAdminNode":                           "V2-only transcode node drain (v1 is frozen): it sets the node's drain request, so a replay converges on the same request and placement state.",
 	"resumeAdminNode":                          "V2-only lift of a transcode node drain request (v1 is frozen): it clears the request, so a replay converges on the same state.",
+	"enrollAdminNode":                          "New v2-only first-connect customer handoff and same-customer receipt recovery before natural-URL registration. The legacy node create remains configuration-only; no legacy route is ported.",
 	"ignoreUnmatchedItem":                      "V2-only mark of an unmatched item as intentionally unmatched (v1 is frozen): it keeps the first time the mark was set, so a replay converges on the same mark.",
 	"unignoreUnmatchedItem":                    "V2-only clear of that mark, the inverse of ignoreUnmatchedItem. Clearing an unmarked item is a no-op, so a replay converges on no mark.",
 	"updateDevice":                             "V2-only rename of a profile's device entry (v1 is frozen): it sets or clears custom_name on one registry row, so a replay converges on the same name.",

@@ -55,6 +55,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeenrollment"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
@@ -168,11 +169,12 @@ type Dependencies struct {
 	MovieMatchQueueRepo      *metadata.MovieMatchQueueRepository
 	SeriesRootMatchQueueRepo *metadata.SeriesRootMatchQueueRepository
 	Refresher                handlers.AdminMetadataRefresher // metadata refresher (may be nil)
-	NodeRepo                 *nodepool.Repository            // stream node repository (may be nil)
-	ProxyPool                *nodepool.ProxyPool             // proxy node pool (may be nil)
-	TranscodePool            *nodepool.TranscodePool         // transcode node pool (may be nil)
-	NodePlanner              *nodepool.Planner               // group/cap-aware node selection (may be nil)
-	NodeHealthChecker        *nodepool.HealthChecker         // periodic node health/capability sweep (may be nil)
+	NodeEnrollment           *nodeenrollment.Client
+	NodeRepo                 *nodepool.Repository    // stream node repository (may be nil)
+	ProxyPool                *nodepool.ProxyPool     // proxy node pool (may be nil)
+	TranscodePool            *nodepool.TranscodePool // transcode node pool (may be nil)
+	NodePlanner              *nodepool.Planner       // group/cap-aware node selection (may be nil)
+	NodeHealthChecker        *nodepool.HealthChecker // periodic node health/capability sweep (may be nil)
 	// NodeCapabilityInvalidator drops one node's cached capability inventory
 	// outside the playback handler — the prepared-download preparer holds its
 	// own. nil where downloads are not wired; set before NewRouter runs.
@@ -2903,6 +2905,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			nodeHandler.SetConfigurationStore(nodepool.NewAdminConfigurationStore(deps.DB))
 			v2deps.AdminNodeConfiguration = nodeHandler
+			nodeHandler.SetEnrollmentClient(deps.NodeEnrollment)
+			v2deps.AdminNodeEnrollment = nodeHandler
 		}
 	}
 	var rateLimitHandler *handlers.RateLimitHandler

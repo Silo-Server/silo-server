@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -105,7 +106,7 @@ func ExtractSubtitle(ctx context.Context, filePath string, trackIndex int, ffmpe
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	if err := encodinglimit.Run(cmd); err != nil {
 		return nil, "", fmt.Errorf("ffmpeg subtitle extraction failed: %w (stderr: %s)",
 			err, truncateStderr(stderr.String()))
 	}
@@ -145,7 +146,7 @@ func ExtractSubtitleWithFormat(ctx context.Context, filePath string, trackIndex 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	if err := encodinglimit.Run(cmd); err != nil {
 		return nil, fmt.Errorf("ffmpeg subtitle extraction failed: %w (stderr: %s)",
 			err, truncateStderr(stderr.String()))
 	}
@@ -244,7 +245,7 @@ func LoadExternalSubtitleAsVTT(ctx context.Context, subtitlePath, format string,
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 
-		if err := cmd.Run(); err != nil {
+		if err := encodinglimit.Run(cmd); err != nil {
 			return nil, fmt.Errorf("ffmpeg external subtitle conversion failed: %w (stderr: %s)",
 				err, truncateStderr(stderr.String()))
 		}
@@ -298,7 +299,7 @@ func ConvertToVTTWithFFmpeg(ctx context.Context, input []byte, fromFormat, ffmpe
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := encodinglimit.Run(cmd); err != nil {
 		return nil, fmt.Errorf("ffmpeg subtitle conversion failed: %w (stderr: %s)", err, truncateStderr(stderr.String()))
 	}
 	if stdout.Len() == 0 {

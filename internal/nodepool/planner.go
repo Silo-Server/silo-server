@@ -671,7 +671,7 @@ func (p *Planner) pickNode(nodes []*Node, currentURL string, now time.Time, elig
 // still occupies the same GPU.
 func (p *Planner) pickTranscode(transcodes, pool, proxies []*Node, groupHealthy map[string]bool, currentURL string, estKbps int, now time.Time) *Node {
 	return p.pickWithScratchGuard(transcodes, pool, currentURL, now, func(n *Node) bool {
-		return admitsSession(n, currentURL) && p.transcodeEligible(n, proxies, groupHealthy, estKbps, now)
+		return admitsSession(n, currentURL) && p.transcodeEligible(n, proxies, groupHealthy, currentURL, estKbps, now)
 	}, p.physicalGPULoadScore(pool, now))
 }
 
@@ -867,12 +867,12 @@ func (p *Planner) physicalGPULoadScore(pool []*Node, now time.Time) func(*Node) 
 // and group-healthy, with no proxy partner required.
 func (p *Planner) pickLocalEgressTranscode(transcodes, pool []*Node, groupHealthy map[string]bool, currentURL string, now time.Time) *Node {
 	return p.pickWithScratchGuard(transcodes, pool, currentURL, now, func(n *Node) bool {
-		return admitsSession(n, currentURL) && p.transcodeEligible(n, nil, groupHealthy, 0, now)
+		return admitsSession(n, currentURL) && p.transcodeEligible(n, nil, groupHealthy, currentURL, 0, now)
 	}, p.physicalGPULoadScore(pool, now))
 }
 
-// transcodeEligible reports whether a transcode node may take a new session:
-// it must be healthy and under cap, and a grouped node additionally requires
+// transcodeEligible reports whether a transcode node may serve this session:
+// it must be healthy, with headroom for a new session. A grouped node requires
 // its whole group healthy and — when the group contains proxies — at least
 // one of them with job and bandwidth headroom (a group's capacity is bounded
 // by its proxies).
@@ -882,8 +882,13 @@ func (p *Planner) pickLocalEgressTranscode(transcodes, pool []*Node, groupHealth
 // empty the candidate set; a hard predicate could not. Callers that use this
 // directly (ReserveTranscodeWorkWith's non-streaming reservations) intentionally
 // keep the historical behavior.
-func (p *Planner) transcodeEligible(n *Node, proxies []*Node, groupHealthy map[string]bool, estKbps int, now time.Time) bool {
-	if !n.Healthy || !n.Enabled || !p.underCap(n, now) {
+func (p *Planner) transcodeEligible(n *Node, proxies []*Node, groupHealthy map[string]bool, currentURL string, estKbps int, now time.Time) bool {
+	if !n.Healthy || !n.Enabled {
+		return false
+	}
+	// A playlist replan serves the session already consuming this node's slot.
+	// New encoding attempts still acquire capacity on the worker itself.
+	if (currentURL == "" || !sameNodeURL(n.URL, currentURL)) && !p.underCap(n, now) {
 		return false
 	}
 	if n.Group == nil {
@@ -956,7 +961,22 @@ func (p *Planner) pickProxy(proxies []*Node, groupHealthy map[string]bool, group
 
 // underCap reports whether a node can take one more job.
 func (p *Planner) underCap(n *Node, now time.Time) bool {
-	return n.MaxJobs == nil || p.effectiveJobs(n, now) < *n.MaxJobs
+	capacity := reportedEncodingCapacity(n)
+	if n.MaxJobs == nil && (capacity == nil || capacity.MaxJobs <= 0) {
+		return true
+	}
+	baseJobs := n.ActiveJobs
+	if capacity != nil && capacity.MaxJobs > 0 {
+		baseJobs = capacity.ActiveJobs
+	}
+	jobs := p.effectiveJobsFrom(n, baseJobs, now)
+	if n.MaxJobs != nil && jobs >= *n.MaxJobs {
+		return false
+	}
+	if capacity != nil && capacity.MaxJobs > 0 {
+		return jobs < capacity.MaxJobs
+	}
+	return true
 }
 
 // underBandwidthCap reports whether a proxy has bandwidth headroom for a
@@ -993,7 +1013,10 @@ func (p *Planner) effectiveEgressKbps(n *Node, now time.Time) int {
 // effectiveJobs is the node's health-reported job count plus reservations the
 // health checker hasn't had a chance to observe yet.
 func (p *Planner) effectiveJobs(n *Node, now time.Time) int {
-	jobs := n.ActiveJobs
+	return p.effectiveJobsFrom(n, n.ActiveJobs, now)
+}
+
+func (p *Planner) effectiveJobsFrom(n *Node, jobs int, now time.Time) int {
 	for _, res := range p.reserved {
 		if now.Sub(res.createdAt) > maxReservationAge {
 			continue

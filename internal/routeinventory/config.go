@@ -14,27 +14,28 @@ const ArtifactPath = "contracts/api/v2/route-inventory.json"
 // constructor names in analyze.go, so a coincidence of spelling between a Silo
 // function and a chi constructor cannot make one constant mean two things.
 const (
-	apiRouterFunc            = "NewRouter"
-	apiRouterCtor            = "newChiRouter"
-	apiV2HandlerFunc         = "NewHandler"
-	apiV2RouterCtor          = "newChiRouter"
-	humaChiAdapterNew        = "github.com/danielgtaylor/huma/v2/adapters/humachi.New"
-	nodeHandlerRecv          = "Server"
-	nodeHandlerFunc          = "Handler"
-	nodeHandlerCtor          = "router"
-	rootHandlerFunc          = "newRootHandler"
-	rootHandlerCtor          = "newRootMux"
-	absListenerFunc          = "newAudiobookshelfListener"
-	jellycompatRouterFunc    = "NewRouter"
-	jellycompatRouterFile    = "internal/jellycompat/router.go"
-	absListenerFile          = "cmd/silo/abs_listener.go"
-	cmdSiloDir               = "cmd/silo"
-	internalAPIDir           = "internal/api"
-	internalAPIV2Dir         = "internal/apiv2"
-	internalProxyDir         = "internal/proxy"
-	internalTranscodeNodeDir = "internal/transcodenode"
-	internalDebugServerDir   = "internal/debugserver"
-	debugServerHandlerFile   = "internal/debugserver/handlers.go"
+	apiRouterFunc             = "NewRouter"
+	apiRouterCtor             = "newChiRouter"
+	apiV2HandlerFunc          = "NewHandler"
+	apiV2RouterCtor           = "newChiRouter"
+	humaChiAdapterNew         = "github.com/danielgtaylor/huma/v2/adapters/humachi.New"
+	nodeHandlerRecv           = "Server"
+	nodeHandlerFunc           = "Handler"
+	nodeHandlerCtor           = "router"
+	rootHandlerFunc           = "newRootHandler"
+	rootHandlerCtor           = "newRootMux"
+	absListenerFunc           = "newAudiobookshelfListener"
+	jellycompatRouterFunc     = "NewRouter"
+	jellycompatRouterFile     = "internal/jellycompat/router.go"
+	absListenerFile           = "cmd/silo/abs_listener.go"
+	cmdSiloDir                = "cmd/silo"
+	internalAPIDir            = "internal/api"
+	internalAPIV2Dir          = "internal/apiv2"
+	internalProxyDir          = "internal/proxy"
+	internalTranscodeNodeDir  = "internal/transcodenode"
+	internalNodeEnrollmentDir = "internal/nodeenrollment"
+	internalDebugServerDir    = "internal/debugserver"
+	debugServerHandlerFile    = "internal/debugserver/handlers.go"
 )
 
 // DefaultConfig describes the legacy native HTTP surface: the listeners Silo
@@ -53,6 +54,7 @@ func DefaultConfig(root string) Config {
 		Root: root,
 		Listeners: []ListenerSpec{
 			debugListenerSpec(),
+			{ID: ListenerNodeEnrollment, Description: "Unbound transcode node listener for one-time customer configuration handoff before database startup.", Dir: internalNodeEnrollmentDir, Recv: nodeHandlerRecv, Func: nodeHandlerFunc, Constructor: nodeHandlerCtor},
 			{
 				ID:          ListenerMetrics,
 				Kind:        ListenerKindServeMux,
@@ -113,6 +115,7 @@ func DefaultConfig(root string) Config {
 			internalAPIV2Dir,
 			internalProxyDir,
 			internalTranscodeNodeDir,
+			internalNodeEnrollmentDir,
 			cmdSiloDir,
 		},
 		Exclusions: []RouterExclusion{

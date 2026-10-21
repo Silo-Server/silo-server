@@ -204,6 +204,7 @@ type Dependencies struct {
 	AdminNodeDrain                AdminNodeDrainService
 	AdminNodeReload               AdminNodeReloadService
 	AdminNodeConfiguration        AdminNodeConfigurationService
+	AdminNodeEnrollment           AdminNodeEnrollmentService
 	AdminServerStatus             AdminServerStatusService
 	AdminServerRestart            AdminServerRestartService
 	AdminBrandingAssets           AdminBrandingAssetService

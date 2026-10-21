@@ -72,9 +72,10 @@ type TranscodeManager struct {
 	// OnFFmpegCrash is invoked when a reconstructed/local ffmpeg exits with an
 	// error so the embedding handler can tear down the playback session (keeping
 	// the card, so a resume can respawn). dead is the exact session that crashed;
-	// the handler passes it back through CloseTranscodeSessionIf so a successor
-	// reconstructed under the same id between the exit and teardown is not killed.
-	// No-op when nil.
+	// The session lifecycle lock is held through the exit decision and callback.
+	// The handler must use UnderLifecycle cleanup/stop variants so a replacement
+	// cannot win between that decision and teardown, and the lock is not acquired
+	// twice. No-op when nil.
 	OnFFmpegCrash func(ctx context.Context, sessionID string, dead *TranscodeSession)
 	// StartThrottler optionally starts the segment throttler for a (re)started
 	// transcode, reading the embedding handler's settings. No-op when nil.
@@ -1086,36 +1087,57 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 		return
 	}
 
+	m.monitorLocalTranscodeExit(sessionID, session, done, 2*time.Second)
+}
+
+func (m *TranscodeManager) monitorLocalTranscodeExit(sessionID string, session *TranscodeSession, done <-chan struct{}, delay time.Duration) <-chan struct{} {
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		<-done
-		time.Sleep(2 * time.Second)
-
-		m.transcodeMu.RLock()
-		current := m.transcodes[sessionID]
-		m.transcodeMu.RUnlock()
-		if current != session {
-			return
+		if delay > 0 {
+			time.Sleep(delay)
 		}
-		if session.IsRunning() {
-			return
-		}
-
-		// When ffmpeg exits cleanly (no error), the segments are fully written and
-		// should remain servable until the client stops the session. This is
-		// critical for copy-mode where ffmpeg finishes writing all content much
-		// faster than real-time playback. Only tear down the session on error exits.
-		if session.WaitError() == nil {
-			return
-		}
-
-		// ffmpeg crash — tear the session down; a client holding a valid token can
-		// reconstruct it on the next request. Pass the dead session so teardown is a
-		// compare-and-delete: a reconstruct that registered a successor under this id
-		// between the current!=session check above and teardown must not be killed.
-		if m.OnFFmpegCrash != nil {
-			m.OnFFmpegCrash(context.Background(), sessionID, session)
-		}
+		m.handleLocalTranscodeExit(sessionID, session, done)
 	}()
+	return finished
+}
+
+func (m *TranscodeManager) handleLocalTranscodeExit(sessionID string, session *TranscodeSession, done <-chan struct{}) {
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+	m.transcodeMu.RLock()
+	current := m.transcodes[sessionID]
+	m.transcodeMu.RUnlock()
+	if current != session {
+		return
+	}
+	session.mu.Lock()
+	// A restart cancels the old child intentionally. The monitor may have
+	// waited behind a long anchor probe, so compare its captured process with
+	// the current one only after acquiring the lifecycle lock. Failed copy probes
+	// restore the previous recipe; a failed restoration clears waitCanceled so
+	// this generation can follow the normal crash cleanup and reconstruction path.
+	ignore := session.done != done || session.running || session.restarting != nil || session.waitCanceled
+	waitErr := session.waitErr
+	session.mu.Unlock()
+	if ignore {
+		return
+	}
+
+	// When ffmpeg exits cleanly (no error), the segments are fully written and
+	// should remain servable until the client stops the session. This is
+	// critical for copy-mode where ffmpeg finishes writing all content much
+	// faster than real-time playback. Only tear down the session on error exits.
+	if waitErr == nil {
+		return
+	}
+
+	// Keep the lifecycle lock through the callback so crash teardown applies to
+	// this exact process generation. A valid token can reconstruct on resume.
+	if m.OnFFmpegCrash != nil {
+		m.OnFFmpegCrash(context.Background(), sessionID, session)
+	}
 }
 
 // CloseTranscodeSession stops a transcode session. If transcodeNodeURL is
@@ -1130,6 +1152,15 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 // deferred to a future PR; today a stopped session can be reconstructed by a
 // still-valid token until it expires.
 func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL string) {
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+	m.CloseTranscodeSessionUnderLifecycle(sessionID, transcodeNodeURL)
+}
+
+// CloseTranscodeSessionUnderLifecycle closes a session while the caller holds
+// LockSessionLifecycle(sessionID). Replacement and stop owners use this variant
+// to keep their whole state transition atomic without acquiring the lock twice.
+func (m *TranscodeManager) CloseTranscodeSessionUnderLifecycle(sessionID, transcodeNodeURL string) {
 	// Clean up local session if one exists (defensive).
 	m.transcodeMu.Lock()
 	session := m.transcodes[sessionID]
@@ -1159,10 +1190,12 @@ func (m *TranscodeManager) StartShutdownCleanup(ctx context.Context) <-chan stru
 		transcodes := m.transcodes
 		m.transcodes = make(map[string]*TranscodeSession)
 		m.transcodeMu.Unlock()
-		for _, session := range transcodes {
+		for sessionID, session := range transcodes {
+			unlock := m.LockSessionLifecycle(sessionID)
 			if session != nil {
 				_ = session.Close()
 			}
+			unlock()
 		}
 	}()
 	return done
@@ -1185,6 +1218,14 @@ func (m *TranscodeManager) StartShutdownCleanup(ctx context.Context) <-chan stru
 // further teardown (e.g. stopping the upstream playback session): when it is
 // false, a successor owns the id and must not be disturbed.
 func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *TranscodeSession, transcodeNodeURL string) bool {
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+	return m.CloseTranscodeSessionIfUnderLifecycle(sessionID, expected, transcodeNodeURL)
+}
+
+// CloseTranscodeSessionIfUnderLifecycle is CloseTranscodeSessionIf for a caller
+// already holding LockSessionLifecycle(sessionID).
+func (m *TranscodeManager) CloseTranscodeSessionIfUnderLifecycle(sessionID string, expected *TranscodeSession, transcodeNodeURL string) bool {
 	m.transcodeMu.Lock()
 	current := m.transcodes[sessionID]
 	if current != expected {
