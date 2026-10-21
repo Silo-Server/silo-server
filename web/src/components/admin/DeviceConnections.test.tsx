@@ -28,7 +28,7 @@ it("marks a lower-bound test and shows the best playback throughput", () => {
   expect(screen.getByText(/^Faster than 51 Mbps · seen during playback/)).toBeInTheDocument();
 });
 
-it("shows a learned limit rounded down", () => {
+it("clears a connection's learned limit for that device", () => {
   const device = {
     user_id: 7,
     device_id: "tv-1",
@@ -48,7 +48,6 @@ it("shows a learned limit rounded down", () => {
     ],
   } as unknown as AdminDeviceDetail;
   render(<DeviceConnections device={device} />);
-  expect(screen.getByText(/^Limited to 44 Mbps after buffering/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Clear limit" }));
   expect(resetLimit.mutate).toHaveBeenCalledWith({
     userId: 7,

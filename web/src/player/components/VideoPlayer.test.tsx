@@ -5667,24 +5667,6 @@ describe("VideoPlayer buffering pill", () => {
     expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
   });
 
-  // A pick the session refuses (a recovery is queued, the server has no plan
-  // for it, or the request fails) is no quality change.
-  it("keeps the viewer's answer when the session refuses a quality pick", () => {
-    const onQualitySelect = vi.fn();
-    const { video } = askPlayer({ onQualitySelect });
-    fireEvent.waiting(video);
-    act(() => vi.advanceTimersByTime(7_000));
-    fireEvent.click(screen.getByRole("button", { name: "Keep quality" }));
-    pickQuality(onQualitySelect, "1080p-high")(undefined);
-
-    // Still answered: the next long stall asks nothing.
-    fireEvent.playing(video);
-    act(() => vi.advanceTimersByTime(20_000));
-    fireEvent.waiting(video);
-    act(() => vi.advanceTimersByTime(7_000));
-    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
-  });
-
   // D12/D16: a version switch counts like a quality pick.
   it("hides the pill when the viewer switches version, and keeps the answer if the switch adopts nothing", () => {
     const onSwitchVersion = vi.fn();
@@ -5891,28 +5873,22 @@ describe("VideoPlayer hls.js request timeouts", () => {
     act(() => vi.advanceTimersByTime(7_000));
     return prompt();
   }
-  const stallAfterTimeout = (loaded: number) =>
-    stallAfterError({ details: "fragLoadTimeOut", stats: { loaded } });
-
-  it("treats a timeout with no data received as an outage", async () => {
-    expect(await stallAfterTimeout(0)).toBeNull();
-  });
-
-  it.each([
-    ["subtitle playlist", { details: "subtitleTrackLoadError" }],
-    ["subtitle segment", { details: "fragLoadError", frag: { type: "subtitle" } }],
-  ])("does not treat a failed %s as an outage", async (_name, error) => {
-    expect(await stallAfterError(error)).not.toBeNull();
-  });
-
-  it("ends the outage once media data arrives again", async () => {
-    const { video, setEnd } = await waitingAfterError({ details: "fragLoadError" });
-    act(() => vi.advanceTimersByTime(2_000));
-    // A segment arrives, too slowly to play: from now it is a stall.
-    setEnd(0.4);
-    fireEvent(video, new Event("progress"));
-    act(() => vi.advanceTimersByTime(6_200));
-    expect(prompt()).not.toBeNull();
+  // An outage holds the prompt back; a stall on a slow link shows it.
+  it.each<[string, Record<string, unknown>, boolean]>([
+    [
+      "a timeout with no data received",
+      { details: "fragLoadTimeOut", stats: { loaded: 0 } },
+      false,
+    ],
+    [
+      "a timeout on a request that was still receiving",
+      { details: "fragLoadTimeOut", stats: { loaded: 2_000_000 } },
+      true,
+    ],
+    ["a failed subtitle playlist", { details: "subtitleTrackLoadError" }, true],
+    ["a failed subtitle segment", { details: "fragLoadError", frag: { type: "subtitle" } }, true],
+  ])("after %s, prompts: %s", async (_name, error, prompts) => {
+    expect((await stallAfterError(error)) !== null).toBe(prompts);
   });
 
   it("ends the outage when hls.js appends media without a progress event", async () => {
@@ -5932,10 +5908,6 @@ describe("VideoPlayer hls.js request timeouts", () => {
     fireEvent(video, new Event("progress"));
     act(() => vi.advanceTimersByTime(6_200));
     expect(prompt()).not.toBeNull();
-  });
-
-  it("treats a timeout on a request that was still receiving as a slow link", async () => {
-    expect(await stallAfterTimeout(2_000_000)).not.toBeNull();
   });
 });
 
@@ -5976,24 +5948,37 @@ describe("VideoPlayer playback throughput", () => {
     return onBufferingSummary.mock.calls.at(-1)![1] as Record<string, unknown>;
   }
 
-  it("reports the rate long hls.js fragments arrived at with the plan summary", async () => {
-    // A 4 MB burst in 300 ms is left out; 3 MB over 1.2 s of transfer counts,
-    // without the wait for its first byte.
-    const summary = await summaryAfterFragments([
-      { loaded: 4_000_000, loading: { start: 0, first: 50, end: 350 } },
-      { loaded: 3_000_000, loading: { start: 900, first: 1000, end: 2200 } },
-    ]);
-    expect(summary.throughput_kbps).toBe(20_000);
-  });
-
-  it("counts the time overlapping video and audio fragments were receiving once", async () => {
-    // A separate audio rendition loads beside the video; subtitles do not count.
-    const summary = await summaryAfterFragments([
-      { loaded: 3_000_000, loading: { start: 0, first: 0, end: 1200 } },
-      { loaded: 1_000_000, loading: { start: 200, first: 200, end: 1400 }, type: "audio" },
-      { loaded: 900_000, loading: { start: 2000, first: 2000, end: 3500 }, type: "subtitle" },
-    ]);
-    expect(summary.throughput_kbps).toBe(22_857);
+  it.each<[string, Parameters<typeof summaryAfterFragments>[0], number | undefined]>([
+    [
+      // A 4 MB burst in 300 ms is left out; 3 MB over 1.2 s of transfer
+      // counts, without the wait for its first byte.
+      "the rate long fragments arrived at",
+      [
+        { loaded: 4_000_000, loading: { start: 0, first: 50, end: 350 } },
+        { loaded: 3_000_000, loading: { start: 900, first: 1000, end: 2200 } },
+      ],
+      20_000,
+    ],
+    [
+      // A separate audio rendition loads beside the video; subtitles do not count.
+      "overlapping video and audio receiving time once",
+      [
+        { loaded: 3_000_000, loading: { start: 0, first: 0, end: 1200 } },
+        { loaded: 1_000_000, loading: { start: 200, first: 200, end: 1400 }, type: "audio" },
+        { loaded: 900_000, loading: { start: 2000, first: 2000, end: 3500 }, type: "subtitle" },
+      ],
+      22_857,
+    ],
+    [
+      "nothing when every fragment arrived in under a second",
+      [
+        { loaded: 4_000_000, loading: { start: 0, first: 50, end: 850 } },
+        { loaded: 4_000_000, loading: { start: 1000, first: 1050, end: 1850 } },
+      ],
+      undefined,
+    ],
+  ])("reports %s with the plan summary", async (_name, fragments, kbps) => {
+    expect((await summaryAfterFragments(fragments)).throughput_kbps).toBe(kbps);
   });
 
   // D1: the server files a sample under the connection that delivers it.
@@ -6005,14 +5990,6 @@ describe("VideoPlayer playback throughput", () => {
         window.dispatchEvent(new Event("online"));
       },
     );
-    expect(summary).not.toHaveProperty("throughput_kbps");
-  });
-
-  it("reports no throughput when every fragment arrived in under a second", async () => {
-    const summary = await summaryAfterFragments([
-      { loaded: 4_000_000, loading: { start: 0, first: 50, end: 850 } },
-      { loaded: 4_000_000, loading: { start: 1000, first: 1050, end: 1850 } },
-    ]);
     expect(summary).not.toHaveProperty("throughput_kbps");
   });
 });

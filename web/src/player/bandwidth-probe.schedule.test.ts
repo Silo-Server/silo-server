@@ -49,31 +49,46 @@ describe("scheduleBandwidthProbe", () => {
     vi.useRealTimers();
   });
 
-  it("keeps the server's settled reading and does not test", async () => {
-    server({
-      target: 115_000,
-      reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 2 * DAY } },
-    });
-    scheduleBandwidthProbe();
-    await readThenTest();
-
-    expect(fetchWithSession).not.toHaveBeenCalled();
-    expect(readMeasuredBandwidthKbps()).toBe(48_000);
-  });
-
-  it("does not test while a lower bound reaches the target, and sends the best reading", async () => {
-    server({
-      target: 115_000,
-      reading: {
-        probe: { kbps: 115_000, lower_bound: true, ageMs: DAY },
-        sample: { kbps: 140_000, ageMs: DAY },
+  // Whether the server's reading proves the link, so the schedule keeps it
+  // for starts and runs no test.
+  it.each<[string, Parameters<typeof server>[0], number | undefined]>([
+    [
+      "keeps a settled reading",
+      { target: 115_000, reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 2 * DAY } } },
+      48_000,
+    ],
+    [
+      "keeps the best reading while a lower bound reaches the target",
+      {
+        target: 115_000,
+        reading: {
+          probe: { kbps: 115_000, lower_bound: true, ageMs: DAY },
+          sample: { kbps: 140_000, ageMs: DAY },
+        },
       },
-    });
+      140_000,
+    ],
+    [
+      "keeps any current reading when the server has no target",
+      { reading: { probe: { kbps: 48_000, lower_bound: true, ageMs: DAY } } },
+      48_000,
+    ],
+    [
+      "tests when the reading has outlived its lifetime",
+      {
+        maxAgeSeconds: 86400,
+        reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 2 * DAY } },
+      },
+      undefined,
+    ],
+  ])("%s", async (_name, options, kept) => {
+    server(options);
+    hangingProbe();
     scheduleBandwidthProbe();
     await readThenTest();
 
-    expect(fetchWithSession).not.toHaveBeenCalled();
-    expect(readMeasuredBandwidthKbps()).toBe(140_000);
+    expect(fetchWithSession).toHaveBeenCalledTimes(kept === undefined ? 1 : 0);
+    expect(readMeasuredBandwidthKbps()).toBe(kept);
   });
 
   it("reads the server's reading at once and runs the quick test later when a lower bound is below the target", async () => {
@@ -94,28 +109,6 @@ describe("scheduleBandwidthProbe", () => {
     expect(posted).toEqual([]);
     // Until a test finishes, starts send the sample.
     expect(readMeasuredBandwidthKbps()).toBe(60_000);
-  });
-
-  it("treats any current reading as proof when the server has no target", async () => {
-    server({ reading: { probe: { kbps: 48_000, lower_bound: true, ageMs: DAY } } });
-    scheduleBandwidthProbe();
-    await readThenTest();
-
-    expect(fetchWithSession).not.toHaveBeenCalled();
-    expect(readMeasuredBandwidthKbps()).toBe(48_000);
-  });
-
-  it("tests when the reading has outlived its lifetime", async () => {
-    server({
-      maxAgeSeconds: 86400,
-      reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 2 * DAY } },
-    });
-    hangingProbe();
-    scheduleBandwidthProbe();
-    await readThenTest();
-
-    expect(fetchWithSession).toHaveBeenCalledTimes(1);
-    expect(readMeasuredBandwidthKbps()).toBeUndefined();
   });
 
   it("reports a test and keeps the reading the server returns", async () => {
@@ -519,68 +512,58 @@ describe("scheduleBandwidthProbe", () => {
   });
 
   // H9: every browser on iOS and iPadOS, and Firefox, cannot report its link.
-  it("runs no automatic test on a phone that cannot tell its link type", async () => {
+  // A handheld on an unknown link may be metered, so the schedule leaves it.
+  it.each<[string, Record<string, unknown>, boolean]>([
+    ["a phone that cannot tell its link type", { userAgent: "Mozilla/5.0 (iPhone) Mobile" }, false],
+    [
+      "a phone whose browser reports an unknown link",
+      {
+        userAgent:
+          "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/128.0 Mobile Safari/537.36",
+        connection: { type: "unknown", saveData: false },
+      },
+      false,
+    ],
+    [
+      "an iPad that asks for desktop sites",
+      {
+        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/17.0 Safari/605.1.15",
+        maxTouchPoints: 5,
+      },
+      false,
+    ],
+    [
+      "an Android tablet that names neither Mobile nor Tablet",
+      {
+        userAgent:
+          "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 Chrome/128.0 Safari/537.36",
+      },
+      false,
+    ],
+    [
+      "a desktop that cannot tell its link type",
+      { userAgent: "Mozilla/5.0 (Macintosh) Firefox" },
+      true,
+    ],
+  ])("on %s, runs the automatic test: %s", async (_name, device, tests) => {
+    vi.stubGlobal("navigator", { ...navigator, ...device });
+    server({});
+    hangingProbe();
+    scheduleBandwidthProbe();
+    await readThenTest();
+    expect(fetchWithSession).toHaveBeenCalledTimes(tests ? 1 : 0);
+  });
+
+  it("lets Test speed run on a handheld that cannot tell its link type", async () => {
     vi.stubGlobal("navigator", { ...navigator, userAgent: "Mozilla/5.0 (iPhone) Mobile" });
     server({});
     hangingProbe();
     scheduleBandwidthProbe();
     await readThenTest();
-    expect(fetchWithSession).not.toHaveBeenCalled();
-
-    // Test speed and the reading still count the link as unmetered.
     const result = testConnectionSpeed();
     await vi.waitFor(() => expect(fetchWithSession).toHaveBeenCalledTimes(1));
     cancelBandwidthProbe();
     await expect(result).resolves.toBe("playing");
-  });
-
-  it("runs no automatic test on a phone whose browser reports an unknown link", async () => {
-    vi.stubGlobal("navigator", {
-      ...navigator,
-      userAgent:
-        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/128.0 Mobile Safari/537.36",
-      connection: { type: "unknown", saveData: false },
-    });
-    server({});
-    hangingProbe();
-    scheduleBandwidthProbe();
-    await readThenTest();
-    expect(fetchWithSession).not.toHaveBeenCalled();
-  });
-
-  it("runs no automatic test on an iPad that asks for desktop sites", async () => {
-    vi.stubGlobal("navigator", {
-      ...navigator,
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/17.0 Safari/605.1.15",
-      maxTouchPoints: 5,
-    });
-    server({});
-    hangingProbe();
-    scheduleBandwidthProbe();
-    await readThenTest();
-    expect(fetchWithSession).not.toHaveBeenCalled();
-  });
-
-  it("runs no automatic test on an Android tablet that names neither Mobile nor Tablet", async () => {
-    vi.stubGlobal("navigator", {
-      ...navigator,
-      userAgent:
-        "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 Chrome/128.0 Safari/537.36",
-    });
-    server({});
-    hangingProbe();
-    scheduleBandwidthProbe();
-    await readThenTest();
-    expect(fetchWithSession).not.toHaveBeenCalled();
-  });
-
-  it("runs the automatic test on a desktop that cannot tell its link type", async () => {
-    vi.stubGlobal("navigator", { ...navigator, userAgent: "Mozilla/5.0 (Macintosh) Firefox" });
-    server({});
-    hangingProbe();
-    scheduleBandwidthProbe();
-    await readThenTest();
-    expect(fetchWithSession).toHaveBeenCalledTimes(1);
   });
 
   // WEB-SCHEDULE-7: a short return resumes only a test the hide stopped.

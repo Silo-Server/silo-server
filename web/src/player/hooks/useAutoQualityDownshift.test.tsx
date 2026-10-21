@@ -159,24 +159,18 @@ it("does not treat an in-place update as a new adoption", () => {
   expect(h.options.onSummary).toHaveBeenCalledTimes(1);
 });
 
-it("reports the kept estimate from a lowering until a new attempt", () => {
+it.each([
+  ["a new attempt", { attemptId: "attempt-2" }],
+  ["a title change", { sessionId: "next-title" }],
+])("reports the kept estimate from a lowering until %s", (_name, change) => {
   const h = setup();
   h.send("waiting");
   h.advance(6000);
   expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(44100);
-  h.rerender({ ...h.options, attemptId: "attempt-2" });
+  h.rerender({ ...h.options, ...change });
   expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(undefined);
   // Client replans are the session's to send, never the hook's.
   expect(h.options.onReplan).toHaveBeenCalledTimes(1);
-});
-
-it("drops the kept estimate when the title changes", () => {
-  const h = setup();
-  h.send("waiting");
-  h.advance(6000);
-  expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(44100);
-  h.rerender({ ...h.options, sessionId: "next-title" });
-  expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(undefined);
 });
 
 it("does not count a wait that begins with media buffered until the buffer runs down", () => {

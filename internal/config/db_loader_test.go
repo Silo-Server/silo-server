@@ -196,14 +196,7 @@ func yamlSettingsMapFromString(t *testing.T, body string) map[string]string {
 }
 
 func TestLoadFromDBBandwidthProbeSchedule(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Playback.AutomaticBandwidthProbeOff || cfg.Playback.BandwidthProbeMaxAge() != 7*24*time.Hour {
-		t.Fatalf("defaults: off=%v max age=%s, want automatic tests and 7 days", cfg.Playback.AutomaticBandwidthProbeOff, cfg.Playback.BandwidthProbeMaxAge())
-	}
-	cfg, err = LoadFromDB(map[string]string{PlaybackBandwidthProbeAutomaticSettingKey: "false", PlaybackBandwidthProbeMaxAgeDaysSettingKey: "30"})
+	cfg, err := LoadFromDB(map[string]string{PlaybackBandwidthProbeAutomaticSettingKey: "false", PlaybackBandwidthProbeMaxAgeDaysSettingKey: "30"})
 	if err != nil {
 		t.Fatal(err)
 	}

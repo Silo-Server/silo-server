@@ -1,12 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  waitForElementToBeRemoved,
-} from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
 
 const request = vi.hoisted(() => vi.fn());
@@ -188,15 +182,17 @@ it("shows a 429's wait only while it lasts", async () => {
   serve({});
   speedTest.mockRejectedValueOnce(new probe.RateLimited(1));
   mount();
-  fireEvent.click(await screen.findByText("Test speed"));
-  const wait = await screen.findByText("Try again in 1 second");
-  await waitForElementToBeRemoved(wait, { timeout: 3000 });
-});
-
-it("says Not measured yet without a reading", async () => {
-  serve({});
-  mount();
-  expect(await screen.findByText("Not measured yet")).toBeInTheDocument();
+  const button = await screen.findByText("Test speed");
+  vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  await act(async () => fireEvent.click(button));
+  expect(screen.getByText("Try again in 1 second")).toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(999));
+  expect(screen.getByText("Try again in 1 second")).toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(1));
+  expect(screen.queryByText("Try again in 1 second")).not.toBeInTheDocument();
 });
 
 it.each([

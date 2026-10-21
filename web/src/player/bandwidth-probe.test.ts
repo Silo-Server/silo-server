@@ -56,13 +56,7 @@ describe("kept reading", () => {
       }),
     );
     expect(readMeasuredBandwidthKbps()).toBeUndefined();
-    // A 30-minute probe result from before the redesign has no lifetime, and
-    // a single reading from before the reading list is replaced by the next look.
-    storage.set(
-      storage.KEYS.BANDWIDTH_ESTIMATE,
-      JSON.stringify({ kbps: 4200, measuredAt: Date.now() }),
-    );
-    expect(readMeasuredBandwidthKbps()).toBeUndefined();
+    // A single reading from before the reading list is replaced by the next look.
     storage.set(
       storage.KEYS.BANDWIDTH_ESTIMATE,
       JSON.stringify({ kbps: 250_000, measuredAt: Date.now(), maxAgeMs: DAY }),

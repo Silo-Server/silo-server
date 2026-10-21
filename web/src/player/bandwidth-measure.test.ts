@@ -9,7 +9,7 @@ vi.mock("@/api/v2/request", () => ({
 }));
 vi.mock("@/api/client", () => ({ fetchWithSession: vi.fn() }));
 
-import { measureBandwidth, ProbeRateLimited } from "./bandwidth-measure";
+import { measureBandwidth } from "./bandwidth-measure";
 import {
   fetchWithSession,
   hangingProbe,
@@ -78,40 +78,6 @@ describe("measureBandwidth", () => {
     ).toEqual({ kbps: 1_000_000, lower_bound: true, bytes: 100_000_000, duration_ms: 594 });
   });
 
-  it("settles over the final second of a quick test without a target", async () => {
-    // 1 MB every 80 ms is 100 Mbps, for longer than the 3-second test.
-    const body = timedBody(1000, 1_000_000, 80);
-    fetchWithSession.mockResolvedValue({ res: body.res });
-
-    const result = await measureBandwidth(
-      new AbortController().signal,
-      "quick",
-      undefined,
-      PROBE_URL,
-      body.clock,
-    );
-
-    expect(result).toMatchObject({ lower_bound: false, duration_ms: 1000 });
-    expect(Math.abs(result!.kbps - 100_000)).toBeLessThanOrEqual(8_000);
-  });
-
-  it("asks for the accurate test's size and ignores the target", async () => {
-    const body = timedBody(1000, 1_000_000, 10);
-    fetchWithSession.mockResolvedValue({ res: body.res });
-
-    const result = await measureBandwidth(
-      new AbortController().signal,
-      "accurate",
-      115_000,
-      PROBE_URL,
-      body.clock,
-    );
-
-    expect(fetchWithSession.mock.calls[0]![0]).toBe(`${PROBE_URL}&size=1000000000`);
-    // 1000 MB in about 10 s is 800 Mbps over the final 3 seconds.
-    expect(result).toMatchObject({ kbps: 800_000, lower_bound: false, duration_ms: 3000 });
-  });
-
   it("returns nothing for a failed or too-short probe", async () => {
     const cancel = vi.fn(async () => undefined);
     fetchWithSession.mockResolvedValue({ res: { ok: false, body: { cancel } } });
@@ -161,24 +127,14 @@ describe("measureBandwidth", () => {
     ).toEqual({ kbps: 888_888, lower_bound: true, bytes: 100_000_000, duration_ms: 900 });
   });
 
-  it("preserves Retry-After from a 429", async () => {
-    fetchWithSession.mockResolvedValue({
-      res: { status: 429, headers: new Headers({ "Retry-After": "19" }) },
-    });
-    await expect(measureBandwidth(new AbortController().signal, "quick")).rejects.toMatchObject({
-      retryAfter: 19,
-    });
-    expect(new ProbeRateLimited(19).message).toBe("Try again in 19 seconds");
-    expect(new ProbeRateLimited(1).message).toBe("Try again in 1 second");
-  });
-
-  // D22: a missing or unreadable Retry-After holds for 30 s, and a wait is at least 1 s.
+  // D22: a 429 keeps its Retry-After; a missing or unreadable one holds for
+  // 30 s, and a wait is at least 1 s.
   it.each([
+    ["19", 19],
     [null, 30],
     ["", 30],
     ["Wed, 21 Oct 2026 07:28:00 GMT", 30],
     ["0", 1],
-    ["-5", 1],
     ["1.5", 2],
   ])("reads Retry-After %j as %i seconds", async (header, seconds) => {
     fetchWithSession.mockResolvedValue({

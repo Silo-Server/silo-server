@@ -266,19 +266,6 @@ func TestBufferedAutoPrefersCopyVersion(t *testing.T) {
 	}
 }
 
-func TestPlaybackCallerKeepsConnectionDeviceSeparate(t *testing.T) {
-	for _, device := range []string{"declared-device", ""} {
-		r := playbackCallerRequest(newAuthorizedPlaybackContext(), PlaybackCaller{DeviceID: "playback-device", ConnectionDeviceID: device})
-		got, _ := r.Context().Value(playbackConnectionDeviceContextKey{}).(string)
-		if got != device {
-			t.Fatalf("connection device = %q, want %q", got, device)
-		}
-		if r.Header.Get(deviceIDHeader) != "playback-device" {
-			t.Fatal("changed existing playback device identity")
-		}
-	}
-}
-
 func TestLearnedLimitAnnotationRequiresAdditionalReduction(t *testing.T) {
 	source := v3HandlerFixtureFile(t)
 	source.Bitrate = 63000

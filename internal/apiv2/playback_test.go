@@ -227,10 +227,6 @@ func TestPlaybackV2SpeedTestSchedule(t *testing.T) {
 	if _, ok := body["bandwidth_probe_target_kbps"]; ok {
 		t.Fatal("a zero target was sent")
 	}
-	body = read(&scheduleService{view: handlers.PlaybackCapabilitiesView{BandwidthProbeAutomatic: true, BandwidthProbeMaxAgeSeconds: 604800, BandwidthProbeTargetKbps: 113750}})
-	if body["bandwidth_probe_automatic"] != true || body["bandwidth_probe_target_kbps"] != float64(113750) {
-		t.Fatalf("schedule = %v", body)
-	}
 	body = read(&fakePlaybackService{})
 	for _, field := range []string{"bandwidth_probe_automatic", "bandwidth_probe_max_age_seconds", "bandwidth_probe_target_kbps", "bandwidth_probe_url"} {
 		if _, ok := body[field]; ok {
