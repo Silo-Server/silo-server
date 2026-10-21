@@ -314,11 +314,11 @@ func (h *CollectionHandler) ReorderCollectionGroups(ctx context.Context, userID 
 // item_count set to the members profileID can see: for another profile's
 // collection, only those its owner can access too. On /api/v2 a collection
 // without an uploaded or imported poster shows its collage for that profile,
-// once built. A collection whose owner cannot be resolved is left out. The
-// counts of hand-picked and imported collections may be remembered from an
-// earlier list read (catalog.PersonalCollectionMemberCounts).
+// once built. A collection whose owner cannot be resolved is left out. On
+// /api/v2 the counts of hand-picked and imported collections may be
+// remembered from an earlier list read (catalog.PersonalCollectionMemberCounts).
 func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, profileID string, collections []userstore.Collection) []PersonalCollectionView {
-	return h.collectionViewsCounted(ctx, store, userID, profileID, collections, h.MemberCounts)
+	return h.collectionViewsCounted(ctx, store, userID, profileID, collections, memberCountsForRead(ctx, h.MemberCounts))
 }
 
 // collectionViewsCounted is collectionViews counting members with
@@ -363,6 +363,15 @@ func collagesForRead(ctx context.Context, collages *catalog.PersonalCollectionCo
 		return nil
 	}
 	return collages
+}
+
+// memberCountsForRead returns memberCounts on /api/v2 and nil elsewhere: the
+// frozen /api/v1 list routes keep counting members on every read.
+func memberCountsForRead(ctx context.Context, memberCounts *catalog.PersonalCollectionMemberCounts) *catalog.PersonalCollectionMemberCounts {
+	if !isNativeAPIV2(ctx) {
+		return nil
+	}
+	return memberCounts
 }
 
 // collectionView renders one stored collection as collectionViews does, and

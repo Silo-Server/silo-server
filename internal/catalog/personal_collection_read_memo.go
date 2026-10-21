@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -135,7 +136,8 @@ func NewPersonalCollectionMemberCounts(pool *pgxpool.Pool) *PersonalCollectionMe
 // Count returns, for each of account userID's collections, how many of its
 // members the viewer described by access can see; a collection with none
 // counts zero. Pass only collections without a smart definition or display
-// filter, which CountPersonalCollections counts.
+// filter, which CountPersonalCollections counts. When the revisions can't be
+// read, every collection is counted afresh and nothing is remembered.
 func (c *PersonalCollectionMemberCounts) Count(ctx context.Context, userID int, collectionIDs []string, access AccessFilter) (map[string]int, error) {
 	counts := make(map[string]int, len(collectionIDs))
 	if len(collectionIDs) == 0 {
@@ -143,7 +145,8 @@ func (c *PersonalCollectionMemberCounts) Count(ctx context.Context, userID int, 
 	}
 	revisions, err := personalCollectionRevisions(ctx, c.pool, userID, collectionIDs)
 	if err != nil {
-		return nil, err
+		slog.WarnContext(ctx, "collections: failed to load personal collection revisions", "component", "catalog", "error", err)
+		return NewItemRepository(c.pool).CountVisiblePersonalCollectionMembers(ctx, userID, collectionIDs, access)
 	}
 	accessKey := collageAccessKey(access)
 	now := time.Now()
