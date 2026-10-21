@@ -432,6 +432,42 @@ describe("scheduleBandwidthProbe", () => {
     await expect(result).resolves.toBe("playing");
   });
 
+  // What stops a test while Test speed waits for the automatic one to end stops Test speed.
+  it("stops Test speed when the tab is hidden while the automatic test it replaced ends", async () => {
+    server({});
+    hangingProbe();
+    scheduleBandwidthProbe();
+    await vi.advanceTimersByTimeAsync(0);
+    const release = holdNextConnectionRead();
+    await vi.advanceTimersByTimeAsync(TEST_DELAY_MS);
+
+    const result = testConnectionSpeed();
+    const outcome = expect(result).rejects.toThrow("The connection speed could not be measured");
+    setVisibility("hidden");
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchWithSession).not.toHaveBeenCalled();
+    await outcome;
+  });
+
+  it("stops Test speed when Data Saver turns on while the automatic test it replaced ends", async () => {
+    const connection = Object.assign(new EventTarget(), { type: "wifi", saveData: false });
+    vi.stubGlobal("navigator", { ...navigator, connection });
+    server({});
+    hangingProbe();
+    scheduleBandwidthProbe();
+    await vi.advanceTimersByTimeAsync(0);
+    const release = holdNextConnectionRead();
+    await vi.advanceTimersByTimeAsync(TEST_DELAY_MS);
+
+    const result = testConnectionSpeed();
+    connection.saveData = true;
+    connection.dispatchEvent(new Event("change"));
+    release();
+    await expect(result).resolves.toBe("metered");
+    expect(fetchWithSession).not.toHaveBeenCalled();
+  });
+
   // WEB-SCHEDULE-4 and -5: the server's hold is not this schedule's to lift.
   it("holds automatic tests after Test speed's 429, across a schedule restart", async () => {
     server({});

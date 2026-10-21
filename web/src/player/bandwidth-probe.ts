@@ -234,12 +234,14 @@ export function testConnectionSpeed(): Promise<ProbeResult | SpeedTestSkipped> {
 async function runSpeedTest(): Promise<ProbeResult | SpeedTestSkipped> {
   if (onMeteredConnection()) return "metered";
   if (mediaActiveHere()) return "playing";
-  if (automaticRun) {
+  const replaced = automaticRun;
+  if (replaced) {
     // The automatic test would only split the link with this one.
     cancelEpoch++;
     stopProbe("replaced");
-    await automaticRun.catch(() => undefined);
   }
+  // Registered before waiting for the replaced test to end, so what stops a
+  // test meanwhile (a hide, metering, a new network, playback) stops this one.
   const probe = new AbortController();
   const { signal } = probe;
   activeProbe = probe;
@@ -261,6 +263,7 @@ async function runSpeedTest(): Promise<ProbeResult | SpeedTestSkipped> {
     throw new Error("The connection speed could not be measured");
   };
   try {
+    if (replaced) await replaced.catch(() => undefined);
     const locks = lockManager();
     return locks
       ? await locks.request(PROBE_LOCK_NAME, { ifAvailable: true }, (lock) =>
