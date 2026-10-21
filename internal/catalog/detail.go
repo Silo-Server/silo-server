@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/ctxerr"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -4119,7 +4120,7 @@ func (s *DetailService) buildPlaybackInfoWith(
 
 		versions = append(versions, FileVersion{
 			FileID:                   f.ID,
-			FileName:                 filepath.Base(f.FilePath),
+			FileName:                 fspath.Display(filepath.Base(f.FilePath)),
 			FilePath:                 f.FilePath,
 			Resolution:               f.Resolution,
 			CodecVideo:               f.CodecVideo,
@@ -4550,7 +4551,7 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			Index:           nextExternalIndex + i,
 			Language:        sub.Language,
 			Codec:           sub.Format,
-			Title:           firstNonEmpty(sub.Title, filepath.Base(sub.Path)),
+			Title:           firstNonEmpty(sub.Title, fspath.Display(filepath.Base(sub.Path))),
 			TitleIsFallback: strings.TrimSpace(sub.Title) == "",
 			EmbeddedTitle:   sub.EmbeddedTitle,
 			Resolution:      sub.Resolution,
@@ -4558,7 +4559,7 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			Default:         sub.Default,
 			HearingImpaired: sub.HearingImpaired,
 			External:        true,
-			FileName:        filepath.Base(sub.Path),
+			FileName:        fspath.Display(filepath.Base(sub.Path)),
 		})
 	}
 	return tracks

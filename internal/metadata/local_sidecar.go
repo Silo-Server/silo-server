@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
@@ -389,13 +389,13 @@ func (c *localSidecarCheck) dirDigest(dir string, names []string) string {
 	entries := make([]string, 0, len(names))
 	for _, name := range names {
 		path := filepath.Join(dir, name)
-		leaf, err := os.Lstat(path)
+		leaf, err := fspath.Lstat(path)
 		if err != nil {
 			continue
 		}
 		info, linked := leaf, leaf.Mode()&fs.ModeSymlink != 0
 		if linked {
-			if target, err := os.Stat(path); err == nil {
+			if target, err := fspath.Stat(path); err == nil {
 				info = target
 			}
 		}
@@ -946,7 +946,7 @@ func (s *MetadataService) itemExists(ctx context.Context, contentID string) (boo
 // offline root cannot be told from a removed one.
 func localMediaReachable(content localSidecarContent) bool {
 	for _, path := range append([]string{content.File}, content.Dirs...) {
-		if _, err := os.Stat(path); err != nil {
+		if _, err := fspath.Stat(path); err != nil {
 			return false
 		}
 	}
@@ -1054,7 +1054,7 @@ func (s *MetadataService) localSidecarProviders(ctx context.Context, folderID in
 func localSidecarFingerprint(paths []string) (string, error) {
 	entries := make([]string, 0, len(paths))
 	for _, path := range compactUniqueFilePaths(paths) {
-		info, err := os.Stat(path)
+		info, err := fspath.Stat(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}

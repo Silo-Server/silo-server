@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
@@ -19,7 +20,7 @@ func (s *Scanner) scanThemeSongs(ctx context.Context, folder *models.MediaFolder
 	if !supportsThemeSongs(folder.Type) {
 		return nil
 	}
-	discovery := themeDiscovery{roots: folder.Paths, ffprobe: s.ffprobePath, ancestors: make(map[themeIgnoreKey]themeIgnoreState), readDir: os.ReadDir}
+	discovery := themeDiscovery{roots: folder.Paths, ffprobe: s.ffprobePath, ancestors: make(map[themeIgnoreKey]themeIgnoreState), readDir: fspath.ReadDir}
 	return discovery.scan(ctx, themesongs.NewRepository(s.fileRepo.Pool()), folder.ID, scope, exact)
 }
 
@@ -142,7 +143,7 @@ func (d *themeDiscovery) ancestorRules(directory, root string) themeIgnoreState 
 // discoverThemeSongs follows the local conventions theme.<audio-extension> and
 // theme-music/<audio-file>. It never imports these files into media_files.
 func discoverThemeSongs(ctx context.Context, directory string, roots []string, ffprobe string, cached map[string]themesongs.File) ([]themesongs.File, error) {
-	d := themeDiscovery{roots: roots, ffprobe: ffprobe, ancestors: make(map[themeIgnoreKey]themeIgnoreState), readDir: os.ReadDir}
+	d := themeDiscovery{roots: roots, ffprobe: ffprobe, ancestors: make(map[themeIgnoreKey]themeIgnoreState), readDir: fspath.ReadDir}
 	return d.discover(ctx, directory, cached)
 }
 
@@ -207,14 +208,14 @@ func (d *themeDiscovery) discover(ctx context.Context, directory string, cached 
 		if len(probe.AudioTracks) == 0 || len(probe.VideoTracks) > 0 {
 			return nil
 		}
-		after, err := os.Stat(path)
+		after, err := fspath.Stat(path)
 		if err != nil {
 			return err
 		}
-		if !os.SameFile(info, after) || info.Size() != after.Size() || !info.ModTime().Equal(after.ModTime()) {
+		if !fspath.SameFile(info, after) || info.Size() != after.Size() || !info.ModTime().Equal(after.ModTime()) {
 			return themesongs.ErrUnavailable
 		}
-		title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		title := fspath.Display(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
 		if strings.EqualFold(title, "theme") {
 			title = "Theme"
 		}

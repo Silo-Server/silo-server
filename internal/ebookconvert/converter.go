@@ -18,6 +18,8 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // mobitoolWasm is libmobi's mobitool compiled to wasm32-wasi.
@@ -152,7 +154,7 @@ func (c *Converter) Convert(ctx context.Context, srcPath, dstPath string) error 
 	if c.closed.Load() {
 		return ErrUnavailable
 	}
-	info, statErr := os.Stat(srcPath)
+	info, statErr := fspath.Stat(srcPath)
 	if statErr != nil {
 		return fmt.Errorf("%w: stat source: %v", ErrConversionFailed, statErr) //nolint:errorlint // callers and the negative cache classify by the verdict sentinel; the cause is only reported
 	}
@@ -403,7 +405,7 @@ func (w *cappedWriter) Write(p []byte) (int, error) {
 func (w *cappedWriter) String() string { return w.buf.String() }
 
 func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+	in, err := fspath.Open(src)
 	if err != nil {
 		return err
 	}
@@ -433,7 +435,7 @@ func moveFile(src, dst string) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	in, err := os.Open(src)
+	in, err := fspath.Open(src)
 	if err != nil {
 		tmp.Close()
 		os.Remove(tmpName)

@@ -5,13 +5,13 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
@@ -195,7 +195,7 @@ func (f *sidecarFinder) find(dir, name string) string {
 		// permission) still serves names looked up exactly.
 		for _, ext := range localArtworkExtensions {
 			path := filepath.Join(dir, name+ext)
-			if _, err := os.Lstat(path); err != nil {
+			if _, err := fspath.Lstat(path); err != nil {
 				continue
 			}
 			if source := f.usableSource(path); source != "" {
@@ -253,7 +253,7 @@ var sharedListings = struct {
 // listDirectory returns dir's entries keyed by lower-cased name, each key's
 // entries sorted so the choice among case variants is stable.
 func listDirectory(dir string) (map[string][]string, error) {
-	info, err := os.Stat(dir)
+	info, err := fspath.Stat(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +265,7 @@ func listDirectory(dir string) (map[string][]string, error) {
 		return cached.names, nil
 	}
 
-	d, err := os.Open(dir)
+	d, err := fspath.Open(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -273,6 +273,9 @@ func listDirectory(dir string) (map[string][]string, error) {
 	_ = d.Close()
 	if err != nil {
 		return nil, err
+	}
+	for i, entry := range entries {
+		entries[i] = fspath.Encode(entry)
 	}
 	names := make(map[string][]string, len(entries))
 	for _, entry := range entries {
@@ -303,7 +306,7 @@ func listDirectory(dir string) (map[string][]string, error) {
 // image-cache processor's re-checks agree with discovery. Skips an admin can
 // fix (a symlink, an oversized or unreadable file) log at warn level.
 func (f *sidecarFinder) usableSource(path string) string {
-	info, err := os.Lstat(path)
+	info, err := fspath.Lstat(path)
 	attrs := []any{"component", "metadata", "path", path}
 	switch {
 	case err != nil:

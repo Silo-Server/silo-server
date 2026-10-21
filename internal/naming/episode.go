@@ -7,6 +7,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 var (
@@ -552,7 +554,7 @@ func EpisodeTitleSuffix(filePath string, libraryRoots ...string) string {
 	if !ok || token.episode == 0 {
 		return ""
 	}
-	return strings.TrimLeft(stem[token.end:], " ._-")
+	return fspath.Display(strings.TrimLeft(stem[token.end:], " ._-"))
 }
 
 // AirDateTitleSuffix returns the text following the air date of a by-date
@@ -565,7 +567,7 @@ func AirDateTitleSuffix(filePath string) string {
 	if match == nil {
 		return ""
 	}
-	return strings.TrimLeft(stem[match[7]:], " ._-")
+	return fspath.Display(strings.TrimLeft(stem[match[7]:], " ._-"))
 }
 
 func compactEpisodeMatch(name string) []int {

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // moduleVersion is a short fingerprint of the embedded wasm, mixed into every
@@ -271,9 +273,10 @@ func (c *Cache) enforceBudget(keep string) {
 }
 
 // SourceKeyFromStat builds a SourceKey from a file path + fileID, reading
-// size/mtime via stat. Checksum is left empty (pass one explicitly if known).
+// size/mtime via stat. path is fspath-encoded. Checksum is left empty (pass
+// one explicitly if known).
 func SourceKeyFromStat(fileID int, path string) (SourceKey, error) {
-	fi, err := os.Stat(path)
+	fi, err := fspath.Stat(path)
 	if err != nil {
 		return SourceKey{}, err
 	}

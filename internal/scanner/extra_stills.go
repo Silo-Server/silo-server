@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
 
@@ -63,7 +64,7 @@ func (d *extraStillDirs) imageNames(dir string) (map[string][]string, bool) {
 	}
 	listed, ok := d.walked[dir]
 	if !ok {
-		entries, err := os.ReadDir(dir)
+		entries, err := fspath.ReadDir(dir)
 		if err != nil {
 			d.names[dir] = nil
 			return nil, false
@@ -128,7 +129,7 @@ func exactFirst(spellings []string, exact string) []string {
 // maxExtraStillBytes are skipped, as for other sidecar artwork. checked is
 // false when path could not be inspected.
 func usableExtraStill(path string) (info fs.FileInfo, checked bool) {
-	info, err := os.Lstat(path)
+	info, err := fspath.Lstat(path)
 	if err != nil {
 		return nil, errors.Is(err, fs.ErrNotExist)
 	}
@@ -195,7 +196,7 @@ func (s *Scanner) setExtraStill(ctx context.Context, extraID, logPath, stored, s
 // sidecar's folder, and only the exact regular file find inspected is read,
 // so an image swapped for a symlink or another file in between is refused.
 func (s *Scanner) cacheExtraStill(ctx context.Context, extraID, path string, info fs.FileInfo) (string, string, error) {
-	file, err := os.OpenInRoot(filepath.Dir(path), filepath.Base(path))
+	file, err := os.OpenInRoot(fspath.Decode(filepath.Dir(path)), fspath.Decode(filepath.Base(path)))
 	if err != nil {
 		return "", "", err
 	}
@@ -204,7 +205,7 @@ func (s *Scanner) cacheExtraStill(ctx context.Context, extraID, path string, inf
 	if err != nil {
 		return "", "", err
 	}
-	if !os.SameFile(info, stat) || !stat.Mode().IsRegular() {
+	if !fspath.SameFile(info, stat) || !stat.Mode().IsRegular() {
 		return "", "", fmt.Errorf("extra image changed while being read: %s", path)
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxExtraStillBytes+1))

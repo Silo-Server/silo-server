@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 func newTestCache(t *testing.T, opts CacheOptions) *Cache {
@@ -208,5 +210,21 @@ func TestCache_BudgetEviction(t *testing.T) {
 	}
 	if total > budget {
 		t.Fatalf("budget not enforced: total=%d > %d (%d files)", total, budget, len(epubs))
+	}
+}
+
+// The catalog stores the fspath-encoded form of a non-UTF-8 file name; the
+// cache key must stat the real file.
+func TestSourceKeyFromStat_EncodedNonUTF8Path(t *testing.T) {
+	rawPath := filepath.Join(t.TempDir(), "B\xe5rd.mobi")
+	if err := os.WriteFile(rawPath, []byte("mobi"), 0o600); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	k, err := SourceKeyFromStat(7, fspath.Encode(rawPath))
+	if err != nil {
+		t.Fatalf("SourceKeyFromStat: %v", err)
+	}
+	if k.Size != 4 {
+		t.Fatalf("Size = %d, want 4", k.Size)
 	}
 }

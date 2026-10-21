@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/contentid"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
@@ -323,7 +324,7 @@ func (c *extrasClassifier) walkMedia(dir string, depth int, inherited []ignoreRu
 	if isIgnoredDirectoryPath(dir) || (mode == walkModeMovie && shouldSkipMovieSupplementalDir(dir)) {
 		return false, ""
 	}
-	entries, err := os.ReadDir(dir)
+	entries, err := fspath.ReadDir(dir)
 	if err != nil {
 		return false, ""
 	}
@@ -340,7 +341,7 @@ func (c *extrasClassifier) walkMedia(dir string, depth int, inherited []ignoreRu
 		if entry.Type()&os.ModeSymlink != 0 {
 			// The library walk follows directory symlinks, so a symlinked
 			// season folder holds the show's episodes too.
-			info, err := os.Stat(child)
+			info, err := fspath.Stat(child)
 			if err != nil {
 				continue
 			}
@@ -478,7 +479,7 @@ func (s *Scanner) processExtraFiles(
 			return stats
 		}
 
-		info, err := os.Stat(candidate.Path)
+		info, err := fspath.Stat(candidate.Path)
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: extra stat failed", "component", "scanner", "path", candidate.Path, "error", err)
 			stats.Errors++

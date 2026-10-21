@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -120,7 +121,7 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 	items := make([]SubtitleInventoryItemV3, 0, len(file.ExternalSubtitles)+len(file.SubtitleTracks)+len(additional))
 	for _, sub := range file.ExternalSubtitles {
 		item := subtitleInventoryItemV3(file.ID, len(items), SubtitleSourceExternalV3, sub.Format,
-			sub.Language, firstNonEmptySubtitleLabelV3(sub.Title, sub.EmbeddedTitle, filepath.Base(sub.Path), sub.Language),
+			sub.Language, firstNonEmptySubtitleLabelV3(sub.Title, sub.EmbeddedTitle, fspath.Display(filepath.Base(sub.Path)), sub.Language),
 			sub.Forced, sub.Default, sub.HearingImpaired)
 		if subtitles.SupportsRetime(subtitles.SubtitleFormat(sub.Format)) {
 			item.SyncKey = subtitles.ExternalSyncKey(sub.Path)

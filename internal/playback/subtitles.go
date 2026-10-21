@@ -6,12 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -98,7 +97,7 @@ func ExtractSubtitle(ctx context.Context, filePath string, trackIndex int, ffmpe
 	if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
 		ffmpeg = ffmpegPath[0]
 	}
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	cmd := fspath.CommandContext(ctx, ffmpeg, args...)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -138,7 +137,7 @@ func ExtractSubtitleWithFormat(ctx context.Context, filePath string, trackIndex 
 	if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
 		ffmpeg = ffmpegPath[0]
 	}
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	cmd := fspath.CommandContext(ctx, ffmpeg, args...)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -161,7 +160,7 @@ func ExtractSubtitleWithFormat(ctx context.Context, filePath string, trackIndex 
 // LoadExternalSubtitleRaw reads an external subtitle file and returns its raw
 // contents without any conversion. Used for serving ASS/SSA files directly.
 func LoadExternalSubtitleRaw(subtitlePath string) ([]byte, error) {
-	data, err := os.ReadFile(subtitlePath)
+	data, err := fspath.ReadFile(subtitlePath)
 	if err != nil {
 		return nil, fmt.Errorf("read external subtitle: %w", err)
 	}
@@ -221,7 +220,7 @@ func ServeSubtitle(w http.ResponseWriter, data []byte, format string) {
 func LoadExternalSubtitleAsVTT(ctx context.Context, subtitlePath, format string, ffmpegPath ...string) ([]byte, error) {
 	switch strings.ToLower(format) {
 	case "srt", "vtt", "webvtt":
-		data, err := os.ReadFile(subtitlePath)
+		data, err := fspath.ReadFile(subtitlePath)
 		if err != nil {
 			return nil, fmt.Errorf("read external subtitle: %w", err)
 		}
@@ -237,7 +236,7 @@ func LoadExternalSubtitleAsVTT(ctx context.Context, subtitlePath, format string,
 		if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
 			ffmpeg = ffmpegPath[0]
 		}
-		cmd := exec.CommandContext(ctx, ffmpeg, args...)
+		cmd := fspath.CommandContext(ctx, ffmpeg, args...)
 
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -289,7 +288,7 @@ func ConvertToVTTWithFFmpeg(ctx context.Context, input []byte, fromFormat, ffmpe
 	if strings.TrimSpace(ffmpegPath) == "" {
 		ffmpegPath = "ffmpeg"
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := fspath.CommandContext(ctx, ffmpegPath,
 		"-hide_banner", "-loglevel", "error",
 		"-f", inputFormat, "-i", "pipe:0",
 		"-f", "webvtt", "pipe:1",

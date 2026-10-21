@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -1510,7 +1511,7 @@ func proxyDeliveryAllowed(cfg config.DownloadConfig) bool {
 }
 
 func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path string, userID int) error {
-	f, err := os.Open(path)
+	f, err := fspath.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return catalog.ErrItemNotFound
@@ -1613,7 +1614,7 @@ func (w *observedDownloadResponse) Write(p []byte) (int, error) {
 // use. A non-ASCII name goes out in the RFC 2231 filename* form rather than
 // as raw UTF-8 in filename, which clients may misread.
 func attachmentDisposition(path string) string {
-	return mime.FormatMediaType("attachment", map[string]string{"filename": sanitizeFilename(filepath.Base(path))})
+	return mime.FormatMediaType("attachment", map[string]string{"filename": sanitizeFilename(fspath.Display(filepath.Base(path)))})
 }
 
 func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r *http.Request, target *FileTarget, userID int) error {

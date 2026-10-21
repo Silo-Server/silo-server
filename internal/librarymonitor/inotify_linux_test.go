@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 func newTestInotify(t *testing.T, hooks inotifyHooks) *inotifyBackend {
@@ -812,19 +814,25 @@ func TestInotifyWalkListingDefersToANewerMarkerCheck(t *testing.T) {
 }
 
 // A marker that now excludes a directory is reported like one that stops
-// excluding it, so a scan reconciles the media it hides.
+// excluding it, so a scan reconciles the media it hides. A directory whose
+// name is not UTF-8 is recorded fspath-encoded and handled the same way.
 func TestInotifyNewMarkerReportsTheFolder(t *testing.T) {
-	root := t.TempDir()
-	mkdirs(t, root, "Movie A/Extras")
-	b := newTestInotify(t, inotifyHooks{})
-	if err := b.AddRoot(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(root, "Movie A", ".nomedia"), "")
-	nextEvents(t, b, func(ev Event) bool {
-		return ev.Kind == EventMovedTo && ev.Dir == root && ev.Name == "Movie A" && ev.IsDir
-	})
-	if got := b.pathsWithPrefix(filepath.Join(root, "Movie A", "Extras")); len(got) != 0 {
-		t.Fatalf("still records %v below the marker", got)
+	for _, name := range []string{"Movie A", "Movie \xe5"} {
+		encoded := fspath.Encode(name)
+		t.Run(fspath.Display(encoded), func(t *testing.T) {
+			root := t.TempDir()
+			mkdirs(t, root, name+"/Extras")
+			b := newTestInotify(t, inotifyHooks{})
+			if err := b.AddRoot(context.Background(), root); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(root, name, ".nomedia"), "")
+			nextEvents(t, b, func(ev Event) bool {
+				return ev.Kind == EventMovedTo && ev.Dir == root && ev.Name == encoded && ev.IsDir
+			})
+			if got := b.pathsWithPrefix(filepath.Join(root, encoded, "Extras")); len(got) != 0 {
+				t.Fatalf("still records %v below the marker", got)
+			}
+		})
 	}
 }
