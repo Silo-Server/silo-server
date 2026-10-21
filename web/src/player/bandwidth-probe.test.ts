@@ -100,6 +100,9 @@ describe("Test speed", () => {
       target: 115_000,
       reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 0 } },
     });
+    // The schedule's first look keeps the server's reading for starts.
+    scheduleBandwidthProbe();
+    await vi.waitFor(() => expect(readMeasuredBandwidthKbps()).toBe(48_000));
     const body = timedBody(1000, 1_000_000, 10);
     fetchWithSession.mockResolvedValue({ res: body.res });
     const clock = vi.spyOn(performance, "now").mockImplementation(body.clock);
@@ -116,6 +119,7 @@ describe("Test speed", () => {
       duration_ms: 3000,
     });
     expect(readMeasuredBandwidthKbps()).toBe(800_000);
+    stopBandwidthProbes();
   });
 
   it("keeps the reading for this page when localStorage refuses the write", async () => {
