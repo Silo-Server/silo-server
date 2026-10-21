@@ -2722,8 +2722,13 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			// otherwise a concurrent method switch made this caller's
 			// negotiated stream obsolete — surface the conflict rather than
 			// continuing on a session with mismatched transcode bookkeeping.
+			// A winner attached on another replica has no native session here,
+			// and rebuilding one before its recipe is committed would start a
+			// second transcode under its id, so the client retries instead.
 			if winner, ok := h.playbackStore.Get(playSessionID); ok && winner.UpstreamPlayMethod == method {
-				return winner, nil
+				if _, err := h.sessionMgr.GetSession(winner.UpstreamSessionID); err == nil {
+					return winner, nil
+				}
 			}
 			return nil, errUpstreamReplaced
 		}

@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -556,5 +557,101 @@ func TestDurableCompatPlaybackStoreSerializesSameSessionMutations(t *testing.T) 
 		close(released)
 	case <-time.After(time.Second):
 		t.Fatal("same-session mutation did not resume after release")
+	}
+}
+
+// TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas: two API
+// replicas whose caches both hold the same upstream session race the
+// compare-and-swap ensureUpstreamPlayback uses to attach a new one. The row
+// lock serializes them, so the second must see the first's commit, get
+// errUpstreamReplaced, and leave its cache matching the committed row rather
+// than keeping a second upstream session of its own.
+func TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas(t *testing.T) {
+	pool := newCompatTestPool(t)
+	replicas := []*DurableCompatPlaybackStore{
+		NewDurableCompatPlaybackStore(pool, time.Hour, nil),
+		NewDurableCompatPlaybackStore(pool, time.Hour, nil),
+	}
+	id := t.Name()
+	replicas[0].Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: "up-0"})
+	t.Cleanup(func() { replicas[0].Delete(id) })
+	for _, replica := range replicas {
+		if got, ok := replica.Get(id); !ok || got.UpstreamSessionID != "up-0" {
+			t.Fatalf("warm cache = %+v, %v", got, ok)
+		}
+	}
+
+	errs := make([]error, len(replicas))
+	start := make(chan struct{})
+	done := make(chan int)
+	for i, replica := range replicas {
+		go func() {
+			<-start
+			errs[i] = replica.Update(id, func(current *PlaybackSession) error {
+				if current.UpstreamSessionID != "up-0" {
+					return errUpstreamReplaced
+				}
+				current.UpstreamSessionID = fmt.Sprintf("up-%c", 'A'+i)
+				return nil
+			})
+			done <- i
+		}()
+	}
+	close(start)
+	<-done
+	<-done
+
+	row, ok, err := replicas[0].load(id)
+	if err != nil || !ok {
+		t.Fatalf("load row: %v, %v", ok, err)
+	}
+	winners := 0
+	for i, replica := range replicas {
+		switch {
+		case errs[i] == nil:
+			winners++
+		case !errors.Is(errs[i], errUpstreamReplaced):
+			t.Fatalf("replica %d Update err = %v, want nil or errUpstreamReplaced", i, errs[i])
+		}
+		cached, ok := replica.mem.Get(id)
+		if !ok {
+			t.Fatalf("replica %d dropped the session from its cache", i)
+		}
+		if cached.UpstreamSessionID != row.UpstreamSessionID {
+			t.Errorf("replica %d cache upstream = %q, row upstream = %q", i, cached.UpstreamSessionID, row.UpstreamSessionID)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("winners = %d (errs %v), want exactly one", winners, errs)
+	}
+}
+
+// TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate: a write queued
+// after a DB failure that no longer applies to the row (its compare-and-swap
+// lost to another replica meanwhile) is dropped instead of blocking every
+// later write to the session.
+func TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate(t *testing.T) {
+	pool := newCompatTestPool(t)
+	store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	id := t.Name()
+	store.Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: "up-0"})
+	t.Cleanup(func() { store.Delete(id) })
+	store.appendPendingUpdate(id, id, func(*PlaybackSession) error { return errUpstreamReplaced })
+
+	if err := store.Update(id, func(current *PlaybackSession) error {
+		current.ClientPlaySessionID = "client-psid"
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	row, ok, err := store.load(id)
+	if err != nil || !ok {
+		t.Fatalf("load row: %v, %v", ok, err)
+	}
+	if row.ClientPlaySessionID != "client-psid" {
+		t.Fatalf("row ClientPlaySessionID = %q, want the update persisted", row.ClientPlaySessionID)
+	}
+	if store.hasPendingUpdates(id) {
+		t.Fatal("rejected pending update is still queued")
 	}
 }
