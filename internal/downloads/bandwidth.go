@@ -277,12 +277,14 @@ func (bm *BandwidthManager) wait(ctx context.Context, userID, bytes int) error {
 // chargeShared reserves up to one chunk of bytes in the shared buckets and
 // returns how many it reserved and how long to wait before sending them.
 func (bm *BandwidthManager) chargeShared(ctx context.Context, userID, bytes int) (int, time.Duration, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
+	// currentRates bounds its own settings read and needs the transfer's
+	// context to tell a canceled transfer from a slow read.
 	server, user, err := bm.currentRates(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
 	// A rate lowered mid-read can leave the bytes above the new burst; charge
 	// them in pieces so one reservation stays about a chunk long.
 	charge := min(bytes, bandwidthChunk(server, user))
