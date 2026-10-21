@@ -120,14 +120,15 @@ measured and where it came from, and never do Auto's arithmetic.
 - **Stall**: the player has run out of data while it should be playing. These
   never count as stalls:
   - buffering caused by a seek, a pause, the end of the media, or a source
-    reload. Buffering after a seek belongs to the seek until playback next
-    runs, including a seek made while paused. Until a plan first runs, a seek,
-    including the player applying the start position, does not end the
-    start's wait: buffering after it still belongs to the start. A wait after
-    resuming from a pause is a stall unless a seek or reload happened since
-    playback last ran. A source reload begins when the client replaces or reopens the playing
-    source, not when it sends the replan that leads to one; until then the
-    current plan is still playing.
+    reload. Buffering after a seek belongs to the seek until playback next runs,
+    including a seek made while paused. Until a plan first runs, a seek,
+    including the player applying the start position, does not end the start's
+    wait: buffering after it still belongs to the start. A plan first runs when
+    it first plays; a pause before then ends the current wait uncounted but does
+    not end this exemption. A wait after resuming from a pause is a stall unless
+    a seek or reload happened since playback last ran. A source reload begins
+    when the client replaces or reopens the playing source, not when it sends
+    the replan that leads to one; until then the current plan is still playing.
   - playback the platform stops when the app leaves the foreground. If the
     platform stops or tears down playback then, a stall in progress ends
     uncounted, as for a pause. If playback continues in the background, its
@@ -144,7 +145,8 @@ measured and where it came from, and never do Auto's arithmetic.
     ends when the plan's media data arrives again (a segment or range request
     receives data, or the buffered position advances) or when playback runs.
     A playlist, subtitle or API request that succeeds does not end it on its
-    own. No time limit ends an outage. While an outage lasts the controller
+    own. No time limit ends an outage, nor does the network coming back. An
+    adopted plan starts with no outage. While an outage lasts the controller
     does not evaluate; the next `playing` after it does.
   - a renderer wait: one that begins with more than
     `RENDERER_WAIT_BUFFER_MS = 1000` of media buffered past the playhead. The
