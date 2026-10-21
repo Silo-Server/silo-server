@@ -2327,8 +2327,9 @@ func hdrDetailsSupportPlanV3(hdr HDRCapabilitiesV3, plan PlanV3) bool {
 	case DynamicRangeHDR10V3, DynamicRangeHDRUnknownV3:
 		return hdr.HDR10 && hdr10LimitsSupportPlanV3(hdr, plan)
 	case DynamicRangeHDR10PlusV3:
-		// An HDR10 output shows HDR10+ as its HDR10 signal.
-		return hdr.HDR10Plus || hdr.HDR10 && hdr10LimitsSupportPlanV3(hdr, plan)
+		// An HDR10 output shows HDR10+ as its HDR10 signal, and the HDR10
+		// ceilings bound an HDR10+ output as well.
+		return (hdr.HDR10Plus || hdr.HDR10) && hdr10LimitsSupportPlanV3(hdr, plan)
 	case DynamicRangeHLGV3:
 		return hdr.HLG
 	case DynamicRangeDolbyVisionV3:
