@@ -5876,7 +5876,8 @@ describe("VideoPlayer buffering pill", () => {
     return (planRevision?: number) => act(() => onAdopt?.(planRevision));
   }
 
-  it("ignores a pick of the quality already playing, and hides the pill once another is adopted", () => {
+  // D12: the pill goes as the viewer picks another quality.
+  it("ignores a pick of the quality already playing, and hides the pill when another is picked", () => {
     const onQualitySelect = vi.fn();
     const { video } = askPlayer({ onQualitySelect });
     fireEvent.waiting(video);
@@ -5885,15 +5886,13 @@ describe("VideoPlayer buffering pill", () => {
     pickQuality(onQualitySelect, "auto");
     expect(onQualitySelect).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
-    const adopted = pickQuality(onQualitySelect, "1080p-high");
+    pickQuality(onQualitySelect, "1080p-high");
     expect(onQualitySelect).toHaveBeenCalledWith(
       "1080p-high",
       expect.any(Number),
       undefined,
       expect.any(Function),
     );
-    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
-    adopted(2);
     expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
   });
 

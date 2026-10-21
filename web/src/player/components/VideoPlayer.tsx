@@ -4416,7 +4416,8 @@ export function VideoPlayer({
       roomReloadBudgetRef.current = createRoomReloadBudget();
       roomIssuedSeekRef.current = null;
       roomSeekCorrectorRef.current = createRoomSeekCorrector();
-      onQualitySelect?.(id, currentTime, undefined, onAdopt);
+      if (onQualitySelect) onQualitySelect(id, currentTime, undefined, onAdopt);
+      else onAdopt?.(undefined);
     },
     [currentTime, onQualitySelect],
   );
@@ -5354,12 +5355,14 @@ export function VideoPlayer({
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={(id) => {
-            // Picking the quality already playing changes nothing, and a pick
-            // the session refuses is no quality change: it counts once its
-            // plan is adopted, which the session tells before it renders.
+            // Picking the quality already playing changes nothing. Any pill
+            // goes as the pick is made, but a pick the session refuses is no
+            // quality change: it counts once its plan is adopted, which the
+            // session tells before it renders.
             if (id === activeQualityId) return;
+            answerBufferingPill("pick_sent");
             handleQualitySelect(id, (revision) => {
-              if (revision !== undefined) answerBufferingPill("quality_changed");
+              answerBufferingPill(revision === undefined ? "pick_refused" : "quality_changed");
             });
           }}
           versionLocked={!!watchTogetherRoomId}

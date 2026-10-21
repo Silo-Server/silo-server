@@ -361,7 +361,7 @@ export function useAutoQualityDownshift(options: Options) {
     };
   }, [options.videoRef, options.sessionId, refresh]);
   const answer = useCallback(
-    (type: BufferingAnswer | "quality_changed") => {
+    (type: BufferingAnswer | "quality_changed" | "pick_sent" | "pick_refused") => {
       controller.current?.event({ type }, now());
       refresh();
     },

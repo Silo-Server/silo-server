@@ -83,6 +83,49 @@ it("reports one stall that outlasts a prompt's timeout as one stall", () => {
   ]);
 });
 
+// D12: a pick hides the pill at once, but changes nothing until its plan is adopted.
+it("hides the prompt when the viewer picks a quality, and keeps the history if the pick is refused", () => {
+  const outputs: { type: string }[] = [];
+  const c = new BufferingQualityController("ask", (output) => outputs.push(output), 0);
+  c.event({ type: "plan_adopted", plan }, 0);
+  c.event({ type: "playing" }, 0);
+  c.event({ type: "waiting" }, 20000);
+  c.tick(26000);
+  expect(c.pill).toBe("prompt");
+  c.event({ type: "pick_sent" }, 27000);
+  expect(c.pill).toBeNull();
+  // Refused: the long stall still counts, so the next evaluation prompts again.
+  c.event({ type: "pick_refused" }, 28000);
+  c.event({ type: "playing" }, 29000);
+  expect(outputs.filter((output) => output.type === "prompt_shown")).toHaveLength(2);
+});
+
+it("announces no lowering adopted while the viewer's pick is pending", () => {
+  const outputs: { type: string }[] = [];
+  const kept: (number | undefined)[] = [];
+  const c = new BufferingQualityController(
+    "always",
+    (output) => outputs.push(output),
+    0,
+    undefined,
+    (kbps) => kept.push(kbps),
+  );
+  c.event({ type: "plan_adopted", plan }, 0);
+  c.event({ type: "playing" }, 0);
+  c.event({ type: "waiting" }, 20000);
+  c.tick(26000);
+  expect(outputs.at(-1)).toMatchObject({ type: "replan" });
+  // The viewer picks while the lowering is in flight; the lowering lands first.
+  c.event({ type: "pick_sent" }, 27000);
+  c.event({ type: "plan_adopted", plan: { ...plan, plan_id: "p2", delivered_kbps: 30000 } }, 28000);
+  expect(c.pill).toBeNull();
+  expect(outputs.map((output) => output.type)).not.toContain("notice");
+  expect(kept).toEqual([44100]);
+  // The pick's plan clears the kept estimate as a quality change does.
+  c.event({ type: "quality_changed" }, 29000);
+  expect(kept).toEqual([44100, undefined]);
+});
+
 it("does not keep the estimate of a lowering the player refused to send", () => {
   const kept: (number | undefined)[] = [];
   const outputs: unknown[] = [];

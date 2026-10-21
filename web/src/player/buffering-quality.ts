@@ -79,6 +79,8 @@ export interface BufferingEvent {
     | "transport_error_end"
     | "replan_failed"
     | "quality_changed"
+    | "pick_sent"
+    | "pick_refused"
     | "new_attempt"
     | "client_replan"
     | "pill_obscured"
@@ -242,6 +244,12 @@ export class BufferingQualityController {
   /** A pill waiting behind a higher-priority one, with its timer frozen. */
   private deferredPill: BufferingPill | null = null;
   private obscured = false;
+  /**
+   * The viewer picked a quality that is not adopted yet. Its pill is gone, but
+   * the answer, history and kept estimate wait for the pick's adoption
+   * (`quality_changed`), and a lowering adopted meanwhile is not announced.
+   */
+  private pickPending = false;
   /** In a Watch Party room: stalls are tracked and reported, but nothing acts. */
   private suspended = false;
   /** The latest Auto lowering's step-down estimate, for this playback attempt. */
@@ -365,7 +373,16 @@ export class BufferingQualityController {
         this.outage = false;
         if (this.waiting) this.beginStall(now);
         break;
+      case "pick_sent":
+        this.pill = null;
+        this.deferredPill = null;
+        this.pickPending = true;
+        break;
+      case "pick_refused":
+        this.pickPending = false;
+        break;
       case "quality_changed":
+        this.pickPending = false;
         this.keep(undefined);
         this.answered = false;
         this.reofferUntil = 0;
@@ -512,7 +529,8 @@ export class BufferingQualityController {
     this.stalls = [];
     this.longStallEnded = undefined;
     this.blockedUntil = 0;
-    if (!pending || pending.restore) return;
+    // A lowering the viewer's pending pick is about to replace says nothing.
+    if (!pending || pending.restore || this.pickPending) return;
     if (
       plan.delivered_kbps >= pending.bitrate ||
       plan.degradation_warnings?.includes("quality_reduction_unavailable")
