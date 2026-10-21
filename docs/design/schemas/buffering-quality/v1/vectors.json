@@ -1,7 +1,7 @@
 {
   "version": 1,
   "spec": "docs/design/2026-10-17-buffering-quality.md",
-  "about": "Replay each case against the buffering-quality controller with a fake wall clock. Apply each event at its time t (ms on the case clock), advancing the clock between events so timers fire, then advance to until. expect is the complete ordered list of outputs; any other output fails the case. A case's mode defaults to defaults.mode. buffering_action, when present, is the plan_summary value each listed plan must report. Trigger evaluation occurs on playing and an in-progress long-stall timer, not on waiting or suppression expiry while playing. Suppressed history is retained; timeout and rearm clear it. Plan labels identify local adoptions, not unique server plan IDs; a server plan_id may repeat. A plan's optional active_quality names the available_qualities entry it delivers; the lower rung is the highest entry below the lower of that entry's bitrate and delivered_kbps, or below delivered_kbps when it names none or no entry. Compute the step-down estimate as the exact integer floor of delivered_kbps * 7 / 10. A plan_adopted with controllerInitiated false answers a replan the controller did not send. client_replan has an operation (track_change, seek_reanchor, seek_failure_recovery, failure_recovery or output_change): the client sends a replan for its own reasons, and the output is a replan whose body holds that operation, the adopted plan's quality as quality_preference and, on Auto with a kept step-down estimate, bandwidth_estimate_kbps without bandwidth_estimate_source; the client's other request fields are outside these vectors. quality_changed is a quality change the controller did not send, such as the viewer's pick; it has no fields, and the new quality arrives with the next plan_adopted. new_attempt is a new playback attempt of the same title that the viewer did not choose; it has no fields, and it discards the kept estimate and nothing else: the answer, the once-per-title notice and the re-offer wait belong to the title. A plan_adopted without controllerInitiated that follows the controller's own replan answers it. A waiting with cause renderer began with more than RENDERER_WAIT_BUFFER_MS of media buffered past the playhead: the decoder or renderer is behind, so it is not a stall. A plain waiting during a renderer wait means the media buffered past the playhead fell to RENDERER_WAIT_BUFFER_MS or less, and the stall begins then.",
+  "about": "Replay each case against the buffering-quality controller with a fake wall clock. Apply each event at its time t (ms on the case clock), advancing the clock between events so timers fire, then advance to until. expect is the complete ordered list of outputs; any other output fails the case. A case's mode defaults to defaults.mode. buffering_action, when present, is the plan_summary value each listed plan must report. Trigger evaluation occurs on playing and an in-progress long-stall timer, not on waiting or suppression expiry while playing. Suppressed history is retained; timeout and rearm clear it. Plan labels identify local adoptions, not unique server plan IDs; a server plan_id may repeat. A plan's optional active_quality names the available_qualities entry it delivers; the lower rung is the highest entry below the lower of that entry's bitrate and delivered_kbps, or below delivered_kbps when it names none or no entry. Compute the step-down estimate as the exact integer floor of delivered_kbps * 7 / 10. A plan_adopted with controllerInitiated false answers a replan the controller did not send. client_replan has an operation (track_change, seek_reanchor, seek_failure_recovery, failure_recovery or output_change): the client sends a replan for its own reasons, and the output is a replan whose body holds that operation, the adopted plan's quality as quality_preference and, on Auto with a kept step-down estimate, bandwidth_estimate_kbps without bandwidth_estimate_source; the client's other request fields are outside these vectors. pick_sent is a viewer's quality pick being sent: any pill hides, nothing prompts or lowers while the pick is pending, and nothing else changes until the pick's plan is adopted (quality_changed, then plan_adopted). pick_refused is that pick refused: nothing else changes, and a long stall in progress is evaluated at once. A lowering adopted while a pick is pending shows no undo pill and no notice, but still reports its buffering_action and, when it is not lower, starts the cooldown. quality_changed is a quality change the controller did not send, such as the viewer's pick; it has no fields, and the new quality arrives with the next plan_adopted. new_attempt is a new playback attempt of the same title that the viewer did not choose; it has no fields, and it discards the kept estimate and nothing else: the answer, the once-per-title notice and the re-offer wait belong to the title. A plan_adopted without controllerInitiated that follows the controller's own replan answers it. A waiting with cause renderer began with more than RENDERER_WAIT_BUFFER_MS of media buffered past the playhead: the decoder or renderer is behind, so it is not a stall. A plain waiting during a renderer wait means the media buffered past the playhead fell to RENDERER_WAIT_BUFFER_MS or less, and the stall begins then.",
   "constants": {
     "STARTUP_GRACE_MS": 10000,
     "STALL_MIN_MS": 1000,
@@ -42,6 +42,8 @@
     "pill_unobscured",
     "client_replan",
     "quality_changed",
+    "pick_sent",
+    "pick_refused",
     "new_attempt"
   ],
   "output_types": [
@@ -5933,6 +5935,490 @@
           }
         }
       ]
+    },
+    {
+      "name": "pick_sent_hides_the_pill",
+      "note": "A viewer's quality pick hides the prompt as it is sent, and nothing prompts while the pick is pending: a Lower quality tap after it finds no pill.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 10000,
+            "quality": "1080p-high",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 133000,
+          "type": "pick_sent"
+        },
+        {
+          "t": 134000,
+          "type": "select_lower"
+        }
+      ],
+      "until": 140000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        }
+      ]
+    },
+    {
+      "name": "pick_keeps_the_answer_until_adoption",
+      "note": "A refused pick leaves the answer alone: a long stall after it asks nothing. The adoption of a later pick clears the answer, and the next long stall asks again.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 10000,
+            "quality": "1080p-high",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 132000,
+          "type": "select_keep"
+        },
+        {
+          "t": 133000,
+          "type": "playing"
+        },
+        {
+          "t": 140000,
+          "type": "pick_sent"
+        },
+        {
+          "t": 141000,
+          "type": "pick_refused"
+        },
+        {
+          "t": 150000,
+          "type": "waiting"
+        },
+        {
+          "t": 158000,
+          "type": "playing"
+        },
+        {
+          "t": 159000,
+          "type": "pick_sent"
+        },
+        {
+          "t": 160000,
+          "type": "quality_changed"
+        },
+        {
+          "t": 160000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 6000,
+            "quality": "1080p-medium",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 160000,
+          "type": "playing"
+        },
+        {
+          "t": 300000,
+          "type": "waiting"
+        }
+      ],
+      "until": 310000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        },
+        {
+          "t": 306000,
+          "type": "prompt_shown"
+        }
+      ]
+    },
+    {
+      "name": "pick_refused_changes_nothing",
+      "note": "A refused pick changes nothing but the hidden pill: the long stall in progress still counts and is evaluated at once.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 10000,
+            "quality": "1080p-high",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 133000,
+          "type": "pick_sent"
+        },
+        {
+          "t": 134000,
+          "type": "pick_refused"
+        }
+      ],
+      "until": 140000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "prompt_shown"
+        },
+        {
+          "t": 134000,
+          "type": "prompt_shown"
+        }
+      ]
+    },
+    {
+      "name": "lowering_adopted_while_a_pick_is_pending",
+      "note": "A lowering adopted while the viewer's pick is pending shows no undo pill; the plan that lowered still reports it.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 132000,
+          "type": "pick_sent"
+        },
+        {
+          "t": 134000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 31600,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 134000,
+          "type": "playing"
+        }
+      ],
+      "until": 140000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ],
+      "buffering_action": {
+        "p1": "lowered"
+      }
+    },
+    {
+      "name": "no_lower_result_while_a_pick_is_pending",
+      "note": "A lowering that comes back no lower while the viewer's pick is pending shows no notice, but reports cant_lower and starts the cooldown: after the pick is refused, the next long stall lowers nothing.",
+      "events": [
+        {
+          "t": 0,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p1",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 0,
+          "type": "playing"
+        },
+        {
+          "t": 125000,
+          "type": "waiting"
+        },
+        {
+          "t": 132000,
+          "type": "pick_sent"
+        },
+        {
+          "t": 134000,
+          "type": "plan_adopted",
+          "plan": {
+            "plan_id": "p2",
+            "delivered_kbps": 63000,
+            "quality": "auto",
+            "available_qualities": [
+              {
+                "label": "original",
+                "preserves_source": true,
+                "bitrate_kbps": 63000
+              },
+              {
+                "label": "1080p-high",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 10000
+              },
+              {
+                "label": "1080p-medium",
+                "preserves_source": false,
+                "height": 1080,
+                "bitrate_kbps": 6000
+              },
+              {
+                "label": "720p-high",
+                "preserves_source": false,
+                "height": 720,
+                "bitrate_kbps": 4000
+              }
+            ]
+          }
+        },
+        {
+          "t": 134000,
+          "type": "playing"
+        },
+        {
+          "t": 135000,
+          "type": "pick_refused"
+        },
+        {
+          "t": 160000,
+          "type": "waiting"
+        }
+      ],
+      "until": 170000,
+      "expect": [
+        {
+          "t": 131000,
+          "type": "replan",
+          "body": {
+            "operation": "quality_change",
+            "quality_preference": "auto",
+            "bandwidth_estimate_kbps": 44100,
+            "bandwidth_estimate_source": "observed_rebuffer"
+          }
+        }
+      ],
+      "buffering_action": {
+        "p1": "lowered",
+        "p2": "cant_lower"
+      }
     }
   ],
   "connection_budget_cases": [

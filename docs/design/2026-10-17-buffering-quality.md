@@ -277,7 +277,7 @@ The prompt has a title, **"Playback keeps buffering"**, a primary action,
 | Event | Outcome |
 | --- | --- |
 | Pause while a pill shows | The timer freezes, and resumes on play. |
-| The viewer picks a quality from the menu | Any pill hides as the pick is sent. The answer, stall history and kept estimate change only when the pick's plan is adopted, and not at all if the pick is refused. A controller lowering adopted while the pick is pending shows no undo pill and no notice. |
+| The viewer picks a quality from the menu | Any pill hides as the pick is sent, and nothing prompts or lowers while the pick is pending. The answer, stall history and kept estimate change only when the pick's plan is adopted, and not at all if the pick is refused; a long stall in progress is then evaluated at once. A controller lowering adopted while the pick is pending shows no undo pill and no notice, but its `buffering_action` and, for a result that is not lower, the cooldown still apply. |
 | The viewer changes quality (see *Quality change*), or a replan the controller did not send is adopted | Any pill hides and stall history clears. An adoption the controller did not request also drops a pending lowering, with no notice. A quality change also clears the answer and ends the re-offer wait. |
 | The plan adopted after a lowering is no lower, or carries `quality_reduction_unavailable` | Show **"Can't lower quality for this video"**. Leave this plan alone for `NO_LOWER_COOLDOWN_MS = 300000`. |
 | The replan fails, or its plan is never adopted | Keep playing the current plan. Watch it again after `REARM_AFTER_UNADOPTED_MS = 60000`. Rearming starts fresh stall history without startup grace; an in-progress stall is timed from the rearm. If the player cannot send the replan now, because another replan is in flight, the replan fails: the client does not queue it. |
@@ -835,6 +835,9 @@ events are:
   `transport_error_end` and `replan_failed`. A plain `waiting` during a
   renderer wait means its buffer fell to the threshold.
 - The pill answers `select_lower`, `select_keep`, `select_restore` and `back`.
+- `pick_sent` and `pick_refused`: the viewer's quality pick is sent, or the
+  player refuses it. An adopted pick arrives as `quality_changed`, then its
+  `plan_adopted`.
 - `pill_obscured` and `pill_unobscured`: a higher-priority actionable pill
   appears, or the last one disappears. Every state in which the player cannot
   show its pills (see *Presentation rules*) sends the same events. A pill that
@@ -960,6 +963,11 @@ The remaining cases pin the rules added since:
 | `ask_lower_keeps_the_estimate` | **Lower quality** on Auto keeps its estimate for the client's later replans, as an automatic lowering does. |
 | `lower_rung_below_a_capped_named_rung` | A cap that keeps the named rung's resolution encodes below that rung: **Lower quality** steps from the delivered bitrate. |
 | `lower_rung_from_the_named_rung` | A cap that changes the resolution names a lower rung than the one picked: **Lower quality** steps from the named rung. |
+| `pick_sent_hides_the_pill` | A viewer's pick hides the prompt as it is sent, and nothing prompts while it is pending. |
+| `pick_keeps_the_answer_until_adoption` | A refused pick leaves the answer; a later pick's adoption clears it. |
+| `pick_refused_changes_nothing` | A refused pick keeps the stall history, and a long stall in progress is evaluated at once. |
+| `lowering_adopted_while_a_pick_is_pending` | A lowering adopted while a pick is pending shows no undo pill, and its plan still reports `lowered`. |
+| `no_lower_result_while_a_pick_is_pending` | A no-lower result while a pick is pending shows no notice, reports `cant_lower` and starts the cooldown. |
 
 ## Phases
 
