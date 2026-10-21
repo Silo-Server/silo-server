@@ -1600,11 +1600,12 @@ compute rungs.
 
 On `/api/v2`, `playback_plan.active_quality` names the entry the plan delivers,
 so the client marks that row instead of re-deriving the planner's choice from
-its own request. A rung that `quality_preference` named is active however the
-plan honors it: by an encode a bandwidth cap or server limit may have lowered,
-or by a source that already fits the rung. Otherwise an encode names the rung of
-its own resolution class and bitrate, so a plain `1080p` that a cap held to 720p
-at 2000 kbps names `720p-medium`, and a lower version played unchanged names its
+its own request. A rung that `quality_preference` named is active while the
+plan keeps its resolution: by an encode a bandwidth cap or server limit may have
+lowered, or by a source that already fits the rung. Otherwise an encode names the
+rung of its own resolution class and bitrate, so a plain `1080p`, or a
+`1080p-medium` that the client's decoder held, encoded at 720p and 2000 kbps
+names `720p-medium`, and a lower version played unchanged names its
 plain resolution entry. The field is absent when the plan delivers no entry: the
 source plays unchanged, or a cap set the encode between two rungs. The client
 marks Auto while the session's preference is `auto`, whatever `active_quality`

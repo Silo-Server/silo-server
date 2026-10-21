@@ -829,11 +829,12 @@ func availableQualitiesV3(input PlannerInputV3, source SourceDescriptorV3) []Ava
 
 // activeQualityV3 names the AvailableQualities entry plan delivers, so a
 // client checks the row the server chose instead of re-deriving it from its
-// request. A rung the request named stays active however the plan honors it
-// (an encode a cap lowered, or a source that already fits it): that row is
-// the viewer's pick. Otherwise the delivery names its entry: an encode the
-// rung of its own resolution class and bitrate (a plain 1080p a cap held to
-// 720p at 2000 kbps is 720p Medium), and a lower version played unchanged its
+// request. A rung the request named stays active while the plan keeps its
+// resolution (an encode a cap lowered, or a source that already fits it):
+// that row is the viewer's pick. Otherwise, as for a rung a decoder held to a
+// smaller class, the delivery names its entry: an encode the rung of its own
+// resolution class and bitrate (a plain 1080p a cap held to 720p at 2000 kbps
+// is 720p Medium), and a lower version played unchanged its
 // plain resolution entry ("720p"). A source played unchanged, or an encode
 // between two rungs, names none; auto already says the source plays.
 func activeQualityV3(request StartRequestV3, plan PlanV3) string {
@@ -852,7 +853,11 @@ func activeQualityV3(request StartRequestV3, plan PlanV3) string {
 		if quality.Label != requested {
 			continue
 		}
-		if _, rung := ladderRungForLabelV3(quality.Label); rung || delivered(quality) {
+		if rung, ok := ladderRungForLabelV3(quality.Label); ok {
+			if !encodes || class == 0 || class == rung.Height {
+				return quality.Label
+			}
+		} else if delivered(quality) {
 			return quality.Label
 		}
 	}

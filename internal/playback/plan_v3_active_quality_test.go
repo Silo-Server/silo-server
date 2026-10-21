@@ -18,11 +18,13 @@ func TestPlanPlaybackV3NamesTheActiveQuality(t *testing.T) {
 		quality         string
 		capKbps         int
 		serverLimitKbps int
+		decoder720p     bool
 		want            string
 	}{
 		{name: "a requested rung", quality: QualityRung1080pLowV3, want: QualityRung1080pLowV3},
 		{name: "a requested rung a cap lowered", quality: QualityRung1080pMediumV3, capKbps: 4_500, want: QualityRung1080pMediumV3},
 		{name: "a requested rung under a server limit", quality: QualityRung1080pMediumV3, serverLimitKbps: 4_000, want: QualityRung1080pMediumV3},
+		{name: "a requested rung a decoder held to 720p", quality: QualityRung1080pMediumV3, decoder720p: true, want: QualityRung720pMediumV3},
 		{name: "auto plays the source", quality: QualityAutoV3, want: ""},
 		{name: "a resolution the source fits plays the source", quality: "1080p", want: ""},
 		{name: "a lower resolution names its class rung", quality: "720p", want: QualityRung720pMediumV3},
@@ -35,6 +37,11 @@ func TestPlanPlaybackV3NamesTheActiveQuality(t *testing.T) {
 			req.Capabilities.CodecsVideo = []string{"h264", "hevc"}
 			if test.capKbps > 0 {
 				req.BandwidthCapKbps = &test.capKbps
+			}
+			if test.decoder720p {
+				req.Capabilities.CodecsVideo = []string{"h264"}
+				req.Capabilities.VideoEvidence = EvidencePlatformAttestedV3
+				req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Hardware: true, MaxWidth: 1280, MaxHeight: 720, MaxFrameRate: 60, BitDepths: []int{8}}}
 			}
 			file := activeQualityFixtureV3()
 			result := PlanPlaybackV3(PlannerInputV3{
