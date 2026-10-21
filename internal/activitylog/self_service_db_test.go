@@ -2,10 +2,10 @@ package activitylog
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -31,7 +31,7 @@ func TestSelfServiceDomainRowsDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	target := fmt.Sprint(time.Now().UnixNano())
+	target := strconv.FormatInt(time.Now().UnixNano(), 10)
 
 	var actor int
 	if err := pool.QueryRow(t.Context(), `INSERT INTO users(username, email, password_hash, role) VALUES ($1, $2, 'x', 'user') RETURNING id`,
@@ -42,36 +42,6 @@ func TestSelfServiceDomainRowsDB(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM activity_log WHERE target_id = $1`, target)
 	})
-	mutate := func(optIn, commit bool, status int) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			if optIn {
-				ctx = auditmutation.WithDomainAudit(ctx)
-			}
-			tx, err := pool.Begin(ctx)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			defer func() { _ = tx.Rollback(context.Background()) }()
-			entry, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPasswordChanged, auditmutation.TargetUser, target, status,
-				auditmutation.SecretChanged(auditmutation.FieldPassword))
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			if !commit {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			if err := tx.Commit(ctx); err != nil {
-				t.Error(err)
-				return
-			}
-			auditmutation.CommitMutation(ctx, entry)
-			w.WriteHeader(status)
-		}
-	}
 	w := &captureWriter{}
 	r := chi.NewRouter()
 	r.Use(NewMiddleware(w, "test"), clientip.Middleware(clientip.NewResolver(nil)), func(next http.Handler) http.Handler {
@@ -80,11 +50,11 @@ func TestSelfServiceDomainRowsDB(t *testing.T) {
 			next.ServeHTTP(rw, req)
 		})
 	})
-	r.Post("/api/v2/account/password", mutate(true, true, http.StatusNoContent))
-	r.Post("/api/v2/password-resets/{token}/complete", mutate(true, true, http.StatusOK))
-	r.Post("/api/v2/account/unmarked", mutate(false, true, http.StatusNoContent))
-	r.Post("/api/v1/auth/account/password", mutate(true, true, http.StatusNoContent))
-	r.Post("/api/v2/account/rolled-back", mutate(true, false, http.StatusNoContent))
+	r.Post("/api/v2/account/password", selfServiceMutation(t, pool, target, true, true, http.StatusNoContent))
+	r.Post("/api/v2/password-resets/{token}/complete", selfServiceMutation(t, pool, target, true, true, http.StatusOK))
+	r.Post("/api/v2/account/unmarked", selfServiceMutation(t, pool, target, false, true, http.StatusNoContent))
+	r.Post("/api/v1/auth/account/password", selfServiceMutation(t, pool, target, true, true, http.StatusNoContent))
+	r.Post("/api/v2/account/rolled-back", selfServiceMutation(t, pool, target, true, false, http.StatusNoContent))
 
 	domainRows := func() []string {
 		t.Helper()
@@ -129,5 +99,39 @@ func TestSelfServiceDomainRowsDB(t *testing.T) {
 		if len(rows) != before+1 || rows[len(rows)-1] != tc.domainPath {
 			t.Fatalf("%s: domain rows %v, want %s", tc.path, rows, tc.domainPath)
 		}
+	}
+}
+
+// selfServiceMutation records a password change against target in its own
+// transaction, opted into domain rows or not, and commits it or rolls it back.
+func selfServiceMutation(t *testing.T, pool *pgxpool.Pool, target string, optIn, commit bool, status int) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if optIn {
+			ctx = auditmutation.WithDomainAudit(ctx)
+		}
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		entry, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPasswordChanged, auditmutation.TargetUser, target, status,
+			auditmutation.SecretChanged(auditmutation.FieldPassword))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if !commit {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Error(err)
+			return
+		}
+		auditmutation.CommitMutation(ctx, entry)
+		w.WriteHeader(status)
 	}
 }

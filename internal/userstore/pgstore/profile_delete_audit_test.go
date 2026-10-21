@@ -31,7 +31,7 @@ func TestPostgresDeleteProfileAuditedSeesConcurrentUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer update.Rollback(context.Background()) //nolint:errcheck
+	defer update.Rollback(context.Background()) //nolint:errcheck // rollback after commit is a no-op
 	if _, err := update.Exec(ctx, `UPDATE user_profiles SET name = 'Kiddo' WHERE user_id = $1 AND id = 'kid'`, userID); err != nil {
 		t.Fatal(err)
 	}
@@ -161,6 +161,6 @@ func waitForBlockedDelete(t *testing.T, pool *pgxpool.Pool, app string, failIfDo
 		if time.Now().After(deadline) {
 			t.Fatal("delete never waited on a lock")
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // polls pg_stat_activity, the observable lock state
 	}
 }

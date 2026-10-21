@@ -42,7 +42,7 @@ func newAuditActionsDB(t *testing.T) *auditActionsDB {
 	users, sessions := NewUserRepository(pool), NewSessionRepository(pool)
 	jwt := NewJWTService("audit-actions-test", 15*time.Minute, 24*time.Hour)
 	d := &auditActionsDB{pool: pool, sessions: sessions, users: users, keys: NewAPIKeyRepository(pool),
-		svc: NewService(NewLocalProvider(users, sessions), jwt, sessions, users, nil, nil, nil), suffix: fmt.Sprint(time.Now().UnixNano())}
+		svc: NewService(NewLocalProvider(users, sessions), jwt, sessions, users, nil, nil, nil), suffix: strconv.FormatInt(time.Now().UnixNano(), 10)}
 	t.Cleanup(func() {
 		ctx := context.Background()
 		_, _ = pool.Exec(ctx, `DELETE FROM api_keys WHERE user_id = ANY($1)`, d.ids)

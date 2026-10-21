@@ -43,7 +43,7 @@ func Context(t *testing.T, pool *pgxpool.Pool, req Request) (context.Context, *a
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM activity_log WHERE node_id = $1`, nodeID)
 	})
-	r := httptest.NewRequest(req.Method, req.Path, nil)
+	r := httptest.NewRequestWithContext(t.Context(), req.Method, req.Path, nil)
 	route := chi.NewRouteContext()
 	route.RoutePatterns = []string{req.Pattern}
 	patternParts, pathParts := strings.Split(req.Pattern, "/"), strings.Split(req.Path, "/")
@@ -61,7 +61,7 @@ func Context(t *testing.T, pool *pgxpool.Pool, req Request) (context.Context, *a
 	}
 	var scoped context.Context
 	clientip.Middleware(clientip.NewResolver(nil))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		scoped = r.Context()
+		scoped = r.Context() //nolint:fatcontext // captures the one request context the middleware builds
 	})).ServeHTTP(httptest.NewRecorder(), r.WithContext(ctx))
 	lc.Request = r.WithContext(scoped)
 	return scoped, lc
