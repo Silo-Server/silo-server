@@ -35,44 +35,44 @@ const (
 // Limit is a learned limit: the step-down estimate a buffering client last
 // reported for one device on one connection.
 type Limit struct {
-	Kbps       int       `json:"kbps"`
-	ObservedAt time.Time `json:"observed_at"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	Kbps       int
+	ObservedAt time.Time
+	ExpiresAt  time.Time
 }
 
 // Probe is the latest connection speed test a device reported. LowerBound
 // marks a test that proved only "at least Kbps".
 type Probe struct {
-	Kbps       int       `json:"kbps"`
-	LowerBound bool      `json:"lower_bound"`
-	MeasuredAt time.Time `json:"measured_at"`
-	Transport  string    `json:"transport"`
+	Kbps       int
+	LowerBound bool
+	MeasuredAt time.Time
+	Transport  string
 }
 
 // Sample is the best throughput playback reached on a connection, kept as a
 // lower bound on its speed.
 type Sample struct {
-	Kbps       int       `json:"kbps"`
-	MeasuredAt time.Time `json:"measured_at"`
+	Kbps       int
+	MeasuredAt time.Time
 }
 
 // ProbeResult is one reported speed test, bounded by the API before it
 // reaches the store.
 type ProbeResult struct {
-	Kbps       int    `json:"kbps"`
-	Bytes      int64  `json:"bytes"`
-	DurationMS int    `json:"duration_ms"`
-	Transport  string `json:"transport"`
-	LowerBound bool   `json:"lower_bound"`
+	Kbps       int
+	Bytes      int64
+	DurationMS int
+	Transport  string
+	LowerBound bool
 }
 
 // State is what the calling device sees for the connection it is using now.
 type State struct {
-	Probe          *Probe  `json:"probe,omitempty"`
-	PlaybackSample *Sample `json:"playback_sample,omitempty"`
-	AutoBudgetKbps *int    `json:"auto_budget_kbps,omitempty"`
-	Connection     string  `json:"connection"`
-	LearnedLimit   *Limit  `json:"learned_limit"`
+	Probe          *Probe
+	PlaybackSample *Sample
+	AutoBudgetKbps *int
+	Connection     string
+	LearnedLimit   *Limit
 }
 
 // Store reads and writes playback_connections. Every method on a nil Store,
@@ -259,12 +259,12 @@ func (s *Store) Sample(ctx context.Context, user int, device, key string) (*Samp
 // AdminConnection is one connection a device used, as the admin device page
 // shows it. ID is the opaque connection key the admin reset addresses.
 type AdminConnection struct {
-	ID             string       `json:"id"`
-	Connection     string       `json:"connection"`
-	Probe          *Probe       `json:"probe"`
-	PlaybackSample *Sample      `json:"playback_sample"`
-	LearnedLimit   *Limit       `json:"learned_limit"`
-	PlanSummary    *PlanSummary `json:"plan_summary"`
+	ID             string
+	Connection     string
+	Probe          *Probe
+	PlaybackSample *Sample
+	LearnedLimit   *Limit
+	PlanSummary    *PlanSummary
 }
 
 // List returns a device's retained connections, most recently updated first.
