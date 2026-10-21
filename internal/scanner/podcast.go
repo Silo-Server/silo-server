@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -50,8 +51,19 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 	}
 
 	show := &parsedPodcastShow{}
+	var changing error
 	for idx, path := range audioFiles {
 		probed, info, err := probeStablePodcastFile(ctx, ffprobePath, path)
+		if errors.Is(err, errPodcastFileChanging) {
+			// A download still being written: leave this episode for the next
+			// scan instead of failing the rest of the show. Its row, if any,
+			// stays present because the caller recorded the listing first.
+			slog.WarnContext(ctx, "podcast scan: episode still changing; skipping it until the next scan", "component", "scanner",
+				"path", path,
+			)
+			changing = err
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -82,15 +94,23 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 			ModTime: normalizeFileModifiedAt(info.ModTime()),
 		})
 	}
+	if len(show.Episodes) == 0 && changing != nil {
+		return nil, changing
+	}
 	return show, nil
 }
+
+// errPodcastFileChanging marks an episode file that kept changing across
+// both probes, such as a download still being written.
+var errPodcastFileChanging = errors.New("podcast file changed while it was probed")
 
 // probeStablePodcastFile probes path and returns the stat of the file that was
 // probed. The file is stat'ed before and after the probe; if it was replaced
 // or rewritten in between, even by a file with the same size and mtime, it is
-// probed once more, and a file still changing is reported as an error so the
-// next scan reads it again. Without this, the probe of one file could be
-// recorded under another file's size and mtime and look current.
+// probed once more, and a file still changing is reported as
+// errPodcastFileChanging so the next scan reads it again. Without this, the
+// probe of one file could be recorded under another file's size and mtime and
+// look current.
 func probeStablePodcastFile(ctx context.Context, ffprobePath, path string) (*ProbeData, os.FileInfo, error) {
 	for attempt := 1; ; attempt++ {
 		before, err := os.Stat(path)
@@ -109,7 +129,7 @@ func probeStablePodcastFile(ctx context.Context, ffprobePath, path string) (*Pro
 			return probed, before, nil
 		}
 		if attempt == 2 {
-			return nil, nil, fmt.Errorf("podcast file %s changed while it was probed", path)
+			return nil, nil, fmt.Errorf("%w: %s", errPodcastFileChanging, path)
 		}
 	}
 }

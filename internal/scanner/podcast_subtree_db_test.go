@@ -123,11 +123,11 @@ func (f *podcastSubtreeFixture) scanSubtree(t *testing.T, path string) *ScanResu
 
 // requireCounts fails unless the scan reported exactly these changes; the
 // ingest publishes its catalog event only for a scan that reports one.
-func requireCounts(t *testing.T, scope string, got *ScanResult, newFiles, restored, unchanged, missing int) {
+func requireCounts(t *testing.T, scope string, got *ScanResult, newFiles, updated, unchanged, missing int) {
 	t.Helper()
-	if got.New != newFiles || got.Updated != restored || got.Unchanged != unchanged || got.Missing != missing {
+	if got.New != newFiles || got.Updated != updated || got.Unchanged != unchanged || got.Missing != missing {
 		t.Fatalf("scan of %s: new=%d updated=%d unchanged=%d missing=%d, want new=%d updated=%d unchanged=%d missing=%d",
-			scope, got.New, got.Updated, got.Unchanged, got.Missing, newFiles, restored, unchanged, missing)
+			scope, got.New, got.Updated, got.Unchanged, got.Missing, newFiles, updated, unchanged, missing)
 	}
 }
 
@@ -268,6 +268,9 @@ func TestScanSubtreeIndexesPodcastShowFolders(t *testing.T) {
 	f.requireOnlyPodcastItems(t)
 	// Nothing changed since, so a rescan reports nothing to publish.
 	requireCounts(t, "Show A again", f.scanSubtree(t, showA), 0, 0, 2, 0)
+	// A retagged episode keeps its path but is reported as updated.
+	f.addEpisode(t, "Show A", "Episode 2.mp3", "Show A", "Episode Two, retagged", "2")
+	requireCounts(t, "retagged Show A", f.scanSubtree(t, showA), 0, 1, 1, 0)
 
 	// The full scan that rebuilt Show A under a new content ID in the issue
 	// must now find both shows where the subtree scans left them.

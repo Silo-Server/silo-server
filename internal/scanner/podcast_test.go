@@ -132,17 +132,32 @@ func TestParsePodcastShowReprobesAFileReplacedDuringTheProbe(t *testing.T) {
 	}
 }
 
-func TestParsePodcastShowRejectsAFileStillChanging(t *testing.T) {
+func TestParsePodcastShowSkipsAFileStillChanging(t *testing.T) {
 	dir := t.TempDir()
 	ffprobePath := filepath.Join(dir, "ffprobe")
-	// Prints the probe stored in the file, then grows the file, as a download
-	// still being written would.
-	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\nprintf ' ' >> \"$last\"\n")
-	showDir, _ := podcastProbeFixture(t, dir, "61")
+	// Prints the probe stored in the file, then grows a "-grow" file, as a
+	// download still being written would.
+	writeFakeTool(t, ffprobePath, "#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n"+
+		"case \"$last\" in *-grow.mp3) printf ' ' >> \"$last\";; esac\n")
+	showDir, stable := podcastProbeFixture(t, dir, "61")
+	if err := os.WriteFile(filepath.Join(showDir, "02-grow.mp3"), []byte(podcastProbeJSON("62")), 0o644); err != nil {
+		t.Fatalf("write growing episode: %v", err)
+	}
 
-	_, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil)
-	if err == nil || !strings.Contains(err.Error(), "changed while it was probed") {
-		t.Fatalf("parsePodcastShow error = %v, want a file that changed while it was probed", err)
+	got, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil)
+	if err != nil {
+		t.Fatalf("parsePodcastShow: %v", err)
+	}
+	if len(got.Episodes) != 1 || got.Episodes[0].Path != stable {
+		t.Fatalf("episodes = %+v, want only the stable %s", got.Episodes, stable)
+	}
+
+	// A show whose only episodes are still changing fails for this scan.
+	if err := os.Remove(stable); err != nil {
+		t.Fatalf("remove stable episode: %v", err)
+	}
+	if _, err := parsePodcastShow(context.Background(), ffprobePath, showDir, nil); !errors.Is(err, errPodcastFileChanging) {
+		t.Fatalf("parsePodcastShow error = %v, want errPodcastFileChanging", err)
 	}
 }
 

@@ -150,10 +150,10 @@ func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFo
 	if err != nil {
 		return nil, fmt.Errorf("podcast scan: listing cataloged files for %s: %w", showPath, err)
 	}
-	wasMissing := make(map[string]bool, len(before))
+	beforeByPath := make(map[string]*models.MediaFile, len(before))
 	for _, mf := range before {
 		if mf != nil {
-			wasMissing[mf.FilePath] = mf.MissingSince != nil
+			beforeByPath[mf.FilePath] = mf
 		}
 	}
 	seenPaths := make(map[string]bool)
@@ -162,12 +162,24 @@ func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFo
 			return nil, fmt.Errorf("podcast scan: show %s: %w", showPath, err)
 		}
 	}
+	// A retagged or replaced episode keeps its path, so compare each row's
+	// recorded file revision before and after indexing to count it as updated.
+	after, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, showPath)
+	if err != nil {
+		return nil, fmt.Errorf("podcast scan: listing cataloged files for %s: %w", showPath, err)
+	}
+	afterByPath := make(map[string]*models.MediaFile, len(after))
+	for _, mf := range after {
+		if mf != nil {
+			afterByPath[mf.FilePath] = mf
+		}
+	}
 	for path := range seenPaths {
-		missing, cataloged := wasMissing[path]
+		prev, cataloged := beforeByPath[path]
 		switch {
 		case !cataloged:
 			result.New++
-		case missing:
+		case prev.MissingSince != nil || podcastFileRevisionChanged(prev, afterByPath[path]):
 			result.Updated++
 		default:
 			result.Unchanged++
@@ -180,6 +192,21 @@ func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFo
 		return nil, err
 	}
 	return result, nil
+}
+
+// podcastFileRevisionChanged reports whether indexing recorded a different
+// file size or modification time for an episode row.
+func podcastFileRevisionChanged(before, after *models.MediaFile) bool {
+	if after == nil {
+		return false
+	}
+	if before.FileSize != after.FileSize {
+		return true
+	}
+	if before.FileModifiedAt == nil || after.FileModifiedAt == nil {
+		return before.FileModifiedAt != after.FileModifiedAt
+	}
+	return !before.FileModifiedAt.Equal(*after.FileModifiedAt)
 }
 
 // podcastShowFolder returns the show folder that holds path in a podcast
