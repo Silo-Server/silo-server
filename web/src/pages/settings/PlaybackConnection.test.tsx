@@ -42,6 +42,18 @@ function mount(client = new QueryClient({ defaultOptions: { queries: { retry: fa
   );
 }
 const SPEED_FEATURES = { features: ["buffering_quality_v1", "connection_speed_v1"] };
+function serve(fields: Record<string, unknown> | (() => Record<string, unknown>)) {
+  request.mockImplementation(async (operation: string) =>
+    operation.endsWith("capabilities")
+      ? SPEED_FEATURES
+      : {
+          connection: "remote",
+          learned_limit: null,
+          ...(typeof fields === "function" ? fields() : fields),
+        },
+  );
+}
+
 const connectionReads = () =>
   request.mock.calls.filter(([op]) => op === "GET /api/v2/playback/connection");
 
@@ -100,16 +112,10 @@ it("says in the row when a reset fails and keeps the limit", async () => {
 });
 
 it("shows server speed and budget and refreshes after a speed test", async () => {
-  request.mockImplementation(async (operation: string) =>
-    operation.endsWith("capabilities")
-      ? SPEED_FEATURES
-      : {
-          connection: "remote",
-          learned_limit: null,
-          probe: { kbps: 48000, measured_at: new Date().toISOString(), transport: "wifi" },
-          auto_budget_kbps: 35280,
-        },
-  );
+  serve(() => ({
+    probe: { kbps: 48000, measured_at: new Date().toISOString(), transport: "wifi" },
+    auto_budget_kbps: 35280,
+  }));
   speedTest.mockResolvedValue(48000);
   mount();
   expect(await screen.findByText(/48 Mbps.*Wi-Fi/)).toBeInTheDocument();
@@ -122,15 +128,9 @@ it("shows server speed and budget and refreshes after a speed test", async () =>
 });
 
 it("reads the connection again whenever Settings opens", async () => {
-  request.mockImplementation(async (operation: string) =>
-    operation.endsWith("capabilities")
-      ? SPEED_FEATURES
-      : {
-          connection: "remote",
-          learned_limit: null,
-          probe: { kbps: 9949, measured_at: new Date().toISOString(), transport: "wifi" },
-        },
-  );
+  serve(() => ({
+    probe: { kbps: 9949, measured_at: new Date().toISOString(), transport: "wifi" },
+  }));
   // A reading cached from an earlier visit, on what may be another network.
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -146,19 +146,13 @@ it("reads the connection again whenever Settings opens", async () => {
 });
 
 it("says when a speed test fails rather than blaming playback", async () => {
-  request.mockImplementation(async (operation: string) =>
-    operation.endsWith("capabilities")
-      ? SPEED_FEATURES
-      : {
-          connection: "remote",
-          learned_limit: null,
-          probe: {
-            kbps: 48000,
-            measured_at: new Date(Date.now() - 3 * 60 * 60_000 - 60_000).toISOString(),
-            transport: "ethernet",
-          },
-        },
-  );
+  serve(() => ({
+    probe: {
+      kbps: 48000,
+      measured_at: new Date(Date.now() - 3 * 60 * 60_000 - 60_000).toISOString(),
+      transport: "ethernet",
+    },
+  }));
   speedTest
     .mockRejectedValueOnce(new Error("no measurement"))
     .mockResolvedValueOnce("playing")
@@ -180,15 +174,9 @@ it("says when a speed test fails rather than blaming playback", async () => {
 });
 
 it("says a result could not be saved and keeps the server's reading", async () => {
-  request.mockImplementation(async (operation: string) =>
-    operation.endsWith("capabilities")
-      ? SPEED_FEATURES
-      : {
-          connection: "remote",
-          learned_limit: null,
-          probe: { kbps: 48000, measured_at: new Date().toISOString(), transport: "wifi" },
-        },
-  );
+  serve(() => ({
+    probe: { kbps: 48000, measured_at: new Date().toISOString(), transport: "wifi" },
+  }));
   speedTest.mockRejectedValueOnce(new probe.NotSaved());
   mount();
   fireEvent.click(await screen.findByText("Test speed"));
@@ -197,11 +185,7 @@ it("says a result could not be saved and keeps the server's reading", async () =
 });
 
 it("shows a 429's wait only while it lasts", async () => {
-  request.mockImplementation(async (operation: string) =>
-    operation.endsWith("capabilities")
-      ? SPEED_FEATURES
-      : { connection: "remote", learned_limit: null },
-  );
+  serve({});
   speedTest.mockRejectedValueOnce(new probe.RateLimited(1));
   mount();
   fireEvent.click(await screen.findByText("Test speed"));
@@ -210,11 +194,7 @@ it("shows a 429's wait only while it lasts", async () => {
 });
 
 it("says Not measured yet without a reading", async () => {
-  request.mockImplementation(async (operation: string) =>
-    operation.endsWith("capabilities")
-      ? SPEED_FEATURES
-      : { connection: "remote", learned_limit: null },
-  );
+  serve({});
   mount();
   expect(await screen.findByText("Not measured yet")).toBeInTheDocument();
 });
@@ -227,16 +207,10 @@ it.each([
   [{ type: "wifi", saveData: true }, "Speed tests are skipped on metered networks."],
 ])("replaces the speed, Test speed and the budget on %o", async (network, note) => {
   probe.network = network;
-  request.mockImplementation(async (operation: string) =>
-    operation.endsWith("capabilities")
-      ? SPEED_FEATURES
-      : {
-          connection: "remote",
-          learned_limit: null,
-          probe: { kbps: 48000, measured_at: new Date().toISOString(), transport: "wifi" },
-          auto_budget_kbps: 35280,
-        },
-  );
+  serve(() => ({
+    probe: { kbps: 48000, measured_at: new Date().toISOString(), transport: "wifi" },
+    auto_budget_kbps: 35280,
+  }));
   mount();
   expect(await screen.findByText(note)).toBeInTheDocument();
   await waitFor(() => expect(connectionReads()).toHaveLength(1));
@@ -259,11 +233,7 @@ it("words a lower bound and a playback sample as faster than, and shows a sample
       measured_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
     },
   };
-  request.mockImplementation(async (operation: string) =>
-    operation.endsWith("capabilities")
-      ? SPEED_FEATURES
-      : { connection: "remote", learned_limit: null, ...reading },
-  );
+  serve(() => reading);
   let finish: (value: unknown) => void = () => undefined;
   speedTest.mockReturnValue(new Promise((resolve) => (finish = resolve)));
   mount();
