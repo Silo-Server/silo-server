@@ -2365,6 +2365,16 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
 		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
+		// Jellyfin Web stops retrying a failed stream with copy refused once the
+		// stream URL names both refusals; append them the way Jellyfin does.
+		if dto.TranscodingURL != "" {
+			if !boolDefault(req.AllowVideoStreamCopy, true) {
+				dto.TranscodingURL += "&allowVideoStreamCopy=false"
+			}
+			if !boolDefault(req.AllowAudioStreamCopy, true) {
+				dto.TranscodingURL += "&allowAudioStreamCopy=false"
+			}
+		}
 		warmSubtitles = append(warmSubtitles, compatWarmsTextSubtitles(subtitleMode, dto.MediaStreams))
 		dto.MediaAttachments = h.mediaAttachments(attachmentContext, routeItemID, playSessionID, source)
 

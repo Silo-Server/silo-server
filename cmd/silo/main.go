@@ -2090,6 +2090,13 @@ func main() {
 		}
 		personRefreshService = metadata.NewPersonRefreshService(deps.DB, pluginResolver, personRepo)
 		personRefreshService.SetImageResolver(imageResolver)
+		// Person lookups reuse their resolved providers like the item chain
+		// cache does, and drop them on the same plugin lifecycle events.
+		if pluginService != nil {
+			pluginService.AddLifecycleHook(func(context.Context) {
+				personRefreshService.InvalidateProviders()
+			})
+		}
 
 		// Wire the audiobook enricher. It uses the same plugin resolver and chain
 		// repo as the movie/TV pipeline, but resolves providers at

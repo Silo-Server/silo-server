@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/streamlocation"
 )
 
 type publicSystemInfoResponse struct {
@@ -95,11 +96,13 @@ func (h *SystemHandler) HandleNamedConfiguration(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, encodingConfigurationResponse{EnableSubtitleExtraction: true})
 }
 
-// HandleEndpoint serves GET /System/Endpoint.
+// HandleEndpoint serves GET /System/Endpoint. Jellyfin Web keys its saved max
+// bitrate by IsInNetwork, so the answer uses the playback location classifier.
 func (h *SystemHandler) HandleEndpoint(w http.ResponseWriter, r *http.Request) {
+	inNetwork := !streamlocation.IsRemote(r.Context())
 	writeJSON(w, http.StatusOK, endpointInfoResponse{
-		IsLocal:     true,
-		IsInNetwork: true,
+		IsLocal:     inNetwork,
+		IsInNetwork: inNetwork,
 		Address:     h.cfg().JellyfinCompat.PublicURL,
 	})
 }

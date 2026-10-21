@@ -757,7 +757,7 @@ func TestBuildItemLocalizationRecord_PreservesExistingWhenRefreshIsBlank(t *test
 		LogoPath:          "s3://logo.png",
 	}
 
-	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", false, true)
+	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", false, true)
 
 	if *loc != *existing {
 		t.Fatalf("localization = %#v, want %#v", loc, existing)
@@ -956,14 +956,16 @@ func TestBuildLocalizationRecordsDoNotCarryAITextForward(t *testing.T) {
 	}
 }
 
-// A refresh in a non-canonical language hands the item builder the
-// canonical-language result, so a scheduled refresh must keep the stored AI
-// translation rather than fill it with canonical text.
+// A locked overview hands the item builder the canonical-language text, so a
+// scheduled refresh must keep the stored AI translation rather than fill it
+// with canonical text.
 func TestBuildItemLocalizationRecordKeepsAITextOnFillEmptyRefresh(t *testing.T) {
+	canonical := &MetadataResult{Overview: "English overview", Tagline: "English tagline"}
 	item := buildItemLocalizationRecord(&models.MediaItemLocalization{
 		Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
 		Tagline: "Phrase IA", TaglineSource: models.LocalizationSourceAI,
-	}, "series-1", "fr", "series", &MetadataResult{Overview: "English overview", Tagline: "English tagline"}, nil, MergeFillEmpty, "fr", false, true)
+	}, "series-1", "fr", "series", localizedItemText(&MetadataResult{}, canonical, []MetadataField{FieldOverview}), canonical,
+		nil, MergeFillEmpty, "fr", false, true)
 
 	if item.Overview != "Apercu IA" || item.Tagline != "Phrase IA" {
 		t.Fatalf("overview/tagline = %q/%q, want the AI translation kept", item.Overview, item.Tagline)

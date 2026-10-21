@@ -289,3 +289,11 @@
 # the only person field search documents carry.
 ./internal/catalog TestPersonWriteReindexesTitlesOnlyOnRenamePostgres
 ./internal/catalog TestPersonWriteWaitingOnARenameReindexesTitlesPostgres
+
+# Server collection counts for a restricted viewer: one statement for stored
+# members and at most four for smart collections, however many are listed.
+./internal/catalog TestViewerCollectionCountsStatementBudgetDB
+
+# Person lookups resolve their metadata providers with one statement and reuse
+# them: later lookups in the window issue none, and a plugin change drops them.
+./internal/metadata TestPersonRefreshReusesResolvedProvidersDB
