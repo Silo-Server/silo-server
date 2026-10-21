@@ -240,8 +240,10 @@ func TestHandleDeleteProfile_AllowsPrimaryToDeleteOther(t *testing.T) {
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	purger := &recordingProfilePurger{}
 	withdrawer := &recordingWatchlistRequestWithdrawer{}
+	sessions := &recordingProfilePurger{}
 	handler.WatchlistTitlesPurger = purger
 	handler.WatchlistRequestWithdrawer = withdrawer
+	handler.JellyfinSessionPurger = sessions
 
 	req := newAuthorizedProfileRequestWithRole(
 		http.MethodDelete,
@@ -267,6 +269,9 @@ func TestHandleDeleteProfile_AllowsPrimaryToDeleteOther(t *testing.T) {
 	}
 	if len(withdrawer.calls) != 1 || withdrawer.calls[0] != "1/profile-2" {
 		t.Fatalf("withdraw calls = %v, want [1/profile-2]", withdrawer.calls)
+	}
+	if len(sessions.calls) != 1 || sessions.calls[0] != "1/profile-2" {
+		t.Fatalf("Jellyfin session purge calls = %v, want [1/profile-2]", sessions.calls)
 	}
 
 }
