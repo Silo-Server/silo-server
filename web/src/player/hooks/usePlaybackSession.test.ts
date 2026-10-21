@@ -2710,7 +2710,7 @@ it("repeats the kept step-down estimate, without a source, on later Auto replans
 });
 
 /** Records every request body, optionally holding the first replan until release. */
-function recordingServer({ holdFirstReplan = false } = {}) {
+function recordingServer({ holdFirstReplan = false, holdSecondStart = false } = {}) {
   const plan = fixturePlanV3({ session_id: "session-1" });
   const decision = (planId: string) =>
     jsonResponse({
@@ -2724,9 +2724,28 @@ function recordingServer({ holdFirstReplan = false } = {}) {
   const held = new Promise<Response>((resolve) => {
     release = () => resolve(decision("plan:held0001"));
   });
+  let releaseStart: ((refused?: boolean) => void) | undefined;
+  const heldStart = new Promise<Response>((resolve) => {
+    releaseStart = (refused) =>
+      resolve(
+        refused
+          ? jsonResponse({
+              protocol_version: 3,
+              server_features: ["playback_plan_v3", "buffering_quality_v1"],
+              outcome: "adaptation_unavailable",
+              session_id: "session-1",
+            })
+          : decision("plan:start0002"),
+      );
+  });
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.endsWith("/playback/start")) return decision(plan.plan_id);
+    if (url.endsWith("/playback/start")) {
+      const count = fetchMock.mock.calls.filter(([u]) =>
+        String(u).endsWith("/playback/start"),
+      ).length;
+      return holdSecondStart && count === 2 ? heldStart : decision(plan.plan_id);
+    }
     if (url.endsWith("/replan")) {
       const count = fetchMock.mock.calls.filter(([u]) => String(u).endsWith("/replan")).length;
       return holdFirstReplan && count === 1 ? held : decision(`plan:next000${count}`);
@@ -2740,7 +2759,11 @@ function recordingServer({ holdFirstReplan = false } = {}) {
     fetchMock.mock.calls
       .filter(([url]) => String(url).endsWith(suffix))
       .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
-  return { bodiesTo, release: () => release?.() };
+  return {
+    bodiesTo,
+    release: () => release?.(),
+    releaseStart: (refused?: boolean) => releaseStart?.(refused),
+  };
 }
 
 const lowering = {
@@ -2831,6 +2854,44 @@ it("refuses a lowering while another replan is in flight, and sends a Restore af
   });
   expect(server.bodiesTo("/replan")[1]).not.toHaveProperty("bandwidth_estimate_kbps");
   await waitFor(() => expect(restored).toHaveBeenCalledWith(3));
+  unmount();
+});
+
+it("sends a Restore answered during a start once that start's plan is adopted", async () => {
+  const server = recordingServer({ holdSecondStart: true });
+  const { result, unmount } = await startSession();
+  act(() => result.current.switchVersion(99, 120));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(2));
+  const restored = vi.fn();
+  await act(async () => {
+    result.current.changeQuality("auto", 121, restore, restored);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(server.bodiesTo("/replan")).toHaveLength(0);
+  await act(async () => server.releaseStart());
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+  expect(server.bodiesTo("/replan")[0]).toMatchObject({
+    operation: "quality_change",
+    learned_limit: "clear",
+    plan_attempt_key: "v3:plan:start0002",
+  });
+  await waitFor(() => expect(restored).toHaveBeenCalledWith(3));
+  unmount();
+});
+
+it("owes a Restore answered during a start that plays nothing to the next start", async () => {
+  const server = recordingServer({ holdSecondStart: true });
+  const { result, unmount } = await startSession();
+  act(() => result.current.switchVersion(99, 120));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(2));
+  const restored = vi.fn();
+  act(() => result.current.changeQuality("auto", 121, restore, restored));
+  await act(async () => server.releaseStart(true));
+  await waitFor(() => expect(restored).toHaveBeenCalledWith(undefined));
+  act(() => result.current.switchVersion(100, 130));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(3));
+  expect(server.bodiesTo("/playback/start")[2]).toMatchObject({ learned_limit: "clear" });
+  expect(server.bodiesTo("/replan")).toHaveLength(0);
   unmount();
 });
 

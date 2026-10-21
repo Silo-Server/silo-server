@@ -1264,7 +1264,12 @@ export function usePlaybackSession(
       const plan = planRef.current;
       const sessionId = sessionIdRef.current;
       const playbackAttemptId = playbackAttemptIdRef.current;
-      if (!plan || !sessionId || !playbackAttemptId) return false;
+      if (!plan || !sessionId || !playbackAttemptId) {
+        // A Restore with no plan to replan, as after a start that adopted
+        // none, owes its `clear` to the next start.
+        if (options.learnedLimit === "clear") clearOwedRef.current = true;
+        return false;
+      }
       if (replanInFlightRef.current) {
         // Whatever happens to a Restore here, its `clear` is owed to the next
         // request that goes out.
@@ -1621,7 +1626,7 @@ export function usePlaybackSession(
     ) => {
       // A lowering waits for nothing: refused while another replan is in
       // flight, it is not sent, and the controller rearms. A Restore waits
-      // behind it instead (see `replan`).
+      // behind it instead (see `replan`), or behind a start in flight.
       if (
         buffering &&
         buffering.learned_limit !== "clear" &&
@@ -1636,34 +1641,46 @@ export function usePlaybackSession(
       setState((current) => ({ ...current, qualityPreference: normalized }));
       // The replan tells onAdopt as it adopts, before the new plan renders; a
       // refusal is told here.
-      void replan(
-        {
-          operation: "quality_change",
-          positionSeconds: currentPosition,
-          ...(buffering
-            ? {
-                bandwidthEstimateKbps: buffering.bandwidth_estimate_kbps ?? null,
-                bandwidthEstimateSource: buffering.bandwidth_estimate_source,
-                learnedLimit: buffering.learned_limit,
-              }
-            : {}),
-        },
-        false,
-        false,
-        onAdopt,
-      ).then((adopted) => {
-        if (adopted) return;
-        onAdopt?.(undefined);
-        if (qualityRef.current !== normalized) return;
-        qualityRef.current = previousPreference;
-        setState((current) =>
-          current.qualityPreference === normalized
-            ? { ...current, qualityPreference: previousPreference }
-            : current,
-        );
-      });
+      const send = () =>
+        void replan(
+          {
+            operation: "quality_change",
+            positionSeconds: currentPosition,
+            ...(buffering
+              ? {
+                  bandwidthEstimateKbps: buffering.bandwidth_estimate_kbps ?? null,
+                  bandwidthEstimateSource: buffering.bandwidth_estimate_source,
+                  learnedLimit: buffering.learned_limit,
+                }
+              : {}),
+          },
+          false,
+          false,
+          onAdopt,
+        ).then((adopted) => {
+          if (adopted) return;
+          onAdopt?.(undefined);
+          if (qualityRef.current !== normalized) return;
+          qualityRef.current = previousPreference;
+          setState((current) =>
+            current.qualityPreference === normalized
+              ? { ...current, qualityPreference: previousPreference }
+              : current,
+          );
+        });
+      // A Restore sent during a start would replan the plan that start
+      // replaces, so it goes out against the plan the start leaves.
+      const sendAfterStarts = () => {
+        const settling =
+          buffering?.learned_limit === "clear" && !replanInFlightRef.current
+            ? awaitAdoptionSettled()
+            : null;
+        if (settling) void settling.then(sendAfterStarts);
+        else send();
+      };
+      sendAfterStarts();
     },
-    [replan],
+    [awaitAdoptionSettled, replan],
   );
 
   const recoverFromFailure = useCallback(
