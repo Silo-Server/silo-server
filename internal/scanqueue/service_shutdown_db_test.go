@@ -4,13 +4,53 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func openDirectRunTestRepository(t *testing.T) (context.Context, *pgxpool.Pool, *Repository, int) {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	name := fmt.Sprintf("scanqueue-direct-run-%d", time.Now().UnixNano())
+	var folderID int
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO media_folders (type, name, enabled)
+		VALUES ('series', $1, true)
+		RETURNING id`,
+		name,
+	).Scan(&folderID); err != nil {
+		t.Fatalf("seed media folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+
+	return ctx, pool, NewRepository(pool), folderID
+}
+
+type overlapTestFolders struct{ folder *models.MediaFolder }
+
+func (f overlapTestFolders) GetByID(context.Context, int) (*models.MediaFolder, error) {
+	return f.folder, nil
+}
 
 // shutdownTestIngester blocks every ingest until its context ends, as a long
 // scan does when the process shuts down. With block unset it completes.
