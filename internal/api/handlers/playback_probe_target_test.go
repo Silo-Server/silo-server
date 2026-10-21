@@ -99,12 +99,7 @@ func TestBandwidthProbeTargetSurvivesCanceledAndFailedReads(t *testing.T) {
 	}
 
 	all := newAuthorizedPlaybackContext()
-	h.probeTargets.mu.Lock()
-	for key, entry := range h.probeTargets.entries {
-		entry.expires = time.Now().Add(-time.Second)
-		h.probeTargets.entries[key] = entry
-	}
-	h.probeTargets.mu.Unlock()
+	expireProbeTargets(h, time.Second)
 	source.err = errors.New("down")
 	if got := h.bandwidthProbeTargetKbps(all); got != 50000 {
 		t.Fatalf("failed refresh: target = %d, want the last good 50000", got)
@@ -114,23 +109,45 @@ func TestBandwidthProbeTargetSurvivesCanceledAndFailedReads(t *testing.T) {
 	}
 }
 
-// An expired scope is dropped when another scope is stored, so profiles that
-// come and go do not leave their targets behind.
+// A scope expired for longer than the cache lifetime is dropped when another
+// scope is stored, so profiles that come and go do not leave their targets
+// behind.
 func TestBandwidthProbeTargetDropsExpiredScopes(t *testing.T) {
 	h := &PlaybackHandler{SourceBitrates: &countingPercentiles{kbps: 40000}}
 	all := newAuthorizedPlaybackContext()
 	kids := access.SetScope(all, access.Scope{AllowedLibraryIDs: []int{3}, LibrariesRestricted: true})
 	h.bandwidthProbeTargetKbps(all)
-	h.probeTargets.mu.Lock()
-	for key, entry := range h.probeTargets.entries {
-		entry.expires = time.Now().Add(-time.Second)
-		h.probeTargets.entries[key] = entry
-	}
-	h.probeTargets.mu.Unlock()
+	expireProbeTargets(h, probeTargetCacheTTL+time.Second)
 	h.bandwidthProbeTargetKbps(kids)
 	h.probeTargets.mu.Lock()
 	defer h.probeTargets.mu.Unlock()
 	if len(h.probeTargets.entries) != 1 {
 		t.Fatalf("kept %d scopes, want only the one just read", len(h.probeTargets.entries))
+	}
+}
+
+// A failed read keeps its scope's last good target even after another
+// scope's store has swept the cache.
+func TestBandwidthProbeTargetKeepsLastGoodAcrossScopes(t *testing.T) {
+	source := &countingPercentiles{kbps: 40000}
+	h := &PlaybackHandler{SourceBitrates: source}
+	all := newAuthorizedPlaybackContext()
+	kids := access.SetScope(all, access.Scope{AllowedLibraryIDs: []int{3}, LibrariesRestricted: true})
+	h.bandwidthProbeTargetKbps(all)
+	expireProbeTargets(h, time.Second)
+	h.bandwidthProbeTargetKbps(kids)
+	source.err = errors.New("down")
+	if got := h.bandwidthProbeTargetKbps(all); got != 50000 {
+		t.Fatalf("failed refresh after another scope's store: target = %d, want the last good 50000", got)
+	}
+}
+
+// expireProbeTargets moves every cached target's expiry age into the past.
+func expireProbeTargets(h *PlaybackHandler, age time.Duration) {
+	h.probeTargets.mu.Lock()
+	defer h.probeTargets.mu.Unlock()
+	for key, entry := range h.probeTargets.entries {
+		entry.expires = time.Now().Add(-age)
+		h.probeTargets.entries[key] = entry
 	}
 }

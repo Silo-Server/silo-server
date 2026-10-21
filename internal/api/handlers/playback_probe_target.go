@@ -47,6 +47,14 @@ type probeTargetEntry struct {
 	expires time.Time
 }
 
+// lookup returns the entry stored for key and whether it is still fresh.
+func (c *probeTargetCache) lookup(key string) (probeTargetEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[key]
+	return entry, ok && time.Now().Before(entry.expires)
+}
+
 // bandwidthProbeTargetKbps is the rate a quick speed test has to prove for
 // this viewer: the highest bitrate the server would plan for them, plus the
 // 25% headroom Auto's 80% margin needs to send it untouched. That bitrate is
@@ -73,16 +81,19 @@ func (h *PlaybackHandler) sourceBitratePercentile(ctx context.Context, filter ca
 	builder.WriteString("|quality=")
 	builder.WriteString(filter.MaxPlaybackQuality)
 	key := builder.String()
-	h.probeTargets.mu.Lock()
-	cached, ok := h.probeTargets.entries[key]
-	h.probeTargets.mu.Unlock()
-	if ok && time.Now().Before(cached.expires) {
+	if cached, fresh := h.probeTargets.lookup(key); fresh {
 		return cached.kbps
 	}
 	// Capability reads for one scope share a query, and it outlives the
 	// request that started it, so a client that disconnects mid-read does
 	// not leave a failure cached for everyone.
 	target, _, _ := h.probeTargets.reads.Do(key, func() (any, error) {
+		// Look again: a read that finished since the check above stored the
+		// target, and a failure below falls back on the latest one.
+		cached, fresh := h.probeTargets.lookup(key)
+		if fresh {
+			return cached.kbps, nil
+		}
 		queryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTargetQueryTimeout)
 		defer cancel()
 		kbps, err := h.SourceBitrates.Percentile(queryCtx, filter, probeTargetPercentile)
@@ -96,11 +107,12 @@ func (h *PlaybackHandler) sourceBitratePercentile(ctx context.Context, filter ca
 		if h.probeTargets.entries == nil {
 			h.probeTargets.entries = map[string]probeTargetEntry{}
 		}
-		// Scopes come and go with profiles and their restrictions; an expired
-		// one is read again on its next use, so it need not be kept.
+		// Scopes come and go with profiles and their restrictions. An expired
+		// one stays an hour longer as the last good target for its failed
+		// reads, then goes.
 		now := time.Now()
 		for cachedKey, cachedEntry := range h.probeTargets.entries {
-			if !now.Before(cachedEntry.expires) {
+			if now.Sub(cachedEntry.expires) > probeTargetCacheTTL {
 				delete(h.probeTargets.entries, cachedKey)
 			}
 		}
