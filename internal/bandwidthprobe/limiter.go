@@ -88,9 +88,6 @@ func (l *Limiter) Release(userID, unsent int, granted, now time.Time) {
 	defer l.mu.Unlock()
 	l.inFlight--
 	account := l.accounts[userID]
-	if account == nil {
-		return
-	}
 	account.inFlight--
 	if account.windowStart.Equal(granted) {
 		account.windowBytes = max(0, account.windowBytes-unsent)
