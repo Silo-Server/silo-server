@@ -35,7 +35,7 @@ func WriteWrapper(t testing.TB, name string) Wrapper {
 	// fork landing between this open and its close would hold a copy of the
 	// fd until it execs, so hold the lock os/exec takes around fork.
 	syscall.ForkLock.Lock()
-	err := os.WriteFile(w.Path, []byte(script), 0o755)
+	err := os.WriteFile(w.Path, []byte(script), 0o755) //nolint:gosec // G306: the wrapper must be executable.
 	syscall.ForkLock.Unlock()
 	if err != nil {
 		t.Fatalf("writing wrapper %s: %v", w.Path, err)
@@ -74,7 +74,7 @@ func RequireExited(t testing.TB, pid int) {
 		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
 			return
 		}
-		state, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+		state, err := exec.CommandContext(t.Context(), "ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output() //nolint:gosec // G204: the argument is a pid.
 		if errors.Is(err, exec.ErrNotFound) {
 			t.Fatalf("reading the state of %d: %v", pid, err)
 		}
