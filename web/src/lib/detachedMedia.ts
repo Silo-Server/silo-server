@@ -21,15 +21,10 @@ function notify(): void {
  */
 export function trackDetachedMedia(element: HTMLMediaElement): () => void {
   tracked.add(element);
-  // A test double may lack the listener methods.
-  if (typeof element.addEventListener === "function") {
-    for (const type of MEDIA_EVENTS) element.addEventListener(type, notify);
-  }
+  for (const type of MEDIA_EVENTS) element.addEventListener(type, notify);
   return () => {
     if (!tracked.delete(element)) return;
-    if (typeof element.removeEventListener === "function") {
-      for (const type of MEDIA_EVENTS) element.removeEventListener(type, notify);
-    }
+    for (const type of MEDIA_EVENTS) element.removeEventListener(type, notify);
     notify();
   };
 }

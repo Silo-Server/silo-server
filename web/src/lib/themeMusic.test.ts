@@ -27,6 +27,8 @@ function audio() {
       element.src = "";
     }),
     load: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
   };
   return element as unknown as HTMLAudioElement;
 }
