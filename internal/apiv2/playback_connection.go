@@ -68,10 +68,7 @@ func registerPlaybackConnection(reg *Registry) {
 		if err != nil {
 			return nil, playbackProblem(err)
 		}
-		body := PlaybackConnection{Connection: state.Connection, Probe: playbackProbeOf(state.Probe), PlaybackSample: playbackSampleOf(state.PlaybackSample), AutoBudgetKbps: state.AutoBudgetKbps}
-		if limit := state.LearnedLimit; limit != nil {
-			body.LearnedLimit.Value = &PlaybackLearnedLimit{Kbps: limit.Kbps, ObservedAt: NewInstant(limit.ObservedAt), ExpiresAt: NewInstant(limit.ExpiresAt)}
-		}
+		body := PlaybackConnection{Connection: state.Connection, Probe: playbackProbeOf(state.Probe), PlaybackSample: playbackSampleOf(state.PlaybackSample), AutoBudgetKbps: state.AutoBudgetKbps, LearnedLimit: NullableObject[PlaybackLearnedLimit]{playbackLimitOf(state.LearnedLimit)}}
 		return &PlaybackConnectionOutput{CacheControl: playbackCacheControl, Body: body}, nil
 	})
 	Register(reg, op(http.MethodDelete, "/learned-limit", "resetPlaybackLearnedLimit"), func(ctx context.Context, in *PlaybackConnectionInput) (*PlaybackConnectionResetOutput, error) {
