@@ -5951,7 +5951,7 @@ describe("VideoPlayer hls.js request timeouts", () => {
     hlsJS.latest = null;
   });
 
-  async function stallAfterTimeout(loaded: number) {
+  async function stallAfterError(error: Record<string, unknown>) {
     hlsJS.supported = true;
     const rendered = renderPlayer({
       bufferingMode: "ask",
@@ -5976,21 +5976,23 @@ describe("VideoPlayer hls.js request timeouts", () => {
     markPlaying(video);
     fireEvent.playing(video);
     act(() => vi.advanceTimersByTime(20_000));
-    act(() =>
-      hlsJS.latest?.emit("error", {
-        type: "networkError",
-        details: "fragLoadTimeOut",
-        fatal: false,
-        stats: { loaded },
-      }),
-    );
+    act(() => hlsJS.latest?.emit("error", { type: "networkError", fatal: false, ...error }));
     fireEvent.waiting(video);
     act(() => vi.advanceTimersByTime(7_000));
     return screen.queryByRole("button", { name: "Lower quality" });
   }
+  const stallAfterTimeout = (loaded: number) =>
+    stallAfterError({ details: "fragLoadTimeOut", stats: { loaded } });
 
   it("treats a timeout with no data received as an outage", async () => {
     expect(await stallAfterTimeout(0)).toBeNull();
+  });
+
+  it.each([
+    ["subtitle playlist", { details: "subtitleTrackLoadError" }],
+    ["subtitle segment", { details: "fragLoadError", frag: { type: "subtitle" } }],
+  ])("does not treat a failed %s as an outage", async (_name, error) => {
+    expect(await stallAfterError(error)).not.toBeNull();
   });
 
   it("ends the outage once media data arrives again", async () => {

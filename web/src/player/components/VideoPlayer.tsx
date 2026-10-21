@@ -2601,11 +2601,14 @@ export function VideoPlayer({
               // A load error (refused, reset, HTTP failure) is the transport
               // failing, and so is a timeout with no data received. hls.js
               // times the whole load, so a timeout on a request that was
-              // still receiving is a slow link and is left out.
+              // still receiving is a slow link and is left out. Subtitle
+              // playlists and segments are not media requests.
               const details = String(data.details);
               const loaded = (data as { stats?: { loaded?: number } }).stats?.loaded ?? 0;
+              const subtitleLoad = details.startsWith("subtitle") || data.frag?.type === "subtitle";
               if (
                 data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                !subtitleLoad &&
                 (details.endsWith("LoadError") || (details.endsWith("LoadTimeOut") && loaded <= 0))
               ) {
                 lastTransportErrorAtRef.current = Date.now();
