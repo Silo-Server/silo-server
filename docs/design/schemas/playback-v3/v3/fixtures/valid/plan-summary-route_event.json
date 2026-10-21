@@ -8,12 +8,13 @@
   "event": "plan_summary",
   "output_context_id": "7",
   "diagnostics": {
+    "buffering_action": "lowered",
+    "buffering_mode": "always",
+    "delivered_kbps": "8000",
     "played_ms": "600000",
     "stall_count": "2",
-    "stall_total_ms": "8000",
     "stall_longest_ms": "6000",
-    "delivered_kbps": "63000",
-    "buffering_mode": "always",
-    "buffering_action": "lowered"
+    "stall_total_ms": "8000",
+    "throughput_kbps": "6200"
   }
 }

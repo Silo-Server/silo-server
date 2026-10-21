@@ -200,7 +200,7 @@ verify-settings-bindings-all: verify-settings-bindings verify-settings-bindings-
 # this would let the contract and the implementation drift apart in silence.
 PLAYBACK_FIXTURE_DIR := internal/playback/testdata/protocol_v3
 PLAYBACK_SCHEMA_FIXTURE_DIR := docs/design/schemas/playback-v3/v3/fixtures/valid
-PLAYBACK_WIRE_FIXTURES := start_request.json replan_request.json decision_response.json native-decision_response.json hls-subtitle-rendition-decision_response.json capability_response.json error_response.json route_event.json
+PLAYBACK_WIRE_FIXTURES := start_request.json replan_request.json decision_response.json native-decision_response.json hls-subtitle-rendition-decision_response.json capability_response.json error_response.json route_event.json buffering-start_request.json buffering-replan_request.json learned-limit-decision_response.json plan-summary-route_event.json
 
 playback-fixtures:
 	go run ./cmd/playbackfixtures -out $(PLAYBACK_FIXTURE_DIR)

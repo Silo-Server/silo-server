@@ -7,13 +7,16 @@
   "file_id": 42,
   "profile_id": "profile-1",
   "playback_attempt_id": "attempt-golden-0001",
-  "quality_preference": "original",
+  "quality_preference": "auto",
   "subtitle_fidelity_preference": "compatible",
   "start_position": 12.5,
   "progress_persistence": "client",
   "audio_track_id": "file:42:audio:0",
   "audio_track_index": 0,
   "metered": false,
+  "bandwidth_estimate_kbps": 48000,
+  "bandwidth_estimate_source": "probe",
+  "learned_limit": "ignore",
   "client_capabilities": {
     "video_evidence": "exact",
     "audio_evidence": "exact",
@@ -96,8 +99,5 @@
         "transformations": []
       }
     }
-  },
-  "bandwidth_estimate_kbps": 44100,
-  "bandwidth_estimate_source": "observed_rebuffer",
-  "learned_limit": "ignore"
+  }
 }
