@@ -38,6 +38,12 @@ var errHDR10PlusStorageStalled = errors.New("media storage is not responding")
 // hdr10PlusStatTimeout bounds the on-disk check after a frame read.
 const hdr10PlusStatTimeout = 5 * time.Second
 
+// hdr10PlusStatSlots caps on-disk checks in flight, stuck ones included. It
+// leaves room above the worker count so one stuck check doesn't end a pass on
+// storage that is otherwise answering; truly stalled storage still ends it
+// through the timed-out streak.
+const hdr10PlusStatSlots = 4 * hdr10PlusBackfillWorkers
+
 var (
 	errHDR10PlusStatTimeout = errors.New("file check did not finish in time; the storage may be stalled")
 	errHDR10PlusStatBusy    = errors.New("file checks are already waiting on stalled storage")
@@ -104,7 +110,7 @@ func NewHDR10PlusBackfiller(repo *FileRepository, ffprobePath string) *HDR10Plus
 		batch:       hdr10PlusBackfillBatchSize,
 		readFrame:   probeVideoFrameSideData,
 		statFile:    os.Stat,
-		statSlots:   make(chan struct{}, hdr10PlusBackfillWorkers),
+		statSlots:   make(chan struct{}, hdr10PlusStatSlots),
 		statTimeout: hdr10PlusStatTimeout,
 	}
 }

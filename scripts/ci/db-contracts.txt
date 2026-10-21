@@ -17,6 +17,10 @@
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
 ./internal/scanner TestMatroskaTrackBackfillReadsEachFileOnce
+./internal/scanner TestHDR10PlusBackfillRecordsFrameStatusDB
+./internal/scanner TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB
+./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
+./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB

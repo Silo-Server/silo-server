@@ -108,6 +108,11 @@ func TestHDRDetailsSupportHDR10PlusPlanWithinHDR10Limits(t *testing.T) {
 	if !hdrDetailsSupportPlanV3(hdr10, plan) {
 		t.Fatal("an HDR10 output rejected an HDR10+ plan within its HDR10 limits")
 	}
+	claimsHDR10Plus := plan
+	claimsHDR10Plus.Claims.Video.HDR10Plus = true
+	if hdrDetailsSupportPlanV3(hdr10, claimsHDR10Plus) {
+		t.Fatal("an HDR10-only delivery accepted a plan that claims HDR10+")
+	}
 	tooFast := 60.0
 	plan.EffectiveRecipe.FrameRate = &tooFast
 	if hdrDetailsSupportPlanV3(hdr10, plan) {

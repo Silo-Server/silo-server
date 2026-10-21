@@ -353,6 +353,32 @@ func TestCarryCheckedHDR10PlusKeepsStatusForTheSameStream(t *testing.T) {
 		t.Fatalf("different stream = %+v, want it left unchecked", next[0])
 	}
 
+	// The fields probe repair fills in are not a different stream.
+	missingRange := checked
+	missingRange.ColorRange = ""
+	next = reprobed()
+	carryCheckedHDR10Plus([]models.VideoTrack{missingRange}, next)
+	if next[0].HDR10PlusUnchecked || !next[0].HDR10Plus {
+		t.Fatalf("repaired color range = %+v, want the checked HDR10+ status kept", next[0])
+	}
+
+	legacy := false
+	legacyDV := models.VideoTrack{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", ColorTransfer: "smpte2084", DVProfile: 8, DVBLCompatID: 1, DVProvenanceCurrent: &legacy, HDR10Plus: true, VideoRangeType: "DOVIWithHDR10Plus"}
+	reprobedDV := func() []models.VideoTrack {
+		return []models.VideoTrack{{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", ColorTransfer: "smpte2084", DVProfile: 8, DVBLCompatID: 1, DVConfigPresent: true, DVBLCompatIDPresent: true, DVBLPresent: true, DVRPUPresent: true, VideoRangeType: "DOVIWithHDR10", HDR10PlusUnchecked: true}}
+	}
+	next = reprobedDV()
+	carryCheckedHDR10Plus([]models.VideoTrack{legacyDV}, next)
+	if next[0].HDR10PlusUnchecked || !next[0].HDR10Plus || next[0].VideoRangeType != "DOVIWithHDR10Plus" {
+		t.Fatalf("repaired DV provenance = %+v, want the checked HDR10+ status kept", next[0])
+	}
+	next = reprobedDV()
+	next[0].DVProfile = 7
+	carryCheckedHDR10Plus([]models.VideoTrack{legacyDV}, next)
+	if !next[0].HDR10PlusUnchecked {
+		t.Fatalf("legacy row, different DV profile = %+v, want it left unchecked", next[0])
+	}
+
 	unchecked := checked
 	unchecked.HDR10Plus, unchecked.HDR10PlusUnchecked = false, true
 	next = reprobed()

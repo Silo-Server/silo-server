@@ -86,13 +86,26 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 
 // carryCheckedHDR10Plus keeps the primary track's recorded HDR10+ status
 // across playback's probe repair, which skips the frame read, when the
-// reprobed stream is the one that was checked. Any other difference leaves
-// the track unchecked for the HDR10+ backfill.
+// reprobed stream is the one that was checked. The fields a repair fills in
+// (a missing color range, legacy Dolby Vision provenance) don't count as a
+// difference. Any other difference leaves the track unchecked for the HDR10+
+// backfill.
 func carryCheckedHDR10Plus(previous, next []models.VideoTrack) {
 	if len(previous) == 0 || len(next) == 0 || previous[0].HDR10PlusUnchecked || !next[0].HDR10PlusUnchecked {
 		return
 	}
-	if tonemap.StreamSignatureForTrack(previous[0]) != tonemap.StreamSignatureForTrack(next[0]) {
+	checked := previous[0]
+	if strings.TrimSpace(checked.ColorRange) == "" {
+		checked.ColorRange = next[0].ColorRange
+	}
+	if videoTracksHaveLegacyDVProvenance([]models.VideoTrack{checked}) {
+		checked.DVConfigPresent = next[0].DVConfigPresent
+		checked.DVBLCompatIDPresent = next[0].DVBLCompatIDPresent
+		checked.DVBLPresent = next[0].DVBLPresent
+		checked.DVELPresent = next[0].DVELPresent
+		checked.DVRPUPresent = next[0].DVRPUPresent
+	}
+	if tonemap.StreamSignatureForTrack(checked) != tonemap.StreamSignatureForTrack(next[0]) {
 		return
 	}
 	next[0].HDR10PlusUnchecked = false
