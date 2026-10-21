@@ -37,7 +37,7 @@ func TestPasswordResetAuditDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	suffix := fmt.Sprint(time.Now().UnixNano())
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
 	var ids []int
 	emails := map[int]string{}
 	t.Cleanup(func() {

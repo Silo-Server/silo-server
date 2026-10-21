@@ -75,7 +75,7 @@ type PreferenceSettingsTransactioner interface {
 // AuditTx commits or rolls back with the profile write, and GetProfile reads
 // the profile inside that transaction. The SQLite backend has no such
 // transaction, so its profile writes record no domain audit rows.
-type AuditedProfileWriter interface {
+type AuditedProfileWriter interface { //nolint:iface // implemented by pgstore, asserted by the profile handlers
 	AuditTx() pgx.Tx
 	GetProfile(ctx context.Context, id string) (*Profile, error)
 }
@@ -85,7 +85,7 @@ type AuditedProfileWriter interface {
 // the commit; an audit error rolls the delete back. audit receives the
 // profile as the transaction locked and deleted it, so a concurrent update
 // that committed first is reflected.
-type AuditedProfileDeleter interface {
+type AuditedProfileDeleter interface { //nolint:iface // implemented by pgstore, asserted by the profile handlers
 	DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *Profile) error) error
 }
 

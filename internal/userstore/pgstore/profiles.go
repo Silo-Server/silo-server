@@ -342,6 +342,29 @@ var profileCascadeTables = []string{
 	"ebook_reader_annotations",
 }
 
+// lockProfileForDelete locks the profile row and reads the image the delete
+// will remove. Setting clears delete user_setting_values rows and then update
+// the profile's legacy columns under the account's preference-settings lock.
+// Taking that lock before the profile row lock keeps that order; locking the
+// profile first and then deleting its settings would deadlock against a clear.
+func (s *PostgresUserStore) lockProfileForDelete(ctx context.Context, tx pgx.Tx, id string) (*userstore.Profile, error) {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)",
+		preferenceSettingsAdvisoryClass, int32(s.userID)); err != nil { //nolint:gosec // users.id is a 32-bit serial, keyed as in WithPreferenceSettingsTransaction
+		return nil, fmt.Errorf("locking preference settings transaction: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2 FOR UPDATE", s.userID, id); err != nil {
+		return nil, fmt.Errorf("locking profile %s: %w", id, err)
+	}
+	deleted, err := getProfile(ctx, tx, s.userID, id)
+	if err != nil {
+		return nil, err
+	}
+	if deleted == nil {
+		return nil, fmt.Errorf("profile %s not found", id)
+	}
+	return deleted, nil
+}
+
 func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error {
 	return s.DeleteProfileAudited(ctx, id, nil)
 }
@@ -376,22 +399,8 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 
 	var deleted *userstore.Profile
 	if audit != nil {
-		// Setting clears delete user_setting_values rows and then update the
-		// profile's legacy columns under this account lock. Taking it before
-		// the profile row lock keeps that order; locking the profile first
-		// and then deleting its settings would deadlock against a clear.
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)",
-			preferenceSettingsAdvisoryClass, int32(s.userID)); err != nil {
-			return fmt.Errorf("locking preference settings transaction: %w", err)
-		}
-		if _, err := tx.Exec(ctx, "SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2 FOR UPDATE", s.userID, id); err != nil {
-			return fmt.Errorf("locking profile %s: %w", id, err)
-		}
-		if deleted, err = getProfile(ctx, tx, s.userID, id); err != nil {
+		if deleted, err = s.lockProfileForDelete(ctx, tx, id); err != nil {
 			return err
-		}
-		if deleted == nil {
-			return fmt.Errorf("profile %s not found", id)
 		}
 	}
 
