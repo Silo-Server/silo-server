@@ -194,63 +194,9 @@ func (s *WebhookService) Create(ctx context.Context, userID int, profileID strin
 	return &hook, signingSecret, nil
 }
 
-// Update applies the provided fields. A URL change re-validates the
-// destination and resets the failure streak; re-enabling clears the
-// auto-disable reason.
-func (s *WebhookService) Update(ctx context.Context, userID int, profileID, id string, input WebhookInput) (*Webhook, error) {
-	hook, err := s.repo.GetByID(ctx, userID, profileID, id)
-	if err != nil {
-		return nil, err
-	}
-	if hook == nil {
-		return nil, ErrWebhookNotFound
-	}
-
-	if err := s.applyWebhookInput(ctx, hook, input); err != nil {
-		return nil, err
-	}
-
-	if err := s.repo.Update(ctx, *hook); err != nil {
-		if errors.Is(err, ErrWebhookNameTaken) {
-			return nil, fmt.Errorf("%w: %s", ErrWebhookInvalid, err.Error())
-		}
-		return nil, err
-	}
-	return hook, nil
-}
-
 // Delete removes a webhook. Idempotent.
 func (s *WebhookService) Delete(ctx context.Context, userID int, profileID, id string) error {
 	return s.repo.Delete(ctx, userID, profileID, id)
-}
-
-// RotateSecret generates and stores a new signing secret for a generic
-// webhook, returning it exactly once. The previous secret is gone
-// immediately; there is no dual-acceptance window.
-func (s *WebhookService) RotateSecret(ctx context.Context, userID int, profileID, id string) (string, error) {
-	hook, err := s.repo.GetByID(ctx, userID, profileID, id)
-	if err != nil {
-		return "", err
-	}
-	if hook == nil {
-		return "", ErrWebhookNotFound
-	}
-	if hook.Type != WebhookTypeGeneric {
-		return "", fmt.Errorf("%w: only generic webhooks have signing secrets", ErrWebhookInvalid)
-	}
-	signingSecret, err := newSigningSecret()
-	if err != nil {
-		return "", err
-	}
-	ciphertext, err := s.cipher.Encrypt(signingSecret, webhookSecretAAD(hook.ID))
-	if err != nil {
-		return "", fmt.Errorf("encrypt signing secret: %w", err)
-	}
-	hook.SigningSecretCiphertext = &ciphertext
-	if err := s.repo.Update(ctx, *hook); err != nil {
-		return "", err
-	}
-	return signingSecret, nil
 }
 
 // WebhookTestResult is the synchronous outcome of a test send.
@@ -329,8 +275,11 @@ func (s *WebhookService) DeleteGuarded(ctx context.Context, userID int, profile,
 	return s.repo.DeleteGuarded(ctx, userID, profile, id, check)
 }
 
-// RotateSecretV2 avoids copying a stale configuration snapshot back into storage.
-func (s *WebhookService) RotateSecretV2(ctx context.Context, userID int, profile, id string) (string, error) {
+// RotateSecret generates and stores a new signing secret for a generic
+// webhook, returning it exactly once. The previous secret is gone
+// immediately; there is no dual-acceptance window. Only the secret column is
+// written, so a concurrent auto-disable or edit is never undone.
+func (s *WebhookService) RotateSecret(ctx context.Context, userID int, profile, id string) (string, error) {
 	hook, err := s.repo.GetByID(ctx, userID, profile, id)
 	if err != nil {
 		return "", err
@@ -355,7 +304,9 @@ func (s *WebhookService) RotateSecretV2(ctx context.Context, userID int, profile
 	return value, nil
 }
 
-// applyWebhookInput preserves the bridge validation and reset behavior.
+// applyWebhookInput applies the provided fields. A URL change re-validates the
+// destination and resets the failure streak; re-enabling clears the
+// auto-disable reason.
 func (s *WebhookService) applyWebhookInput(ctx context.Context, hook *Webhook, input WebhookInput) error {
 	if input.Name != nil {
 		name, err := validateChannelName(*input.Name, ErrWebhookInvalid)
@@ -407,10 +358,14 @@ func (s *WebhookService) applyWebhookInput(ctx context.Context, hook *Webhook, i
 	return nil
 }
 
+// UpdateGuarded applies input under the webhook's row lock. check, when set,
+// validates the stored revision first (the v2 If-Match precondition).
 func (s *WebhookService) UpdateGuarded(ctx context.Context, userID int, profile, id string, input WebhookInput, check func(int64) error) (*Webhook, error) {
 	row, err := s.repo.UpdateGuarded(ctx, userID, profile, id, func(hook *Webhook) error {
-		if err := check(hook.Revision); err != nil {
-			return err
+		if check != nil {
+			if err := check(hook.Revision); err != nil {
+				return err
+			}
 		}
 		return s.applyWebhookInput(ctx, hook, input)
 	})
