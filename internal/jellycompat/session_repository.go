@@ -230,24 +230,24 @@ func (r *SessionRepository) DeleteByToken(ctx context.Context, token string) err
 	return nil
 }
 
-// PseudoUserOwner returns the account and profile of a live compat session
-// signed in as the pseudo-user id, or ErrSessionNotFound when none is. Every
-// session of one pseudo-user names the same owner, since the id is derived
-// from it.
-func (r *SessionRepository) PseudoUserOwner(ctx context.Context, id uuid.UUID, now time.Time) (pseudoUserOwner, error) {
-	var owner pseudoUserOwner
-	err := r.pool.QueryRow(ctx, `
-		SELECT streamapp_user_id, profile_id
+// PseudoUserTokens returns the tokens of up to limit unexpired compat
+// sessions signed in as the pseudo-user id, the most recently extended first.
+// The caller checks each one's login session.
+func (r *SessionRepository) PseudoUserTokens(ctx context.Context, id uuid.UUID, now time.Time, limit int) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT token
 		FROM jellycompat_sessions
 		WHERE pseudo_user_id = $1 AND expires_at > $2
-		LIMIT 1`, id, now).Scan(&owner.UserID, &owner.ProfileID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return owner, ErrSessionNotFound
-	}
+		ORDER BY expires_at DESC
+		LIMIT $3`, id, now, limit)
 	if err != nil {
-		return owner, fmt.Errorf("find compat session owner: %w", err)
+		return nil, fmt.Errorf("find compat sessions for pseudo-user: %w", err)
 	}
-	return owner, nil
+	tokens, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("find compat sessions for pseudo-user: %w", err)
+	}
+	return tokens, nil
 }
 
 // DeleteExpired removes expired compat sessions.

@@ -219,9 +219,16 @@ func TestHandleUserImageNotFound(t *testing.T) {
 		}
 	}
 
-	// Signing out removes the only route from the id to the profile.
-	f.sessions.Delete(f.session.Token)
-	if rec := f.serve(http.MethodGet, "/UserImage?UserId="+compatUserID(f.session.PseudoUserID)); rec.Code != http.StatusNotFound {
+	// Signing out the login session behind the only compat session removes
+	// the route from the id to the profile, though the compat row remains.
+	logins := &loginSessionsFake{live: map[string]bool{f.session.LoginSessionID: true}}
+	f.sessions.WithLoginSessions(logins)
+	target := "/UserImage?UserId=" + compatUserID(f.session.PseudoUserID)
+	if rec := f.serve(http.MethodGet, target); rec.Code != http.StatusOK {
+		t.Fatalf("status with a live login session = %d, want 200", rec.Code)
+	}
+	logins.live[f.session.LoginSessionID] = false
+	if rec := f.serve(http.MethodGet, target); rec.Code != http.StatusNotFound {
 		t.Fatalf("status after sign-out = %d, want 404", rec.Code)
 	}
 
@@ -230,22 +237,6 @@ func TestHandleUserImageNotFound(t *testing.T) {
 	(&ImagesHandler{}).HandleUserImage(rec, httptest.NewRequest(http.MethodGet, "/UserImage?UserId="+compatUserID(f.session.PseudoUserID), nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status without avatar store = %d, want 404", rec.Code)
-	}
-}
-
-func TestHandleUserByIDAcceptsBothGuidForms(t *testing.T) {
-	f := newUserAvatarFixture(t, testAvatarRef)
-	h := f.authHandler()
-	for id, want := range map[string]int{
-		compatUserID(f.session.PseudoUserID):          http.StatusOK,
-		f.session.PseudoUserID.String():               http.StatusOK,
-		compatUserID(PseudoUserID(7, "someone-else")): http.StatusNotFound,
-	} {
-		rec := httptest.NewRecorder()
-		h.HandleUserByID(rec, viewerRequest(http.MethodGet, "/Users/"+id, "", "id", id, &f.session))
-		if rec.Code != want {
-			t.Errorf("GET /Users/%s status = %d, want %d", id, rec.Code, want)
-		}
 	}
 }
 

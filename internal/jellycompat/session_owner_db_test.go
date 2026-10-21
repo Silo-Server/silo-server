@@ -17,7 +17,8 @@ import (
 // TestPseudoUserOwnerAcrossReplicasPostgres: a replica that never saw a
 // sign-in still maps the pseudo-user id to its account and profile through
 // the stored session, so any replica can serve the user's avatar. Expired
-// sessions and unknown ids map to nothing.
+// sessions, sessions whose login session was signed out, and unknown ids map
+// to nothing.
 func TestPseudoUserOwnerAcrossReplicasPostgres(t *testing.T) {
 	pool, suffix := jellyfin12CompatPool(t)
 	ctx := context.Background()
@@ -31,30 +32,38 @@ func TestPseudoUserOwnerAcrossReplicasPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refresh, err := auth.NewJWTService("jellycompat-owner-test-secret-0123456789", time.Hour, 24*time.Hour).GenerateRefreshToken(user.ID, models.RoleUser, uuid.NewString())
+	jwt := auth.NewJWTService("jellycompat-owner-test-secret-0123456789", time.Hour, 24*time.Hour)
+	liveLogin, signedOutLogin := uuid.NewString(), uuid.NewString()
+	refresh, err := jwt.GenerateRefreshToken(user.ID, models.RoleUser, liveLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedOutRefresh, err := jwt.GenerateRefreshToken(user.ID, models.RoleUser, signedOutLogin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	signIn := NewPersistentSessionStore(time.Hour, func() time.Time { return now }, NewSessionRepository(pool, cipher))
-	live, expired := PseudoUserID(user.ID, "kids"), PseudoUserID(user.ID, "gone")
+	live, expired, signedOut := PseudoUserID(user.ID, "kids"), PseudoUserID(user.ID, "gone"), PseudoUserID(user.ID, "left")
 	for token, s := range map[string]Session{
-		fmt.Sprintf("jfowner-live-%d", suffix):    {ProfileID: "kids", PseudoUserID: live},
-		fmt.Sprintf("jfowner-expired-%d", suffix): {ProfileID: "gone", PseudoUserID: expired, ExpiresAt: now.Add(-time.Minute)},
+		fmt.Sprintf("jfowner-live-%d", suffix):       {ProfileID: "kids", PseudoUserID: live, StreamAppRefreshToken: refresh},
+		fmt.Sprintf("jfowner-expired-%d", suffix):    {ProfileID: "gone", PseudoUserID: expired, StreamAppRefreshToken: refresh, ExpiresAt: now.Add(-time.Minute)},
+		fmt.Sprintf("jfowner-signed-out-%d", suffix): {ProfileID: "left", PseudoUserID: signedOut, StreamAppRefreshToken: signedOutRefresh},
 	} {
 		s.Token, s.StreamAppUserID = token, user.ID
-		s.StreamAppAccessToken, s.StreamAppRefreshToken, s.StreamAppTokenExpiry = "access", refresh, now.Add(time.Hour)
+		s.StreamAppAccessToken, s.StreamAppTokenExpiry = "access", now.Add(time.Hour)
 		if err := signIn.Put(s); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	other := NewPersistentSessionStore(time.Hour, func() time.Time { return now }, NewSessionRepository(pool, cipher))
+	other := NewPersistentSessionStore(time.Hour, func() time.Time { return now }, NewSessionRepository(pool, cipher)).
+		WithLoginSessions(&loginSessionsFake{live: map[string]bool{liveLogin: true}})
 	owner, err := other.PseudoUserOwner(ctx, live)
 	if err != nil || owner != (pseudoUserOwner{UserID: user.ID, ProfileID: "kids"}) {
 		t.Fatalf("PseudoUserOwner(live) = %+v, %v; want user %d profile kids", owner, err, user.ID)
 	}
-	for name, id := range map[string]uuid.UUID{"expired": expired, "unknown": PseudoUserID(user.ID, "nobody")} {
+	for name, id := range map[string]uuid.UUID{"expired": expired, "signed out": signedOut, "unknown": PseudoUserID(user.ID, "nobody")} {
 		if owner, err := other.PseudoUserOwner(ctx, id); !errors.Is(err, ErrSessionNotFound) {
 			t.Errorf("PseudoUserOwner(%s) = %+v, %v; want ErrSessionNotFound", name, owner, err)
 		}

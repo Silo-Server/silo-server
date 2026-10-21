@@ -135,23 +135,50 @@ func (s *SessionStore) PutTx(ctx context.Context, tx pgx.Tx, session Session) (S
 	return session, nil
 }
 
-// PseudoUserOwner returns the account and profile a live compat session
-// signed in as the pseudo-user id names, or ErrSessionNotFound. A persistent
-// store asks the database, which sees every replica's sessions; a memory-only
-// store searches its own.
+// maxPseudoUserOwnerCandidates bounds the sessions one owner lookup checks.
+// Each candidate whose login session ended is deleted as it is checked, so a
+// later lookup reaches the rest.
+const maxPseudoUserOwnerCandidates = 8
+
+// PseudoUserOwner returns the account and profile of a live compat session
+// signed in as the pseudo-user id, or ErrSessionNotFound. Every candidate goes
+// through Recheck, so a session whose login session was signed out or expired
+// names no owner. A persistent store finds candidates in the database, which
+// sees every replica's sessions; a memory-only store searches its own.
 func (s *SessionStore) PseudoUserOwner(ctx context.Context, id uuid.UUID) (pseudoUserOwner, error) {
-	if lookup, ok := s.repo.(pseudoUserOwnerLookup); ok {
-		return lookup.PseudoUserOwner(ctx, id, s.now())
+	tokens, err := s.pseudoUserTokens(ctx, id)
+	if err != nil {
+		return pseudoUserOwner{}, err
 	}
-	now := s.now()
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, session := range s.sessions {
-		if session.PseudoUserID == id && (session.ExpiresAt.IsZero() || session.ExpiresAt.After(now)) {
-			return pseudoUserOwner{UserID: session.StreamAppUserID, ProfileID: session.ProfileID}, nil
+	for _, token := range tokens {
+		session, err := s.Recheck(ctx, token)
+		if errors.Is(err, ErrSessionNotFound) {
+			continue
 		}
+		if err != nil {
+			return pseudoUserOwner{}, err
+		}
+		return pseudoUserOwner{UserID: session.StreamAppUserID, ProfileID: session.ProfileID}, nil
 	}
 	return pseudoUserOwner{}, ErrSessionNotFound
+}
+
+func (s *SessionStore) pseudoUserTokens(ctx context.Context, id uuid.UUID) ([]string, error) {
+	if lookup, ok := s.repo.(pseudoUserTokenLookup); ok {
+		return lookup.PseudoUserTokens(ctx, id, s.now(), maxPseudoUserOwnerCandidates)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var tokens []string
+	for token, session := range s.sessions {
+		if len(tokens) == maxPseudoUserOwnerCandidates {
+			break
+		}
+		if session.PseudoUserID == id {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens, nil
 }
 
 // txSessionPersistence is a sessionPersistence that can write inside a

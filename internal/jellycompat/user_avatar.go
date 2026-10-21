@@ -44,10 +44,10 @@ type pseudoUserOwner struct {
 	ProfileID string
 }
 
-// pseudoUserOwnerLookup is implemented by session persistence that can find
-// the owner of a pseudo-user id across replicas.
-type pseudoUserOwnerLookup interface {
-	PseudoUserOwner(ctx context.Context, id uuid.UUID, now time.Time) (pseudoUserOwner, error)
+// pseudoUserTokenLookup is implemented by session persistence that can find
+// the sessions of a pseudo-user id across replicas.
+type pseudoUserTokenLookup interface {
+	PseudoUserTokens(ctx context.Context, id uuid.UUID, now time.Time, limit int) ([]string, error)
 }
 
 // maxUserAvatarBytes bounds the display variant read into memory. Uploads are

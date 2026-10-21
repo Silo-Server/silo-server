@@ -50,7 +50,10 @@ get no tag. `GET`/`HEAD /UserImage?userId=` and `/Users/{id}/Images/Primary`
 are anonymous, as in Jellyfin. They resolve the ID through the stored compat
 sessions, so any replica answers. They return the 256px WebP with
 `Last-Modified`, or `404` for a user with no uploaded avatar, an unknown ID, or
-no live session. Seerr falls back to its default avatar on that `404`.
+no live session. A compat session whose login session was signed out or
+expired does not count as live. Seerr falls back to its default avatar on that
+`404`. Unlike item artwork, these routes spend the per-IP rate-limit budget,
+because each request reads the session, profile, and blob stores.
 
 ## Viewer state and preferences
 
