@@ -24,6 +24,7 @@
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
 ./internal/scanner TestScanSkipsVideoLibraryFilesWithoutVideoDB
 ./internal/scanner TestPodcastSubtreeScanKeepsAudioFilesDB
+./internal/scanner TestMovedFileWithoutVideoIsNotRelinkedDB
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
 ./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB

@@ -204,6 +204,38 @@ func TestScanSkipsVideoLibraryFilesWithoutVideoDB(t *testing.T) {
 	}
 }
 
+// TestMovedFileWithoutVideoIsNotRelinkedDB covers a renamed file whose probe
+// finds no video: it must not take back the row it had at its old path, which
+// would restore its title without the scan ever judging it.
+func TestMovedFileWithoutVideoIsNotRelinkedDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	repo := NewFileRepository(pool)
+	ctx := t.Context()
+	root := t.TempDir()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("moved-audio-%d", time.Now().UnixNano()))
+	folder := &models.MediaFolder{ID: folderID, Type: "movies", Paths: []string{root}}
+	from := filepath.Join(root, "Score (2021)", "Score (2021).mkv")
+	to := filepath.Join(root, "Score (2021)", "Score (2021) - 1080p.mkv")
+	writeRelinkTestMedia(t, from, 1)
+	writeRelinkTestMedia(t, filepath.Join(root, "Keeper (2010)", "Keeper (2010).mkv"), 9)
+	// A node without ffprobe catalogs the file without judging its streams.
+	if _, err := NewScanner(repo, "", nil, 1, false, time.Hour).ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	if err := os.Rename(from, to); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewScanner(repo, writeAudioOnlyFFprobe(t), nil, 1, false, time.Hour).ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan after rename: %v", err)
+	}
+	if _, err := repo.GetByPath(ctx, to); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("renamed audio-only file: GetByPath err = %v, want no row", err)
+	}
+	if stored, err := repo.GetByPath(ctx, from); err != nil || stored.MissingSince == nil {
+		t.Fatalf("old row: %s (err %v), want marked missing", rowState(stored), err)
+	}
+}
+
 // rowState describes the fields TestScanSkipsVideoLibraryFilesWithoutVideoDB
 // checks.
 func rowState(file *models.MediaFile) string {

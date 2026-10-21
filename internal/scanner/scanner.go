@@ -3272,15 +3272,16 @@ func (s *Scanner) processFile(
 	hints := s.gatherHints(filePath)
 	fileHash := hints.FileHash
 
-	if s.relinkMovedFile(ctx, folder, filePath, fileSize, fileModifiedAt, fileHash, assignment, groupAssignment, loadExternalSubs) {
-		return actionUpdated, []string{"moved"}, nil
-	}
-
-	// Try to get probe data.
+	// Probe before relinking: a moved file with no video must not take back
+	// the row it had, which would restore its title.
 	probe, probeSource, probeRejected := s.probeFile(ctx, filePath)
 	if probeFindsNoVideo(folder, probe) {
 		logNoVideoSkip(ctx, filePath, probe)
 		return actionSkipped, nil, nil
+	}
+
+	if s.relinkMovedFile(ctx, folder, filePath, fileSize, fileModifiedAt, fileHash, assignment, groupAssignment, loadExternalSubs) {
+		return actionUpdated, []string{"moved"}, nil
 	}
 
 	// Detect external subtitles.
