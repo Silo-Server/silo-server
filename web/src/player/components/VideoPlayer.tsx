@@ -144,7 +144,7 @@ import {
   setWatchTogetherGuestControl,
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
-import { MIN_PROBE_KBPS } from "../probe-meter";
+import { MAX_PROBE_KBPS, MIN_PROBE_KBPS } from "../probe-meter";
 import { cancelBandwidthProbe, mediaElementReleased } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
 
@@ -596,9 +596,6 @@ export function VideoPlayer({
   const fullscreenRootRef = usePlayerFullscreenRoot();
   const isMountedRef = useRef(true);
   const hlsRef = useRef<HlsType | null>(null);
-  // The fragments the current plan received, for plan_summary's
-  // throughput_kbps: bytes, and the time spent receiving them from each
-  // response's first byte to its last.
   // The plan's long media fragments: their bytes, and the times they were
   // receiving, merged so that overlapping requests count once.
   const fragmentThroughputRef = useRef<
@@ -4483,7 +4480,7 @@ export function VideoPlayer({
         String(fragments.planRevision) === summaryPlan.adoption_id &&
         String(networkChangedInRevisionRef.current) !== summaryPlan.adoption_id &&
         ms >= MIN_THROUGHPUT_SAMPLE_MS
-          ? Math.min(Math.floor((fragments.bytes * 8) / ms), 1_000_000)
+          ? Math.min(Math.floor((fragments.bytes * 8) / ms), MAX_PROBE_KBPS)
           : 0;
       onBufferingSummary?.(
         summaryPlan,
