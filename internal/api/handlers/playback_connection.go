@@ -118,7 +118,7 @@ func markLearnedLimit(result *playback.PlannerResultV3, limit *playback.Bandwidt
 	if result.Plan.EffectiveRecipe.BitrateKbps != nil {
 		delivered = *result.Plan.EffectiveRecipe.BitrateKbps
 	}
-	if original > limit.Kbps*8/10 && delivered > 0 && delivered < original && delivered < baseline.BitrateKbps {
+	if original > playback.StreamBudgetKbpsV3(limit.Kbps) && delivered > 0 && delivered < original && delivered < baseline.BitrateKbps {
 		result.Plan.BandwidthLimit = limit
 	}
 }
@@ -130,7 +130,7 @@ func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.Sta
 	if req.QualityPreference != playback.QualityAutoV3 || req.BandwidthEstimateSource != playback.BandwidthEstimateObservedRebufferV3 || req.BandwidthEstimateKbps == nil || !req.AllowsAlternateVersions() {
 		return base, req, audio
 	}
-	budget := *req.BandwidthEstimateKbps * 8 / 10
+	budget := playback.StreamBudgetKbpsV3(*req.BandwidthEstimateKbps)
 	if req.BandwidthCapKbps != nil {
 		budget = min(budget, *req.BandwidthCapKbps)
 	}

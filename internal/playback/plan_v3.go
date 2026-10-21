@@ -1816,7 +1816,7 @@ func estimateLimitV3(estimateKbps, targetHeight, classLimit int, source SourceDe
 	if sourceKbps <= 0 {
 		sourceKbps = ladderClassBitrateKbpsV3(streamClassV3(minPositiveV3(targetHeight, source.Height), classLimit, source))
 	}
-	budget = streamBudgetKbpsV3(estimateKbps)
+	budget = StreamBudgetKbpsV3(estimateKbps)
 	return streamLadderClassV3(estimateKbps, source), budget, sourceKbps > budget
 }
 
@@ -2143,12 +2143,12 @@ func resolutionLabelV3(h int) string {
 // earns for this source. Automatic quality keeps a fifth of the measured
 // bandwidth as headroom and plans H.264, the output every route can decode.
 func streamLadderClassV3(kbps int, source SourceDescriptorV3) int {
-	return LadderClassForBitrate(streamBudgetKbpsV3(kbps), source.FrameRate, transcodeCodecH264)
+	return LadderClassForBitrate(StreamBudgetKbpsV3(kbps), source.FrameRate, transcodeCodecH264)
 }
 
-// streamBudgetKbpsV3 is the part of a bandwidth figure automatic quality
+// StreamBudgetKbpsV3 is the part of a bandwidth figure automatic quality
 // plans to use.
-func streamBudgetKbpsV3(kbps int) int {
+func StreamBudgetKbpsV3(kbps int) int {
 	return int(float64(kbps) * 0.8)
 }
 func minPositiveV3(a, b int) int {

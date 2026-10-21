@@ -162,10 +162,10 @@ func (s *Store) Cleanup(ctx context.Context) error {
 	return err
 }
 
-// Budget uses the same margin as Auto: 80% of the lower of the reading and the
-// learned limit, capped by capKbps. The reading is the higher of the probe and
-// the playback sample; callers pass only those within their lifetime. A
-// missing measurement is not a zero-speed link.
+// Budget uses the same margin as Auto (playback.StreamBudgetKbpsV3): 80% of
+// the lower of the reading and the learned limit, capped by capKbps. The
+// reading is the higher of the probe and the playback sample; callers pass only
+// those within their lifetime. A missing measurement is not a zero-speed link.
 func Budget(probe *Probe, sample *Sample, limit *Limit, capKbps int) *int {
 	kbps := 0
 	if probe != nil {
