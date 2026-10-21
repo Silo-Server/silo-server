@@ -35,9 +35,10 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 	var failures scanFailures
 	reconcileRoots := make([]string, 0, len(folder.Paths))
 	seenPaths := make(map[string]bool)
-	// unreadable holds the roots and show folders the scan could not read:
-	// the episodes cataloged under them may still exist.
-	var unreadable []string
+	// failed holds the roots the scan could not read and the shows it could
+	// not reconcile: the episodes cataloged under them may still exist, and
+	// rows an earlier scan marked missing must not be swept.
+	var failed []string
 	for _, root := range folder.Paths {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -50,7 +51,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 		}
 		if err != nil {
 			slog.WarnContext(ctx, "podcast scan: read root failed", "component", "scanner", "root", root, "error", err)
-			unreadable = append(unreadable, root)
+			failed = append(failed, root)
 			attempted++
 			failures.addf("read root %s: %w", root, err)
 			continue
@@ -74,14 +75,10 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 				continue
 			}
 			attempted++
-			paths, err := listPodcastShowAudioFiles(subPath, rootIgnoreRules)
-			switch {
-			case err == nil:
+			if paths, err := listPodcastShowAudioFiles(subPath, rootIgnoreRules); err == nil {
 				for _, path := range paths {
 					seenPaths[path] = true
 				}
-			case !errors.Is(err, errFolderHasNoMedia):
-				unreadable = append(unreadable, subPath)
 			}
 			episodePaths, err := s.reconcilePodcastShow(ctx, folder, subPath, rootIgnoreRules)
 			if err != nil {
@@ -94,6 +91,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 					"error", err,
 				)
 				failures.addf("%s: %w", subPath, err)
+				failed = append(failed, subPath)
 				// Continue with siblings — one bad show should not stop the scan.
 				continue
 			}
@@ -106,7 +104,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 	if attempted > 0 && succeeded == 0 && failures.len() > 0 {
 		return fmt.Errorf("podcast scan failed for every attempted folder_id=%d: %w", folder.ID, failures.join())
 	}
-	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths, unreadable); err != nil {
+	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths, failed); err != nil {
 		slog.WarnContext(ctx, "podcast scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 	}
 	return nil
