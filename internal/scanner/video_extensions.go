@@ -49,6 +49,19 @@ var videoExtensions = func() map[string]bool {
 	return set
 }()
 
+// extensionAllowsContainer reports whether filePath's extension allows a
+// probe's container: false only for a video extension whose group does not
+// list that container.
+func extensionAllowsContainer(filePath, container string) bool {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	for _, group := range videoContainers {
+		if slices.Contains(strings.Fields(group.extensions), ext) {
+			return slices.Contains(group.containers, container)
+		}
+	}
+	return true
+}
+
 // containerListsStreams reports whether container's header declares every
 // stream the file holds.
 func containerListsStreams(container string) bool {
