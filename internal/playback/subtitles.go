@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -176,7 +177,7 @@ func LoadExternalSubtitle(ctx context.Context, timings subtitles.ExternalTimingL
 	if err != nil {
 		return nil, err
 	}
-	return subtitles.ExternalDeliveryBytes(ctx, timings, fileID, subtitles.SubtitleFormat(sub.Format), data)
+	return subtitles.ExternalDeliveryBytes(ctx, timings, fileID, subtitles.SubtitleFormat(sub.Format), sub.Language, data)
 }
 
 // ParseSubtitleTrackParam parses a subtitle track URL parameter that may
@@ -216,19 +217,31 @@ func ServeSubtitle(w http.ResponseWriter, data []byte, format string) {
 	w.Write(data) //nolint:errcheck
 }
 
-// LoadExternalSubtitleAsVTT reads a sidecar subtitle file and converts it to
-// WebVTT for player consumption.
-func LoadExternalSubtitleAsVTT(ctx context.Context, subtitlePath, format string, ffmpegPath ...string) ([]byte, error) {
-	switch strings.ToLower(format) {
+// LoadExternalSubtitleAsVTT reads a sidecar subtitle file as UTF-8
+// (subtitles.DecodeText) and converts it to WebVTT for player consumption.
+func LoadExternalSubtitleAsVTT(ctx context.Context, sub models.ExternalSubtitle, ffmpegPath ...string) ([]byte, error) {
+	raw, err := os.ReadFile(sub.Path)
+	if err != nil {
+		return nil, fmt.Errorf("read external subtitle: %w", err)
+	}
+	data := subtitles.DecodeText(subtitles.SubtitleFormat(sub.Format), sub.Language, raw)
+	switch strings.ToLower(sub.Format) {
 	case "srt", "vtt", "webvtt":
-		data, err := os.ReadFile(subtitlePath)
-		if err != nil {
-			return nil, fmt.Errorf("read external subtitle: %w", err)
-		}
-		return ConvertToVTT(data, format)
+		return ConvertToVTT(data, sub.Format)
 	default:
+		// FFmpeg picks the demuxer by probing the file and its extension, so
+		// re-encoded text goes to it as a file with the same extension.
+		input := sub.Path
+		if !bytes.Equal(data, raw) {
+			tmp, err := writeTempSubtitle(data, filepath.Ext(sub.Path))
+			if err != nil {
+				return nil, err
+			}
+			defer os.Remove(tmp) //nolint:errcheck // a leftover temp file is harmless
+			input = tmp
+		}
 		args := []string{
-			"-i", subtitlePath,
+			"-i", input,
 			"-f", "webvtt",
 			"pipe:1",
 		}
@@ -249,13 +262,27 @@ func LoadExternalSubtitleAsVTT(ctx context.Context, subtitlePath, format string,
 				err, truncateStderr(stderr.String()))
 		}
 
-		data := stdout.Bytes()
-		if len(data) == 0 {
-			return nil, fmt.Errorf("ffmpeg produced empty subtitle output for %s", subtitlePath)
+		out := stdout.Bytes()
+		if len(out) == 0 {
+			return nil, fmt.Errorf("ffmpeg produced empty subtitle output for %s", sub.Path)
 		}
 
-		return data, nil
+		return out, nil
 	}
+}
+
+func writeTempSubtitle(data []byte, ext string) (string, error) {
+	f, err := os.CreateTemp("", "silo-subtitle-*"+ext)
+	if err != nil {
+		return "", fmt.Errorf("create subtitle temp file: %w", err)
+	}
+	_, writeErr := f.Write(data)
+	closeErr := f.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		os.Remove(f.Name()) //nolint:errcheck // already failing; a leftover temp file is harmless
+		return "", fmt.Errorf("write subtitle temp file: %w", err)
+	}
+	return f.Name(), nil
 }
 
 // ConvertToVTT converts subtitle data from a given format to WebVTT.

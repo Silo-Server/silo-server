@@ -7,6 +7,10 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/encoding/unicode"
 )
 
 const deliverySRT = "1\r\n00:00:01,000 --> 00:00:02,500\r\nHello\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\nWorld\r\n"
@@ -16,6 +20,62 @@ func TestDeliveryBytesUnsupportedFormatServesStoredBytes(t *testing.T) {
 	got, err := DeliveryBytes(&DownloadedSubtitle{ID: 8, Format: FormatSUB, Timing: Timing{OffsetMS: 100}}, data)
 	if err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("unsupported format: %q %v", got, err)
+	}
+}
+
+// Every subtitle response is labeled UTF-8, so text in a legacy code page
+// must be delivered decoded. Input that cannot be decoded safely is delivered
+// as stored.
+func TestDeliveryBytesDeliversUTF8(t *testing.T) {
+	const (
+		ruSRT = "1\r\n00:00:01,000 --> 00:00:02,000\r\nПривет, мир! Ёжик в тумане.\r\n"
+		plSRT = "1\r\n00:00:01,000 --> 00:00:02,000\r\nZażółć gęślą jaźń. Śnieg, źdźbło.\r\n"
+		frSRT = "1\r\n00:00:01,000 --> 00:00:02,000\r\nÇa va? Déjà vu, mon garçon. Il fait très beau aujourd'hui.\r\n"
+		ruASS = "[Script Info]\r\nScriptType: v4.00+\r\n\r\n[Events]\r\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n" +
+			"Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\an8\\i1}Привет{\\i0}, мир\r\n" //nolint:misspell // ASS syntax
+	)
+	encode := func(enc encoding.Encoding, text string) []byte {
+		out, err := enc.NewEncoder().Bytes([]byte(text))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	vobsub := []byte{0x00, 0x00, 0x01, 0xBA, 0x44, 0x00, 0x04, 0x00, 0x04, 0x01}
+	cp1251Untagged := encode(charmap.Windows1251, ruSRT)
+	tests := []struct {
+		name     string
+		language string
+		format   SubtitleFormat
+		data     []byte
+		want     string
+	}{
+		{"windows-1251 russian", "ru", FormatSRT, encode(charmap.Windows1251, ruSRT), ruSRT},
+		{"koi8-r russian", "rus", FormatSRT, encode(charmap.KOI8R, ruSRT), ruSRT},
+		{"windows-1250 polish", "pl", FormatSRT, encode(charmap.Windows1250, plSRT), plSRT},
+		{"iso-8859-2 polish", "pol", FormatSRT, encode(charmap.ISO8859_2, plSRT), plSRT},
+		{"windows-1252 untagged", "", FormatSRT, encode(charmap.Windows1252, frSRT), frSRT},
+		{"utf-16le with bom", "", FormatSRT, encode(unicode.UTF16(unicode.LittleEndian, unicode.UseBOM), ruSRT), ruSRT},
+		{"utf-16be with bom", "", FormatVTT, encode(unicode.UTF16(unicode.BigEndian, unicode.UseBOM), ruSRT), ruSRT},
+		{"windows-1251 ass keeps styling", "ru", FormatASS, encode(charmap.Windows1251, ruASS), ruASS},
+		{"utf-8", "ru", FormatSRT, []byte(ruSRT), ruSRT},
+		{"utf-8 with bom", "ru", FormatSRT, []byte("\ufeff" + ruSRT), "\ufeff" + ruSRT},
+		{"untagged non-latin stays as stored", "", FormatSRT, cp1251Untagged, string(cp1251Untagged)},
+		{"binary sub stays as stored", "ru", FormatSUB, vobsub, string(vobsub)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := DeliveryBytes(&DownloadedSubtitle{ID: 1, Language: tt.language, Format: tt.format}, tt.data)
+			if err != nil || string(got) != tt.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+
+	// The timing correction applies to the decoded text.
+	timed, err := DeliveryBytes(&DownloadedSubtitle{ID: 2, Language: "ru", Format: FormatSRT, Timing: Timing{OffsetMS: 1000}}, encode(charmap.Windows1251, ruSRT))
+	if err != nil || !bytes.Contains(timed, []byte("00:00:02,000 --> 00:00:03,000\r\nПривет")) {
+		t.Fatalf("timed: %q %v", timed, err)
 	}
 }
 

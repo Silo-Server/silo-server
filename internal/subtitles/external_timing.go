@@ -35,37 +35,40 @@ var ErrExternalTimingChanged = errors.New("sidecar subtitle timing changed")
 func ContentSHA256(data []byte) string { return subtitleContentHash(data) }
 
 // ExternalDelivery returns the bytes a client receives for a sidecar, data
-// with the correction stored for exactly these bytes applied, and a revision
-// that changes whenever they do. It hashes the delivered bytes: a correction
-// row recreated after a media file replacement restarts its revision, so the
-// revision number alone could repeat for different bytes. Without a lookup
-// or a format Retime can rewrite, data is returned unchanged.
-func ExternalDelivery(ctx context.Context, timings ExternalTimingLookup, mediaFileID int, format SubtitleFormat, data []byte) ([]byte, string, error) {
-	sha := ContentSHA256(data)
+// as UTF-8 (DecodeText, using the sidecar's language) with the correction
+// stored for exactly these bytes applied, and a revision that changes
+// whenever they do. The correction is looked up by the bytes on disk, which
+// is what sync jobs record it under. The revision hashes the delivered bytes:
+// a correction row recreated after a media file replacement restarts its
+// revision, so the revision number alone could repeat for different bytes.
+// Without a lookup or a format Retime can rewrite, no correction applies.
+func ExternalDelivery(ctx context.Context, timings ExternalTimingLookup, mediaFileID int, format SubtitleFormat, language string, data []byte) ([]byte, string, error) {
+	text := DecodeText(format, language, data)
 	if timings == nil || !SupportsRetime(format) {
-		return data, externalRevision(sha, nil), nil
+		return text, externalRevision(text, nil), nil
 	}
-	row, err := timings.ExternalTiming(ctx, mediaFileID, sha)
+	row, err := timings.ExternalTiming(ctx, mediaFileID, ContentSHA256(data))
 	if err != nil {
 		return nil, "", fmt.Errorf("look up sidecar subtitle timing: %w", err)
 	}
 	if row == nil || row.Timing.IsIdentity() {
-		return data, externalRevision(sha, row), nil
+		return text, externalRevision(text, row), nil
 	}
-	out, err := Retime(format, data, row.Timing)
+	out, err := Retime(format, text, row.Timing)
 	if err != nil {
 		return nil, "", fmt.Errorf("retime sidecar subtitle: %w", err)
 	}
-	return out, externalRevision(ContentSHA256(out), row), nil
+	return out, externalRevision(out, row), nil
 }
 
 // ExternalDeliveryBytes is ExternalDelivery without the revision.
-func ExternalDeliveryBytes(ctx context.Context, timings ExternalTimingLookup, mediaFileID int, format SubtitleFormat, data []byte) ([]byte, error) {
-	out, _, err := ExternalDelivery(ctx, timings, mediaFileID, format, data)
+func ExternalDeliveryBytes(ctx context.Context, timings ExternalTimingLookup, mediaFileID int, format SubtitleFormat, language string, data []byte) ([]byte, error) {
+	out, _, err := ExternalDelivery(ctx, timings, mediaFileID, format, language, data)
 	return out, err
 }
 
-func externalRevision(sha string, row *ExternalTiming) string {
+func externalRevision(delivered []byte, row *ExternalTiming) string {
+	sha := ContentSHA256(delivered)
 	var revision int64
 	if row != nil {
 		revision = row.Revision
