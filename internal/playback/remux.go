@@ -116,7 +116,7 @@ func supportsDoviRPUFilter(bin string) bool {
 	if available, ok := doviRPUCache[bin]; ok {
 		return available
 	}
-	out, err := exec.Command(bin, "-hide_banner", "-bsfs").Output()
+	out, err := procgroup.CommandContext(context.Background(), bin, "-hide_banner", "-bsfs").Output()
 	available := err == nil && bytes.Contains(out, []byte("dovi_rpu")) && bytes.Contains(out, []byte("filter_units"))
 	if !available {
 		slog.Warn("ffmpeg lacks the dovi_rpu or filter_units bitstream filter (dovi_rpu needs FFmpeg 7.1+); validated Profile 7 HDR10 remux is disabled", "ffmpeg", bin)

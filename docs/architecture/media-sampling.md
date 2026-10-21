@@ -648,11 +648,13 @@ failure is logged. Deadlines and the limiter still
 bound background work. If the idle I/O class is seen to starve it on a disk
 that is never idle, switch to the lowest best-effort level (7) instead.
 
-Every ffmpeg run, background or not, starts in a process group of its own
-through `internal/procgroup`, which every other ffmpeg and ffprobe run in
-Silo uses too. A timeout or cancellation kills the whole group, so when the
-ffmpeg path is a wrapper script that runs the real ffmpeg as a child, the
-child dies with the wrapper instead of running on outside the limiter.
+On Unix every ffmpeg run, background or not, starts in a process group of
+its own through `internal/procgroup`, which every other ffmpeg and ffprobe
+run in Silo uses too (`fspath.CommandContext`, which runs the tools on media
+paths, builds its commands with it). A timeout or cancellation kills the whole group, so
+when the ffmpeg path is a wrapper script that runs the real ffmpeg as a
+child, the child dies with the wrapper instead of running on outside the
+limiter. Other platforms kill only the process Silo started.
 
 ## Artifact storage
 
