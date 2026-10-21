@@ -2750,6 +2750,21 @@ func (h *LibraryCollectionHandler) withViewerPosters(ctx context.Context, collec
 	return out
 }
 
+// viewerCollectionCounts returns how many members of each collection the
+// viewer described by access can open (catalog ViewerCollectionCounts), or nil
+// when access narrows nothing and the stored counts are the viewer's. A
+// collection whose count could not be read is absent and logged.
+func (h *LibraryCollectionHandler) viewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access catalog.AccessFilter) map[string]int {
+	if h.repo == nil {
+		return nil
+	}
+	counts, err := h.repo.ViewerCollectionCounts(ctx, collections, access)
+	if err != nil {
+		slog.WarnContext(ctx, "counting server collections for the viewer failed", "component", "collections", "error", err)
+	}
+	return counts
+}
+
 // withViewerPoster is withViewerPosters for one collection and the viewer in
 // ctx.
 func (h *LibraryCollectionHandler) withViewerPoster(ctx context.Context, collection *models.LibraryCollection) *models.LibraryCollection {

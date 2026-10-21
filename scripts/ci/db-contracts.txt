@@ -424,3 +424,7 @@
 # Explore all on a row the catalog cannot express as a query pages the row's
 # own fetch past its item limit, on Home and on its library page.
 ./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
+
+# Server collections show a restricted viewer only the members it can open, and
+# leave out a collection whose members it can open none of (#2828).
+./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB

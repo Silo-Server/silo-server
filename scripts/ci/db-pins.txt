@@ -289,3 +289,7 @@
 # the only person field search documents carry.
 ./internal/catalog TestPersonWriteReindexesTitlesOnlyOnRenamePostgres
 ./internal/catalog TestPersonWriteWaitingOnARenameReindexesTitlesPostgres
+
+# Server collection counts for a restricted viewer: one statement for stored
+# members and at most four for smart collections, however many are listed.
+./internal/catalog TestViewerCollectionCountsStatementBudgetDB
