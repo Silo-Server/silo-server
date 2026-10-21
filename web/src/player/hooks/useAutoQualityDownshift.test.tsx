@@ -56,7 +56,7 @@ it("correlates a controller replan before showing its undo", () => {
   expect(h.options.onReplan).toHaveBeenCalledTimes(1);
   const [request, adopted] = h.options.onReplan.mock.calls[0]!;
   expect(request.bandwidth_estimate_kbps).toBe(44100);
-  act(() => adopted("p2", 2));
+  act(() => adopted(2));
   h.rerender({
     ...h.options,
     planRevision: 2,
@@ -98,7 +98,7 @@ it("freezes the pill timer while paused and reports the retired plan once", () =
   const h = setup();
   h.send("waiting");
   h.advance(6_000);
-  act(() => h.options.onReplan.mock.calls[0]![1]("p2", 2));
+  act(() => h.options.onReplan.mock.calls[0]![1](2));
   h.rerender({
     ...h.options,
     planRevision: 2,
@@ -126,7 +126,7 @@ it("settles a no-lower adoption even when its server plan ID repeats", () => {
   const h = setup();
   h.send("waiting");
   h.advance(6000);
-  act(() => h.options.onReplan.mock.calls[0]![1]("p1", 2));
+  act(() => h.options.onReplan.mock.calls[0]![1](2));
   h.rerender({ ...h.options, planRevision: 2, plan: { ...plan } });
   expect(h.options.onNotice).toHaveBeenCalledExactlyOnceWith("cant_lower");
   h.send("playing");
@@ -143,7 +143,7 @@ it("does not treat an in-place update as a new adoption", () => {
   const h = setup();
   h.send("waiting");
   h.advance(6000);
-  act(() => h.options.onReplan.mock.calls[0]![1]("p2", 2));
+  act(() => h.options.onReplan.mock.calls[0]![1](2));
   const next = {
     ...h.options,
     planRevision: 2,

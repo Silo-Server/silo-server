@@ -257,7 +257,7 @@ interface VideoPlayerProps {
     label: string,
     currentPosition: number,
     buffering?: BufferingReplan,
-    onAdopt?: (planId?: string, planRevision?: number, sent?: boolean) => void,
+    onAdopt?: (planRevision?: number, sent?: boolean) => void,
   ) => void;
   /** `track_change` replan for a subtitle the server has to render. */
   onSubtitleTrackChange?: (combinedIndex: number | null, currentPosition: number) => void;

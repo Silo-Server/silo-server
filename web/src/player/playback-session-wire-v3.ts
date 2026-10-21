@@ -167,10 +167,7 @@ export interface ReplanRequestInput extends ReplanOptions {
   qualityPreference: string;
   attemptedPlanKeys: string[];
   attemptCount: number;
-  bandwidthEstimateKbps?: number | null;
   bandwidthCapKbps?: number | null;
-  bandwidthEstimateSource?: "probe" | "observed_rebuffer";
-  learnedLimit?: "ignore" | "clear";
   clientCapabilities: ClientCodecCapabilitiesV3;
   clientPlaybackContext: ClientPlaybackContextV3;
 }

@@ -193,7 +193,7 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
     currentPosition: number,
     buffering?: BufferingReplan,
     /** `sent` is false when the replan was refused before it was sent. */
-    onAdopt?: (planId?: string, planRevision?: number, sent?: boolean) => void,
+    onAdopt?: (planRevision?: number, sent?: boolean) => void,
   ) => void;
   /**
    * The step-down estimate of the latest Auto lowering, or undefined. The
@@ -670,10 +670,9 @@ export function usePlaybackSession(
       if (event === "plan_summary") {
         if (!serverFeaturesRef.current.includes("playback_plan_summary_v1")) return;
         // Each adoption is summarized once, against its own plan and session.
-        const identity = extra?.adoptionId
-          ? summaryIdentitiesRef.current.get(extra.adoptionId)
-          : undefined;
-        if (!identity || !extra?.adoptionId) return;
+        if (!extra?.adoptionId) return;
+        const identity = summaryIdentitiesRef.current.get(extra.adoptionId);
+        if (!identity) return;
         summaryIdentitiesRef.current.delete(extra.adoptionId);
         input = {
           event,
@@ -1578,7 +1577,7 @@ export function usePlaybackSession(
       label: string,
       currentPosition: number,
       buffering?: BufferingReplan,
-      onAdopt?: (planId?: string, planRevision?: number, sent?: boolean) => void,
+      onAdopt?: (planRevision?: number, sent?: boolean) => void,
     ) => {
       // A lowering waits for nothing: refused while another replan is in
       // flight, it is not sent, and the controller rearms. A Restore waits
@@ -1588,7 +1587,7 @@ export function usePlaybackSession(
         buffering.learned_limit !== "clear" &&
         (replanInFlightRef.current || !planRef.current || !sessionIdRef.current)
       ) {
-        onAdopt?.(undefined, undefined, false);
+        onAdopt?.(undefined, false);
         return;
       }
       const normalized = normalizeQualityPreferenceV3(label);
@@ -1606,10 +1605,7 @@ export function usePlaybackSession(
             }
           : {}),
       }).then((adopted) => {
-        onAdopt?.(
-          adopted ? planRef.current?.plan_id : undefined,
-          adopted ? planRevisionRef.current : undefined,
-        );
+        onAdopt?.(adopted ? planRevisionRef.current : undefined);
         if (adopted) return;
         if (qualityRef.current !== normalized) return;
         qualityRef.current = previousPreference;

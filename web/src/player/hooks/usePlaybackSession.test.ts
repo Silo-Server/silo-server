@@ -3128,7 +3128,7 @@ it("reports each adoption's summary once, with the estimate it was requested wit
     ),
   );
   // The server plan ID repeats; the adoptions stay apart.
-  await waitFor(() => expect(adopted).toHaveBeenCalledWith(plan.plan_id, 2));
+  await waitFor(() => expect(adopted).toHaveBeenCalledWith(2));
   act(() => {
     result.current.reportEvent("plan_summary", {
       adoptionId: "1",
@@ -3295,7 +3295,7 @@ it("refuses a lowering while another replan is in flight, and sends a Restore af
   // The lowering is not queued: the controller hears it was never sent.
   const lowered = vi.fn();
   act(() => result.current.changeQuality("auto", 121, lowering, lowered));
-  expect(lowered).toHaveBeenCalledWith(undefined, undefined, false);
+  expect(lowered).toHaveBeenCalledWith(undefined, false);
 
   const restored = vi.fn();
   act(() => result.current.changeQuality("auto", 122, restore, restored));
@@ -3306,7 +3306,7 @@ it("refuses a lowering while another replan is in flight, and sends a Restore af
     learned_limit: "clear",
   });
   expect(server.bodiesTo("/replan")[1]).not.toHaveProperty("bandwidth_estimate_kbps");
-  await waitFor(() => expect(restored).toHaveBeenCalledWith(expect.any(String), 3));
+  await waitFor(() => expect(restored).toHaveBeenCalledWith(3));
   unmount();
 });
 

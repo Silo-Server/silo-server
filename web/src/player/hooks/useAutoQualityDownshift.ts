@@ -85,7 +85,7 @@ interface Options {
    */
   onReplan: (
     request: BufferingReplan,
-    onAdopt: (planId?: string, planRevision?: number, sent?: boolean) => void,
+    onAdopt: (planRevision?: number, sent?: boolean) => void,
   ) => void;
   onNotice: (key: BufferingNotice) => void;
   /** `pageEnding` when the page is closing and the summary must go out at once. */
@@ -159,7 +159,7 @@ export function useAutoQualityDownshift(options: Options) {
         // are sent from here.
         if (output.type === "replan" && output.body.operation === "quality_change") {
           requestedPlan.current = undefined;
-          latest.current.onReplan(output.body, (_id, revision, sent) => {
+          latest.current.onReplan(output.body, (revision, sent) => {
             if (controller.current !== c) return;
             requestedPlan.current = revision;
             if (sent === false) c.event({ type: "replan_failed", unsent: true }, now());
