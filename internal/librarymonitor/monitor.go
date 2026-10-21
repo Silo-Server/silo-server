@@ -306,7 +306,7 @@ func setDefault(d *time.Duration, def time.Duration) {
 // blocks on the initial walks, which queue no scans.
 func (m *Monitor) Start(ctx context.Context) {
 	m.startOnce.Do(func() {
-		m.ctx, m.cancel = context.WithCancel(ctx)
+		m.ctx, m.cancel = context.WithCancel(ctx) //nolint:fatcontext // set once under startOnce, derived from the caller's ctx
 		go m.run(m.ctx)
 		go m.statusLoop(m.ctx)
 	})

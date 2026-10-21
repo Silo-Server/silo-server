@@ -5,7 +5,7 @@ import {
   captureNotificationAuthority,
 } from "@/api/v2/notifications";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -20,6 +20,7 @@ import {
   Webhook as WebhookIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/page/PageHeader";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import type {
   NotificationChannelMode,
@@ -79,6 +80,7 @@ import {
 } from "@/hooks/queries/notificationWebhooks";
 import { notificationKeys } from "@/hooks/queries/keys";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { formatRelativeTime } from "@/lib/date";
 import {
   currentWebPushSubscription,
@@ -106,6 +108,7 @@ type WebhookNotifyKey = (typeof WEBHOOK_NOTIFY_FIELDS)[number]["key"];
 function PreferencesSection() {
   const { data: prefs, isLoading } = useNotificationPreferences();
   const updatePrefs = useUpdateNotificationPreferences();
+  const { data: capability } = useNotificationCapability();
 
   if (isLoading || !prefs) {
     return (
@@ -118,7 +121,22 @@ function PreferencesSection() {
   return (
     <SettingsGroup
       title="New Episode Notifications"
-      description="Choose which series relationships notify this profile when a new episode arrives."
+      description={
+        <>
+          Choose which series relationships notify this profile when a new episode arrives.
+          {capability?.series?.available && (
+            <>
+              {" "}
+              <Link
+                to="/notifications?view=series"
+                className="text-foreground underline underline-offset-4"
+              >
+                See which series notify you
+              </Link>
+            </>
+          )}
+        </>
+      }
     >
       <div className="flex items-center justify-between gap-3">
         <div>
@@ -379,6 +397,8 @@ const DISCORD_LINK_ERRORS: Record<string, string> = {
 };
 
 function DiscordSection() {
+  const { profile } = useCurrentProfile();
+  const canManage = profile?.is_primary === true;
   const authority = captureProfileRequestContext();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -442,6 +462,11 @@ function DiscordSection() {
       title="Discord Notifications"
       description="Account-wide: the Silo bot sends direct messages covering every profile on this account. You must share a Discord server with the bot."
     >
+      {!canManage && (
+        <p className="text-muted-foreground text-sm">
+          Switch to the primary profile to manage Discord notifications for this account.
+        </p>
+      )}
       {!linked ? (
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -450,7 +475,7 @@ function DiscordSection() {
               Authorize on Discord so the bot knows who to message
             </div>
           </div>
-          <Button size="sm" disabled={linkInit.isPending} onClick={startLink}>
+          <Button size="sm" disabled={!canManage || linkInit.isPending} onClick={startLink}>
             {linkInit.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             Link Discord
           </Button>
@@ -469,7 +494,7 @@ function DiscordSection() {
             <div className="flex items-center gap-2">
               <Switch
                 checked={enabled}
-                disabled={updatePrefs.isPending}
+                disabled={!canManage || updatePrefs.isPending}
                 onCheckedChange={(checked) =>
                   updatePrefs.mutate({ mode: checked ? "daily_digest" : "off" })
                 }
@@ -478,7 +503,7 @@ function DiscordSection() {
                 variant="ghost"
                 size="sm"
                 className="text-destructive"
-                disabled={unlink.isPending}
+                disabled={!canManage || unlink.isPending}
                 onClick={() => unlink.mutate()}
               >
                 Unlink
@@ -490,7 +515,7 @@ function DiscordSection() {
               mode={mode}
               allowPerEpisode={allowPerEpisode}
               digestHour={digestHour}
-              isPending={updatePrefs.isPending}
+              isPending={!canManage || updatePrefs.isPending}
               perEpisodeHint="A DM as soon as each notification arrives"
               onChange={(value) => updatePrefs.mutate({ mode: value })}
             />
@@ -1104,7 +1129,10 @@ export default function NotificationsSettings() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Notifications</h2>
+      <PageHeader
+        title="Notifications"
+        subtitle="New-episode alerts by email, Discord, push, or webhook."
+      />
 
       <PreferencesSection />
 

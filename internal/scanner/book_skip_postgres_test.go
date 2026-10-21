@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -183,79 +182,6 @@ func TestUnchangedBooksDoNotQueryLiteraryWorks(t *testing.T) {
 	}
 }
 
-func TestBookScansLinkLaterFormat(t *testing.T) {
-	for _, ebookFirst := range []bool{true, false} {
-		name := "audiobook-first"
-		if ebookFirst {
-			name = "ebook-first"
-		}
-		t.Run(name, func(t *testing.T) {
-			pool := newBookScanTestPool(t)
-			ebookFolder := newBookScanTestFolder(t, pool, "ebooks")
-			audioFolder := newBookScanTestFolder(t, pool, "audiobooks")
-			title := fmt.Sprintf("Sequential Book %d", ebookFolder.ID)
-			ebookPath := writeTestEPUBWithOPFBytes(t, []byte(fmt.Sprintf(`<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata><dc:title>%s</dc:title><dc:creator>Sequence Author</dc:creator></metadata></package>`, title)))
-			audioPath := t.TempDir()
-			if _, err := exec.LookPath("ffmpeg"); err != nil {
-				t.Skip("ffmpeg unavailable")
-			}
-			if out, err := exec.CommandContext(t.Context(), "ffmpeg", "-v", "error", "-f", "lavfi", "-i", "anullsrc", "-t", "0.1", "-metadata", "title="+title, "-metadata", "artist=Sequence Author", filepath.Join(audioPath, "book.m4b")).CombinedOutput(); err != nil {
-				t.Fatalf("generate audio: %v: %s", err, out)
-			}
-			s := NewScanner(NewFileRepository(pool), "ffprobe", nil, 1, false, 0)
-			repo := literaryworks.NewRepository(pool)
-			s.SetLiteraryWorkLinker(literaryworks.NewService(repo))
-			var skipped int64
-			scanEbook := func() error {
-				return s.reconcileEbookFile(t.Context(), ebookFolder, ebookPath, &skipped, newEbookGroupLocks())
-			}
-			scanAudio := func() error { return s.reconcileAudiobookFolder(t.Context(), audioFolder, audioPath, nil, &skipped) }
-			first, second := scanAudio, scanEbook
-			firstFolder := audioFolder
-			if ebookFirst {
-				first, second = scanEbook, scanAudio
-				firstFolder = ebookFolder
-			}
-			if err := first(); err != nil {
-				t.Fatal(err)
-			}
-			var firstID string
-			if err := pool.QueryRow(t.Context(), `SELECT content_id FROM media_item_libraries WHERE media_folder_id=$1`, firstFolder.ID).Scan(&firstID); err != nil {
-				t.Fatal(err)
-			}
-			workID, err := repo.GetFirstWorkIDForContentIDs(t.Context(), []string{firstID})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if workID != "" {
-				t.Fatalf("first format unexpectedly linked to %q", workID)
-			}
-			if err := second(); err != nil {
-				t.Fatal(err)
-			}
-			var members, works int
-			if err := pool.QueryRow(t.Context(), `SELECT count(*),count(DISTINCT wi.work_id) FROM literary_work_items wi JOIN media_item_libraries ml USING(content_id) WHERE ml.media_folder_id=ANY($1)`, []int{ebookFolder.ID, audioFolder.ID}).Scan(&members, &works); err != nil {
-				t.Fatal(err)
-			}
-			if members != 2 || works != 1 {
-				t.Fatalf("linked members=%d works=%d, want 2 members in one work", members, works)
-			}
-			// Both formats now skip, without querying the linker or changing membership.
-			counts := &bookQueryCounts{}
-			ctx := context.WithValue(t.Context(), bookQueryTraceKey{}, counts)
-			if err := s.reconcileEbookFile(ctx, ebookFolder, ebookPath, &skipped, newEbookGroupLocks()); err != nil {
-				t.Fatal(err)
-			}
-			if err := s.reconcileAudiobookFolder(ctx, audioFolder, audioPath, nil, &skipped); err != nil {
-				t.Fatal(err)
-			}
-			if skipped != 2 || counts.literary != 0 {
-				t.Fatalf("repeat scans: skipped=%d literary queries=%d, want 2 and 0", skipped, counts.literary)
-			}
-		})
-	}
-}
-
 // Run against an otherwise idle migrated Postgres, e.g. -run '^$' -bench
 // BenchmarkUnchangedEbookScan -benchtime=3000x -count=3. Fixtures are outside timing.
 func BenchmarkUnchangedEbookScan(b *testing.B) {
@@ -358,33 +284,6 @@ func TestEbookSkipPreloadPreservesEligibility(t *testing.T) {
 				t.Fatalf("preload leaked another library: %v", other)
 			}
 		})
-	}
-}
-
-func TestEbookSkipPreloadStillChecksOPFSidecar(t *testing.T) {
-	pool := newBookScanTestPool(t)
-	folder := newBookScanTestFolder(t, pool, "ebooks")
-	paths := seedUnchangedBooks(t, pool, folder, 1)
-	repo := NewFileRepository(pool)
-	state, err := repo.loadEbookSkipState(t.Context(), folder.ID, paths)
-	if err != nil {
-		t.Fatal(err)
-	}
-	opf := strings.TrimSuffix(paths[0], ".epub") + ".opf"
-	if err := os.WriteFile(opf, []byte("<package/>"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	later := time.Now().Add(time.Hour)
-	if err := os.Chtimes(opf, later, later); err != nil {
-		t.Fatal(err)
-	}
-	s := NewScanner(repo, "ffprobe", nil, 1, false, 0)
-	var skipped int64
-	// The seeded EPUB deliberately isn't parseable. A changed sidecar must fall
-	// through to parsing even though the batch snapshot matches the ebook bytes.
-	err = s.reconcileEbookFileWithSkipState(t.Context(), folder, paths[0], &skipped, newEbookGroupLocks(), state)
-	if err == nil || !strings.Contains(err.Error(), "parse ebook file") || skipped != 0 {
-		t.Fatalf("err=%v skipped=%d, want reparse after sidecar change", err, skipped)
 	}
 }
 

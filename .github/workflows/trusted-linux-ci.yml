@@ -27,8 +27,8 @@ env:
 jobs:
   prune-go-caches:
     name: Prune old Go caches
-    if: ${{ !inputs.self_hosted && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
+    if: ${{ !inputs.self_hosted && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule' }}
+    runs-on: ubuntu-24.04
     permissions:
       actions: write
       contents: read
@@ -69,7 +69,7 @@ jobs:
   # which gofmt in the lint lane would otherwise see.
   select:
     name: Select CI jobs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       go: ${{ steps.plan.outputs.go }}
       web: ${{ steps.plan.outputs.web }}
@@ -78,14 +78,14 @@ jobs:
       # file contents. A sparse checkout also fetches with blob:none, so only
       # the sparse paths' contents are downloaded.
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           filter: blob:none
           sparse-checkout: .github/actions
           persist-credentials: false
       - name: Check out the CI tools from main
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Silo-Server/silo-server
           ref: ${{ job.workflow_sha || 'refs/heads/main' }}
@@ -106,19 +106,32 @@ jobs:
   # it instead of delaying the private-runner jobs.
   repo-checks:
     name: Repository checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Every job except Go skips web/assets-source (230 MB of PNG files that
         # only the internal/collections/templates tests read).
-        with: &no-assets
+        with:
+          fetch-depth: 0
           filter: blob:none
           sparse-checkout: |
             /*
             !/web/assets-source/
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      - name: Install pinned workflow and shell tools
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/workflow-tools"
+          cd "$RUNNER_TEMP/workflow-tools"
+          curl -fsSL --retry 3 -o actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz' | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          curl -fsSL --retry 3 -o shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          echo '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  shellcheck.tar.xz' | sha256sum -c -
+          tar -xJf shellcheck.tar.xz --strip-components=1 shellcheck-v0.11.0/shellcheck
+          echo "$RUNNER_TEMP/workflow-tools" >> "$GITHUB_PATH"
       - name: Test CI helper changes
         run: |
           if [ -f .github/actions/ci-tools/test_select_jobs.py ]; then
@@ -127,6 +140,48 @@ jobs:
           if [ -f scripts/test_lint_changed.py ]; then
             python3 scripts/test_lint_changed.py
           fi
+      - name: Check workflows and shell
+        run: make verify-actionlint verify-shellcheck
+      - name: Check action SHA pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidates=$(git grep -nE "(^|[[:space:]{,]|\\[)[\"']?uses[\"']?[[:space:]]*:" -- '.github/workflows/*.yml' '.github/workflows/*.yaml' '.github/actions/*.yml' '.github/actions/*.yaml') || [[ $? == 1 ]]
+          unsupported=$(grep -vE '^[^:]+:[0-9]+:[[:space:]]*(-[[:space:]]*)?uses:' <<< "$candidates") || [[ $? == 1 ]]
+          [[ -z "$unsupported" ]] || { printf 'Action references must use plain block form:\n%s\n' "$unsupported" >&2; exit 1; }
+          references=$(git grep -nE '^[[:space:]]*(-[[:space:]]*)?uses:' -- .github/workflows .github/actions) || {
+            status=$?
+            [[ "$status" == 1 ]] || exit "$status"
+          }
+          [[ -n "$references" ]] || { echo 'No action references could be checked' >&2; exit 1; }
+          failed=0
+          while IFS= read -r line; do
+            read -r reference _ <<< "${line#*uses:}"
+            case "$reference" in
+              \"*\"|\'*\') reference=${reference:1:${#reference}-2} ;;
+            esac
+            if [[ "$reference" == ./* || "$reference" =~ ^Silo-Server/silo-server/\.github/workflows/[^/@]+@main$ || "$reference" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_./-]+@[a-fA-F0-9]{40}$ ]]; then
+              continue
+            fi
+            echo "Mutable or malformed action reference: $line" >&2
+            failed=1
+          done <<< "$references"
+          exit "$failed"
+      # - name: Audit workflow security with zizmor
+      #   run: zizmor .github/workflows .github/actions
+      # Declined: broad workflow security/hygiene; the action SHA gate remains active.
+      # - name: Lint Python with Ruff
+      #   run: ruff check .
+      # Declined: Python tooling is outside the selected checks.
+      # - name: Scan secrets
+      #   run: gitleaks detect
+      # Declined: secret scanning is outside the selected checks.
+      # - name: Check PR body sections
+      #   run: node scripts/ci/pr-body-check.mjs
+      # Not measured; needs a prototype. Prior sample: 72/100 lacked Evidence.
+      # - name: Check backtick documentation paths
+      #   run: make verify-backtick-paths
+      # Not measured; needs a prototype. Prior sample: 19 unresolved, about half false positives.
       - name: Verify no local paths leaked into committed docs
         run: make verify-local-paths
       # Linux checks out two paths that differ only in case without
@@ -137,7 +192,7 @@ jobs:
       # checker gates later runs once it merges; its tests run in Go test.
       # After the PR checkout, which would otherwise clean it away.
       - name: Check out the case-collision checker from main
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Silo-Server/silo-server
           ref: ${{ job.workflow_sha || 'refs/heads/main' }}
@@ -150,7 +205,7 @@ jobs:
       # The checker uses only the standard library, so it needs a toolchain
       # but no module cache.
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '>=1.26 <1.27'
           cache: false
@@ -161,6 +216,41 @@ jobs:
           go build -o "$RUNNER_TEMP/casecollisions" ./.ci-tools/scripts/ci/casecollisions
           "$RUNNER_TEMP/casecollisions"
 
+      # A pull request checks out its merge with the target's current tip,
+      # and the payload's base.sha can be older than that tip, which would
+      # count the target's newer commits as the PR's. The make targets take
+      # the merge base with the freshly fetched target branch instead, as the
+      # contract checks do.
+      - name: Verify file line limits and bidi controls
+        shell: bash
+        env:
+          BASE_REF: origin/${{ github.base_ref || github.event.repository.default_branch }}
+        run: make verify-size-ratchet verify-bidi
+      - name: Verify migrations
+        shell: bash
+        env:
+          BASE_REF: origin/${{ github.base_ref || github.event.repository.default_branch }}
+        run: make verify-migrations
+      - name: Verify Prometheus rule tests
+        run: |
+          docker pull prom/prometheus:v3.5.0
+          make verify-prometheus-rules
+      # - name: Check migration lock risk with squawk
+      #   run: squawk migrations/sql/*.sql
+      # Not measured; needs a prototype. Prior sample: 457 findings in 146 files.
+      # - name: Check SELECT star on base tables
+      #   run: make verify-select-star
+      # Not measured; needs a prototype. Prior sample: 2 of 36 SELECT-star uses.
+      # - name: Check migration order
+      #   run: make verify-migration-order
+      # Not measured; needs a prototype and disposable histories.
+      # - name: Check spelling with codespell
+      #   run: codespell
+      # Declined: broad spelling cleanup.
+      # - name: Check raw setting-key literals
+      #   run: make lint-setting-keys
+      # Declined: generated bindings own settings access.
+
   # Contract assertions run once in the full suite; artifact generation and
   # semantic comparison retain their separate gate. PG17 race tests and
   # pgvector query-budget pins use independent disposable databases.
@@ -170,9 +260,11 @@ jobs:
   # one after the other.
   go-lint:
     name: Go lint
+    # timeout-minutes: 30 # Declined: do not add job timeouts.
+    # runs-on: ubuntu-24.04-arm # Declined: retain the existing Go runner architecture.
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
-    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-lint"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-lint"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     steps:
       # github.com/h2non/bimg binds libvips through cgo and pkg-config, so
       # nothing under ./... compiles without the headers. The Dockerfile
@@ -191,7 +283,7 @@ jobs:
         name: Restore the libvips packages
         if: runner.environment == 'github-hosted'
         id: libvips-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/libvips-debs/*.deb
           key: ${{ steps.libvips-cache-key.outputs.key }}
@@ -245,7 +337,7 @@ jobs:
           ) > /dev/null 2>&1 &
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # golangci-lint and the contract diff need the merge base to tell
           # this branch's lines from the ones it inherited.
@@ -255,7 +347,7 @@ jobs:
       # After the PR checkout, which would otherwise clean it away, and
       # before any PR code runs.
       - name: Check out the CI tools from main
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Silo-Server/silo-server
           ref: ${{ job.workflow_sha || 'refs/heads/main' }}
@@ -276,7 +368,7 @@ jobs:
       - &libvips-save
         name: Save the libvips packages
         if: runner.environment == 'github-hosted' && github.event_name != 'pull_request' && steps.libvips-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/libvips-debs/*.deb
           key: ${{ steps.libvips-cache.outputs.cache-primary-key }}
@@ -289,7 +381,7 @@ jobs:
       - name: Restore the golangci-lint binary
         if: runner.environment == 'github-hosted'
         id: golangci-lint-binary
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/bin/golangci-lint
           key: golangci-lint-binary-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-${{ hashFiles('go.mod') }}
@@ -313,7 +405,7 @@ jobs:
 
       - name: Restore the golangci-lint analysis cache
         if: runner.environment == 'github-hosted' && github.event_name == 'pull_request'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/golangci-lint
           key: golangci-lint-cache-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-${{ github.sha }}
@@ -322,7 +414,7 @@ jobs:
 
       - name: Restore and save the golangci-lint analysis cache
         if: runner.environment == 'github-hosted' && github.event_name != 'pull_request'
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/golangci-lint
           key: golangci-lint-cache-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-${{ github.sha }}
@@ -332,16 +424,29 @@ jobs:
       - name: Normalize tracked source mtimes
         run: python3 scripts/ci/content_mtimes.py
 
+      - name: Check Go module tidiness without rewriting
+        run: go mod tidy -diff
+      - name: Scan reachable Go vulnerabilities
+        if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck -scan=symbol -show=verbose ./...
+      # - name: Check dependency edges with depaware
+      #   run: depaware ./...
+      # Not measured; needs a prototype with reviewed edge allowances.
+
       - name: Run Go lint and contract checks
         shell: bash
         env:
-          LINT_BASE_REF: ${{ github.event_name == 'push' && github.event.before || github.event_name == 'pull_request' && github.event.pull_request.base.sha || format('origin/{0}', github.event.repository.default_branch) }}
-          LINT_BASE_MODE: ${{ github.event_name == 'push' && 'revision' || 'merge-base' }}
+          LINT_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.event.before || format('origin/{0}', github.event.repository.default_branch) }}
+          LINT_BASE_MODE: ${{ github.event_name == 'pull_request' && 'pr-merge' || github.event_name == 'push' && 'revision' || 'merge-base' }}
+          LINT_CHANGED_TARGET_REF: ${{ format('origin/{0}', github.event.repository.default_branch) }}
+          LINT_CHANGED_FULL_TREE: ${{ (github.event_name == 'schedule' || github.repository == 'Silo-Server/silo-server' && github.ref_name == 'main') && '1' || '0' }}
           CONTRACT_BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
         run: make -f .ci-tools/.github/actions/ci-tools/go-checks.mk --keep-going lint contracts
 
       - name: Save the Go cache
-        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule'
         uses: ./.github/actions/save-go-cache
         with:
           job-status: ${{ job.status }}
@@ -349,23 +454,25 @@ jobs:
 
   go-test:
     name: Go test
+    # Combining lint and tests is disabled until cold/warm analyzer coverage,
+    # seeded findings and wall/runner-time measurements show equivalent gates.
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
-    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-test"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-test"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     steps:
       - *libvips-cache-key
       - *libvips-restore
       - *libvips-install
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       # After the PR checkout, which would otherwise clean it away, and
       # before any PR code runs.
       - name: Check out the CI tools from main
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Silo-Server/silo-server
           ref: ${{ job.workflow_sha || 'refs/heads/main' }}
@@ -382,6 +489,8 @@ jobs:
         id: setup-go
         with:
           cache-name: test
+          # cache-mode: readonly # Disabled: caller/callee writer behavior for
+          # PRs, forks, pushes and schedules needs a hosted trial and actionlint compatibility.
 
       - *libvips-save
 
@@ -391,11 +500,29 @@ jobs:
       - name: Run Go tests
         shell: bash
         env:
-          TEST_GOFLAGS: ${{ github.event_name == 'schedule' && '-count=1' || '' }}
-        run: make -f .ci-tools/.github/actions/ci-tools/go-checks.mk tests
+          TEST_GOFLAGS: ${{ github.event_name == 'schedule' && '-shuffle=on -count=2 -v' || '' }}
+          # TEST_GOFLAGS: '-vet=off' # Disabled: analyzer parity and cold/warm cost are unmeasured.
+          # apiv2 fixture reduction/sharding: deferred: cause unverified.
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
+            echo "Shuffle: count=2 packages=./... toolchain=$(go env GOVERSION) runner=$RUNNER_OS/$RUNNER_ARCH"
+            # go test prints each seed; -v keeps it in the run log for replay.
+          fi
+          make -f .ci-tools/.github/actions/ci-tools/go-checks.mk tests
 
       - name: Save the Go cache
-        if: ${{ !cancelled() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' }}
+        if: ${{ !cancelled() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule' }}
+        uses: ./.github/actions/save-go-cache
+        with:
+          job-status: ${{ job.status }}
+          cache-key: ${{ steps.setup-go.outputs.cache-key }}
+          module-cache-key: ${{ steps.setup-go.outputs.module-cache-key }}
+          module-cache-hit: ${{ steps.setup-go.outputs.module-cache-hit }}
+
+      # Scheduled executions refresh modules under the existing policy, while
+      # the composite action never prunes or saves compiled entries on schedule.
+      - name: Save the shared module cache on schedule
+        if: ${{ !cancelled() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name == 'schedule' }}
         uses: ./.github/actions/save-go-cache
         with:
           job-status: ${{ job.status }}
@@ -407,7 +534,7 @@ jobs:
     name: Go integration
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
-    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-integration"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-integration"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     env:
       SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5433/silo_test?sslmode=disable
     steps:
@@ -425,8 +552,14 @@ jobs:
         run: docker run -d --rm --cidfile "$RUNNER_TEMP/pgvector" -p 5433:5432 --tmpfs /var/lib/postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=silo_test pgvector/pgvector:pg18 > "$RUNNER_TEMP/pgvector.log" 2>&1 &
 
       - name: Checkout
-        uses: actions/checkout@v5
-        with: *no-assets
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: &no-assets
+          filter: blob:none
+          sparse-checkout: |
+            /*
+            !/web/assets-source/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Set up Go
         uses: ./.github/actions/setup-go
         id: setup-go
@@ -443,21 +576,30 @@ jobs:
           timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/pgvector")" pg_isready -h 127.0.0.1 -U postgres -d silo_test; do sleep 1; done' || { cat "$RUNNER_TEMP/pgvector.log"; exit 1; }
 
       - name: Migrate the test database
-        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run ./cmd/silo/ --migrate-only
+        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" go run ./scripts/ci/migrate/ --migrate-only
+
+      - name: Build race test binaries
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/race"
+          go test -p 2 -race -c -o "$RUNNER_TEMP/race/" \
+            ./internal/watchtogether/ ./migrations/ ./internal/historyimport/ ./internal/api/handlers/ ./internal/adminjob/ ./internal/auth/ ./internal/recommendations/ ./cmd/silo/
 
       - name: Test Watch Party coordination against Postgres
         env:
           SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
         run: |
           : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
-          go test -race -count=1 ./internal/watchtogether/
+          (cd internal/watchtogether && "$RUNNER_TEMP/race/watchtogether.test" -test.count=1 -test.timeout=10m)
 
       - name: Test history import cancellation and profile authorization against Postgres
         env:
           SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
         run: |
           : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
-          go test -race -count=1 -run '^(TestHistoryImportCancellation.*|TestQueue.*|TestHistoryImportV1ProfileAuthorization)$' ./migrations/ ./internal/historyimport/ ./internal/api/handlers/
+          for package in migrations internal/historyimport internal/api/handlers; do
+            (cd "$package" && "$RUNNER_TEMP/race/${package##*/}.test" -test.run='^(TestHistoryImportCancellation.*|TestQueue.*|TestHistoryImportV1ProfileAuthorization)$' -test.count=1 -test.timeout=10m)
+          done
 
       # 20260925144545 moves marker claims between rows that share a payload
       # while the payload index still exists. The replay seeds a winner-first
@@ -468,22 +610,22 @@ jobs:
           SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
         run: |
           : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
-          go test -race -count=1 -run '^TestMarkerContributionClaimsByTargetMigrationPostgres$' ./migrations/
+          (cd migrations && "$RUNNER_TEMP/race/migrations.test" -test.run='^TestMarkerContributionClaimsByTargetMigrationPostgres$' -test.count=1 -test.timeout=10m)
 
       - name: Test image cache cleanup resumption against Postgres
-        run: go test -race -count=1 -run '^(TestImageCacheCleanup|TestRequeuedImageCacheCleanup|TestJobOutcomeIsRecorded)' ./internal/adminjob/
+        run: cd internal/adminjob && "$RUNNER_TEMP/race/adminjob.test" -test.run='^(TestImageCacheCleanup|TestRequeuedImageCacheCleanup|TestJobOutcomeIsRecorded)' -test.count=1 -test.timeout=10m
 
       - name: Test device sign-in against Postgres
-        run: go test -race -count=1 -run '^TestDeviceLogin.*DB$' ./internal/auth/
+        run: cd internal/auth && "$RUNNER_TEMP/race/auth.test" -test.run='^TestDeviceLogin.*DB$' -test.count=1 -test.timeout=10m
 
       - name: Test taste cluster replacement against Postgres
-        run: go test -race -count=1 -run '^TestUpsertTasteClusters.*Postgres$' ./internal/recommendations/
+        run: cd internal/recommendations && "$RUNNER_TEMP/race/recommendations.test" -test.run='^TestUpsertTasteClusters.*Postgres$' -test.count=1 -test.timeout=10m
 
       - name: Test Jellyfin detail preferences against Postgres
-        run: go test -race -count=1 -run '^TestCompatDetailServiceResolvesViewerSubtitleDefaultsPostgres$' ./cmd/silo/
+        run: cd cmd/silo && "$RUNNER_TEMP/race/silo.test" -test.run='^TestCompatDetailServiceResolvesViewerSubtitleDefaultsPostgres$' -test.count=1 -test.timeout=10m
 
       - name: Save the Go cache
-        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule'
         uses: ./.github/actions/save-go-cache
         with:
           job-status: ${{ job.status }}
@@ -502,7 +644,7 @@ jobs:
     name: Go DB pins
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
-    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-pins"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-pins"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     env:
       SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/silo_test?sslmode=disable
     steps:
@@ -515,7 +657,7 @@ jobs:
         run: docker run -d --rm --cidfile "$RUNNER_TEMP/pg" -p 5432:5432 --tmpfs /var/lib/postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=silo_test pgvector/pgvector:pg18 > "$RUNNER_TEMP/pg.log" 2>&1 &
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: *no-assets
 
       - name: Set up Go
@@ -531,16 +673,14 @@ jobs:
           # shellcheck disable=SC2016
           timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/pg")" pg_isready -h 127.0.0.1 -U postgres -d silo_test; do sleep 1; done' || { cat "$RUNNER_TEMP/pg.log"; exit 1; }
 
-      # A throwaway key: it only has to pass the bootstrap length check, and
-      # nothing encrypted with it outlives the job.
       - name: Migrate the test database
-        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run ./cmd/silo/ --migrate-only
+        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" go run ./scripts/ci/migrate/ --migrate-only
 
       - name: Run the query-budget pins
         run: make test-db-pins
 
       - name: Save the Go cache
-        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule'
         uses: ./.github/actions/save-go-cache
         with:
           job-status: ${{ job.status }}
@@ -556,7 +696,7 @@ jobs:
     name: Go DB external auth
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
-    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-auth"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-auth"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     env:
       SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/silo_test?sslmode=disable
     steps:
@@ -568,7 +708,7 @@ jobs:
         run: docker run -d --rm --cidfile "$RUNNER_TEMP/pg" -p 5432:5432 --tmpfs /var/lib/postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=silo_test pgvector/pgvector:pg18 > "$RUNNER_TEMP/pg.log" 2>&1 &
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: *no-assets
 
       - name: Set up Go
@@ -584,12 +724,15 @@ jobs:
           # shellcheck disable=SC2016
           timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/pg")" pg_isready -h 127.0.0.1 -U postgres -d silo_test; do sleep 1; done' || { cat "$RUNNER_TEMP/pg.log"; exit 1; }
 
-      # A throwaway key: it only has to pass the bootstrap length check, and
-      # nothing encrypted with it outlives the job.
-      # Every test in this job runs with -race, so migrating with -race reuses
-      # the race build instead of caching a second, non-race copy of the tree.
       - name: Migrate the test database
-        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run -race ./cmd/silo/ --migrate-only
+        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" go run ./scripts/ci/migrate/ --migrate-only
+
+      - name: Build race test binaries
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/race"
+          go test -p 2 -race -c -o "$RUNNER_TEMP/race/" \
+            ./internal/api/handlers/ ./internal/auth/ ./internal/jellycompat/ ./internal/plugins/
 
       # Account resolution and linking, the local-password policy, the OAuth
       # flow store across nodes, provider re-checks, network identity sign-in
@@ -598,13 +741,13 @@ jobs:
       # a database that already holds a break-glass account.
       - name: Test external sign-in against Postgres
         run: |
-          go test -race -count=1 -run '^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' ./internal/api/handlers/
-          go test -race -count=1 -run '^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestNetworkSignIn|TestNetworkIdentity|TestLinkNetworkIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' ./internal/auth/
-          go test -race -count=1 -run '^TestLoginPINConventionStaysLocalDB$' ./internal/jellycompat/
-          go test -race -count=1 -run '^TestUpsertAuthBindingAllows(OneEnabledProvider|NetworkProviderBesidePrimary)$' ./internal/plugins/
+          (cd internal/api/handlers && "$RUNNER_TEMP/race/handlers.test" -test.run='^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' -test.count=1 -test.timeout=10m)
+          (cd internal/auth && "$RUNNER_TEMP/race/auth.test" -test.run='^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestNetworkSignIn|TestNetworkIdentity|TestLinkNetworkIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' -test.count=1 -test.timeout=10m)
+          (cd internal/jellycompat && "$RUNNER_TEMP/race/jellycompat.test" -test.run='^TestLoginPINConventionStaysLocalDB$' -test.count=1 -test.timeout=10m)
+          (cd internal/plugins && "$RUNNER_TEMP/race/plugins.test" -test.run='^TestUpsertAuthBindingAllows(OneEnabledProvider|NetworkProviderBesidePrimary)$' -test.count=1 -test.timeout=10m)
 
       - name: Save the Go cache
-        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule'
         uses: ./.github/actions/save-go-cache
         with:
           job-status: ${{ job.status }}
@@ -612,9 +755,10 @@ jobs:
 
   web:
     name: Web (${{ matrix.part }})
+    # Consolidation and two web shards: deferred: no recorded occurrence.
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.web != 'false') }}
-    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix:
@@ -624,21 +768,21 @@ jobs:
         working-directory: web
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: *no-assets
 
       # The pnpm version comes from web/package.json's packageManager field —
       # there is no package.json at the repo root, and `defaults.run` does not
       # apply to an action's own inputs.
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/package.json
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: web/pnpm-lock.yaml
@@ -657,24 +801,24 @@ jobs:
 
       - name: Restore the web check cache
         if: matrix.part == 'checks' && runner.environment == 'github-hosted' && github.event_name == 'pull_request'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.web-cache.outputs.path }}
-          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
-          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
+          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
+          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
 
       - name: Restore and save the web check cache
         if: matrix.part == 'checks' && runner.environment == 'github-hosted' && github.event_name != 'pull_request'
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.web-cache.outputs.path }}
-          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
-          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
+          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
+          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
 
       - name: Lint and format check
         if: matrix.part == 'checks'
         env:
-          ESLINT_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*') }}
+          ESLINT_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json') }}
           PRETTIER_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}
         run: |
           cache_dir="${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web"
@@ -685,36 +829,25 @@ jobs:
           wait $! || { echo "::error::Prettier failed"; failed=1; }
           exit "$failed"
 
-      - name: Restore the TypeScript cache
-        if: matrix.part == 'build' && runner.environment == 'github-hosted' && github.event_name == 'pull_request'
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ runner.temp }}/silo-tsc
-          key: tsc-${{ runner.os }}-${{ github.sha }}
-          restore-keys: tsc-${{ runner.os }}-
-
-      - name: Restore and save the TypeScript cache
-        if: matrix.part == 'build' && runner.environment == 'github-hosted' && github.event_name != 'pull_request'
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/silo-tsc
-          key: tsc-${{ runner.os }}-${{ github.sha }}
-          restore-keys: tsc-${{ runner.os }}-
+      - name: Audit the pinned dependency lockfile
+        if: matrix.part == 'checks' && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main'))
+        run: pnpm audit --audit-level=high
+      # - name: Check JSX accessibility
+      #   run: pnpm exec eslint . --config eslint-a11y.config.js
+      # Not measured; needs a prototype grounded in rendered tests.
+      # - name: Check import cycles with madge
+      #   run: pnpm exec madge --circular src
+      # Not measured; needs a prototype defining layers, aliases and type-only edges.
+      # - name: Check unused exports with Knip
+      #   run: pnpm exec knip
+      # Not measured; needs a prototype defining entrypoints and public consumers.
 
       - name: Typecheck and build
         if: matrix.part == 'build'
         run: |
-          cache_dir="$RUNNER_TEMP/silo-tsc"
-          mkdir -p "$cache_dir"
-          # -p --incremental reuses content checks after checkout resets mtimes; tsc -b rechecks.
-          pnpm exec tsc -p tsconfig.app.json --incremental --tsBuildInfoFile "$cache_dir/app.tsbuildinfo" &
-          app_pid=$!
-          pnpm exec tsc -p tsconfig.node.json --incremental --tsBuildInfoFile "$cache_dir/node.tsbuildinfo" &
-          node_pid=$!
           failed=0
+          pnpm exec tsrs -b || { echo "::error::Typecheck failed"; failed=1; }
           pnpm exec vite build || { echo "::error::Vite build failed"; failed=1; }
-          wait "$app_pid" || { echo "::error::App typecheck failed"; failed=1; }
-          wait "$node_pid" || { echo "::error::Node typecheck failed"; failed=1; }
           exit "$failed"
 
       # Reports the launch bundle size, and fails when the React vendor chunk
@@ -726,7 +859,7 @@ jobs:
 
       - name: Upload frontend bundle for image builds
         if: matrix.part == 'build' && github.event_name == 'push' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frontend-dist-${{ github.sha }}
           path: web/dist
@@ -738,7 +871,7 @@ jobs:
       # pnpm. It needs Go to run the generator.
       - name: Set up Go
         if: matrix.part == 'checks'
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '>=1.26 <1.27'
           cache: ${{ runner.environment == 'github-hosted' }}
@@ -762,25 +895,25 @@ jobs:
     name: Web test (${{ matrix.shard }}/4)
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.web != 'false') }}
-    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web-test-{2}"]', github.run_id, github.run_attempt, matrix.shard)) || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web-test-{2}"]', github.run_id, github.run_attempt, matrix.shard)) || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: *no-assets
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/package.json
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: web/pnpm-lock.yaml
@@ -805,10 +938,10 @@ jobs:
     name: CI result
     if: always()
     needs: [select, repo-checks, go-lint, go-test, go-integration, go-db-pins, go-db-auth, web, web-test]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out the CI tools from main
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Silo-Server/silo-server
           ref: ${{ job.workflow_sha || 'refs/heads/main' }}

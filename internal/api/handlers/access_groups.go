@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,9 @@ type AccessGroupStore interface {
 
 type AccessGroupHandler struct {
 	store AccessGroupStore
+	// RecWorker is told when a group's libraries change or the group is
+	// deleted, so its members' recommendations are rebuilt. Optional.
+	RecWorker AccountsScopeNotifier
 }
 
 func NewAccessGroupHandler(store AccessGroupStore) *AccessGroupHandler {
@@ -102,8 +106,7 @@ func (f accessGroupIntSliceField) Ptr() *[]int {
 	if !f.Set {
 		return nil
 	}
-	value := append([]int(nil), f.Value...)
-	return &value
+	return new(slices.Clone(f.Value))
 }
 
 type accessGroupStringSliceField struct {
@@ -118,14 +121,6 @@ func (f *accessGroupStringSliceField) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	return json.Unmarshal(data, &f.Value)
-}
-
-func (f accessGroupStringSliceField) Ptr() *[]string {
-	if !f.Set {
-		return nil
-	}
-	value := append([]string(nil), f.Value...)
-	return &value
 }
 
 func (h *AccessGroupHandler) HandleList(w http.ResponseWriter, r *http.Request) {
@@ -202,10 +197,14 @@ func (h *AccessGroupHandler) HandleUpdate(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	librariesChange := h.groupLibrariesChange(input)
 	group, err := h.store.Update(r.Context(), id, input)
 	if err != nil {
 		writeAccessGroupError(w, err, "Failed to update access group")
 		return
+	}
+	if librariesChange {
+		notifyAccountsScopeChanged(r.Context(), h.RecWorker, h.groupMembers(r.Context(), id)...)
 	}
 	writeJSON(w, http.StatusOK, toAccessGroupResponse(*group))
 }
@@ -222,10 +221,12 @@ func (h *AccessGroupHandler) HandleDelete(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	members := h.groupMembers(r.Context(), id)
 	if err := h.store.Delete(r.Context(), id); err != nil {
 		writeAccessGroupError(w, err, "Failed to delete access group")
 		return
 	}
+	notifyAccountsScopeChanged(r.Context(), h.RecWorker, members...)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -403,7 +404,7 @@ func toAccessGroupResponse(group access.Group) accessGroupResponse {
 		ID:                       group.ID,
 		Name:                     group.Name,
 		Description:              group.Description,
-		LibraryIDs:               append([]int(nil), group.LibraryIDs...),
+		LibraryIDs:               slices.Clone(group.LibraryIDs),
 		MaxPlaybackQuality:       access.NormalizePlaybackQuality(group.MaxPlaybackQuality),
 		DownloadAllowed:          group.DownloadAllowed,
 		DownloadTranscodeAllowed: group.DownloadTranscodeAllowed,
@@ -411,7 +412,7 @@ func toAccessGroupResponse(group access.Group) accessGroupResponse {
 		AudioTranscodeAllowed:    group.AudioTranscodeAllowed,
 		MaxStreams:               group.MaxStreams,
 		MaxTranscodes:            group.MaxTranscodes,
-		AllowedPermissions:       append([]string(nil), group.AllowedPermissions...),
+		AllowedPermissions:       slices.Clone(group.AllowedPermissions),
 		RequestsAllowed:          group.RequestsAllowed,
 		IsDefault:                group.IsDefault,
 		MemberCount:              group.MemberCount,

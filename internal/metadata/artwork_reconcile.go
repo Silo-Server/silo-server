@@ -325,6 +325,10 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		{name: "season posters", table: "seasons", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
 		{name: "localized season posters", table: "season_localizations", keyCols: []artworkSweepKey{textSweepKey("season_content_id"), textSweepKey("language")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
 		{name: "episode stills", table: "episodes", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "still_path", sourceCol: "still_source_path", clearSet: plainClear("still_path")},
+		// Local extra images come from a sidecar or a generated frame, not a
+		// provider: clearing the source too makes the next scan copy the
+		// sidecar again, or the extra stills task take the frame again.
+		{name: "extra stills", table: "media_extras", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "still_path", clearSet: `still_path = '', still_source = '', still_thumbhash = '', still_retry_after = NULL, updated_at = NOW()`},
 		{name: "person photos", table: peopleTable, keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: "photo_path", sourceCol: "photo_source_path", clearSet: plainClear("photo_path")},
 
 		// Admin/user uploads: no re-downloadable source. Clearing falls back

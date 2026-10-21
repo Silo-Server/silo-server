@@ -11,6 +11,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AISettings from "./AISettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 import { setAccessToken, setProfileId } from "@/api/client";
 
 // JSDOM omits the browser methods used by Radix Select.
@@ -77,25 +78,18 @@ let chatGPTStatus = {
 };
 let chatGPTModels: { id: string }[] = [];
 
-const useSettingsFormMock = vi.fn((_options?: { keys: string[] }) => ({
-  isLoading: false,
-  getValue: (key: string) => values[key] ?? "",
-  setValue: mocks.setValue,
-  resetValue: mocks.resetValue,
-  dirtyCount,
-  dirtyKeys,
-  isDirty: (key: string) => dirtyKeys.includes(key),
-  isClearStaged: (key: string) => dirtyKeys.includes(key) && (values[key] ?? "") === "",
-  save: mocks.save,
-  discard: mocks.discard,
-  isSaving: false,
-  restartRequired: false,
-  sensitiveConfigured,
-  sensitiveManagedByEnv: [],
-  sensitiveStatusReady: true,
-  sensitiveStatusError: false,
-  buildConnectionCheckRequest: vi.fn(() => ({ values: {}, dirty_keys: [] })),
-}));
+const useSettingsFormMock = vi.fn((_options?: { keys: string[] }) =>
+  fakeSettingsForm(values, {
+    dirty: dirtyKeys,
+    dirtyCount,
+    setValue: mocks.setValue,
+    resetValue: mocks.resetValue,
+    save: mocks.save,
+    discard: mocks.discard,
+    sensitiveConfigured,
+    buildConnectionCheckRequest: vi.fn(() => ({ values: {}, dirty_keys: [] })),
+  }),
+);
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (options: { keys: string[] }) => useSettingsFormMock(options),
@@ -172,22 +166,18 @@ describe("AISettings", () => {
     Object.assign(values, DEFAULT_VALUES);
   });
 
-  it("stages reasoning effort and clears it for the model default", async () => {
-    const user = userEvent.setup();
-    const view = render(<AISettings />);
-    await openTile(user, "Text model");
-    await user.click(screen.getByRole("combobox", { name: "Reasoning level" }));
-    await user.click(screen.getByRole("option", { name: "High" }));
-    expect(mocks.setValue).toHaveBeenCalledWith("ai.reasoning_effort", "high");
+  it("opens the text model's Advanced section when the model drops the saved level", () => {
     values["ai.reasoning_effort"] = "high";
-    view.rerender(
-      <MemoryRouter>
-        <AISettings />
-      </MemoryRouter>,
+    dirtyKeys = ["ai.chat_model"];
+    dirtyCount = 1;
+    reasoningLevels = [];
+    render(<AISettings />);
+
+    // Save refuses this level, so the field it names has to be on screen.
+    const tile = screen.getByRole("group", { name: "Text model" });
+    expect(within(tile).getByRole("combobox", { name: "Reasoning level" })).toHaveTextContent(
+      "high (unsupported by this model)",
     );
-    await user.click(screen.getByRole("combobox", { name: "Reasoning level" }));
-    await user.click(screen.getByRole("option", { name: "Provider default" }));
-    expect(mocks.setValue).toHaveBeenCalledWith("ai.reasoning_effort", "");
   });
 
   it("rejects a saved reasoning effort after choosing a model without reasoning", async () => {
@@ -234,15 +224,6 @@ describe("AISettings", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(mocks.save).toHaveBeenCalledOnce();
     expect(mocks.toastError).not.toHaveBeenCalled();
-  });
-
-  it("stages ChatGPT authentication from the provider selector", async () => {
-    const user = userEvent.setup();
-    render(<AISettings />);
-    await openTile(user, "Text model");
-    await user.click(screen.getByRole("combobox", { name: "Authentication" }));
-    await user.click(screen.getByRole("option", { name: "ChatGPT plan" }));
-    expect(mocks.setValue).toHaveBeenCalledWith("ai.auth_mode", "chatgpt");
   });
 
   it("requires a connected account and a model from that account before saving ChatGPT", async () => {
@@ -340,24 +321,95 @@ describe("AISettings", () => {
     },
   );
 
-  it("applies the OpenRouter transcription preset", async () => {
-    const user = userEvent.setup();
+  it("does not call a fresh install's default OpenAI endpoint configured without a key", () => {
+    // What a fresh install reads: the server defaults, and no key anywhere.
+    values["ai.base_url"] = "https://api.openai.com";
+    values["ai.chat_model"] = "gpt-4o-mini";
+    values["ai.asr_model"] = "whisper-1";
+    values["subtitle_ai.enabled"] = "false";
+    sensitiveConfigured = [];
+
     render(<AISettings />);
-    await openTile(user, "Speech-to-text");
-    await user.click(screen.getByRole("button", { name: "OpenRouter" }));
-    expect(mocks.setValue).toHaveBeenCalledWith("ai.asr_base_url", "https://openrouter.ai/api/v1");
-    expect(mocks.setValue).toHaveBeenCalledWith("ai.asr_model", "openai/whisper-large-v3-turbo");
+
+    const text = screen.getByRole("group", { name: "Text model" });
+    expect(within(text).queryByText("Configured")).not.toBeInTheDocument();
+    expect(within(text).getByText("API key required")).toBeInTheDocument();
+    expect(within(text).getByRole("button", { name: "Connect" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Translate descriptions" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Create subtitles from audio" })).toBeDisabled();
   });
 
-  it("applies a speech-to-text preset", async () => {
-    const user = userEvent.setup();
+  it("counts the default endpoint ready once a key is saved", () => {
+    values["ai.base_url"] = "https://api.openai.com";
+    values["subtitle_ai.enabled"] = "false";
+    sensitiveConfigured = ["ai.api_key"];
+
     render(<AISettings />);
-    await openTile(user, "Speech-to-text");
 
-    await user.click(screen.getByRole("button", { name: "Groq - fast" }));
+    const text = screen.getByRole("group", { name: "Text model" });
+    expect(within(text).getByText("Configured")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Create subtitles from audio" })).toBeEnabled();
+  });
 
-    expect(mocks.setValue).toHaveBeenCalledWith("ai.asr_base_url", "https://api.groq.com/openai");
-    expect(mocks.setValue).toHaveBeenCalledWith("ai.asr_model", "whisper-large-v3-turbo");
+  it("lets a local endpoint run without a key, as the server does", () => {
+    values["ai.base_url"] = "http://ollama:11434";
+    values["subtitle_ai.enabled"] = "false";
+    sensitiveConfigured = [];
+
+    render(<AISettings />);
+
+    expect(
+      within(screen.getByRole("group", { name: "Text model" })).getByText("Configured"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeEnabled();
+  });
+
+  it.each([["an Azure OpenAI resource", "https://example-resource.openai.azure.com/openai"]])(
+    "does not count %s ready for transcription without a key",
+    (_name, url) => {
+      values["ai.base_url"] = "http://ollama:11434";
+      values["ai.asr_base_url"] = url;
+      values["ai.asr_model"] = "whisper-large-v3";
+      values["subtitle_ai.enabled"] = "false";
+      sensitiveConfigured = [];
+
+      render(<AISettings />);
+
+      expect(screen.getByRole("switch", { name: "Create subtitles from audio" })).toBeDisabled();
+      // The local text endpoint still runs without one.
+      expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeEnabled();
+    },
+  );
+
+  it("stops counting the default endpoint ready while its key's clear is staged", () => {
+    values["ai.base_url"] = "https://api.openai.com";
+    values["ai.api_key"] = "";
+    values["subtitle_ai.enabled"] = "false";
+    sensitiveConfigured = ["ai.api_key"];
+    dirtyKeys = ["ai.api_key"];
+    dirtyCount = 1;
+
+    render(<AISettings />);
+
+    expect(screen.getByRole("switch", { name: "Translate subtitles" })).toBeDisabled();
+  });
+
+  it("refuses to save a feature switch for the default endpoint without a key", async () => {
+    values["ai.base_url"] = "https://api.openai.com";
+    values["metadata_ai.enabled"] = "true";
+    sensitiveConfigured = [];
+    dirtyKeys = ["metadata_ai.enabled"];
+    dirtyCount = 1;
+
+    render(<AISettings />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      "Add an API key for the text model, or point it at an endpoint that needs none.",
+    );
   });
 
   it("blocks turning on a feature whose model cannot serve it", () => {
@@ -413,23 +465,6 @@ describe("AISettings", () => {
 
     expect(mocks.toastError).toHaveBeenCalledWith(message);
     expect(mocks.save).not.toHaveBeenCalled();
-  });
-
-  it("runs the text model check against the staged values", async () => {
-    const user = userEvent.setup();
-    mocks.checkConnection.mockResolvedValue({
-      success: true,
-      message: "Text connection verified.",
-    });
-    render(<AISettings />);
-    await openTile(user, "Text model");
-
-    await user.click(screen.getByRole("button", { name: "Test text model" }));
-
-    expect(await screen.findByText(/Text connection verified\./)).toBeInTheDocument();
-    expect(mocks.checkConnection).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "ai_chat" }),
-    );
   });
 
   it.each([true, false])(

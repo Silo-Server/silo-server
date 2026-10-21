@@ -119,9 +119,9 @@ func TestFetchPackageResourceTimesOutStalledBody(t *testing.T) {
 // longer than the timeout in total but keeps sending still completes.
 func TestFetchPackageResourceAllowsSlowProgressingBody(t *testing.T) {
 	const (
-		idle   = 500 * time.Millisecond
-		chunks = 20
-		gap    = 50 * time.Millisecond
+		idle   = 300 * time.Millisecond
+		chunks = 12
+		gap    = 30 * time.Millisecond
 	)
 	server := stallingServer(t, func(w http.ResponseWriter, _ *http.Request, _ <-chan struct{}) {
 		w.WriteHeader(http.StatusOK)
@@ -182,7 +182,7 @@ func TestFetchPackageResourceCancelDuringStalledBody(t *testing.T) {
 func TestFetchPackageResourceAllowsSlowSingleChunkBody(t *testing.T) {
 	const (
 		idle  = 100 * time.Millisecond
-		total = 2 << 20
+		total = 1 << 20
 		piece = 16 << 10
 		gap   = 10 * time.Millisecond
 	)

@@ -11,24 +11,14 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // When every read times out the storage is stalled: the pass stops after a
 // few timeouts in a row instead of waiting out every remaining file. FIFOs
 // with no writer block on open the way files on a hung mount do.
 func TestMatroskaTrackBackfillStopsOnStalledStorage(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	t.Cleanup(pool.Close)
+	pool := newScannerTestPool(t)
 
 	saved := matroskaTracksReadTimeout
 	matroskaTracksReadTimeout = 50 * time.Millisecond
@@ -64,16 +54,8 @@ func TestMatroskaTrackBackfillStopsOnStalledStorage(t *testing.T) {
 // check, but its stuck reads still fill the read slots, and the pass ends
 // there instead of accumulating more.
 func TestMatroskaTrackBackfillStopsOnIntermittentStalls(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	t.Cleanup(pool.Close)
+	pool := newScannerTestPool(t)
 
 	savedSlots, savedTimeout := matroskaTracksReadSlots, matroskaTracksReadTimeout
 	matroskaTracksReadSlots = make(chan struct{}, 3)

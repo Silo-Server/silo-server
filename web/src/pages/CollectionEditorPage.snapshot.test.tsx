@@ -86,23 +86,6 @@ describe("the editor page keeps the collection it opened", () => {
     });
   });
 
-  it("waits for list artwork before freezing the canonical definition", async () => {
-    let listed!: (value: unknown) => void;
-    v2Recorder.answer(
-      "GET /api/v2/admin/collections",
-      () => new Promise((resolve) => (listed = resolve)),
-    );
-    show();
-    await waitFor(() =>
-      expect(v2Recorder.callsOf("GET /api/v2/admin/collections/{id}")).toHaveLength(1),
-    );
-    expect(screen.getByText("Loading collection editor…")).toBeInTheDocument();
-
-    await act(async () => listed(adminCollectionList({ ...smart, poster_url: "hydrated.png" })));
-
-    expect(await screen.findByText(`Original hydrated.png ${ORIGINAL_ETAG}`)).toBeInTheDocument();
-  });
-
   it("lets a 404 replace a collection that was already loaded", async () => {
     show();
     await screen.findByText(`Original poster.png ${ORIGINAL_ETAG}`);

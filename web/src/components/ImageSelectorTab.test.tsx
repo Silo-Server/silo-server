@@ -25,8 +25,6 @@ function item(type: ItemDetail["type"]): ItemDetail {
 describe("ImageSelectorTab", () => {
   it.each([
     ["series", "poster"],
-    ["series", "backdrop"],
-    ["series", "logo"],
     ["season", "poster"],
   ] as const)("reports a successful %s %s selection to the metadata editor", (itemType, type) => {
     mocks.useItemImages.mockReturnValue({

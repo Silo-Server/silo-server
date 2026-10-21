@@ -49,6 +49,10 @@ type SettingValuesHandler struct {
 	// successful write or delete. Nil (as in tests) simply skips publishing.
 	EventsHub *evt.Hub
 
+	// RecWorker is told when a profile's hidden libraries change, so its
+	// recommendations are rebuilt without them. Optional.
+	RecWorker SignalsChangedNotifier
+
 	// ProfileTokens enables household management for a PIN-locked primary
 	// profile naming another profile on its own account. Nil means that
 	// widening is simply unavailable — never that it is unguarded.
@@ -72,6 +76,13 @@ type languageSuggestionSource interface {
 // and admin mutations so the two routes cannot create different orphan rows.
 func (h *SettingValuesHandler) SetLibraryLookup(lookup libraryLookup) {
 	h.libraryLookup = lookup
+}
+
+// SetAdminDefaults lets the administrator's server-wide defaults stand in for
+// contract defaults on definitions that declare admin_default. Without it every
+// effective default comes from the contract.
+func (h *SettingValuesHandler) SetAdminDefaults(settings settingsresolve.ServerSettings) {
+	h.resolver = settingsresolve.New(h.contract).WithAdminDefaults(settings)
 }
 
 // SetLanguageSuggestionSource wires deployment-observed original languages

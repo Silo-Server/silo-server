@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { Sparkles, ArrowRight, Heart, Map } from "lucide-react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useFavorites } from "@/hooks/queries/favorites";
 import { useOnboardingFlow } from "@/hooks/queries/onboarding";
 import { TourHost } from "@/components/onboarding/TourHost";
+import { NotInterestedList } from "@/components/settings/NotInterestedList";
 
 /**
  * Re-entry point for the taste-seeding flow. Always links to /taste-seed —
@@ -20,12 +22,12 @@ export default function PersonalizeSettings() {
 
   return (
     <div className="space-y-6">
-      <header className="space-y-2">
-        <h2 className="text-foreground text-xl font-semibold tracking-tight">Personalize</h2>
-        <p className="text-muted-foreground text-sm">
-          Pick titles you love so your home, recommendations, and "For You" rows reflect your taste.
-        </p>
-      </header>
+      <PageHeader
+        title="Personalize"
+        subtitle={
+          'Pick titles you love so your home, recommendations, and "For You" rows reflect your taste.'
+        }
+      />
 
       <div className="surface-panel rounded-2xl border-0 p-6">
         <div className="flex items-start gap-4">
@@ -49,6 +51,8 @@ export default function PersonalizeSettings() {
           </div>
         </div>
       </div>
+
+      <NotInterestedList />
 
       <div className="surface-panel rounded-2xl border-0 p-6">
         <div className="flex items-start gap-4">

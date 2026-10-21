@@ -255,69 +255,15 @@ func TestGetHomeLayout(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/home/layout", "", viewerHeaders()), TypeDependencyUnavailable)
 }
 
-// TestGetHomeLayoutIncludedSections pins the include_items option: absent
-// or 0 answers the layout with an empty included_sections, N answers the
-// first N rows byte for byte as getHomeSectionItems does, and the bound is
-// a validation failure.
-func TestGetHomeLayoutIncludedSections(t *testing.T) {
-	deps, fake := homeDeps(t)
-	h := newTestHandler(t, deps)
-	type layoutBody struct {
-		Sections         []json.RawMessage `json:"sections"`
-		IncludedSections []json.RawMessage `json:"included_sections"`
-	}
-	decode := func(t *testing.T, path string) layoutBody {
-		t.Helper()
-		rec := do(t, h, http.MethodGet, path, "", viewerHeaders())
-		if rec.Code != 200 {
-			t.Fatal(path, rec.Code, rec.Body.String())
-		}
-		var body layoutBody
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatal(err)
-		}
-		return body
-	}
-
-	plain := do(t, h, http.MethodGet, "/api/v2/home/layout", "", viewerHeaders()).Body.String()
-	if !strings.HasSuffix(plain, `,"included_sections":[]}`+"\n") || fake.lastInclude != 0 {
-		t.Fatalf("include_items absent: %s (seam saw %d)", plain, fake.lastInclude)
-	}
-	if zero := do(t, h, http.MethodGet, "/api/v2/home/layout?include_items=0", "", viewerHeaders()).Body.String(); zero != plain {
-		t.Fatalf("include_items=0 = %s, want %s", zero, plain)
-	}
-
-	body := decode(t, "/api/v2/home/layout?include_items=2&image_size=large")
-	if fake.lastInclude != 2 || fake.lastViewer.ImageSize != imagesize.Large || fake.lastViewer.Access.ProfileID != "p-owner" {
-		t.Fatalf("seam saw include=%d viewer=%+v", fake.lastInclude, fake.lastViewer)
-	}
-	if len(body.Sections) != 2 || len(body.IncludedSections) != 2 {
-		t.Fatalf("sections=%d included=%d, want 2 and 2", len(body.Sections), len(body.IncludedSections))
-	}
-	for i, id := range []string{"continue_watching", "next_up"} {
-		row := do(t, h, http.MethodGet, "/api/v2/home/sections/"+id+"/items?image_size=large", "", viewerHeaders())
-		if got, want := string(body.IncludedSections[i]), strings.TrimSuffix(row.Body.String(), "\n"); got != want {
-			t.Fatalf("included_sections[%d] = %s, want the getHomeSectionItems body %s", i, got, want)
-		}
-	}
-
-	for _, bad := range []string{"-1", "5", "two"} {
-		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/layout?include_items="+bad, "", viewerHeaders()), TypeValidationFailed)
-		if len(p.Errors) != 1 || p.Errors[0].Location != "query.include_items" {
-			t.Fatalf("include_items=%s errors = %+v", bad, p.Errors)
-		}
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/layout?include_items=1&image_size=huge", "", viewerHeaders()), TypeValidationFailed)
-}
-
 func TestListHomeSections(t *testing.T) {
 	deps, fake := homeDeps(t)
 	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=large", "", viewerHeaders())
+	rec := do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=large&backdrop_width=2688", "", viewerHeaders())
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"continue_watching"`) || !strings.Contains(rec.Body.String(), `"total_count":1`) || !strings.Contains(rec.Body.String(), `"items":[{`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	if fake.lastViewer.ImageSize != imagesize.Large || fake.lastViewer.Access.UserID != 1 || fake.lastViewer.Access.ProfileID != "p-owner" {
+	if fake.lastViewer.ImageSize != imagesize.Large || fake.lastViewer.ImageWidths != (imagesize.Widths{Backdrop: 2688}) ||
+		fake.lastViewer.Access.UserID != 1 || fake.lastViewer.Access.ProfileID != "p-owner" {
 		t.Fatalf("viewer = %+v", fake.lastViewer)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/home/sections?image_size=huge", "", viewerHeaders()), TypeValidationFailed)

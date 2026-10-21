@@ -56,7 +56,7 @@ section's libraries with the viewer's allowed libraries and applies the access
 filter's content allow-list and name prefix (`catalog.AppendContentScope`).
 
 Rows that sort by rating without requiring a vote count (format showcases,
-anniversaries, seasonal keyword picks) use `catalog.RatedOrder`: the weighted
+anniversaries) use `catalog.RatedOrder`: the weighted
 rating first, then titles with no known count by `rating_tmdb` and then
 `rating_imdb`, so a perfect score from a few votes never leads them either.
 The default Top Rated library rows are rule rows and keep the sort their

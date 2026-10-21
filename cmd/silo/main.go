@@ -30,6 +30,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -51,6 +52,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/blobgc"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
+	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
@@ -60,15 +62,18 @@ import (
 	"github.com/Silo-Server/silo-server/internal/dashmetrics"
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/extrastills"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
+	"github.com/Silo-Server/silo-server/internal/lantls"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
@@ -770,7 +775,14 @@ func main() {
 	// package-level global.
 	dataCipher, err := secret.New(bc.SecretKey)
 	if err != nil {
-		log.Fatalf("secret cipher: %v", err)
+		log.Fatalf("secret cipher: %v", err) //nolint:gocritic // exiting closes the debug listener with the process
+	}
+	// The API listener also answers TLS on its own port, with a key derived
+	// from SECRET_KEY, so signed-in clients can use the server's local-network
+	// address over a channel they authenticate by pin (internal/lantls).
+	lanTLS, err := lantls.New(bc.SecretKey)
+	if err != nil {
+		log.Fatalf("local network TLS: %v", err)
 	}
 
 	// Step 2: Connect to PostgreSQL (bootstrap pool with default max connections)
@@ -784,25 +796,10 @@ func main() {
 
 	if *migrateStatus {
 		migCtx, migCancel := database.MigrationContext(ctx)
-		statuses, statusErr := database.MigrationStatuses(migCtx, pool, migrations.FS, "sql")
+		statusErr := database.PrintMigrationStatus(migCtx, pool, migrations.FS, "sql", os.Stdout)
 		migCancel()
 		if statusErr != nil {
 			log.Fatalf("failed to read migration status: %v", statusErr)
-		}
-
-		fmt.Printf("%-8s %8s %-25s %s\n", "STATE", "VERSION", "APPLIED_AT", "MIGRATION")
-		for _, status := range statuses {
-			appliedAt := "-"
-			if !status.AppliedAt.IsZero() {
-				appliedAt = status.AppliedAt.UTC().Format(time.RFC3339)
-			}
-			source := status.Source
-			if source != "" {
-				source = filepath.Base(source)
-			} else {
-				source = "-"
-			}
-			fmt.Printf("%-8s %8d %-25s %s\n", status.State, status.Version, appliedAt, source)
 		}
 		return
 	}
@@ -824,10 +821,7 @@ func main() {
 
 	if *migrateOnly {
 		migCtx, migCancel := database.MigrationContext(ctx)
-		migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql")
-		if migErr == nil {
-			migErr = ensureAuditDetailIndexes(migCtx, pool)
-		}
+		migErr := database.MigrateOnly(migCtx, pool, migrations.FS, "sql")
 		migCancel()
 		if migErr != nil {
 			log.Fatalf("failed to run migrations: %v", migErr)
@@ -845,10 +839,7 @@ func main() {
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	if isPrimaryNode {
 		migCtx, migCancel := database.MigrationContext(ctx)
-		migErr := database.RunMigrations(migCtx, pool, migrations.FS, "sql")
-		if migErr == nil {
-			migErr = ensureAuditDetailIndexes(migCtx, pool)
-		}
+		migErr := database.MigrateOnly(migCtx, pool, migrations.FS, "sql")
 		if migErr != nil {
 			migCancel()
 			log.Fatalf("failed to run migrations: %v", migErr)
@@ -937,6 +928,12 @@ func main() {
 	// the recommendations engine: forgetting the builder call at a construction
 	// site fails silently (unrated titles hidden, no error).
 	unratedContent := config.NewUnratedContentPolicy(settingsRepo)
+	// One snapshot of the administrator's setting defaults (the Next Up and
+	// title-art defaults), shared by every resolver on this node so Home,
+	// Jellyfin clients and the settings pages agree. Admin writes refresh it in
+	// the router; other nodes' writes refresh it from the settings-changed event
+	// subscribed below, before clients are told to re-read.
+	adminDefaults := config.NewAdminDefaults(settingsRepo)
 	nodeID := resolveNodeIdentity()
 	// Lease a Sonyflake machine ID before anything generates IDs, so replicas
 	// sharing this database never share one. Only primary nodes mint IDs, and
@@ -1000,7 +997,16 @@ func main() {
 
 	mode := cfg.Server.Mode
 	maybeApplyPostgresTuning(ctx, pool, cfg.Database.MaxConnections, mode)
-	slog.Info("silo starting", "mode", mode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel, "node_id", nodeID)
+	queryAttribution := "off"
+	if queryattr.Initialize() {
+		queryAttribution = "on"
+	}
+	queryRun := uuid.NewString()
+	if isPrimaryNode && queryattr.Enabled() {
+		queryattr.RegisterMetrics(prometheus.DefaultRegisterer)
+	}
+	slog.Info("silo starting", "mode", mode, "listen", cfg.Server.Listen, "log_level", cfg.Server.LogLevel, "node_id", nodeID,
+		"query_attribution", queryAttribution, "query_run", queryRun)
 
 	appCtx, appCancel := context.WithCancel(ctx)
 	defer appCancel()
@@ -1070,6 +1076,10 @@ func main() {
 	// rows to other nodes' live tails, and the event bus closes last.
 	defer logStreamHub.Close()
 	defer stopOperationalLog()
+	if queryattr.Enabled() {
+		stopQuerySummary := startLogDrain(func(ctx context.Context) { queryattr.RunSummary(ctx, queryRun, buildinfo.Current().Display) })
+		defer stopQuerySummary()
+	}
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
 	if mode == "proxy" || mode == "transcode" {
@@ -1212,6 +1222,11 @@ func main() {
 		return
 	}
 
+	// Keep the administrator defaults fresh without waiting for a request.
+	// Started past the proxy/transcode return: those nodes never resolve a
+	// viewer's settings, so polling there would read for nothing.
+	go adminDefaults.Run(appCtx)
+
 	// Hot-reload config watcher for integrated/api mode. Reloads on
 	// EventSettingsChanged (Redis) with a 60s poll fallback, so settings
 	// changes apply without restart even on Redis-less deployments. The
@@ -1279,6 +1294,8 @@ func main() {
 	// OnServerSettingUpdated closure, which only runs on admin requests after
 	// startup completes.
 	var ipResolver *clientip.Resolver
+	// Assigned below when recommendations start; nil (a no-op) otherwise.
+	var settingsRecWorker *recommendations.Worker
 	var shutdownWork []<-chan struct{}
 	registerShutdownWork := func(done <-chan struct{}) {
 		shutdownWork = append(shutdownWork, done)
@@ -1293,6 +1310,7 @@ func main() {
 	var shuttingDown atomic.Bool
 	deps := api.Dependencies{
 		ShuttingDown:                 shuttingDown.Load,
+		AdminDefaults:                adminDefaults,
 		SubtitlePlaySync:             subtitlePlaySync,
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
@@ -1333,6 +1351,11 @@ func main() {
 				if loadErr := ipResolver.ReloadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
 					slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", loadErr)
 				}
+			}
+			// Cached recommendation rows of profiles with a rating ceiling
+			// are built under the unrated-content decision.
+			if key == config.AccessUnratedContentSettingKey {
+				settingsRecWorker.NotifyUnratedContentChanged(context.Background(), config.UnratedContentCacheTTL+time.Second)
 			}
 			// Nudge the hot-reload watcher so same-process settings changes
 			// apply immediately even without Redis (the event bus is a no-op
@@ -1606,6 +1629,7 @@ func main() {
 	// revoke, status pushes) and all three listeners (token validation).
 	networkAccess := netaccess.NewBroker()
 	deps.NetworkAccess = networkAccess
+	deps.LocalTLSPin = lanTLS.Pin()
 	if deps.DB != nil {
 		pluginCacheDir := resolvePluginCacheDir()
 		repositoryStore := plugins.NewRepositoryStore(deps.DB)
@@ -1981,15 +2005,15 @@ func main() {
 		}
 		if deps.Blobs.Assets != nil {
 			imageResolver.SetArtworkResolver(deps.ArtworkResolver)
-			// Local storage publishes with an atomic rename, so the catalog
-			// can trust the manifest as written. Only external delivery (a
-			// public or token-authenticated read endpoint in front of S3)
-			// can lag behind a write and needs the verified-keys lookup.
-			if deps.ArtworkDelivery.External {
-				imageResolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(
-					deps.DB, deps.ArtworkDelivery.Scope, true,
-				))
-			}
+			// Every backend reads the publication manifest, because a key the
+			// catalog holds can name a rung its revision predates: after a
+			// ladder change, existing artwork lacks the new widest rung until
+			// the ladder backfill regenerates it. Only external delivery (a
+			// public or token-authenticated read endpoint in front of S3) can
+			// also lag behind a write, so only it runs the verifier.
+			imageResolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(
+				deps.DB, deps.ArtworkDelivery.Scope, deps.ArtworkDelivery.External,
+			))
 		}
 		deps.ImageResolver = imageResolver
 		deps.PluginImageResolver = imageResolver
@@ -2048,6 +2072,11 @@ func main() {
 			personRepo,
 			deps.FileRepo, skippedRootRepo, staleIDRepo, rootClaimRepo,
 		)
+		// Catalog merges and splits mark stale the recommendations of the
+		// profiles whose user state they moved.
+		if cfg.Recommendations.Enabled && deps.DB != nil {
+			metadataService.SetRecommendationStaler(recommendations.NewRepo(deps.DB))
+		}
 		// Drop the resolved-chain cache whenever a plugin is installed, enabled,
 		// disabled, updated, or uninstalled. The installation-enabled check is
 		// served from the plugins service's in-memory cache (invalidated on the
@@ -2398,10 +2427,10 @@ func main() {
 		profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
 		var notificationScopes notifications.ScopeResolver
 		if policySystem != nil {
-			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 		} else {
 			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 		}
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
@@ -2512,7 +2541,7 @@ func main() {
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).
-			WithRatingStore(catalog.NewRatingsRepo(deps.DB), recommendations.NewRepo(deps.DB)).
+			WithRatingStore(catalog.NewRatingsRepo(deps.DB)).
 			WithDroppedStore(notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), notificationSystem))
 		backgroundInit = append(backgroundInit, func(ctx context.Context) {
 			if compatTerminalRecoveryReady != nil {
@@ -2695,7 +2724,19 @@ func main() {
 			catalog.NewPersonRepository(deps.DB),
 			userStoreProvider,
 			cfg.Recommendations,
-		).WithUnratedContentPolicy(unratedContent)
+		).WithUnratedContentPolicy(unratedContent).
+			WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
+		if userStoreProvider != nil {
+			// Cached rows are built under the scope the API resolves for the
+			// profile's own requests, so reads do not filter them down.
+			recUserRepo := auth.NewUserRepository(deps.DB)
+			if policySystem != nil {
+				recEngine.WithScopeResolver(policy.NewViewerResolver(recUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
+			} else {
+				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+				recEngine.WithScopeResolver(access.NewResolver(recUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
+			}
+		}
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
 
@@ -2711,7 +2752,31 @@ func main() {
 		if err != nil {
 			slog.Error("failed to create recommendation worker", "error", err)
 		} else {
+			recWorker.WithJobHistory(taskrepository.NewPgExecutionRepository(deps.DB)).
+				WithPolicyCheck(policySystem.Current).
+				WithSavedConfig(func(ctx context.Context) (config.RecommendationsConfig, error) {
+					saved, err := settingsRepo.GetAll(ctx)
+					if err != nil {
+						return config.RecommendationsConfig{}, err
+					}
+					savedCfg, err := config.LoadFromDB(saved)
+					if err != nil {
+						return config.RecommendationsConfig{}, err
+					}
+					return savedCfg.Recommendations, nil
+				})
 			deps.RecWorker = recWorker
+			settingsRecWorker = recWorker
+			// Watch-provider syncs rebuild a profile's recommendations once
+			// per run that imported something.
+			if watchProviderService != nil {
+				watchProviderService.WithSignalsChangedNotifier(recWorker)
+			}
+			// A scope policy can change every profile's scope, and cached
+			// rows are built under it. The first node to load a new policy
+			// generation marks every profile stale; refreshes wait until
+			// their node has loaded it (WithPolicyCheck above).
+			policySystem.OnChangeApplied(recWorker.NotifyPolicyChanged)
 		}
 	}
 
@@ -2735,6 +2800,16 @@ func main() {
 		}
 		if loadErr := ipResolver.ReloadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
 			slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", loadErr)
+		}
+	})
+	// Another node's admin write of an administrator default: reload this
+	// node's snapshot. Its own subscription, so a slow settings read never
+	// holds up the trusted-proxy reload above. The writing node reloads before
+	// it publishes the client event; here the two can race, which the TTL and
+	// the web client's second re-read cover.
+	_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+		if event.Type == cache.EventSettingsChanged {
+			adminDefaults.Changed(context.Background(), event.Payload)
 		}
 	})
 	// The config watcher covers the Redis-less poll/RequestReload path, so
@@ -2859,6 +2934,7 @@ func main() {
 	var collectionSyncScheduler *catalog.CollectionSyncScheduler
 	var userCollectionScheduler *usercollections.Scheduler
 	var trendingRefresher *sections.TrendingRefresher
+	var seasonalListRefresher *sections.SeasonalListRefresher
 	if needsWorkers && deps.DB != nil {
 		collectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
 		collItemRepo := catalog.NewItemRepository(deps.DB)
@@ -2870,16 +2946,17 @@ func main() {
 
 		// The trending refresher reuses the section repo (to find used source/
 		// window combos beyond the calendar's fixed feed), a snapshot repo, an
-		// item repo (external-ID matching), and the TMDB fetcher. The Trakt fetcher needs settingsRepo and is
-		// propagated onto deps.TrendingRefresher later in router.go.
+		// item repo (external-ID matching), and the TMDB fetcher.
+		sectionDemand := sections.NewSectionDemandLister(sectionRepo, auth.NewUserRepository(deps.DB), userStoreProvider)
 		trendingRefresher = sections.NewTrendingRefresher(
-			sections.NewTrendingDemandLister(sectionRepo, auth.NewUserRepository(deps.DB), userStoreProvider),
+			sectionDemand,
 			sections.NewTrendingSnapshotRepository(pool),
 			catalog.NewItemRepository(deps.DB),
 			collectionService.TMDBCollections,
-			collectionService.TraktCollections,
 		)
 		deps.TrendingRefresher = trendingRefresher
+		seasonalListRefresher = sections.NewSeasonalListRefresher(sectionDemand, sections.NewSeasonalListRepository(pool))
+		deps.SeasonalListRefresher = seasonalListRefresher
 
 		if deps.UserStoreProvider != nil {
 			// Imports fill their item limit with titles their owner profile
@@ -2887,10 +2964,10 @@ func main() {
 			// so the owner resolver is wired here, not in the router.
 			var ownerScopes scopeResolver
 			if policySystem != nil {
-				ownerScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+				ownerScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				ownerScopes = access.NewResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+				ownerScopes = access.NewResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 			}
 			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, usercollections.NewOwnerAccess(ownerScopes), nil, slog.Default())
 			userSync.TMDBCollections = collectionService.TMDBCollections
@@ -2899,8 +2976,6 @@ func main() {
 			// here; the router gives it its generator.
 			deps.PersonalCollectionCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
 			userSync.Collages = deps.PersonalCollectionCollages
-			// Trakt fetchers are wired in router.go (they need settingsRepo);
-			// router.go propagates them onto userSync once configured.
 			userCollectionScheduler = usercollections.NewScheduler(deps.DB, userSync, slog.Default())
 			deps.UserCollectionSync = userSync
 			deps.UserCollectionScheduler = userCollectionScheduler
@@ -3017,6 +3092,9 @@ func main() {
 			}
 		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexerFromSettings(deps.DB, settingsRepo, catalogSearchStartupSettings)
+		if recEngine != nil {
+			catalogSearchIndexer.WithSemanticModelProvider(recEngine)
+		}
 		taskMgr.Register(tasks.NewSyncCatalogSearchIndexTask(catalogSearchIndexer))
 		taskMgr.Register(tasks.NewRebuildCatalogSearchIndexTask(catalogSearchIndexer))
 		maintenanceSteps = append(maintenanceSteps, tasks.NewCatalogSearchEventRetentionTask(catalog.NewSearchIndexEventRepository(deps.DB)))
@@ -3033,6 +3111,13 @@ func main() {
 		}
 		if chapterBackfiller, ok := deps.ChapterThumbnailQueuer.(*chapterthumbs.Service); ok {
 			taskMgr.Register(tasks.NewChapterThumbnailBackfillTask(chapterBackfiller, 25))
+			// Local extras without an image beside them get a frame through the
+			// same extractor, in every library.
+			stillCacher := imagecache.New(deps.Blobs.Assets)
+			stillCacher.SetArtworkRevisionTracker(catalog.NewArtworkRevisionTracker(deps.DB))
+			taskMgr.Register(tasks.NewGenerateExtraStillsTask(
+				extrastills.NewGenerator(deps.DB, deps.FileRepo, chapterBackfiller, stillCacher), 200,
+			))
 		}
 		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
@@ -3169,6 +3254,19 @@ func main() {
 			)
 			taskMgr.Register(cacheImagesTask)
 			taskMgr.Register(tasks.NewBackfillMetadataImagesTask(metadataImageCacheProcessor))
+			if releaser := metadata.NewStoredArtworkReleaser(deps.DB); releaser != nil {
+				taskMgr.Register(tasks.NewReleaseStoredArtworkTask(releaser))
+				// Turning caching off releases stored artwork now, not at the
+				// next daily pass.
+				configWatcher.OnChange(func(previous, updated *config.Config) {
+					if previous == nil || !previous.Metadata.CacheImages || updated.Metadata.CacheImages {
+						return
+					}
+					if _, err := taskMgr.StartTask(tasks.ReleaseStoredArtworkTaskKey); err != nil {
+						slog.Debug("metadata: stored artwork release not started", "error", err)
+					}
+				})
+			}
 		}
 		if deps.Blobs.Assets != nil {
 			identity := deps.Blobs.Assets.Identity()
@@ -3215,6 +3313,9 @@ func main() {
 		if trendingRefresher != nil {
 			taskMgr.Register(tasks.NewRefreshTrendingDiscoverTask(trendingRefresher))
 		}
+		if seasonalListRefresher != nil {
+			taskMgr.Register(tasks.NewRefreshSeasonalListsTask(seasonalListRefresher))
+		}
 		taskMgr.Register(tasks.NewRefreshAnimeIDsTask(animeids.NewRefresher(deps.DB)))
 		if userCollectionScheduler != nil {
 			taskMgr.Register(tasks.NewSyncUserCollectionsTask(userCollectionScheduler))
@@ -3246,10 +3347,10 @@ func main() {
 			profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
 			var reconcileResolver scopeResolver
 			if policySystem != nil {
-				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 			}
 			requestReconcileSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: reconcileResolver})
 		}
@@ -3289,7 +3390,11 @@ func main() {
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
 		historyResolver := watchstate.NewStableIdentityResolver(nil, reconcileEpisodeRepo, reconcileProviderIDRepo)
 		historyReconciler := watchstate.NewHistoryReconciler(deps.DB, historyResolver)
-		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(metadata.NewProviderIDIntegrityRepairer(deps.DB), historyReconciler))
+		providerIDRepairer := metadata.NewProviderIDIntegrityRepairer(deps.DB)
+		if recWorker != nil {
+			providerIDRepairer.WithRecommendationStaler(recommendations.NewRepo(deps.DB))
+		}
+		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(providerIDRepairer, historyReconciler))
 		taskMgr.Register(tasks.NewReconcileWatchHistoryTask(historyReconciler))
 		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
 		if audiobookEnricher != nil {
@@ -3365,9 +3470,9 @@ func main() {
 		}
 		var absScopeResolver scopeResolver
 		if policySystem != nil {
-			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 		} else {
-			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 		}
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
@@ -3403,9 +3508,8 @@ func main() {
 		}
 	}
 	// The revoking transaction deletes the account's stored
-	// Jellyfin-compatible sessions, but every replica caches them in memory
-	// and serves a cached one without reading the database, so a revocation
-	// is announced on the admin channel for each replica to drop its copies.
+	// Jellyfin-compatible sessions. Persistent lookups always check those
+	// rows; the admin event also lets each replica discard its cached copies.
 	if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
 		if event.Type != cache.EventUserSessionsRevoked {
 			return
@@ -3534,7 +3638,8 @@ func main() {
 		}
 		adminJobRunner = adminjob.NewRunner(
 			adminjob.NewRepository(deps.DB),
-			catalogseed.NewService(deps.DB, catalog.NewPersonRepository(deps.DB), recommendations.NewRepo(deps.DB)),
+			catalogseed.NewService(deps.DB, catalog.NewPersonRepository(deps.DB), recommendations.NewRepo(deps.DB)).
+				WithEmbeddingModel(cfg.Recommendations.EmbeddingModel),
 			artifactStore,
 			itemRefreshExecutor,
 			libraryRefreshExecutor,
@@ -3555,11 +3660,13 @@ func main() {
 			recWorker.Start()
 			defer recWorker.Stop()
 
-			// Check if this is first run (no embeddings yet).
-			embCount, _ := recommendations.NewRepo(deps.DB).EmbeddingCount(appCtx)
-			if embCount == 0 {
-				slog.Info("first run detected, triggering initial embedding")
-				recWorker.RunEmbeddingsNow()
+			// Resume a first or interrupted backfill now rather than at the
+			// next catch-up tick.
+			if needed, err := recEngine.NeedsEmbedding(appCtx); err != nil {
+				slog.WarnContext(appCtx, "checking for items that need embeddings failed", "component", "recommendations", "error", err)
+			} else if needed {
+				slog.InfoContext(appCtx, "items need embeddings; starting the embedding catch-up", "component", "recommendations")
+				recWorker.EmbedMissingNow()
 			}
 		}
 
@@ -3578,6 +3685,7 @@ func main() {
 	var compatSrv *http.Server
 	if (mode == "integrated" || mode == "api") && cfg.JellyfinCompat.Enabled && cfg.JellyfinCompat.Listen != "" {
 		compatDeps := jellycompat.Dependencies{
+			AdminDefaults:        adminDefaults,
 			ArtworkHandler:       apiv2.NewArtworkHandler(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair),
 			Config:               cfg,
 			AppContext:           appCtx,
@@ -3594,6 +3702,7 @@ func main() {
 			JWTSecret:            cfg.Auth.JWTSecret,
 			RecWorker:            recWorker,
 			FrontendFS:           deps.FrontendFS,
+			ArtworkStore:         deps.Blobs.Assets,
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
 			RecipeNodeStore:  noderecipe.NewStore(apiRedisClient, 0),
@@ -3683,6 +3792,23 @@ func main() {
 
 			compatDeps.SubtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 
+			// /Movies/Recommendations reads the cached rows the native API
+			// reads. With recommendations disabled it has no reader and
+			// answers an empty list, so rows cached before are not served.
+			if cfg.Recommendations.Enabled {
+				var compatRecRefresh recommendations.ReadRefreshRequester
+				if recWorker != nil {
+					compatRecRefresh = recWorker
+				}
+				compatDeps.RecommendationReader = recommendations.NewReader(recommendations.NewRepo(deps.DB), catalog.NewRatingsRepo(deps.DB), compatRecRefresh, userStoreProvider).
+					WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
+			}
+			// /Items/{id}/Similar ranks by embeddings when recommendations
+			// are enabled, and by genre otherwise.
+			if recEngine != nil {
+				compatDeps.Recommender = recEngine
+			}
+
 			// Construct auth service for jellycompat login.
 			userRepo := auth.NewUserRepository(deps.DB)
 			compatDeps.APIKeyValidator = auth.NewAPIKeyRepository(deps.DB)
@@ -3725,7 +3851,7 @@ func main() {
 						nil, // profile tokens unused: compat login already verifies PINs
 						policySystem.PDP(),
 						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent)
+					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 				} else {
 					// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 					compatScopeResolver = access.NewResolver(
@@ -3733,7 +3859,7 @@ func main() {
 						userStoreProvider,
 						nil, // profile tokens unused: compat login already verifies PINs
 						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent)
+					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
 				}
 				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
 				compatDeps.PlaybackScopeResolver = compatScopeResolver
@@ -3798,7 +3924,7 @@ func main() {
 	} else {
 		go func() {
 			slog.Info("HTTP server listening", "addr", cfg.Server.Listen)
-			if serveErr := srv.Serve(apiListener); serveErr != nil && serveErr != http.ErrServerClosed {
+			if serveErr := srv.Serve(lantls.NewListener(apiListener, lanTLS.Config(), 0)); serveErr != nil && serveErr != http.ErrServerClosed {
 				errCh <- fmt.Errorf("HTTP server error: %w", serveErr)
 			}
 		}()
@@ -4436,6 +4562,14 @@ func replaceWatchSyncPluginProviders(
 		if installation == nil || installation.IsBuiltin() {
 			continue
 		}
+		if watchsync.RetiredPlugin(installation.PluginID) {
+			slog.WarnContext(ctx, "skip retired watch sync plugin; Silo no longer supports its provider",
+				"component", "app",
+				"installation_id", installation.ID,
+				"plugin_id", installation.PluginID,
+			)
+			continue
+		}
 		siloManaged, err := service.InstalledFromSiloRepository(ctx, installation)
 		if err != nil {
 			// Registering a first-party plugin under a per-installation key
@@ -4834,9 +4968,4 @@ type audiobooksSettingsAdapter struct {
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {
 	return a.repo.Get(ctx, key)
-}
-
-func ensureAuditDetailIndexes(ctx context.Context, pool *pgxpool.Pool) error {
-	return partman.NewManager(pool, "activity_log", partman.Weekly, 2).EnsureIndexes(ctx,
-		"activity_log_action_time_idx", "activity_log_target_time_idx")
 }

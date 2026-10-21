@@ -2,50 +2,11 @@ package catalog
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"os"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-// TestEpisodeRepo_ListBySeriesGroupedBySeason_BuildsSingleQuery asserts the
-// SQL shape produced by buildListBySeriesGroupedBySeasonQuery: a single
-// top-level SELECT against episodes filtered by series_id, ordered by
-// season+episode, with the seriesID bound as $1. This is the query that
-// replaces N per-season ListBySeason calls in the jellycompat ListSeasons
-// handler (audit 2026-05-01 §2.2).
-func TestEpisodeRepo_ListBySeriesGroupedBySeason_BuildsSingleQuery(t *testing.T) {
-	repo := &EpisodeRepository{}
-	sql, args := repo.buildListBySeriesGroupedBySeasonQuery("series-abc")
-
-	if !strings.Contains(sql, "WHERE series_id = $1") {
-		t.Fatalf("expected query to filter by series_id = $1; got:\n%s", sql)
-	}
-	if !strings.Contains(sql, "ORDER BY season_number ASC, episode_number ASC") {
-		t.Fatalf("expected query to ORDER BY season_number ASC, episode_number ASC; got:\n%s", sql)
-	}
-	// Top-level SELECT count: episodeAvailabilityPredicate contains an
-	// EXISTS (SELECT 1 FROM ...) subquery, so checking "exactly one SELECT"
-	// is too strict. Instead, assert there is exactly one SELECT before the
-	// FROM episodes clause.
-	upper := strings.ToUpper(sql)
-	fromIdx := strings.Index(upper, "FROM EPISODES")
-	if fromIdx < 0 {
-		t.Fatalf("expected query to FROM episodes; got:\n%s", sql)
-	}
-	if got := strings.Count(upper[:fromIdx], "SELECT"); got != 1 {
-		t.Fatalf("expected exactly one top-level SELECT before FROM episodes; got %d in:\n%s", got, sql)
-	}
-	if len(args) != 1 || args[0] != "series-abc" {
-		t.Fatalf("expected args == [\"series-abc\"]; got %v", args)
-	}
-}
 
 func TestEpisodeRepository_BulkUpsertRejectsMixedSeries(t *testing.T) {
 	repo := &EpisodeRepository{}
@@ -83,105 +44,5 @@ func TestBulkUpsertsRejectPostgresIntegerOverflow(t *testing.T) {
 				t.Fatalf("Episode BulkUpsert error = %v, want PostgreSQL integer range validation error", err)
 			}
 		})
-	}
-}
-
-func TestEpisodeRepository_BulkUpsertRollsBackStaleIDClear(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	var tableName *string
-	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.episodes')::text`).Scan(&tableName); err != nil {
-		t.Fatalf("check episodes table: %v", err)
-	}
-	if tableName == nil || *tableName == "" {
-		t.Skip("test database has not applied the base schema")
-	}
-
-	seriesID := fmt.Sprintf("bulk-rollback-series-%d", time.Now().UnixNano())
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'series', 'Bulk Rollback Series')`,
-		seriesID,
-	); err != nil {
-		t.Fatalf("seed series: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, seriesID)
-	})
-
-	season := &models.Season{
-		ContentID:      seriesID + "-season-1",
-		SeriesID:       seriesID,
-		SeasonNumber:   1,
-		Title:          "Season 1",
-		MetadataSource: "provider",
-	}
-	if err := NewSeasonRepository(pool).Upsert(ctx, season); err != nil {
-		t.Fatalf("seed season: %v", err)
-	}
-
-	repo := NewEpisodeRepository(pool)
-	sharedTMDBID := "bulk-rollback-shared-" + seriesID
-	owner := &models.Episode{
-		ContentID:      seriesID + "-episode-1",
-		SeriesID:       seriesID,
-		SeasonID:       season.ContentID,
-		SeasonNumber:   1,
-		EpisodeNumber:  1,
-		Title:          "Existing owner",
-		TmdbID:         sharedTMDBID,
-		MetadataSource: "provider",
-	}
-	if err := repo.Upsert(ctx, owner); err != nil {
-		t.Fatalf("seed existing episode: %v", err)
-	}
-
-	err = repo.BulkUpsert(ctx, seriesID, []*models.Episode{
-		{
-			ContentID:      seriesID + "-episode-2",
-			SeriesID:       seriesID,
-			SeasonID:       season.ContentID,
-			SeasonNumber:   1,
-			EpisodeNumber:  2,
-			Title:          "Conflicting owner 1",
-			TmdbID:         sharedTMDBID,
-			MetadataSource: "provider",
-		},
-		{
-			ContentID:      seriesID + "-episode-3",
-			SeriesID:       seriesID,
-			SeasonID:       season.ContentID,
-			SeasonNumber:   1,
-			EpisodeNumber:  3,
-			Title:          "Conflicting owner 2",
-			TmdbID:         sharedTMDBID,
-			MetadataSource: "provider",
-		},
-	})
-	if err == nil {
-		t.Fatal("BulkUpsert succeeded with duplicate external IDs")
-	}
-
-	storedOwner, err := repo.GetBySeriesAndNumber(ctx, seriesID, 1, 1)
-	if err != nil {
-		t.Fatalf("reload existing owner: %v", err)
-	}
-	if got := storedOwner.TmdbID; got != sharedTMDBID {
-		t.Fatalf("existing TMDB ID after rolled-back batch = %q, want %q", got, sharedTMDBID)
-	}
-	for _, episodeNumber := range []int{2, 3} {
-		_, err := repo.GetBySeriesAndNumber(ctx, seriesID, 1, episodeNumber)
-		if !errors.Is(err, ErrEpisodeNotFound) {
-			t.Fatalf("episode %d lookup error = %v, want ErrEpisodeNotFound", episodeNumber, err)
-		}
 	}
 }

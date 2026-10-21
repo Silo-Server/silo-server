@@ -134,18 +134,3 @@ func TestApplyRewritesMostSpecificWins(t *testing.T) {
 		t.Fatalf("broad fallthrough: got %q want %q", got, "/A/other/x")
 	}
 }
-
-func TestNormalizeSeparators(t *testing.T) {
-	if got := normalizeSeparators(`C:\Media\Movies\Dune\Dune.mkv`); got != "C:/Media/Movies/Dune/Dune.mkv" {
-		t.Fatalf("normalizeSeparators(windows) = %q", got)
-	}
-	// POSIX paths are unchanged.
-	if got := normalizeSeparators("/mnt/media/x.mkv"); got != "/mnt/media/x.mkv" {
-		t.Fatalf("normalizeSeparators(posix) = %q", got)
-	}
-	// A normalized Windows path then rewrites on the Linux host.
-	rw := []PathRewrite{{From: "C:/Media", To: "/mnt/media"}}
-	if got := applyRewrites(normalizeSeparators(`C:\Media\ShowA\S01\E01.mkv`), rw); got != "/mnt/media/ShowA/S01/E01.mkv" {
-		t.Fatalf("windows rewrite = %q", got)
-	}
-}

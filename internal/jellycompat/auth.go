@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 type sessionContextKey string
@@ -232,6 +233,11 @@ func safeTokenPrefix(token string) string {
 // serveWithSession injects the resolved compat session into the request context
 // and continues the handler chain.
 func serveWithSession(next http.Handler, w http.ResponseWriter, r *http.Request, session *Session) {
+	r = r.WithContext(ratelimit.WithAccount(r.Context(), session.StreamAppUserID))
+	serveWithSessionContext(next, w, r, session)
+}
+
+func serveWithSessionContext(next http.Handler, w http.ResponseWriter, r *http.Request, session *Session) {
 	attributeActivity(r, session)
 	ctx := context.WithValue(r.Context(), compatSessionKey, session)
 	ctx = playback.WithClientInfo(ctx, compatPlaybackClientInfo(r))
@@ -376,7 +382,10 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 					if ok {
 						slog.InfoContext(r.Context(), "jellycompat static stream granted without credentials",
 							"play_session", grant.ID, "user_id", grant.UserID, "item_id", itemID, "media_source_id", sourceID, "client_ip", clientIP, "peer", requestPeerHost(r), "negotiated_peer", grant.ClientPeer)
-						serveWithSession(next, w, r, session)
+						// This grant infers an owner from a shared address; the
+						// caller supplied no credential. Keep source/global
+						// protection without spending that owner's account budget.
+						serveWithSessionContext(next, w, r, session)
 						return
 					}
 				}

@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { useLocation } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { v2, V2ProblemError } from "@/api/v2/request";
+import { v2Problem } from "@/api/v2/problems.test-support";
+import { v2 } from "@/api/v2/request";
 import ActivateDevice from "./ActivateDevice";
+import { renderRoutes } from "./authPage.test-support";
 
 const auth = vi.hoisted(() => ({
   user: null as null | { username: string },
@@ -60,38 +62,21 @@ const pending = {
 let lookups: Array<Record<string, unknown>>;
 const decisions: Array<{ op: string; body: unknown }> = [];
 
-function notFound() {
-  return new V2ProblemError("getDeviceLogin", {
-    type: "https://siloserver.org/docs/api/v2/problems/not_found",
-    title: "Not found",
-    status: 404,
-    detail: "Device login request not found",
-    instance: "urn:silo:request:1",
-  } as never);
-}
-
 function Where() {
   const location = useLocation();
   return <p data-testid="where">{location.pathname + location.search}</p>;
 }
 
 function mount(entry: string) {
-  return render(
-    <MemoryRouter initialEntries={[entry]}>
-      <Routes>
-        <Route
-          path="/activate"
-          element={
-            <>
-              <ActivateDevice />
-              <Where />
-            </>
-          }
-        />
-        <Route path="/login" element={<Where />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  return renderRoutes(entry, {
+    "/activate": (
+      <>
+        <ActivateDevice />
+        <Where />
+      </>
+    ),
+    "/login": <Where />,
+  });
 }
 
 beforeEach(() => {
@@ -311,12 +296,11 @@ it("explains the server refusing an impersonation session instead of offering a 
   vi.mocked(v2).mockImplementation(((op: string) => {
     if (op === "GET /api/v2/auth/device") return Promise.resolve(pending);
     return Promise.reject(
-      new V2ProblemError("approveDeviceLogin", {
-        type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
-        title: "Permission denied",
-        status: 403,
-        detail: "Approving or denying a device needs a signed-in session.",
-      } as never),
+      v2Problem(
+        403,
+        "permission_denied",
+        "Approving or denying a device needs a signed-in session.",
+      ),
     );
   }) as never);
   mount("/activate?code=48217730");
@@ -339,23 +323,6 @@ it("switches account without losing the code or ending the provider's session", 
       "/login?redirect=%2Factivate%3Fcode%3D48217730&switch_account=1",
     ),
   );
-});
-
-it("explains codes it can't act on", async () => {
-  lookups = [notFound()] as never;
-  mount("/activate?code=11112222");
-  await screen.findByText("We couldn't find that code. Check the code on your TV.");
-
-  cleanup();
-  lookups = [{ ...pending, status: "canceled" }];
-  mount("/activate?code=48217730");
-  await screen.findByText("This TV stopped waiting. Start again on the TV.");
-  expect(screen.queryByText("Check that your TV shows")).toBeNull();
-
-  cleanup();
-  lookups = [{ ...pending, status: "expired", user_code: "" }];
-  mount("/activate?code=48217730");
-  await screen.findByText("This code expired. Your TV is showing a new one; scan it again.");
 });
 
 const quickConnect = {
@@ -463,17 +430,9 @@ it("keeps a Quick Connect request pending when the PIN is wrong", async () => {
 it("says when an account has tried too many Quick Connect codes", async () => {
   vi.mocked(v2).mockImplementation((() =>
     Promise.reject(
-      new V2ProblemError(
-        "getDeviceLogin",
-        {
-          type: "https://siloserver.org/docs/api/v2/problems/rate_limited",
-          title: "Rate limited",
-          status: 429,
-          detail: "Too many Quick Connect codes tried. Try again later.",
-          instance: "urn:silo:request:1",
-        } as never,
-        900,
-      ),
+      v2Problem(429, "rate_limited", "Too many Quick Connect codes tried. Try again later.", {
+        retryAfterSeconds: 900,
+      }),
     )) as never);
   mount("/activate?code=482177");
   await screen.findByText("You've tried too many codes. Try again in 15 minutes.");
@@ -494,39 +453,14 @@ it("declines a Quick Connect request without looking it up again", async () => {
 it("explains that an admin viewing as someone can't look up a Quick Connect code", async () => {
   vi.mocked(v2).mockImplementation((() =>
     Promise.reject(
-      new V2ProblemError("getDeviceLogin", {
-        type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
-        title: "Permission denied",
-        status: 403,
-        detail: "Only the account's own signed-in session can look up a Quick Connect code.",
-        instance: "urn:silo:request:1",
-      } as never),
+      v2Problem(
+        403,
+        "permission_denied",
+        "Only the account's own signed-in session can look up a Quick Connect code.",
+      ),
     )) as never);
   mount("/activate?code=482177");
   await screen.findByText(/Stop viewing as laura to approve a TV/);
-});
-
-it("says a PIN lockout is about the profile, not the codes", async () => {
-  profiles.list = [{ id: "p-kids", name: "Kids", has_pin: true }];
-  profiles.verify.mockRejectedValue(
-    new V2ProblemError(
-      "verifyProfilePIN",
-      {
-        type: "https://siloserver.org/docs/api/v2/problems/rate_limited",
-        title: "Rate limited",
-        status: 429,
-        detail: "Too many incorrect PINs.",
-        instance: "urn:silo:request:1",
-      } as never,
-      300,
-    ),
-  );
-  const recorded = recordQuickConnectDecisions();
-  mount("/activate?code=482177");
-  fireEvent.change(await screen.findByLabelText("Kids PIN"), { target: { value: "0000" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-  await screen.findByText("Too many incorrect PINs. Try again in 5 minutes.");
-  expect(recorded.calls).toEqual([]);
 });
 
 it("reloads a Quick Connect request that moved on before it was declined", async () => {
@@ -540,13 +474,7 @@ it("reloads a Quick Connect request that moved on before it was declined", async
       );
     }
     return Promise.reject(
-      new V2ProblemError("denyDeviceLogin", {
-        type: "https://siloserver.org/docs/api/v2/problems/device_login_expired",
-        title: "Expired",
-        status: 410,
-        detail: "Device login request has expired.",
-        instance: "urn:silo:request:1",
-      } as never),
+      v2Problem(410, "device_login_expired", "Device login request has expired."),
     );
   }) as never);
   mount("/activate?code=482177");

@@ -332,42 +332,6 @@ func TestEscalateRefusedProgressiveRemuxV3LeavesExecutableRoutesAlone(t *testing
 	}
 }
 
-// The capability fan-out costs a per-node HTTP round trip, so it must not run
-// for a planner that cannot consume the eligibility predicate it produces.
-func TestPlanNodeSessionV3SkipsCapabilityFanOutWithoutConsumer(t *testing.T) {
-	fetches := 0
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fetches++
-		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
-			{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
-		}})
-	}))
-	defer node.Close()
-
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.JWTSecret = "test-secret"
-	// Enumerates pooled nodes, but implements neither PlanSessionWith nor the
-	// local-egress selector.
-	handler.NodePlanner = enumeratingNodePlannerV3{
-		staticNodePlannerV3: staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: node.URL}}},
-		urls:                []string{node.URL},
-	}
-	plan := &playback.PlanV3{
-		PlanID:          "plan:no-consumer",
-		Delivery:        playback.DeliveryRemuxHLSV3,
-		Transformations: []playback.TransformationV3{{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3}},
-	}
-	for _, localEgress := range []bool{false, true} {
-		selected := handler.planNodeSessionV3(context.Background(), &playback.Session{ID: "session-no-consumer"}, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux}, localEgress)
-		if selected.TranscodeNode == nil || selected.TranscodeNode.URL != node.URL {
-			t.Fatalf("planner selection = %+v, want the static node", selected.TranscodeNode)
-		}
-	}
-	if fetches != 0 {
-		t.Fatalf("capability fan-out ran %d times for a planner that discards the predicate", fetches)
-	}
-}
-
 // software_video_decode_v1 is attempt-sticky like header-authenticated media: a
 // replan that sends an explicit feature list cannot drop it and silently
 // convert a direct route into a transcode.
@@ -380,12 +344,7 @@ func TestHandleReplanPlaybackV3PinsAttemptStickyFeatures(t *testing.T) {
 
 	start := v3HandlerStartRequest()
 	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureSoftwareVideoDecodeV3)
-	startRR := httptest.NewRecorder()
-	handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
-	var started playback.DecisionResponseV3
-	if startRR.Code != http.StatusCreated || json.Unmarshal(startRR.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
-		t.Fatalf("start status=%d body=%s", startRR.Code, startRR.Body.String())
-	}
+	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, start))
 
 	nextContext := start.ClientPlaybackContext
 	nextContext.Output.OutputContextID = "route-2"

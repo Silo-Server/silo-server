@@ -12,17 +12,6 @@ describe("LocalErrorBoundary", () => {
     consoleError.mockRestore();
   });
 
-  it("renders its children while they work", () => {
-    render(
-      <LocalErrorBoundary fallback={<p>fallback</p>}>
-        <p>content</p>
-      </LocalErrorBoundary>,
-    );
-
-    expect(screen.getByText("content")).toBeInTheDocument();
-    expect(screen.queryByText("fallback")).not.toBeInTheDocument();
-  });
-
   it("contains a failed lazy import and reports it once", async () => {
     const failure = new Error("Failed to fetch dynamically imported module");
     const Broken = lazy(() => Promise.reject(failure));

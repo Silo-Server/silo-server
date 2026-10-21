@@ -13,8 +13,11 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -40,11 +43,13 @@ type ImagesHandler struct {
 	detailSvc  *catalog.DetailService
 	// backdrops lists the backdrops after an item's primary for
 	// Backdrop/{index}; the detail service in production.
-	backdrops    extraBackdropSource
-	itemRepo     imageItemRepository
-	folderRepo   imageFolderRepository
-	seasonRepo   imageSeasonRepository
-	episodeRepo  imageEpisodeRepository
+	backdrops   extraBackdropSource
+	itemRepo    imageItemRepository
+	folderRepo  imageFolderRepository
+	seasonRepo  imageSeasonRepository
+	episodeRepo imageEpisodeRepository
+	// extraRepo resolves a local extra's image; nil serves none.
+	extraRepo    imageExtraRepository
 	accessFilter AccessFilterResolver
 	posterSigner LibraryPosterPresigner
 	presignTTL   time.Duration
@@ -61,6 +66,9 @@ type ImagesHandler struct {
 	// served straight from the embedded frontend assets. Without it those paths
 	// have no fetchable origin on the compat surface.
 	frontendFS fs.FS
+	// artworkStore decides which proxied URLs may reach the local network;
+	// see Dependencies.ArtworkStore.
+	artworkStore blobstore.Store
 }
 
 type extraBackdropSource interface {
@@ -85,6 +93,10 @@ type imageEpisodeRepository interface {
 	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
 }
 
+type imageExtraRepository interface {
+	GetByID(ctx context.Context, contentID string) (*models.MediaExtra, error)
+}
+
 type imageFolderRepository interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
 }
@@ -92,7 +104,7 @@ type imageFolderRepository interface {
 // NewImagesHandler creates a Jellyfin-compatible image route handler.
 func NewImagesHandler(content ContentService, codec *ResourceIDCodec, sessions *SessionStore, images *ImageCache, personRepo *catalog.PersonRepository, detailSvc *catalog.DetailService, itemRepo *catalog.ItemRepository, folderRepo *catalog.FolderRepository, seasonRepo *catalog.SeasonRepository, episodeRepo *catalog.EpisodeRepository, accessFilter AccessFilterResolver, posterSigner LibraryPosterPresigner, presignTTL time.Duration, imageTagSecret string, httpClient *http.Client) *ImagesHandler {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = newCompatImageClient()
 	}
 	// A nil concrete repository has to stay nil in the interface field, or the
 	// nil checks guarding the person route would see a non-nil interface holding
@@ -271,8 +283,8 @@ func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// Headshots ride the profile ladder ({500, 300}), not the poster ladder,
-	// which now carries a w780 rung. Resolving them as posters would name a
-	// profile/w780 key that is never generated — and the server-side ladder
+	// which carries wider rungs. Resolving them as posters would name a
+	// profile/w1000 key that is never generated — and the server-side ladder
 	// fallback deliberately skips profile, so nothing would rescue it.
 	resolvedImage := compatPresignImageWithExpiry(h.detailSvc, r.Context(), person.PhotoPath, artworkkey.ImageProfile, imageSize)
 	imageURL := resolvedImage.URL
@@ -334,9 +346,10 @@ func (h *ImagesHandler) resolveItemImageURLFromRepos(ctx context.Context, sessio
 	return h.resolveCatalogImageURL(ctx, contentID, imageType, compatBackdropIndex(r, imageType), compatRequestImageSize(r, imageType), &access)
 }
 
-// resolveCatalogImageURL resolves a movie, series, episode, or season image from
-// the catalog. A non-nil access filter limits it to what that viewer may see;
-// nil serves any item, as Jellyfin does for anonymous image GETs.
+// resolveCatalogImageURL resolves a movie, series, episode, season, or local
+// extra image from the catalog. A non-nil access filter limits it to what that
+// viewer may see; nil serves any item, as Jellyfin does for anonymous image
+// GETs.
 func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, imageType string, backdropIndex int, imageSize string, access *catalog.AccessFilter) (catalog.ResolvedImageURL, bool, error) {
 	switch imageType {
 	case "Primary", compatBackdropImageType, compatImageThumb, "Logo", compatImageBanner, compatImageArt, compatImageDisc:
@@ -410,7 +423,35 @@ func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, i
 		}
 	}
 
-	return catalog.ResolvedImageURL{}, false, nil
+	return h.resolveExtraImageURL(ctx, contentID, imageType, imageSize, ensureAccessible)
+}
+
+// resolveExtraImageURL resolves a local extra's image: its still, with its
+// parent's backdrop and logo filling in as for an episode. Access is the
+// parent's.
+func (h *ImagesHandler) resolveExtraImageURL(ctx context.Context, contentID, imageType, imageSize string, ensureAccessible func(*models.MediaItem) error) (catalog.ResolvedImageURL, bool, error) {
+	if h.extraRepo == nil || h.itemRepo == nil {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	extra, err := h.extraRepo.GetByID(ctx, contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrExtraNotFound) {
+			return catalog.ResolvedImageURL{}, false, nil
+		}
+		return catalog.ResolvedImageURL{}, false, wrapCatalogError(err)
+	}
+	parent, err := h.itemRepo.GetByID(ctx, extra.ParentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			return catalog.ResolvedImageURL{}, false, nil
+		}
+		return catalog.ResolvedImageURL{}, false, wrapCatalogError(err)
+	}
+	if err := ensureAccessible(parent); err != nil {
+		return catalog.ResolvedImageURL{}, false, err
+	}
+	imageURL := h.imageURLForItem(ctx, extra.StillPath, "still", parent.BackdropPath, parent.LogoPath, imageType, imageSize)
+	return imageURL, imageURL.URL != "", nil
 }
 
 // collectionArtworkKey returns the stored artwork reference for the requested
@@ -808,7 +849,8 @@ func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, im
 		return
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target.String(), nil)
+	ctx := artworkurl.FetchContext(r.Context(), h.artworkStore, target.String())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
 		return
@@ -817,7 +859,7 @@ func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, im
 
 	client := h.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		client = newCompatImageClient()
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -825,6 +867,14 @@ func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, im
 		return
 	}
 	proxyImage(w, resp)
+}
+
+// newCompatImageClient returns the client proxied images are fetched with.
+// Its netguard transport checks every address it dials, redirect hops
+// included, so a stored metadata-provider URL cannot reach the server's own
+// network; artworkurl.FetchContext trusts the artwork store's direct URLs.
+func newCompatImageClient() *http.Client {
+	return netguard.NewClient(30 * time.Second)
 }
 
 func parseRemoteImageURL(imageURL string) (*url.URL, error) {

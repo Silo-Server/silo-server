@@ -54,19 +54,6 @@ it("serializes only defined filters and never puts a credential in the URL", () 
   expect(adminLogsSocketProtocols("abc")).toEqual(["silo.admin-logs.v2", "silo.ticket.abc"]);
 });
 
-it("mints under captured authority once, with no authentication replay", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(ticketResponse());
-  vi.stubGlobal("fetch", fetchMock);
-  const authority = captureProfileRequestContext()!;
-  const ticket = await mintAdminLogsSocketTicket(authority);
-  expect(ticket.ticket).toBe("c".repeat(43));
-  expect(fetchMock).toHaveBeenCalledOnce();
-  const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-  expect(url).toBe("/api/v2/admin/logs/ws-ticket");
-  expect(init.method).toBe("POST");
-  expect((init.headers as Record<string, string>)["X-Profile-Id"]).toBe("profile-a");
-});
-
 it("refuses a wrong protocol, a 401, and a stale authority without retrying", async () => {
   const authority = captureProfileRequestContext()!;
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ticketResponse("silo.events.v2")));

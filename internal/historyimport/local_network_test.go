@@ -11,8 +11,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/netguard"
-	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
-	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
 type staticSettings map[string]string
@@ -218,71 +216,5 @@ func makeUserOneAdmin(t *testing.T, repo *Repository) {
 	addUserRoles(t, repo)
 	if _, err := repo.pool.Exec(t.Context(), `UPDATE users SET role = 'admin' WHERE id = 1`); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestLocalNetworkAccessTrustsOnlyEnabledAdmins(t *testing.T) {
-	repo := personalQueueRepository(t)
-	makeUserOneAdmin(t, repo)
-	if _, err := repo.pool.Exec(t.Context(), `INSERT INTO users(id, role, enabled) VALUES (3, 'admin', false)`); err != nil {
-		t.Fatal(err)
-	}
-	access := NewLocalNetworkAccess(staticSettings{}, repo)
-	for userID, want := range map[int]bool{1: true, 2: false, 3: false, 99: false} {
-		if got := access.Allowed(t.Context(), userID); got != want {
-			t.Errorf("user %d: Allowed = %v, want %v", userID, got, want)
-		}
-	}
-	// The setting extends the same trust to every account.
-	everyone := NewLocalNetworkAccess(staticSettings{SettingAllowPrivateDestinations: "true"}, repo)
-	if !everyone.Allowed(t.Context(), 2) {
-		t.Error("setting on: a non-admin account was refused")
-	}
-}
-
-// A run admitted while the setting was on must not reach the local server if
-// the admin turns the setting off before the run executes.
-func TestPersonalRunnerRereadsLocalNetworkPolicy(t *testing.T) {
-	repo := personalEffectRepository(t)
-	addUserRoles(t, repo)
-	var fetchCalls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/Users/AuthenticateByName" {
-			_, _ = w.Write([]byte(`{"AccessToken":"server-token","User":{"Id":"external"}}`))
-			return
-		}
-		fetchCalls.Add(1)
-		_, _ = w.Write([]byte(`{"Items":[]}`))
-	}))
-	defer upstream.Close()
-
-	admitCtx, stopAdmit := context.WithCancel(t.Context())
-	admitting := NewService(admitCtx, repo, pgstore.NewPostgresProvider(repo.pool))
-	admitting.SetLocalNetworkAccess(NewLocalNetworkAccess(staticSettings{SettingAllowPrivateDestinations: "true"}, repo))
-	run, err := admitting.CreateRun(t.Context(), 1, CreateRunInput{
-		Source: SourceTypeJellyfin, ProfileID: "p",
-		JellyfinBaseURL: upstream.URL, JellyfinUsername: "user", JellyfinPassword: "password",
-	})
-	stopAdmit()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, stop := context.WithCancel(t.Context())
-	defer stop()
-	observed := make(chan Run, 16)
-	runner := NewService(ctx, NewRepository(repo.pool, repo.cipher), pgstore.NewPostgresProvider(repo.pool))
-	runner.SetLocalNetworkAccess(NewLocalNetworkAccess(staticSettings{SettingAllowPrivateDestinations: "false"}, repo))
-	runner.SetStableIdentityResolver(watchstate.NewStableIdentityResolver(startupIdentityItems{}, nil, startupIdentityProviders{}))
-	runner.AddObserver(queueObserverFunc(func(run Run) { observed <- run }))
-	runner.StartBackgroundWork()
-
-	finished := waitPersonalTerminal(t, observed, run.ID)
-	if finished.Status != RunStatusFailed || finished.ErrorMessage != PrivateAddressMessage {
-		t.Fatalf("run = %s %q, want failed with the address message", finished.Status, finished.ErrorMessage)
-	}
-	if fetchCalls.Load() != 0 {
-		t.Fatalf("the local server received %d fetches after the setting was turned off", fetchCalls.Load())
 	}
 }

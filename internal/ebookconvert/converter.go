@@ -119,12 +119,12 @@ func NewConverter(ctx context.Context, opts Options) (*Converter, error) {
 	r := wazero.NewRuntimeWithConfig(ctx, cfg)
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, r); err != nil {
 		_ = r.Close(ctx)
-		return nil, fmt.Errorf("%w: instantiate wasi: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: instantiate wasi: %v", ErrUnavailable, err) //nolint:errorlint // callers classify by the sentinel; the wasm runtime error is only reported
 	}
 	compiled, err := r.CompileModule(ctx, mobitoolWasm)
 	if err != nil {
 		_ = r.Close(ctx)
-		return nil, fmt.Errorf("%w: compile module: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: compile module: %v", ErrUnavailable, err) //nolint:errorlint // callers classify by the sentinel; the wasm runtime error is only reported
 	}
 	return &Converter{
 		runtime:  r,
@@ -154,7 +154,7 @@ func (c *Converter) Convert(ctx context.Context, srcPath, dstPath string) error 
 	}
 	info, statErr := os.Stat(srcPath)
 	if statErr != nil {
-		return fmt.Errorf("%w: stat source: %v", ErrConversionFailed, statErr)
+		return fmt.Errorf("%w: stat source: %v", ErrConversionFailed, statErr) //nolint:errorlint // callers and the negative cache classify by the verdict sentinel; the cause is only reported
 	}
 	if info.Size() > c.opts.MaxSourceBytes {
 		return ErrSourceTooLarge
@@ -170,20 +170,20 @@ func (c *Converter) Convert(ctx context.Context, srcPath, dstPath string) error 
 	// Per-conversion scratch: in/ (read-only mount) and out/ (writable mount).
 	scratch, err := os.MkdirTemp(c.opts.WorkRoot, "ebookconvert-")
 	if err != nil {
-		return fmt.Errorf("%w: scratch: %v", ErrConversionFailed, err)
+		return fmt.Errorf("%w: scratch: %v", ErrConversionFailed, err) //nolint:errorlint // callers and the negative cache classify by the verdict sentinel; the cause is only reported
 	}
 	defer os.RemoveAll(scratch)
 
 	inDir := filepath.Join(scratch, "in")
 	outDir := filepath.Join(scratch, "out")
 	if err := os.MkdirAll(inDir, 0o755); err != nil {
-		return fmt.Errorf("%w: in dir: %v", ErrConversionFailed, err)
+		return fmt.Errorf("%w: in dir: %v", ErrConversionFailed, err) //nolint:errorlint // callers and the negative cache classify by the verdict sentinel; the cause is only reported
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return fmt.Errorf("%w: out dir: %v", ErrConversionFailed, err)
+		return fmt.Errorf("%w: out dir: %v", ErrConversionFailed, err) //nolint:errorlint // callers and the negative cache classify by the verdict sentinel; the cause is only reported
 	}
 	if err := copyFile(srcPath, filepath.Join(inDir, guestInputName)); err != nil {
-		return fmt.Errorf("%w: stage input: %v", ErrConversionFailed, err)
+		return fmt.Errorf("%w: stage input: %v", ErrConversionFailed, err) //nolint:errorlint // callers and the negative cache classify by the verdict sentinel; the cause is only reported
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
@@ -226,10 +226,10 @@ func (c *Converter) Convert(ctx context.Context, srcPath, dstPath string) error 
 		return fmt.Errorf("%w: output EPUB exceeds %d bytes", ErrConversionFailed, c.opts.MaxOutputBytes)
 	}
 	if err := validateEpub(producedEpub); err != nil {
-		return fmt.Errorf("%w: %v", ErrConversionFailed, err)
+		return fmt.Errorf("%w: %v", ErrConversionFailed, err) //nolint:errorlint // callers and the negative cache classify by the verdict sentinel; the cause is only reported
 	}
 	if err := moveFile(producedEpub, dstPath); err != nil {
-		return fmt.Errorf("%w: deliver output: %v", ErrConversionFailed, err)
+		return fmt.Errorf("%w: deliver output: %v", ErrConversionFailed, err) //nolint:errorlint // callers and the negative cache classify by the verdict sentinel; the cause is only reported
 	}
 	return nil
 }
@@ -273,7 +273,7 @@ func classifyRunError(parent, run context.Context, instErr error, timeout time.D
 			return fmt.Errorf("%w: mobitool exit %d: %s", ErrConversionFailed, exitErr.ExitCode(), trim(combined))
 		}
 	}
-	return fmt.Errorf("%w: run: %v", ErrConversionFailed, instErr)
+	return fmt.Errorf("%w: run: %v", ErrConversionFailed, instErr) //nolint:errorlint // callers and the negative cache classify by the verdict sentinel; the cause is only reported
 }
 
 // validateEpub confirms a well-formed EPUB OCF container: a zip whose first

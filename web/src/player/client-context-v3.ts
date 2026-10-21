@@ -13,6 +13,8 @@
  */
 
 import {
+  CLAIM_CLIENT_MANAGED_DYNAMIC_RANGE_V3,
+  CLAIM_CLIENT_SELECTED_AUDIO_TRACK_V3,
   PROTOCOL_V3,
   type ClientCodecCapabilitiesV3,
   type ClientPlaybackContextV3,
@@ -21,7 +23,13 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
+import {
+  onMeteredConnection,
+  readMeasuredBandwidthKbps,
+  readMeteredObservedLimitKbps,
+} from "./bandwidth-probe";
 import { isSafariBrowserV3 } from "./utils/hlsEngine";
+import type { EngineCapabilities } from "./engine/capabilities";
 
 /** App version reported to the server for diagnostics. */
 const WEB_APP_VERSION = "web";
@@ -30,14 +38,15 @@ const WEB_APP_VERSION = "web";
  * Subtitle capabilities of the web player, identical for every delivery class:
  * the server exposes external and embedded text as session-scoped sidecars,
  * which it renders as WebVTT or ASS via JASSUB (with container font
- * attachments). It has no bitmap subtitle renderer, so PGS/VOBSUB tracks must
- * still be burned in server-side.
+ * attachments). Embedded PGS arrives as a lossless `.sup` sidecar drawn by
+ * usePGSSubtitles. Embedded DVD/DVB bitmaps have no sidecar, so the server
+ * still burns them in; it refuses external bitmap files outright.
  */
 const WEB_SUBTITLE_CAPABILITIES: DeliverySubtitleCapabilitiesV3 = {
   embedded_text: true,
   sidecar_text: true,
   ass_styling: true,
-  embedded_bitmap: false,
+  embedded_bitmap: true,
   sidecar_bitmap: false,
   font_attachments: true,
 };
@@ -83,7 +92,7 @@ export interface WebCapabilityProbe {
   codecsAudio: string[];
   /** Audio codecs supported specifically inside progressive MP4 delivery. */
   progressiveCodecsAudio: string[];
-  /** Best-effort screen-derived resolution ceiling. */
+  /** Largest video size the browser decodes; never derived from the screen. */
   maxResolution: string;
   /** Best-effort HDR display detection. */
   hdr: boolean;
@@ -95,21 +104,37 @@ export interface WebCapabilityProbe {
   nativeHLS: boolean;
 }
 
+function union(...lists: readonly (readonly string[])[]): string[] {
+  return Array.from(new Set(lists.flat()));
+}
+
 /**
  * Builds the `client_capabilities` block. Every list is a flat declaration;
  * `codecs_video_hardware` mirrors `codecs_video` because a browser exposes no
  * way to tell software from hardware decode, and on the `declared` tier the
  * server treats the two lists identically.
+ *
+ * With the browser decode engine on, the device-level lists include what the
+ * engine adds. The server reads these lists for every route and then narrows
+ * each one by its delivery class, and only `original_http` carries the engine's
+ * additions, so remux and HLS routes are unaffected.
  */
-export function buildClientCapabilitiesV3(probe: WebCapabilityProbe): ClientCodecCapabilitiesV3 {
-  const codecsVideo = Array.from(new Set([...probe.codecsVideo, ...probe.progressiveCodecsVideo]));
+export function buildClientCapabilitiesV3(
+  probe: WebCapabilityProbe,
+  engine: EngineCapabilities | null = null,
+): ClientCodecCapabilitiesV3 {
+  const codecsVideo = union(
+    probe.codecsVideo,
+    probe.progressiveCodecsVideo,
+    engine?.videoCodecs ?? [],
+  );
   return {
     video_evidence: "declared",
     audio_evidence: "declared",
     codecs_video: codecsVideo,
     codecs_video_hardware: codecsVideo,
-    codecs_audio: probe.codecsAudio,
-    containers: probe.containers,
+    codecs_audio: union(probe.codecsAudio, engine?.audioCodecs ?? []),
+    containers: union(probe.containers, engine?.containers ?? []),
     max_resolution: probe.maxResolution,
     hdr: probe.hdr,
     hdr_details: probe.hdrDetails,
@@ -142,13 +167,40 @@ function buildDeliveryCapability(
 }
 
 /**
+ * The browser decode engine's additions to the `original_http` class: what it
+ * decodes on top of the media element, the audio track it can pick from the
+ * whole file, and, when its WebGPU presenter works and the display is SDR, HDR and
+ * Dolby Vision originals (see docs/architecture/web-decode-engine.md). The
+ * engine only presents SDR, so on an HDR display the claim stays off and HDR
+ * sources keep the routes that preserve HDR.
+ */
+function engineOriginalOverrides(
+  probe: WebCapabilityProbe,
+  original: Partial<DeliveryCapabilityV3>,
+  engine: EngineCapabilities,
+): Partial<DeliveryCapabilityV3> {
+  return {
+    ...original,
+    containers: union(probe.containers, engine.containers),
+    video_codecs: union(probe.codecsVideo, engine.videoCodecs),
+    audio_decode_codecs: union(probe.codecsAudio, engine.audioCodecs),
+    validated_claims: [
+      CLAIM_CLIENT_SELECTED_AUDIO_TRACK_V3,
+      ...(engine.hdr && !probe.hdr ? [CLAIM_CLIENT_MANAGED_DYNAMIC_RANGE_V3] : []),
+    ],
+  };
+}
+
+/**
  * Builds the `deliveries` map. `original_http` and `progressive` ride the
  * `<video>` element directly; `hls` uses hls.js where MSE is available and the
- * media element's native HLS implementation otherwise.
+ * media element's native HLS implementation otherwise. With the decode engine
+ * on, `original_http` also covers what the engine can play.
  */
 export function buildDeliveriesV3(
   probe: WebCapabilityProbe,
   userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "",
+  engine: EngineCapabilities | null = null,
 ): Partial<Record<DeliveryClassV3, DeliveryCapabilityV3>> {
   const nonProgressiveHDRDetails: HDRCapabilitiesV3 = {
     ...probe.hdrDetails,
@@ -167,10 +219,12 @@ export function buildDeliveriesV3(
   const progressiveHDRDetails = nativeHLSPreferred ? nonProgressiveHDRDetails : probe.hdrDetails;
   const hlsHDRDetails = nativeHLSPreferred ? probe.hdrDetails : nonProgressiveHDRDetails;
   const hlsVideoCodecs = nativeHLSPreferred ? probe.progressiveCodecsVideo : probe.codecsVideo;
+  const original: Partial<DeliveryCapabilityV3> = { hdr_details: nonProgressiveHDRDetails };
   return {
-    original_http: buildDeliveryCapability(probe, {
-      hdr_details: nonProgressiveHDRDetails,
-    }),
+    original_http: buildDeliveryCapability(
+      probe,
+      engine ? engineOriginalOverrides(probe, original, engine) : original,
+    ),
     progressive: buildDeliveryCapability(probe, {
       video_codecs: probe.progressiveCodecsVideo,
       audio_decode_codecs: probe.progressiveCodecsAudio,
@@ -187,45 +241,20 @@ export function buildDeliveriesV3(
 }
 
 /**
- * The slice of the Network Information API we use. It is not in the DOM lib
- * and is absent in Safari and Firefox, so everything here is best effort and
- * every reader tolerates `undefined`.
- */
-interface NetworkInformationLike {
-  saveData?: boolean;
-  downlink?: number;
-  type?: string;
-}
-
-function networkInformation(): NetworkInformationLike | undefined {
-  if (typeof navigator === "undefined") return undefined;
-  return (navigator as Navigator & { connection?: NetworkInformationLike }).connection;
-}
-
-/**
- * Whether the user is on a connection they would rather not spend. Only
- * Data Saver is a real signal in a browser — cellular detection via
- * `connection.type` is unimplemented nearly everywhere — so we report exactly
- * that and let the server treat the absence as "unknown, assume unmetered".
- */
-export function detectMeteredV3(): boolean {
-  return networkInformation()?.saveData === true;
-}
-
-/**
- * Best-effort downlink estimate in kbps for the planner's ladder choice.
+ * Measured downlink in kbps for the planner's Auto choice: a source that fits
+ * the estimate plays as-is, and only one that does not is converted.
  *
- * `connection.downlink` is a coarse, rounded, deliberately fingerprint-resistant
- * number, so it is a hint and not a measurement. Returns undefined rather than a
- * fabricated value when the API is absent or the reading falls outside the
- * contract's 100..1_000_000 kbps bounds.
+ * A fresh measurement from the background bandwidth probe wins, unless the
+ * link is metered (Data Saver or cellular): that measurement was taken on
+ * another link, so only a limit playback observed on this kind of link counts
+ * there. `connection.downlink` is never used: browsers round and cap it
+ * (Chromium at 10 Mbps), so it is a guess, not a measurement. Returns
+ * undefined when nothing was measured, which lets Auto send the source.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
-  const downlinkMbps = networkInformation()?.downlink;
-  if (typeof downlinkMbps !== "number" || !Number.isFinite(downlinkMbps)) return undefined;
-  const kbps = Math.round(downlinkMbps * 1000);
-  if (kbps < 100 || kbps > 1_000_000) return undefined;
-  return kbps;
+  // On a metered link a probe result describes another link; only a limit
+  // playback observed on a metered link describes this one.
+  return onMeteredConnection() ? readMeteredObservedLimitKbps() : readMeasuredBandwidthKbps();
 }
 
 /** Coarse form factor, used by the server only for quirk lookups. */
@@ -252,7 +281,10 @@ function boundedDetail(value: string | undefined): string | undefined {
  * and the server only ever compares that token for equality, so a synthesized
  * value would invalidate plans at random.
  */
-export function buildClientPlaybackContextV3(probe: WebCapabilityProbe): ClientPlaybackContextV3 {
+export function buildClientPlaybackContextV3(
+  probe: WebCapabilityProbe,
+  engine: EngineCapabilities | null = null,
+): ClientPlaybackContextV3 {
   const platformDetails: Record<string, string> = {};
   const userAgent = boundedDetail(typeof navigator !== "undefined" ? navigator.userAgent : "");
   if (userAgent) platformDetails["user_agent"] = userAgent;
@@ -272,6 +304,7 @@ export function buildClientPlaybackContextV3(probe: WebCapabilityProbe): ClientP
     deliveries: buildDeliveriesV3(
       probe,
       typeof navigator !== "undefined" ? navigator.userAgent : "",
+      engine,
     ),
   };
 }

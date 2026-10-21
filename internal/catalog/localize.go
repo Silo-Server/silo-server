@@ -11,6 +11,12 @@ import (
 // metadata because metadata already depends on catalog.
 const fieldImagesLocked = 10
 
+// Machine-translated field names, as MachineTranslatedFields reports them.
+const (
+	MachineTranslatedOverview = "overview"
+	MachineTranslatedTagline  = "tagline"
+)
+
 // applyItemLocalization merges a localization onto a clone of item. Only
 // non-empty localized fields override the base — localization rows are
 // legitimately partial (an AI translation carries only overview/tagline; a
@@ -23,6 +29,8 @@ func applyItemLocalization(item *models.MediaItem, loc *models.MediaItemLocaliza
 	if localized == nil || loc == nil {
 		return localized
 	}
+	// The markers describe this localization only, never a previous one.
+	localized.MachineTranslatedFields = nil
 	if loc.Title != "" {
 		localized.Title = loc.Title
 	}
@@ -31,9 +39,15 @@ func applyItemLocalization(item *models.MediaItem, loc *models.MediaItemLocaliza
 	}
 	if loc.Overview != "" {
 		localized.Overview = loc.Overview
+		if loc.OverviewSource == models.LocalizationSourceAI {
+			localized.MachineTranslatedFields = append(localized.MachineTranslatedFields, MachineTranslatedOverview)
+		}
 	}
 	if loc.Tagline != "" {
 		localized.Tagline = loc.Tagline
+		if loc.TaglineSource == models.LocalizationSourceAI {
+			localized.MachineTranslatedFields = append(localized.MachineTranslatedFields, MachineTranslatedTagline)
+		}
 	}
 	imagesLocked := slices.Contains(item.LockedFields, fieldImagesLocked)
 	if !imagesLocked && loc.PosterPath != "" && !artworkkey.IsLocal(item.PosterPath) {
@@ -60,11 +74,16 @@ func applySeasonLocalization(season *models.Season, loc *models.SeasonLocalizati
 	if localized == nil || loc == nil {
 		return localized
 	}
+	// The markers describe this localization only, never a previous one.
+	localized.MachineTranslatedFields = nil
 	if loc.Title != "" {
 		localized.Title = loc.Title
 	}
 	if loc.Overview != "" {
 		localized.Overview = loc.Overview
+		if loc.OverviewSource == models.LocalizationSourceAI {
+			localized.MachineTranslatedFields = append(localized.MachineTranslatedFields, MachineTranslatedOverview)
+		}
 	}
 	if !imagesLocked && loc.PosterPath != "" && !artworkkey.IsLocal(season.PosterPath) {
 		localized.PosterPath = loc.PosterPath
@@ -81,11 +100,16 @@ func applyEpisodeLocalization(episode *models.Episode, loc *models.EpisodeLocali
 	if localized == nil || loc == nil {
 		return localized
 	}
+	// The markers describe this localization only, never a previous one.
+	localized.MachineTranslatedFields = nil
 	if loc.Title != "" {
 		localized.Title = loc.Title
 	}
 	if loc.Overview != "" {
 		localized.Overview = loc.Overview
+		if loc.OverviewSource == models.LocalizationSourceAI {
+			localized.MachineTranslatedFields = append(localized.MachineTranslatedFields, MachineTranslatedOverview)
+		}
 	}
 	return localized
 }

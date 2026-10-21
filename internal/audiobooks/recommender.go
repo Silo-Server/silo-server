@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
@@ -34,7 +35,7 @@ func (r *ABSRecommender) Similar(ctx context.Context, contentID string, limit in
 	}
 	if r.Recs != nil {
 		if emb, err := r.Recs.GetEmbedding(ctx, contentID); err == nil && emb != nil {
-			scored, err := r.Recs.FindSimilar(ctx, emb, []string{contentID}, "audiobook", limit*3)
+			scored, err := r.Recs.FindSimilar(ctx, emb, []string{contentID}, "audiobook", limit*3, catalog.AccessFilter{})
 			if err == nil && len(scored) > 0 {
 				ids := make([]string, 0, limit)
 				for _, s := range scored {

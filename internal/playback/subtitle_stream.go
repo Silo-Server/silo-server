@@ -2,12 +2,14 @@ package playback
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -135,6 +137,48 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	return nil
 }
 
+// cachedSupSeekSlack is how far before a window's start an extract from a
+// cached .sup seeks, so a display set at the start is read whole. Its
+// segments are separate packets, and in a cache made from a Blu-ray transport
+// stream they keep their own timestamps, decoded ahead of the time the set
+// shows (a full-plane object decodes in about 0.13 s). The extra lead-in only
+// adds earlier screens, or part of one, which a PGS decoder merges or drops.
+const cachedSupSeekSlack = 2.0
+
+// windowFromCachedSup adapts a windowed extract whose input is a cached .sup
+// whose first cue is at firstCue seconds. ffmpeg cannot seek to a point
+// before a file's first packet: it reports the failed seek, carries on, and
+// loses the first display set's presentation segment. A window that starts
+// at or before the first cue reads from the start instead and ends where it
+// would have; nothing before the first cue exists to leave out.
+func windowFromCachedSup(opts StreamExtractOpts, firstCue float64) StreamExtractOpts {
+	if opts.SeekSeconds > 0 && opts.SeekSeconds-cachedSupSeekSlack <= firstCue {
+		if opts.DurationSeconds > 0 {
+			opts.DurationSeconds += opts.SeekSeconds
+		}
+		opts.SeekSeconds = 0
+	}
+	return opts
+}
+
+// readSupFirstCue returns the time, in seconds, of the first segment in a
+// .sup file.
+func readSupFirstCue(path string) (float64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = f.Close() }()
+	header := make([]byte, 13)
+	if _, err := io.ReadFull(f, header); err != nil {
+		return 0, err
+	}
+	if header[0] != 'P' || header[1] != 'G' {
+		return 0, errors.New("not a .sup stream")
+	}
+	return float64(binary.BigEndian.Uint32(header[2:6])) / 90000, nil
+}
+
 // streamExtractArgs builds the ffmpeg argument list for a streaming
 // subtitle extract.
 func streamExtractArgs(opts StreamExtractOpts) []string {
@@ -157,7 +201,17 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 	windowable := !IsASS(opts.SourceCodec) && (!IsPGS(opts.SourceCodec) || opts.AllowWindow)
 	seekApplied := opts.SeekSeconds > 0 && windowable
 	if seekApplied {
-		args = append(args, "-ss", strconv.FormatFloat(opts.SeekSeconds, 'f', 3, 64))
+		seek := opts.SeekSeconds
+		if opts.InputIsExtractedSup {
+			seek = max(0, seek-cachedSupSeekSlack)
+		}
+		args = append(args, "-ss", strconv.FormatFloat(seek, 'f', 3, 64))
+		// ffmpeg offsets an input seek by the input's start time. A cached
+		// .sup's start time is its first cue, so the seek has to be taken
+		// as an absolute timestamp or the window starts that much late.
+		if opts.InputIsExtractedSup {
+			args = append(args, "-seek_timestamp", "1")
+		}
 	}
 
 	// A cached .sup input has no container magic worth probing and exactly
@@ -185,14 +239,14 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 	// windows taken after a seek stay on the same clock as the first one
 	// instead of running late by the container's start time (seconds
 	// for TS remuxes). A cached .sup was already rebased when it was
-	// extracted, and its own start time is its first cue, so it must
-	// keep its timestamps as they are.
-	if seekApplied {
-		args = append(args, "-copyts")
-		if !opts.InputIsExtractedSup {
-			args = append(args, "-start_at_zero")
-		}
-		args = append(args, "-avoid_negative_ts", "disabled")
+	// extracted, and its own start time is its first cue, so it keeps its
+	// timestamps as they are, seeked or not; rebasing it would pull every
+	// cue early by the first cue's time.
+	switch {
+	case opts.InputIsExtractedSup:
+		args = append(args, "-copyts", "-avoid_negative_ts", "disabled")
+	case seekApplied:
+		args = append(args, "-copyts", "-start_at_zero", "-avoid_negative_ts", "disabled")
 	}
 	// Input -t does not bound subtitle-only output: ffmpeg keeps demuxing
 	// and emitting cues to EOF. Limit the output instead, using the window's

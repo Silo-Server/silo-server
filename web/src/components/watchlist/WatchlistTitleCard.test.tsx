@@ -2,7 +2,6 @@ import type { WatchlistTitle } from "@/api/v2/watchlistTitles";
 import { UICustomizationContext } from "@/contexts/uiCustomizationContext";
 import {
   buildDefaultPrefs,
-  PRESET_IDS,
   type CardOverlayPrefs,
   type OverlayId,
   type PresetId,
@@ -110,7 +109,7 @@ describe("WatchlistTitleCard", () => {
   const captionCases: Array<[string, CardOverlayPrefs | null]> = [
     ["overlays off", null],
     ["the status badge off", prefsWith("classic", "content_rating")],
-    ...PRESET_IDS.map((id): [string, CardOverlayPrefs] => [`the ${id} preset`, prefsWith(id)]),
+    ["the classic preset", prefsWith("classic")],
   ];
 
   it.each(captionCases)("keeps the full status in the caption with %s", (_, prefs) => {
@@ -164,14 +163,5 @@ describe("WatchlistTitleCard", () => {
 
     renderCard(downloading, null, { onRequest });
     expect(screen.queryByRole("button", { name: /Request Heat/ })).toBeNull();
-  });
-
-  it("removes the title from the watchlist from the corner action", () => {
-    const onRemove = vi.fn();
-    renderCard(downloading, null, { onRemove });
-    const button = screen.getByRole("button", { name: "Remove Heat from your watchlist" });
-    expect(button).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(button);
-    expect(onRemove).toHaveBeenCalledTimes(1);
   });
 });

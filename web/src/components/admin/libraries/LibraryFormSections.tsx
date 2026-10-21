@@ -39,6 +39,7 @@ import {
 } from "./realtimeMonitoring";
 import { contentLevelLabel } from "./useLibraryForm";
 import type { LevelChainItem, LibraryFormController } from "./useLibraryForm";
+import { LibraryTranslatePanel } from "./LibraryTranslatePanel";
 
 function SettingCard({
   htmlFor,
@@ -370,6 +371,7 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
           onCheckedChange={form.setAutoTranslateMetadata}
         />
       </div>
+      {form.library && <LibraryTranslatePanel libraryId={form.library.id} />}
       {form.settingSupport.trailers && (
         <div className="space-y-1.5">
           <Label>Trailer &amp; extras types</Label>
@@ -482,11 +484,12 @@ export function AdvancedFields({
         <SettingCard
           htmlFor="chapter-thumbnails-switch"
           title="Generate chapter thumbnails"
-          description="Stores chapter preview images in the configured public asset S3 bucket. Chapter markers and chapter menus still work without thumbnails."
+          description="Stores chapter preview images in artwork storage (local disk or S3). Chapter markers and chapter menus still work without thumbnails."
           footer={
             !chapterThumbnailsSupported ? (
               <p className="text-warning text-xs">
-                Public asset S3 storage is required before this can be enabled.
+                Artwork storage must be available before this can be enabled. Check it in Storage
+                &amp; Database settings.
               </p>
             ) : null
           }

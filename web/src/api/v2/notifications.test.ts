@@ -3,10 +3,18 @@ import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "
 import {
   captureNotificationAuthority,
   listNotifications,
+  listNotificationSeries,
   markAllNotificationsRead,
-  markNotificationRead,
+  setNotificationSeriesMuted,
   updateNotificationPreferences,
 } from "./notifications";
+import {
+  getNotificationDiscordPreferences,
+  getNotificationEmailPreferences,
+} from "./notificationChannels";
+import { testNotificationDestination } from "./notificationDestinationTests";
+import { testNotificationDiscord } from "./notificationDiscord";
+import { clearNotificationRelay } from "./notificationRelay";
 const row = {
   id: "delivery-1",
   type: "episode.available",
@@ -83,34 +91,30 @@ it("refuses a missing cutoff or malformed page instead of marking the current in
     await expect(listNotifications("all")).rejects.toThrow("page");
   }
 });
-it("never refreshes or replays inbox and preference mutations", async () => {
-  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () =>
-    response(
-      {
-        type: "https://example.invalid/problems/authentication_required",
-        title: "Unauthorized",
-        status: 401,
-      },
-      401,
-    ),
-  );
-  vi.stubGlobal("fetch", fetch);
-  for (const run of [
-    () => markNotificationRead("delivery-1"),
-    () => markAllNotificationsRead("cutoff"),
-    () => updateNotificationPreferences({ enabled: false }),
-  ]) {
-    fetch.mockClear();
-    await expect(run()).rejects.toMatchObject({ status: 401 });
-    expect(fetch).toHaveBeenCalledTimes(1);
-  }
-});
-it("rejects a captured authority after profile replacement", async () => {
+// Each notification wrapper checks the captured profile itself; v2() compares
+// only the account, so every wrapper is its own row.
+it.each<[string, (authority: ReturnType<typeof captureNotificationAuthority>) => Promise<unknown>]>(
+  [
+    ["markAllNotificationsRead", (authority) => markAllNotificationsRead("cutoff", authority)],
+    ["getNotificationEmailPreferences", getNotificationEmailPreferences],
+    ["getNotificationDiscordPreferences", getNotificationDiscordPreferences],
+    ["testNotificationDiscord", testNotificationDiscord],
+    ["clearNotificationRelay", clearNotificationRelay],
+    [
+      "testNotificationDestination webhook",
+      (authority) => testNotificationDestination("webhook", "destination", authority),
+    ],
+    [
+      "testNotificationDestination server-channel",
+      (authority) => testNotificationDestination("server-channel", "destination", authority),
+    ],
+  ],
+)("%s refuses a captured authority after profile replacement", async (_name, call) => {
   const authority = captureNotificationAuthority();
   setProfileId("other");
   const fetch = vi.fn<typeof globalThis.fetch>();
   vi.stubGlobal("fetch", fetch);
-  await expect(markAllNotificationsRead("cutoff", authority)).rejects.toThrow();
+  await expect(call(authority)).rejects.toThrow();
   expect(fetch).not.toHaveBeenCalled();
 });
 it("preserves explicit false preferences and omits response-only profile identity", async () => {
@@ -130,4 +134,59 @@ it("preserves explicit false preferences and omits response-only profile identit
     enabled: false,
     notify_favorites: false,
   });
+});
+it("pages notified series by status and rejects a page that repeats its cursor", async () => {
+  const series = {
+    item: {
+      content_id: "series:bear",
+      title: "The Bear",
+      type: "series",
+      status: "matched",
+      genres: [],
+      keywords: [],
+    },
+    reasons: { favorite: true, watchlist: false, continue_watching: false, next_up: false },
+    active_reasons: { favorite: true, watchlist: false, continue_watching: false, next_up: false },
+    notifies: true,
+  };
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(
+      response({ items: [series], page: { has_more: true, next_cursor: "next" } }),
+    )
+    .mockResolvedValueOnce(response({ items: [], page: { has_more: true, next_cursor: "next" } }));
+  vi.stubGlobal("fetch", fetch);
+  const page = await listNotificationSeries("inactive", {
+    q: "bear",
+    reason: "favorite",
+    sort: "-latest_episode_added",
+  });
+  expect(page).toEqual({ series: [series], next_cursor: "next" });
+  const url = new URL(String(fetch.mock.calls[0]![0]), "http://silo.test");
+  expect(url.pathname).toBe("/api/v2/notifications/series");
+  expect(Object.fromEntries(url.searchParams)).toMatchObject({
+    status: "inactive",
+    q: "bear",
+    reason: "favorite",
+    sort: "-latest_episode_added",
+  });
+  await expect(listNotificationSeries("inactive", {}, "next")).rejects.toThrow(
+    "Invalid series page",
+  );
+});
+it("mutes with PUT and unmutes with DELETE on the series' mute", async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockImplementation(async () => new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetch);
+  await setNotificationSeriesMuted("series:bear", true);
+  await setNotificationSeriesMuted("series:bear", false);
+  const calls = fetch.mock.calls.map(([input, init]) => [
+    new URL(String(input), "http://silo.test").pathname,
+    init?.method,
+  ]);
+  expect(calls).toEqual([
+    ["/api/v2/notifications/series/series%3Abear/mute", "PUT"],
+    ["/api/v2/notifications/series/series%3Abear/mute", "DELETE"],
+  ]);
 });

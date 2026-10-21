@@ -131,12 +131,25 @@ const insertSettingValueSQL = `
 		(key, scope, profile_id, device_id, library_id, series_id, value, created_at, updated_at)
 	VALUES (?, ?, ?, ?, ?, ?, ?, '2026-07-27T00:00:00Z', '2026-07-27T00:00:00Z')`
 
+// newSchemaDB opens an in-memory store with the current schema.
 func newSchemaDB(t *testing.T) *sql.DB {
+	t.Helper()
+	return openSchemaDB(t, 0)
+}
+
+// newSingleConnSchemaDB is newSchemaDB held to one connection.
+func newSingleConnSchemaDB(t *testing.T) *sql.DB {
+	t.Helper()
+	return openSchemaDB(t, 1)
+}
+
+func openSchemaDB(t *testing.T, maxOpenConns int) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(maxOpenConns)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := InitSchema(db); err != nil {
 		t.Fatalf("InitSchema: %v", err)

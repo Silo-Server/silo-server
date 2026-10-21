@@ -8,7 +8,6 @@ import {
   buildClientCapabilitiesV3,
   buildClientPlaybackContextV3,
   detectBandwidthEstimateKbpsV3,
-  detectMeteredV3,
 } from "@/player/client-context-v3";
 import { usePlayerConfig } from "@/player/context/PlayerConfigContext";
 import { replanV2 } from "@/player/lifecycle-v2";
@@ -420,7 +419,6 @@ export function useAudiobookPlayback({
             qualityPreference: QUALITY_ORIGINAL_V3,
             attemptedPlanKeys,
             attemptCount,
-            metered: detectMeteredV3(),
             bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
             clientCapabilities,
             clientPlaybackContext,
@@ -610,7 +608,6 @@ export function useAudiobookPlayback({
           // "resume wherever the server last saw us".
           forceStartPosition: true,
           progressPersistence: "client",
-          metered: detectMeteredV3(),
           bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3() ?? null,
           clientCapabilities,
           clientPlaybackContext,

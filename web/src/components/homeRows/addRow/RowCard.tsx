@@ -69,7 +69,7 @@ export function RowCard({
           ) : null}
         </span>
         {summary ? (
-          <span className="text-foreground/80 mt-1 block text-[12.5px]">{summary}</span>
+          <span className="text-foreground/80 mt-1 block text-[13px]">{summary}</span>
         ) : compact ? null : (
           <VariantChips card={card} onPick={(presetKey) => onPick(presetKey)} />
         )}
@@ -77,7 +77,7 @@ export function RowCard({
       {onPage ? (
         <span
           aria-hidden
-          className="bg-background/70 ring-border absolute top-3 right-3 inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold ring-1 ring-inset"
+          className="bg-background/70 ring-border absolute top-3 right-3 inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset"
         >
           <Check className="text-success size-3" />
           On {pageLabel}

@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSeasons, useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
+import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
@@ -261,6 +263,9 @@ export function SeriesDrilldown({
             {item?.overview ? (
               <p className="text-muted-foreground mt-1 line-clamp-2 max-w-3xl text-xs leading-relaxed">
                 {item.overview}
+                {hasMachineTranslation(item.machine_translated_fields) && (
+                  <MachineTranslatedLabel compact className="ml-1.5 align-middle" />
+                )}
               </p>
             ) : detail.isLoading ? (
               <Skeleton className="mt-1.5 h-3 w-64 rounded" />
@@ -383,6 +388,11 @@ export function SeriesDrilldown({
                             <span className="text-muted-foreground shrink-0 text-xs">
                               {episode.runtime ? `${episode.runtime}m` : ""}
                             </span>
+                            {episode.overview &&
+                              !(spoilerPrefs.hideOverviews && unwatched) &&
+                              hasMachineTranslation(episode.machine_translated_fields) && (
+                                <MachineTranslatedLabel compact className="shrink-0 self-center" />
+                              )}
                           </span>
                           {episode.overview && !(spoilerPrefs.hideOverviews && unwatched) ? (
                             <span className="text-muted-foreground mt-0.5 line-clamp-2 text-xs leading-relaxed">

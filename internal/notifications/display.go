@@ -3,6 +3,8 @@ package notifications
 import (
 	"fmt"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/titleutil"
 )
 
 // NotificationDisplay is the compact, user-facing display metadata clients use
@@ -95,25 +97,31 @@ func BuildNotificationDisplay(row DeliveryRow) NotificationDisplay {
 	return display
 }
 
+// episodeDisplayTitle leads with the series name alone: native notifications
+// give the title one line, and any fixed wording around the name pushes it
+// past the cut. The episode details go in the body, which wraps.
 func episodeDisplayTitle(row DeliveryRow) string {
-	code := episodeDisplayCode(row)
-	switch {
-	case row.SeriesTitle != "" && code != "":
-		return fmt.Sprintf("The latest episode of %s %s just dropped!", row.SeriesTitle, code)
-	case row.SeriesTitle != "":
-		return "The latest episode of " + row.SeriesTitle + " just dropped!"
-	case code != "":
-		return "New episode " + code + " available"
-	default:
-		return "New episode available"
+	if row.SeriesTitle != "" {
+		return row.SeriesTitle
 	}
+	return "New episode available"
 }
 
+// episodeDisplayBody reads "New episode · S02E01 · Hello, Ms. Cobel", dropping
+// the parts that are missing. A placeholder title such as "TBA" says nothing
+// the episode code doesn't, so it is left out.
 func episodeDisplayBody(row DeliveryRow) string {
-	if row.EpisodeTitle != "" {
-		return row.EpisodeTitle
+	parts := make([]string, 0, 3)
+	if row.SeriesTitle != "" {
+		parts = append(parts, "New episode")
 	}
-	return episodeDisplayCode(row)
+	if code := episodeDisplayCode(row); code != "" {
+		parts = append(parts, code)
+	}
+	if title := strings.TrimSpace(row.EpisodeTitle); title != "" && !titleutil.IsProvisionalEpisodeTitle(title) {
+		parts = append(parts, title)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func episodeDisplayCode(row DeliveryRow) string {

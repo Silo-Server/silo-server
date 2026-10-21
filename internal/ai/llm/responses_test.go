@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"testing/synctest"
 	"time"
 )
 
@@ -67,34 +68,20 @@ func TestSubscriptionRejectsPartialAndFailedStreams(t *testing.T) {
 	}
 }
 
-func TestSubscriptionStreamLineEndings(t *testing.T) {
+func TestSubscriptionStreamFraming(t *testing.T) {
+	type framing struct{ name, stream, want string }
+	var tests []framing
 	for _, test := range []struct{ name, ending string }{
 		{"LF", "\n"}, {"CRLF", "\r\n"}, {"CR", "\r"},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			stream := strings.Join([]string{
-				`: ignored`,
-				`data: {"type":`,
-				`data: "response.output_text.delta","delta":"complete"}`,
-				"", `data: {"type":"response.completed"}`, "", "",
-			}, test.ending)
-			for _, chunked := range []bool{false, true} {
-				t.Run(fmt.Sprintf("chunked=%t", chunked), func(t *testing.T) {
-					var reader io.Reader = strings.NewReader(stream)
-					if chunked {
-						reader = iotest.OneByteReader(reader)
-					}
-					out, err := readResponseStream(reader)
-					if err != nil || out != "complete" {
-						t.Fatalf("response = %q, %v", out, err)
-					}
-				})
-			}
-		})
+		tests = append(tests, framing{name: test.name, want: "complete", stream: strings.Join([]string{
+			`: ignored`,
+			`data: {"type":`,
+			`data: "response.output_text.delta","delta":"complete"}`,
+			"", `data: {"type":"response.completed"}`, "", "",
+		}, test.ending)})
 	}
-}
-
-func TestSubscriptionStreamStripsOnlyOneLeadingBOM(t *testing.T) {
+	// Only one leading BOM is stripped.
 	for _, test := range []struct {
 		name, leading, firstPrefix, secondPrefix, want string
 	}{
@@ -103,13 +90,15 @@ func TestSubscriptionStreamStripsOnlyOneLeadingBOM(t *testing.T) {
 		{name: "later BOM preserved", secondPrefix: "\ufeff", want: "prefix"},
 		{name: "BOM after first line preserved", leading: "\n", firstPrefix: "\ufeff", want: "suffix"},
 	} {
+		tests = append(tests, framing{name: test.name, want: test.want, stream: test.leading + test.firstPrefix + "data: {\"type\":\"response.output_text.delta\",\"delta\":\"prefix\"}\n\n" +
+			test.secondPrefix + "data: {\"type\":\"response.output_text.delta\",\"delta\":\"suffix\"}\n\n" +
+			"data: {\"type\":\"response.completed\"}\n\n"})
+	}
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			stream := test.leading + test.firstPrefix + "data: {\"type\":\"response.output_text.delta\",\"delta\":\"prefix\"}\n\n" +
-				test.secondPrefix + "data: {\"type\":\"response.output_text.delta\",\"delta\":\"suffix\"}\n\n" +
-				"data: {\"type\":\"response.completed\"}\n\n"
 			for _, chunked := range []bool{false, true} {
 				t.Run(fmt.Sprintf("chunked=%t", chunked), func(t *testing.T) {
-					var reader io.Reader = strings.NewReader(stream)
+					var reader io.Reader = strings.NewReader(test.stream)
 					if chunked {
 						reader = iotest.OneByteReader(reader)
 					}
@@ -278,26 +267,28 @@ func TestSubscriptionRecoversUnauthorizedOnlyOnce(t *testing.T) {
 }
 
 func TestSubscriptionUsageUnavailableRetries(t *testing.T) {
-	if isExhaustedQuota([]byte(`{"error":{"code":"subscription_sharing_usage_unavailable"}}`)) {
-		t.Fatal("temporary usage failure classified as exhausted quota")
-	}
-	calls := 0
-	client := NewClient(Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol",
-		ChatGPTTokenSource:   testTokenSource(func(context.Context) (string, error) { return "token", nil }),
-		ChatGPTTokenRejected: func(context.Context, string, bool) error { t.Fatal("usage outage invalidated credentials"); return nil },
-	})
-	client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-		calls++
-		body := "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"subscription_sharing_usage_unavailable\"}}}\n\n"
-		if calls > 1 {
-			body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"
+	synctest.Test(t, func(t *testing.T) {
+		if isExhaustedQuota([]byte(`{"error":{"code":"subscription_sharing_usage_unavailable"}}`)) {
+			t.Fatal("temporary usage failure classified as exhausted quota")
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+		calls := 0
+		client := NewClient(Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol",
+			ChatGPTTokenSource:   testTokenSource(func(context.Context) (string, error) { return "token", nil }),
+			ChatGPTTokenRejected: func(context.Context, string, bool) error { t.Fatal("usage outage invalidated credentials"); return nil },
+		})
+		client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			body := "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"subscription_sharing_usage_unavailable\"}}}\n\n"
+			if calls > 1 {
+				body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"
+			}
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+		})
+		out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false)
+		if err != nil || out != "complete" || calls != 2 {
+			t.Fatalf("temporary failure recovery: %q, %v, calls=%d", out, err, calls)
+		}
 	})
-	out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false)
-	if err != nil || out != "complete" || calls != 2 {
-		t.Fatalf("temporary failure recovery: %q, %v, calls=%d", out, err, calls)
-	}
 }
 
 func testTokenSource(getToken func(context.Context) (string, error)) func(context.Context) (func(context.Context) (string, error), error) {
@@ -307,60 +298,62 @@ func testTokenSource(getToken func(context.Context) (string, error)) func(contex
 func TestSubscriptionRetriesPinAccountAndRequestConfig(t *testing.T) {
 	for _, status := range []int{http.StatusServiceUnavailable, http.StatusUnauthorized, http.StatusOK} {
 		t.Run(fmt.Sprintf("status=%d", status), func(t *testing.T) {
-			active := "a"
-			tokens := map[string]string{"a": "a-token", "b": "b-token"}
-			calls, factories := 0, 0
-			cfg := Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol", ReasoningEffort: "high"}
-			cfg.ChatGPTTokenSource = func(context.Context) (func(context.Context) (string, error), error) {
-				factories++
-				pinned := active
-				return func(context.Context) (string, error) { return tokens[pinned], nil }, nil
-			}
-			cfg.ChatGPTTokenRejected = func(_ context.Context, rejected string, needsLogin bool) error {
-				if rejected != "a-token" || needsLogin {
-					t.Fatal("recovery rejected wrong account")
+			synctest.Test(t, func(t *testing.T) {
+				active := "a"
+				tokens := map[string]string{"a": "a-token", "b": "b-token"}
+				calls, factories := 0, 0
+				cfg := Config{AuthMode: AuthModeChatGPT, ChatModel: "gpt-6.1-sol", ReasoningEffort: "high"}
+				cfg.ChatGPTTokenSource = func(context.Context) (func(context.Context) (string, error), error) {
+					factories++
+					pinned := active
+					return func(context.Context) (string, error) { return tokens[pinned], nil }, nil
 				}
-				tokens["a"] = "a-renewed"
-				return nil
-			}
-			client := NewClient(cfg)
-			client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				calls++
-				var body responseRequest
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-					t.Fatal(err)
-				}
-				wantToken, wantModel, wantEffort := "a-token", "gpt-6.1-sol", "high"
-				if calls == 2 && status == 401 {
-					wantToken = "a-renewed"
-				}
-				if calls == 3 {
-					wantToken, wantModel, wantEffort = "b-token", "gpt-5.4", "low"
-				}
-				if r.Header.Get("Authorization") != "Bearer "+wantToken || body.Model != wantModel || body.Reasoning == nil || body.Reasoning.Effort != wantEffort {
-					t.Fatalf("retry changed account/model/effort: auth=%s body=%+v", r.Header.Get("Authorization"), body)
-				}
-				if calls == 1 {
-					active = "b"
-					next := client.Config()
-					next.ChatModel, next.ReasoningEffort = "gpt-5.4", "low"
-					client.UpdateConfig(next)
-					failure := "{}"
-					if status == http.StatusOK {
-						failure = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\"}}}\n\n"
+				cfg.ChatGPTTokenRejected = func(_ context.Context, rejected string, needsLogin bool) error {
+					if rejected != "a-token" || needsLogin {
+						t.Fatal("recovery rejected wrong account")
 					}
-					return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(failure))}, nil
+					tokens["a"] = "a-renewed"
+					return nil
 				}
-				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"))}, nil
+				client := NewClient(cfg)
+				client.chatHTTP.Transport = retryRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+					calls++
+					var body responseRequest
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Fatal(err)
+					}
+					wantToken, wantModel, wantEffort := "a-token", "gpt-6.1-sol", "high"
+					if calls == 2 && status == 401 {
+						wantToken = "a-renewed"
+					}
+					if calls == 3 {
+						wantToken, wantModel, wantEffort = "b-token", "gpt-5.4", "low"
+					}
+					if r.Header.Get("Authorization") != "Bearer "+wantToken || body.Model != wantModel || body.Reasoning == nil || body.Reasoning.Effort != wantEffort {
+						t.Fatalf("retry changed account/model/effort: auth=%s body=%+v", r.Header.Get("Authorization"), body)
+					}
+					if calls == 1 {
+						active = "b"
+						next := client.Config()
+						next.ChatModel, next.ReasoningEffort = "gpt-5.4", "low"
+						client.UpdateConfig(next)
+						failure := "{}"
+						if status == http.StatusOK {
+							failure = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\"}}}\n\n"
+						}
+						return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(failure))}, nil
+					}
+					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"complete\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"))}, nil
+				})
+				for range 2 {
+					if out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false); err != nil || out != "complete" {
+						t.Fatalf("chat=%q, %v", out, err)
+					}
+				}
+				if calls != 3 || factories != 2 {
+					t.Fatalf("calls=%d source resolutions=%d", calls, factories)
+				}
 			})
-			for range 2 {
-				if out, err := client.Chat(t.Context(), []Message{{Role: "user", Content: "translate"}}, false); err != nil || out != "complete" {
-					t.Fatalf("chat=%q, %v", out, err)
-				}
-			}
-			if calls != 3 || factories != 2 {
-				t.Fatalf("calls=%d source resolutions=%d", calls, factories)
-			}
 		})
 	}
 }

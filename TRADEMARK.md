@@ -52,7 +52,7 @@ Never use the marks to promote piracy or to impersonate the project.
 ## Naming your project
 
 Give your client, plugin, or fork its own name, then mention Silo in the
-tagline or description: "Bramble — a Silo client for Android TV," "Trakt sync
+tagline or description: "Bramble — a Silo client for Android TV," "Simkl sync
 plugin for Silo." That is referential use and needs no permission.
 
 Official products use "Silo" alone, **Silo Server**, or "Silo" joined to a
@@ -65,7 +65,7 @@ need written permission:
 - "[word]Silo" names such as OpenSilo or MySilo, which read as the project
 - misspellings and look-alikes such as Sylo or Si1o
 
-Repository and package names such as `silo-plugin-trakt` are fine when "silo"
+Repository and package names such as `silo-plugin-simkl` are fine when "silo"
 only describes what the code plugs into.
 
 **Wordplay is fine, and is the exception to the rules above.** A name such as

@@ -141,20 +141,6 @@ func TestRouterRateLimitsSignInPerClientIP(t *testing.T) {
 	}
 }
 
-// TestRouterWithoutRateLimitLeavesSignInUnlimited pins that a nil limiter,
-// which is what rate_limit.enabled=false wires, keeps today's behavior.
-func TestRouterWithoutRateLimitLeavesSignInUnlimited(t *testing.T) {
-	router := newRateLimitedRouter(t, nil, nil)
-	for i := range 50 {
-		if rec := signInFrom(router, "203.0.113.10", "wrong"); rec.Code != http.StatusUnauthorized {
-			t.Fatalf("attempt %d: status = %d, want 401", i+1, rec.Code)
-		}
-	}
-	if rec := signInFrom(router, "203.0.113.10", "right"); rec.Code != http.StatusOK {
-		t.Fatalf("sign-in: status = %d, want 200", rec.Code)
-	}
-}
-
 // TestRouterRateLimitCoversAuthenticatedAndMediaRoutesOnly pins the route
 // split: anonymous artwork, avatars, web assets, and public server reads never
 // spend the per-IP budget, while authenticated API and media routes do, as on

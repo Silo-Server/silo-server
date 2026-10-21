@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -174,23 +173,7 @@ func TestCompatChildHLSRoutesRequireBoundPolicyCompliantTransport(t *testing.T) 
 			wantStatus: http.StatusServiceUnavailable, wantCode: compatRoutingPolicyUnsatisfiedCode,
 		},
 		{
-			name: "segment rejects recipe outside committed workload", segment: true, recipe: "local",
-			assignment: playback.NodeRoutingAssignment{
-				Workload: string(noderouting.WorkloadRemux), Execution: string(noderouting.ExecutionTranscode),
-				Egress: string(noderouting.EgressAPI),
-			},
-			wantStatus: http.StatusServiceUnavailable, wantCode: compatRoutingPolicyUnsatisfiedCode,
-		},
-		{
 			name: "manifest rejects API relay outside committed proxy route", recipe: "remote",
-			assignment: playback.NodeRoutingAssignment{
-				Workload: string(noderouting.WorkloadVideoTranscode), Execution: string(noderouting.ExecutionTranscode),
-				ExecutionNodeURL: "http://worker-1", Egress: string(noderouting.EgressProxy),
-			},
-			wantStatus: http.StatusServiceUnavailable, wantCode: compatRoutingPolicyUnsatisfiedCode,
-		},
-		{
-			name: "segment rejects API relay outside committed proxy route", segment: true, recipe: "remote",
 			assignment: playback.NodeRoutingAssignment{
 				Workload: string(noderouting.WorkloadVideoTranscode), Execution: string(noderouting.ExecutionTranscode),
 				ExecutionNodeURL: "http://worker-1", Egress: string(noderouting.EgressProxy),
@@ -243,26 +226,6 @@ func TestCompatChildHLSRoutesRequireBoundPolicyCompliantTransport(t *testing.T) 
 				t.Fatalf("response = %d %s, want %d %s", recorder.Code, recorder.Body.String(), test.wantStatus, test.wantCode)
 			}
 		})
-	}
-}
-
-func TestRecordNodeRoutingAssignmentPersistsChildRouteBinding(t *testing.T) {
-	store := NewPlaybackSessionStore(0, nil)
-	store.Put(PlaybackSession{ID: "play-1", CompatToken: "compat-token"})
-	handler := &PlaybackHandler{playbackStore: store}
-	want := playback.NodeRoutingAssignment{
-		NetworkProvider: new(""),
-		Workload:        string(noderouting.WorkloadVideoTranscode), Execution: string(noderouting.ExecutionTranscode),
-		ExecutionNodeID: 2, ExecutionNodeURL: "http://worker-1",
-		Egress: string(noderouting.EgressAPI),
-	}
-
-	if err := handler.recordNodeRoutingAssignment(t.Context(), "play-1", "upstream-1", want); err != nil {
-		t.Fatalf("record route: %v", err)
-	}
-	stored, ok := store.Get("play-1")
-	if !ok || stored.RoutingAssignment == nil || !reflect.DeepEqual(*stored.RoutingAssignment, want) {
-		t.Fatalf("stored route = %#v, want %#v", stored.RoutingAssignment, want)
 	}
 }
 

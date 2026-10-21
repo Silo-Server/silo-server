@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isProfileRequestContextCurrent, type ProfileRequestContextSnapshot } from "@/api/client";
 import { v2, V2ProblemError, type V2Query, type V2Result } from "@/api/v2/request";
@@ -14,6 +14,7 @@ import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { ShortcutTarget } from "@/lib/uiCustomization";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { deviceKeys, libraryKeys, sectionKeys, settingsKeys } from "./keys";
+import { refreshLocalizedMediaQueries } from "./mediaSurfaceRefresh";
 
 /**
  * Typed access to the canonical settings API.
@@ -428,13 +429,41 @@ function shouldReconcileAfterMutationError(error: unknown): boolean {
   return !isDefinitiveSettingMutationRejection(error);
 }
 
+// Profile preferences that change which rows Home has, the cards they hold, or
+// their order.
+const HOME_REFRESH_KEYS: ReadonlySet<string> = new Set([
+  SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+  SETTING_KEYS.UI_NEXT_UP_MODE,
+  SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
+]);
+
+// The Next Up settings also shape library pages, where the server adds the
+// Next Up row and orders Continue Watching the same way as on Home.
+const LIBRARY_SECTION_REFRESH_KEYS: ReadonlySet<string> = new Set([
+  SETTING_KEYS.UI_NEXT_UP_MODE,
+  SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST,
+]);
+
 function refreshHomeForSetting(queryClient: ReturnType<typeof useQueryClient>, key?: string) {
-  if (key !== SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS) return;
+  if (!key || !HOME_REFRESH_KEYS.has(key)) return;
   // Home uses observer-less fetchQuery calls. Mark its data stale before
   // resetting the load queue, including when the settings screen has unmounted.
-  return queryClient
+  const home = queryClient
     .invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" })
+    // Next up episodes decides which rows Home has (the server adds the Next
+    // Up row), so a mounted Home refetches its layout before its rows reload;
+    // the reload alone only refreshes the rows the old layout listed.
+    .then(() =>
+      key === SETTING_KEYS.UI_NEXT_UP_MODE
+        ? queryClient.refetchQueries({ queryKey: sectionKeys.homeLayout(), type: "active" })
+        : undefined,
+    )
     .then(() => bumpHomeRefreshSignal(queryClient));
+  if (!LIBRARY_SECTION_REFRESH_KEYS.has(key)) return home;
+  return Promise.all([
+    home,
+    queryClient.invalidateQueries({ queryKey: sectionKeys.libraryRoot() }),
+  ]).then(() => undefined);
 }
 
 // A profile with a library limit gets its hidden libraries left out of the
@@ -445,17 +474,60 @@ function refreshLibrariesForSetting(queryClient: ReturnType<typeof useQueryClien
   return queryClient.invalidateQueries({ queryKey: libraryKeys.all });
 }
 
+const METADATA_LANGUAGE_KEYS: ReadonlySet<string> = new Set([
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
+]);
+
+// The metadata language decides the localized titles and descriptions in the
+// media reads (catalog, home sections, people, collections, episodes). The
+// write does not wait for their refetch, so the settings controls unlock as
+// soon as the value is saved.
+function refreshLocalizedMediaForSetting(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key?: string,
+) {
+  if (!key || !METADATA_LANGUAGE_KEYS.has(key)) return;
+  return refreshLocalizedMediaQueries(queryClient);
+}
+
+/**
+ * Refreshes what an administrator default changes for the admin's own session:
+ * the effective values and the rows they shape. Other sessions refresh from the
+ * user_settings.changed event the server publishes for the same write.
+ */
+export function invalidateAdminDefaultQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key: SettingKey,
+) {
+  return refreshForSettingChange(queryClient, key);
+}
+
+/** Marks the effective values stale, and the media reads the key shapes. */
+function refreshForSettingChange(queryClient: ReturnType<typeof useQueryClient>, key?: string) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
+    refreshHomeForSetting(queryClient, key),
+    refreshLibrariesForSetting(queryClient, key),
+    refreshLocalizedMediaForSetting(queryClient, key),
+  ]).then(() => undefined);
+}
+
+/**
+ * How long after an administrator-default event to re-read once more. Every
+ * node reloads its copy of the defaults when one changes, but the event can
+ * reach this client before the node answering its re-read has; nodes converge
+ * within the server's 10-second cache TTL (config.AdminDefaultsCacheTTL).
+ */
+const ADMIN_DEFAULT_SETTLE_MS = 11_000;
+
 /** Refreshes the reads a setting write changes, as useSetSettingValue does. */
 export function invalidateSettingValueQueries(
   queryClient: ReturnType<typeof useQueryClient>,
   identity: SettingIdentity,
   key: SettingKey,
 ) {
-  const invalidations = [
-    queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
-    refreshHomeForSetting(queryClient, key),
-    refreshLibrariesForSetting(queryClient, key),
-  ];
+  const invalidations: Promise<unknown>[] = [refreshForSettingChange(queryClient, key)];
   // A device-scoped write changes that device's "how many things differ"
   // count, which the device list shows. Without this the badge stays stale
   // until the list's own staleTime expires.
@@ -585,7 +657,10 @@ export type SettingsCapabilities = Pick<
   Partial<
     Pick<
       V2Result<"GET /api/v2/settings/contract/capabilities">,
-      "supports_batched_effective" | "supports_idempotent_writes" | "supports_atomic_shortcuts"
+      | "supports_batched_effective"
+      | "supports_idempotent_writes"
+      | "supports_atomic_shortcuts"
+      | "supports_device_rename"
     >
   >;
 
@@ -655,7 +730,8 @@ export function useSettingsCapabilities(options?: { enabled?: boolean }) {
 /** The user_settings.changed payload. Identity only — never a value. */
 interface UserSettingsChangedPayload {
   key?: string;
-  scope?: SettingScope;
+  /** "default" when an administrator default changed (no row, no account). */
+  scope?: SettingScope | "default";
   profile_id?: string;
 }
 
@@ -663,9 +739,9 @@ interface UserSettingsChangedPayload {
  * Keeps this client's resolved settings honest while another device edits them.
  *
  * The server publishes user_settings.changed on every canonical write and
- * delete, carrying only what changed and never the value — admins receive
- * other accounts' events, so a value in the payload would leak private
- * settings. The event is therefore a pure invalidation signal: mark the value
+ * delete, carrying only what changed and never the value. Recipients read
+ * values over HTTP under their current authority. The event is a pure
+ * invalidation signal: mark the value
  * queries stale and let react-query refetch the ones a mounted screen is
  * actually reading. Nothing is written into the cache from the socket.
  *
@@ -675,6 +751,14 @@ interface UserSettingsChangedPayload {
  */
 export function useSettingValuesRealtime() {
   const qc = useQueryClient();
+  const settleTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const timers = settleTimers.current;
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
 
   const handlers = useMemo(
     () => ({
@@ -682,19 +766,22 @@ export function useSettingValuesRealtime() {
         const event = message as { event?: string; data?: UserSettingsChangedPayload };
         if (event?.event !== "user_settings.changed") return;
 
-        // One account can have several profiles, and admins additionally
-        // receive other accounts' user-scoped events (the frame carries no
-        // user id to filter on, so that case falls through to a harmless
-        // refetch). A profile-addressed change to a profile that is not the
-        // signed-in one cannot alter what we resolve, so it is dropped. An
+        // Keep a profile-addressed change from refreshing another profile's
+        // values, including when connected to an older server. An
         // account-scoped change carries no profile and does affect us.
         const changedProfile = event.data?.profile_id;
         const activeProfile = activeProfileId();
         if (changedProfile && activeProfile && changedProfile !== activeProfile) return;
 
-        qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
-        void refreshHomeForSetting(qc, event.data?.key);
-        void refreshLibrariesForSetting(qc, event.data?.key);
+        const key = event.data?.key;
+        void refreshForSettingChange(qc, key);
+        if (event.data?.scope === "default") {
+          const timer = setTimeout(() => {
+            settleTimers.current.delete(timer);
+            void refreshForSettingChange(qc, key);
+          }, ADMIN_DEFAULT_SETTLE_MS);
+          settleTimers.current.add(timer);
+        }
       },
     }),
     [qc],

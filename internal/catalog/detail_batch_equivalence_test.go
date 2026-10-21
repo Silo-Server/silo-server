@@ -4,23 +4,18 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"reflect"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // batchEquivFileFetcher is a FileVersionFetcher (and the optional batch
 // fileVersionBatchFetcher) backed by one in-memory map. Serving both the
 // per-item GetByContentID and the batched ListByContentIDs from the same
-// backing data is exactly how the real scanner.FileRepository behaves: the two
-// methods return the same files for a given content ID. This lets the
-// equivalence test prove that GetItemDetailsByIDs routes prefetched files into
-// buildMediaItemDetail identically to the per-item GetItemDetail path, without
+// backing data is how the real scanner.FileRepository behaves, without
 // pulling the scanner package in (which would create an import cycle).
 type batchEquivFileFetcher struct {
 	files map[string][]*models.MediaFile
@@ -44,27 +39,19 @@ func (f *batchEquivFileFetcher) ListByContentIDs(_ context.Context, contentIDs [
 	return out, nil
 }
 
-// batchEquivWorkSummaryProvider implements both the per-item
-// WorkSummaryProvider and the batched WorkSummaryBatchProvider from one backing
-// map, the same contract literaryworks.Repository satisfies in production. As
-// with files, this proves the batch path's work-summary routing matches the
-// per-item path without importing literaryworks (import cycle).
-type batchEquivWorkSummaryProvider struct {
-	summaries map[string]*WorkSummary
-}
-
-func (p *batchEquivWorkSummaryProvider) GetSummaryForContentID(_ context.Context, contentID string, _ AccessFilter) (*WorkSummary, error) {
-	return p.summaries[contentID], nil
-}
-
-func (p *batchEquivWorkSummaryProvider) ListSummariesForContentIDs(_ context.Context, contentIDs []string, _ AccessFilter) (map[string]*WorkSummary, error) {
-	out := make(map[string]*WorkSummary, len(contentIDs))
-	for _, id := range contentIDs {
-		if s, ok := p.summaries[id]; ok {
-			out[id] = s
-		}
+// newTestPool connects to SILO_TEST_DATABASE_URL, skipping when it is unset.
+func newTestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	return out, nil
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
 }
 
 func newBatchEquivTestPool(t *testing.T) *pgxpool.Pool {
@@ -96,259 +83,56 @@ func batchEquivExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 	}
 }
 
-// TestGetItemDetailsByIDs_MatchesGetItemDetail exercises the REAL
-// DetailService.GetItemDetailsByIDs against the REAL per-item GetItemDetail over
-// shared in-memory/real repositories, asserting per-id deep equality of the
-// returned *ItemDetail.
-//
-// Unlike the jellycompat handler test (which stubs the content service so both
-// paths return the same canned *ItemDetail), this drives the genuinely-batched
-// repository code: ItemRepository.GetByIDs vs GetByID, EnsureAccessibleIDs vs
-// EnsureAccessible, localization grouped by target language, and
-// PersonRepository.ListForItems vs ListForItem all run against a real Postgres.
-// Media files and work summaries route through interface fakes that serve the
-// batch and per-item method shapes from one backing map (mirroring the real
-// FileRepository / literaryworks.Repository), so the file/work-summary
-// prefetch wiring is compared too.
-//
-// Equivalence axes covered, with a mixed movie+movie+series dataset:
-//   - access checks (EnsureAccessibleIDs vs EnsureAccessible), incl. an
-//     access-filtered R-rated item asserted ABSENT from the batch map and
-//     rejected by per-item GetItemDetail;
-//   - localization: a movie with an fr localization row (localized title/
-//     overview path) alongside a movie that has none (nil short-circuit) and
-//     a pending-translation-language case;
-//   - credits ordering (ListForItems vs ListForItem) on the first movie;
-//   - media files (ListByContentIDs vs GetByContentID) on the first movie;
-//   - work summary (ListSummariesForContentIDs vs GetSummaryForContentID) on
-//     the series.
-func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
-	pool := newBatchEquivTestPool(t)
-	ctx := context.Background()
-
-	suffix := time.Now().UnixNano()
-	movieA := fmt.Sprintf("batch-equiv-movie-a-%d", suffix)
-	movieB := fmt.Sprintf("batch-equiv-movie-b-%d", suffix)
-	series := fmt.Sprintf("batch-equiv-series-%d", suffix)
-	movieR := fmt.Sprintf("batch-equiv-movie-r-%d", suffix)
-	personActor1 := suffix
-	personActor2 := suffix + 1
-	personDirector := suffix + 2
-	extraA := fmt.Sprintf("batch-equiv-extra-%d", suffix)
-	extraFolderName := fmt.Sprintf("batch-equiv-folder-%d", suffix)
-
-	t.Cleanup(func() {
-		ids := []string{movieA, movieB, series, movieR}
-		batchEquivExec(t, pool, `DELETE FROM item_people WHERE content_id = ANY($1)`, ids)
-		batchEquivExec(t, pool, `DELETE FROM people WHERE id = ANY($1)`, []int64{personActor1, personActor2, personDirector})
-		batchEquivExec(t, pool, `DELETE FROM media_item_localizations WHERE content_id = ANY($1)`, ids)
-		// Deleting the folder cascades the extra's media_files row; deleting
-		// the items cascades item_videos, media_item_rating_sources and
-		// media_extras.
-		batchEquivExec(t, pool, `DELETE FROM media_folders WHERE name = $1`, extraFolderName)
-		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
-	})
-
-	insertItem := func(contentID, mediaType, title, overview, rating, originalLanguage string) {
-		batchEquivExec(t, pool, `
-			INSERT INTO media_items (content_id, type, title, genres, overview, content_rating, content_rating_age, default_metadata_language, original_language)
-			VALUES ($1, $2, $3, '{}'::text[], $4, $5, $7, 'en', $6)
-		`, contentID, mediaType, title, overview, rating, originalLanguage, access.StoredRating(rating))
+func seedCompletionEpisodes(tb testing.TB, count int) (*EpisodeRepository, string, string) {
+	tb.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		tb.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	// movieA: localized into fr, credited, has files. content_rating PG -> visible.
-	insertItem(movieA, "movie", "Movie A", "Movie A overview (en)", "PG", "en")
-	// movieB: Norwegian original, default metadata language en, and no no
-	// localization row. The per-source original-language exception must produce
-	// a Norwegian pending-translation target in both batch and per-item paths.
-	insertItem(movieB, "movie", "Movie B", "Movie B overview (en)", "PG", "no")
-	// series: has a work summary, no playable files (series skip the file path).
-	insertItem(series, "series", "Series One", "Series overview (en)", "PG", "en")
-	// movieR: R-rated -> filtered out by MaxContentRating=PG-13 on BOTH paths.
-	insertItem(movieR, "movie", "Movie R", "Movie R overview (en)", "R", "en")
-
-	// fr localization for movieA only.
-	batchEquivExec(t, pool, `
-		INSERT INTO media_item_localizations (
-			content_id, language, title, sort_title, overview, tagline,
-			poster_path, poster_source_path, poster_thumbhash,
-			backdrop_path, backdrop_source_path, backdrop_thumbhash,
-			logo_path, logo_source_path, overview_source, tagline_source
-		)
-		VALUES ($1, 'fr', 'Film A', '', 'Synopsis du film A (fr)', '',
-			'', '', '', '', '', '', '', '', 'manual', 'manual')
-	`, movieA)
-
-	// Credits on movieA: two actors (cast) + one director (crew). Seeded with
-	// sort_order so ListForItems / ListForItem ordering parity is observable.
-	insertPerson := func(id int64, name string) {
-		batchEquivExec(t, pool, `INSERT INTO people (id, name) VALUES ($1, $2)`, id, name)
-	}
-	insertPerson(personActor1, "Lead Actor")
-	insertPerson(personActor2, "Supporting Actor")
-	insertPerson(personDirector, "The Director")
-	insertCredit := func(id, personID int64, kind models.PersonKind, character string, order int) {
-		batchEquivExec(t, pool, `
-			INSERT INTO item_people (id, person_id, content_id, kind, character, sort_order)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, id, personID, movieA, int16(kind), character, order)
-	}
-	insertCredit(personActor1, personActor1, models.PersonKindActor, "Hero", 0)
-	insertCredit(personActor2, personActor2, models.PersonKindActor, "Sidekick", 1)
-	insertCredit(personDirector, personDirector, models.PersonKindDirector, "", 0)
-
-	// Remote videos on movieA and the series: exercises the batched
-	// videoRepo.ListByContentIDs prefetch against per-item GetByContentID.
-	insertVideo := func(id int64, contentID, providerKey, kind string, official bool, order int) {
-		batchEquivExec(t, pool, `
-			INSERT INTO item_videos (id, content_id, provider, provider_key, kind, site, site_key, name, language, is_official, sort_order)
-			VALUES ($1, $2, 'tmdb', $3, $4, 'youtube', 'yt-' || $3, 'Video ' || $3, 'en', $5, $6)
-		`, id, contentID, providerKey, kind, official, order)
-	}
-	insertVideo(suffix+10, movieA, "v1", "trailer", true, 0)
-	insertVideo(suffix+11, movieA, "v2", "featurette", false, 1)
-	insertVideo(suffix+12, series, "v3", "teaser", false, 0)
-
-	// Per-source ratings on movieA and the series: exercises the batched
-	// ratingSourceRepo.ListByContentIDs prefetch against per-item
-	// GetByContentID, including display order and a NULL vote count.
-	insertRatingSource := func(contentID, source string, score float64, votes *int64) {
-		batchEquivExec(t, pool, `
-			INSERT INTO media_item_rating_sources (content_id, source, score, votes, provider)
-			VALUES ($1, $2, $3, $4, 'mdblist')
-		`, contentID, source, score, votes)
-	}
-	imdbVotes := int64(673852)
-	insertRatingSource(movieA, "mdblist", 86, nil)
-	insertRatingSource(movieA, models.RatingSourceIMDB, 81, &imdbVotes)
-	insertRatingSource(series, "letterboxd", 80, nil)
-
-	// A local extra on movieA backed by a live media_files row: exercises the
-	// batched extraRepo.ListWithFilesByParentIDs prefetch against the per-item
-	// ListWithFilesByParentID lookup.
-	var extraFolderID int
-	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name) VALUES ('movies', $1) RETURNING id`,
-		extraFolderName).Scan(&extraFolderID); err != nil {
-		t.Fatalf("seed extra folder: %v", err)
-	}
-	batchEquivExec(t, pool, `
-		INSERT INTO media_extras (content_id, parent_id, kind, title)
-		VALUES ($1, $2, 'featurette', 'Making Of')
-	`, extraA, movieA)
-	batchEquivExec(t, pool, `
-		INSERT INTO media_files (extra_id, media_folder_id, file_path, duration)
-		VALUES ($1, $2, $3, 120)
-	`, extraA, extraFolderID, fmt.Sprintf("/media/batch-equiv-extra-%d.mkv", suffix))
-
-	fileFetcher := &batchEquivFileFetcher{files: map[string][]*models.MediaFile{
-		movieA: {
-			{ID: 9001, ContentID: movieA, FilePath: "/media/movie-a-1080p.mkv", Container: "mkv", Resolution: "1080p", Duration: 6000, FileSize: 5_000_000},
-			{ID: 9002, ContentID: movieA, FilePath: "/media/movie-a-720p.mkv", Container: "mkv", Resolution: "720p", Duration: 6000, FileSize: 2_000_000},
-		},
-	}}
-	workSummaries := &batchEquivWorkSummaryProvider{summaries: map[string]*WorkSummary{
-		series: {
-			WorkID: "work-series-1",
-			Title:  "Series One Work",
-			Formats: []WorkFormatSummary{
-				{Type: "series", ContentID: series, LibraryID: 3},
-			},
-		},
-	}}
-
-	newService := func() *DetailService {
-		svc := NewDetailService(
-			NewItemRepository(pool),
-			NewEpisodeRepository(pool),
-			NewSeasonRepository(pool),
-			NewPersonRepository(pool),
-			fileFetcher,
-		)
-		svc.SetWorkSummaryProvider(workSummaries)
-		return svc
-	}
-
-	// Single shared access filter for BOTH paths: PG-13 ceiling (so PG items are
-	// visible, the R item is not), a French profile fallback, and Norwegian
-	// original-language metadata for Norwegian titles. This forces the batch
-	// path to group one page into two localization targets.
-	filter := AccessFilter{
-		ProfilePreferredLanguage: "fr",
-		MetadataLanguageOverrides: map[string]string{
-			"no": access.OriginalMetadataLanguage,
-		},
-		MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"},
-		UserID:         1,
-		ProfileID:      "profile-1",
-	}
-
-	visibleIDs := []string{movieA, movieB, series}
-	allIDs := []string{movieA, movieB, series, movieR}
-
-	batch, err := newService().GetItemDetailsByIDs(ctx, allIDs, filter)
+	ctx := tb.Context()
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		t.Fatalf("GetItemDetailsByIDs: %v", err)
+		tb.Fatal(err)
 	}
-
-	// Access-control parity: the R-rated item must be absent from the batch map
-	// and rejected by per-item GetItemDetail, i.e. EnsureAccessibleIDs and
-	// EnsureAccessible agree.
-	if _, present := batch[movieR]; present {
-		t.Fatalf("access-filtered item %s present in batch result", movieR)
-	}
-	if _, err := newService().GetItemDetail(ctx, movieR, filter); err == nil {
-		t.Fatalf("per-item GetItemDetail(%s) succeeded, want access rejection", movieR)
-	}
-
-	for _, id := range visibleIDs {
-		batchDetail, ok := batch[id]
-		if !ok {
-			t.Fatalf("id %s missing from batch result", id)
-		}
-		perItem, err := newService().GetItemDetail(ctx, id, filter)
-		if err != nil {
-			t.Fatalf("GetItemDetail(%s): %v", id, err)
-		}
-		if !reflect.DeepEqual(batchDetail, perItem) {
-			t.Fatalf("detail mismatch for %s:\nbatch:   %#v\nperItem: %#v", id, batchDetail, perItem)
+	tb.Cleanup(pool.Close)
+	prefix := fmt.Sprintf("completion-ids-%d", time.Now().UnixNano())
+	seriesID, seasonID := prefix+"-series", prefix+"-season"
+	var folderID, otherFolderID int
+	for _, id := range []*int{&folderID, &otherFolderID} {
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type,name,enabled) VALUES ('series',$1,true) RETURNING id`, prefix).Scan(id); err != nil {
+			tb.Fatal(err)
 		}
 	}
-
-	// Guard that the distinguishing data actually landed (otherwise the deep
-	// equality above could pass vacuously on empty details).
-	if got := batch[movieA]; got.Title != "Film A" || got.Overview != "Synopsis du film A (fr)" {
-		t.Fatalf("movieA not localized into fr: title=%q overview=%q", got.Title, got.Overview)
+	tb.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, seriesID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=ANY($1)`, []int{folderID, otherFolderID})
+	})
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO media_items (content_id,type,title,genres) VALUES ($1,'series','Completion fixture','{}')`, []any{seriesID}},
+		{`INSERT INTO seasons (content_id,series_id,season_number) VALUES ($1,$2,1)`, []any{seasonID, seriesID}},
+		{`INSERT INTO episodes (content_id,series_id,season_id,season_number,episode_number,title,overview)
+    SELECT $1 || '-episode-' || n,$2,$3,1,n,'Episode ' || n,repeat('Synthetic episode overview. ',80)
+    FROM generate_series(1,$4::int) n`, []any{prefix, seriesID, seasonID, count}},
+		{`INSERT INTO media_files (content_id,episode_id,media_folder_id,file_path)
+    SELECT $1,content_id,$2,content_id || '.mkv' FROM episodes WHERE series_id=$1 AND episode_number>1`, []any{seriesID, folderID}},
+		// Multiple folders must not duplicate an episode. Missing files deliberately
+		// retain membership and must keep the existing completion behavior.
+		{`INSERT INTO media_files (content_id,episode_id,media_folder_id,file_path,missing_since)
+    SELECT $1,content_id,$2,content_id || '-other.mkv',now() FROM episodes WHERE series_id=$1 AND episode_number=2`, []any{seriesID, otherFolderID}},
+		{`UPDATE media_files SET missing_since=now() WHERE content_id=$1 AND episode_id IN
+	    (SELECT content_id FROM episodes WHERE series_id=$1 AND episode_number=3)`, []any{seriesID}},
+		{`INSERT INTO episode_libraries (episode_id,media_folder_id)
+	    SELECT content_id,$2 FROM episodes WHERE series_id=$1 AND episode_number>1`, []any{seriesID, folderID}},
+		{`INSERT INTO episode_libraries (episode_id,media_folder_id)
+	    SELECT content_id,$2 FROM episodes WHERE series_id=$1 AND episode_number=2`, []any{seriesID, otherFolderID}},
 	}
-	if got := batch[movieA]; len(got.Cast) != 2 || len(got.Crew) != 1 {
-		t.Fatalf("movieA credits = %d cast / %d crew, want 2/1", len(got.Cast), len(got.Crew))
+	for _, s := range statements {
+		if _, err := pool.Exec(ctx, s.sql, s.args...); err != nil {
+			tb.Fatal(err)
+		}
 	}
-	if got := batch[movieA]; got.Cast[0].Character != "Hero" || got.Cast[1].Character != "Sidekick" {
-		t.Fatalf("movieA cast order = %q,%q, want Hero,Sidekick", got.Cast[0].Character, got.Cast[1].Character)
-	}
-	if got := batch[movieA]; len(got.Versions) != 2 {
-		t.Fatalf("movieA versions = %d, want 2 (file prefetch not applied)", len(got.Versions))
-	}
-	if got := batch[movieB]; got.PendingTranslationLanguage != "no" {
-		t.Fatalf("movieB pending translation language = %q, want no", got.PendingTranslationLanguage)
-	}
-	if got := batch[series]; got.WorkID != "work-series-1" {
-		t.Fatalf("series work summary not applied: WorkID=%q", got.WorkID)
-	}
-	if got := batch[movieA]; len(got.Videos) != 2 || got.Videos[0].Kind != "trailer" || got.Videos[0].SiteKey != "yt-v1" {
-		t.Fatalf("movieA videos prefetch mismatch: %#v", got.Videos)
-	}
-	if got := batch[series]; len(got.Videos) != 1 || got.Videos[0].Kind != "teaser" {
-		t.Fatalf("series videos prefetch mismatch: %#v", got.Videos)
-	}
-	if got := batch[movieA]; len(got.RatingSources) != 2 ||
-		got.RatingSources[0].Source != models.RatingSourceIMDB || got.RatingSources[0].Votes == nil || *got.RatingSources[0].Votes != imdbVotes ||
-		got.RatingSources[1].Source != "mdblist" || got.RatingSources[1].Votes != nil {
-		t.Fatalf("movieA rating sources prefetch mismatch: %#v", got.RatingSources)
-	}
-	if got := batch[series]; len(got.RatingSources) != 1 || got.RatingSources[0].Score != 80 {
-		t.Fatalf("series rating sources prefetch mismatch: %#v", got.RatingSources)
-	}
-	if got := batch[movieA]; len(got.Extras) != 1 || got.Extras[0].ContentID != extraA ||
-		got.Extras[0].DurationSeconds != 120 || got.Extras[0].FileID == 0 {
-		t.Fatalf("movieA extras prefetch mismatch: %#v", got.Extras)
-	}
+	return NewEpisodeRepository(pool), seriesID, seasonID
 }

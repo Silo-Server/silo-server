@@ -349,21 +349,74 @@ func TestFrontendAssetReturnsNotAcceptableWithoutAvailableRepresentation(t *test
 	}
 }
 
-func TestFrontendPrecompressedAssetFallsBackWhenSidecarIsMissing(t *testing.T) {
+// TestFrontendPrecompressedAssetEdgeCases covers a missing sidecar, split
+// Accept-Encoding lines, and how a Range request picks its representation.
+func TestFrontendPrecompressedAssetEdgeCases(t *testing.T) {
 	handler := newFrontendTestHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/assets/plain.js", nil)
-	req.Header.Set("Accept-Encoding", "br, gzip")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	tests := []struct {
+		name             string
+		method           string
+		path             string
+		acceptEncoding   []string
+		rangeHeader      string
+		wantStatus       int
+		wantEncoding     string
+		wantBody         string
+		wantContentRange string
+	}{
+		{
+			name: "falls back to identity when the sidecar is missing", method: http.MethodGet, path: "/assets/plain.js",
+			acceptEncoding: []string{"br, gzip"}, wantStatus: http.StatusOK, wantBody: "plain",
+		},
+		{
+			name: "combines Accept-Encoding header lines", method: http.MethodGet, path: "/assets/app.js",
+			acceptEncoding: []string{"gzip;q=0.3", "br;q=0.8"}, wantStatus: http.StatusOK, wantEncoding: "br", wantBody: "br-compressed",
+		},
+		{
+			name: "range uses the identity asset", method: http.MethodGet, path: "/assets/app.js",
+			acceptEncoding: []string{"br, gzip"}, rangeHeader: "bytes=0-6",
+			wantStatus: http.StatusPartialContent, wantBody: "console", wantContentRange: "bytes 0-6/14",
+		},
+		{
+			name: "range with rejected identity sends the full compressed asset", method: http.MethodGet, path: "/assets/app.js",
+			acceptEncoding: []string{"br, identity;q=0"}, rangeHeader: "bytes=0-6",
+			wantStatus: http.StatusOK, wantEncoding: "br", wantBody: "br-compressed",
+		},
+		{
+			name: "head ignores the range", method: http.MethodHead, path: "/assets/app.js",
+			acceptEncoding: []string{"br, identity;q=0"}, rangeHeader: "bytes=0-6",
+			wantStatus: http.StatusOK, wantEncoding: "br",
+		},
+	}
 
-	if rec.Code != http.StatusOK || rec.Body.String() != "plain" {
-		t.Fatalf("response = %d %q, want 200 identity body", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Encoding"); got != "" {
-		t.Fatalf("content-encoding = %q, want identity", got)
-	}
-	if got := rec.Header().Get("Vary"); got != "Accept-Encoding" {
-		t.Fatalf("vary = %q, want Accept-Encoding", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			for _, value := range tt.acceptEncoding {
+				req.Header.Add("Accept-Encoding", value)
+			}
+			if tt.rangeHeader != "" {
+				req.Header.Set("Range", tt.rangeHeader)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if got := rec.Header().Get("Content-Encoding"); got != tt.wantEncoding {
+				t.Fatalf("content-encoding = %q, want %q", got, tt.wantEncoding)
+			}
+			if got := rec.Header().Get("Content-Range"); got != tt.wantContentRange {
+				t.Fatalf("content-range = %q, want %q", got, tt.wantContentRange)
+			}
+			if got := rec.Body.String(); got != tt.wantBody {
+				t.Fatalf("body = %q, want %q", got, tt.wantBody)
+			}
+			if got := rec.Header().Get("Vary"); got != "Accept-Encoding" {
+				t.Fatalf("vary = %q, want Accept-Encoding", got)
+			}
+		})
 	}
 }
 
@@ -386,109 +439,6 @@ func TestFrontendPrecompressedAssetTriesNextAcceptableEncoding(t *testing.T) {
 	}
 	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
 		t.Fatalf("content-encoding = %q, want gzip", got)
-	}
-}
-
-func TestFrontendPrecompressedAssetCombinesHeaderLines(t *testing.T) {
-	handler := newFrontendTestHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
-	req.Header.Add("Accept-Encoding", "gzip;q=0.3")
-	req.Header.Add("Accept-Encoding", "br;q=0.8")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK || rec.Body.String() != "br-compressed" {
-		t.Fatalf("response = %d %q, want 200 brotli body", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Encoding"); got != "br" {
-		t.Fatalf("content-encoding = %q, want br", got)
-	}
-}
-
-func TestFrontendRangeRequestsUseIdentityAsset(t *testing.T) {
-	handler := newFrontendTestHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
-	req.Header.Set("Accept-Encoding", "br, gzip")
-	req.Header.Set("Range", "bytes=0-6")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusPartialContent {
-		t.Fatalf("status = %d, want 206", rec.Code)
-	}
-	if got := rec.Header().Get("Content-Encoding"); got != "" {
-		t.Fatalf("content-encoding = %q, want identity", got)
-	}
-	if got := rec.Header().Get("Content-Range"); got != "bytes 0-6/14" {
-		t.Fatalf("content-range = %q", got)
-	}
-	if got := rec.Body.String(); got != "console" {
-		t.Fatalf("body = %q, want identity byte range", got)
-	}
-}
-
-func TestFrontendRangeWithRejectedIdentityUsesFullCompressedAsset(t *testing.T) {
-	handler := newFrontendTestHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
-	req.Header.Set("Accept-Encoding", "br, identity;q=0")
-	req.Header.Set("Range", "bytes=0-6")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if got := rec.Header().Get("Content-Encoding"); got != "br" {
-		t.Fatalf("content-encoding = %q, want br", got)
-	}
-	if got := rec.Header().Get("Content-Range"); got != "" {
-		t.Fatalf("content-range = %q, want none", got)
-	}
-	if got := rec.Body.String(); got != "br-compressed" {
-		t.Fatalf("body = %q, want full brotli representation", got)
-	}
-}
-
-func TestFrontendPrecompressedAssetSupportsHead(t *testing.T) {
-	handler := newFrontendTestHandler(t)
-	req := httptest.NewRequest(http.MethodHead, "/assets/app.js", nil)
-	req.Header.Set("Accept-Encoding", "br")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if got := rec.Header().Get("Content-Encoding"); got != "br" {
-		t.Fatalf("content-encoding = %q, want br", got)
-	}
-	if got := rec.Header().Get("Content-Length"); got != "13" {
-		t.Fatalf("content-length = %q, want 13", got)
-	}
-	if rec.Body.Len() != 0 {
-		t.Fatalf("HEAD body = %d bytes, want 0", rec.Body.Len())
-	}
-}
-
-func TestFrontendPrecompressedAssetIgnoresRangeOnHead(t *testing.T) {
-	handler := newFrontendTestHandler(t)
-	req := httptest.NewRequest(http.MethodHead, "/assets/app.js", nil)
-	req.Header.Set("Accept-Encoding", "br, identity;q=0")
-	req.Header.Set("Range", "bytes=0-6")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if got := rec.Header().Get("Content-Encoding"); got != "br" {
-		t.Fatalf("content-encoding = %q, want br", got)
-	}
-	if got := rec.Header().Get("Content-Range"); got != "" {
-		t.Fatalf("content-range = %q, want none", got)
-	}
-	if rec.Body.Len() != 0 {
-		t.Fatalf("HEAD body = %d bytes, want 0", rec.Body.Len())
 	}
 }
 

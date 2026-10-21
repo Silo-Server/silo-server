@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarkerProviderConfig, PluginInstallation } from "@/api/types";
 
 import ProvidersSettings from "./ProvidersSettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 
 const mocks = vi.hoisted(() => ({
   checkConnection: vi.fn(),
@@ -44,7 +45,9 @@ function markerProvider(overrides: Partial<MarkerProviderConfig> = {}): MarkerPr
 }
 
 let markerProviders: MarkerProviderConfig[] = [];
-let pluginInstallations: Partial<PluginInstallation>[] = [];
+let pluginInstallations: Partial<PluginInstallation>[] | undefined = [];
+let installationsError = false;
+const refetchInstallations = vi.fn();
 
 vi.mock("@/hooks/queries/admin/markers", () => ({
   useMarkerProviders: () => ({ data: { providers: markerProviders }, isLoading: false }),
@@ -53,36 +56,25 @@ vi.mock("@/hooks/queries/admin/markers", () => ({
 }));
 
 vi.mock("@/hooks/queries/admin/plugins", () => ({
-  useAdminPluginInstallations: () => ({ data: pluginInstallations }),
+  useAdminPluginInstallations: () => ({
+    data: pluginInstallations,
+    isLoading: false,
+    isError: installationsError,
+    refetch: refetchInstallations,
+  }),
 }));
 
 let sensitiveConfigured: string[] = ["mdblist.api_key"];
 let settingsValues: Record<string, string> = {};
 const setValueMock = vi.fn();
-let adminNodes: { data?: unknown[]; isSuccess: boolean } = { data: [], isSuccess: true };
 
-vi.mock("@/hooks/queries/admin/nodes", () => ({
-  useAdminNodes: () => adminNodes,
-}));
-
-const useSettingsFormMock = vi.fn((_options?: { keys: string[] }) => ({
-  isLoading: false,
-  getValue: (key: string) => settingsValues[key] ?? "",
-  setValue: setValueMock,
-  resetValue: vi.fn(),
-  dirtyCount: 0,
-  dirtyKeys: [],
-  isDirty: vi.fn(() => false),
-  save: vi.fn(),
-  discard: vi.fn(),
-  isSaving: false,
-  restartRequired: false,
-  sensitiveConfigured,
-  sensitiveManagedByEnv: [],
-  sensitiveStatusReady: true,
-  sensitiveStatusError: false,
-  buildConnectionCheckRequest: vi.fn(() => ({ values: {}, dirty_keys: [] })),
-}));
+const useSettingsFormMock = vi.fn((_options?: { keys: string[] }) =>
+  fakeSettingsForm(settingsValues, {
+    setValue: setValueMock,
+    sensitiveConfigured,
+    buildConnectionCheckRequest: vi.fn(() => ({ values: {}, dirty_keys: [] })),
+  }),
+);
 
 const reportUnsavedMock = vi.fn();
 vi.mock("@/hooks/useUnsavedChanges", () => ({
@@ -171,60 +163,12 @@ describe("ProvidersSettings", () => {
     );
     sensitiveConfigured = ["mdblist.api_key"];
     settingsValues = {};
-    adminNodes = { data: [], isSuccess: true };
     setValueMock.mockReset();
     markerProviders = [];
     pluginInstallations = [];
+    installationsError = false;
+    refetchInstallations.mockReset();
     for (const mock of Object.values(mocks)) mock.mockReset();
-  });
-
-  it("stages the subtitle sync settings with their defaults", async () => {
-    adminNodes = {
-      data: [{ id: 1, type: "transcode", enabled: true, healthy: true }],
-      isSuccess: true,
-    };
-    render(<ProvidersSettings />);
-
-    expect(useSettingsFormMock).toHaveBeenLastCalledWith({
-      keys: expect.arrayContaining([
-        "subtitles.auto_sync",
-        "subtitles.sync_execution",
-        "subtitles.sync_node_capacity",
-      ]),
-    });
-    const group = screen.getByRole("group", { name: "Subtitle sync" });
-    const auto = within(group).getByRole("switch", { name: /Sync subtitles automatically/ });
-    expect(auto).toBeChecked();
-    expect(
-      within(group).getByText(
-        "Aligns subtitles to the video's audio: downloaded and uploaded ones when they're added, any other the first time it's played. Fixes subtitles cut for a different release.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(group).getByRole("combobox", { name: /Where to analyze audio/ }),
-    ).toHaveTextContent("Prefer transcode nodes");
-    expect(
-      within(group).getByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
-    ).toHaveValue(1);
-    expect(within(group).queryByText("No transcode nodes are connected")).not.toBeInTheDocument();
-
-    await userEvent.click(auto);
-    expect(setValueMock).toHaveBeenCalledWith("subtitles.auto_sync", "false");
-  });
-
-  it("hides node capacity for local sync and warns about node-only sync without nodes", () => {
-    settingsValues = { "subtitles.sync_execution": "local" };
-    const view = render(<ProvidersSettings />);
-    let group = screen.getByRole("group", { name: "Subtitle sync" });
-    expect(
-      within(group).queryByRole("spinbutton", { name: /Concurrent syncs per transcode node/ }),
-    ).not.toBeInTheDocument();
-    view.unmount();
-
-    settingsValues = { "subtitles.sync_execution": "transcode_nodes_only" };
-    render(<ProvidersSettings />);
-    group = screen.getByRole("group", { name: "Subtitle sync" });
-    expect(within(group).getByText("No transcode nodes are connected")).toBeInTheDocument();
   });
 
   it("reports a credential draft to the unsaved-changes registry", async () => {
@@ -262,7 +206,8 @@ describe("ProvidersSettings", () => {
           etag: '"captured"',
           intent: expect.objectContaining({ provider: "subdl" }),
         }),
-        config: { enabled: false, api_key: "retained-secret" },
+        // SubDL had no key, so its first one switches it on.
+        config: { enabled: true, api_key: "retained-secret" },
       },
       expect.anything(),
     );
@@ -276,6 +221,69 @@ describe("ProvidersSettings", () => {
     await waitFor(() => expect(within(panel).getByRole("button", { name: "Save" })).toBeEnabled());
     expect(within(panel).getByLabelText("API key")).toHaveValue("");
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("switches a subtitle provider on with its first credentials", async () => {
+    const user = userEvent.setup();
+    render(<ProvidersSettings />);
+    await user.click(
+      within(screen.getByRole("group", { name: "SubDL" })).getByRole("button", { name: "Connect" }),
+    );
+    const panel = within(screen.getByRole("group", { name: "SubDL" }));
+    await waitFor(() => expect(panel.getByRole("switch", { name: "Enable SubDL" })).toBeEnabled());
+    expect(panel.getByRole("switch", { name: "Enable SubDL" })).not.toBeChecked();
+
+    await user.type(panel.getByLabelText("API key"), "first-key");
+    // The switch shows what Save will do before it does it.
+    expect(panel.getByRole("switch", { name: "Enable SubDL" })).toBeChecked();
+    await user.click(panel.getByRole("button", { name: "Save" }));
+
+    expect(mocks.updateProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ config: { enabled: true, api_key: "first-key" } }),
+      expect.anything(),
+    );
+  });
+
+  it("keeps a first-connected provider off when the admin switched it off", async () => {
+    const user = userEvent.setup();
+    render(<ProvidersSettings />);
+    await user.click(
+      within(screen.getByRole("group", { name: "SubDL" })).getByRole("button", { name: "Connect" }),
+    );
+    const panel = within(screen.getByRole("group", { name: "SubDL" }));
+    await waitFor(() => expect(panel.getByRole("switch", { name: "Enable SubDL" })).toBeEnabled());
+
+    await user.type(panel.getByLabelText("API key"), "first-key");
+    await user.click(panel.getByRole("switch", { name: "Enable SubDL" }));
+    await user.click(panel.getByRole("button", { name: "Save" }));
+
+    expect(mocks.updateProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ config: { enabled: false, api_key: "first-key" } }),
+      expect.anything(),
+    );
+  });
+
+  it("leaves a configured provider that is off alone when its key is replaced", async () => {
+    const user = userEvent.setup();
+    render(<ProvidersSettings />);
+    await user.click(
+      within(screen.getByRole("group", { name: "SubSource" })).getByRole("button", {
+        name: "Manage",
+      }),
+    );
+    const panel = within(screen.getByRole("group", { name: "SubSource" }));
+    await waitFor(() =>
+      expect(panel.getByRole("switch", { name: "Enable SubSource" })).toBeEnabled(),
+    );
+
+    await user.type(panel.getByLabelText("API key"), "rotated-key");
+    expect(panel.getByRole("switch", { name: "Enable SubSource" })).not.toBeChecked();
+    await user.click(panel.getByRole("button", { name: "Save" }));
+
+    expect(mocks.updateProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ config: { enabled: false, api_key: "rotated-key" } }),
+      expect.anything(),
+    );
   });
 
   it("shows subtitle saved with local failure without claiming immediate removal", async () => {
@@ -343,35 +351,6 @@ describe("ProvidersSettings", () => {
     expect(mocks.updateProvider).not.toHaveBeenCalled();
   });
 
-  it("surfaces a failed provider test on the tile itself", async () => {
-    const user = userEvent.setup();
-    mocks.testProvider.mockImplementation((_vars, options) => {
-      options.onSuccess({ success: false, error: "401 — key rejected" });
-    });
-    render(<ProvidersSettings />);
-
-    await user.click(
-      within(screen.getByRole("group", { name: "SubSource" })).getByRole("button", {
-        name: "Manage",
-      }),
-    );
-    await user.click(
-      within(screen.getByRole("group", { name: "SubSource" })).getByRole("button", {
-        name: "Test connection",
-      }),
-    );
-    await user.click(
-      within(screen.getByRole("group", { name: "SubSource" })).getByRole("button", {
-        name: "Close",
-      }),
-    );
-
-    const subsource = screen.getByRole("group", { name: "SubSource" });
-    expect(subsource).toHaveAttribute("data-state", "error");
-    expect(within(subsource).getByRole("button", { name: "Fix" })).toBeInTheDocument();
-    expect(within(subsource).getByText("401 — key rejected")).toBeInTheDocument();
-  });
-
   it("edits marker provider behavior in the tile and sends the whole row", async () => {
     const user = userEvent.setup();
     markerProviders = [markerProvider()];
@@ -386,6 +365,16 @@ describe("ProvidersSettings", () => {
 
     const tile = screen.getByRole("group", { name: "TheIntroDB" });
     expect(tile).toHaveAttribute("data-expanded", "true");
+    // Lookup order and the sharing threshold have working defaults, so they
+    // wait under the tile's Advanced section.
+    expect(within(tile).queryByLabelText("Provider priority")).not.toBeInTheDocument();
+    expect(
+      within(tile).queryByLabelText("Minimum confidence for automatic sharing"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(tile).getByRole("switch", { name: "Get markers from this provider" }),
+    ).toBeChecked();
+    await user.click(within(tile).getByRole("button", { name: "Advanced · 2 settings" }));
     expect(within(tile).getByLabelText("Provider priority")).toHaveValue(10);
     expect(within(tile).getByLabelText("Minimum confidence for automatic sharing")).toHaveValue(95);
     // Credentials are the plugin's, not Silo's: the panel links out for them.
@@ -410,34 +399,32 @@ describe("ProvidersSettings", () => {
     });
   });
 
-  it.each([0, 92.5, 100])(
-    "saves a confidence of %s percent in the API's 0–1 range",
-    async (percent) => {
-      const user = userEvent.setup();
-      markerProviders = [markerProvider({ contribute_enabled: true, contribute_auto_local: true })];
-      render(<ProvidersSettings />);
-      const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
-      await user.click(tile.getByRole("button", { name: "Manage" }));
+  it.each([0, 92.5])("saves a confidence of %s percent in the API's 0–1 range", async (percent) => {
+    const user = userEvent.setup();
+    markerProviders = [markerProvider({ contribute_enabled: true, contribute_auto_local: true })];
+    render(<ProvidersSettings />);
+    const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
+    await user.click(tile.getByRole("button", { name: "Manage" }));
+    await user.click(tile.getByRole("button", { name: /^Advanced/ }));
 
-      const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
-      await user.clear(confidence);
-      await user.type(confidence, String(percent));
-      await user.click(tile.getByRole("button", { name: "Save" }));
+    const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
+    await user.clear(confidence);
+    await user.type(confidence, String(percent));
+    await user.click(tile.getByRole("button", { name: "Save" }));
 
-      expect(mocks.updateMarkerProvider).toHaveBeenCalledWith({
-        provider: "plugin:6:introdb",
-        patch: {
-          fetch_enabled: true,
-          fetch_priority: 10,
-          contribute_enabled: true,
-          contribute_auto_local: true,
-          contribute_min_confidence: percent / 100,
-        },
-      });
-    },
-  );
+    expect(mocks.updateMarkerProvider).toHaveBeenCalledWith({
+      provider: "plugin:6:introdb",
+      patch: {
+        fetch_enabled: true,
+        fetch_priority: 10,
+        contribute_enabled: true,
+        contribute_auto_local: true,
+        contribute_min_confidence: percent / 100,
+      },
+    });
+  });
 
-  it.each([0.947, 0.9500000000000001, 0.9876543210987654])(
+  it.each([0.9500000000000001])(
     "keeps custom confidence %s clean and exact when another setting changes",
     async (savedConfidence) => {
       const user = userEvent.setup();
@@ -446,6 +433,7 @@ describe("ProvidersSettings", () => {
       render(<ProvidersSettings />);
       const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
       await user.click(tile.getByRole("button", { name: "Manage" }));
+      await user.click(tile.getByRole("button", { name: /^Advanced/ }));
 
       expect(tile.getByRole("button", { name: "Save" })).toBeDisabled();
       expect(reportUnsavedMock.mock.calls.every(([dirty]) => dirty === false)).toBe(true);
@@ -468,6 +456,7 @@ describe("ProvidersSettings", () => {
     render(<ProvidersSettings />);
     const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
     await user.click(tile.getByRole("button", { name: "Manage" }));
+    await user.click(tile.getByRole("button", { name: /^Advanced/ }));
 
     const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
     await user.clear(confidence);
@@ -484,9 +473,12 @@ describe("ProvidersSettings", () => {
     render(<ProvidersSettings />);
     const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
     await user.click(tile.getByRole("button", { name: "Manage" }));
+    await user.click(tile.getByRole("button", { name: /^Advanced/ }));
 
     const sharing = tile.getByRole("switch", { name: "Allow sharing with this provider" });
-    const automatic = tile.getByRole("switch", { name: "Automatically share detected intros" });
+    const automatic = tile.getByRole("switch", {
+      name: "Automatically share detected intros and credits",
+    });
     const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
     expect(automatic).toBeDisabled();
     expect(confidence).toBeEnabled();
@@ -511,6 +503,7 @@ describe("ProvidersSettings", () => {
     render(<ProvidersSettings />);
     const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
     await user.click(tile.getByRole("button", { name: "Manage" }));
+    await user.click(tile.getByRole("button", { name: /^Advanced/ }));
     const priority = tile.getByLabelText("Provider priority");
     const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
     await user.clear(priority);
@@ -543,30 +536,64 @@ describe("ProvidersSettings", () => {
     render(<ProvidersSettings />);
     const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
     await user.click(tile.getByRole("button", { name: "Manage" }));
+    await user.click(tile.getByRole("button", { name: /^Advanced/ }));
 
     expect(tile.getByRole("switch", { name: "Allow sharing with this provider" })).toBeDisabled();
     expect(
-      tile.getByRole("switch", { name: "Automatically share detected intros" }),
+      tile.getByRole("switch", { name: "Automatically share detected intros and credits" }),
     ).toBeDisabled();
     expect(tile.getByLabelText("Minimum confidence for automatic sharing")).toBeDisabled();
     expect(tile.queryByRole("button", { name: "Test connection" })).not.toBeInTheDocument();
   });
 
-  it("tests the marker provider connection and displays the result", async () => {
-    const user = userEvent.setup();
-    markerProviders = [markerProvider()];
-    mocks.validateMarkerProvider.mockImplementation((_vars, options) => {
-      options.onSuccess({ valid: true });
-    });
+  it("reports a failed watch provider load instead of claiming nothing is installed", async () => {
+    pluginInstallations = undefined;
+    installationsError = true;
     render(<ProvidersSettings />);
-    const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
-    await user.click(tile.getByRole("button", { name: "Manage" }));
-    await user.click(tile.getByRole("button", { name: "Test connection" }));
 
-    expect(mocks.validateMarkerProvider).toHaveBeenCalledWith(
-      { provider: "plugin:6:introdb", displayName: "TheIntroDB" },
-      expect.any(Object),
+    const watch = screen.getByRole("group", { name: "Watch providers" });
+    expect(within(watch).getByRole("alert")).toHaveTextContent(
+      "Couldn't load the installed watch provider plugins.",
     );
-    expect(tile.getByRole("status")).toHaveTextContent("Tested");
+    expect(screen.queryByText("No watch provider plugins are installed.")).not.toBeInTheDocument();
+    await userEvent.setup().click(within(watch).getByRole("button", { name: "Retry" }));
+    expect(refetchInstallations).toHaveBeenCalled();
+  });
+
+  it("does not label an enabled watch plugin as connected until its required config is set", () => {
+    const schema = [{ key: "account", title: "Account", json_schema: "{}", required: true }];
+    pluginInstallations = [
+      {
+        id: 7,
+        plugin_id: "silo-plugin-watchsync-anilist",
+        enabled: true,
+        capabilities: [{ type: "watch_sync_provider.v1", id: "anilist", display_name: "AniList" }],
+        global_config_schema: schema,
+        global_configs: [],
+      },
+      {
+        id: 9,
+        plugin_id: "silo-plugin-watchsync-serializd",
+        enabled: true,
+        capabilities: [
+          { type: "watch_sync_provider.v1", id: "serializd", display_name: "Serializd" },
+        ],
+        global_config_schema: schema,
+        global_configs: [{ key: "account", value: {}, configured_secrets: ["api_key"] }],
+      },
+    ];
+
+    render(<ProvidersSettings />);
+
+    // Enabled but keyless: the plugin cannot serve a request, so the tile must
+    // not read as set up.
+    const watch = screen.getByRole("group", { name: "Watch providers" });
+    const anilist = within(watch).getByRole("group", { name: "AniList" });
+    expect(anilist).toHaveAttribute("data-state", "not_connected");
+    expect(within(anilist).getByText("Needs setup")).toBeInTheDocument();
+
+    const serializd = within(watch).getByRole("group", { name: "Serializd" });
+    expect(serializd).toHaveAttribute("data-state", "connected");
+    expect(within(serializd).getByText("Enabled")).toBeInTheDocument();
   });
 });

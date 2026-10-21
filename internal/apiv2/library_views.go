@@ -22,15 +22,15 @@ type LibraryViewInput struct {
 
 // LibrarySectionsInput is the listLibrarySections query.
 type LibrarySectionsInput struct {
-	ID        ID     `path:"id" doc:"Library identifier" example:"1"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ID ID `path:"id" doc:"Library identifier" example:"1"`
+	ArtworkQuery
 }
 
 // LibrarySectionItemsInput is the getLibrarySectionItems query.
 type LibrarySectionItemsInput struct {
 	ID        ID     `path:"id" doc:"Library identifier" example:"1"`
 	SectionID string `path:"section_id" minLength:"1" doc:"Section identifier from the layout" example:"recently_added"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 }
 
 // SectionLayoutEntry is one section of a page layout, without items.
@@ -219,12 +219,8 @@ func viewerIdentity(ctx context.Context) (int, string, *Problem) {
 // sectionViewer is what the section seams need beyond the context. The v2
 // listener does not read a device header, so the access filter carries no
 // device id.
-func sectionViewer(ctx context.Context, imageSize string) handlers.SectionViewer {
-	size, err := imagesize.Parse(imageSize)
-	if err != nil {
-		size = imagesize.Unset
-	}
-	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: size}
+func sectionViewer(ctx context.Context, art imagesize.Request) handlers.SectionViewer {
+	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: art.Size, ImageWidths: art.Widths}
 }
 
 func (reg *Registry) librarySections() (LibrarySectionService, *Problem) {
@@ -288,7 +284,7 @@ func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySection
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibrarySections(ctx, id, sectionViewer(ctx, in.ImageSize))
+	view, err := svc.LibrarySections(ctx, id, sectionViewer(ctx, in.Artwork()))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -312,7 +308,7 @@ func (reg *Registry) getLibrarySectionItems(ctx context.Context, in *LibrarySect
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibrarySectionItems(ctx, id, in.SectionID, sectionViewer(ctx, in.ImageSize))
+	view, err := svc.LibrarySectionItems(ctx, id, in.SectionID, sectionViewer(ctx, in.Artwork()))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

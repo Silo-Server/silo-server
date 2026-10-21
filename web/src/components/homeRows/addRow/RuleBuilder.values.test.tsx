@@ -50,6 +50,16 @@ function languageRule(field: string, value: string): QueryDefinition {
   };
 }
 
+/** A catalog filters answer whose only original language is French. */
+const FRENCH_FILTERS = {
+  genres: [],
+  studios: [],
+  networks: [],
+  countries: [],
+  original_languages: ["fr"],
+  content_ratings: [],
+};
+
 describe("RuleBuilder value pickers", () => {
   it("look for values in the rule's libraries and kind of titles", async () => {
     v2Recorder.answer("GET /api/v2/catalog/search/capabilities", {
@@ -89,12 +99,7 @@ describe("RuleBuilder value pickers", () => {
 
   it("pick an audio language by name from the languages titles have", async () => {
     v2Recorder.answer("GET /api/v2/catalog/filters", {
-      genres: [],
-      studios: [],
-      networks: [],
-      countries: [],
-      original_languages: ["fr"],
-      content_ratings: [],
+      ...FRENCH_FILTERS,
       technical: { resolutions: [], audio_languages: ["ja", "en"], subtitle_languages: [] },
     });
     const onChange = vi.fn();
@@ -122,14 +127,7 @@ describe("RuleBuilder value pickers", () => {
         failed = true;
         throw new Error("network down");
       }
-      return {
-        genres: [],
-        studios: [],
-        networks: [],
-        countries: [],
-        original_languages: ["fr"],
-        content_ratings: [],
-      };
+      return FRENCH_FILTERS;
     });
     renderBuilder(languageRule("original_language", ""));
 
@@ -147,14 +145,7 @@ describe("RuleBuilder value pickers", () => {
       state: "available",
       allowed: true,
     });
-    v2Recorder.answer("GET /api/v2/catalog/filters", {
-      genres: [],
-      studios: [],
-      networks: [],
-      countries: [],
-      original_languages: ["fr"],
-      content_ratings: [],
-    });
+    v2Recorder.answer("GET /api/v2/catalog/filters", FRENCH_FILTERS);
     renderBuilder(languageRule("original_language", ""));
 
     await userEvent.click(screen.getByRole("combobox", { name: "Value" }));
@@ -173,14 +164,7 @@ describe("RuleBuilder value pickers", () => {
       }
       return { revision: "r1", state: "available", allowed: true, facet_value_search: true };
     });
-    v2Recorder.answer("GET /api/v2/catalog/filters", {
-      genres: [],
-      studios: [],
-      networks: [],
-      countries: [],
-      original_languages: ["fr"],
-      content_ratings: [],
-    });
+    v2Recorder.answer("GET /api/v2/catalog/filters", FRENCH_FILTERS);
     renderBuilder(languageRule("original_language", ""));
 
     const value = screen.getByRole("combobox", { name: "Value" });
@@ -193,14 +177,7 @@ describe("RuleBuilder value pickers", () => {
   });
 
   it("keep a saved language no title has any more", async () => {
-    v2Recorder.answer("GET /api/v2/catalog/filters", {
-      genres: [],
-      studios: [],
-      networks: [],
-      countries: [],
-      original_languages: ["fr"],
-      content_ratings: [],
-    });
+    v2Recorder.answer("GET /api/v2/catalog/filters", FRENCH_FILTERS);
     renderBuilder(languageRule("original_language", "de"));
 
     const value = screen.getByRole("combobox", { name: "Value" });

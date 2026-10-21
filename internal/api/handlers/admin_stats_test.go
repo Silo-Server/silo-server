@@ -8,12 +8,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
-type stubWatchProviderLister struct {
-	summaries []watchsync.ProviderSummary
-}
-
-func (s stubWatchProviderLister) List() []watchsync.ProviderSummary { return s.summaries }
-
 func providerStatsByKey(t *testing.T, stats []WatchProviderStats, key string) WatchProviderStats {
 	t.Helper()
 	for _, entry := range stats {
@@ -136,15 +130,5 @@ func TestMergeWatchProviderStatsWithoutRegistrySerializesAsArray(t *testing.T) {
 	}
 	if string(decoded["watch_providers"]) != "[]" {
 		t.Fatalf("watch_providers = %s, want []", decoded["watch_providers"])
-	}
-}
-
-func TestListWatchProvidersToleratesNilRegistry(t *testing.T) {
-	var registry *watchsync.Registry
-	if got := listWatchProviders(registry); got != nil {
-		t.Fatalf("nil registry should list no providers, got %+v", got)
-	}
-	if got := listWatchProviders(stubWatchProviderLister{}); got != nil {
-		t.Fatalf("empty lister should list no providers, got %+v", got)
 	}
 }

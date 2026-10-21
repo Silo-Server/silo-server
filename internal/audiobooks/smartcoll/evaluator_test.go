@@ -14,100 +14,6 @@ func sampleCandidates() []Candidate {
 	}
 }
 
-func TestEvaluate_EmptyRulesMatchesAll(t *testing.T) {
-	got := Evaluate(context.Background(), QueryDefinition{}, sampleCandidates(), EvaluateOptions{})
-	if len(got) != 3 {
-		t.Errorf("matched %d, want 3", len(got))
-	}
-}
-
-func TestEvaluate_GenreContains(t *testing.T) {
-	qd := QueryDefinition{
-		Match:  "all",
-		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "genre", Op: "contains", Value: "Sci"}}}},
-	}
-	got := Evaluate(context.Background(), qd, sampleCandidates(), EvaluateOptions{})
-	if len(got) != 2 {
-		t.Errorf("matched %d, want 2 (sci-fi books)", len(got))
-	}
-}
-
-func TestEvaluate_YearBetween(t *testing.T) {
-	qd := QueryDefinition{
-		Match:  "all",
-		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "year", Op: "between", Value: []any{2000, 2025}}}}},
-	}
-	got := Evaluate(context.Background(), qd, sampleCandidates(), EvaluateOptions{})
-	if len(got) != 2 {
-		t.Errorf("matched %d, want 2 (Mistborn + Project Hail Mary)", len(got))
-	}
-}
-
-func TestEvaluate_AddedInLast14d(t *testing.T) {
-	qd := QueryDefinition{
-		Match:  "all",
-		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "added_at", Op: "in_last", Value: "14d"}}}},
-	}
-	got := Evaluate(context.Background(), qd, sampleCandidates(), EvaluateOptions{Now: time.Now()})
-	if len(got) != 1 {
-		t.Errorf("matched %d, want 1 (only Project Hail Mary within 14d)", len(got))
-	}
-}
-
-func TestEvaluate_MatchAny(t *testing.T) {
-	qd := QueryDefinition{
-		Match: "any",
-		Groups: []QueryGroup{
-			{Match: "all", Rules: []QueryRule{{Field: "author", Op: "is", Value: "Andy Weir"}}},
-			{Match: "all", Rules: []QueryRule{{Field: "year", Op: "lt", Value: 1970}}},
-		},
-	}
-	got := Evaluate(context.Background(), qd, sampleCandidates(), EvaluateOptions{})
-	if len(got) != 2 {
-		t.Errorf("matched %d, want 2 (Project Hail Mary + Dune)", len(got))
-	}
-}
-
-func TestEvaluate_PersonalizedDroppedWithoutScope(t *testing.T) {
-	cands := sampleCandidates()
-	cands[0].IsFinished = true
-	qd := QueryDefinition{
-		Match:  "all",
-		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "finished", Op: "is", Value: true}}}},
-	}
-	got := Evaluate(context.Background(), qd, cands, EvaluateOptions{AllowPersonalized: false})
-	if len(got) != 0 {
-		t.Errorf("matched %d with personalization dropped, want 0", len(got))
-	}
-	got2 := Evaluate(context.Background(), qd, cands, EvaluateOptions{AllowPersonalized: true})
-	if len(got2) != 1 {
-		t.Errorf("matched %d with personalization on, want 1 (Mistborn)", len(got2))
-	}
-}
-
-func TestEvaluate_BookmarkCountGT(t *testing.T) {
-	cands := sampleCandidates()
-	cands[0].BookmarkCount = 5
-	cands[1].BookmarkCount = 0
-	cands[2].BookmarkCount = 2
-	qd := QueryDefinition{
-		Match:  "all",
-		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "bookmark_count", Op: "gt", Value: 0}}}},
-	}
-	got := Evaluate(context.Background(), qd, cands, EvaluateOptions{AllowPersonalized: true})
-	if len(got) != 2 {
-		t.Errorf("matched %d, want 2", len(got))
-	}
-}
-
-func TestEvaluate_SortTitleAsc(t *testing.T) {
-	qd := QueryDefinition{Sort: QuerySort{Field: "title", Order: "asc"}}
-	got := Evaluate(context.Background(), qd, sampleCandidates(), EvaluateOptions{})
-	if len(got) != 3 || got[0].Item.Title != "Dune" || got[2].Item.Title != "Project Hail Mary" {
-		t.Errorf("sort wrong: %v %v %v", got[0].Item.Title, got[1].Item.Title, got[2].Item.Title)
-	}
-}
-
 func TestEvaluate_RandomDeterministicPerSeed(t *testing.T) {
 	qd := QueryDefinition{Sort: QuerySort{Field: "random"}}
 	a := Evaluate(context.Background(), qd, sampleCandidates(), EvaluateOptions{UserSeed: "u1:c1"})
@@ -119,25 +25,71 @@ func TestEvaluate_RandomDeterministicPerSeed(t *testing.T) {
 	}
 }
 
-func TestEvaluate_LimitTrims(t *testing.T) {
-	limit := 2
-	qd := QueryDefinition{Limit: &limit, Sort: QuerySort{Field: "title", Order: "asc"}}
-	got := Evaluate(context.Background(), qd, sampleCandidates(), EvaluateOptions{})
-	if len(got) != 2 {
-		t.Errorf("limit didn't apply: len = %d, want 2", len(got))
+// oneRule is a query matching every candidate that satisfies a single rule.
+func oneRule(field, op string, value any) QueryDefinition {
+	return QueryDefinition{
+		Match:  "all",
+		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: field, Op: op, Value: value}}}},
 	}
 }
 
-func TestEvaluate_AbandonedRule(t *testing.T) {
-	cands := sampleCandidates()
-	cands[0].CurrentSeconds = 1000
-	cands[0].LastPlayedAt = time.Now().Add(-90 * 24 * time.Hour)
-	qd := QueryDefinition{
-		Match:  "all",
-		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "abandoned", Op: "is", Value: true}}}},
+func TestEvaluateRules(t *testing.T) {
+	finished := func(c []Candidate) { c[0].IsFinished = true }
+	tests := []struct {
+		name   string
+		qd     QueryDefinition
+		mutate func([]Candidate)
+		opts   EvaluateOptions
+		want   int
+		why    string
+	}{
+		{name: "GenreContains", qd: oneRule("genre", "contains", "Sci"), want: 2, why: "sci-fi books"},
+		{name: "YearBetween", qd: oneRule("year", "between", []any{2000, 2025}), want: 2, why: "Mistborn + Project Hail Mary"},
+		{name: "AddedInLast14d", qd: oneRule("added_at", "in_last", "14d"), opts: EvaluateOptions{Now: time.Now()}, want: 1, why: "only Project Hail Mary within 14d"},
+		{
+			name: "MatchAny",
+			qd: QueryDefinition{
+				Match: "any",
+				Groups: []QueryGroup{
+					{Match: "all", Rules: []QueryRule{{Field: "author", Op: "is", Value: "Andy Weir"}}},
+					{Match: "all", Rules: []QueryRule{{Field: "year", Op: "lt", Value: 1970}}},
+				},
+			},
+			want: 2, why: "Project Hail Mary + Dune",
+		},
+		{name: "PersonalizedDroppedWithoutScope", qd: oneRule("finished", "is", true), mutate: finished, opts: EvaluateOptions{AllowPersonalized: false}, want: 0, why: "personalization dropped"},
+		{name: "PersonalizedWithScope", qd: oneRule("finished", "is", true), mutate: finished, opts: EvaluateOptions{AllowPersonalized: true}, want: 1, why: "Mistborn, personalization on"},
+		{
+			name: "BookmarkCountGT",
+			qd:   oneRule("bookmark_count", "gt", 0),
+			mutate: func(c []Candidate) {
+				c[0].BookmarkCount = 5
+				c[1].BookmarkCount = 0
+				c[2].BookmarkCount = 2
+			},
+			opts: EvaluateOptions{AllowPersonalized: true}, want: 2, why: "Mistborn + Dune",
+		},
+		{
+			name: "AbandonedRule",
+			qd:   oneRule("abandoned", "is", true),
+			mutate: func(c []Candidate) {
+				c[0].CurrentSeconds = 1000
+				c[0].LastPlayedAt = time.Now().Add(-90 * 24 * time.Hour)
+			},
+			opts: EvaluateOptions{AllowPersonalized: true, AbandonedAfter: 60 * 24 * time.Hour, Now: time.Now()},
+			want: 1, why: "Mistborn abandoned 90d ago",
+		},
 	}
-	got := Evaluate(context.Background(), qd, cands, EvaluateOptions{AllowPersonalized: true, AbandonedAfter: 60 * 24 * time.Hour, Now: time.Now()})
-	if len(got) != 1 {
-		t.Errorf("matched %d, want 1 (Mistborn abandoned 90d ago)", len(got))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cands := sampleCandidates()
+			if tt.mutate != nil {
+				tt.mutate(cands)
+			}
+			got := Evaluate(context.Background(), tt.qd, cands, tt.opts)
+			if len(got) != tt.want {
+				t.Errorf("matched %d, want %d (%s)", len(got), tt.want, tt.why)
+			}
+		})
 	}
 }

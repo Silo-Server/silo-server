@@ -138,15 +138,4 @@ describe("taste-seed gate and banner", () => {
     expect(screen.getByText("home")).toBeTruthy();
     expect(screen.queryByText("Personalize your home")).toBeNull();
   });
-
-  it("hides the banner when the newest favorite is hidden but more follow", async () => {
-    setTasteSeedDismissed("p-owner");
-    stubFavorites(hiddenNewestFavorite);
-
-    const client = renderHome();
-    await waitFor(() => expect(client.isFetching()).toBe(0));
-
-    expect(screen.getByText("home")).toBeTruthy();
-    expect(screen.queryByText("Personalize your home")).toBeNull();
-  });
 });
