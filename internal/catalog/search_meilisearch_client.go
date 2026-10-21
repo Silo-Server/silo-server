@@ -211,24 +211,40 @@ func (c *meilisearchClient) Health(ctx context.Context) error {
 // Meilisearch redirected to another scheme, host or port.
 var ErrMeilisearchCheckRedirected = errors.New("meilisearch redirected the connection check to another address")
 
+// ErrMeilisearchCheckKeyRejected reports a connection check whose key, or
+// missing key, Meilisearch refused for an authenticated request.
+var ErrMeilisearchCheckKeyRejected = errors.New("meilisearch rejected the API key")
+
 // checkConnection keeps a credentialed administrative probe at its configured
 // scheme, host and port: it follows redirects within them and reports any
 // other as ErrMeilisearchCheckRedirected. Runtime clients and checks without a
 // key retain their redirect policy.
+//
+// /health answers without a key, so the check also lists one index, which
+// needs the indexes.get action the rebuild cleanup uses. A 401 or 403 there
+// is reported as ErrMeilisearchCheckKeyRejected with the status code only,
+// not Meilisearch's error text.
 func (c *meilisearchClient) checkConnection(ctx context.Context) error {
-	if c.apiKey == "" {
-		return c.Health(ctx)
-	}
-	c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if !sameCheckAuthority(req.URL, via[0].URL) {
-			return ErrMeilisearchCheckRedirected
+	if c.apiKey != "" {
+		c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if !sameCheckAuthority(req.URL, via[0].URL) {
+				return ErrMeilisearchCheckRedirected
+			}
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			return nil
 		}
-		if len(via) >= 10 {
-			return errors.New("stopped after 10 redirects")
-		}
-		return nil
 	}
-	return c.Health(ctx)
+	if err := c.Health(ctx); err != nil {
+		return err
+	}
+	err := c.do(ctx, http.MethodGet, "/indexes?limit=1", nil, nil)
+	var httpErr *meilisearchHTTPError
+	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden) {
+		return fmt.Errorf("%w (HTTP %d)", ErrMeilisearchCheckKeyRejected, httpErr.StatusCode)
+	}
+	return err
 }
 
 // sameCheckAuthority reports whether a redirect keeps the scheme, host and

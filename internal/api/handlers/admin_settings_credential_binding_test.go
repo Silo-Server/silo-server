@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
@@ -200,6 +201,12 @@ func TestMeilisearchCheckBridgesUseOnlyBoundDraftCredentials(t *testing.T) {
 	redirected := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{catalog.SearchSettingMeilisearchURL: "http://search.example.test"}}}
 	if result, err := redirected.CheckAdminSettingsConnection(t.Context(), "meilisearch", nil, nil); err != nil || result.Success || result.Message != adminMeilisearchRedirectMessage {
 		t.Fatalf("redirected check result = %+v, %v", result, err)
+	}
+	checkAdminMeilisearchSettingsConnection = func(context.Context, catalog.CatalogSearchSettings) error {
+		return fmt.Errorf("%w: SYNTHETIC_PROVIDER_DETAIL", catalog.ErrMeilisearchCheckKeyRejected)
+	}
+	if result, err := redirected.CheckAdminSettingsConnection(t.Context(), "meilisearch", nil, nil); err != nil || result.Success || result.Message != adminMeilisearchKeyRejectedMessage {
+		t.Fatalf("rejected key check result = %+v, %v", result, err)
 	}
 	checkAdminMeilisearchSettingsConnection = func(context.Context, catalog.CatalogSearchSettings) error {
 		return errors.New("SYNTHETIC_PROVIDER_DETAIL")

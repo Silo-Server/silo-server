@@ -42,7 +42,10 @@ remain clears under each provider's existing fallback rules. Connection checks d
 not persist draft values. Credentialed Meilisearch checks follow redirects only
 within the same scheme, exact host and effective port; any other redirect fails the check with a
 message asking for the final address. Checks without a key retain the HTTP
-client's ordinary redirect behavior.
+client's ordinary redirect behavior. Because Meilisearch answers `/health`
+without a key, the check then lists one index, which needs the `indexes.get`
+action; a key Meilisearch refuses there, or a missing one on a secured
+instance, fails with a message asking for another key.
 Provider failures return `success: false` with a generic message that excludes
 provider error bodies and credentials. Invalid kinds/configuration return `422`.
 
