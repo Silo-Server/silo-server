@@ -854,7 +854,8 @@ began in time may run longer.
 
 Household management (creating, editing, and deleting profiles, listing household sessions,
 managing another profile's devices or settings, importing history for another profile, and
-creating a personal API key) belongs to the account's primary profile, verified with
+creating a personal API key, and changing the account-wide Discord notification
+destination or delivery mode) belongs to the account's primary profile, verified with
 `X-Profile-Token` when it has a PIN; v2 also refuses a scope whose PIN check an API key
 skipped. The account's admin role does not widen this, the same way acting-admin routes refuse
 admin powers to a non-primary profile: on an admin account, every other profile is a household

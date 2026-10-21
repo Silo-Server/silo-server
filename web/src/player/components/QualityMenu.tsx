@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Settings } from "lucide-react";
-import { resolveActiveQualityOptionId } from "../playback-info";
-import type { EffectiveRecipeV3 } from "../protocol-v3";
+import { plainResolutionLabel, resolveActiveQualityOptionId } from "../playback-info";
+import type { EffectiveRecipeV3, SourceDescriptorV3 } from "../protocol-v3";
 import type { QualityOption } from "../types";
 import { PLAYBACK_SPEEDS, formatPlaybackSpeed } from "../utils/playbackSpeed";
 import { PlaybackSpeedTrack } from "./PlaybackSpeedTrack";
@@ -19,6 +19,8 @@ interface QualityMenuProps {
   activeId: string;
   /** The plan's effective recipe, which shows when a bitrate cap reduced the source. */
   deliveredRecipe?: EffectiveRecipeV3;
+  /** The source the plan delivers from, for showing Auto when it plays as-is. */
+  source?: Pick<SourceDescriptorV3, "height" | "bitrate_kbps">;
   isTranscoding: boolean;
   error: string | null;
   onSelect: (id: string) => void;
@@ -34,6 +36,7 @@ export function QualityMenu({
   options,
   activeId,
   deliveredRecipe,
+  source,
   isTranscoding,
   error,
   onSelect,
@@ -115,11 +118,14 @@ export function QualityMenu({
   if (showSpeed) menuLabel = "Playback settings";
   else if (showQuality) menuLabel = "Quality";
 
-  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, deliveredRecipe);
+  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, deliveredRecipe, source);
   const activeOption = options.find((option) => option.id === resolvedActiveId);
   let sourceLabel: string | null = null;
-  if (showQuality) sourceLabel = isTranscoding ? "…" : (activeOption?.label ?? "Quality");
-  else if (showVersions) sourceLabel = "Version";
+  if (showQuality) {
+    sourceLabel = isTranscoding
+      ? "…"
+      : (activeOption?.label ?? plainResolutionLabel(activeId) ?? "Quality");
+  } else if (showVersions) sourceLabel = "Version";
   // A speed other than 1x stays on the gear in every layout: inline after the
   // quality label, or on the gear's corner where the label is hidden.
   const changedSpeed = showSpeed && playbackSpeed !== 1 ? formatPlaybackSpeed(playbackSpeed) : null;

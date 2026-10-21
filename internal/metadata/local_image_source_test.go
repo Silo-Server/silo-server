@@ -44,8 +44,8 @@ func TestPreserveCachedArtworkRoutesLocalSource(t *testing.T) {
 	// No prior cached art: the file:// source must never land in *_path; the
 	// pre-cache window keeps the path empty until the cache job completes.
 	path, thumb, source := preserveCachedArtwork(
-		"file:///media/movies/Film/poster.jpg", "", "", "", "",
-	)
+		"file:///media/movies/Film/poster.jpg", "", "", "", "", true)
+
 	if path != "" {
 		t.Fatalf("path = %q, want empty during pre-cache window", path)
 	}
@@ -59,8 +59,8 @@ func TestPreserveCachedArtworkRoutesLocalSource(t *testing.T) {
 	// Prior cached art keeps serving while the local source waits to cache.
 	path, thumb, source = preserveCachedArtwork(
 		"file:///media/movies/Film/poster.jpg", "",
-		"tmdb/movies/550/poster/original.webp", "https://image.tmdb.org/a.jpg", "th",
-	)
+		"tmdb/movies/550/poster/original.webp", "https://image.tmdb.org/a.jpg", "th", true)
+
 	if path != "tmdb/movies/550/poster/original.webp" {
 		t.Fatalf("path = %q, want prior cached key", path)
 	}
@@ -78,7 +78,7 @@ func TestPrepareItemImagesForQueueRoutesLocalSource(t *testing.T) {
 		Type:       "movie",
 		PosterPath: "file:///media/movies/Film/poster.jpg",
 	}
-	prepareItemImagesForQueue(item, nil)
+	prepareItemImagesForQueue(item, nil, true)
 	if item.PosterPath != "" {
 		t.Fatalf("PosterPath = %q, want empty during pre-cache window", item.PosterPath)
 	}
@@ -359,7 +359,7 @@ func TestApplyBestImagesClearsClearArtLogoOnManualRefresh(t *testing.T) {
 	applyBestImages(&item, []RemoteImage{
 		{ProviderID: "tvdb", URL: "tvdb://banners/v4/series/81189/clearart/611b4e1126ff1.png", Type: ImageLogo, Language: "en", Rating: 10},
 	}, MergeReplaceUnlocked, "en")
-	prepareItemImagesForQueue(&item, existing)
+	prepareItemImagesForQueue(&item, existing, true)
 
 	if item.LogoPath != "" || item.LogoSourcePath != "" {
 		t.Fatalf("clear-art logo survived manual refresh: path=%q source=%q", item.LogoPath, item.LogoSourcePath)
@@ -377,7 +377,7 @@ func TestApplyBestImagesReplacesClearArtLogoWithTVDBClearLogo(t *testing.T) {
 		applyBestImages(&item, []RemoteImage{
 			{ProviderID: "tvdb", URL: tvdbClearLogoURL, Type: ImageLogo, Language: "en", Rating: 10},
 		}, mode, "en")
-		prepareItemImagesForQueue(&item, existing)
+		prepareItemImagesForQueue(&item, existing, true)
 
 		// The cached path stays served until the cache job publishes the new source.
 		if item.LogoPath != existing.LogoPath || item.LogoSourcePath != tvdbClearLogoURL {
@@ -394,7 +394,7 @@ func TestApplyBestImagesKeepsTVDBClearLogoWhenRefreshOffersNoLogo(t *testing.T) 
 	item := *existing
 
 	applyBestImages(&item, nil, MergeReplaceUnlocked, "en")
-	prepareItemImagesForQueue(&item, existing)
+	prepareItemImagesForQueue(&item, existing, true)
 
 	if item.LogoPath != existing.LogoPath || item.LogoSourcePath != existing.LogoSourcePath {
 		t.Fatalf("logo = path %q source %q, want cached TVDB ClearLogo kept", item.LogoPath, item.LogoSourcePath)
@@ -427,8 +427,8 @@ func TestBuildItemLocalizationRecordSkipsLocalCandidates(t *testing.T) {
 		},
 		MergeFillEmpty,
 		"de",
-		false,
-	)
+		false, true)
+
 	if loc.PosterPath != "" || loc.PosterSourcePath != "" {
 		t.Fatalf("localization picked up local candidate: path=%q source=%q", loc.PosterPath, loc.PosterSourcePath)
 	}
@@ -591,7 +591,7 @@ func TestApplyBestImagesKeepsLockedClearArtLogoOnManualRefresh(t *testing.T) {
 	applyBestImages(item, []RemoteImage{
 		{ProviderID: "tvdb", URL: "tvdb://banners/v4/series/81189/clearart/611b4e1126ff1.png", Type: ImageLogo, Rating: 9},
 	}, MergeReplaceUnlocked, "en")
-	prepareItemImagesForQueue(item, &existing)
+	prepareItemImagesForQueue(item, &existing, true)
 	if item.LogoPath != existing.LogoPath || item.LogoSourcePath != existing.LogoSourcePath {
 		t.Fatalf("locked logo = path %q source %q, want admin selection kept", item.LogoPath, item.LogoSourcePath)
 	}

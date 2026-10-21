@@ -46,6 +46,11 @@ vi.mock("@/hooks/queries/watchlist", () => ({
   useToggleWatchlist: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }));
 
+vi.mock("@/hooks/queries/notInterested", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/notInterested")>()),
+  useToggleNotInterested: () => ({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
+}));
+
 vi.mock("@/hooks/queries/items", () => ({
   useRefreshItemMetadata: () => ({ isPending: false, mutate: vi.fn() }),
   useWatchedStateMutation: () => ({
@@ -120,16 +125,41 @@ describe("buildMediaItemMenuModel", () => {
     expect(actions[1]?.label).toBe("Mark Unwatched");
     expect(actions[2]?.label).toBe("Remove from Favorites");
     expect(actions[3]?.label).toBe("Remove from Watchlist");
-    expect(actions[4]?.label).toBe("View Play History");
-    expect(actions[5]?.label).toBe("Refresh Metadata");
-    expect(actions[6]?.label).toBe("Edit Metadata");
-    expect(actions[7]?.label).toBe("Match Item");
+    expect(actions[4]?.label).toBe("Not Interested");
+    expect(actions[5]?.label).toBe("View Play History");
+    expect(actions[6]?.label).toBe("Refresh Metadata");
+    expect(actions[7]?.label).toBe("Edit Metadata");
+    expect(actions[8]?.label).toBe("Match Item");
     expect(model.some((item) => item.kind === "action" && item.label === "View Play History")).toBe(
       true,
     );
     expect(model.some((item) => item.kind === "action" && item.label === "Refresh Metadata")).toBe(
       true,
     );
+  });
+
+  it("offers Not Interested on movies and series only, and its undo once marked", () => {
+    const labels = (
+      mediaType: "movie" | "series" | "episode" | "audiobook",
+      notInterested = false,
+    ) =>
+      buildMediaItemMenuModel({
+        mediaType,
+        userState: {
+          played: false,
+          is_favorite: false,
+          in_watchlist: false,
+          not_interested: notInterested,
+        },
+        isAdmin: false,
+      })
+        .filter((item) => item.kind === "action")
+        .map((item) => item.label);
+
+    expect(labels("movie")).toContain("Not Interested");
+    expect(labels("series", true)).toContain("Show in Recommendations");
+    expect(labels("episode")).not.toContain("Not Interested");
+    expect(labels("audiobook")).not.toContain("Not Interested");
   });
 
   it("omits favorites and watchlist when showCollectionActions is false", () => {

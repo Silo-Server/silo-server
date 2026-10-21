@@ -30,6 +30,21 @@ type rowBuilder struct {
 	store  rowStore
 	lambda float64
 	now    time.Time
+	// aversion is the titles the profile turned away, which the rows rank
+	// against (see aversion.apply); nil for none.
+	aversion *aversion
+	// penalized, when set, counts the candidates the aversion pushed down.
+	penalized *int
+}
+
+// withAversion applies the builder's aversion to a pool fetched around
+// query, before MMR ranks it.
+func (b rowBuilder) withAversion(pool []ScoredItem, embeddings map[string][]float32, query []float32) ([]ScoredItem, aversionResult) {
+	pool, res := b.aversion.apply(pool, embeddings, query)
+	if b.penalized != nil {
+		*b.penalized += res.penalized
+	}
+	return pool, res
 }
 
 // rowBuilder returns the builder for the rows cached now.
@@ -94,6 +109,13 @@ func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID strin
 			failed++
 			slog.WarnContext(ctx, "cluster recommendation embeddings failed", "component", "recommendations",
 				"user_id", userID, "profile_id", profileID, "cluster_idx", c.ClusterIdx, "error", err)
+			continue
+		}
+		candidates, averse := b.withAversion(candidates, embMap, c.Embedding)
+		if averse.interestShare(c.TotalWeight) < aversionInterestFloor {
+			// The profile turned away enough of this interest's titles that
+			// it no longer gets a row of its own.
+			rows = append(rows, ForYouRow{Type: clusterRowType, Label: clusterTitle(c.Label), ClusterIndex: c.ClusterIdx})
 			continue
 		}
 		reranked := applyMMR(candidates, embMap, b.lambda, clusterLimit)
@@ -169,7 +191,9 @@ func withoutMainRowItems(rows []ForYouRow, main []ScoredItem) []ForYouRow {
 // mainRowAnchors), whose every prefix holds each interest's share by weight;
 // any other, or one whose anchors find nothing, a row of the candidates
 // nearest its averaged taste vector, ranked by MMR, whose served window the
-// genre pass then shapes. The genre pass leaves a composed row alone: capping
+// genre pass then shapes. A profile that turned away every one of its
+// interests gets a main row with no items (see anchoredRow). The genre pass leaves a
+// composed row alone: capping
 // a genre at half the window would cut an interest heavier than half the
 // profile below its share. Type supplements fill the rest of either row.
 func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (*ForYouRow, error) {
@@ -187,8 +211,15 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 
 	var row, pool []ScoredItem
 	if anchors := mainRowAnchors(clusters); len(anchors) > 0 {
-		if row, pool, err = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter); err != nil {
+		var allAverted bool
+		if row, pool, allAverted, err = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter); err != nil {
 			return nil, err
+		}
+		if allAverted {
+			// The profile turned away every interest; a row around the
+			// averaged taste vector would serve them all again. The empty
+			// row is cached, so reads know it was built.
+			return &ForYouRow{Type: clusterRowType, Label: ForYouLabel, Items: []ScoredItem{}}, nil
 		}
 	}
 	if len(row) == 0 {
@@ -202,6 +233,7 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 		if err != nil {
 			return nil, fmt.Errorf("main row embeddings: %w", err)
 		}
+		pool, _ = b.withAversion(pool, embMap, embedding)
 		row = applyGenreCap(applyMMR(pool, embMap, b.lambda, limit), genreMap)
 	}
 	if len(row) == 0 {
@@ -269,7 +301,19 @@ func (b rowBuilder) addTypeSupplements(
 				slog.WarnContext(ctx, "main row type supplement failed", "component", "recommendations", "media_type", mediaType, "error", err)
 				continue
 			}
-			pool = mergeScoredCandidates(pool, b.withQualityPrior(ctx, extra, 0))
+			extra = b.withQualityPrior(ctx, extra, 0)
+			if !b.aversion.empty() {
+				// Supplements rank against the turned-away titles like the
+				// rest of the row; a type whose embeddings cannot be read is
+				// not supplemented rather than supplemented unranked.
+				embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(extra))
+				if err != nil {
+					slog.WarnContext(ctx, "main row type supplement embeddings failed", "component", "recommendations", "media_type", mediaType, "error", err)
+					continue
+				}
+				extra, _ = b.withAversion(extra, embMap, embedding)
+			}
+			pool = mergeScoredCandidates(pool, extra)
 			for _, item := range extra {
 				mediaTypes[item.MediaItemID] = mediaType
 			}
@@ -401,11 +445,16 @@ func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID st
 	if err != nil {
 		return nil, fmt.Errorf("get recommendation exclusions: %w", err)
 	}
-	return e.becauseYouWatched(ctx, sourceItemID, limit, excluded, filter)
+	builder := e.rowBuilder()
+	if builder.aversion, err = e.loadAversion(ctx, userID, profileID, builder.now); err != nil {
+		return nil, fmt.Errorf("get turned-away titles: %w", err)
+	}
+	return e.becauseYouWatched(ctx, builder, sourceItemID, limit, excluded, filter)
 }
 
-// becauseYouWatched is BecauseYouWatched with the exclusion set given.
-func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, limit int, excluded map[string]struct{}, filter catalog.AccessFilter) ([]ScoredItem, error) {
+// becauseYouWatched is BecauseYouWatched with the exclusion set given, ranked
+// by builder, whose aversion it applies.
+func (e *Engine) becauseYouWatched(ctx context.Context, builder rowBuilder, sourceItemID string, limit int, excluded map[string]struct{}, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	embedding, err := e.repo.GetEmbedding(ctx, sourceItemID)
 	if err != nil {
 		return nil, fmt.Errorf("get embedding for item %s: %w", sourceItemID, err)
@@ -444,15 +493,24 @@ func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, lim
 	// the row's places.
 	blended := blendScores(embCandidates, cowatchMap, 0.7, 0.3)
 	blended = excludeScoredItems(blended, excluded)
-	blended = e.rowBuilder().withQualityPrior(ctx, blended, qualityMinSmallPool)
+	blended = builder.withQualityPrior(ctx, blended, qualityMinSmallPool)
 
 	// Apply MMR re-ranking.
 	candidateIDs := make([]string, len(blended))
 	for i, item := range blended {
 		candidateIDs[i] = item.MediaItemID
 	}
-	embMap, _ := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-	result := applyMMR(blended, embMap, e.mmrLambda(), limit)
+	embMap, err := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
+	if err != nil {
+		if !builder.aversion.empty() {
+			// Without embeddings the row could not rank against the
+			// profile's turned-away titles.
+			return nil, fmt.Errorf("because watched embeddings: %w", err)
+		}
+		embMap = nil
+	}
+	blended, _ = builder.withAversion(blended, embMap, embedding)
+	result := applyMMR(blended, embMap, builder.lambda, limit)
 
 	for i := range result {
 		if result[i].Reason == "" {

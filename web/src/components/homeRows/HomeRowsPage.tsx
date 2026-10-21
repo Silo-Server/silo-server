@@ -273,7 +273,7 @@ export function HomeRowsPage({
                             }
                           : undefined
                       }
-                      switchDisabled={!adapter.canEdit || (row.legacyTrakt && !row.shown)}
+                      switchDisabled={!adapter.canEdit}
                       onShownChange={(shown) => void adapter.setShown(row.id, shown)}
                       onOpen={onOpenRow ? () => onOpenRow(row) : undefined}
                       menu={

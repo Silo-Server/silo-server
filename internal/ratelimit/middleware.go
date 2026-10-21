@@ -130,15 +130,11 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 			return
 		}
 
-		// Check global limiter (per-second only — spec says no per-minute global limit).
-		// Setting RequestsPerMinute = RPS*60 makes the per-minute limiter a mathematical
-		// no-op: it never triggers before the per-second limiter does.
-		globalRate := globalRateFor(cfg)
-		globalResult := mw.global.Allow(r.Context(), "global", globalRate)
-		if !globalResult.Allowed {
-			writeRateLimitResponse(w, globalResult, reject)
-			return
-		}
+		// The narrower per-IP and per-key budgets run before the shared
+		// global one, as in AuthEndpointHandler, so a client over its own
+		// limit cannot spend server-wide capacity and get unrelated clients
+		// rejected. A request the global check then rejects keeps the
+		// narrower tokens it spent; that only charges the client that sent it.
 
 		// Check per-IP limiter
 		if clientIP := clientip.FromContext(r.Context()); clientIP != "" {
@@ -187,6 +183,15 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 				writeRateLimitResponse(w, result, reject)
 				return
 			}
+		}
+
+		// Check global limiter (per-second only — spec says no per-minute global limit).
+		// Setting RequestsPerMinute = RPS*60 makes the per-minute limiter a mathematical
+		// no-op: it never triggers before the per-second limiter does.
+		globalResult := mw.global.Allow(r.Context(), "global", globalRateFor(cfg))
+		if !globalResult.Allowed {
+			writeRateLimitResponse(w, globalResult, reject)
+			return
 		}
 
 		next.ServeHTTP(w, r)

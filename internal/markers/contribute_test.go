@@ -328,26 +328,53 @@ func TestContributeSettlesInvalidRefusal(t *testing.T) {
 	}
 }
 
-func TestContributeSkipsEpisodesWithoutSeasonAndEpisode(t *testing.T) {
-	sub := &fakeSubmitter{id: "introdb"}
-	file := newContribFile()
-	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
-	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
-	reg := NewRegistry(nil)
-	_ = reg.Register(sub)
-	resolver := fakeResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 0, EpisodeNumber: 3}}
-	rec := &fakeRecorder{}
-	svc := NewContributionService(reg, resolver, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec, nil)
+func TestContributeSubmitsSpecialsButSkipsUnnumberedEpisodes(t *testing.T) {
+	tests := []struct {
+		name            string
+		season, episode int
+		wantSubmitted   bool
+	}{
+		{name: "special", season: 0, episode: 3, wantSubmitted: true},
+		{name: "unnumbered episode", season: 1, episode: 0},
+		{name: "unknown season", season: -1, episode: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sub := &fakeSubmitter{id: "introdb"}
+			file := newContribFile()
+			file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+			file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+			reg := NewRegistry(nil)
+			_ = reg.Register(sub)
+			resolver := fakeResolver{ids: ExternalIDs{
+				Kind: ItemKindEpisode, TvdbID: "121361", SeasonNumber: tt.season, EpisodeNumber: tt.episode,
+				Episode: EpisodeIDs{TvdbID: "4242"}, EpisodeTitle: "Inside the Episode",
+			}}
+			rec := &fakeRecorder{}
+			svc := NewContributionService(reg, resolver, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec, nil)
 
-	outcomes, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
-	if err != nil {
-		t.Fatalf("ContributeFile: %v", err)
-	}
-	if len(sub.submitted) != 0 || len(rec.recorded) != 0 {
-		t.Fatalf("season 0 must not reach the provider or the ledger: submitted=%d recorded=%d", len(sub.submitted), len(rec.recorded))
-	}
-	if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped {
-		t.Fatalf("outcomes = %+v, want skipped", outcomes)
+			outcomes, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+			if err != nil {
+				t.Fatalf("ContributeFile: %v", err)
+			}
+			if !tt.wantSubmitted {
+				if len(sub.submitted) != 0 || len(rec.recorded) != 0 {
+					t.Fatalf("must not reach the provider or the ledger: submitted=%d recorded=%d", len(sub.submitted), len(rec.recorded))
+				}
+				if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped {
+					t.Fatalf("outcomes = %+v, want skipped", outcomes)
+				}
+				return
+			}
+			if len(sub.submitted) != 1 {
+				t.Fatalf("submitted = %d, want 1 (outcomes %+v)", len(sub.submitted), outcomes)
+			}
+			got := sub.submitted[0]
+			if got.SeasonNumber != tt.season || got.EpisodeNumber != tt.episode ||
+				got.EpisodeExternalIDs[ExternalIDKeyTVDB] != "4242" || got.EpisodeTitle != "Inside the Episode" {
+				t.Fatalf("submission = %+v, want the special with its episode identity", got)
+			}
+		})
 	}
 }
 

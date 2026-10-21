@@ -67,6 +67,22 @@ func (f *bufferingRoom) expected() float64 {
 	return expectedPosition(f.repo.room, f.now)
 }
 
+// expectedAt is the room's position when command executes, which is the
+// position every command carries.
+func (f *bufferingRoom) expectedAt(command TransportCommand) float64 {
+	f.t.Helper()
+	return expectedAtExecution(f.t, f.repo.room, command)
+}
+
+func expectedAtExecution(t *testing.T, room Room, command TransportCommand) float64 {
+	t.Helper()
+	executeAt, err := time.Parse(time.RFC3339Nano, command.ExecuteAt)
+	if err != nil {
+		t.Fatalf("command %s execute_at %q: %v", command.CommandID, command.ExecuteAt, err)
+	}
+	return expectedPosition(room, executeAt)
+}
+
 func (f *bufferingRoom) buffer(profileID string) Snapshot {
 	f.t.Helper()
 	snapshot, err := f.s.HandleBufferingForConnection(f.t.Context(), f.reg(profileID), f.userID(profileID), profileID, StateReport{
@@ -241,8 +257,8 @@ func TestRecoveryAfterDeadlineClearsBufferingAndTargetsTheRoom(t *testing.T) {
 				t.Fatal("recovered guest received no target")
 			}
 			command := lastTransport(t, f.conns["guest"])
-			if command.Action != TransportActionPlay || command.SessionID != "guest-session" || command.PositionSeconds != f.expected() {
-				t.Fatalf("recovery target = %+v, want play at %v", command, f.expected())
+			if command.Action != TransportActionPlay || command.SessionID != "guest-session" || command.PositionSeconds != f.expectedAt(command) {
+				t.Fatalf("recovery target = %+v, want play at %v", command, f.expectedAt(command))
 			}
 		})
 	}
@@ -262,7 +278,8 @@ func TestBufferingViewerIsNotCorrectedUntilTheHoldExpires(t *testing.T) {
 
 	f.now = f.now.Add(bufferingCorrectionHold)
 	f.report("guest", 100)
-	if command := lastTransport(t, f.conns["guest"]); command.PositionSeconds != f.expected() {
+	f.report("guest", 100)
+	if command := lastTransport(t, f.conns["guest"]); command.PositionSeconds != f.expectedAt(command) {
 		t.Fatalf("correction after the hold = %+v", command)
 	}
 }
@@ -286,12 +303,22 @@ func TestStalledHostDoesNotRewindTheRoom(t *testing.T) {
 	if !f.member("host").syncingToRoom {
 		t.Fatal("recovered host is not syncing to the room")
 	}
-	f.now = f.now.Add(time.Second)
+	sync := lastTransport(t, f.conns["host"])
+	if sync.PositionSeconds != f.expectedAt(sync) {
+		t.Fatalf("recovering host sync = %+v", sync)
+	}
+	// A report before the sync could have run is not corrected again.
+	f.report("host", 100.5)
+	if command := lastTransport(t, f.conns["host"]); command.CommandID != sync.CommandID {
+		t.Fatalf("report inside the settle window was corrected: %+v", command)
+	}
+	f.now = f.now.Add(3 * time.Second)
+	f.report("host", 100.5)
 	f.report("host", 100.5)
 	if f.repo.room.AnchorPositionSeconds != anchor {
 		t.Fatalf("recovering host moved the anchor to %v", f.repo.room.AnchorPositionSeconds)
 	}
-	if command := lastTransport(t, f.conns["host"]); command.PositionSeconds != f.expected() {
+	if command := lastTransport(t, f.conns["host"]); command.CommandID == sync.CommandID || command.PositionSeconds != f.expectedAt(command) {
 		t.Fatalf("recovering host correction = %+v", command)
 	}
 }
@@ -300,17 +327,33 @@ func TestHostDriftInsideTheCatchUpBandIsCorrected(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.now = f.now.Add(10 * time.Second)
 	anchor := f.repo.room.AnchorPositionSeconds
-	f.report("host", f.expected()-1.8)
+	frames := len(f.conns["host"].payloads)
+
+	// Drift the client converges on by rate is neither followed nor corrected.
+	f.report("host", f.expected()-0.8)
+	f.report("host", f.expected()-0.8)
+	if f.repo.room.AnchorPositionSeconds != anchor || transportCount(f.conns["host"]) != transportCountIn(f.conns["host"].payloads[:frames]) {
+		t.Fatalf("host drift inside the nudge band moved the room or was corrected")
+	}
+
+	// Sustained larger drift is corrected on the host like a guest's.
+	f.report("host", f.expected()-6)
+	f.report("host", f.expected()-6)
 	if f.repo.room.AnchorPositionSeconds != anchor {
 		t.Fatalf("host drift inside the band moved the anchor to %v", f.repo.room.AnchorPositionSeconds)
 	}
-	if command := lastTransport(t, f.conns["host"]); command.PositionSeconds != f.expected() {
+	if command := lastTransport(t, f.conns["host"]); command.PositionSeconds != f.expectedAt(command) {
 		t.Fatalf("host drift correction = %+v", command)
 	}
 
-	f.report("host", f.expected()+30)
-	if f.repo.room.AnchorPositionSeconds != f.expected() {
-		t.Fatalf("host jump did not move the anchor: %v", f.repo.room.AnchorPositionSeconds)
+	// Only a jump beyond the host authority band is the host's decision.
+	f.now = f.now.Add(3 * time.Second)
+	jump := f.expected() + 30
+	f.report("host", jump)
+	command := lastTransport(t, f.conns["guest"])
+	if command.Action != TransportActionPlay || f.repo.room.AnchorPositionSeconds != f.expectedAt(command) ||
+		command.PositionSeconds != jump+defaultTransportLead.Seconds() {
+		t.Fatalf("host jump: anchor=%v command=%+v, want both at %v", f.repo.room.AnchorPositionSeconds, command, jump+defaultTransportLead.Seconds())
 	}
 }
 
@@ -480,8 +523,8 @@ func TestViewerLeftAloneRecoversFromTheirPosition(t *testing.T) {
 	if f.repo.room.AnchorPositionSeconds != 100 || f.repo.room.PlaybackState != RoomPlaybackStatePlaying {
 		t.Fatalf("recovery jumped the room: anchor=%v state=%s", f.repo.room.AnchorPositionSeconds, f.repo.room.PlaybackState)
 	}
-	if command := lastTransport(t, f.conns["host"]); command.Action != TransportActionPlay || command.PositionSeconds != 100 {
-		t.Fatalf("recovery target = %+v, want play at 100", command)
+	if command := lastTransport(t, f.conns["host"]); command.Action != TransportActionPlay || command.PositionSeconds != f.expectedAt(command) {
+		t.Fatalf("recovery target = %+v, want play at %v", command, f.expectedAt(command))
 	}
 }
 

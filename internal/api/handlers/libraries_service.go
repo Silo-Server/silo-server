@@ -486,6 +486,9 @@ func (h *LibraryHandler) ListLibraryRoots(ctx context.Context, libraryID int, st
 				}
 				contentIDByGroup[groupOverrideLookupKey(version, groupKey)] = contentID
 			}
+			if err := claimRows.Err(); err != nil {
+				slog.WarnContext(ctx, "listing group claims", "component", "api", "library_id", libraryID, "error", err)
+			}
 		}
 	}
 
@@ -756,6 +759,10 @@ func (h *LibraryHandler) listAllStaleIDs(ctx context.Context) ([]StaleMediaIDVie
 			TmdbID: tmdbID, TvdbID: tvdbID, ImdbID: imdbID,
 			LibraryID: libID, LibraryName: libName,
 		}
+	}
+	if err := rows.Err(); err != nil {
+		slog.ErrorContext(ctx, "loading items for stale IDs", "component", "api", "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load item data")
 	}
 
 	resp := make([]StaleMediaIDView, 0, len(staleIDs))

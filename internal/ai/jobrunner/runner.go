@@ -175,12 +175,12 @@ func (r *Runner) Dispatch(id int64, run func(ctx context.Context), onAbort func(
 				<-r.sem
 			}
 		}()
-		runCtx = context.WithValue(runCtx, slotKey{}, jobSlot)
+		jobCtx := context.WithValue(runCtx, slotKey{}, jobSlot)
 
 		// A terminal signal or local cancellation can race semaphore admission.
-		if runCtx.Err() != nil {
+		if jobCtx.Err() != nil {
 			if onAbort != nil {
-				onAbort(context.WithoutCancel(runCtx))
+				onAbort(context.WithoutCancel(jobCtx))
 			}
 			return
 		}
@@ -191,9 +191,9 @@ func (r *Runner) Dispatch(id int64, run func(ctx context.Context), onAbort func(
 		case "metadata translation":
 			workload = "metadata"
 		}
-		runCtx, observation := workmetrics.Start(runCtx, workload, queuedAt)
+		jobCtx, observation := workmetrics.Start(jobCtx, workload, queuedAt)
 		defer observation.Finish("unknown")
-		workmetrics.Do(runCtx, run)
+		workmetrics.Do(jobCtx, run)
 	}()
 }
 

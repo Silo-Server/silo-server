@@ -3059,7 +3059,8 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // Returns the number of rows deleted.
 func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration, protectedRoots []string) (int, error) {
 	cutoff := time.Now().UTC().Add(-gracePeriod)
-	query := `DELETE FROM media_files mf
+	query := `WITH deleted AS (
+		DELETE FROM media_files mf
 		WHERE mf.media_folder_id = $1
 		  AND mf.missing_since IS NOT NULL
 		  AND mf.missing_since < $2
@@ -3073,11 +3074,15 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 		query += " AND NOT (" + strings.Join(clauses, " OR ") + ")"
 		args = append(args, clauseArgs...)
 	}
-	tag, err := r.pool.Exec(ctx, query, args...)
-	if err != nil {
+	query += `
+		RETURNING mf.id, mf.extra_id
+	)` + catalog.ClearEmptiedExtraStillsCTE + `
+	SELECT count(*) FROM deleted`
+	var deleted int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&deleted); err != nil {
 		return 0, fmt.Errorf("deleting missing files for folder %d: %w", folderID, err)
 	}
-	return int(tag.RowsAffected()), nil
+	return deleted, nil
 }
 
 // ListRootsWithCatalogedFiles returns the subset of roots (in input order)
@@ -3181,20 +3186,25 @@ func (r *FileRepository) ListRootsWithOnlyMissingFiles(ctx context.Context, fold
 	return suspect, nil
 }
 
-// DeleteByIDs removes specific media file rows by primary key.
+// DeleteByIDs removes specific media file rows by primary key, clearing the
+// image of any local extra left without a file
+// (catalog.ClearEmptiedExtraStillsCTE).
 func (r *FileRepository) DeleteByIDs(ctx context.Context, ids []int) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
 
-	tag, err := r.pool.Exec(ctx,
-		"DELETE FROM media_files WHERE id = ANY($1)",
+	var deleted int
+	err := r.pool.QueryRow(ctx, `WITH deleted AS (
+		DELETE FROM media_files WHERE id = ANY($1) RETURNING id, extra_id
+	)`+catalog.ClearEmptiedExtraStillsCTE+`
+	SELECT count(*) FROM deleted`,
 		ids,
-	)
+	).Scan(&deleted)
 	if err != nil {
 		return 0, fmt.Errorf("deleting media files by id: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	return deleted, nil
 }
 
 // ListIDsOutsideRoots returns file row ids for a folder whose paths are no

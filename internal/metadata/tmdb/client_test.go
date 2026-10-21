@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1389,6 +1391,99 @@ func TestGetListPagesMixedEntriesInListOrder(t *testing.T) {
 	}
 }
 
+// A list is read to its last page however long it is; collections have no
+// item cap of their own.
+func TestGetListReadsWholeLongList(t *testing.T) {
+	const pageCount = 30 // 600 entries, past the old 500-entry cap
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		items := make([]map[string]any, 20)
+		for i := range items {
+			items[i] = map[string]any{"id": page*100 + i, "media_type": "movie", "title": "Movie"}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"page": page, "total_pages": pageCount, "items": items})
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	got, err := client.GetList(context.Background(), 310, 0)
+	if err != nil {
+		t.Fatalf("GetList: %v", err)
+	}
+	if len(got) != pageCount*20 {
+		t.Fatalf("GetList returned %d entries, want %d", len(got), pageCount*20)
+	}
+	// Pages load concurrently but keep list order.
+	for i, entry := range got {
+		if want := (i/20+1)*100 + i%20; entry.ID != want {
+			t.Fatalf("entry %d has ID %d, want %d", i, entry.ID, want)
+		}
+	}
+}
+
+// A limit stops GetList from requesting pages it cannot use.
+func TestGetListRequestsOnlyPagesTheLimitNeeds(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		items := make([]map[string]any, 20)
+		for i := range items {
+			items[i] = map[string]any{"id": page*100 + i, "media_type": "movie", "title": "Movie"}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"page": page, "total_pages": 50, "items": items})
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	got, err := client.GetList(context.Background(), 310, 45)
+	if err != nil {
+		t.Fatalf("GetList: %v", err)
+	}
+	if len(got) != 45 || requests.Load() != 3 {
+		t.Fatalf("GetList(limit=45) returned %d entries from %d pages, want 45 from 3", len(got), requests.Load())
+	}
+}
+
+// TMDB answers no page past 500 of its paged feeds, so a preset stops there
+// even when the limit asks for more and short pages leave it below the limit.
+func TestGetCollectionPresetStopsAtTMDBPageCeiling(t *testing.T) {
+	var lastPage atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		if page > maxPages {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		lastPage.Store(int64(page))
+		results := make([]map[string]any, 19)
+		for i := range results {
+			results[i] = map[string]any{"id": page*100 + i, "media_type": "movie", "title": "Movie"}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"page": page, "total_pages": 1000, "results": results})
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 100000)
+	client.SetBaseURL(server.URL)
+
+	got, err := client.GetCollectionPreset(context.Background(), "trending", "all", "week", math.MaxInt)
+	if err != nil {
+		t.Fatalf("GetCollectionPreset: %v", err)
+	}
+	if len(got) != maxPages*19 || lastPage.Load() != maxPages {
+		t.Fatalf("GetCollectionPreset returned %d entries through page %d, want %d through page %d",
+			len(got), lastPage.Load(), maxPages*19, maxPages)
+	}
+}
+
 func TestGetListRejectsNonPositiveID(t *testing.T) {
 	client := NewClient("test-key", 1000)
 	if _, err := client.GetList(context.Background(), 0, 10); err == nil {
@@ -1677,5 +1772,72 @@ func TestFindByExternalID(t *testing.T) {
 	}
 	if _, err := client.FindByExternalID(t.Context(), ExternalSourceIMDb, " "); err == nil {
 		t.Fatal("empty id should fail before any request")
+	}
+}
+
+// Recurring matching reuses one /find answer; recovery still asks TMDB again.
+func TestFindByExternalIDCached(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"movie_results":[{"id":550,"title":"Fight Club"}],"tv_results":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	defer client.Close()
+	client.SetBaseURL(server.URL)
+
+	for range 3 {
+		results, err := client.FindByExternalIDCached(t.Context(), ExternalSourceIMDb, "tt0137523")
+		if err != nil || len(results) != 1 || results[0].ID != 550 {
+			t.Fatalf("cached find = %+v, %v", results, err)
+		}
+		results[0].ID = 0 // a caller's edit must not reach the cache
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("cached finds made %d requests, want 1", got)
+	}
+	if _, err := client.FindByExternalID(t.Context(), ExternalSourceIMDb, "tt0137523"); err != nil {
+		t.Fatal(err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("uncached find made %d requests in total, want 2", got)
+	}
+	if _, err := client.FindByExternalIDCached(t.Context(), "facebook_id", "x"); err == nil {
+		t.Fatal("unsupported source should fail before any request")
+	}
+}
+
+// A canceled sync must not leave a detached /find request behind for each
+// title it had left to look up.
+func TestFindByExternalIDCachedCanceledCallerSendsNoRequest(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"movie_results":[],"tv_results":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	defer client.Close()
+	client.SetBaseURL(server.URL)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	for i := range 20 {
+		if _, err := client.FindByExternalIDCached(ctx, ExternalSourceIMDb, "tt"+strconv.Itoa(i)); !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled find err = %v, want context.Canceled", err)
+		}
+	}
+	// A fetch that had started would finish against this local server well
+	// within the uncached find below, which waits for its own response.
+	if _, err := client.FindByExternalID(t.Context(), ExternalSourceIMDb, "tt9999999"); err != nil {
+		t.Fatal(err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("server saw %d requests, want only the uncached find", got)
 	}
 }

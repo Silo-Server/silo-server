@@ -431,3 +431,32 @@ it.each([
   });
   expect(writes.at(-1)).toBe('"A"');
 });
+
+// An administrator default changes what profiles without their own choice
+// resolve, and the rows those values shape; a server setting that holds no
+// default leaves them alone.
+it.each([
+  ["defaults.ui.next_up_mode", '"separate"', true],
+  ["server.log_level", "debug", false],
+])("refreshes effective values and Home rows after saving %s", async (key, value, refreshes) => {
+  const fetchMock = vi
+    .fn()
+    .mockImplementation(async (_url, init) =>
+      init?.method === "PUT" ? response({ key, value }) : response({ [key]: "" }),
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const { client, wrapper } = fixture();
+  const valuesKey = ["settings", "values", "profile"];
+  const homeKey = ["sections", "home", "items", "continue-watching"];
+  client.setQueryData(valuesKey, {});
+  client.setQueryData(homeKey, { section: { items: [] } });
+  const { result } = renderHook(
+    () => ({ read: useAdminServerSettings(), write: useUpdateServerSetting() }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.read.isSuccess).toBe(true));
+  act(() => result.current.write.mutate({ key, value }));
+  await waitFor(() => expect(result.current.write.isSuccess).toBe(true));
+  expect(client.getQueryState(valuesKey)?.isInvalidated).toBe(refreshes);
+  expect(client.getQueryState(homeKey)?.isInvalidated).toBe(refreshes);
+});

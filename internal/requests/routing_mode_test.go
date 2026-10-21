@@ -441,6 +441,9 @@ func TestAdvancedSeedUsesOnlyServersThatStillFitDatabase(t *testing.T) {
 			}
 			out[mediaType] = [2]string{hd, uhd}
 		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
 		return out
 	}
 	save := func(t *testing.T, repo *Repository, in Integration, create bool) {

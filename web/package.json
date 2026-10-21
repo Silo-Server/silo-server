@@ -8,11 +8,12 @@
   "scripts": {
     "dev": "vite",
     "test": "vitest run",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/typecheck.mjs && vite build",
     "budget:check": "node scripts/check-bundle-budget.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "lint:prune": "eslint . --prune-suppressions",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\"",
     "generate:apiv2": "node scripts/generate-apiv2.mjs"
@@ -57,6 +58,7 @@
     "thumbhash": "^0.1.1"
   },
   "devDependencies": {
+    "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
     "@eslint/js": "^9.39.4",
     "@tailwindcss/vite": "^4.0.0",
     "@testing-library/jest-dom": "^6.9.1",
@@ -76,9 +78,10 @@
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.6.14",
     "tailwindcss": "^4.0.0",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.57.0",
-    "vite": "^6.4.3",
+    "vite": "^6.4.4",
     "vitest": "^4.1.11"
   },
   "pnpm": {

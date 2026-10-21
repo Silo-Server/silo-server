@@ -111,9 +111,10 @@ items carry one of its vectors.
 
 ## Signals and taste profiles
 
-Signals are ratings, favorites, watchlist entries, video watch progress and
-history, and ebook reading progress. The write paths for ratings, favorites,
-watchlist and video progress call `Worker.NotifySignalsChanged`, which marks
+Signals are ratings, favorites, watchlist entries, Not interested marks, video
+watch progress and history, and ebook reading progress. The write paths for
+ratings, favorites, watchlist, Not interested marks and video progress call
+`Worker.NotifySignalsChanged`, which marks
 the profile stale and queues a refresh on that server: native and Jellyfin
 handlers, history imports (once per run), watch-provider syncs (once per run
 that changed local state) and media-server webhooks. Catalog merges and splits
@@ -161,7 +162,12 @@ finish out of order.
 - Progress below 15% counts as abandonment only after 14 days.
 - The taste vector and clusters average the titles with a positive weight
   only. Dislikes and abandoned titles still count in `signal_counts`, but do
-  not pull the vector away from themselves. A 3-star rating adds no weight of
+  not pull the vector away from themselves. A title marked Not interested
+  leaves the vector however it was watched, rated or favorited, and counts
+  as `not_interested`; marks are not positive signals, so a profile with
+  only marks has no taste profile and asks for no refresh. The rows rank
+  against marked and 1-2 star titles instead (see Turned-away titles under
+  Ranking). A 3-star rating adds no weight of
   its own and halves the title's watch and intent weight, so a 3-star
   completion weighs less than an unrated one.
 - Clusters split the same titles into interests. A profile under 10 titles
@@ -208,14 +214,28 @@ finish out of order.
 ## Rows
 
 Personal rows leave out the profile's exclusion set: watched titles,
-favorites (which include taste-seed picks), every title the profile rated,
+favorites (which include taste-seed picks), titles marked Not interested,
+every title the profile rated,
 and every title it abandoned (progress under 15% left untouched for 14 days,
 which its taste profile counts as a dislike), canonicalized episode to
 series. A title the profile already judged is not news to it, and one it
 rated well would otherwise lead its own row. Watchlist titles stay
 recommendable. Rows are built leaving out the whole set; a read drops watched,
-favorited and rated titles again, from every row, so rows cached before a
-change are cleaned, and abandoned titles leave at the next rebuild.
+favorited, marked and rated titles again, from every row, so rows cached
+before a change are cleaned, and abandoned titles leave at the next rebuild.
+
+A Not interested mark is per profile, on a movie or series only (a series
+mark covers its episodes); the API refuses episodes and seasons. Beyond the
+personal rows it keeps the title out of the live lists the recommendations
+handler filters (Popular, Recently Added, the airings Discover blends in,
+Watch Tonight), an item's "More like this" list (left out before ranking, on
+the native and Jellyfin surfaces), and the Home and library discovery
+sections `sections.HidesNotInterested` names, which drop marked titles after
+the shared list cache and may come out shorter: several draw a daily sample
+sized by the row's limit, so a wider refetch would swap unrelated titles. Library
+browsing, search, item detail, playback, collections, the profile's own
+lists, Continue Watching and Next Up keep the title. Because You Watched
+never anchors on a marked title.
 
 Similar Users needs at least 3 peer accounts and at least 2 supporting
 accounts per title, counted by account, so no single household's ratings are
@@ -303,8 +323,8 @@ maturity limits, marks every profile stale too, and again once servers'
 Every read filters again with the viewer's access filter. List endpoints that
 return bare identifiers filter before answering, and a list anchored on an
 item the viewer cannot see answers as one anchored on an unknown item.
-Deleting a profile purges its ratings, taste profile, clusters and cached rows
-on both user-store backends. A refresh that runs afterwards writes no taste row
+Deleting a profile purges its ratings, Not interested marks, taste profile,
+clusters and cached rows on both user-store backends. A refresh that runs afterwards writes no taste row
 for a profile the user store no longer lists, and on the Postgres store the
 nightly taste job skips such profiles, as the purge migration does.
 
@@ -347,6 +367,34 @@ library sections, which scope the whole row to their libraries.
   so the page does not repeat the main row.
   A row left with fewer than 10 titles is cached empty, and a row cached
   empty counts as built: reads do not ask for a rebuild of it.
+- **Turned-away titles.** Before MMR, the main row's pools and type
+  supplements, the cluster pools, Because You Watched (cached and live) and
+  Similar Users rank against the titles the
+  profile marked Not interested (weight 1, fading with a 365-day half-life)
+  and rated 1-2 stars (weight 0.6, on the taste half-life), the newest 200.
+  Everything is measured inside the pool being built, so the rule holds
+  whatever cosines an embedding model gives. A title counts for a pool only
+  when it is as near the pool's query (taste vector, centroid or source
+  title) as the pool's median candidate. It then pushes the candidates
+  nearer it than 90% of the pool, up to its whole weight 2 standard
+  deviations of the pool's similarities to it further on; pushes from
+  several titles combine as `1 − Π(1 − push)`. A candidate's score drops by
+  `2 × sd(pool scores) × aversion`, so a sequel of a marked title leaves the
+  served window while its genre-mates barely move, and marks in one area
+  add up. Each counting title also weighs against the pool's interest: an
+  anchor or cluster of weight `W` keeps `W / (W + 4 × Σ weights)` of its
+  share, its main-row slots are re-split by the reduced weights, and under
+  0.3 the anchor leaves the main row and the cluster row is cached empty.
+  The anchors left fetch again for the slots they gained, so the row keeps
+  its length, and their shares are taken again from the wider pools. A
+  profile whose every anchor leaves gets a main row cached empty, rather
+  than one around the averaged taste vector, which would serve those
+  interests again; reads count the empty row as built.
+  The pushes only reorder the pool, so rows keep their length. A profile
+  with no turned-away title gets exactly the rows it would without the
+  step. Rows are not built while the turned-away titles, or a pool's
+  embeddings, cannot be read; an anchor that leaves the main row also leaves
+  the pool type supplements are drawn from.
 - **Quality prior.** Before MMR a candidate's score becomes
   `score + 0.5 × sd(pool scores) × clamp(z, −1, 1)`, where `z` standardizes
   its catalog rating (trusted IMDb, else trusted TMDB) among the pool's rated

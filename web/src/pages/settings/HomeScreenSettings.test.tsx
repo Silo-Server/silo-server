@@ -91,62 +91,6 @@ describe("HomeScreenSettings helpers", () => {
     ]);
   });
 
-  it("leaves out a shown legacy Trakt section without a saved override unless the change is to it", () => {
-    const trakt = { source: "trakt", list: "trending" };
-    const sections = [
-      makeSection({ id: "trakt-shown", config: trakt }),
-      makeSection({ id: "trakt-hidden", config: trakt, hidden: true }),
-      makeSection({ id: "trakt-saved", config: { source_provider: "trakt" } }),
-      makeSection({ id: "admin-1" }),
-    ];
-    const ids = {
-      savedOverrides: [{ id: "saved", section_id: "trakt-saved" }],
-      newId: (sectionId: string) => `new-${sectionId}`,
-    };
-    const overrides = buildSectionOverrides(sections, [{ id: "trakt-removed" }], {
-      ...ids,
-      changedSectionId: "admin-1",
-    });
-
-    expect(overrides.map(({ id, section_id }) => ({ id, section_id }))).toEqual([
-      { id: "new-trakt-hidden", section_id: "trakt-hidden" },
-      { id: "saved", section_id: "trakt-saved" },
-      { id: "new-admin-1", section_id: "admin-1" },
-      { id: "new-trakt-removed", section_id: "trakt-removed" },
-    ]);
-    expect(overrides.find((o) => o.section_id === "admin-1")?.position).toBe(3);
-
-    // An edit or move of the section itself is sent, so its refusal shows.
-    const edited = buildSectionOverrides(sections, [], { ...ids, changedSectionId: "trakt-shown" });
-    expect(edited[0]).toMatchObject({ id: "new-trakt-shown", section_id: "trakt-shown" });
-  });
-
-  it("numbers the other sections around a left-out section's admin position", () => {
-    const held = makeSection({ id: "trakt", position: 3, config: { source: "trakt" } });
-    const row = (id: string) => makeSection({ id });
-    const positions = (sections: SettingsSectionEntry[]) =>
-      buildSectionOverrides(sections, [], { newId: (id) => `new-${id}` }).map(
-        ({ section_id, position }) => [section_id, position],
-      );
-
-    // A row moved below the held section follows it.
-    expect(positions([row("a"), row("b"), held, row("moved"), row("c")])).toEqual([
-      ["a", 0],
-      ["b", 1],
-      ["moved", 4],
-      ["c", 5],
-    ]);
-    // With more rows above it than its position allows, it keeps its place and
-    // the rest follow it, never sharing its position.
-    expect(positions([row("moved"), row("a"), row("b"), row("c"), held, row("d")])).toEqual([
-      ["moved", 0],
-      ["a", 1],
-      ["b", 2],
-      ["c", 4],
-      ["d", 5],
-    ]);
-  });
-
   it("gives each admin section one new override ID per source", () => {
     const first = createOverrideIdSource();
     const id = first("admin-1");
@@ -328,7 +272,7 @@ describe("override set saved by each Home Screen edit", () => {
 
   it("hides a row", () => {
     const next = page.map((s) => (s.id === "admin-b" ? { ...s, hidden: true } : s));
-    expect(buildSectionOverrides(next, [], { ...ids, changedSectionId: "admin-b" })).toEqual([
+    expect(buildSectionOverrides(next, [], ids)).toEqual([
       { ...adminA, position: 0 },
       { ...adminB, position: 1, hidden: true },
       { ...ownC, position: 2 },
@@ -337,7 +281,7 @@ describe("override set saved by each Home Screen edit", () => {
 
   it("renames a row", () => {
     const next = page.map((s) => (s.id === "admin-a" ? { ...s, title: "New Movies" } : s));
-    expect(buildSectionOverrides(next, [], { ...ids, changedSectionId: "admin-a" })).toEqual([
+    expect(buildSectionOverrides(next, [], ids)).toEqual([
       { ...adminA, position: 0, title: "New Movies" },
       { ...adminB, position: 1 },
       { ...ownC, position: 2 },
@@ -346,7 +290,7 @@ describe("override set saved by each Home Screen edit", () => {
 
   it("moves a row", () => {
     const next = [page[2]!, page[0]!, page[1]!];
-    expect(buildSectionOverrides(next, [], { ...ids, changedSectionId: "own-c" })).toEqual([
+    expect(buildSectionOverrides(next, [], ids)).toEqual([
       { ...ownC, position: 0 },
       { ...adminA, position: 1 },
       { ...adminB, position: 2 },

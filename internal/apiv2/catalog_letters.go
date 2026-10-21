@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 )
 
 // Section catalog-letters: the letter index behind an alphabetical jump bar.
@@ -75,7 +76,7 @@ func (reg *Registry) queryCatalogLetters(ctx context.Context, in *CatalogLetters
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, "", "", "")
+	viewer, p := reg.itemViewer(ctx, imagesize.Request{}, "", "")
 	if p != nil {
 		return nil, p
 	}

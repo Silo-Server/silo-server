@@ -174,6 +174,7 @@ var intentTables = []struct {
 	{"user_favorites", colMediaItemID, []string{colUserID, colProfileID}},
 	{"user_watchlist", colMediaItemID, []string{colUserID, colProfileID}},
 	{"user_ratings", colMediaItemID, []string{colUserID, colProfileID}},
+	{"user_not_interested", colMediaItemID, []string{colUserID, colProfileID}},
 	{"user_personal_collection_items", colMediaItemID, []string{colUserID, "collection_id", "sub_item_id"}},
 	{"library_collection_items", colMediaItemID, []string{"collection_id"}},
 	{"user_home_item_dismissals", colMediaItemID, []string{colUserID, colProfileID, "surface"}},
@@ -181,6 +182,7 @@ var intentTables = []struct {
 	{"user_audio_preferences", colSeriesID, []string{colUserID, colProfileID}},
 	{"user_subtitle_preferences", colSeriesID, []string{colUserID, colProfileID}},
 	{"user_series_playback_preferences", colSeriesID, []string{colUserID, colProfileID}},
+	{"profile_series_notification_mutes", colSeriesID, []string{colUserID, colProfileID}},
 }
 
 // movePairs moves ALL state rows for each (from,to) pair: the whole-item path

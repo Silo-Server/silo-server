@@ -625,7 +625,7 @@ func (a *Analyzer) analyzeEpisode(ctx context.Context, episodeID string, kinds E
 	if err := a.extractor.Preflight(ctx); err != nil {
 		summary.ChromaprintSupported = false
 		summary.ChromaprintSupportMessage = err.Error()
-		return summary, nil
+		return summary, nil //nolint:nilerr // missing Chromaprint support is reported in the summary, as the library-wide run does
 	}
 	summary.ChromaprintSupported = true
 

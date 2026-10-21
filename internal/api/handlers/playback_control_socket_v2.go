@@ -193,9 +193,9 @@ type PlaybackControlSocketV2 struct {
 	lanes  map[string]*playbackControlLane
 }
 
-func NewPlaybackControlSocketV2(playbackHandler *PlaybackHandler, client *redis.Client, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker, publicURL string) *PlaybackControlSocketV2 {
+func NewPlaybackControlSocketV2(playbackHandler *PlaybackHandler, client *redis.Client, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider, publicURL string) *PlaybackControlSocketV2 {
 	h := &PlaybackControlSocketV2{Playback: playbackHandler, Tickets: NewPlaybackControlTicketStore(client), PublicOrigin: publicURL, lanes: map[string]*playbackControlLane{}}
-	h.Validate = newSocketAuthorityValidator(sessions, users, resolver, primary)
+	h.Validate = newSocketAuthorityValidator(sessions, users, resolver, actingAdmin)
 	return h
 }
 

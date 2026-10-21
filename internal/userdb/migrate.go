@@ -1,11 +1,12 @@
 package userdb
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
 
-const schemaVersion = 32
+const schemaVersion = 34
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -330,6 +331,28 @@ func runMigrations(db *sql.DB) error {
 			}
 		}
 		if _, err := tx.Exec("PRAGMA user_version = 32"); err != nil {
+			return err
+		}
+	}
+	if version < 33 {
+		if err := retireTraktSectionOverrides(tx); err != nil {
+			return fmt.Errorf("migration v33 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 33"); err != nil {
+			return err
+		}
+	}
+	if version < 34 {
+		// A Next Up row a profile added; the Postgres store deletes the same
+		// rows in 20261018213122_retire_next_up_rows.sql. The server inserts
+		// the only Next Up row itself and refuses new ones.
+		if _, err := tx.ExecContext(context.Background(), `
+DELETE FROM profile_section_overrides
+WHERE COALESCE(section_id, '') = ''
+  AND COALESCE(NULLIF(user_section_type, ''), section_type) = 'next_up'`); err != nil {
+			return fmt.Errorf("migration v34 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 34"); err != nil {
 			return err
 		}
 	}

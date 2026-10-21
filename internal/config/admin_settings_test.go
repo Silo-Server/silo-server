@@ -539,3 +539,53 @@ func TestAuthProviderRecheckInterval(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeAdminSettingLocalURLIsAnOrigin(t *testing.T) {
+	for raw, want := range map[string]string{
+		"":                            "",
+		" http://192.168.1.20:8080/ ": "http://192.168.1.20:8080",
+		"https://silo.lan":            "https://silo.lan",
+	} {
+		got, err := NormalizeAdminSetting(ServerLocalURLSettingKey, raw)
+		if err != nil || got != want {
+			t.Fatalf("NormalizeAdminSetting(%q) = %q, %v; want %q", raw, got, err, want)
+		}
+	}
+	for _, raw := range []string{
+		"192.168.1.20:8080",
+		"ftp://192.168.1.20",
+		"http://192.168.1.20:8080/silo",
+		"http://192.168.1.20:8080/?x=1",
+		"http://user@192.168.1.20:8080",
+	} {
+		if got, err := NormalizeAdminSetting(ServerLocalURLSettingKey, raw); err == nil {
+			t.Fatalf("NormalizeAdminSetting(%q) = %q, want an error", raw, got)
+		}
+	}
+}
+
+// An administrator default is validated against the value schema of the
+// setting it stands in for, so the resolver never has to discard one.
+func TestNormalizeAdminSettingValidatesAdminDefaults(t *testing.T) {
+	const key = "defaults.ui.title_art"
+	for _, tc := range []struct{ in, want string }{
+		{"false", "false"},
+		{" true ", "true"},
+		{"", ""},
+	} {
+		got, err := NormalizeAdminSetting(key, tc.in)
+		if err != nil || got != tc.want {
+			t.Errorf("NormalizeAdminSetting(%q, %q) = %q, %v; want %q", key, tc.in, got, err, tc.want)
+		}
+	}
+	for _, bad := range []string{"off", `"false"`, "1", "null"} {
+		if _, err := NormalizeAdminSetting(key, bad); err == nil {
+			t.Errorf("NormalizeAdminSetting(%q, %q) accepted a value ui.title_art rejects", key, bad)
+		}
+	}
+	// A defaults.* key for a setting without admin_default is not an
+	// administrator default and passes through untouched, as before.
+	if got, err := NormalizeAdminSetting("defaults.ui.theme", "anything"); err != nil || got != "anything" {
+		t.Errorf("defaults.ui.theme = %q, %v; want passthrough", got, err)
+	}
+}

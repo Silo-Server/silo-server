@@ -11,6 +11,7 @@
  */
 
 import type { components } from "@/api/v2/schema";
+import { cancelBandwidthProbe } from "./bandwidth-probe";
 import type { PlayerConfig } from "./context/PlayerConfigContext";
 import {
   isTransientPlayerRequestError,
@@ -109,6 +110,8 @@ export async function startPlaybackV2(
   body: StartRequestV3,
   options: { signal?: AbortSignal } = {},
 ): Promise<DecisionResponseV3> {
+  // A background bandwidth probe would compete with the media about to load.
+  cancelBandwidthProbe();
   const cap = await playbackCapabilitiesV2(config);
   if (cap.state === "not_configured")
     throw new Error("API v2 playback is not configured on this server");

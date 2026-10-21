@@ -18,7 +18,7 @@ func (f *fakeFulfillmentBackend) PostServerChannelRequestEvent(context.Context, 
 	f.channelPost++
 }
 
-func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, profileID string) (bool, error) {
+func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, _ int, profileID string) (bool, error) {
 	return !f.disabled[profileID], nil
 }
 

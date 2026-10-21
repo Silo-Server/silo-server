@@ -71,52 +71,6 @@ func TestAdminCollectionLookupAPIErrorPreservesFailureClass(t *testing.T) {
 	}
 }
 
-func TestLegacyTraktAdminCollectionLibraryScopeIsImmutable(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		existing   *models.LibraryCollection
-		libraryIDs []int
-		wantError  bool
-	}{
-		{
-			name: "collection type changed scope",
-			existing: &models.LibraryCollection{
-				CollectionType: "trakt", LibraryIDs: []int{1, 2},
-			},
-			libraryIDs: []int{2, 3}, wantError: true,
-		},
-		{
-			name: "source config changed scope",
-			existing: &models.LibraryCollection{
-				CollectionType: "manual", LibraryIDs: []int{1, 2},
-				SourceConfig: json.RawMessage(`{"provider":"trakt","mode":"trakt_list"}`),
-			},
-			libraryIDs: []int{2, 3}, wantError: true,
-		},
-		{
-			name: "reordered duplicate scope is unchanged",
-			existing: &models.LibraryCollection{
-				CollectionType: "trakt", LibraryIDs: []int{1, 2},
-			},
-			libraryIDs: []int{2, 1, 2},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateAdminCollectionSourceUpdate(tc.existing, AdminCollectionUpdate{LibraryIDs: &tc.libraryIDs})
-			if tc.wantError {
-				apiErr, ok := errors.AsType[*APIError](err)
-				if !ok || apiErr.Code != "legacy_source_immutable" {
-					t.Fatalf("error = %#v, want legacy_source_immutable", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
-			}
-		})
-	}
-}
-
 // The web editor changes a franchise list's TMDB collection ID by sending a
 // rebuilt tmdb_collection source; only Trakt sources are frozen.
 func TestAdminCollectionSourceUpdateAcceptsFranchiseID(t *testing.T) {

@@ -99,7 +99,12 @@ describe("AppearanceSettings", () => {
     render(<AppearanceSettings />);
 
     const keys = useSettingsFormMock.mock.calls[0]?.[0]?.keys as string[];
-    expect(keys).toEqual(["branding.accent_color", "overlays.enabled", "defaults.card_overlays"]);
+    expect(keys).toEqual([
+      "branding.accent_color",
+      "overlays.enabled",
+      "defaults.card_overlays",
+      "defaults.ui.title_art",
+    ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Use accent #10b981" }));
 
@@ -124,6 +129,28 @@ describe("AppearanceSettings", () => {
 
   // Restoring is an ordinary staged edit: the admin still confirms the batch
   // through the SaveBar, and Discard puts the previous defaults back.
+
+  it("stages the server-wide title art default, showing the built-in default while unset", () => {
+    render(<AppearanceSettings />);
+
+    const keys = useSettingsFormMock.mock.calls[0]?.[0]?.keys as string[];
+    expect(keys).toContain("defaults.ui.title_art");
+
+    const toggle = screen.getByRole("switch", { name: "Show title art" });
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+
+    expect(form.save).not.toHaveBeenCalled();
+    expect(form.setValue).toHaveBeenCalledWith("defaults.ui.title_art", "false");
+  });
+
+  it("shows a stored title art default of off", () => {
+    form = makeForm({ "defaults.ui.title_art": "false" });
+    render(<AppearanceSettings />);
+
+    expect(screen.getByRole("switch", { name: "Show title art" })).not.toBeChecked();
+  });
 
   it("leaves the badge kill switch alone when restoring the defaults", () => {
     form = makeForm({

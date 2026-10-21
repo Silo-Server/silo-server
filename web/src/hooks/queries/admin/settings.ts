@@ -27,6 +27,8 @@ import type {
   JellyfinCompatWebInstallRequest,
 } from "@/api/types";
 import { adminKeys, compatKeys, settingsKeys, themeKeys } from "../keys";
+import { invalidateAdminDefaultQueries } from "../settingValues";
+import { adminDefaultSettingFor } from "@/lib/settingsAdminDefaults";
 import { toast } from "sonner";
 
 /**
@@ -43,6 +45,16 @@ export const OVERLAY_CONFIG_SERVER_KEYS = [
 
 function affectsOverlayConfig(key: string) {
   return (OVERLAY_CONFIG_SERVER_KEYS as readonly string[]).includes(key);
+}
+
+function invalidateAdminDefaults(
+  queryClient: ReturnType<typeof useQueryClient>,
+  serverSettingKeys: string[],
+) {
+  return serverSettingKeys.flatMap((serverSettingKey) => {
+    const key = adminDefaultSettingFor(serverSettingKey);
+    return key ? [invalidateAdminDefaultQueries(queryClient, key)] : [];
+  });
 }
 
 /* eslint-disable react-hooks/refs -- baseline capture must observe authority synchronously. */
@@ -66,7 +78,7 @@ function useRetainedSettingsBaseline(
     },
   };
 }
-/* eslint-enable react-hooks/refs */
+/* eslint-enable react-hooks/refs -- ends the baseline-capture exception */
 
 export type CatalogSearchStatus = V2Result<"GET /api/v2/admin/catalog/search/status">;
 
@@ -272,6 +284,7 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: settingsKeys.overlayConfig() }),
         );
       }
+      invalidations.push(...invalidateAdminDefaults(queryClient, keys));
       await Promise.all(invalidations);
       if (isCapturedProfileAuthorityActive(profileContext)) retained.reset();
     },
@@ -379,6 +392,7 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: settingsKeys.overlayConfig() }),
         );
       }
+      invalidations.push(...invalidateAdminDefaults(queryClient, [variables.key]));
       await Promise.all(invalidations);
       if (isCapturedProfileAuthorityActive(variables.profileContext)) retained.reset();
     },

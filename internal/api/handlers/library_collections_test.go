@@ -9,23 +9,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestNormalizeTraktPresetRequest(t *testing.T) {
-	preset, mediaType, profileID, err := normalizeTraktPresetRequest("recommended", "tv", "prof-1")
-	if err != nil {
-		t.Fatalf("normalizeTraktPresetRequest: %v", err)
-	}
-	if preset != "recommended" || mediaType != "tv" || profileID != "prof-1" {
-		t.Fatalf("got %q/%q/%q", preset, mediaType, profileID)
-	}
-
-	if _, _, _, err := normalizeTraktPresetRequest("recommended", "movie", ""); err == nil {
-		t.Fatal("expected profile_id error")
-	}
-	if _, _, _, err := normalizeTraktPresetRequest("popular", "all", ""); err == nil {
-		t.Fatal("expected media_type error")
-	}
-}
-
 func TestBuildTMDBCollectionSourceConfig(t *testing.T) {
 	limit := 12
 	raw, err := buildTMDBCollectionSourceConfig(86311, &limit)
@@ -286,26 +269,6 @@ func TestValidateTMDBDiscoverRequest(t *testing.T) {
 	bad.Limit = &limit
 	if err := validateTMDBDiscoverRequest(bad); err == nil {
 		t.Fatal("expected error for limit=0")
-	}
-}
-
-func TestBuildTraktSourceConfig(t *testing.T) {
-	limit := 25
-	raw, err := buildTraktSourceConfig("recommended", "movie", "prof-1", &limit)
-	if err != nil {
-		t.Fatalf("buildTraktSourceConfig: %v", err)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got["mode"] != "trakt_preset" || got["provider"] != "trakt" ||
-		got["preset"] != "recommended" || got["media_type"] != "movie" ||
-		got["profile_id"] != "prof-1" || got["limit"].(float64) != 25 {
-		t.Fatalf("source config = %#v", got)
-	}
-	if url := buildTraktSourceURL("recommended", "movie", "prof-1"); url != "trakt://recommended/movie/prof-1" {
-		t.Fatalf("source url = %q", url)
 	}
 }
 

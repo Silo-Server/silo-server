@@ -308,6 +308,10 @@ func TestTerminalPreparationEventFollowsLinkedDownloadFailure(t *testing.T) {
 				}
 				statuses = append(statuses, status)
 			}
+			if err := rows.Err(); err != nil {
+				t.Errorf("read requesters: %v", err)
+				return
+			}
 			seen = append(seen, statuses)
 		})
 		return &seen

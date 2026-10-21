@@ -8,7 +8,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -22,7 +21,7 @@ type WatchDetailInput struct {
 	ID        ID     `path:"id" doc:"A movie, episode, audiobook or ebook; a series is not directly playable" example:"movie:heat-1995"`
 	FileID    ID     `query:"file_id" doc:"Prefer this file when the item has several versions" example:"42"`
 	LibraryID ID     `query:"library_id" doc:"Present the item as a member of this library" example:"1"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 }
 
 // WatchDetailOutput is the getWatchState response.
@@ -58,7 +57,7 @@ type WatchDetail struct {
 	EffectiveVersionHDR             *bool                   `json:"effective_version_hdr,omitempty"`
 	EffectiveVersionCodecVideo      *string                 `json:"effective_version_codec_video,omitempty"`
 	EffectiveVersionEditionKey      *string                 `json:"effective_version_edition_key,omitempty"`
-	PosterURL                       string                  `json:"poster_url,omitempty" doc:"The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls"`
+	PosterURL                       string                  `json:"poster_url,omitempty" doc:"The item's poster, an episode's still, or a local extra's still (its parent's poster when it has none), sized by image_size; for system media controls"`
 	PosterThumbhash                 string                  `json:"poster_thumbhash,omitempty"`
 	BackdropURL                     string                  `json:"backdrop_url,omitempty" doc:"The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size"`
 	BackdropThumbhash               string                  `json:"backdrop_thumbhash,omitempty"`
@@ -307,9 +306,8 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 		}
 		opts.PresentationLibraryID = &n
 	}
-	if size, err := imagesize.Parse(in.ImageSize); err == nil {
-		opts.ImageSize = size
-	}
+	art := in.Artwork()
+	opts.ImageSize, opts.ImageWidths = art.Size, art.Widths
 	filter, err := reg.deps.Watch.ContextAccessFilter(ctx, opts)
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")

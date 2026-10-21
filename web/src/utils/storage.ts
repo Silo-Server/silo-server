@@ -20,6 +20,7 @@ const STORAGE_KEYS = {
   UI_TIME_FORMAT: "silo-ui-time-format",
   UI_CACHE_OWNER: "silo-ui-cache-owner",
   CALENDAR_PRESET: "calendar:preset",
+  BANDWIDTH_ESTIMATE: "silo-bandwidth-estimate",
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];

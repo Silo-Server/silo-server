@@ -217,7 +217,7 @@ func TestRecheckStopsWithTheCheckerContext(t *testing.T) {
 	f.checker.recheckInterval = time.Hour
 	ctx, cancel := context.WithCancel(context.Background())
 	f.checker.mu.Lock()
-	f.checker.ctx = ctx
+	f.checker.ctx = ctx //nolint:fatcontext // installs the test's ctx once, as Start would
 	f.checker.mu.Unlock()
 
 	f.planner.MarkTranscodeNodeUnreachable(nodeURL)

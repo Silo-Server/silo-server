@@ -839,11 +839,12 @@ func TestHandleUserImageHeadRequest(t *testing.T) {
 	}
 }
 
-// TestHandlePersonImageClampsLargeRequestToProfileLadder verifies a large-ish
-// person-image request resolves a w500 headshot. Profiles ride the {500, 300}
-// ladder, so resolving them as posters would name a profile/w780 key that is
-// never generated, and the server-side ladder fallback skips profile.
-func TestHandlePersonImageClampsLargeRequestToProfileLadder(t *testing.T) {
+// TestHandlePersonImageSizesOnProfileLadder verifies person images size on the
+// {500, 300} profile ladder. A 900px request is wider than its 500px rung, so
+// it gets the original; sizing it as a poster would pick large, a w500
+// headshot, and a poster-ladder rung would name a profile key that is never
+// generated, which the server-side ladder fallback does not rescue.
+func TestHandlePersonImageSizesOnProfileLadder(t *testing.T) {
 	codec := NewResourceIDCodec()
 	routeID := codec.EncodeIntID(EncodedIDPerson, 287)
 	photoPath := "tmdb/people/287/profile/original.abc123.webp"
@@ -866,10 +867,10 @@ func TestHandlePersonImageClampsLargeRequestToProfileLadder(t *testing.T) {
 
 	h.handlePersonImage(rec, req, &Session{}, routeID, "Primary", "", 287)
 
-	if got := compatRequestImageSize(req, "Primary"); got != compatLargeImageSize {
-		t.Fatalf("compatRequestImageSize = %q, want %q", got, compatLargeImageSize)
+	if got := compatSizeFor(compatRequestImageSize(req, "Primary"), "profile"); got != compatOriginalImageSize {
+		t.Fatalf("headshot size = %q, want %q", got, compatOriginalImageSize)
 	}
-	want := "tmdb/people/287/profile/w500.abc123.webp"
+	want := photoPath
 	if resolver.path != want {
 		t.Fatalf("resolved path = %q, want %q", resolver.path, want)
 	}

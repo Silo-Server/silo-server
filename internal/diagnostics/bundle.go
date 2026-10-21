@@ -75,7 +75,7 @@ func ValidateBundle(r io.Reader, limits BundleLimits) (BundleInfo, error) {
 		if errors.Is(err, ErrCompressedTooLarge) {
 			return BundleInfo{}, ErrCompressedTooLarge
 		}
-		return BundleInfo{}, fmt.Errorf("%w: open gzip: %v", ErrInvalidBundle, err)
+		return BundleInfo{}, fmt.Errorf("%w: open gzip: %v", ErrInvalidBundle, err) //nolint:errorlint // an upload read error (e.g. *http.MaxBytesError) must not outrank the invalid-bundle verdict
 	}
 	gz.Multistream(false)
 	gzipClosed := false
@@ -405,7 +405,7 @@ func classifyEntryContentError(err error) error {
 	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
 		return fmt.Errorf("%w: truncated or empty JSON entry", ErrInvalidBundle)
 	default:
-		return fmt.Errorf("%w: %v", ErrInvalidBundle, err)
+		return fmt.Errorf("%w: %v", ErrInvalidBundle, err) //nolint:errorlint // an upload read error (e.g. *http.MaxBytesError) must not outrank the invalid-bundle verdict
 	}
 }
 
@@ -474,7 +474,7 @@ func classifyBundleReadError(err error) error {
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return fmt.Errorf("%w: truncated archive", ErrInvalidBundle)
 	}
-	return fmt.Errorf("%w: %v", ErrInvalidBundle, err)
+	return fmt.Errorf("%w: %v", ErrInvalidBundle, err) //nolint:errorlint // an upload read error (e.g. *http.MaxBytesError) must not outrank the invalid-bundle verdict
 }
 
 type bundleUploadAbortError struct {

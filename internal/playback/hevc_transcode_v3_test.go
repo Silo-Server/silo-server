@@ -61,8 +61,7 @@ func TestPlanPlaybackV3HEVCOutputKeepsTheSourceBitrateBound(t *testing.T) {
 		input.RequestedFile, input.EffectiveFile = &file, &file
 		input.Settings.Allow4KTranscode = true
 		input.Request.QualityPreference = "auto"
-		estimate := 10_000
-		input.Request.BandwidthEstimateKbps = &estimate
+		input.Request.Capabilities.MaxResolution = "1080p"
 		return input
 	}
 	check := func(name string, result PlannerResultV3, wantCodec string, wantBitrate int) {
@@ -153,8 +152,8 @@ func TestPlanPlaybackV3H264TargetStaysWithinTheDecoderBitrate(t *testing.T) {
 		input.Request.Capabilities.VideoDecode = append(input.Request.Capabilities.VideoDecode,
 			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 5_000, Hardware: true})
 		input.Request.QualityPreference = "auto"
-		estimate := 7_000
-		input.Request.BandwidthEstimateKbps = &estimate
+		capKbps := 7_000
+		input.Request.BandwidthCapKbps = &capKbps
 		result := PlanPlaybackV3(input)
 		if result.Plan == nil || result.TargetVideoCodec != tc.wantCodec || result.TargetBitrateKbps != tc.wantBitrate {
 			t.Fatalf("HEVC %v: %s codec %q bitrate %d, want %s at %d", tc.allowHEVC, ExplainPlannerResultV3(result), result.TargetVideoCodec, result.TargetBitrateKbps, tc.wantCodec, tc.wantBitrate)
@@ -177,8 +176,8 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 		input.Request.Capabilities.VideoDecode = append(input.Request.Capabilities.VideoDecode,
 			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: decoderWidth, MaxHeight: decoderHeight, MaxFrameRate: 60, Hardware: true})
 		input.Request.QualityPreference = "auto"
-		estimate := 7_000
-		input.Request.BandwidthEstimateKbps = &estimate
+		capKbps := 7_000
+		input.Request.BandwidthCapKbps = &capKbps
 		return input
 	}
 	check := func(name string, result PlannerResultV3, codec, res string, width, bitrate int) {
@@ -200,7 +199,7 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 	check("a 1280x962 decoder", PlanPlaybackV3(input(false)), "h264", "720p", 1280, 2_000)
 
 	// A same-size codec conversion is fitted too: a 5 Mbps 1080p HEVC source
-	// fits the estimate, but an H.264-only client with a 720p decoder needs
+	// fits the cap, but an H.264-only client with a 720p decoder needs
 	// an H.264 encode it can take.
 	decoderWidth, decoderHeight = 1280, 720
 	conversion := input(false)
@@ -221,8 +220,8 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 30, Hardware: true},
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1280, MaxHeight: 720, MaxFrameRate: 60, Hardware: true},
 	}
-	estimate := 9_000
-	fast.Request.BandwidthEstimateKbps = &estimate
+	capKbps := 9_000
+	fast.Request.BandwidthCapKbps = &capKbps
 	check("a 60 fps source", PlanPlaybackV3(fast), "h264", "720p", 1280, 2_000)
 
 	// The decoder is checked against the even frame the encoder writes: a
@@ -248,13 +247,17 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 1_000, Hardware: true},
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true},
 	}
-	check("a slow 4K decoder beside a fast 1080p one", PlanPlaybackV3(slow), "h264", "1080p", 1920, 5_600)
+	check("a slow 4K decoder beside a fast 1080p one", PlanPlaybackV3(slow), "h264", "1080p", 1920, 6_000)
 
 	// Hardware decoders win only when one takes the source's frame rate; an
 	// opted-in software decoder that does is used instead.
+	// The source sits over the cap, so it is re-encoded at a size the cap's
+	// budget earns for 60 fps.
 	software := input(false)
-	software.RequestedFile, software.EffectiveFile = &fastFile, &fastFile
-	software.Request.BandwidthEstimateKbps = &estimate
+	softwareFile := fastFile
+	softwareFile.VideoTracks = []models.VideoTrack{{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "60/1", Bitrate: 12_000, BitDepth: 8, VideoRange: "SDR"}}
+	software.RequestedFile, software.EffectiveFile = &softwareFile, &softwareFile
+	software.Request.BandwidthCapKbps = &capKbps
 	software.Request.ClientFeatures = append(software.Request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
 	software.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 30, Hardware: true},
@@ -282,8 +285,8 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 	wide.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 15_000, Hardware: true},
 	}
-	wideEstimate := 10_000
-	wide.Request.BandwidthEstimateKbps = &wideEstimate
+	wideCap := 10_000
+	wide.Request.BandwidthCapKbps = &wideCap
 	check("a 2560x1080 conversion under a 15 Mbps decoder", PlanPlaybackV3(wide), "h264", "1080p", 2560, 5_000)
 }
 

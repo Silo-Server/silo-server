@@ -18,6 +18,26 @@ import (
 
 func apiKeyMetadataRepository(t *testing.T) *APIKeyRepository {
 	t.Helper()
+	repo := apiKeyLegacyRepository(t)
+	up, _ := apiKeyVerifierMigration(t)
+	if _, err := repo.pool.Exec(t.Context(), up); err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
+func apiKeyVerifierMigration(t *testing.T) (up, down string) {
+	t.Helper()
+	migration, err := os.ReadFile("../../migrations/sql/20261019181724_hash_api_key_verifiers.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, down, _ = strings.Cut(string(migration), "-- +goose Down")
+	return up, down
+}
+
+func apiKeyLegacyRepository(t *testing.T) *APIKeyRepository {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -63,7 +83,7 @@ func TestAPIKeyMetadataNeverReturnsCredential(t *testing.T) {
 	repo := apiKeyMetadataRepository(t)
 	ctx := t.Context()
 	original, err := repo.GetByKey(ctx, "sa_existing_credential_kept_unchanged")
-	if err != nil || original.Key != "sa_existing_credential_kept_unchanged" {
+	if err != nil || original.Key != "" {
 		t.Fatalf("migration changed authentication: %v", err)
 	}
 	created, err := repo.Create(ctx, 2, "Created", []string{ScopeAdminUsers})
@@ -89,11 +109,11 @@ func TestAPIKeyMetadataNeverReturnsCredential(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(data), created.Key) || strings.Contains(string(data), original.Key) || strings.Contains(string(data), `"Key":`) {
+		if strings.Contains(string(data), created.Key) || strings.Contains(string(data), "sa_existing_credential_kept_unchanged") || strings.Contains(string(data), `"Key":`) {
 			t.Fatal("metadata read exposed full credential")
 		}
 	}
-	if _, err = repo.pool.Exec(ctx, `INSERT INTO api_keys(user_id,label,api_key) VALUES(1,'Short','sa_x'),(1,'Near short','sa_1234567890')`); err != nil {
+	if _, err = repo.pool.Exec(ctx, `INSERT INTO api_keys(user_id,label,key_hash) VALUES(1,'Short',encode(sha256('sa_x'::bytea),'hex')),(1,'Near short',encode(sha256('sa_1234567890'::bytea),'hex'))`); err != nil {
 		t.Fatal(err)
 	}
 	list, err := repo.ListByUser(ctx, 1)
@@ -165,7 +185,7 @@ func TestAPIKeyConfigurationRevisionAndLegacyWriters(t *testing.T) {
 			t.Fatalf("metadata write did not advance revision: %v", err)
 		}
 	}
-	for _, statement := range []string{`UPDATE api_keys SET id=99 WHERE id=1`, `UPDATE api_keys SET user_id=2 WHERE id=1`, `UPDATE api_keys SET api_key='replacement' WHERE id=1`} {
+	for _, statement := range []string{`UPDATE api_keys SET id=99 WHERE id=1`, `UPDATE api_keys SET user_id=2 WHERE id=1`, `UPDATE api_keys SET key_hash=repeat('a',64) WHERE id=1`, `UPDATE api_keys SET key_prefix='sa_ffffffff' WHERE id=1`} {
 		if _, err = repo.pool.Exec(ctx, statement); err == nil {
 			t.Fatal("credential identity changed")
 		}
@@ -177,7 +197,7 @@ func TestAPIKeyConfigurationRevisionAndLegacyWriters(t *testing.T) {
 	if err = repo.DeleteByAdminConditional(ctx, 1, APIKeyPrecondition{Revision: latest.Revision}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = repo.pool.Exec(ctx, `INSERT INTO api_keys(id,user_id,label,api_key) VALUES(1,1,'Recreated','sa_recreated_credential_with_new_generation')`); err != nil {
+	if _, err = repo.pool.Exec(ctx, `INSERT INTO api_keys(id,user_id,label,key_hash) VALUES(1,1,'Recreated',encode(sha256('sa_recreated_credential_with_new_generation'::bytea),'hex'))`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = repo.UpdateTierConditional(ctx, 1, "elevated", APIKeyPrecondition{Revision: latest.Revision}); !errors.Is(err, ErrAPIKeyRevisionConflict) {
@@ -251,7 +271,7 @@ func TestAPIKeyConfigurationConcurrentGuards(t *testing.T) {
 func TestAPIKeyMetadataPagingIsBoundedAndStable(t *testing.T) {
 	repo := apiKeyMetadataRepository(t)
 	ctx := t.Context()
-	if _, err := repo.pool.Exec(ctx, `INSERT INTO api_keys(user_id,label,api_key,created_at) SELECT 1,'Paged','sa_paged_credential_'||i,'2026-01-01'::timestamptz FROM generate_series(1,205) i`); err != nil {
+	if _, err := repo.pool.Exec(ctx, `INSERT INTO api_keys(user_id,label,key_hash,created_at) SELECT 1,'Paged',encode(sha256(convert_to('sa_paged_credential_'||i,'UTF8')),'hex'),'2026-01-01'::timestamptz FROM generate_series(1,205) i`); err != nil {
 		t.Fatal(err)
 	}
 	first, more, err := repo.ListAllPage(ctx, nil, 10000)

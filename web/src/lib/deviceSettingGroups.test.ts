@@ -60,7 +60,6 @@ describe("deviceSettingGroups", () => {
   // changes nothing.
   const NATIVE_ONLY_PLAYER_KEYS = [
     "player.playback_speed",
-    "player.subtitle_sync_ms",
     "player.hdr_enabled",
     "player.audio_sync_ms",
   ] as const;

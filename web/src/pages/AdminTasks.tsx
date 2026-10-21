@@ -36,6 +36,7 @@ const REFRESH_REASON_LABELS: Record<string, string> = {
   refresh_failure: "Refresh failure",
   core_metadata_incomplete: "Core metadata incomplete",
   trailers_requested: "Trailers requested",
+  provider_artwork: "Provider artwork",
 };
 
 function useTaskClock() {

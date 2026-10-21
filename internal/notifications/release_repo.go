@@ -333,9 +333,11 @@ type newAvailability struct {
 	AvailableAt   time.Time
 }
 
-// recordAvailability runs the availability insert and the optional release
-// event insert in one short transaction, so an event is never created without
-// its availability fact.
+// recordAvailability runs the availability insert, marks the inserted rows
+// that are releases, and inserts the optional release events in one short
+// transaction, so an event is never created without its availability fact.
+// Rows are marked released whenever the library is seeded, whether or not
+// release events are enabled: Next Up orders by released_at too.
 func (r *ReleaseRepository) recordAvailability(ctx context.Context, libraryID int, emitEvents bool, query string, args []any) (int, int, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -362,24 +364,16 @@ func (r *ReleaseRepository) recordAvailability(ctx context.Context, libraryID in
 	}
 
 	events := 0
-	if emitEvents && len(inserted) > 0 {
-		ids := make([]string, len(inserted))
-		for i, row := range inserted {
-			ids[i] = row.EpisodeID
-		}
-		addedEarlier, err := episodesAddedBeforeWindow(ctx, tx, libraryID, ids)
+	if len(inserted) > 0 {
+		releases, err := markReleasedAvailability(ctx, tx, libraryID, emitEvents, inserted)
 		if err != nil {
 			return 0, 0, err
 		}
-		releases := make([]newAvailability, 0, len(inserted))
-		for _, row := range inserted {
-			if _, ok := addedEarlier[row.EpisodeID]; !ok {
-				releases = append(releases, row)
+		if emitEvents {
+			events, err = insertReleaseEvents(ctx, tx, libraryID, releases)
+			if err != nil {
+				return 0, 0, err
 			}
-		}
-		events, err = insertReleaseEvents(ctx, tx, libraryID, releases)
-		if err != nil {
-			return 0, 0, err
 		}
 	}
 
@@ -387,6 +381,52 @@ func (r *ReleaseRepository) recordAvailability(ctx context.Context, libraryID in
 		return 0, 0, fmt.Errorf("commit availability tx: %w", err)
 	}
 	return len(inserted), events, nil
+}
+
+// markReleasedAvailability sets released_at on the newly inserted rows that
+// are releases and returns them. Nothing is a release until the library's
+// first full scan has seeded it, and an episode whose file was added before
+// newReleaseWindow is a late match, not news. A caller emitting events has
+// already found the library seeded; otherwise the seed state is read here,
+// since releases are marked even while release events are off.
+func markReleasedAvailability(ctx context.Context, tx pgx.Tx, libraryID int, seeded bool, inserted []newAvailability) ([]newAvailability, error) {
+	if !seeded {
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM notification_library_seed_state WHERE library_id = $1)`,
+			libraryID,
+		).Scan(&seeded); err != nil {
+			return nil, fmt.Errorf("read library seed state: %w", err)
+		}
+	}
+	if !seeded {
+		return nil, nil
+	}
+	ids := make([]string, len(inserted))
+	for i, row := range inserted {
+		ids[i] = row.EpisodeID
+	}
+	addedEarlier, err := episodesAddedBeforeWindow(ctx, tx, libraryID, ids)
+	if err != nil {
+		return nil, err
+	}
+	releases := make([]newAvailability, 0, len(inserted))
+	releasedIDs := make([]string, 0, len(inserted))
+	for _, row := range inserted {
+		if _, ok := addedEarlier[row.EpisodeID]; !ok {
+			releases = append(releases, row)
+			releasedIDs = append(releasedIDs, row.EpisodeID)
+		}
+	}
+	if len(releasedIDs) == 0 {
+		return nil, nil
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE episode_availability SET released_at = available_at
+		WHERE library_id = $1 AND episode_id = ANY($2)`,
+		libraryID, releasedIDs); err != nil {
+		return nil, fmt.Errorf("mark released availability: %w", err)
+	}
+	return releases, nil
 }
 
 // episodesAddedBeforeWindow returns the episodes whose library membership

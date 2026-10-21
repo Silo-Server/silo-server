@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -60,33 +61,34 @@ func (s *DetailService) GetItemCardsByIDs(ctx context.Context, contentIDs []stri
 		return nil, err
 	}
 
-	// Every image on the page is resolved in one batch. Paths are normalized
-	// to the requested variant first so cached keys match the way the
-	// per-item path would have asked for them.
-	size := string(filter.ImageSize)
-	paths := make([]string, 0, len(visible)*3)
-	seen := make(map[string]struct{}, len(visible)*3)
-	add := func(path string) string {
+	// Every image on the page is resolved together (see ArtworkBatch). Paths
+	// are normalized to the requested variant first so cached keys match the
+	// way the per-item path would have asked for them.
+	var batch ArtworkBatch
+	hints := make(map[imagesize.Slot]string, 3)
+	for _, slot := range []imagesize.Slot{imagesize.SlotPoster, imagesize.SlotBackdrop, imagesize.SlotLogo} {
+		hints[slot] = sizeToVariant(string(filter.ImageSizeFor(slot)))
+	}
+	// add normalizes a path on its own ladder (imageType only when the key
+	// names none) at the size the client asked for that slot.
+	add := func(path, imageType string, slot imagesize.Slot) string {
 		if path == "" || path == "-" {
 			return ""
 		}
-		normalized := cachedImageVariantPath(path, imageTypeOrDefault(path, artworkkey.ImagePoster), size)
-		if _, ok := seen[normalized]; !ok {
-			seen[normalized] = struct{}{}
-			paths = append(paths, normalized)
-		}
+		normalized := cachedImageVariantPath(path, imageType, string(filter.ImageSizeFor(slot)))
+		batch.Add(normalized, hints[slot])
 		return normalized
 	}
 	type cardPaths struct{ poster, backdrop, logo string }
 	byID := make(map[string]cardPaths, len(visible))
 	for _, item := range visible {
 		byID[item.ContentID] = cardPaths{
-			poster:   add(item.PosterPath),
-			backdrop: addTyped(add, item.BackdropPath, artworkkey.ImageBackdrop, size),
-			logo:     addTyped(add, item.LogoPath, artworkkey.ImageLogo, size),
+			poster:   add(item.PosterPath, artworkkey.ImagePoster, imagesize.SlotPoster),
+			backdrop: add(item.BackdropPath, artworkkey.ImageBackdrop, imagesize.SlotBackdrop),
+			logo:     add(item.LogoPath, artworkkey.ImageLogo, imagesize.SlotLogo),
 		}
 	}
-	urls := s.PresignURLsWithExpiry(ctx, paths, sizeToVariant(size))
+	urls := batch.Resolve(ctx, s, sizeToVariant(string(filter.ImageSize)))
 
 	for _, item := range visible {
 		id := item.ContentID
@@ -121,32 +123,13 @@ func (s *DetailService) GetItemCardsByIDs(ctx context.Context, contentIDs []stri
 			SeasonCount:       localized.SeasonCount,
 			PosterThumbhash:   localized.PosterThumbhash,
 			BackdropThumbhash: localized.BackdropThumbhash,
-			PosterURL:         urls[p.poster].URL,
-			BackdropURL:       urls[p.backdrop].URL,
-			LogoURL:           urls[p.logo].URL,
+			PosterURL:         urls.Get(p.poster, hints[imagesize.SlotPoster]).URL,
+			BackdropURL:       urls.Get(p.backdrop, hints[imagesize.SlotBackdrop]).URL,
+			LogoURL:           urls.Get(p.logo, hints[imagesize.SlotLogo]).URL,
 			Versions:          []FileVersion{},
 			PlaybackVariants:  []PlaybackVariant{},
 			Subtitles:         []SubtitleInfo{},
 		}
 	}
 	return result, nil
-}
-
-// addTyped normalizes a non-poster path with its own ladder before adding it.
-func addTyped(add func(string) string, path, imageType, size string) string {
-	if path == "" || path == "-" {
-		return ""
-	}
-	// add() normalizes with the poster ladder; pre-normalize with the right
-	// type so the poster rewrite is a no-op on an already-variant path.
-	return add(cachedImageVariantPath(path, imageTypeOrDefault(path, imageType), size))
-}
-
-// imageTypeOrDefault reads the ladder off a cached key, falling back to the
-// slot's default for keys that do not encode one.
-func imageTypeOrDefault(path, fallback string) string {
-	if t := imageTypeFromCachedPath(path); t != "" {
-		return t
-	}
-	return fallback
 }

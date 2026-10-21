@@ -706,16 +706,20 @@ func (r *FolderRepository) DeleteWithStats(
 	if progress != nil {
 		progress(orphanTotal, orphanTotal, "Deleting media files")
 	}
+	// An extra whose parent survives in another library loses its image with
+	// its last file.
 	if _, err := deleteInBatches(ctx, folderChildDeleteBatch, func(ctx context.Context) (int64, error) {
-		tag, e := r.pool.Exec(ctx, `
-			DELETE FROM media_files
-			WHERE id IN (
-				SELECT id FROM media_files WHERE media_folder_id = $1 LIMIT $2
-			)`, id, folderChildDeleteBatch)
-		if e != nil {
-			return 0, e
-		}
-		return tag.RowsAffected(), nil
+		var deleted int64
+		e := r.pool.QueryRow(ctx, `
+			WITH deleted AS (
+				DELETE FROM media_files
+				WHERE id IN (
+					SELECT id FROM media_files WHERE media_folder_id = $1 LIMIT $2
+				)
+				RETURNING id, extra_id
+			)`+ClearEmptiedExtraStillsCTE+`
+			SELECT count(*) FROM deleted`, id, folderChildDeleteBatch).Scan(&deleted)
+		return deleted, e
 	}); err != nil {
 		return nil, fmt.Errorf("deleting media files: %w", err)
 	}
@@ -1006,7 +1010,7 @@ func collectOrphanIDs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]st
 }
 
 // collectRawImageDirs returns the deduped S3 directory prefixes referenced by
-// the given content IDs (items, their seasons, and their episodes), without
+// the given content IDs (items, their seasons, episodes and local extras), without
 // filtering out dirs still used by other content.
 func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string) ([]string, error) {
 	imgRows, err := q.Query(ctx, `
@@ -1021,6 +1025,8 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 		SELECT poster_path, '', '' FROM seasons WHERE series_id = ANY($1)
 		UNION ALL
 		SELECT still_path, '', '' FROM episodes WHERE series_id = ANY($1)
+		UNION ALL
+		SELECT still_path, '', '' FROM media_extras WHERE parent_id = ANY($1)
 	`, contentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("collecting image paths: %w", err)
@@ -1121,6 +1127,9 @@ func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deleti
 			UNION ALL
 			SELECT e.still_path FROM episodes e
 				WHERE NOT (e.series_id = ANY($2::text[])) AND e.still_path <> ''
+			UNION ALL
+			SELECT x.still_path FROM media_extras x
+				WHERE NOT (x.parent_id = ANY($2::text[])) AND x.still_path <> ''
 		), referenced AS (
 			SELECT DISTINCT left(p.path, n) AS dir
 			FROM referenced_path p

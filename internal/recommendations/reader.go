@@ -543,7 +543,8 @@ func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool) ([]For
 	}
 	// Positive signals without personal rows ask for them even at level 0:
 	// titles that had no embedding at the last refresh may have one now.
-	missingPersonalized := positiveSignalCount(meta) > 0 && (len(mainItems) == 0 || missingClusters)
+	// A main row cached empty was built (every interest turned away).
+	missingPersonalized := positiveSignalCount(meta) > 0 && (mainItems == nil || missingClusters)
 	if len(mainItems) > 0 {
 		personalRows = append(personalRows, ForYouRow{
 			Type:        clusterRowType,

@@ -43,11 +43,13 @@ type ImagesHandler struct {
 	detailSvc  *catalog.DetailService
 	// backdrops lists the backdrops after an item's primary for
 	// Backdrop/{index}; the detail service in production.
-	backdrops    extraBackdropSource
-	itemRepo     imageItemRepository
-	folderRepo   imageFolderRepository
-	seasonRepo   imageSeasonRepository
-	episodeRepo  imageEpisodeRepository
+	backdrops   extraBackdropSource
+	itemRepo    imageItemRepository
+	folderRepo  imageFolderRepository
+	seasonRepo  imageSeasonRepository
+	episodeRepo imageEpisodeRepository
+	// extraRepo resolves a local extra's image; nil serves none.
+	extraRepo    imageExtraRepository
 	accessFilter AccessFilterResolver
 	posterSigner LibraryPosterPresigner
 	presignTTL   time.Duration
@@ -89,6 +91,10 @@ type imageSeasonRepository interface {
 
 type imageEpisodeRepository interface {
 	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
+}
+
+type imageExtraRepository interface {
+	GetByID(ctx context.Context, contentID string) (*models.MediaExtra, error)
 }
 
 type imageFolderRepository interface {
@@ -277,8 +283,8 @@ func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	// Headshots ride the profile ladder ({500, 300}), not the poster ladder,
-	// which now carries a w780 rung. Resolving them as posters would name a
-	// profile/w780 key that is never generated — and the server-side ladder
+	// which carries wider rungs. Resolving them as posters would name a
+	// profile/w1000 key that is never generated — and the server-side ladder
 	// fallback deliberately skips profile, so nothing would rescue it.
 	resolvedImage := compatPresignImageWithExpiry(h.detailSvc, r.Context(), person.PhotoPath, artworkkey.ImageProfile, imageSize)
 	imageURL := resolvedImage.URL
@@ -340,9 +346,10 @@ func (h *ImagesHandler) resolveItemImageURLFromRepos(ctx context.Context, sessio
 	return h.resolveCatalogImageURL(ctx, contentID, imageType, compatBackdropIndex(r, imageType), compatRequestImageSize(r, imageType), &access)
 }
 
-// resolveCatalogImageURL resolves a movie, series, episode, or season image from
-// the catalog. A non-nil access filter limits it to what that viewer may see;
-// nil serves any item, as Jellyfin does for anonymous image GETs.
+// resolveCatalogImageURL resolves a movie, series, episode, season, or local
+// extra image from the catalog. A non-nil access filter limits it to what that
+// viewer may see; nil serves any item, as Jellyfin does for anonymous image
+// GETs.
 func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, imageType string, backdropIndex int, imageSize string, access *catalog.AccessFilter) (catalog.ResolvedImageURL, bool, error) {
 	switch imageType {
 	case "Primary", compatBackdropImageType, compatImageThumb, "Logo", compatImageBanner, compatImageArt, compatImageDisc:
@@ -416,7 +423,35 @@ func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, i
 		}
 	}
 
-	return catalog.ResolvedImageURL{}, false, nil
+	return h.resolveExtraImageURL(ctx, contentID, imageType, imageSize, ensureAccessible)
+}
+
+// resolveExtraImageURL resolves a local extra's image: its still, with its
+// parent's backdrop and logo filling in as for an episode. Access is the
+// parent's.
+func (h *ImagesHandler) resolveExtraImageURL(ctx context.Context, contentID, imageType, imageSize string, ensureAccessible func(*models.MediaItem) error) (catalog.ResolvedImageURL, bool, error) {
+	if h.extraRepo == nil || h.itemRepo == nil {
+		return catalog.ResolvedImageURL{}, false, nil
+	}
+	extra, err := h.extraRepo.GetByID(ctx, contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrExtraNotFound) {
+			return catalog.ResolvedImageURL{}, false, nil
+		}
+		return catalog.ResolvedImageURL{}, false, wrapCatalogError(err)
+	}
+	parent, err := h.itemRepo.GetByID(ctx, extra.ParentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			return catalog.ResolvedImageURL{}, false, nil
+		}
+		return catalog.ResolvedImageURL{}, false, wrapCatalogError(err)
+	}
+	if err := ensureAccessible(parent); err != nil {
+		return catalog.ResolvedImageURL{}, false, err
+	}
+	imageURL := h.imageURLForItem(ctx, extra.StillPath, "still", parent.BackdropPath, parent.LogoPath, imageType, imageSize)
+	return imageURL, imageURL.URL != "", nil
 }
 
 // collectionArtworkKey returns the stored artwork reference for the requested

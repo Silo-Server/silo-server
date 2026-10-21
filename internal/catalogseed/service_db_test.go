@@ -13,6 +13,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 func newCatalogSeedTestPool(t *testing.T) *pgxpool.Pool {
@@ -21,11 +24,12 @@ func newCatalogSeedTestPool(t *testing.T) *pgxpool.Pool {
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	// The application's pool, so embeddings move with its vector codecs.
+	pool, err := database.NewPool(context.Background(), config.DatabaseConfig{URL: dsn})
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
 	}
-	t.Cleanup(pool.Close)
+	t.Cleanup(func() { database.ClosePool(pool) })
 	return pool
 }
 

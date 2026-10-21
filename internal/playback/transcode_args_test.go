@@ -183,6 +183,7 @@ func TestEveryToneMapSourceKindBuildsEveryExecutorGraph(t *testing.T) {
 		{name: "software", mode: tonemap.ModeSoftware, hwAccel: "none", filter: tonemap.SoftwareFilterHable, encoder: "libx264"},
 		{name: "qsv", mode: tonemap.ModeHardware, hwAccel: "qsv", filter: tonemap.HardwareFilterOpenCL, encoder: "h264_qsv"},
 		{name: "vaapi", mode: tonemap.ModeHardware, hwAccel: "vaapi", filter: tonemap.HardwareFilterVAAPI, encoder: "h264_vaapi"},
+		{name: "vaapi-opencl", mode: tonemap.ModeHardware, hwAccel: "vaapi", filter: tonemap.HardwareFilterOpenCL, encoder: "h264_vaapi"},
 		{name: "nvenc", mode: tonemap.ModeHardware, hwAccel: "nvenc", filter: tonemap.HardwareFilterCUDA, encoder: "h264_nvenc"},
 		{name: "videotoolbox", mode: tonemap.ModeHardware, hwAccel: "videotoolbox", filter: tonemap.HardwareFilterVideoToolbox, encoder: "h264_videotoolbox"},
 	}
@@ -221,6 +222,7 @@ func TestHardwareToneMapRemovesMetadataAfterHardwareFormatConversion(t *testing.
 	}{
 		{name: "QSV", hwAccel: "qsv", filter: tonemap.HardwareFilterOpenCL, before: "hwmap=derive_device=qsv"},
 		{name: "VAAPI", hwAccel: "vaapi", filter: tonemap.HardwareFilterVAAPI, before: "scale_vaapi"},
+		{name: "VAAPI OpenCL", hwAccel: "vaapi", filter: tonemap.HardwareFilterOpenCL, before: "reverse=1"},
 		{name: "NVENC", hwAccel: "nvenc", filter: tonemap.HardwareFilterCUDA, before: "scale_cuda"},
 		{name: "VideoToolbox", hwAccel: "videotoolbox", filter: tonemap.HardwareFilterVideoToolbox, before: "scale_vt"},
 	}
@@ -286,10 +288,10 @@ func TestQSVToneMapBitmapSubtitlesCompositeOnOpenCL(t *testing.T) {
 		return args[slices.Index(args, "-filter_complex")+1]
 	}
 
-	want := "[0:v:0]" + tonemap.QSVOpenCLToneMapFilter(tonemap.SourcePQ, 0) + "[vmain];" +
+	want := "[0:v:0]" + tonemap.IntelOpenCLToneMapFilter(tonemap.SourcePQ, 0) + "[vmain];" +
 		"[0:s:0]scale=out_color_matrix=bt709:out_range=tv,format=yuva420p,hwupload=derive_device=opencl[sub];" +
 		"[vmain][sub]overlay_opencl=eof_action=pass,scale_opencl=w=-2:h=1080," +
-		tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		tonemap.IntelOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
 	if got := graphFor(tonemap.SourcePQ, "1080p", false); got != want {
 		t.Fatalf("QSV HDR bitmap burn-in graph:\n got %s\nwant %s", got, want)
 	}
@@ -306,9 +308,9 @@ func TestQSVToneMapBitmapSubtitlesCompositeOnOpenCL(t *testing.T) {
 					if toneMap < 0 || strings.Contains(graph, "overlay_vaapi") || strings.Contains(graph[toneMap:], "scale_vaapi=w=") {
 						t.Fatalf("a VAAPI filter processes the tone-mapped surface: %s", graph)
 					}
-					steps := []string{"overlay_opencl=eof_action=pass,", tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + ","}
+					steps := []string{"overlay_opencl=eof_action=pass,", tonemap.IntelOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + ","}
 					if resolution != "" {
-						steps = []string{"overlay_opencl=eof_action=pass,", "scale_opencl=w=-2:h=1080,", tonemap.QSVOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + ","}
+						steps = []string{"overlay_opencl=eof_action=pass,", "scale_opencl=w=-2:h=1080,", tonemap.IntelOpenCLReturnFilter() + "," + tonemap.QSVInteropFilter() + ","}
 					} else if strings.Contains(graph, "scale_opencl") {
 						t.Fatalf("unscaled graph resizes on OpenCL: %s", graph)
 					}
@@ -327,6 +329,87 @@ func TestQSVToneMapBitmapSubtitlesCompositeOnOpenCL(t *testing.T) {
 
 	if graph := graphFor(tonemap.SourceSDRBT2020, "1080p", false); !strings.Contains(graph, "overlay_vaapi=eof_action=pass") {
 		t.Fatalf("SDR base layer bitmap burn-in does not use overlay_vaapi: %s", graph)
+	}
+}
+
+// TestIntelVAAPIToneMapsHDROnOpenCL covers #2414: a VAAPI recipe the probe
+// froze with tonemap_opencl (an Intel GPU) takes the OpenCL graph QSV uses on
+// every subtitle path, hands VAAPI surfaces straight to h264_vaapi without the
+// QSV interop, and declares the OpenCL device only for HDR sources.
+func TestIntelVAAPIToneMapsHDROnOpenCL(t *testing.T) {
+	argsFor := func(kind tonemap.SourceKind, subtitleCodec string) []string {
+		opts := TranscodeOpts{
+			InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+			TargetResolution: "1080p", HWAccel: transcodeHWVAAPI, HWDevice: "/dev/dri/renderD128", SourceVideoBitDepth: 10,
+			ToneMapPolicy: tonemap.PolicyHardwareOnly, ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: kind,
+			ToneMapFilter: tonemap.HardwareFilterOpenCL, ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+			ToneMapSourceRevision: tonemap.SourceRevision{MediaFileID: 1, FileSize: 1, StreamSignature: "stream"},
+			SubtitleTrackIndex:    -1,
+		}
+		if subtitleCodec != "" {
+			opts.SubtitleBurnIn, opts.SubtitleTrackIndex, opts.SubtitleCodec = true, 0, subtitleCodec
+		}
+		if err := validateToneMapOpts(opts); err != nil {
+			t.Fatalf("VAAPI OpenCL recipe rejected: %v", err)
+		}
+		return buildFFmpegArgs(opts)
+	}
+
+	for _, kind := range []tonemap.SourceKind{tonemap.SourcePQ, tonemap.SourceHLG, tonemap.SourceHLGBT709, tonemap.SourceDolbyVision} {
+		for _, subtitleCodec := range []string{"", "subrip", "hdmv_pgs_subtitle"} {
+			t.Run(fmt.Sprintf("%s subtitles %q", kind, subtitleCodec), func(t *testing.T) {
+				joined := strings.Join(argsFor(kind, subtitleCodec), " ")
+				for _, want := range []string{"-init_hw_device vaapi=hw:/dev/dri/renderD128 -init_hw_device opencl=ocl@hw -filter_hw_device hw", "tonemap_opencl=", tonemap.IntelOpenCLReturnFilter(), "-c:v h264_vaapi"} {
+					if !strings.Contains(joined, want) {
+						t.Fatalf("graph lacks %q: %s", want, joined)
+					}
+				}
+				if strings.Contains(joined, tonemap.HardwareFilterVAAPI) || strings.Contains(joined, "derive_device=qsv") || strings.Contains(joined, "overlay_vaapi") {
+					t.Fatalf("graph reaches tonemap_vaapi, the QSV interop, or overlay_vaapi: %s", joined)
+				}
+				toneMap := strings.Index(joined, tonemap.HardwareFilterOpenCL+"=")
+				if strings.Contains(joined[toneMap:], "scale_vaapi=w=") {
+					t.Fatalf("a VAAPI scale reads the tone-mapped surface: %s", joined)
+				}
+				if resize := strings.Index(joined, "scale_vaapi=w=-2:h=1080:format=p010"); subtitleCodec == "" && (resize < 0 || resize > toneMap) {
+					t.Fatalf("graph does not resize before tone mapping: %s", joined)
+				}
+			})
+		}
+	}
+
+	bitmap := argsFor(tonemap.SourcePQ, "hdmv_pgs_subtitle")
+	want := "[0:v:0]" + tonemap.IntelOpenCLToneMapFilter(tonemap.SourcePQ, 0) + "[vmain];" +
+		"[0:s:0]scale=out_color_matrix=bt709:out_range=tv,format=yuva420p,hwupload=derive_device=opencl[sub];" +
+		"[vmain][sub]overlay_opencl=eof_action=pass,scale_opencl=w=-2:h=1080," +
+		tonemap.IntelOpenCLReturnFilter() + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+	if got := bitmap[slices.Index(bitmap, "-filter_complex")+1]; got != want {
+		t.Fatalf("VAAPI HDR bitmap burn-in graph:\n got %s\nwant %s", got, want)
+	}
+
+	// SDR bases keep the VAAPI color conversion and need no OpenCL runtime.
+	sdr := strings.Join(argsFor(tonemap.SourceSDRBT2020, ""), " ")
+	if strings.Contains(sdr, "opencl") || !strings.Contains(sdr, tonemap.VAAPIFilter(tonemap.SourceSDRBT2020)) {
+		t.Fatalf("SDR base on the Intel VAAPI recipe uses OpenCL: %s", sdr)
+	}
+}
+
+// TestVAAPIToneMapRecipeAcceptsOnlyVAAPIOrOpenCL keeps recipe validation
+// aligned with the two filters the VAAPI probe can freeze.
+func TestVAAPIToneMapRecipeAcceptsOnlyVAAPIOrOpenCL(t *testing.T) {
+	for filter, wantOK := range map[string]bool{
+		tonemap.HardwareFilterVAAPI:  true,
+		tonemap.HardwareFilterOpenCL: true,
+		tonemap.HardwareFilterCUDA:   false,
+	} {
+		err := validateToneMapOpts(TranscodeOpts{
+			TargetCodecVideo: "h264", HWAccel: transcodeHWVAAPI, ToneMapPolicy: tonemap.PolicyHardwareOnly,
+			ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: filter,
+			ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, ToneMapSourceRevision: tonemap.SourceRevision{MediaFileID: 1, FileSize: 1, StreamSignature: "stream"},
+		})
+		if (err == nil) != wantOK {
+			t.Fatalf("VAAPI recipe with %s: err = %v, want ok %t", filter, err, wantOK)
+		}
 	}
 }
 

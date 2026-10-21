@@ -447,7 +447,7 @@ describe("v2 declared request headers", () => {
     const fetchMock = vi.fn<typeof fetch>(async () => json({ id: "collection" }));
     vi.stubGlobal("fetch", fetchMock);
     await v2("PATCH /api/v2/watch-providers/{provider}/connection", {
-      path: { provider: "trakt" },
+      path: { provider: "simkl" },
       body: { scrobble_enabled: true },
       headers: { "If-Match": '"observed-revision"' },
     });
@@ -478,23 +478,23 @@ describe("v2 declared request headers", () => {
     if (runTypeChecks()) {
       // @ts-expect-error If-Match is required for guarded watch-provider updates.
       void v2("PATCH /api/v2/watch-providers/{provider}/connection", {
-        path: { provider: "trakt" },
+        path: { provider: "simkl" },
         body: {},
       });
       void v2("PATCH /api/v2/watch-providers/{provider}/connection", {
-        path: { provider: "trakt" },
+        path: { provider: "simkl" },
         body: {},
         // @ts-expect-error An empty header set cannot satisfy the required validator.
         headers: {},
       });
       void v2("PATCH /api/v2/watch-providers/{provider}/connection", {
-        path: { provider: "trakt" },
+        path: { provider: "simkl" },
         body: {},
         // @ts-expect-error Operation headers cannot carry session authority.
         headers: { "If-Match": '"v1"', Authorization: "other" },
       });
       void v2("PATCH /api/v2/watch-providers/{provider}/connection", {
-        path: { provider: "trakt" },
+        path: { provider: "simkl" },
         body: {},
         // @ts-expect-error Unknown headers are not part of the generated contract.
         headers: { "If-Match": '"v1"', "X-Unknown": "x" },

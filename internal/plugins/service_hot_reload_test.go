@@ -151,6 +151,7 @@ type fakePluginClient struct {
 	manifest              *pluginv1.PluginManifest
 	metadataProviderCalls int
 	metadataProviderErr   error
+	markerProvider        *pluginhost.MarkerProviderClient
 }
 
 func (f *fakePluginClient) Manifest() *pluginv1.PluginManifest {
@@ -167,7 +168,7 @@ func (f *fakePluginClient) ImageResolver(string) (*pluginhost.ImageResolverClien
 }
 
 func (f *fakePluginClient) MarkerProvider(string) (*pluginhost.MarkerProviderClient, error) {
-	return nil, nil
+	return f.markerProvider, nil
 }
 
 func (f *fakePluginClient) MediaAnalyzer(string) (*pluginhost.MediaAnalyzerClient, error) {
