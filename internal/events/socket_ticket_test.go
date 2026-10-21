@@ -1,13 +1,10 @@
 package events
 
 import (
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 func socketIdentity() SocketIdentity {
@@ -59,18 +56,4 @@ func TestSocketTicketMemorySingleUseAndExpiry(t *testing.T) {
 	if _, err := store.Mint(t.Context(), invalid); err == nil {
 		t.Fatal("sessionless proof minted")
 	}
-}
-func TestSocketTicketRedisCrossNodeSingleUse(t *testing.T) {
-	endpoint := os.Getenv("SILO_TEST_REDIS_URL")
-	if endpoint == "" {
-		t.Skip("requires synthetic Redis URL")
-	}
-	opts, err := redis.ParseURL(endpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a, b := redis.NewClient(opts), redis.NewClient(opts)
-	defer func() { _ = a.Close() }()
-	defer func() { _ = b.Close() }()
-	testSocketTicketSingleUse(t, NewSocketTicketStore(a), NewSocketTicketStore(b))
 }

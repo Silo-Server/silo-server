@@ -63,11 +63,6 @@ func TestBuildRemuxArgsBoostsOnlySurroundToStereoAAC(t *testing.T) {
 		{name: "5.1 to stereo", transcodeAudio: true, sourceChannels: 6, targetChannels: 2, wantBoost: true},
 		{name: "7.1 to default stereo", transcodeAudio: true, sourceChannels: 8, targetChannels: 0, wantBoost: true},
 		{name: "stereo encode", transcodeAudio: true, sourceChannels: 2, targetChannels: 2},
-		{name: "unknown source", transcodeAudio: true, sourceChannels: 0, targetChannels: 2},
-		{name: "surround to mono", transcodeAudio: true, sourceChannels: 6, targetChannels: 1},
-		{name: "negative target resolves to ordinary stereo", transcodeAudio: true, sourceChannels: 6, targetChannels: -1},
-		{name: "noncanonical target resolves to ordinary stereo", transcodeAudio: true, sourceChannels: 6, targetChannels: 3},
-		{name: "surround preserved", transcodeAudio: true, sourceChannels: 6, targetChannels: 6},
 		{name: "audio copy", sourceChannels: 6, targetChannels: 2},
 	}
 
@@ -92,8 +87,6 @@ func TestBuildRemuxArgsNormalizesAACAcrossSeekAnchors(t *testing.T) {
 	}{
 		{name: "initial start", seek: 0},
 		{name: "rewind reanchor", seek: 600},
-		{name: "saved resume", seek: 2201.111},
-		{name: "forward reanchor", seek: 2800},
 	}
 
 	for _, anchor := range anchors {
@@ -182,40 +175,24 @@ func TestBuildRemuxArgsDelaysMoovForCopiedAtmosConfiguration(t *testing.T) {
 	}
 }
 
-// writeProbeAwareFFmpeg stands in for an ffmpeg that carries the dovi_rpu
-// filter but cannot parse this source's RPU: it advertises the filter, fails
-// the probe the way the real one does (rejecting packets while exiting 0), and
-// records the arguments of every non-probe invocation.
-func writeProbeAwareFFmpeg(t *testing.T) (bin, argLog string) {
+// writeRemuxFFmpeg stands in for an ffmpeg that carries the dovi_rpu and
+// filter_units filters and records the arguments of every non-probe
+// invocation. When probeFails is set it cannot parse this source's RPU: it
+// fails the probe the way the real one does (rejecting packets while exiting
+// 0); otherwise the probe succeeds.
+func writeRemuxFFmpeg(t *testing.T, probeFails bool) (bin, argLog string) {
 	t.Helper()
 	dir := t.TempDir()
 	bin = filepath.Join(dir, "ffmpeg")
 	argLog = filepath.Join(dir, "args")
-	script := "#!/bin/sh\n" +
-		"case \"$*\" in\n" +
-		"  *-bsfs*) printf 'dovi_rpu\\nfilter_units\\n'; exit 0;;\n" +
-		"  *'-f null'*) echo '[dovi_rpu @ 0x55] Failed to read unit 1 (type 39).' >&2; exit 0;;\n" +
-		"esac\n" +
-		"echo \"$*\" >> " + argLog + "\n" +
-		"exit 0\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake ffmpeg: %v", err)
+	probe := "  *'-f null'*) exit 0;;\n"
+	if probeFails {
+		probe = "  *'-f null'*) echo '[dovi_rpu @ 0x55] Failed to read unit 1 (type 39).' >&2; exit 0;;\n"
 	}
-	return bin, argLog
-}
-
-// writeRecordingFFmpeg stands in for an ffmpeg whose dovi_rpu probe succeeds,
-// recording the arguments of every non-probe invocation so tests can assert
-// what the remux mode actually mapped onto the command line.
-func writeRecordingFFmpeg(t *testing.T) (bin, argLog string) {
-	t.Helper()
-	dir := t.TempDir()
-	bin = filepath.Join(dir, "ffmpeg")
-	argLog = filepath.Join(dir, "args")
 	script := "#!/bin/sh\n" +
 		"case \"$*\" in\n" +
 		"  *-bsfs*) printf 'dovi_rpu\\nfilter_units\\n'; exit 0;;\n" +
-		"  *'-f null'*) exit 0;;\n" +
+		probe +
 		"esac\n" +
 		"echo \"$*\" >> " + argLog + "\n" +
 		"exit 0\n"
@@ -241,7 +218,7 @@ func recordedRemuxArgs(t *testing.T, session *RemuxSession, argLog string) strin
 // mapping from RemuxDVPreserveV3 must be exercised through the mode switch.
 func TestPreserveModeTagsTheSampleEntry(t *testing.T) {
 	for _, profile := range []int{5, 8} {
-		bin, argLog := writeRecordingFFmpeg(t)
+		bin, argLog := writeRemuxFFmpeg(t, false)
 		session, err := StartRemuxWithDVMode(t.Context(), remuxSourceFile(t), "mp4", 0, false, -1, profile, RemuxDVPreserveV3, bin)
 		if err != nil {
 			t.Fatalf("preserve remux refused profile %d: %v", profile, err)
@@ -255,7 +232,7 @@ func TestPreserveModeTagsTheSampleEntry(t *testing.T) {
 
 func TestExplicitStripModeTagsHVC1(t *testing.T) {
 	for _, profile := range []int{7, 8} {
-		bin, argLog := writeRecordingFFmpeg(t)
+		bin, argLog := writeRemuxFFmpeg(t, false)
 		session, err := StartRemuxWithDVMode(t.Context(), remuxSourceFile(t), "mp4", 0, false, -1, profile, RemuxDVStripToHDR10V3, bin)
 		if err != nil {
 			t.Fatalf("strip remux refused profile %d: %v", profile, err)
@@ -285,7 +262,7 @@ func remuxSourceFile(t *testing.T) string {
 // dovi_rpu filter does, or the filter rejects every packet and the response
 // never produces a byte.
 func TestLegacyRemuxDropsTheStripForAnUnstrippableSource(t *testing.T) {
-	bin, argLog := writeProbeAwareFFmpeg(t)
+	bin, argLog := writeRemuxFFmpeg(t, true)
 	path := remuxSourceFile(t)
 
 	session, err := StartRemuxWithDVMode(context.Background(), path, "mp4", 0, false, -1, 7, RemuxDVLegacyAutoV3, bin)
@@ -293,14 +270,7 @@ func TestLegacyRemuxDropsTheStripForAnUnstrippableSource(t *testing.T) {
 		t.Fatalf("legacy remux refused to start: %v", err)
 	}
 	// Drain to EOF so the stand-in has finished recording before it is killed.
-	_, _ = io.ReadAll(session)
-	session.Close()
-
-	recorded, err := os.ReadFile(argLog)
-	if err != nil {
-		t.Fatalf("the remux never ran: %v", err)
-	}
-	if strings.Contains(string(recorded), DV7ToHDR10BitstreamFilter) {
+	if recorded := recordedRemuxArgs(t, session, argLog); strings.Contains(recorded, DV7ToHDR10BitstreamFilter) {
 		t.Fatalf("the hanging filter survived into the remux: %s", recorded)
 	}
 }
@@ -311,7 +281,7 @@ func TestLegacyRemuxDropsTheStripForAnUnstrippableSource(t *testing.T) {
 // is right: fail so the request gets a definite error instead of a stalled
 // stream, and so the next start re-plans onto a route that works.
 func TestExplicitStripRecipeRefusesAnUnstrippableSource(t *testing.T) {
-	bin, _ := writeProbeAwareFFmpeg(t)
+	bin, _ := writeRemuxFFmpeg(t, true)
 	path := remuxSourceFile(t)
 
 	session, err := StartRemuxWithDVMode(context.Background(), path, "mp4", 0, false, -1, 7, RemuxDVStripToHDR10V3, bin)

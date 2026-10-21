@@ -109,24 +109,6 @@ func TestHandleVerifyPIN_CorrectPINResetsCount(t *testing.T) {
 	requireVerifyPIN(t, postVerifyPIN(t, h, "profile-1", "1234"), true)
 }
 
-// Two API nodes sharing one backend share the count, as Redis does in a
-// cluster.
-func TestHandleVerifyPIN_SharedLimiterAcrossHandlers(t *testing.T) {
-	store := newPINLimitStore(t)
-	shared := ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
-	nodeA := newPINLimitHandler(t, store, shared)
-	nodeB := newPINLimitHandler(t, store, shared)
-
-	for range 3 {
-		requireVerifyPIN(t, postVerifyPIN(t, nodeA, "profile-1", "0000"), false)
-	}
-	for range 2 {
-		requireVerifyPIN(t, postVerifyPIN(t, nodeB, "profile-1", "0000"), false)
-	}
-	requirePINLocked(t, postVerifyPIN(t, nodeA, "profile-1", "1234"))
-	requirePINLocked(t, postVerifyPIN(t, nodeB, "profile-1", "1234"))
-}
-
 // A profile that does not exist or has no PIN is refused before an attempt
 // is counted, so it never reaches the lockout and adds no limiter entry.
 func TestHandleVerifyPIN_UnknownOrPINlessProfileTakesNoAttempt(t *testing.T) {

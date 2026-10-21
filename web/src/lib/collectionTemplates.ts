@@ -2,11 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { v2 } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
-import type {
-  ImportMDBListCollectionRequest,
-  ImportTMDBCollectionRequest,
-  ImportTraktCollectionRequest,
-} from "@/api/types";
+import type { ImportMDBListCollectionRequest, ImportTMDBCollectionRequest } from "@/api/types";
 import { adminKeys } from "@/hooks/queries/keys";
 
 export type CollectionTemplateCategory =
@@ -22,7 +18,6 @@ export type CollectionTemplateCategory =
 
 export type CollectionTemplateSource =
   | "tmdb"
-  | "trakt"
   | "mdblist"
   | "tmdb_discover"
   | "tmdb_collection"
@@ -36,8 +31,6 @@ export type CollectionTemplateTMDB = Pick<
   ImportTMDBCollectionRequest,
   "preset" | "media_type" | "time_window"
 >;
-
-export type CollectionTemplateTrakt = Pick<ImportTraktCollectionRequest, "preset" | "media_type">;
 
 export type CollectionTemplateMDBList = Pick<ImportMDBListCollectionRequest, "url">;
 
@@ -86,7 +79,6 @@ export interface CollectionTemplate {
   featured?: boolean;
   tags?: string[];
   tmdb?: CollectionTemplateTMDB;
-  trakt?: CollectionTemplateTrakt;
   mdblist?: CollectionTemplateMDBList;
   tmdb_collection?: CollectionTemplateTMDBCollection;
   tmdb_discover?: CollectionTemplateTMDBDiscover;
@@ -170,11 +162,6 @@ export interface ApplyCollectionTemplateBundleResponse {
 }
 
 export const TEMPLATE_STALE_TIME = 5 * 60_000;
-
-// Largest explicit "Max Items" value the import APIs accept. Mirrors
-// MaxExplicitItemLimit in internal/collectionutil — sync never scans more
-// than 500 source entries, so larger limits could never be satisfied.
-export const COLLECTION_MAX_ITEMS = 500;
 
 export function fetchCollectionTemplates(): Promise<CollectionTemplateCatalog> {
   return v2("GET /api/v2/admin/collections/templates").then(

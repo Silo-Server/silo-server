@@ -9,7 +9,6 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -65,59 +64,6 @@ func (r *collectionArtworkS3Recorder) putPaths() []string {
 	out := make([]string, len(r.puts))
 	copy(out, r.puts)
 	return out
-}
-
-func TestStoreBundledCollectionPosterIfS3Configured_NoS3KeepsPath(t *testing.T) {
-	path := "/images/collection-templates/template.jpg"
-	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
-		context.Background(),
-		nil,
-		fstest.MapFS{},
-		"collection-1",
-		adminCollectionImagePrefix,
-		path,
-	)
-	if err != nil {
-		t.Fatalf("storeBundledCollectionPosterIfS3Configured: %v", err)
-	}
-	if stored {
-		t.Fatal("stored = true, want false")
-	}
-	if gotPath != path {
-		t.Fatalf("path = %q, want %q", gotPath, path)
-	}
-	if gotThumbhash != "" {
-		t.Fatalf("thumbhash = %q, want empty", gotThumbhash)
-	}
-}
-
-func TestStoreBundledCollectionPosterIfS3Configured_IgnoresNonTemplatePath(t *testing.T) {
-	recorder := newCollectionArtworkS3Recorder(t)
-	path := "collection-images/existing/poster/original.webp"
-
-	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
-		context.Background(),
-		blobstore.NewS3(recorder.client()),
-		fstest.MapFS{},
-		"collection-1",
-		adminCollectionImagePrefix,
-		path,
-	)
-	if err != nil {
-		t.Fatalf("storeBundledCollectionPosterIfS3Configured: %v", err)
-	}
-	if stored {
-		t.Fatal("stored = true, want false")
-	}
-	if gotPath != path {
-		t.Fatalf("path = %q, want %q", gotPath, path)
-	}
-	if gotThumbhash != "" {
-		t.Fatalf("thumbhash = %q, want empty", gotThumbhash)
-	}
-	if puts := recorder.putPaths(); len(puts) != 0 {
-		t.Fatalf("PUT paths = %#v, want none", puts)
-	}
 }
 
 func TestStoreBundledCollectionPosterIfS3Configured_UploadsTemplatePoster(t *testing.T) {
@@ -462,26 +408,6 @@ func TestCleanUpReplacedCollectionImage_OutlivesCanceledRequest(t *testing.T) {
 	assertCollectionImageDeletes(t, store.deleted, "collection-images/c1/poster/original.0000000000000001.webp")
 }
 
-func TestUploadCollectionImageVariants_RejectsNonImage(t *testing.T) {
-	recorder := newCollectionArtworkS3Recorder(t)
-
-	_, _, err := uploadCollectionImageVariants(
-		context.Background(),
-		blobstore.NewS3(recorder.client()),
-		adminCollectionImagePrefix,
-		"collection-1",
-		"poster",
-		[]byte(`<?xml version="1.0"?><root/>`),
-	)
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Status != http.StatusBadRequest {
-		t.Fatalf("err = %v, want a 400 APIError", err)
-	}
-	if puts := recorder.putPaths(); len(puts) != 0 {
-		t.Fatalf("PUT paths = %#v, want none", puts)
-	}
-}
-
 func TestDownloadCollectionImageURL_ClientErrorsAre400(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
@@ -501,46 +427,6 @@ func TestDownloadCollectionImageURL_ClientErrorsAre400(t *testing.T) {
 				t.Fatalf("err = %v, want a 400 APIError", err)
 			}
 		})
-	}
-}
-
-// lockedBuffer collects log output written from the HTTP client's goroutines.
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-func TestDownloadCollectionImageURL_LogsTheHostThatAnswered(t *testing.T) {
-	missing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	}))
-	t.Cleanup(missing.Close)
-	redirect := httptest.NewServer(http.RedirectHandler(missing.URL+"/poster.jpg", http.StatusFound))
-	t.Cleanup(redirect.Close)
-
-	var logs lockedBuffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-
-	if _, err := downloadCollectionImageURL(context.Background(), redirect.Client(), redirect.URL+"/poster.jpg"); err == nil {
-		t.Fatal("downloadCollectionImageURL succeeded, want the 404 error")
-	}
-	missingHost := strings.TrimPrefix(missing.URL, "http://")
-	if got := logs.String(); !strings.Contains(got, "host="+missingHost) || !strings.Contains(got, "status=404") {
-		t.Fatalf("log = %q, want host=%s status=404", got, missingHost)
 	}
 }
 

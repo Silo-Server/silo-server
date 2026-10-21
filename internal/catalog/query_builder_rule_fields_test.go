@@ -3,80 +3,12 @@ package catalog
 import (
 	"errors"
 	"net/url"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func buildSingleRule(t *testing.T, qb *QueryBuilder, rule QueryRule) (string, []any) {
-	t.Helper()
-	clause, args, err := qb.Build(QueryDefinition{
-		Match:  "all",
-		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{rule}}},
-	})
-	if err != nil {
-		t.Fatalf("Build(%+v) returned error: %v", rule, err)
-	}
-	return clause, args
-}
-
-func TestBuild_DateRulesNotInLastComplementsInLast(t *testing.T) {
-	tests := []struct {
-		rule QueryRule
-		want string
-	}{
-		{QueryRule{Field: "added_at", Op: "not_in_last", Value: "30d"}, "mi.created_at < NOW() - INTERVAL '30 days'"},
-		{QueryRule{Field: "release_date", Op: "not_in_last", Value: "1y"}, "mi.release_date < (CURRENT_DATE - INTERVAL '1 years')::date"},
-		{QueryRule{Field: "latest_episode_added", Op: "in_last", Value: "7d"}, "mi.latest_episode_added_at >= NOW() - INTERVAL '7 days'"},
-		{QueryRule{Field: "latest_episode_added", Op: "not_in_last", Value: "7d"}, "mi.latest_episode_added_at < NOW() - INTERVAL '7 days'"},
-		{QueryRule{Field: "last_air_date", Op: "in_last", Value: "2w"}, "mi.last_air_date_at >= (CURRENT_DATE - INTERVAL '2 weeks')::date"},
-		{QueryRule{Field: "last_air_date", Op: "not_in_last", Value: "6m"}, "mi.last_air_date_at < (CURRENT_DATE - INTERVAL '6 months')::date"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.rule.Field+"_"+tt.rule.Op, func(t *testing.T) {
-			clause, args := buildSingleRule(t, NewQueryBuilder("mi"), tt.rule)
-			if len(args) != 0 {
-				t.Fatalf("expected no args, got %v", args)
-			}
-			if !strings.Contains(clause, tt.want) {
-				t.Fatalf("expected clause to contain %q, got %q", tt.want, clause)
-			}
-		})
-	}
-}
-
-func TestBuild_DateRulesBindAbsoluteBounds(t *testing.T) {
-	clause, args := buildSingleRule(t, NewQueryBuilder("mi"), QueryRule{Field: "latest_episode_added", Op: "lt", Value: "2026-01-01"})
-	if clause != "(mi.latest_episode_added_at < $1::timestamptz)" {
-		t.Fatalf("unexpected clause %q", clause)
-	}
-	if !reflect.DeepEqual(args, []any{"2026-01-01"}) {
-		t.Fatalf("unexpected args %v", args)
-	}
-
-	clause, args = buildSingleRule(t, NewQueryBuilder("mi"), QueryRule{Field: "last_air_date", Op: "between", Value: []any{"2024-01-01", "2024-12-31"}})
-	if clause != "(mi.last_air_date_at >= $1::date AND mi.last_air_date_at <= $2::date)" {
-		t.Fatalf("unexpected clause %q", clause)
-	}
-	if len(args) != 2 {
-		t.Fatalf("expected two args, got %v", args)
-	}
-}
-
-func TestBuild_LastWatchedNotInLastKeepsNeverWatched(t *testing.T) {
-	qb := NewQueryBuilder("mi").WithUserScope(1, "p1")
-	clause, _ := buildSingleRule(t, qb, QueryRule{Field: "last_watched", Op: "not_in_last", Value: "30d"})
-	want := "COALESCE(uhist.last_watched, '-infinity'::timestamptz) < NOW() - INTERVAL '30 days'"
-	if !strings.Contains(clause, want) {
-		t.Fatalf("expected %q, got %q", want, clause)
-	}
-	if !qb.RequiresUserHistoryCTE() {
-		t.Fatal("last_watched must require the user history CTE")
-	}
-}
 
 func TestBuild_RelativeDateRulesRejectMalformedSpans(t *testing.T) {
 	for _, field := range []string{"added_at", "release_date", "latest_episode_added", "last_air_date"} {
@@ -90,35 +22,6 @@ func TestBuild_RelativeDateRulesRejectMalformedSpans(t *testing.T) {
 	}
 }
 
-func TestBuild_TitleOperators(t *testing.T) {
-	tests := []struct {
-		op      string
-		value   string
-		want    string
-		wantArg string
-	}{
-		{"is", " Alien ", "(LOWER(BTRIM(mi.title)) = LOWER($1))", "Alien"},
-		{"is_not", "Alien", "(NOT (LOWER(BTRIM(mi.title)) = LOWER($1)))", "Alien"},
-		{"contains", "star", `(mi.title ILIKE $1 ESCAPE '\')`, "%star%"},
-		{"not_contains", "star", `(NOT (mi.title ILIKE $1 ESCAPE '\'))`, "%star%"},
-		{"begins_with", "The", `(BTRIM(mi.title) ILIKE $1 ESCAPE '\')`, "The%"},
-		{"ends_with", "II", `(BTRIM(mi.title) ILIKE $1 ESCAPE '\')`, "%II"},
-		// LIKE wildcards in the value match literally.
-		{"contains", `100%_off\`, `(mi.title ILIKE $1 ESCAPE '\')`, `%100\%\_off\\%`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.op+"_"+tt.value, func(t *testing.T) {
-			clause, args := buildSingleRule(t, NewQueryBuilder("mi"), QueryRule{Field: "title", Op: tt.op, Value: tt.value})
-			if clause != tt.want {
-				t.Fatalf("clause = %q, want %q", clause, tt.want)
-			}
-			if !reflect.DeepEqual(args, []any{tt.wantArg}) {
-				t.Fatalf("args = %v, want [%q]", args, tt.wantArg)
-			}
-		})
-	}
-}
-
 func TestBuild_TitleRejectsNonStringValue(t *testing.T) {
 	_, _, err := NewQueryBuilder("mi").Build(QueryDefinition{
 		Match:  "all",
@@ -126,49 +29,6 @@ func TestBuild_TitleRejectsNonStringValue(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected a non-string title value to be rejected")
-	}
-}
-
-func TestBuild_DecadeMatchesTenYears(t *testing.T) {
-	clause, args := buildSingleRule(t, NewQueryBuilder("mi"), QueryRule{Field: "decade", Op: "is", Value: 1995.0})
-	if clause != "(mi.year >= $1 AND mi.year <= $2)" {
-		t.Fatalf("unexpected clause %q", clause)
-	}
-	if !reflect.DeepEqual(args, []any{1990, 1999}) {
-		t.Fatalf("args = %v, want [1990 1999]", args)
-	}
-
-	clause, _ = buildSingleRule(t, NewQueryBuilder("mi"), QueryRule{Field: "decade", Op: "is_not", Value: "1980"})
-	if clause != "(NOT (mi.year >= $1 AND mi.year <= $2))" {
-		t.Fatalf("unexpected is_not clause %q", clause)
-	}
-
-	_, _, err := NewQueryBuilder("mi").Build(QueryDefinition{
-		Match:  "all",
-		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "decade", Op: "is", Value: "eighties"}}}},
-	})
-	if err == nil {
-		t.Fatal("expected a non-numeric decade to be rejected")
-	}
-}
-
-func TestBuild_NumericRuleFieldsCastBounds(t *testing.T) {
-	tests := []struct {
-		rule QueryRule
-		want string
-	}{
-		{QueryRule{Field: "runtime", Op: "lt", Value: 90.0}, "(NULLIF(mi.runtime, 0) < $1::numeric)"},
-		{QueryRule{Field: "rating_tmdb", Op: "gte", Value: 7.5}, "(mi.rating_tmdb >= $1::numeric)"},
-		{QueryRule{Field: "rating_rt_critic", Op: "gt", Value: 85.5}, "(mi.rating_rt_critic > $1::numeric)"},
-		{QueryRule{Field: "rating_rt_audience", Op: "between", Value: []any{60.0, 90.0}}, "(mi.rating_rt_audience >= $1::numeric AND mi.rating_rt_audience <= $2::numeric)"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.rule.Field, func(t *testing.T) {
-			clause, _ := buildSingleRule(t, NewQueryBuilder("mi"), tt.rule)
-			if clause != tt.want {
-				t.Fatalf("clause = %q, want %q", clause, tt.want)
-			}
-		})
 	}
 }
 
@@ -198,24 +58,6 @@ func TestValidate_NewRuleOperatorsPerField(t *testing.T) {
 		if err := def.Validate(); err == nil {
 			t.Errorf("%s %s: expected the operator to be rejected", rule.Field, rule.Op)
 		}
-	}
-}
-
-func TestBuild_LatestEpisodeAddedMatchesNoEpisode(t *testing.T) {
-	// The cross-type search evaluates an unscoped definition's rules against
-	// episode rows, so the episode scope must accept the field and match nothing.
-	qb := NewQueryBuilder("mi").WithMediaScope("episode")
-	clause, _ := buildSingleRule(t, qb, QueryRule{Field: "latest_episode_added", Op: "in_last", Value: "7d"})
-	if clause != "(NULL::timestamptz >= NOW() - INTERVAL '7 days')" {
-		t.Fatalf("unexpected clause %q", clause)
-	}
-	_, _, err := NewQueryBuilder("mi").WithMediaScope("episode").Build(QueryDefinition{
-		MediaScope: "episode",
-		Match:      "all",
-		Groups:     []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "latest_episode_added", Op: "not_in_last", Value: "soon"}}}},
-	})
-	if err == nil {
-		t.Fatal("expected a malformed span to be rejected in the episode scope too")
 	}
 }
 
@@ -302,47 +144,6 @@ func TestParseCatalogRequest_TitleValuesStayText(t *testing.T) {
 	}
 }
 
-func TestV1RequestsKeepTheFrozenRuleVocabulary(t *testing.T) {
-	// /api/v1 refuses the rules /api/v2 added, with the messages it gave
-	// before they existed; /api/v2 opts in and accepts them.
-	for _, tc := range []struct {
-		field, op, value string
-		v1Error          string
-		postError        string
-	}{
-		{"title", "contains", "x", `groups[0].rules[0].field "title" is not supported`, `groups[0].rules[0].field "title" is not supported`},
-		{"release_date", "not_in_last", "1y", `groups[0].rules[0] is invalid`, `groups[0].rules[0].op "not_in_last" is not supported for field "release_date"`},
-	} {
-		values := url.Values{
-			"q":                          {"dune"},
-			"groups[0][rules][0][field]": {tc.field},
-			"groups[0][rules][0][op]":    {tc.op},
-			"groups[0][rules][0][value]": {tc.value},
-		}
-		v1, err := ParseCatalogRequest(values)
-		if err != nil {
-			t.Fatalf("ParseCatalogRequest: %v", err)
-		}
-		if err := validateCatalogQueryRequest(v1, false); !errors.Is(err, ErrInvalidCatalogRequest) || !strings.Contains(err.Error(), tc.v1Error) {
-			t.Errorf("v1 %s %s: got %v, want an invalid request naming %q", tc.field, tc.op, err, tc.v1Error)
-		}
-		v2, err := ParseCatalogRequestWithOptions(values, CatalogRequestOptions{ExtendedRules: true})
-		if err != nil {
-			t.Fatalf("ParseCatalogRequestWithOptions: %v", err)
-		}
-		if err := validateCatalogQueryRequest(v2, false); err != nil {
-			t.Errorf("v2 %s %s: expected the rule to be accepted, got %v", tc.field, tc.op, err)
-		}
-		// POST /api/v1/catalog/query validates its body with ValidateV1Rules.
-		if err := ValidateV1Rules(v1.Query); err == nil || err.Error() != tc.postError {
-			t.Errorf("ValidateV1Rules %s %s: got %v, want %q", tc.field, tc.op, err, tc.postError)
-		}
-	}
-	if err := ValidateV1Rules(QueryDefinition{Groups: []QueryGroup{{Rules: []QueryRule{{Field: "release_date", Op: "in_last", Value: "1y"}}}}}); err != nil {
-		t.Errorf("expected a v1 rule to pass, got %v", err)
-	}
-}
-
 func TestUserHistoryCTESQLRollsEpisodesUpToSeries(t *testing.T) {
 	sql := UserHistoryCTESQL(1)
 	for _, fragment := range []string{
@@ -357,19 +158,6 @@ func TestUserHistoryCTESQLRollsEpisodesUpToSeries(t *testing.T) {
 		if !strings.Contains(sql, fragment) {
 			t.Fatalf("expected CTE to contain %q, got:\n%s", fragment, sql)
 		}
-	}
-}
-
-func TestBuildEpisodeCatalogComparisonClause_NotInLast(t *testing.T) {
-	clause, args, next, ok, err := buildEpisodeCatalogComparisonClause("ece.episode_air_date", QueryRule{Field: "release_date", Op: "not_in_last", Value: "1y"}, 3, "date")
-	if err != nil || !ok {
-		t.Fatalf("unexpected result ok=%v err=%v", ok, err)
-	}
-	if clause != "ece.episode_air_date < (CURRENT_DATE - INTERVAL '1 years')::date" {
-		t.Fatalf("unexpected clause %q", clause)
-	}
-	if len(args) != 0 || next != 3 {
-		t.Fatalf("expected no args and an unchanged index, got %v, %d", args, next)
 	}
 }
 

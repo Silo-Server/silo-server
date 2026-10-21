@@ -7,6 +7,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
 // Section scopes and the titles and IDs of default rows, named once for the
@@ -102,10 +103,8 @@ func DefaultHomeSections(libraries []*models.MediaFolder) []*PageSection {
 			SectionType: SectionSeasonalThemed,
 			Title:       "Seasonal Picks",
 			ItemLimit:   DefaultItemLimit,
-			Config: json.RawMessage(
-				`{"enabled_themes":["halloween","christmas","valentines","st_patricks","thanksgiving","summer_blockbuster","saturday_morning"]}`,
-			),
-			Enabled: true,
+			Config:      json.RawMessage(recipes.DefaultSeasonalConfig),
+			Enabled:     true,
 		},
 	)
 

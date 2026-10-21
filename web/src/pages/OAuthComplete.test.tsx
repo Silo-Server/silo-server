@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import { useLocation } from "react-router";
+import { v2Problem } from "@/api/v2/problems.test-support";
 import { V2ProblemError } from "@/api/v2/request";
+import { renderRoutes } from "./authPage.test-support";
 import OAuthComplete from "./OAuthComplete";
 
 const request = vi.hoisted(() => vi.fn());
@@ -38,14 +40,10 @@ function Where() {
 }
 
 function mount() {
-  render(
-    <MemoryRouter initialEntries={["/login/oauth-complete"]}>
-      <Routes>
-        <Route path="/login/oauth-complete" element={<OAuthComplete />} />
-        <Route path="*" element={<Where />} />
-      </Routes>
-    </MemoryRouter>,
-  );
+  renderRoutes("/login/oauth-complete", {
+    "/login/oauth-complete": <OAuthComplete />,
+    "*": <Where />,
+  });
 }
 
 async function landedOn(path: string) {
@@ -84,14 +82,7 @@ it("redeems the code once and goes on to where the sign-in started", async () =>
 });
 
 it("sends a refused code back to the login page, which does not restart the provider", async () => {
-  request.mockRejectedValue(
-    new V2ProblemError("completeOAuthLogin", {
-      type: "https://siloserver.org/docs/api/v2/problems/invalid_grant",
-      title: "Invalid grant",
-      status: 400,
-      detail: "raw",
-    } as never),
-  );
+  request.mockRejectedValue(v2Problem(400, "invalid_grant", "raw"));
   mount();
   await landedOn("/login?error=oauth_failed&reason=session_expired");
   expect(completeLogin).not.toHaveBeenCalled();

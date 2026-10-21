@@ -23,6 +23,11 @@ func EpisodeKey(seasonNumber, episodeNumber int) int {
 	return seasonNumber*episodeKeySeasonMultiplier + episodeNumber
 }
 
+// SplitEpisodeKey is the inverse of EpisodeKey.
+func SplitEpisodeKey(key int) (seasonNumber, episodeNumber int) {
+	return key / episodeKeySeasonMultiplier, key % episodeKeySeasonMultiplier
+}
+
 // ValidEpisodeOrdinals reports whether the ordinals can be folded into an
 // episode key that fits in an int4 without collisions.
 func ValidEpisodeOrdinals(seasonNumber, episodeNumber int) bool {

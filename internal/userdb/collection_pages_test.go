@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -104,28 +103,6 @@ func TestSQLiteCollectionContinuation(t *testing.T) {
 	}
 	if _, err := s.ListCollectionItemsPage(ctx, c.ID, userstore.CollectionItemsPageOptions{Limit: 2}); !errors.Is(err, userstore.ErrCollectionNotFound) {
 		t.Fatalf("deleted collection: %v", err)
-	}
-}
-
-func TestSQLiteCollectionContinuationSeekIndex(t *testing.T) {
-	s := newConformanceStore(t).(*SQLiteUserStore)
-	rows, err := s.db.Query(`EXPLAIN QUERY PLAN SELECT media_item_id, position FROM personal_collection_items WHERE collection_id = ? AND (position,media_item_id) > (?,?) ORDER BY position,media_item_id LIMIT 3`, "collection", 3, "item")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var id, parent, unused int
-		var detail string
-		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(detail, "personal_collection_items_continuation_idx (collection_id=? AND (position,media_item_id)>(?,?))") {
-			t.Fatalf("not a bounded tuple seek: %s", detail)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 }
 

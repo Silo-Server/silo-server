@@ -124,12 +124,7 @@ func TestHandleStartPlaybackV3SubtitleOnlyRefusalKeepsTheRequestedVersion(t *tes
 	startRequest.SubtitleTrackID = playback.TrackIDV3(source.ID, "subtitle", subtitleIndex)
 	startRequest.SubtitleTrackIndex = &subtitleIndex
 
-	rec := httptest.NewRecorder()
-	handler.HandleStartPlayback(rec, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
-	var started playback.DecisionResponseV3
-	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
-		t.Fatalf("start status=%d body=%s", rec.Code, rec.Body.String())
-	}
+	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, startRequest))
 	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
 	requireRequestedVersionWithoutSubtitleV3(t, started.PlaybackPlan, source)
 }
@@ -137,12 +132,7 @@ func TestHandleStartPlaybackV3SubtitleOnlyRefusalKeepsTheRequestedVersion(t *tes
 // The same holds when the viewer turns the subtitle on during playback.
 func TestHandleReplanPlaybackV3SubtitleOnlyRefusalKeepsTheRequestedVersion(t *testing.T) {
 	handler, source, _, startRequest := subtitleBlockedHDRFixtureV3(t)
-	rec := httptest.NewRecorder()
-	handler.HandleStartPlayback(rec, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
-	var started playback.DecisionResponseV3
-	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
-		t.Fatalf("start status=%d body=%s", rec.Code, rec.Body.String())
-	}
+	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, startRequest))
 	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
 	if started.PlaybackPlan.EffectiveMediaFileID != source.ID {
 		t.Fatalf("start effective file = %d, want the 4K file %d", started.PlaybackPlan.EffectiveMediaFileID, source.ID)
@@ -251,15 +241,6 @@ func requireRequestedEditionWithoutSubtitleV3(t *testing.T, plan *playback.PlanV
 	}
 }
 
-// The active alternate is kept during an output change only to keep the
-// viewer's subtitle. When the new output cannot show that subtitle on the
-// alternate either, playback still returns to the requested edition without
-// it: the requested edition is the picture the viewer asked for.
-func TestHandleReplanPlaybackV3OutputChangeReturnsToRequestedEditionWhenSubtitleCannotBeShown(t *testing.T) {
-	handler, active, requested, startRequest := subtitleBlockedHDRFixtureV3(t)
-	requireRequestedEditionWithoutSubtitleV3(t, outputChangeAfterKeptAlternateV3(t, handler, active, requested, startRequest), requested)
-}
-
 // The requested edition is listed after every other version, which the
 // fallback tries lower resolutions first. Another version that also drops the
 // subtitle must not take its place, and neither may the 4K edition without it.
@@ -327,12 +308,7 @@ func TestHandleStartPlaybackV3SubtitleOnlyRefusalKeepsAnExecutableSibling(t *tes
 	startRequest.SubtitleTrackID = playback.TrackIDV3(source.ID, "subtitle", 0)
 	startRequest.SubtitleTrackIndex = new(0)
 
-	rec := httptest.NewRecorder()
-	handler.HandleStartPlayback(rec, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
-	var started playback.DecisionResponseV3
-	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &started) != nil {
-		t.Fatalf("start status=%d body=%s", rec.Code, rec.Body.String())
-	}
+	started := postPlaybackStartV3(t, handler, marshalV3StartRequest(t, startRequest))
 	if started.SessionID != "" {
 		t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
 	}

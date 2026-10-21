@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -95,7 +96,7 @@ func registerPlaybackDelivery(reg *Registry) {
 		{http.MethodGet, "/stream/{session_id}", "getPlaybackMedia", "media-bytes", handlers.Original, append(playback.MediaMIMETypes(), playbackMediaBinary, "multipart/byteranges"), true},
 		{http.MethodHead, "/stream/{session_id}", "headPlaybackMedia", "media-bytes", handlers.Original, nil, true},
 		{http.MethodGet, "/playback/transcode/{session_id}/master.m3u8", "getPlaybackManifest", "hls", handlers.Manifest, []string{"application/vnd.apple.mpegurl"}, false},
-		{http.MethodGet, "/playback/transcode/{session_id}/segment/{name}", playbackSegmentOperation, "hls", handlers.Segment, []string{"video/mp4", "video/mp2t", playbackMediaBinary, "multipart/byteranges"}, true},
+		{http.MethodGet, "/playback/transcode/{session_id}/segment/{name}", playbackSegmentOperation, "hls", handlers.Segment, []string{"video/mp4", "video/mp2t", playbackSubtitleVTT, playbackMediaBinary, "multipart/byteranges"}, true},
 		{http.MethodGet, "/stream/{session_id}/subtitles/{track}", playbackSubtitleOperation, "subtitle-sidecar", handlers.Subtitle, []string{playbackSubtitleVTT, playbackSubtitleSSA, playbackSubtitleSubrip, playbackMediaBinary}, false},
 		{http.MethodHead, "/stream/{session_id}/subtitles/{track}", playbackSubtitleHead, "subtitle-sidecar", handlers.Subtitle, nil, false},
 	} {
@@ -105,7 +106,10 @@ func registerPlaybackDelivery(reg *Registry) {
 			{Name: "st", In: playbackParamQuery, Description: "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.", Schema: &huma.Schema{Type: huma.TypeString}},
 		}
 		if route.id == playbackSegmentOperation {
-			params = append(params, &huma.Param{Name: playbackSegmentName, In: playbackParamPath, Required: true, Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}})
+			params = append(params, &huma.Param{Name: playbackSegmentName, In: playbackParamPath, Required: true, Description: "Segment name from the media playlist. sub_NNNNN.vtt names a WebVTT subtitle rendition segment, answered from the cues already produced; one the transcode does not reach in time is an empty WebVTT document.", Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}})
+		}
+		if route.id == "getPlaybackManifest" {
+			params = append(params, &huma.Param{Name: playback.SubtitleRenditionQueryParam, In: playbackParamQuery, Description: "Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist.", Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{"video", "subtitles"}}})
 		}
 		subtitle := route.id == playbackSubtitleOperation || route.id == playbackSubtitleHead
 		if subtitle {
@@ -231,3 +235,6 @@ func (w *playbackDeliveryWriter) Unwrap() http.ResponseWriter    { return w.Resp
 func (w *playbackDeliveryWriter) WriteHeader(status int)         { w.transport().WriteHeader(status) }
 func (w *playbackDeliveryWriter) Write(data []byte) (int, error) { return w.transport().Write(data) }
 func (w *playbackDeliveryWriter) FlushError() error              { return w.transport().FlushError() }
+func (w *playbackDeliveryWriter) ReadFrom(src io.Reader) (int64, error) {
+	return w.transport().ReadFrom(src)
+}

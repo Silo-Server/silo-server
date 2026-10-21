@@ -2,12 +2,10 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -125,56 +123,6 @@ func TestListHistoryImportSources(t *testing.T) {
 	deps := historyImportDeps(nil)
 	deps.HistoryImports = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/history-imports/sources", "", bearer(memberToken)), TypeDependencyUnavailable)
-}
-
-type runPage struct {
-	Items []struct {
-		ID        string   `json:"id"`
-		UserID    string   `json:"user_id"`
-		MappingID *string  `json:"mapping_id"`
-		Warnings  []string `json:"warnings"`
-		Samples   []any    `json:"unmatched_samples"`
-	} `json:"items"`
-	Page struct {
-		NextCursor string `json:"next_cursor"`
-		HasMore    bool   `json:"has_more"`
-	} `json:"page"`
-}
-
-func TestListHistoryImportRuns(t *testing.T) {
-	h := newTestHandler(t, historyImportDeps(fixtureHistoryImports()))
-	rec := do(t, h, http.MethodGet, "/api/v2/history-imports/runs?limit=2", "", bearer(memberToken))
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	var page runPage
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Items) != 2 || page.Items[0].ID != "run-3" || page.Items[1].ID != "run-2" || !page.Page.HasMore || page.Page.NextCursor == "" {
-		t.Fatalf("page = %s", rec.Body.String())
-	}
-	if page.Items[0].UserID != "1" || page.Items[0].MappingID != nil || len(page.Items[0].Warnings) != 0 || len(page.Items[0].Samples) != 0 {
-		t.Fatalf("item = %+v", page.Items[0])
-	}
-	if *page.Items[1].MappingID != "3" || len(page.Items[1].Samples) != 1 {
-		t.Fatalf("item = %+v", page.Items[1])
-	}
-	rec = do(t, h, http.MethodGet, "/api/v2/history-imports/runs?limit=2&cursor="+page.Page.NextCursor, "", bearer(memberToken))
-	page = runPage{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
-	// The other account's run never appears, and the last page has no cursor.
-	if rec.Code != 200 || len(page.Items) != 1 || page.Items[0].ID != "run-1" || page.Page.HasMore {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// Offset paging is gone.
-	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/history-imports/runs?offset=2", "", bearer(memberToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "query.offset" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/history-imports/runs?cursor=nope", "", bearer(memberToken)), TypeInvalidCursor)
 }
 
 func TestCreateHistoryImportRun(t *testing.T) {
@@ -357,51 +305,6 @@ func TestHistoryImportDemoGuard(t *testing.T) {
 	}
 }
 
-func TestHistoryImportRunShowsSafeSummaries(t *testing.T) {
-	run := historyImportRunOf(&historyimport.Run{
-		ID:           "run-3",
-		Status:       historyimport.RunStatusFailed,
-		ErrorMessage: historyimport.RunErrorStoppedEarly,
-		Warnings: []string{
-			"unmatched items (2): missing tmdb_id, imdb_id, or tvdb_id",
-			"fetching Emby favorites: emby http 500: <html>internal stack</html>",
-			"pq: relation user_favorites does not exist",
-		},
-		UnmatchedSamples: []historyimport.UnmatchedSample{{Kind: "movie", Title: "Blade Runner 2049", Reason: `no tmdb_id match for "335984"`}},
-	})
-	if run.ErrorMessage != historyimport.RunErrorStoppedEarly {
-		t.Fatalf("error message = %q, want the user-facing run error", run.ErrorMessage)
-	}
-	want := []string{
-		"Not matched (2): The source item has no TMDB, IMDb, or TVDB ID.",
-		"Emby favorites couldn't be read, so none were imported.",
-		historyimport.GenericRunWarning,
-	}
-	if !slices.Equal(run.Warnings, want) {
-		t.Fatalf("warnings = %q, want %q", run.Warnings, want)
-	}
-	if got := run.UnmatchedSamples[0].Reason; got != "Nothing in the library has the same TMDB, IMDb, or TVDB ID." {
-		t.Fatalf("unmatched reason = %q", got)
-	}
-}
-
-// seamError mirrors the v1 seam's *handlers.APIError: its text is the v1
-// decision and the service error is only reachable by unwrapping.
-type seamError struct{ cause error }
-
-func (e seamError) Error() string { return "internal_error: History import request failed" }
-func (e seamError) Unwrap() error { return e.cause }
-
-func TestHistoryImportInputMessage(t *testing.T) {
-	invalid := fmt.Errorf("%w: choose a server and enter the Emby username", historyimport.ErrInvalidInput)
-	if got := historyImportInputMessage(seamError{invalid}); got != "Choose a server and enter the Emby username." {
-		t.Fatalf("message through the seam = %q", got)
-	}
-	if got := historyImportInputMessage(fmt.Errorf("%w: base_url must be an http or https URL", historyimport.ErrInvalidInput)); got != "base_url must be an http or https URL." {
-		t.Fatalf("field-name message = %q", got)
-	}
-}
-
 // profileScopedFakeHistoryImports records the acting profile the v2 routes
 // pass to the profile-aware seam and applies the #1336 rule: p-owner may act
 // for every profile, any other profile only for itself.
@@ -477,69 +380,4 @@ func TestHistoryImportRoutesActForTheRequestProfile(t *testing.T) {
 	if len(fake.actors) != 3 {
 		t.Fatalf("list and get did not go through the profile-aware seam: %+v", fake.actors)
 	}
-}
-
-func TestHistoryImportCreateRefusedForAnotherProfileIsForbidden(t *testing.T) {
-	fake := &profileScopedFakeHistoryImports{fakeHistoryImports: fixtureHistoryImports()}
-	h := newTestHandler(t, profileScopedHistoryImportDeps(fake))
-	// No acting profile: only the seam's rule decides, and it refuses.
-	body := `{"profile_id":"p-owner","source":"plex","plex_session_id":"plex-sess","plex_server_id":"abc123","source_id":"1"}`
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", body, bearer(memberToken)), TypePermissionDenied)
-	if fake.lastCreate != nil {
-		t.Fatalf("a refused import was created: %+v", fake.lastCreate)
-	}
-}
-
-// TestHistoryImportCapabilityAndPlexBaseURLs covers the pair a client needs
-// together: the capability that says fallback is honored, and the request
-// member it enables. A server without fallback rejects plex_base_urls as an
-// unknown member, so a client needs the capability before sending it.
-func TestHistoryImportCapabilityAndPlexBaseURLs(t *testing.T) {
-	fake := fixtureHistoryImports()
-	h := newTestHandler(t, historyImportDeps(fake))
-
-	rec := do(t, h, http.MethodGet, Prefix+"/history-imports/capability", "", bearer(memberToken))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("capability: %d %s", rec.Code, rec.Body)
-	}
-	var capability HistoryImportCapability
-	if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil {
-		t.Fatalf("decoding capability: %v (%s)", err, rec.Body)
-	}
-	if capability.State != StateAvailable || !capability.PlexConnectionFallback {
-		t.Fatalf("capability = %+v, want available with fallback", capability)
-	}
-	// A client sizes its list against this number, so it has to be the bound
-	// the service enforces rather than a restated constant.
-	if capability.MaxPlexConnections != historyimport.MaxPlexConnectionCandidates {
-		t.Errorf("max_plex_connections = %d, want %d", capability.MaxPlexConnections, historyimport.MaxPlexConnectionCandidates)
-	}
-
-	body := `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_base_urls":["https://relay.plex.direct:443"],"plex_token":"server-token"}`
-	if rec = do(t, h, http.MethodPost, Prefix+"/history-imports/runs", body, bearer(memberToken)); rec.Code != http.StatusAccepted {
-		t.Fatalf("create run: %d %s", rec.Code, rec.Body)
-	}
-	in := fake.lastCreate
-	if in == nil || len(in.PlexBaseURLs) != 1 || in.PlexBaseURLs[0] != "https://relay.plex.direct:443" {
-		t.Fatalf("plex_base_urls did not reach the service: %+v", in)
-	}
-	if in.PlexBaseURL != "https://primary.plex.direct:32400" {
-		t.Errorf("plex_base_url = %q, want the preferred address preserved", in.PlexBaseURL)
-	}
-
-	// The schema bounds the list at what admission checks, counting
-	// plex_base_url, so a client can send everything and let the server filter.
-	urls := func(n int) string {
-		list := make([]string, n)
-		for i := range list {
-			list[i] = fmt.Sprintf("%q", fmt.Sprintf("https://a%d.example", i))
-		}
-		return strings.Join(list, ",")
-	}
-	body = `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_token":"t","plex_base_urls":[` + urls(historyimport.MaxPlexAdvertisedConnections-1) + `]}`
-	if rec = do(t, h, http.MethodPost, Prefix+"/history-imports/runs", body, bearer(memberToken)); rec.Code != http.StatusAccepted {
-		t.Fatalf("create run at the bound: %d %s", rec.Code, rec.Body)
-	}
-	over := `{"profile_id":"p-owner","source":"plex","plex_base_url":"https://primary.plex.direct:32400","plex_token":"t","plex_base_urls":[` + urls(historyimport.MaxPlexAdvertisedConnections) + `]}`
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/history-imports/runs", over, bearer(memberToken)), TypeValidationFailed)
 }

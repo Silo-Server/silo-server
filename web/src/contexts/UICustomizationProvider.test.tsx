@@ -33,6 +33,31 @@ function Probe() {
   );
 }
 
+function advertise(revision: number, etag: string, extra: Record<string, boolean> = {}) {
+  mocks.useSettingsCapabilities.mockReturnValue({
+    data: {
+      api_version: 1,
+      manifest_revision: revision,
+      contract_etag: etag,
+      supports_batched_effective: true,
+      supports_idempotent_writes: true,
+      ...extra,
+    },
+    isLoading: false,
+    isError: false,
+  });
+}
+
+/** Renders the provider and returns the probe's output element. */
+function renderProbe() {
+  render(
+    <UICustomizationProvider>
+      <Probe />
+    </UICustomizationProvider>,
+  );
+  return screen.getByRole("status");
+}
+
 describe("UICustomizationProvider capability gating", () => {
   beforeEach(() => {
     mocks.useEffectiveSettings.mockReset();
@@ -49,27 +74,13 @@ describe("UICustomizationProvider capability gating", () => {
       isLoading: false,
       isError: false,
     });
-    mocks.useSettingsCapabilities.mockReturnValue({
-      data: {
-        api_version: 1,
-        manifest_revision: 4,
-        contract_etag: "revision-four",
-        supports_batched_effective: true,
-        supports_idempotent_writes: true,
-      },
-      isLoading: false,
-      isError: false,
-    });
+    advertise(4, "revision-four");
   });
 
   afterEach(cleanup);
 
   it("does not request revision-five settings from an older server", () => {
-    render(
-      <UICustomizationProvider>
-        <Probe />
-      </UICustomizationProvider>,
-    );
+    const status = renderProbe();
 
     expect(mocks.useEffectiveSettings).toHaveBeenCalledWith({
       keys: [
@@ -79,52 +90,27 @@ describe("UICustomizationProvider capability gating", () => {
       ],
       enabled: false,
     });
-    expect(screen.getByRole("status")).toHaveAttribute("data-supported", "false");
-    expect(screen.getByRole("status")).toHaveAttribute("data-atomic", "false");
-    expect(screen.getByRole("status")).toHaveTextContent("standard");
+    expect(status).toHaveAttribute("data-supported", "false");
+    expect(status).toHaveAttribute("data-atomic", "false");
+    expect(status).toHaveTextContent("standard");
   });
 
   it("enables revision-five reads but requires an explicit atomic flag", () => {
-    mocks.useSettingsCapabilities.mockReturnValue({
-      data: {
-        api_version: 1,
-        manifest_revision: 5,
-        contract_etag: "revision-five",
-        supports_batched_effective: true,
-        supports_idempotent_writes: true,
-      },
-      isLoading: false,
-      isError: false,
-    });
+    advertise(5, "revision-five");
 
-    render(
-      <UICustomizationProvider>
-        <Probe />
-      </UICustomizationProvider>,
-    );
+    const status = renderProbe();
 
     expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         enabled: true,
       }),
     );
-    expect(screen.getByRole("status")).toHaveAttribute("data-supported", "true");
-    expect(screen.getByRole("status")).toHaveAttribute("data-atomic", "false");
+    expect(status).toHaveAttribute("data-supported", "true");
+    expect(status).toHaveAttribute("data-atomic", "false");
   });
 
   it("exposes atomic shortcut support only when advertised", () => {
-    mocks.useSettingsCapabilities.mockReturnValue({
-      data: {
-        api_version: 1,
-        manifest_revision: 5,
-        contract_etag: "revision-five-atomic",
-        supports_batched_effective: true,
-        supports_idempotent_writes: true,
-        supports_atomic_shortcuts: true,
-      },
-      isLoading: false,
-      isError: false,
-    });
+    advertise(5, "revision-five-atomic", { supports_atomic_shortcuts: true });
     mocks.useEffectiveSettings.mockReturnValue({
       data: {
         [SETTING_KEYS.UI_CARD_PRESENTATION]: {
@@ -135,44 +121,25 @@ describe("UICustomizationProvider capability gating", () => {
       isLoading: false,
     });
 
-    render(
-      <UICustomizationProvider>
-        <Probe />
-      </UICustomizationProvider>,
-    );
+    const status = renderProbe();
 
-    expect(screen.getByRole("status")).toHaveAttribute("data-atomic", "true");
-    expect(screen.getByRole("status")).toHaveTextContent("large");
+    expect(status).toHaveAttribute("data-atomic", "true");
+    expect(status).toHaveTextContent("large");
   });
 
   it("marks customization unavailable when effective settings fail to load", () => {
-    mocks.useSettingsCapabilities.mockReturnValue({
-      data: {
-        api_version: 1,
-        manifest_revision: 5,
-        contract_etag: "revision-five",
-        supports_batched_effective: true,
-        supports_idempotent_writes: true,
-        supports_atomic_shortcuts: true,
-      },
-      isLoading: false,
-      isError: false,
-    });
+    advertise(5, "revision-five", { supports_atomic_shortcuts: true });
     mocks.useEffectiveSettings.mockReturnValue({
       data: undefined,
       isLoading: false,
       isError: true,
     });
 
-    render(
-      <UICustomizationProvider>
-        <Probe />
-      </UICustomizationProvider>,
-    );
+    const status = renderProbe();
 
-    expect(screen.getByRole("status")).toHaveAttribute("data-supported", "true");
-    expect(screen.getByRole("status")).toHaveAttribute("data-loading", "false");
-    expect(screen.getByRole("status")).toHaveAttribute("data-unavailable", "true");
-    expect(screen.getByRole("status")).toHaveTextContent("standard");
+    expect(status).toHaveAttribute("data-supported", "true");
+    expect(status).toHaveAttribute("data-loading", "false");
+    expect(status).toHaveAttribute("data-unavailable", "true");
+    expect(status).toHaveTextContent("standard");
   });
 });

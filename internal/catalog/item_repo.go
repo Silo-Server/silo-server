@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
@@ -164,11 +166,21 @@ const fuzzyFallbackThreshold = 5
 // exceeds this, the overflow is logged and the total is reported as inexact.
 const fuzzyMaxResults = 50
 
-// fuzzyRerankMaxAliasesPerItem bounds the only extra metadata the in-process
-// typo reranker may read. Candidate rows are already capped by fuzzyMaxResults,
-// so this makes its worst case 50 items / 200 relevant aliases regardless of
-// total library size.
-const fuzzyRerankMaxAliasesPerItem = 4
+// fuzzyCandidatePool is how many trigram candidates, in trigram rank order, the
+// fallback scores before admitFuzzyRanks keeps the titles matching every word.
+// Whole-query trigram similarity favors short titles, so a long title matching
+// every word ranks low: among 664 candidates for "brekng bad" in a
+// 190,000-title catalog, "Snow Globe: A Breaking Bad Short" ranked 184th and
+// two Breaking Bad documentaries 496th and 497th. The trigram scan dominates the
+// query's cost; a larger LIMIT adds only row transfer and in-process scoring.
+const fuzzyCandidatePool = 500
+
+// fuzzyRerankAliasesPerOrder bounds the only extra metadata the in-process
+// typo reranker may read: per item, this many aliases by similarity and this
+// many by word coverage (see loadFuzzyRerankAliases). Candidate rows are
+// already capped by fuzzyCandidatePool, so its worst case is 500 items / 4,000
+// relevant aliases regardless of total library size.
+const fuzzyRerankAliasesPerOrder = 4
 
 const (
 	fuzzyRerankMaxQueryTokens = 16
@@ -181,7 +193,7 @@ const (
 // for the fuzzy query via SET LOCAL. The <<% operator's selectivity is
 // otherwise governed by a cluster-wide GUC a DBA (or another application) can
 // change, silently altering both match quality and scan cost per deployment —
-// and its server default (0.6) would reject ordinary one-edit typos
+// and its server default (0.5) would reject ordinary one-edit typos
 // ("avegners" vs "avengers" scores ~0.38), so pinning is load-bearing, not
 // just hygiene.
 const trgmWordSimilarityThreshold = 0.30
@@ -627,7 +639,9 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 }
 
 // writeItem inserts item and, when update is set, overwrites every mutable
-// field of an existing row. It reports whether a row was written.
+// field of an existing row. It reports whether a row was written. An update
+// that leaves the item matched also clears match_ignored_at, since an
+// admin's ignore only means something while the item is unmatched.
 func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item *models.MediaItem, update bool) (bool, error) {
 	if item.ContentID == "" {
 		return false, fmt.Errorf("refusing to write media item with empty content_id")
@@ -719,6 +733,7 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			episode_metadata_incomplete = EXCLUDED.episode_metadata_incomplete,
 			episode_metadata_last_checked_at = EXCLUDED.episode_metadata_last_checked_at,
 			status = EXCLUDED.status,
+			match_ignored_at = CASE WHEN lower(trim(EXCLUDED.status)) = 'matched' THEN NULL ELSE media_items.match_ignored_at END,
 			content_rating_age = EXCLUDED.content_rating_age,
 			advisory_age = EXCLUDED.advisory_age,
 			advisory_source = EXCLUDED.advisory_source,
@@ -1041,48 +1056,133 @@ type ExternalIDLookup struct {
 	ByTVDB map[string]string
 }
 
-// GetByExternalIDs fetches media items matching any of the given external IDs
-// of the specified type, in a single query. Replaces N×3 GetByExternalID
-// calls in MDBList collection sync (audit 2026-05-01 §3.7).
-func (r *ItemRepository) GetByExternalIDs(ctx context.Context, batch ExternalIDBatch, itemType string) (*ExternalIDLookup, error) {
-	if len(batch.TMDBIDs) == 0 && len(batch.IMDbIDs) == 0 && len(batch.TVDBIDs) == 0 {
-		return &ExternalIDLookup{
-			ByTMDB: map[string]string{},
-			ByIMDb: map[string]string{},
-			ByTVDB: map[string]string{},
-		}, nil
+// Resolve picks the content_id a source entry names, trying its IDs in the
+// itemType's anchor precedence (contentid.AnchorPrecedence): TVDB → TMDB →
+// IMDb for a series, TMDB → IMDb → TVDB otherwise. It returns "" when no ID
+// matches or the lookup is nil.
+func (l *ExternalIDLookup) Resolve(itemType, tvdbID, tmdbID, imdbID string) string {
+	if l == nil {
+		return ""
 	}
-	sql, args := r.buildGetByExternalIDsSQL(batch, itemType)
-	rows, err := r.pool.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, fmt.Errorf("fetching media items by external IDs: %w", err)
+	for _, provider := range contentid.AnchorPrecedence(itemType) {
+		var id string
+		switch provider {
+		case contentid.ProviderTVDB:
+			id = lookupExternalID(l.ByTVDB, tvdbID)
+		case contentid.ProviderTMDB:
+			id = lookupExternalID(l.ByTMDB, tmdbID)
+		case contentid.ProviderIMDB:
+			id = lookupExternalID(l.ByIMDb, imdbID)
+		}
+		if id != "" {
+			return id
+		}
 	}
-	defer rows.Close()
+	return ""
+}
 
+func lookupExternalID(byID map[string]string, id string) string {
+	if id == "" {
+		return ""
+	}
+	return byID[id]
+}
+
+// externalIDLookupChunk caps how many IDs of each provider one
+// GetByExternalIDs statement carries.
+const externalIDLookupChunk = 1000
+
+// GetByExternalIDs fetches media items matching any of the given external IDs
+// of the specified type. Repeated IDs are looked up once, and each statement
+// carries at most externalIDLookupChunk IDs per provider, so a long list costs
+// a bounded number of bounded statements. Replaces N×3 GetByExternalID calls
+// in MDBList collection sync (audit 2026-05-01 §3.7).
+func (r *ItemRepository) GetByExternalIDs(ctx context.Context, batch ExternalIDBatch, itemType string) (*ExternalIDLookup, error) {
 	out := &ExternalIDLookup{
 		ByTMDB: map[string]string{},
 		ByIMDb: map[string]string{},
 		ByTVDB: map[string]string{},
 	}
+	tmdbIDs, imdbIDs, tvdbIDs := uniqueExternalIDs(batch.TMDBIDs), uniqueExternalIDs(batch.IMDbIDs), uniqueExternalIDs(batch.TVDBIDs)
+	for start := 0; start < max(len(tmdbIDs), len(imdbIDs), len(tvdbIDs)); start += externalIDLookupChunk {
+		chunk := ExternalIDBatch{
+			TMDBIDs: externalIDChunk(tmdbIDs, start),
+			IMDbIDs: externalIDChunk(imdbIDs, start),
+			TVDBIDs: externalIDChunk(tvdbIDs, start),
+		}
+		if err := r.getByExternalIDsChunk(ctx, chunk, itemType, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// getByExternalIDsChunk adds to out the best title for each ID in batch.
+// Rows arrive best first, so a shared ID keeps the title GetByExternalID
+// would pick. A row can carry another chunk's ID in a column it did not match
+// on; only IDs this chunk asked for are kept, so that ID is decided by its own
+// chunk's ordering.
+func (r *ItemRepository) getByExternalIDsChunk(ctx context.Context, batch ExternalIDBatch, itemType string, out *ExternalIDLookup) error {
+	sql, args := r.buildGetByExternalIDsSQL(batch, itemType)
+	rows, err := r.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return fmt.Errorf("fetching media items by external IDs: %w", err)
+	}
+	defer rows.Close()
+
+	tmdbAsked, imdbAsked, tvdbAsked := externalIDSet(batch.TMDBIDs), externalIDSet(batch.IMDbIDs), externalIDSet(batch.TVDBIDs)
+	keep := func(by map[string]string, asked map[string]struct{}, id, contentID string) {
+		if _, ok := asked[id]; !ok {
+			return
+		}
+		if _, taken := by[id]; !taken {
+			by[id] = contentID
+		}
+	}
 	for rows.Next() {
 		var contentID, tmdb, imdb, tvdb string
 		if err := rows.Scan(&contentID, &tmdb, &imdb, &tvdb); err != nil {
-			return nil, fmt.Errorf("scanning external-ID row: %w", err)
+			return fmt.Errorf("scanning external-ID row: %w", err)
 		}
-		if tmdb != "" {
-			out.ByTMDB[tmdb] = contentID
-		}
-		if imdb != "" {
-			out.ByIMDb[imdb] = contentID
-		}
-		if tvdb != "" {
-			out.ByTVDB[tvdb] = contentID
-		}
+		keep(out.ByTMDB, tmdbAsked, tmdb, contentID)
+		keep(out.ByIMDb, imdbAsked, imdb, contentID)
+		keep(out.ByTVDB, tvdbAsked, tvdb, contentID)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating external-ID rows: %w", err)
+		return fmt.Errorf("iterating external-ID rows: %w", err)
 	}
-	return out, nil
+	return nil
+}
+
+// uniqueExternalIDs drops empty and repeated IDs, keeping first-seen order.
+func uniqueExternalIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, dup := seen[id]; id == "" || dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// externalIDChunk returns the externalIDLookupChunk IDs starting at start, or
+// nil past the end.
+func externalIDChunk(ids []string, start int) []string {
+	if start >= len(ids) {
+		return nil
+	}
+	return ids[start:min(start+externalIDLookupChunk, len(ids))]
+}
+
+func externalIDSet(ids []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		set[id] = struct{}{}
+	}
+	return set
 }
 
 // buildGetByExternalIDsSQL pins the exact SQL shape used by GetByExternalIDs:
@@ -1091,11 +1191,100 @@ func (r *ItemRepository) GetByExternalIDs(ctx context.Context, batch ExternalIDB
 // the column is NULL (imdb_id/tmdb_id/tvdb_id are nullable text on
 // media_items per migration 001).
 func (r *ItemRepository) buildGetByExternalIDsSQL(batch ExternalIDBatch, itemType string) (string, []any) {
-	sql := `SELECT content_id, COALESCE(tmdb_id, ''), COALESCE(imdb_id, ''), COALESCE(tvdb_id, '')
-            FROM media_items
-            WHERE (tmdb_id = ANY($1) OR imdb_id = ANY($2) OR tvdb_id = ANY($3))
-              AND type = $4`
+	// Titles match on their own ID columns and on their provider ID rows; a
+	// title can be known to a provider only through the latter. Rows arrive
+	// best first: direct columns before provider rows, then the order
+	// GetByExternalID prefers.
+	sql := `SELECT content_id, tmdb, imdb, tvdb FROM (
+                SELECT mi.content_id, COALESCE(mi.tmdb_id, '') AS tmdb, COALESCE(mi.imdb_id, '') AS imdb,
+                       COALESCE(mi.tvdb_id, '') AS tvdb, 0 AS source_rank, mi.status, mi.updated_at
+                FROM media_items mi
+                WHERE (mi.tmdb_id = ANY($1) OR mi.imdb_id = ANY($2) OR mi.tvdb_id = ANY($3))
+                  AND mi.type = $4
+                UNION ALL
+                SELECT mi.content_id,
+                       CASE WHEN mip.provider = 'tmdb' THEN mip.provider_id ELSE '' END,
+                       CASE WHEN mip.provider = 'imdb' THEN mip.provider_id ELSE '' END,
+                       CASE WHEN mip.provider = 'tvdb' THEN mip.provider_id ELSE '' END,
+                       1, mi.status, mi.updated_at
+                FROM media_item_provider_ids mip
+                JOIN media_items mi ON mi.content_id = mip.content_id AND mi.type = $4
+                WHERE mip.item_type = $4
+                  AND ((mip.provider = 'tmdb' AND mip.provider_id = ANY($1))
+                    OR (mip.provider = 'imdb' AND mip.provider_id = ANY($2))
+                    OR (mip.provider = 'tvdb' AND mip.provider_id = ANY($3)))
+            ) matches
+            ORDER BY
+                source_rank,
+                CASE lower(trim(status))
+                    WHEN 'matched' THEN 0
+                    WHEN 'pending' THEN 1
+                    WHEN 'unmatched' THEN 2
+                    ELSE 3
+                END,
+                updated_at DESC,
+                content_id ASC`
 	return sql, []any{batch.TMDBIDs, batch.IMDbIDs, batch.TVDBIDs, itemType}
+}
+
+// TitleWithoutTMDBID is a catalog title known by IMDb or TVDB ID but not by
+// TMDB ID.
+type TitleWithoutTMDBID struct {
+	ContentID string
+	IMDbID    string
+	TVDBID    string
+}
+
+// TitlesWithoutTMDBID returns up to limit titles of itemType that have no bare
+// numeric TMDB ID in their own columns or provider ID rows but do have an IMDb
+// or TVDB ID. Only these titles can match a TMDB entry through another
+// provider's ID. A TMDB ID stored in TMDB's "id-slug" URL form (see
+// sameTMDBID) never equals an entry's ID, so such a title is listed too.
+// Titles arrive in GetByExternalID's preference order, so when two of them
+// resolve to one TMDB ID the caller can keep the first.
+func (r *ItemRepository) TitlesWithoutTMDBID(ctx context.Context, itemType string, limit int) ([]TitleWithoutTMDBID, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT mi.content_id,
+		       COALESCE(NULLIF(mi.imdb_id, ''), imdb.provider_id, ''),
+		       COALESCE(NULLIF(mi.tvdb_id, ''), tvdb.provider_id, '')
+		FROM media_items mi
+		LEFT JOIN media_item_provider_ids imdb ON imdb.content_id = mi.content_id AND imdb.provider = 'imdb'
+		LEFT JOIN media_item_provider_ids tvdb ON tvdb.content_id = mi.content_id AND tvdb.provider = 'tvdb'
+		WHERE mi.type = $1
+		  AND COALESCE(mi.tmdb_id, '') !~ '^[0-9]+$'
+		  AND NOT EXISTS (
+		      SELECT 1 FROM media_item_provider_ids tmdb
+		      WHERE tmdb.content_id = mi.content_id AND tmdb.provider = 'tmdb'
+		        AND tmdb.provider_id ~ '^[0-9]+$'
+		  )
+		  AND (COALESCE(NULLIF(mi.imdb_id, ''), imdb.provider_id, '') <> ''
+		       OR COALESCE(NULLIF(mi.tvdb_id, ''), tvdb.provider_id, '') <> '')
+		ORDER BY
+		    CASE lower(trim(mi.status))
+		        WHEN 'matched' THEN 0
+		        WHEN 'pending' THEN 1
+		        WHEN 'unmatched' THEN 2
+		        ELSE 3
+		    END,
+		    mi.updated_at DESC,
+		    mi.content_id ASC
+		LIMIT $2`, itemType, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing titles without a TMDB ID: %w", err)
+	}
+	defer rows.Close()
+	var out []TitleWithoutTMDBID
+	for rows.Next() {
+		var title TitleWithoutTMDBID
+		if err := rows.Scan(&title.ContentID, &title.IMDbID, &title.TVDBID); err != nil {
+			return nil, fmt.Errorf("scanning title without a TMDB ID: %w", err)
+		}
+		out = append(out, title)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating titles without a TMDB ID: %w", err)
+	}
+	return out, nil
 }
 
 // GetByTitleYearType finds a media item by exact title, year, and type match.
@@ -1148,6 +1337,9 @@ func (r *ItemRepository) Delete(ctx context.Context, contentID string) ([]string
 		}
 	}
 	imgRows.Close()
+	if err := imgRows.Err(); err != nil {
+		return nil, fmt.Errorf("collecting image paths before delete: %w", err)
+	}
 
 	tag, err := tx.Exec(ctx, "DELETE FROM media_items WHERE content_id = $1", contentID)
 	if err != nil {
@@ -1327,10 +1519,10 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 	var fuzzyBlock []*models.MediaItem
 	fuzzyTruncated := false
 	if fuzzyLimit > 0 {
-		fuzzySQL, _, fuzzyArgs := r.buildFuzzySearchFromParsed(parsed, itemTypes, fuzzyLimit+1, 0, filter, false, contentIDsFromMediaItems(ftsBlock), minSimilarity)
+		fuzzySQL, _, fuzzyArgs := r.buildFuzzySearchFromParsed(parsed, itemTypes, fuzzyCandidatePool+1, 0, filter, false, contentIDsFromMediaItems(ftsBlock), minSimilarity)
 		if fuzzySQL != "" {
 			var err error
-			fuzzyBlock, fuzzyTruncated, err = r.execFuzzyBlock(ctx, searchTextFromParsed(parsed), fuzzySQL, fuzzyArgs, fuzzyLimit)
+			fuzzyBlock, fuzzyTruncated, err = r.execFuzzyBlock(ctx, searchTextFromParsed(parsed), fuzzySQL, fuzzyArgs, fuzzyLimit, len(ftsBlock) > 0)
 			if err != nil {
 				return nil, 0, false, includeTotal, err
 			}
@@ -1394,10 +1586,11 @@ func searchBlockHasExactTitle(items []*models.MediaItem, normalizedTitle string)
 
 // execFuzzyBlock runs the fuzzy data query inside a transaction that pins
 // pg_trgm.strict_word_similarity_threshold, so the <<% operator's selectivity
-// cannot drift with cluster configuration (its 0.6 server default would reject
-// ordinary typos outright). The query was built with LIMIT fuzzyLimit+1; the
-// extra row only signals truncation and is trimmed from the returned block.
-func (r *ItemRepository) execFuzzyBlock(ctx context.Context, searchText, dataSQL string, args []any, fuzzyLimit int) ([]*models.MediaItem, bool, error) {
+// cannot drift with cluster configuration (its 0.5 server default would reject
+// ordinary typos outright). The query was built with LIMIT fuzzyCandidatePool+1;
+// the extra row only signals truncation. The admitted candidates are trimmed to
+// fuzzyLimit. exactHits reports whether the FTS block found any results.
+func (r *ItemRepository) execFuzzyBlock(ctx context.Context, searchText, dataSQL string, args []any, fuzzyLimit int, exactHits bool) ([]*models.MediaItem, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("beginning fuzzy search tx: %w", err)
@@ -1411,21 +1604,23 @@ func (r *ItemRepository) execFuzzyBlock(ctx context.Context, searchText, dataSQL
 	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL pg_trgm.strict_word_similarity_threshold = %g", trgmWordSimilarityThreshold)); err != nil {
 		return nil, false, fmt.Errorf("pinning trigram word-similarity threshold: %w", err)
 	}
-	block, _, truncated, _, err := r.execSearchBlock(ctx, tx, dataSQL, "", args, fuzzyLimit, 0, false)
+	block, _, truncated, _, err := r.execSearchBlock(ctx, tx, dataSQL, "", args, fuzzyCandidatePool, 0, false)
 	if err != nil {
 		return nil, false, err
 	}
-	if len(block) > 1 {
-		aliases, err := loadFuzzyRerankAliases(ctx, tx, searchText, block)
-		if err != nil {
-			return nil, false, err
-		}
-		if err := rerankFuzzyItems(ctx, searchText, block, aliases); err != nil {
-			return nil, false, err
-		}
+	aliases, err := loadFuzzyRerankAliases(ctx, tx, searchText, block)
+	if err != nil {
+		return nil, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, fmt.Errorf("committing fuzzy search tx: %w", err)
+	}
+	block, err = rerankFuzzyItems(ctx, searchText, block, aliases, exactHits)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(block) > fuzzyLimit {
+		block, truncated = block[:fuzzyLimit], true
 	}
 	return block, truncated, nil
 }
@@ -1433,7 +1628,13 @@ func (r *ItemRepository) execFuzzyBlock(ctx context.Context, searchText, dataSQL
 // loadFuzzyRerankAliases reads only aliases that passed the same indexed
 // strict-word predicate as the fuzzy candidate query. ROW_NUMBER applies the
 // cap per content ID; an item with pathological alias history cannot inflate
-// the in-process relevance workload.
+// the in-process relevance workload. Each item gets its most similar aliases,
+// which usually score best, and the aliases covering the most query words,
+// because admitFuzzyRanks drops an item whose loaded aliases miss a word.
+// Coverage sums each word's best strict word similarity, which neither word
+// order nor extra words lower. Similarity alone ranked "Harbor" and three
+// other short aliases above "Tales from the Lantern Keeper's Distant Northern
+// Harbor" for "lantrn harbor".
 func loadFuzzyRerankAliases(ctx context.Context, q searchQuerier, searchText string, items []*models.MediaItem) (map[string][]string, error) {
 	contentIDs := contentIDsFromMediaItems(items)
 	if len(contentIDs) == 0 {
@@ -1447,17 +1648,25 @@ func loadFuzzyRerankAliases(ctx context.Context, q searchQuerier, searchText str
 				ROW_NUMBER() OVER (
 					PARTITION BY mia.content_id
 					ORDER BY
-						0.65 * similarity(public.normalize_search_text($2), mia.normalized_title)
-							+ 0.35 * strict_word_similarity(public.normalize_search_text($2), mia.normalized_title) DESC,
+						0.65 * similarity($2, mia.normalized_title)
+							+ 0.35 * strict_word_similarity($2, mia.normalized_title) DESC,
 						mia.normalized_title ASC
-				) AS alias_rank
+				) AS similarity_rank,
+				ROW_NUMBER() OVER (
+					PARTITION BY mia.content_id
+					ORDER BY coverage.score DESC, mia.normalized_title ASC
+				) AS coverage_rank
 			FROM media_item_aliases mia
+			CROSS JOIN LATERAL (
+				SELECT sum(strict_word_similarity(word, mia.normalized_title)) AS score
+				FROM unnest(string_to_array($2, ' ')) AS word
+			) coverage
 			WHERE mia.content_id = ANY($1)
-			  AND public.normalize_search_text($2) <<% mia.normalized_title
+			  AND $2 <<% mia.normalized_title
 		)
 		SELECT content_id, normalized_title
 		FROM matched
-		WHERE alias_rank <= $3`, contentIDs, searchText, fuzzyRerankMaxAliasesPerItem)
+		WHERE similarity_rank <= $3 OR coverage_rank <= $3`, contentIDs, fuzzyCandidateText(searchText), fuzzyRerankAliasesPerOrder)
 	if err != nil {
 		return nil, fmt.Errorf("loading bounded fuzzy aliases: %w", err)
 	}
@@ -1481,8 +1690,16 @@ type fuzzyTitleScore struct {
 	exact         bool
 	contiguous    bool
 	matchedTokens int
-	editDistance  int
-	extraTokens   int
+	// missingWords counts required query words (see fuzzyRequiredWords) the
+	// title does not match within their typo allowance.
+	missingWords int
+	editDistance int
+	extraTokens  int
+}
+
+// unmatchedFuzzyTitleScore ranks below every scored title variant.
+func unmatchedFuzzyTitleScore() fuzzyTitleScore {
+	return fuzzyTitleScore{missingWords: math.MaxInt, editDistance: math.MaxInt, extraTokens: math.MaxInt}
 }
 
 type fuzzyRankedItem struct {
@@ -1491,61 +1708,168 @@ type fuzzyRankedItem struct {
 	order int
 }
 
-// rerankFuzzyItems is a deliberately tiny relevance layer over PostgreSQL's
+// rerankFuzzyItems orders typo candidates best first and returns only the ones
+// admitFuzzyRanks keeps. exactHits reports whether the exact FTS search
+// already found results for the query.
+func rerankFuzzyItems(ctx context.Context, searchText string, items []*models.MediaItem, aliases map[string][]string, exactHits bool) ([]*models.MediaItem, error) {
+	ranks, required, err := rankFuzzyItems(ctx, searchText, items, aliases)
+	if err != nil || required == 0 {
+		return items, err
+	}
+	ranks = admitFuzzyRanks(ranks, required, exactHits)
+	admitted := make([]*models.MediaItem, len(ranks))
+	for i, rank := range ranks {
+		admitted[i] = rank.item
+	}
+	return admitted, nil
+}
+
+// rankFuzzyItems is a deliberately tiny relevance layer over PostgreSQL's
 // indexed candidate set, not another search index. Its edit limits mirror the
-// auto-fuzziness policy used by Bleve (Apache-2.0): 0 edits for <=2 characters,
-// 1 for 3-5, and at most 2 for longer tokens. PostgreSQL still decides which
-// rows are candidates; this only prevents one strongly matching word from
-// outranking a phrase whose every token is a plausible typo correction.
-func rerankFuzzyItems(ctx context.Context, searchText string, items []*models.MediaItem, aliases map[string][]string) error {
+// auto-fuzziness policy used by Bleve (Apache-2.0) and Elasticsearch's
+// fuzziness AUTO: 0 edits for <=2 characters, 1 for 3-5, and at most 2 for
+// longer tokens. PostgreSQL still decides which rows are candidates; this ranks
+// a phrase whose every token is a plausible typo correction above titles that
+// share one strongly matching word. required counts the query's required
+// words; it is 0 when the query has no words or too many to score, and ranks
+// then keep PostgreSQL's order.
+func rankFuzzyItems(ctx context.Context, searchText string, items []*models.MediaItem, aliases map[string][]string) (ranks []fuzzyRankedItem, required int, err error) {
 	query := normalizeTitleForComparison(searchText)
 	queryTokens, ok := boundedFuzzyTokens(query, fuzzyRerankMaxQueryTokens)
-	if !ok || len(queryTokens) == 0 || len(items) < 2 {
-		return nil
-	}
-
-	ranked := make([]fuzzyRankedItem, 0, len(items))
-	for i, item := range items {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		var variants []string
-		if item != nil {
-			variants = append(variants, aliases[item.ContentID]...)
-		}
-		if item != nil && len(item.Title) <= fuzzyRerankMaxTitleBytes {
-			variants = append(variants, item.Title)
-		}
-		score := fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
-		for _, variant := range variants {
-			candidate := scoreFuzzyTitleVariant(query, queryTokens, variant)
-			if fuzzyTitleScoreBetter(candidate, score) {
-				score = candidate
+	scored := ok && len(queryTokens) > 0
+	if scored {
+		for _, word := range fuzzyRequiredWords(queryTokens) {
+			if word {
+				required++
 			}
 		}
-		ranked = append(ranked, fuzzyRankedItem{item: item, score: score, order: i})
 	}
 
-	sort.SliceStable(ranked, func(i, j int) bool {
-		if fuzzyTitleScoreBetter(ranked[i].score, ranked[j].score) {
-			return true
+	ranks = make([]fuzzyRankedItem, 0, len(items))
+	for i, item := range items {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
 		}
-		if fuzzyTitleScoreBetter(ranked[j].score, ranked[i].score) {
-			return false
+		score := fuzzyTitleScore{}
+		if scored {
+			var variants []string
+			if item != nil {
+				variants = append(variants, aliases[item.ContentID]...)
+			}
+			if item != nil && len(item.Title) <= fuzzyRerankMaxTitleBytes {
+				variants = append(variants, item.Title)
+			}
+			score = unmatchedFuzzyTitleScore()
+			for _, variant := range variants {
+				candidate := scoreFuzzyTitleVariant(query, queryTokens, variant)
+				if fuzzyTitleScoreBetter(candidate, score) {
+					score = candidate
+				}
+			}
 		}
-		return ranked[i].order < ranked[j].order
-	})
-	for i := range ranked {
-		items[i] = ranked[i].item
+		ranks = append(ranks, fuzzyRankedItem{item: item, score: score, order: i})
 	}
-	return nil
+
+	slices.SortStableFunc(ranks, func(a, b fuzzyRankedItem) int {
+		if fuzzyTitleScoreBetter(a.score, b.score) {
+			return -1
+		}
+		if fuzzyTitleScoreBetter(b.score, a.score) {
+			return 1
+		}
+		return 0
+	})
+	return ranks, required, nil
+}
+
+// admitFuzzyRanks keeps the typo candidates a search engine would return:
+// titles that match every required query word within its typo allowance, as
+// Elasticsearch's AND operator and Meilisearch's "all" strategy require. Only
+// when no candidate matches every word and the exact search found nothing does
+// it relax to the candidates missing the fewest words, as Typesense's
+// drop_tokens_threshold does. Ranking alone left every partial match in the
+// results: "the god place" listed The Good Place and then each "The ... Place".
+// ranks and required come from rankFuzzyItems.
+func admitFuzzyRanks(ranks []fuzzyRankedItem, required int, exactHits bool) []fuzzyRankedItem {
+	if len(ranks) == 0 {
+		return ranks
+	}
+	fewest := ranks[0].score.missingWords
+	if fewest > 0 && (exactHits || fewest >= required) {
+		return ranks[:0]
+	}
+	end := 0
+	for end < len(ranks) && ranks[end].score.missingWords == fewest {
+		end++
+	}
+	return ranks[:end]
+}
+
+// fuzzyStopwords take no typo and need not appear in a typo match. "the" is
+// one edit from "she" and "tho", and a title may drop a leading article
+// ("Quiet Place" for "a quiet place"). They still count as matched words, so a
+// title containing them ranks higher. The list is English and short on purpose:
+// every entry is a word a title can omit without changing which work it names.
+var fuzzyStopwords = func() map[string]bool {
+	words := map[string]bool{}
+	for _, word := range strings.Fields("a an the of in on at to for by with from") {
+		words[word] = true
+	}
+	return words
+}()
+
+// fuzzyCandidateText is the text the trigram candidate search matches: the
+// normalized query without stopwords. Stopwords need not appear in a typo
+// match, and their trigrams occur in much of a catalog: in 191,307 titles,
+// "the godfathr" admitted 51,530 candidates and "godfathr" 456, which kept the
+// query near its deadline. When no other word has fuzzyMinTokenLen characters
+// ("from up"), the remaining words form too few trigrams to be selective, so
+// the whole query is matched as before.
+func fuzzyCandidateText(searchText string) string {
+	words := strings.Fields(normalizeTitleForComparison(searchText))
+	content := make([]string, 0, len(words))
+	selective := false
+	for _, word := range words {
+		if !fuzzyStopwords[word] {
+			content = append(content, word)
+			selective = selective || utf8.RuneCountInString(word) >= fuzzyMinTokenLen
+		}
+	}
+	if !selective {
+		return strings.Join(words, " ")
+	}
+	return strings.Join(content, " ")
+}
+
+func fuzzyTokenMaxEdits(token []rune) int {
+	if fuzzyStopwords[string(token)] {
+		return 0
+	}
+	return fuzzyAutoMaxEdits(len(token))
+}
+
+// fuzzyRequiredWords marks the query words a typo match must contain: every
+// word except stopwords, or every word when the query has only stopwords.
+func fuzzyRequiredWords(queryTokens [][]rune) []bool {
+	required := make([]bool, len(queryTokens))
+	content := false
+	for i, token := range queryTokens {
+		required[i] = !fuzzyStopwords[string(token)]
+		content = content || required[i]
+	}
+	if !content {
+		for i := range required {
+			required[i] = true
+		}
+	}
+	return required
 }
 
 func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string) fuzzyTitleScore {
 	title := normalizeTitleForComparison(rawTitle)
 	titleTokens, ok := boundedFuzzyTokens(title, fuzzyRerankMaxTitleTokens)
 	if !ok || len(titleTokens) == 0 {
-		return fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
+		return unmatchedFuzzyTitleScore()
 	}
 	// Compare without spaces so "Live Stream From Hell" is an exact match for
 	// "Livestream from Hell" and "spiderman" for "Spider-Man".
@@ -1557,14 +1881,17 @@ func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string)
 	}
 	// A query word may also match two adjacent title words joined, and two
 	// adjacent query words joined may match one title word.
-	titleTerms := slices.Concat(titleTokens, joinAdjacentFuzzyTokens(titleTokens))
+	joinedTitleTokens := joinAdjacentFuzzyTokens(titleTokens)
+	titleTerms := slices.Concat(titleTokens, joinedTitleTokens)
 	matches := make([]fuzzyTokenMatch, len(queryTokens))
 	for i, token := range queryTokens {
-		matches[i] = bestFuzzyTokenMatch(token, titleTerms)
+		matches[i] = bestFuzzyTokenMatch(token, titleTokens, joinedTitleTokens)
 	}
+	matched := make([]bool, len(queryTokens))
 	for i := 0; i < len(queryTokens); i++ {
 		if i+1 < len(queryTokens) && (!matches[i].ok || !matches[i+1].ok) && fuzzyTokensJoinable(queryTokens[i], queryTokens[i+1]) {
 			if pair := bestFuzzyPairMatch(queryTokens[i], queryTokens[i+1], titleTerms); pair.ok {
+				matched[i], matched[i+1] = true, true
 				score.matchedTokens += 2
 				score.editDistance += pair.distance
 				i++
@@ -1572,27 +1899,62 @@ func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string)
 			}
 		}
 		if matches[i].ok {
+			matched[i] = true
 			score.matchedTokens++
 		}
 		score.editDistance += matches[i].distance
 	}
+	if !score.exact && !spellsConsecutiveFuzzyTokens(titleTokens, compactQuery) {
+		for i, required := range fuzzyRequiredWords(queryTokens) {
+			if required && !matched[i] {
+				score.missingWords++
+			}
+		}
+	}
 	return score
 }
 
-type fuzzyTokenMatch struct {
-	distance int
-	ok       bool // distance is within the token's typo allowance
-}
-
-func bestFuzzyTokenMatch(token []rune, terms [][]rune) fuzzyTokenMatch {
-	maxEdits := fuzzyAutoMaxEdits(len(token))
-	best := maxEdits + 1
-	for _, term := range terms {
-		if distance := boundedLevenshteinRunes(token, term, maxEdits); distance < best {
-			best = distance
+// spellsConsecutiveFuzzyTokens reports whether compactQuery spells a run of
+// whole title words typed without spaces: "lordoftherings" for "The Lord of
+// the Rings". Word matching joins at most two words, so such a query would
+// otherwise miss every word of the title it names. The run must start and end
+// on word boundaries, so "heat" does not match inside "Theater".
+func spellsConsecutiveFuzzyTokens(titleTokens [][]rune, compactQuery string) bool {
+	for start := range titleTokens {
+		for end := start + 1; end <= len(titleTokens); end++ {
+			run := compactFuzzyTokens(titleTokens[start:end])
+			if run == compactQuery {
+				return true
+			}
+			if len(run) >= len(compactQuery) {
+				break
+			}
 		}
 	}
-	return fuzzyTokenMatch{distance: best, ok: best <= maxEdits}
+	return false
+}
+
+type fuzzyTokenMatch struct {
+	distance int  // ranking cost; maxEdits+1 when the word does not match
+	ok       bool // the word matches within its typo allowance
+}
+
+// bestFuzzyTokenMatch matches a query word against single title words and
+// adjacent title words joined. A joined match costs one extra edit, so a title
+// spelling the word as one ranks first: for "the ofice", "The Office" before
+// "The Clink of Ice".
+func bestFuzzyTokenMatch(token []rune, words, joined [][]rune) fuzzyTokenMatch {
+	maxEdits := fuzzyTokenMaxEdits(token)
+	best := fuzzyTokenMatch{distance: maxEdits + 1}
+	for penalty, terms := range [][][]rune{words, joined} {
+		for _, term := range terms {
+			distance := boundedLevenshteinRunes(token, term, maxEdits)
+			if distance <= maxEdits && (!best.ok || distance+penalty < best.distance) {
+				best = fuzzyTokenMatch{distance: distance + penalty, ok: true}
+			}
+		}
+	}
+	return best
 }
 
 // bestFuzzyPairMatch matches two adjacent query words against one term split
@@ -1600,7 +1962,7 @@ func bestFuzzyTokenMatch(token []rune, terms [][]rune) fuzzyTokenMatch {
 // keeps a short word from being dropped: "ed wood" does not match "Wood", nor
 // "a spider" match "Spider".
 func bestFuzzyPairMatch(first, second []rune, terms [][]rune) fuzzyTokenMatch {
-	firstEdits, secondEdits := fuzzyAutoMaxEdits(len(first)), fuzzyAutoMaxEdits(len(second))
+	firstEdits, secondEdits := fuzzyTokenMaxEdits(first), fuzzyTokenMaxEdits(second)
 	best := firstEdits + secondEdits + 1
 	for _, term := range terms {
 		if absInt(len(term)-len(first)-len(second)) > firstEdits+secondEdits {
@@ -1654,6 +2016,9 @@ func fuzzyTokensJoinable(left, right []rune) bool {
 func fuzzyTitleScoreBetter(a, b fuzzyTitleScore) bool {
 	if a.exact != b.exact {
 		return a.exact
+	}
+	if a.missingWords != b.missingWords {
+		return a.missingWords < b.missingWords
 	}
 	if a.matchedTokens != b.matchedTokens {
 		return a.matchedTokens > b.matchedTokens
@@ -1954,8 +2319,9 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 // block so a title matching both is not shown twice. minSimilarity > 0 adds an
 // explicit similarity floor above the base threshold — used when the FTS block
 // had real hits so augmentation only admits near-certain corrections. Argument
-// order: $1 searchText, then the similarity floor (if any), then the shared
-// scope placeholders, then the exclusion array, then limit/offset.
+// order: $1 searchText, $2 its fuzzyCandidateText, then the similarity floor
+// (if any), then the shared scope placeholders, then the exclusion array, then
+// limit/offset.
 func (r *ItemRepository) buildFuzzySearchSQL(query string, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool, excludeContentIDs []string, minSimilarity float64) (dataSQL, countSQL string, args []any) {
 	return r.buildFuzzySearchFromParsed(parseSearchQuery(query), itemTypes, limit, offset, filter, includeTotal, excludeContentIDs, minSimilarity)
 }
@@ -1971,8 +2337,10 @@ func (r *ItemRepository) buildFuzzySearchCursorSQL(parsed parsedSearchQuery, ite
 		return "", "", nil
 	}
 
-	args = []any{searchText}
-	argIdx := 2
+	// Candidates and their trigram rank come from the query's content words
+	// ($2); the whole-title floor and tie-break compare the full query ($1).
+	args = []any{searchText, fuzzyCandidateText(searchText)}
+	argIdx := 3
 	// Strict word similarity (<<%) rather than full-string similarity (%): a
 	// typo of one word must still reach long titles ("avegners" → "Avengers:
 	// Endgame"), where full-string similarity is diluted by every extra trigram
@@ -2032,21 +2400,21 @@ func (r *ItemRepository) buildFuzzySearchCursorSQL(parsed parsedSearchQuery, ite
 			SELECT
 				mia.content_id,
 				MAX(
-					0.65 * similarity(public.normalize_search_text($1), mia.normalized_title)
-						+ 0.35 * strict_word_similarity(public.normalize_search_text($1), mia.normalized_title)
+					0.65 * similarity($2, mia.normalized_title)
+						+ 0.35 * strict_word_similarity($2, mia.normalized_title)
 				) AS fuzzy_rank,
 				MAX(similarity(public.normalize_search_text($1), mia.normalized_title)) AS fuzzy_full_rank
 			FROM media_item_aliases mia
-			WHERE public.normalize_search_text($1) <<%% mia.normalized_title
+			WHERE $2 <<%% mia.normalized_title
 			GROUP BY mia.content_id
 		), candidates AS (
 			SELECT
 				mi.content_id,
-				0.65 * similarity(public.normalize_search_text($1), mi.title_normalized)
-					+ 0.35 * strict_word_similarity(public.normalize_search_text($1), mi.title_normalized) AS fuzzy_rank,
+				0.65 * similarity($2, mi.title_normalized)
+					+ 0.35 * strict_word_similarity($2, mi.title_normalized) AS fuzzy_rank,
 				similarity(public.normalize_search_text($1), mi.title_normalized) AS fuzzy_full_rank
 			FROM media_items mi
-			WHERE public.normalize_search_text($1) <<%% mi.title_normalized
+			WHERE $2 <<%% mi.title_normalized
 			UNION ALL
 			SELECT content_id, fuzzy_rank, fuzzy_full_rank
 			FROM alias_candidates
@@ -2085,7 +2453,9 @@ func (r *ItemRepository) buildFuzzySearchCursorSQL(parsed parsedSearchQuery, ite
 // ListUnmatchedByFolderAndPathPrefix returns content IDs for unmatched-style
 // items that are linked to at least one present file within the given folder
 // subtree. This intentionally includes ambiguous items so a library scan can
-// revisit legacy scanner ambiguities after inference heuristics improve.
+// revisit legacy scanner ambiguities after inference heuristics improve. It
+// leaves out items an admin ignored: the matcher would skip them anyway, and
+// the scan would report each one as still unmatched.
 func (r *ItemRepository) buildListUnmatchedByFolderAndPathPrefixSQL(folderID int, pathPrefix string, limit int) (string, []any) {
 	query := `
 		SELECT mi.content_id
@@ -2100,6 +2470,7 @@ func (r *ItemRepository) buildListUnmatchedByFolderAndPathPrefixSQL(folderID int
 		WHERE mil.media_folder_id = $1
 		  AND folders.enabled = true
 		  AND mi.status IN ('unmatched', 'pending', 'ambiguous')
+		  AND mi.match_ignored_at IS NULL
 		  -- Manga chapters stay status='pending' by design: provider metadata
 		  -- lives on the type='manga' series item, so chapters are never
 		  -- matchable and must not feed the matcher's retry loop (mirrors the
@@ -2465,6 +2836,10 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 	addString("air_time", upd.AirTime)
 	addNullableString("air_timezone", upd.AirTimezone)
 	addString("status", upd.Status)
+	if upd.Status != nil && strings.EqualFold(strings.TrimSpace(*upd.Status), "matched") {
+		// An admin's ignore only means something while the item is unmatched.
+		setClauses = append(setClauses, "match_ignored_at = NULL")
+	}
 	addString("show_status", upd.ShowStatus)
 	addString("imdb_id", upd.ImdbID)
 	addString("tmdb_id", upd.TmdbID)
@@ -2883,4 +3258,29 @@ func (r *ItemRepository) LookupExternalIDs(
 
 func pathPrefixLike(pathPrefix string) string {
 	return pathscope.PrefixLike(pathPrefix)
+}
+
+// LibraryIDsForItem returns the libraries a media item or episode belongs to,
+// in ID order. It reads the same memberships as GetItemsInLibrary, so every
+// library it lists is one where a library-scoped detail page of contentID
+// resolves.
+func (r *ItemRepository) LibraryIDsForItem(ctx context.Context, contentID string) ([]int, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT media_folder_id FROM media_item_libraries WHERE content_id = $1
+		UNION
+		SELECT media_folder_id FROM episode_libraries WHERE episode_id = $1
+		ORDER BY media_folder_id`, contentID)
+	if err != nil {
+		return nil, fmt.Errorf("listing item libraries: %w", err)
+	}
+	defer rows.Close()
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning item library: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

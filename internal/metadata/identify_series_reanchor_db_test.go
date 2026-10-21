@@ -181,6 +181,9 @@ func TestIdentify_CorrectedSeriesMovesWithItsChildren(t *testing.T) {
 		progress[id] = position
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if want := map[string]float64{newEpisode1: 500, newEpisode4: 900}; fmt.Sprint(progress) != fmt.Sprint(want) {
 		t.Errorf("progress = %v, want %v", progress, want)
 	}
@@ -297,6 +300,9 @@ func TestIdentify_CorrectionOntoExistingSeriesMovesUnpairedEpisodeState(t *testi
 		progress[id] = position
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if want := map[string]float64{newPaired: 100, newUnpaired: 200}; fmt.Sprint(progress) != fmt.Sprint(want) {
 		t.Errorf("progress = %v, want %v", progress, want)
 	}

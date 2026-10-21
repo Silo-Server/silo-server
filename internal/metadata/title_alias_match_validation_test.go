@@ -76,17 +76,13 @@ func seoulSpringSearchResult(tmdbID string, year int) SearchResult {
 	}
 }
 
-func TestInitialMatchAcceptsResultWhoseDetailsListTheFolderTitle(t *testing.T) {
-	t.Parallel()
+// requireInitialMatchTMDB runs an initial match for hints and requires it to
+// store the given TMDB ID.
+func requireInitialMatchTMDB(t *testing.T, hints *MatchHints, provider Provider, wantTMDB string) {
+	t.Helper()
 	harness := newTestHarness()
-	provider := &aliasProvider{
-		slug:    "tmdb",
-		results: []SearchResult{seoulSpringSearchResult("919207", 2023)},
-		aliases: map[string][]string{"919207": {"Seoul Spring", "首尔之春", "首爾之春"}},
-	}
-
 	result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
-		Hints: &MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"},
+		Hints: hints,
 		Mode:  ModeInitialMatch,
 	}, []Provider{provider})
 	if err != nil {
@@ -99,9 +95,18 @@ func TestInitialMatchAcceptsResultWhoseDetailsListTheFolderTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load item: %v", err)
 	}
-	if item.TmdbID != "919207" {
-		t.Fatalf("item tmdb = %q, want 919207", item.TmdbID)
+	if item.TmdbID != wantTMDB {
+		t.Fatalf("item tmdb = %q, want %s", item.TmdbID, wantTMDB)
 	}
+}
+
+func TestInitialMatchAcceptsResultWhoseDetailsListTheFolderTitle(t *testing.T) {
+	t.Parallel()
+	requireInitialMatchTMDB(t, &MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, &aliasProvider{
+		slug:    "tmdb",
+		results: []SearchResult{seoulSpringSearchResult("919207", 2023)},
+		aliases: map[string][]string{"919207": {"Seoul Spring", "首尔之春", "首爾之春"}},
+	}, "919207")
 }
 
 func TestInitialMatchLeavesUnrelatedSameYearResultUnmatched(t *testing.T) {
@@ -276,19 +281,6 @@ func TestValidateMatchByProviderTitleAliases(t *testing.T) {
 	}
 }
 
-func TestValidateMatchByProviderTitleAliasesSkipsConflictingIDs(t *testing.T) {
-	t.Parallel()
-	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}}
-	candidates := NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie")
-	candidates[0].ConflictingProviderIDKeys = []string{"tmdb"}
-
-	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en", nil)
-	if winner != nil || provider.detailCallCount() != 0 {
-		t.Fatalf("winner = %v, detail calls = %d; want no fetch for a candidate with conflicting IDs", winner, provider.detailCallCount())
-	}
-}
-
 func TestValidateMatchByProviderTitleAliasesAsksEverySourceProvider(t *testing.T) {
 	t.Parallel()
 	// The first source in the chain lists no matching title; the second does.
@@ -307,70 +299,139 @@ func TestValidateMatchByProviderTitleAliasesAsksEverySourceProvider(t *testing.T
 	}
 }
 
-func TestValidateMatchByProviderTitleAliasesIgnoresTitleOnlyNFOCandidate(t *testing.T) {
-	t.Parallel()
-	// A title-only movie.nfo echoes the folder title; it is not a remote
-	// exact-title rival and must not veto the alias check.
-	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}}
-	candidates := NormalizeCandidates([]SearchResult{
-		seoulSpringSearchResult("919207", 2023),
-		{Name: "首尔之春", Year: 2023, Provider: "nfo"},
-	}, "movie")
+// seoulSpringAliasTitle is the local title of 首尔之春 (2023) in the alias outcome cases.
+const seoulSpringAliasTitle = "首尔之春"
 
-	winner, errs := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en", nil)
-	if winner == nil || winner.ProviderIDs["tmdb"] != "919207" || len(errs) != 0 {
-		t.Fatalf("winner = %v, errs = %v; want 919207 confirmed despite the NFO candidate", winner, errs)
-	}
+type validateMatchByProviderTitleAliasesOutcomesCase struct {
+	name       string
+	providers  []*aliasProvider
+	results    []SearchResult
+	mutate     func([]MatchCandidate)
+	wantWinner bool
+	wantTMDB   string
+	checkErrs  bool
+	noFetch    bool
 }
 
-func TestValidateMatchByProviderTitleAliasesLeavesConflictingRivalUnresolved(t *testing.T) {
-	t.Parallel()
-	// 222 lists the title, but rival 111 carries conflicting IDs, so its
-	// details can't rule it out.
-	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"111": {"首尔之春"}, "222": {"首尔之春"}}}
-	candidates := NormalizeCandidates([]SearchResult{
-		seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023),
-	}, "movie")
-	for i := range candidates {
-		if candidates[i].ProviderIDs["tmdb"] == "111" {
-			candidates[i].ConflictingProviderIDKeys = []string{"tvdb"}
+var validateMatchByProviderTitleAliasesOutcomesCases = func() []validateMatchByProviderTitleAliasesOutcomesCase {
+	markRival := func(apply func(*MatchCandidate)) func([]MatchCandidate) {
+		return func(candidates []MatchCandidate) {
+			for i := range candidates {
+				if candidates[i].ProviderIDs["tmdb"] == "111" {
+					apply(&candidates[i])
+				}
+			}
 		}
 	}
+	rivalPair := []SearchResult{seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023)}
+	lone := []SearchResult{seoulSpringSearchResult("919207", 2023)}
 
-	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en", nil)
-	if winner != nil {
-		t.Fatalf("winner = %v, want no match while a conflicting rival is unresolved", winner.ProviderIDs)
+	return []validateMatchByProviderTitleAliasesOutcomesCase{
+		{
+			name:      "skips a candidate with conflicting IDs without fetching",
+			providers: []*aliasProvider{{slug: "tmdb", aliases: map[string][]string{"919207": {seoulSpringAliasTitle}}}},
+			results:   lone,
+			mutate:    func(c []MatchCandidate) { c[0].ConflictingProviderIDKeys = []string{"tmdb"} },
+			noFetch:   true,
+		},
+		{
+			// A title-only movie.nfo echoes the folder title; it is not a remote
+			// exact-title rival and must not veto the alias check.
+			name:       "ignores a title-only NFO candidate",
+			providers:  []*aliasProvider{{slug: "tmdb", aliases: map[string][]string{"919207": {seoulSpringAliasTitle}}}},
+			results:    []SearchResult{seoulSpringSearchResult("919207", 2023), {Name: seoulSpringAliasTitle, Year: 2023, Provider: "nfo"}},
+			wantWinner: true, wantTMDB: "919207", checkErrs: true,
+		},
+		{
+			// 222 lists the title, but rival 111 carries conflicting IDs, so its
+			// details can't rule it out.
+			name:      "leaves a conflicting rival unresolved",
+			providers: []*aliasProvider{{slug: "tmdb", aliases: map[string][]string{"111": {seoulSpringAliasTitle}, "222": {seoulSpringAliasTitle}}}},
+			results:   rivalPair,
+			mutate:    markRival(func(c *MatchCandidate) { c.ConflictingProviderIDKeys = []string{"tvdb"} }),
+		},
+		{
+			// 222 lists the title; rival 111's title list is partial, so its
+			// alternative titles are unknown.
+			name:      "needs complete rival titles",
+			providers: []*aliasProvider{{slug: "tmdb", aliases: map[string][]string{"222": {seoulSpringAliasTitle}}, partial: map[string]bool{"111": true}}},
+			results:   rivalPair,
+		},
+		{
+			name:       "a partial list that contains the title still confirms a lone result",
+			providers:  []*aliasProvider{{slug: "tmdb", aliases: map[string][]string{"919207": {seoulSpringAliasTitle}}, partial: map[string]bool{"919207": true}}},
+			results:    lone,
+			wantWinner: true,
+		},
+		{
+			// Rival 111 came from two providers: tmdb's complete list lacks the
+			// title, but tvdb's list is partial, so 111 isn't ruled out.
+			name: "needs every source to rule out a rival",
+			providers: []*aliasProvider{
+				{slug: "tmdb", aliases: map[string][]string{"222": {seoulSpringAliasTitle}}},
+				{slug: "tvdb", partial: map[string]bool{"111": true, "222": true}},
+			},
+			results: rivalPair,
+			mutate:  markRival(func(c *MatchCandidate) { c.Sources = []string{"tmdb", "tvdb"} }),
+		},
+		{
+			name:      "a response without metadata can't confirm a candidate",
+			providers: []*aliasProvider{{slug: "tmdb", aliases: map[string][]string{"919207": {seoulSpringAliasTitle}}, noMetadata: map[string]bool{"919207": true}}},
+			results:   lone,
+		},
+		{
+			name:      "a response without metadata can't rule out a rival",
+			providers: []*aliasProvider{{slug: "tmdb", aliases: map[string][]string{"222": {seoulSpringAliasTitle}}, noMetadata: map[string]bool{"111": true}}},
+			results:   rivalPair,
+		},
+		{
+			// The search dated 919207 to 2023, but its details say 2019.
+			name:      "requires the detail year to agree",
+			providers: []*aliasProvider{{slug: "tmdb", aliases: map[string][]string{"919207": {seoulSpringAliasTitle}}, years: map[string]int{"919207": 2019}}},
+			results:   lone,
+		},
 	}
-}
+}()
 
-func TestValidateMatchByProviderTitleAliasesNeedsCompleteRivalTitles(t *testing.T) {
+// TestValidateMatchByProviderTitleAliasesOutcomes holds the single-call cases
+// for 首尔之春 (2023) that differ in the providers' detail responses and the
+// candidate set.
+func TestValidateMatchByProviderTitleAliasesOutcomes(t *testing.T) {
 	t.Parallel()
-	// 222 lists the title; rival 111's title list is partial, so its
-	// alternative titles are unknown.
-	provider := &aliasProvider{
-		slug:    "tmdb",
-		aliases: map[string][]string{"222": {"首尔之春"}},
-		partial: map[string]bool{"111": true},
-	}
-	candidates := NormalizeCandidates([]SearchResult{
-		seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023),
-	}, "movie")
 
-	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{provider}, "en", nil)
-	if winner != nil {
-		t.Fatalf("winner = %v, want no match while a rival's titles are incomplete", winner.ProviderIDs)
-	}
-
-	// A partial list that does contain the title still confirms a lone result.
-	lone := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}, partial: map[string]bool{"919207": true}}
-	winner, _ = validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"},
-		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{lone}, "en", nil)
-	if winner == nil {
-		t.Fatalf("want a lone result confirmed by a partial list that contains the title")
+	for _, tt := range validateMatchByProviderTitleAliasesOutcomesCases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			providers := make([]Provider, 0, len(tt.providers))
+			for _, provider := range tt.providers {
+				providers = append(providers, provider)
+			}
+			candidates := NormalizeCandidates(tt.results, "movie")
+			if tt.mutate != nil {
+				tt.mutate(candidates)
+			}
+			winner, errs := validateMatchByProviderTitleAliases(context.Background(),
+				&MatchHints{Title: seoulSpringAliasTitle, Year: 2023, Type: "movie"}, candidates, providers, "en", nil)
+			if tt.checkErrs && len(errs) != 0 {
+				t.Fatalf("errs = %v, want none", errs)
+			}
+			if !tt.wantWinner && winner != nil {
+				t.Fatalf("winner = %v, want no match", winner.ProviderIDs)
+			}
+			if tt.wantWinner && winner == nil {
+				t.Fatal("winner = nil, want a confirmed result")
+			}
+			if tt.wantTMDB != "" && winner.ProviderIDs["tmdb"] != tt.wantTMDB {
+				t.Fatalf("winner = %v, want tmdb %s", winner.ProviderIDs, tt.wantTMDB)
+			}
+			if tt.noFetch {
+				for _, provider := range tt.providers {
+					if got := provider.detailCallCount(); got != 0 {
+						t.Fatalf("detail calls = %d, want no fetch", got)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -385,136 +446,42 @@ func (p *queryAliasProvider) Search(_ context.Context, query SearchQuery) ([]Sea
 	return p.byTitle[query.Title], nil
 }
 
-func TestInitialMatchChecksPrimaryResultsAfterAlternateIdentityFails(t *testing.T) {
-	t.Parallel()
-	harness := newTestHarness()
-	// The alternate identity's exact-title result outscores the primary's
-	// regional-title result but is rejected for its year, which made it the
-	// kept candidate set. The primary result must still get the alias check.
-	provider := &queryAliasProvider{
+// seoulSpringQueryProvider finds 919207 under its Chinese title and an
+// unrelated 2010 film under "Seoul Spring".
+func seoulSpringQueryProvider() *queryAliasProvider {
+	return &queryAliasProvider{
 		aliasProvider: aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}},
 		byTitle: map[string][]SearchResult{
 			"首尔之春":         {seoulSpringSearchResult("919207", 2023)},
 			"Seoul Spring": {{Name: "Seoul Spring", Year: 2010, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "444"}}},
 		},
 	}
-
-	result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
-		Hints: &MatchHints{
-			Title: "首尔之春", Year: 2023, Type: "movie",
-			AlternateIdentities: []MatchIdentityHint{{Title: "Seoul Spring", Year: 2023, Source: "filename"}},
-		},
-		Mode: ModeInitialMatch,
-	}, []Provider{provider})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders() error = %v", err)
-	}
-	if result == nil || result.Decision == nil || result.Decision.Outcome != "matched" {
-		t.Fatalf("result = %#v, want the primary result confirmed by its alternative titles", result)
-	}
-	item, err := harness.itemRepo.GetByID(context.Background(), result.ContentID)
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.TmdbID != "919207" {
-		t.Fatalf("item tmdb = %q, want 919207", item.TmdbID)
-	}
 }
 
-func TestValidateMatchByProviderTitleAliasesNeedsEverySourceToRuleOutRival(t *testing.T) {
+func TestInitialMatchChecksPrimaryResultsAfterAlternateIdentityFails(t *testing.T) {
 	t.Parallel()
-	// Rival 111 came from two providers: tmdb's complete list lacks the
-	// title, but tvdb's list is partial, so 111 isn't ruled out.
-	tmdb := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"222": {"首尔之春"}}}
-	tvdb := &aliasProvider{slug: "tvdb", partial: map[string]bool{"111": true, "222": true}}
-	candidates := NormalizeCandidates([]SearchResult{
-		seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023),
-	}, "movie")
-	for i := range candidates {
-		if candidates[i].ProviderIDs["tmdb"] == "111" {
-			candidates[i].Sources = []string{"tmdb", "tvdb"}
-		}
-	}
-
-	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}, candidates, []Provider{tmdb, tvdb}, "en", nil)
-	if winner != nil {
-		t.Fatalf("winner = %v, want no match while one source's list for the rival is partial", winner.ProviderIDs)
-	}
-}
-
-func TestValidateMatchByProviderTitleAliasesIgnoresMetadataNegativeResponses(t *testing.T) {
-	t.Parallel()
-	hints := &MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"}
-
-	// A response without metadata can't confirm a candidate, even with the title.
-	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}, noMetadata: map[string]bool{"919207": true}}
-	winner, _ := validateMatchByProviderTitleAliases(context.Background(), hints,
-		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{provider}, "en", nil)
-	if winner != nil {
-		t.Fatalf("winner = %v, want no match from a response without metadata", winner.ProviderIDs)
-	}
-
-	// Nor can it rule out a rival.
-	provider = &aliasProvider{slug: "tmdb", aliases: map[string][]string{"222": {"首尔之春"}}, noMetadata: map[string]bool{"111": true}}
-	winner, _ = validateMatchByProviderTitleAliases(context.Background(), hints,
-		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("111", 2023), seoulSpringSearchResult("222", 2023)}, "movie"),
-		[]Provider{provider}, "en", nil)
-	if winner != nil {
-		t.Fatalf("winner = %v, want no match while a rival's response has no metadata", winner.ProviderIDs)
-	}
+	// The alternate identity's exact-title result outscores the primary's
+	// regional-title result but is rejected for its year, which made it the
+	// kept candidate set. The primary result must still get the alias check.
+	requireInitialMatchTMDB(t, &MatchHints{
+		Title: "首尔之春", Year: 2023, Type: "movie",
+		AlternateIdentities: []MatchIdentityHint{{Title: "Seoul Spring", Year: 2023, Source: "filename"}},
+	}, seoulSpringQueryProvider(), "919207")
 }
 
 func TestInitialMatchChecksEveryAlternateIdentityForAliases(t *testing.T) {
 	t.Parallel()
-	harness := newTestHarness()
 	// The primary search finds nothing. The first alternate finds the film
 	// under its English title; the second finds a higher-scoring exact-title
 	// result from 2010 that selection rejects and keeps. The first alternate's
 	// result must still get the alias check.
-	provider := &queryAliasProvider{
-		aliasProvider: aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}},
-		byTitle: map[string][]SearchResult{
-			"首尔之春":         {seoulSpringSearchResult("919207", 2023)},
-			"Seoul Spring": {{Name: "Seoul Spring", Year: 2010, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "444"}}},
+	requireInitialMatchTMDB(t, &MatchHints{
+		Title: "Spring 2023 Remux", Year: 2023, Type: "movie",
+		AlternateIdentities: []MatchIdentityHint{
+			{Title: "首尔之春", Year: 2023, Source: "folder"},
+			{Title: "Seoul Spring", Year: 2023, Source: "filename"},
 		},
-	}
-
-	result, err := harness.service.ProcessWithProviders(context.Background(), ProcessRequest{
-		Hints: &MatchHints{
-			Title: "Spring 2023 Remux", Year: 2023, Type: "movie",
-			AlternateIdentities: []MatchIdentityHint{
-				{Title: "首尔之春", Year: 2023, Source: "folder"},
-				{Title: "Seoul Spring", Year: 2023, Source: "filename"},
-			},
-		},
-		Mode: ModeInitialMatch,
-	}, []Provider{provider})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders() error = %v", err)
-	}
-	if result == nil || result.Decision == nil || result.Decision.Outcome != "matched" {
-		t.Fatalf("result = %#v, want the first alternate's result confirmed by its alternative titles", result)
-	}
-	item, err := harness.itemRepo.GetByID(context.Background(), result.ContentID)
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.TmdbID != "919207" {
-		t.Fatalf("item tmdb = %q, want 919207", item.TmdbID)
-	}
-}
-
-func TestValidateMatchByProviderTitleAliasesRequiresDetailYearToAgree(t *testing.T) {
-	t.Parallel()
-	// The search dated 919207 to 2023, but its details say 2019.
-	provider := &aliasProvider{slug: "tmdb", aliases: map[string][]string{"919207": {"首尔之春"}}, years: map[string]int{"919207": 2019}}
-	winner, _ := validateMatchByProviderTitleAliases(context.Background(),
-		&MatchHints{Title: "首尔之春", Year: 2023, Type: "movie"},
-		NormalizeCandidates([]SearchResult{seoulSpringSearchResult("919207", 2023)}, "movie"), []Provider{provider}, "en", nil)
-	if winner != nil {
-		t.Fatalf("winner = %v, want no match when the details contradict the year", winner.ProviderIDs)
-	}
+	}, seoulSpringQueryProvider(), "919207")
 }
 
 func TestValidateMatchByProviderTitleAliasesSharesBudgetAcrossCalls(t *testing.T) {

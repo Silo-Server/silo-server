@@ -23,6 +23,12 @@ const (
 	// real debt) and nothing recomputes it, so the next successful refresh
 	// clears it like any resolved reason.
 	RefreshDebtReasonTrailersRequested int64 = 32
+	// RefreshDebtReasonProviderArtwork marks an item the stored-artwork
+	// release (StoredArtworkReleaser) queued while metadata.cache_images is
+	// off, so the refresh fills artwork only a provider can supply. Like
+	// trailers_requested it carries no priority case and nothing recomputes
+	// it: the next successful refresh clears it.
+	RefreshDebtReasonProviderArtwork int64 = 64
 )
 
 const (
@@ -153,6 +159,27 @@ func nextRefreshDelay(reasonMask int64, attemptCount int) time.Duration {
 
 func nextRefreshAtForDebt(reasonMask int64, attemptCount int, now time.Time) time.Time {
 	return now.Add(nextRefreshDelay(reasonMask, attemptCount))
+}
+
+// nextRefreshAtForEpisodeDebt is nextRefreshAtForDebt for debt held by
+// episodes. A recent episode can owe debt only because it is recent (a TBA/TBD
+// title or a missing still), so the row is due again no later than the moment
+// the first of them leaves EpisodeRecentStillWindow. Without that, terminal
+// parking would hold the debt for up to 90 days after the rule stops applying.
+func nextRefreshAtForEpisodeDebt(reasonMask int64, attemptCount int, now time.Time, episodes ...*models.Episode) time.Time {
+	next := nextRefreshAtForDebt(reasonMask, attemptCount, now)
+	for _, ep := range episodes {
+		if ep == nil || ep.AirDate == nil {
+			continue
+		}
+		// The window still covers an air date exactly EpisodeRecentStillWindow
+		// old, so wake just after it closes.
+		windowEnd := ep.AirDate.Add(EpisodeRecentStillWindow + time.Minute)
+		if windowEnd.After(now) && windowEnd.Before(next) {
+			next = windowEnd
+		}
+	}
+	return next
 }
 
 // logRefreshDebtTerminal emits a one-time notice when an episode-incomplete debt row first

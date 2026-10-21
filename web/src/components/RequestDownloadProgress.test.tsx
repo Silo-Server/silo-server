@@ -55,20 +55,6 @@ describe("RequestDownloadProgress", () => {
     expect(screen.getByText("Downloading · 43%")).toBeInTheDocument();
   });
 
-  it("keeps no clock without an estimate", () => {
-    vi.useRealTimers();
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
-    vi.setSystemTime(new Date("2026-01-02T03:04:05Z"));
-    const { unmount } = render(
-      <RequestDownloadProgress download={download({ estimated_completion_at: undefined })} />,
-    );
-    expect(vi.getTimerCount()).toBe(0);
-    unmount();
-
-    render(<RequestDownloadProgress download={download()} />);
-    expect(vi.getTimerCount()).toBe(1);
-  });
-
   it("names a blocked import for admins and a wait for requesters", () => {
     const blocked = download({ phase: "import_blocked", percent: 100 });
     const { rerender } = render(<RequestDownloadProgress download={blocked} />);

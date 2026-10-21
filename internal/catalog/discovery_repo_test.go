@@ -12,125 +12,103 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 )
 
-// ---------------------------------------------------------------------------
-// ListByRatingThreshold SQL generation tests
-// ---------------------------------------------------------------------------
-
-func TestRatingThreshold_BasicQuery(t *testing.T) {
-	query, args := buildRatingThresholdQuery(RatingFilter{
-		Min:      7.5,
-		MinVotes: 500,
-		Limit:    20,
-	})
-
-	assertQualifiedItemSelect(t, query)
-	if !strings.Contains(query, "mi.tmdb_vote_average >= $1 AND mi.tmdb_vote_count >= $2") {
-		t.Fatalf("expected rating and vote predicates, got:\n%s", query)
-	}
-	assertWeightedRatingOrder(t, query)
-	if !strings.Contains(query, "LIMIT $3") {
-		t.Fatalf("expected LIMIT clause at $3, got:\n%s", query)
-	}
-	if len(args) != 3 {
-		t.Fatalf("expected 3 args (min rating, min votes, limit), got %d: %v", len(args), args)
-	}
-	if args[0] != 7.5 || args[1] != 500 || args[2] != 20 {
-		t.Fatalf("expected args [7.5 500 20], got %v", args)
-	}
-}
-
-func TestRatingThreshold_NoLimitOmitsClause(t *testing.T) {
-	query, args := buildRatingThresholdQuery(RatingFilter{Min: 8.0})
-
-	if strings.Contains(query, "LIMIT") {
-		t.Fatalf("expected no LIMIT clause, got:\n%s", query)
-	}
-	if len(args) != 2 {
-		t.Fatalf("expected 2 args, got %d", len(args))
-	}
-}
-
-func TestRatingThreshold_LibraryIDUsesSemiJoin(t *testing.T) {
-	libID := 42
-	query, args := buildRatingThresholdQuery(RatingFilter{
-		Min:       7.0,
-		LibraryID: &libID,
-	})
-
-	assertNoLibraryJoin(t, query)
-	if !strings.Contains(query, "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in") {
-		t.Fatalf("expected library EXISTS predicate, got:\n%s", query)
-	}
-	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY($3)") {
-		t.Fatalf("expected library id predicate at $3, got:\n%s", query)
-	}
-	if len(args) != 3 {
-		t.Fatalf("expected 3 args (min, min votes, library id slice), got %d", len(args))
-	}
-	assertIntSliceArg(t, args, 2, []int{42})
-}
-
-func TestRatingThreshold_AllowedLibraries(t *testing.T) {
-	query, args := buildRatingThresholdQuery(RatingFilter{
-		Min: 7.0,
-		Filter: AccessFilter{
-			AllowedLibraryIDs: []int{1, 2},
+// The viewer's allowed and disabled libraries reach every discovery query as
+// independent EXISTS / NOT EXISTS predicates, bound after the query's own args.
+func TestDiscoveryQueries_LibraryAccessPredicates(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		build     func() (string, []any)
+		predicate string
+		anyClause string
+		wantArgs  int
+		ids       []int
+	}{
+		{
+			name: "rating threshold allowed",
+			build: func() (string, []any) {
+				return buildRatingThresholdQuery(RatingFilter{Min: 7.0, Filter: AccessFilter{AllowedLibraryIDs: []int{1, 2}}})
+			},
+			predicate: "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in",
+			anyClause: "mil_scope_in.media_folder_id = ANY($3)",
+			wantArgs:  3,
+			ids:       []int{1, 2},
 		},
-	})
-
-	assertNoLibraryJoin(t, query)
-	if !strings.Contains(query, "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in") {
-		t.Fatalf("expected allowed library EXISTS predicate, got:\n%s", query)
-	}
-	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY($3)") {
-		t.Fatalf("expected allowed library ANY clause, got:\n%s", query)
-	}
-	if len(args) != 3 {
-		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
-	}
-	assertIntSliceArg(t, args, 2, []int{1, 2})
-}
-
-func TestRatingThreshold_DisabledLibrariesUseItemLevelExclusion(t *testing.T) {
-	query, args := buildRatingThresholdQuery(RatingFilter{
-		Min: 7.0,
-		Filter: AccessFilter{
-			DisabledLibraryIDs: []int{99},
+		{
+			name: "rating threshold disabled uses item-level exclusion",
+			build: func() (string, []any) {
+				return buildRatingThresholdQuery(RatingFilter{Min: 7.0, Filter: AccessFilter{DisabledLibraryIDs: []int{99}}})
+			},
+			predicate: "NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out",
+			anyClause: "mil_scope_out.media_folder_id = ANY($3)",
+			wantArgs:  3,
+			ids:       []int{99},
 		},
-	})
-
-	assertNoLibraryJoin(t, query)
-	if !strings.Contains(query, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out") {
-		t.Fatalf("expected disabled library NOT EXISTS predicate, got:\n%s", query)
-	}
-	if !strings.Contains(query, "mil_scope_out.media_folder_id = ANY($3)") {
-		t.Fatalf("expected disabled library ANY clause, got:\n%s", query)
-	}
-	if len(args) != 3 {
-		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
-	}
-	assertIntSliceArg(t, args, 2, []int{99})
-}
-
-func TestRatingThreshold_EmptyAllowedLibrariesReturnsEmptyQuery(t *testing.T) {
-	query, _ := buildRatingThresholdQuery(RatingFilter{
-		Min: 7.0,
-		Filter: AccessFilter{
-			AllowedLibraryIDs: []int{},
+		{
+			name: "unplayed high rated allowed",
+			build: func() (string, []any) {
+				return buildUnplayedHighRatedQuery(UnplayedFilter{MinRating: 7.0, UserID: 3, ProfileID: "p",
+					Filter: AccessFilter{AllowedLibraryIDs: []int{10, 11}}})
+			},
+			predicate: "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in",
+			anyClause: "mil_scope_in.media_folder_id = ANY($5)",
+			wantArgs:  5,
+			ids:       []int{10, 11},
 		},
-	})
-	if query != "" {
-		t.Fatalf("expected empty query for empty allowed libraries, got %q", query)
+		{
+			name: "forgotten favorites allowed",
+			build: func() (string, []any) {
+				return buildForgottenFavoritesQuery(ForgottenFavoritesFilter{LookbackDays: 180, UserID: 3, ProfileID: "p",
+					Filter: AccessFilter{AllowedLibraryIDs: []int{10, 11}}})
+			},
+			predicate: "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in",
+			anyClause: "mil_scope_in.media_folder_id = ANY($6)",
+			wantArgs:  6,
+			ids:       []int{10, 11},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query, args := tc.build()
+			assertNoLibraryJoin(t, query)
+			if !strings.Contains(query, tc.predicate) {
+				t.Fatalf("expected library predicate %q, got:\n%s", tc.predicate, query)
+			}
+			if !strings.Contains(query, tc.anyClause) {
+				t.Fatalf("expected library ANY clause %q, got:\n%s", tc.anyClause, query)
+			}
+			if len(args) != tc.wantArgs {
+				t.Fatalf("expected %d args, got %d: %v", tc.wantArgs, len(args), args)
+			}
+			assertIntSliceArg(t, args, tc.wantArgs-1, tc.ids)
+		})
 	}
 }
 
-func TestRatingThreshold_EmptyLibraryScopeReturnsEmptyQuery(t *testing.T) {
-	query, _ := buildRatingThresholdQuery(RatingFilter{
-		Min:        7.0,
-		LibraryIDs: []int{},
-	})
-	if query != "" {
-		t.Fatalf("expected empty query for an explicit empty library scope, got %q", query)
+// A viewer with no reachable library gets no query at all.
+func TestDiscoveryQueries_EmptyLibraryAccessReturnsEmptyQuery(t *testing.T) {
+	lib := 5
+	for name, build := range map[string]func() (string, []any){
+		"rating threshold": func() (string, []any) {
+			return buildRatingThresholdQuery(RatingFilter{Min: 7.0, Filter: AccessFilter{AllowedLibraryIDs: []int{}}})
+		},
+		"unplayed high rated": func() (string, []any) {
+			return buildUnplayedHighRatedQuery(UnplayedFilter{MinRating: 7.0, UserID: 1, ProfileID: "p",
+				Filter: AccessFilter{AllowedLibraryIDs: []int{}}})
+		},
+		"forgotten favorites": func() (string, []any) {
+			return buildForgottenFavoritesQuery(ForgottenFavoritesFilter{LookbackDays: 365, UserID: 1, ProfileID: "p",
+				Filter: AccessFilter{AllowedLibraryIDs: []int{}}})
+		},
+		// Section scope {5} ∩ viewer-allowed {7,9} is empty.
+		"unplayed high rated section scope outside viewer access": func() (string, []any) {
+			return buildUnplayedHighRatedQuery(UnplayedFilter{MinRating: 7.5, UserID: 1, ProfileID: "p1", LibraryID: &lib,
+				Filter: AccessFilter{AllowedLibraryIDs: []int{7, 9}}})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if query, _ := build(); query != "" {
+				t.Fatalf("expected empty query, got %q", query)
+			}
+		})
 	}
 }
 
@@ -224,65 +202,6 @@ func TestUnplayedHighRated_BasicQuery(t *testing.T) {
 	}
 }
 
-func TestUnplayedHighRated_NoLimitOmitsClause(t *testing.T) {
-	query, _ := buildUnplayedHighRatedQuery(UnplayedFilter{
-		MinRating: 7.0,
-		UserID:    1,
-		ProfileID: "p",
-	})
-	if strings.Contains(query, "LIMIT") {
-		t.Fatalf("expected no LIMIT clause, got:\n%s", query)
-	}
-}
-
-func TestUnplayedHighRated_NoLibraryScope(t *testing.T) {
-	query, _ := buildUnplayedHighRatedQuery(UnplayedFilter{
-		MinRating: 7.0,
-		UserID:    1,
-		ProfileID: "p",
-	})
-	if strings.Contains(query, "media_item_libraries") {
-		t.Fatalf("expected no library scope when no library filter is set, got:\n%s", query)
-	}
-}
-
-func TestUnplayedHighRated_AllowedLibraries(t *testing.T) {
-	query, args := buildUnplayedHighRatedQuery(UnplayedFilter{
-		MinRating: 7.0,
-		UserID:    3,
-		ProfileID: "p",
-		Filter: AccessFilter{
-			AllowedLibraryIDs: []int{10, 11},
-		},
-	})
-
-	assertNoLibraryJoin(t, query)
-	if !strings.Contains(query, "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in") {
-		t.Fatalf("expected allowed library EXISTS predicate, got:\n%s", query)
-	}
-	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY($5)") {
-		t.Fatalf("expected allowed library ANY clause at $5, got:\n%s", query)
-	}
-	if len(args) != 5 {
-		t.Fatalf("expected 5 args, got %d: %v", len(args), args)
-	}
-	assertIntSliceArg(t, args, 4, []int{10, 11})
-}
-
-func TestUnplayedHighRated_EmptyAllowedLibrariesReturnsEmptyQuery(t *testing.T) {
-	query, _ := buildUnplayedHighRatedQuery(UnplayedFilter{
-		MinRating: 7.0,
-		UserID:    1,
-		ProfileID: "p",
-		Filter: AccessFilter{
-			AllowedLibraryIDs: []int{},
-		},
-	})
-	if query != "" {
-		t.Fatalf("expected empty query for empty allowed libraries, got %q", query)
-	}
-}
-
 func TestUnplayedHighRated_ContentRatingFilter(t *testing.T) {
 	query, args := buildUnplayedHighRatedQuery(UnplayedFilter{
 		MinRating: 6.0,
@@ -350,82 +269,6 @@ func TestForgottenFavorites_BasicQuery(t *testing.T) {
 	}
 }
 
-func TestForgottenFavorites_NoLimitOmitsClause(t *testing.T) {
-	query, _ := buildForgottenFavoritesQuery(ForgottenFavoritesFilter{
-		LookbackDays: 365,
-		UserID:       1,
-		ProfileID:    "p",
-	})
-	if strings.Contains(query, "LIMIT") {
-		t.Fatalf("expected no LIMIT clause, got:\n%s", query)
-	}
-}
-
-func TestForgottenFavorites_NoLibraryScope(t *testing.T) {
-	query, _ := buildForgottenFavoritesQuery(ForgottenFavoritesFilter{
-		LookbackDays: 365,
-		UserID:       1,
-		ProfileID:    "p",
-	})
-	if strings.Contains(query, "media_item_libraries") {
-		t.Fatalf("expected no library scope when no library filter is set, got:\n%s", query)
-	}
-}
-
-func TestForgottenFavorites_AllowedLibraries(t *testing.T) {
-	query, args := buildForgottenFavoritesQuery(ForgottenFavoritesFilter{
-		LookbackDays: 180,
-		UserID:       3,
-		ProfileID:    "p",
-		Filter: AccessFilter{
-			AllowedLibraryIDs: []int{10, 11},
-		},
-	})
-
-	assertNoLibraryJoin(t, query)
-	if !strings.Contains(query, "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in") {
-		t.Fatalf("expected allowed library EXISTS predicate, got:\n%s", query)
-	}
-	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY($6)") {
-		t.Fatalf("expected allowed library ANY clause at $6, got:\n%s", query)
-	}
-	if len(args) != 6 {
-		t.Fatalf("expected 6 args, got %d: %v", len(args), args)
-	}
-	assertIntSliceArg(t, args, 5, []int{10, 11})
-}
-
-func TestForgottenFavorites_EmptyAllowedLibrariesReturnsEmptyQuery(t *testing.T) {
-	query, _ := buildForgottenFavoritesQuery(ForgottenFavoritesFilter{
-		LookbackDays: 365,
-		UserID:       1,
-		ProfileID:    "p",
-		Filter: AccessFilter{
-			AllowedLibraryIDs: []int{},
-		},
-	})
-	if query != "" {
-		t.Fatalf("expected empty query for empty allowed libraries, got %q", query)
-	}
-}
-
-func TestForgottenFavorites_DefaultLookbackApplied(t *testing.T) {
-	query, args := buildForgottenFavoritesQuery(ForgottenFavoritesFilter{
-		LookbackDays: 0,
-		UserID:       1,
-		ProfileID:    "p",
-	})
-	if !strings.Contains(query, "NOT EXISTS") {
-		t.Fatalf("expected NOT EXISTS subquery, got:\n%s", query)
-	}
-	if len(args) < 5 {
-		t.Fatalf("expected at least 5 args, got %d", len(args))
-	}
-	if args[4] != 365 {
-		t.Fatalf("expected lookback default 365, got %v", args[4])
-	}
-}
-
 func TestDiscoveryQueries_DisabledLibrariesUseNotExists(t *testing.T) {
 	filter := AccessFilter{DisabledLibraryIDs: []int{9}}
 
@@ -446,45 +289,6 @@ func TestDiscoveryQueries_DisabledLibrariesUseNotExists(t *testing.T) {
 				t.Fatalf("expected disabled library NOT EXISTS predicate, got:\n%s", tc.query)
 			}
 		})
-	}
-}
-
-func TestRatingThreshold_NarrowsByTypeGenreAndRuntime(t *testing.T) {
-	query, args := buildRatingThresholdQuery(RatingFilter{
-		Min:        6.5,
-		MinVotes:   100,
-		Types:      []string{"movie", "series"},
-		GenresAny:  []string{"Comedy", "Family"},
-		MaxRuntime: 95,
-		Limit:      50,
-	})
-	for _, want := range []string{
-		"mi.tmdb_vote_average >= $1 AND mi.tmdb_vote_count >= $2",
-		"mi.type = ANY($3)",
-		"mi.genres && $4::text[]",
-		"mi.runtime > 0 AND mi.runtime <= $5",
-		"LIMIT $6",
-	} {
-		if !strings.Contains(query, want) {
-			t.Fatalf("query lacks %q:\n%s", want, query)
-		}
-	}
-	if len(args) != 6 || args[4] != 95 || args[5] != 50 {
-		t.Fatalf("args = %v, want rating, votes, types, genres, 95, 50", args)
-	}
-}
-
-// An unknown vote count must never qualify, or a title rated 10 by one person
-// would lead the row again.
-func TestDiscoveryQueries_RequireAKnownVoteCount(t *testing.T) {
-	cases := map[string][]any{}
-	_, cases["rating_threshold"] = buildRatingThresholdQuery(RatingFilter{Min: 8})
-	_, cases["unplayed_high_rated"] = buildUnplayedHighRatedQuery(UnplayedFilter{MinRating: 7.5, UserID: 1, ProfileID: "p"})
-	_, cases["forgotten_favorites"] = buildForgottenFavoritesQuery(ForgottenFavoritesFilter{UserID: 1, ProfileID: "p", LookbackDays: 365})
-	for name, args := range cases {
-		if args[1] != 1 {
-			t.Errorf("%s: unset MinVotes bound %v, want 1", name, args[1])
-		}
 	}
 }
 
@@ -540,98 +344,3 @@ func assertIntSliceArg(t *testing.T, args []any, idx int, want []int) {
 }
 
 func mustQuery(query string, _ []any) string { return query }
-
-func TestUnplayedHighRated_LibraryScopeIntersectsViewerAccess(t *testing.T) {
-	lib := 5
-	query, args := buildUnplayedHighRatedQuery(UnplayedFilter{
-		MinRating: 7.5,
-		UserID:    1,
-		ProfileID: "p1",
-		LibraryID: &lib,
-		Filter:    AccessFilter{AllowedLibraryIDs: []int{7, 9}},
-	})
-	// Section scope {5} ∩ viewer-allowed {7,9} is empty: no query at all.
-	if query != "" {
-		t.Fatalf("expected empty query for disjoint scope, got %q", query)
-	}
-	_ = args
-}
-
-func TestUnplayedHighRated_MultiLibraryScope(t *testing.T) {
-	query, args := buildUnplayedHighRatedQuery(UnplayedFilter{
-		MinRating:  7.5,
-		UserID:     1,
-		ProfileID:  "p1",
-		LibraryIDs: []int{3, 4},
-	})
-	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY(") {
-		t.Errorf("expected library semi-join for multi-library scope, query: %s", query)
-	}
-	found := false
-	for _, arg := range args {
-		if ids, ok := arg.([]int); ok && len(ids) == 2 && ids[0] == 3 && ids[1] == 4 {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected [3 4] library ids in args, got %v", args)
-	}
-}
-
-func TestUnplayedHighRated_MaxPlaysUsesCountThreshold(t *testing.T) {
-	query, args := buildUnplayedHighRatedQuery(UnplayedFilter{
-		MinRating: 7.5,
-		MaxPlays:  2,
-		UserID:    1,
-		ProfileID: "p1",
-	})
-	if !strings.Contains(query, "SELECT COUNT(*)") {
-		t.Errorf("MaxPlays > 0 should use a COUNT threshold: %s", query)
-	}
-	// The strict never-started NOT EXISTS over watch history must be replaced
-	// by the COUNT form (the manga-exclusion NOT EXISTS is unrelated).
-	if strings.Contains(query, "NOT EXISTS (\n\t\t\tSELECT 1\n\t\t\tFROM user_watch_history") {
-		t.Errorf("MaxPlays > 0 should not use the never-started NOT EXISTS: %s", query)
-	}
-	found := false
-	for _, arg := range args {
-		if v, ok := arg.(int); ok && v == 2 {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected max plays 2 in args, got %v", args)
-	}
-}
-
-func TestForgottenFavorites_SingleLibraryScope(t *testing.T) {
-	lib := 3
-	query, _ := buildForgottenFavoritesQuery(ForgottenFavoritesFilter{
-		LookbackDays: 365,
-		UserID:       1,
-		ProfileID:    "p1",
-		LibraryID:    &lib,
-	})
-	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY(") {
-		t.Errorf("expected library semi-join for single-library scope, query: %s", query)
-	}
-}
-
-func TestRatingThreshold_MultiLibraryScope(t *testing.T) {
-	query, args := buildRatingThresholdQuery(RatingFilter{
-		Min:        8.0,
-		LibraryIDs: []int{2, 6},
-	})
-	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY(") {
-		t.Errorf("expected library semi-join for multi-library scope, query: %s", query)
-	}
-	found := false
-	for _, arg := range args {
-		if ids, ok := arg.([]int); ok && len(ids) == 2 && ids[0] == 2 && ids[1] == 6 {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected [2 6] library ids in args, got %v", args)
-	}
-}

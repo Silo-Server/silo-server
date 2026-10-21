@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -140,13 +141,14 @@ func cuesFor(l layout, posA, posB uint64) []byte {
 		}
 		return el(idCuePoint, uintEl(idCueTime, ticks), el(idCueTrackPos, trackPos...))
 	}
-	return el(idCues,
+	points := [][]byte{
 		point(4218, videoTrack, posB),
 		point(0, videoTrack, posA),
 		point(10, audioTrack, posA), // audio: not a video keyframe
 		point(2216, videoTrack, posA),
 		point(2216, videoTrack, posA), // duplicate
-	)
+	}
+	return el(idCues, points...)
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -304,6 +306,9 @@ func TestReadMatroskaRejectsOtherFiles(t *testing.T) {
 	}
 }
 
+// cuesLimit is the largest Cues element the reader loads (maxCuesSize).
+const cuesLimit = 16 << 20
+
 // A Cues element larger than the reader loads is a damaged file, not a
 // multi-gigabyte allocation.
 func TestReadMatroskaRejectsOversizedCues(t *testing.T) {
@@ -316,6 +321,32 @@ func TestReadMatroskaRejectsOversizedCues(t *testing.T) {
 	)
 	if _, err := read(f); err == nil || errors.Is(err, ErrNoIndex) {
 		t.Fatalf("err = %v, want a size error", err)
+	}
+}
+
+// Cues packed with small cue points, each with its own time and cluster
+// position, cost a small multiple of their size: a crafted file can't make
+// one read cost hundreds of megabytes.
+func TestReadMatroskaCuesCostBoundedMemory(t *testing.T) {
+	var points bytes.Buffer
+	for i := range (cuesLimit - 16) / 17 {
+		points.Write([]byte{
+			byte(idCuePoint), 0x8F,
+			byte(idCueTime), 0x83, byte(i >> 16), byte(i >> 8), byte(i),
+			byte(idCueTrackPos), 0x88,
+			byte(idCueTrack), 0x81, videoTrack,
+			byte(idCueClusterPosition), 0x83, byte(i >> 16), byte(i >> 8), byte(i),
+		})
+	}
+	cues := el(idCues, points.Bytes())
+	f := slices.Concat(ebmlHeader, el(idSegment, slices.Concat(info, tracks, cues)))
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, _ = read(f) // the cue positions don't hold clusters; only the cost matters
+	runtime.ReadMemStats(&after)
+	if got, limit := after.TotalAlloc-before.TotalAlloc, uint64(4*len(cues)); got > limit {
+		t.Fatalf("reading %d bytes of Cues allocated %d bytes, want at most %d", len(cues), got, limit)
 	}
 }
 

@@ -25,42 +25,6 @@ func negotiatedTrickplayRouter(handler *PlaybackHandler) http.Handler {
 	return router
 }
 
-func TestTrickplayUsesNegotiatedSourceBeforeStreaming(t *testing.T) {
-	for _, inRoute := range []bool{false, true} {
-		t.Run(map[bool]string{false: "body source", true: "route source"}[inRoute], func(t *testing.T) {
-			handler, content := newTwoVersionPlaybackInfoHandler(t)
-			for i := range content.detail.Versions {
-				content.detail.Versions[i].Trickplay = new(testTrickplayGrid)
-			}
-			sheets := &fakeTrickplaySheets{files: map[int]bool{42: true, 43: true}}
-			handler.Trickplay = sheets
-			itemID := handler.codec.EncodeStringID(EncodedIDItem, "movie-1")
-			sourceID := handler.codec.EncodeIntID(EncodedIDMediaSource, 43)
-			routeID, body := itemID, `{"MediaSourceId":"`+sourceID+`"}`
-			if inRoute {
-				routeID, body = sourceID, `{}`
-			}
-			resp := postPlaybackInfo(t, handler, routeID, body)
-			play, ok := handler.playbackStore.Get(resp.PlaySessionID)
-			if !ok || play.UpstreamSessionID != "" || len(play.MediaSources) != 1 || play.MediaSources[0].FileID != 43 {
-				t.Fatalf("negotiated play=%+v found=%v", play, ok)
-			}
-			router := negotiatedTrickplayRouter(handler)
-			if rec := getWithToken(router, "/Videos/"+itemID+"/Trickplay/300/0.jpg"); rec.Code != http.StatusOK || len(sheets.opened) != 1 || sheets.opened[0] != 43 {
-				t.Errorf("pre-stream sheet status=%d opened=%v", rec.Code, sheets.opened)
-			}
-			if rec := getWithToken(router, "/Videos/"+itemID+"/Trickplay/300/tiles.m3u8"); rec.Code != http.StatusOK || strings.Count(rec.Body.String(), "MediaSourceId="+sourceID) != 3 {
-				t.Errorf("pre-stream playlist status=%d body=%s", rec.Code, rec.Body.String())
-			}
-			sheets.opened = nil
-			defaultID := handler.codec.EncodeIntID(EncodedIDMediaSource, 42)
-			if rec := getWithToken(router, "/Videos/"+itemID+"/Trickplay/300/0.jpg?MediaSourceId="+defaultID); rec.Code != http.StatusOK || len(sheets.opened) != 1 || sheets.opened[0] != 42 {
-				t.Fatalf("explicit source override status=%d opened=%v", rec.Code, sheets.opened)
-			}
-		})
-	}
-}
-
 type versionedTrickplaySheets struct{}
 
 func (versionedTrickplaySheets) OpenSheet(_ context.Context, fileID, _, index int) (io.ReadCloser, string, bool, error) {

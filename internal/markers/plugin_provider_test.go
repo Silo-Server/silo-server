@@ -66,17 +66,24 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	}
 
 	res, err := provider.FetchMarkers(context.Background(), Request{
-		Kind:          ItemKindEpisode,
-		ExternalIDs:   map[string]string{ExternalIDKeyTVDB: "777"},
-		SeasonNumber:  1,
-		EpisodeNumber: 2,
-		Duration:      1800 * time.Second,
+		Kind:               ItemKindEpisode,
+		ExternalIDs:        map[string]string{ExternalIDKeyTVDB: "777"},
+		SeasonNumber:       1,
+		EpisodeNumber:      2,
+		EpisodeExternalIDs: map[string]string{ExternalIDKeyTVDB: "9001", ExternalIDKeyTMDB: "63"},
+		EpisodeNumbering:   "tvdb",
+		EpisodeTitle:       "Second Episode",
+		Duration:           1800 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("FetchMarkers: %v", err)
 	}
 	if client.fetchReq.GetItemType() != "episode" || client.fetchReq.GetExternalIds().GetTvdbId() != "777" {
 		t.Fatalf("fetch request = %+v", client.fetchReq)
+	}
+	if episode := client.fetchReq.GetEpisodeExternalIds(); episode.GetTvdbId() != "9001" || episode.GetTmdbId() != "63" ||
+		client.fetchReq.GetEpisodeTitle() != "Second Episode" || client.fetchReq.GetEpisodeNumbering() != "tvdb" {
+		t.Fatalf("fetch episode identity = %+v %q", episode, client.fetchReq.GetEpisodeTitle())
 	}
 	if res.SourceClass != models.MarkerSourcePlugin || res.ProviderID != "plugin:12:markers" {
 		t.Fatalf("result provenance = source %q provider %q", res.SourceClass, res.ProviderID)
@@ -128,6 +135,11 @@ func TestPluginProviderSubmitMapsRequest(t *testing.T) {
 	if client.submitReq.GetItemType() != "movie" || client.submitReq.GetExternalIds().GetImdbId() != "tt1" {
 		t.Fatalf("submit request identity = %+v", client.submitReq)
 	}
+	// A movie has no episode identity; the field stays unset as from an
+	// older host.
+	if client.submitReq.EpisodeExternalIds != nil || client.submitReq.GetEpisodeTitle() != "" {
+		t.Fatalf("movie submit carried episode identity: %+v", client.submitReq)
+	}
 	if client.submitReq.GetSegment() != "intro" || client.submitReq.GetStartSeconds() != 5 || client.submitReq.GetEndSeconds() != 30 {
 		t.Fatalf("submit request segment = %+v", client.submitReq)
 	}
@@ -150,22 +162,7 @@ func TestPluginProviderSubmitMapsConflicts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &fakePluginMarkerClient{submitErr: tt.err}
-			provider, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
-				InstallationID: 12,
-				CapabilityID:   "markers",
-			}, func(context.Context, int, string) (pluginMarkerClient, error) {
-				return client, nil
-			})
-			if err != nil {
-				t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
-			}
-
-			_, err = provider.SubmitMarker(context.Background(), SubmissionRequest{
-				Kind:        ItemKindMovie,
-				ExternalIDs: map[string]string{ExternalIDKeyTMDB: "123"},
-				Segment:     MarkerKindIntro,
-			})
+			_, err := submitWithPluginError(t, tt.err)
 			var conflict *SubmissionConflictError
 			if !errors.As(err, &conflict) {
 				t.Fatalf("error = %T %v, want SubmissionConflictError", err, err)

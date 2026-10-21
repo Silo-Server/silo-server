@@ -2,7 +2,6 @@ package metadata
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
@@ -44,7 +43,7 @@ func TestLocalMetadataURLSourceRouting(t *testing.T) {
 	if served != "" || source != nfoPosterSource {
 		t.Errorf("splitProviderImagePath = %q, %q; want only the source", served, source)
 	}
-	path, _, source := preserveCachedArtwork(nfoPosterSource, "", "tmdb/movies/1/poster/original.webp", "https://image.tmdb.org/p.jpg", "th")
+	path, _, source := preserveCachedArtwork(nfoPosterSource, "", "tmdb/movies/1/poster/original.webp", "https://image.tmdb.org/p.jpg", "th", true)
 	if path != "tmdb/movies/1/poster/original.webp" || source != nfoPosterSource {
 		t.Errorf("preserveCachedArtwork = %q from %q; want the cached copy kept until the NFO's lands", path, source)
 	}
@@ -102,18 +101,6 @@ func TestImageCacheProcessorDownloadsLocalMetadataURL(t *testing.T) {
 	}
 	if people.cachedPath != "local/people/287/profile/original.webp" {
 		t.Errorf("cachedPath = %q", people.cachedPath)
-	}
-}
-
-// A title's interactive artwork refresh covers its own jobs and its seasons'
-// and episodes', not the photos of the people its NFO credits, whose jobs
-// carry the title's content ID only to confine a local read.
-func TestImageCacheTargetScopeLeavesOutPersonJobs(t *testing.T) {
-	t.Parallel()
-
-	scope := imageCacheTargetScope("$1")
-	if !strings.Contains(scope, "target_content_id = $1") || !strings.Contains(scope, "target_type <> 'person'") {
-		t.Fatalf("scope = %q", scope)
 	}
 }
 

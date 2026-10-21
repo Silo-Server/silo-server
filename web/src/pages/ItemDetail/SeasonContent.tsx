@@ -22,6 +22,8 @@ import DetailBreadcrumb from "./components/DetailBreadcrumb";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
 import type { EpisodeNavigationState } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
+import { hasMachineTranslation } from "./components/machineTranslation";
+import EpisodesTranslationAction from "./components/EpisodesTranslationAction";
 
 function seasonLabel(seasonNumber: number, title?: string) {
   if (title) return title;
@@ -49,6 +51,13 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
   } = useItemEpisodes(item.content_id);
 
   const episodes = episodesData?.episodes ?? [];
+  // The season's pending language also covers its episodes. While an episode
+  // is the thing missing, or the season has no overview of its own, the
+  // translation status and action sit with the episode list; otherwise the
+  // hero offers them under the overview.
+  const episodesPending = episodes.some((episode) => episode.pending_translation_language);
+  const translationWithEpisodes = !item.overview || episodesPending;
+  const translationInHero = !translationWithEpisodes && !episodesLoading;
   const seasonNumber = item.season_number ?? 0;
   const label = item.is_specials ? "Specials" : seasonLabel(seasonNumber, item.title);
   const seriesTitle = item.series_title ?? "Series";
@@ -129,8 +138,9 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
             />
           }
           overview={item.overview}
-          overviewTranslating={overviewTranslating}
-          onTranslateOverview={onTranslateOverview}
+          overviewTranslating={translationInHero && overviewTranslating}
+          onTranslateOverview={translationInHero ? onTranslateOverview : undefined}
+          overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
           actions={
             <WatchedActionBar
               compactMobile
@@ -172,9 +182,17 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
           <section>
             <div className="mb-5 flex items-center justify-between gap-3">
               <h2 className="text-xl font-semibold tracking-tight">Episodes</h2>
-              <span className="text-muted-foreground text-sm">
-                {item.episode_count ?? episodes.length} total
-              </span>
+              <div className="flex items-center gap-3">
+                {translationWithEpisodes && (
+                  <EpisodesTranslationAction
+                    translating={overviewTranslating}
+                    onTranslate={onTranslateOverview}
+                  />
+                )}
+                <span className="text-muted-foreground text-sm">
+                  {item.episode_count ?? episodes.length} total
+                </span>
+              </div>
             </div>
 
             <SeasonEpisodeGrid

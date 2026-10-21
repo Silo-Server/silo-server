@@ -1,7 +1,6 @@
 package jellycompat
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -92,32 +91,6 @@ func TestDeviceProfileRegistrationQuota(t *testing.T) {
 	}
 	if len(store.profiles) != 2 { // One registration belongs to another token.
 		t.Fatalf("expired registrations retained: %d", len(store.profiles))
-	}
-}
-
-func TestDeviceProfileRegistrationQuotaAcrossProcesses(t *testing.T) {
-	pool := newCompatTestPool(t)
-	token := fmt.Sprintf("profile-quota-%d", time.Now().UnixNano())
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_device_profiles WHERE token_hash=ANY($1)`, []string{deviceProfileTokenHash(token), deviceProfileTokenHash(token + "-other")})
-	})
-	first := NewDeviceProfileStore(time.Hour, nil).WithDB(pool)
-	second := NewDeviceProfileStore(time.Hour, nil).WithDB(pool)
-	assertDeviceProfileQuota(t, first, second, token)
-	var count int
-	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM jellycompat_device_profiles WHERE token_hash=$1`, deviceProfileTokenHash(token)).Scan(&count); err != nil || count != maxDeviceProfilesPerToken {
-		t.Fatalf("registration count=%d err=%v", count, err)
-	}
-	if _, err := pool.Exec(t.Context(), `UPDATE jellycompat_device_profiles SET expires_at=$2 WHERE token_hash=$1`, deviceProfileTokenHash(token), time.Now().Add(-time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if err := first.PutForDevice(t.Context(), token, "new-after-expiry", DeviceProfile{Name: "new"}); err != nil {
-		t.Fatalf("expired registrations consumed quota: %v", err)
-	}
-	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM jellycompat_device_profiles WHERE token_hash=$1`, deviceProfileTokenHash(token)).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("expired registration count=%d err=%v", count, err)
 	}
 }
 

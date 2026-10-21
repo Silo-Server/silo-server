@@ -154,34 +154,6 @@ func TestValidFixtures(t *testing.T) {
 	}
 }
 
-func TestClientProgressPersistenceRequiresExplicitStartPosition(t *testing.T) {
-	schemas := compileSchemasV3(t)
-	request := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "start_request.json"))).(map[string]any)
-	delete(request, "start_position")
-	if err := schemas["start-request.schema.json"].Validate(request); err == nil {
-		t.Fatal("client progress_persistence without start_position satisfied the schema")
-	}
-}
-
-func TestIntentOnlyReplansRejectFailureEvidence(t *testing.T) {
-	schemas := compileSchemasV3(t)
-	for _, operation := range []playback.ReplanOperationV3{
-		playback.ReplanOperationTrackChangeV3,
-		playback.ReplanOperationQualityChangeV3,
-		playback.ReplanOperationOutputChangeV3,
-	} {
-		t.Run(string(operation), func(t *testing.T) {
-			request := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "replan_request.json"))).(map[string]any)
-			request["operation"] = string(operation)
-			request["quality_preference"] = "720p"
-			request["failure"] = map[string]any{"classification": "decoder_failure"}
-			if err := schemas["replan-request.schema.json"].Validate(request); err == nil {
-				t.Fatal("intent-only replan with failure satisfied the schema")
-			}
-		})
-	}
-}
-
 // TestGoldenFixturesSatisfyTheSchemas closes the loop the schemas exist for: a
 // schema that no longer accepts what cmd/playbackfixtures emits is a schema
 // that describes a server nobody runs.
@@ -439,47 +411,58 @@ func TestResponseSchemaRequiredFieldsMatchGoTags(t *testing.T) {
 	}
 }
 
-func TestResponseSchemasEnforcePublishedInvariants(t *testing.T) {
+// TestSchemasRejectMutatedGoldenBodies breaks one published rule in a golden
+// body the schema accepts and requires the schema to refuse the result.
+func TestSchemasRejectMutatedGoldenBodies(t *testing.T) {
 	schemas := compileSchemasV3(t)
-
-	capability := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
-	capability["protocol_versions"] = []any{}
-	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
-		t.Fatal("capability schema accepted a response that omitted protocol v3")
+	type mutation struct {
+		name   string
+		golden string
+		mutate func(body map[string]any)
 	}
-
-	capability = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
-	features := capability["features"].([]any)
-	capability["features"] = features[:len(features)-1]
-	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
-		t.Fatal("capability schema accepted a response that omitted a baseline feature")
+	cases := []mutation{
+		{"client progress_persistence without start_position", "start_request.json", func(body map[string]any) {
+			delete(body, "start_position")
+		}},
+		{"capability response that omitted protocol v3", "capability_response.json", func(body map[string]any) {
+			body["protocol_versions"] = []any{}
+		}},
+		{"capability response that omitted a baseline feature", "capability_response.json", func(body map[string]any) {
+			features := body["features"].([]any)
+			body["features"] = features[:len(features)-1]
+		}},
+		{"partial delivery registry", "capability_response.json", func(body map[string]any) {
+			body["deliveries"] = []any{"original_http"}
+		}},
+		{"client-executed server transformation", "capability_response.json", func(body map[string]any) {
+			body["transformations"].([]any)[0].(map[string]any)["executor"] = "client"
+		}},
+		{"malformed server plan identity", "decision_response.json", func(body map[string]any) {
+			body["playback_plan"].(map[string]any)["plan_id"] = "plan:opaque-but-not-the-server-shape"
+		}},
+		{"playable plan with no source quality rung", "decision_response.json", func(body map[string]any) {
+			body["playback_plan"].(map[string]any)["available_qualities"] = []any{}
+		}},
 	}
-
-	capability = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
-	capability["deliveries"] = []any{"original_http"}
-	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
-		t.Fatal("capability schema accepted a partial delivery registry")
+	for _, operation := range []playback.ReplanOperationV3{
+		playback.ReplanOperationTrackChangeV3,
+		playback.ReplanOperationQualityChangeV3,
+		playback.ReplanOperationOutputChangeV3,
+	} {
+		cases = append(cases, mutation{"intent-only " + string(operation) + " replan with failure", "replan_request.json", func(body map[string]any) {
+			body["operation"] = string(operation)
+			body["quality_preference"] = "720p"
+			body["failure"] = map[string]any{"classification": "decoder_failure"}
+		}})
 	}
-
-	capability = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
-	transformations := capability["transformations"].([]any)
-	transformations[0].(map[string]any)["executor"] = "client"
-	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
-		t.Fatal("capability schema accepted a client-executed server transformation")
-	}
-
-	decision := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "decision_response.json"))).(map[string]any)
-	plan := decision["playback_plan"].(map[string]any)
-	plan["plan_id"] = "plan:opaque-but-not-the-server-shape"
-	if err := schemas["decision-response.schema.json"].Validate(decision); err == nil {
-		t.Fatal("decision schema accepted a malformed server plan identity")
-	}
-
-	decision = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "decision_response.json"))).(map[string]any)
-	plan = decision["playback_plan"].(map[string]any)
-	plan["available_qualities"] = []any{}
-	if err := schemas["decision-response.schema.json"].Validate(decision); err == nil {
-		t.Fatal("decision schema accepted a playable plan with no source quality rung")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, tc.golden))).(map[string]any)
+			tc.mutate(body)
+			if err := schemas[fixtureSchemasV3[tc.golden]].Validate(body); err == nil {
+				t.Fatalf("%s satisfied the schema", tc.name)
+			}
+		})
 	}
 }
 

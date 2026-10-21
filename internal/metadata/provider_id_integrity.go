@@ -29,11 +29,21 @@ type ProviderIDIntegrityStats struct {
 }
 
 type ProviderIDIntegrityRepairer struct {
-	pool *pgxpool.Pool
+	pool       *pgxpool.Pool
+	recsStaler RecommendationStaler
 }
 
 func NewProviderIDIntegrityRepairer(pool *pgxpool.Pool) *ProviderIDIntegrityRepairer {
 	return &ProviderIDIntegrityRepairer{pool: pool}
+}
+
+// WithRecommendationStaler installs what marks recommendations stale after a
+// repair merges a duplicate item, and returns the repairer.
+func (r *ProviderIDIntegrityRepairer) WithRecommendationStaler(staler RecommendationStaler) *ProviderIDIntegrityRepairer {
+	if r != nil {
+		r.recsStaler = staler
+	}
+	return r
 }
 
 func (r *ProviderIDIntegrityRepairer) Run(ctx context.Context, batchSize int) (ProviderIDIntegrityStats, error) {
@@ -236,12 +246,12 @@ func (r *ProviderIDIntegrityRepairer) repairDriftRow(ctx context.Context, row pr
 		}
 		return "provisional_conflict", nil
 	case isConfirmedOwnershipStatus(owner.Status) && isProvisionalOwnershipStatus(row.Status):
-		if _, err := canonicalizeProviderIDDuplicateInto(ctx, r.pool, row.ContentID, owner.ContentID, false, false); err != nil {
+		if _, err := canonicalizeProviderIDDuplicateInto(ctx, r.pool, r.recsStaler, row.ContentID, owner.ContentID, false, false); err != nil {
 			return "", err
 		}
 		return "matched_canonicalization", nil
 	case isConfirmedOwnershipStatus(owner.Status) && isConfirmedOwnershipStatus(row.Status):
-		if _, err := canonicalizeProviderIDDuplicate(ctx, r.pool, row.ContentID, owner.ContentID, true, false); err != nil {
+		if _, err := canonicalizeProviderIDDuplicate(ctx, r.pool, r.recsStaler, row.ContentID, owner.ContentID, true, false); err != nil {
 			return "", err
 		}
 		return "matched_canonicalization", nil
@@ -364,7 +374,7 @@ func (s *MetadataService) canonicalizeProviderIDDuplicate(
 	if s == nil || s.dbPool == nil {
 		return "", nil
 	}
-	return canonicalizeProviderIDDuplicate(ctx, s.dbPool, leftContentID, rightContentID, allowMatchedSource, markIdentity)
+	return canonicalizeProviderIDDuplicate(ctx, s.dbPool, s.recsStaler, leftContentID, rightContentID, allowMatchedSource, markIdentity)
 }
 
 // clearProvisionalProviderIDsLocked removes provider ID rows for an item only
@@ -377,11 +387,20 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 	if contentID == "" {
 		return fmt.Errorf("content_id is required")
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin provisional provider-id clear: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, contentID); err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			// A provisional owner that vanished leaves nothing to clear, as
+			// the status lookup below treats it; the caller retries persist.
+			return nil
+		}
+		return err
+	}
 
 	var status string
 	err = tx.QueryRow(ctx, `SELECT status FROM media_items WHERE content_id = $1 FOR UPDATE`, contentID).Scan(&status)
@@ -404,15 +423,17 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 }
 
 // canonicalizeProviderIDDuplicate merges two items that share a provider ID
-// onto the one chooseCanonicalProviderOwner picks. With markIdentity (an
-// Identify of leftContentID that hit the conflict with rightContentID, the
-// owner of the chosen IDs) the merge records the choice when it keeps
-// rightContentID: that item holds the chosen IDs. When it keeps
+// onto the one chooseCanonicalProviderOwner picks, then marks stale through
+// staler the recommendations of profiles whose state moved with it. With
+// markIdentity (an Identify of leftContentID that hit the conflict with
+// rightContentID, the owner of the chosen IDs) the merge records the choice
+// when it keeps rightContentID: that item holds the chosen IDs. When it keeps
 // leftContentID, which still has its old IDs, the identity write that follows
 // marks it.
 func canonicalizeProviderIDDuplicate(
 	ctx context.Context,
 	pool *pgxpool.Pool,
+	staler RecommendationStaler,
 	leftContentID string,
 	rightContentID string,
 	allowMatchedSource bool,
@@ -423,11 +444,15 @@ func canonicalizeProviderIDDuplicate(
 	if leftContentID == "" || rightContentID == "" || leftContentID == rightContentID {
 		return leftContentID, nil
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return "", fmt.Errorf("begin provider-id canonicalization: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, leftContentID, rightContentID); err != nil {
+		return "", err
+	}
 
 	canonical, source, err := chooseCanonicalProviderOwner(ctx, tx, leftContentID, rightContentID)
 	if err != nil {
@@ -456,16 +481,20 @@ func canonicalizeProviderIDDuplicate(
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit provider-id canonicalization: %w", err)
 	}
+	MarkRecommendationsStale(ctx, staler, canonical.ContentID)
 	return canonical.ContentID, nil
 }
 
 // canonicalizeProviderIDDuplicateInto merges sourceID onto canonicalID, the
-// item that owns the shared provider IDs. With markIdentity (an Identify that
-// hit the conflict) the merge also records the choice on canonicalID, so the
-// mark commits with the chosen IDs even if the identity write after it fails.
+// item that owns the shared provider IDs, then marks stale through staler the
+// recommendations of profiles whose state moved with it. With markIdentity
+// (an Identify that hit the conflict) the merge also records the choice on
+// canonicalID, so the mark commits with the chosen IDs even if the identity
+// write after it fails.
 func canonicalizeProviderIDDuplicateInto(
 	ctx context.Context,
 	pool *pgxpool.Pool,
+	staler RecommendationStaler,
 	sourceID string,
 	canonicalID string,
 	allowMatchedSource bool,
@@ -479,11 +508,15 @@ func canonicalizeProviderIDDuplicateInto(
 	if sourceID == canonicalID {
 		return canonicalID, nil
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return "", fmt.Errorf("begin provider-id canonicalization: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, sourceID, canonicalID); err != nil {
+		return "", err
+	}
 
 	candidates := make(map[string]canonicalCandidate, 2)
 	rows, err := tx.Query(ctx, `
@@ -544,6 +577,7 @@ func canonicalizeProviderIDDuplicateInto(
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit provider-id canonicalization: %w", err)
 	}
+	MarkRecommendationsStale(ctx, staler, canonicalID)
 	return canonicalID, nil
 }
 
@@ -728,6 +762,15 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
 			SET added_at = LEAST(user_watchlist.added_at, EXCLUDED.added_at)`},
 	{"delete source watchlist", `DELETE FROM user_watchlist WHERE media_item_id = $1`},
+	{"merge not interested", `
+			INSERT INTO user_not_interested (user_id, profile_id, media_item_id, added_at)
+			SELECT user_id, profile_id, $2, MIN(added_at)
+			FROM user_not_interested
+			WHERE media_item_id = $1
+			GROUP BY user_id, profile_id
+			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
+			SET added_at = LEAST(user_not_interested.added_at, EXCLUDED.added_at)`},
+	{"delete source not interested", `DELETE FROM user_not_interested WHERE media_item_id = $1`},
 	{"merge ratings", `
 			INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating, rated_at)
 			SELECT DISTINCT ON (user_id, profile_id) user_id, profile_id, $2, rating, rated_at
@@ -832,11 +875,11 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 	{"delete source embeddings", `DELETE FROM media_item_embeddings WHERE media_item_id = $1`},
 	{"merge item localizations", `
 			INSERT INTO media_item_localizations (
-				content_id, language, title, sort_title, overview, tagline, poster_path, poster_thumbhash,
-				backdrop_path, backdrop_thumbhash, logo_path, created_at, updated_at
+				content_id, language, title, sort_title, overview, overview_source, tagline, tagline_source,
+				poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path, created_at, updated_at
 			)
-			SELECT $2, language, title, sort_title, overview, tagline, poster_path, poster_thumbhash,
-			       backdrop_path, backdrop_thumbhash, logo_path, created_at, NOW()
+			SELECT $2, language, title, sort_title, overview, overview_source, tagline, tagline_source,
+			       poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash, logo_path, created_at, NOW()
 			FROM media_item_localizations
 			WHERE content_id = $1
 			ON CONFLICT (content_id, language) DO NOTHING`},
@@ -945,6 +988,15 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			ON CONFLICT (user_id, profile_id, series_id) DO UPDATE
 			SET dropped_at = GREATEST(user_dropped_series.dropped_at, EXCLUDED.dropped_at)`},
 	{"delete source dropped series", `DELETE FROM user_dropped_series WHERE series_id = $1`},
+	// A notification mute follows its series; the earlier mute's time is kept.
+	{"merge notification mutes", `
+			INSERT INTO profile_series_notification_mutes (user_id, profile_id, series_id, muted_at)
+			SELECT user_id, profile_id, $2, muted_at
+			FROM profile_series_notification_mutes
+			WHERE series_id = $1
+			ON CONFLICT (user_id, profile_id, series_id) DO UPDATE
+			SET muted_at = LEAST(profile_series_notification_mutes.muted_at, EXCLUDED.muted_at)`},
+	{"delete source notification mutes", `DELETE FROM profile_series_notification_mutes WHERE series_id = $1`},
 	{"merge watch provider dropped items", `
 			INSERT INTO watch_provider_dropped_items (connection_id, provider_account_id, series_id, provider_item_key, remote_seen, updated_at)
 			SELECT connection_id, provider_account_id, $2, '', false, NOW()

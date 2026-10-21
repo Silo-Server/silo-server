@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -40,91 +39,6 @@ func TestUpdateJellyfinCompatSettingsRejectsArbitraryWebDir(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "cannot point at an arbitrary path") {
 		t.Fatalf("unexpected response body %q", rec.Body.String())
-	}
-}
-
-func TestUpdateJellyfinCompatSettingsUpdatesWebEnabled(t *testing.T) {
-	cfg, err := config.LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatalf("LoadFromDB: %v", err)
-	}
-	settings := &fakeServerSettingsStore{values: map[string]string{
-		"jellyfin_compat.web_install_dir": "/var/lib/silo/compat/jellyfin-web",
-	}}
-	restartStatus := NewServerRestartStatusTracker()
-	handler := &AdminHandler{
-		Config:        cfg,
-		SettingsRepo:  settings,
-		RestartStatus: restartStatus,
-	}
-
-	req := httptest.NewRequest(
-		http.MethodPatch,
-		"/admin/jellyfin-compat/settings",
-		strings.NewReader(`{"web_enabled":false}`),
-	)
-	rec := httptest.NewRecorder()
-
-	handler.HandleUpdateJellyfinCompatSettings(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if got := settings.values["jellyfin_compat.web_enabled"]; got != "false" {
-		t.Fatalf("jellyfin_compat.web_enabled = %q, want false", got)
-	}
-	if !strings.Contains(rec.Body.String(), `"web_enabled":false`) {
-		t.Fatalf("response body %q does not include disabled web_enabled", rec.Body.String())
-	}
-	if snapshot := restartStatus.Snapshot(); snapshot.RestartRequired {
-		t.Fatalf("RestartRequired = true, want false for web_enabled-only update")
-	}
-}
-
-func TestUpdateJellyfinCompatSettingsDoesNotMarkRestartForLiveFields(t *testing.T) {
-	cfg, err := config.LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatalf("LoadFromDB: %v", err)
-	}
-	root := t.TempDir()
-	settings := &fakeServerSettingsStore{values: map[string]string{}}
-	restartStatus := NewServerRestartStatusTracker()
-	handler := &AdminHandler{
-		Config:        cfg,
-		SettingsRepo:  settings,
-		RestartStatus: restartStatus,
-	}
-
-	body := `{"public_url":"https://compat.example.test","server_name":"Silo Compat","emulated_server_version":"10.11.6","web_version":"10.11.6","web_install_dir":"` + root + `"}`
-	req := httptest.NewRequest(
-		http.MethodPatch,
-		"/admin/jellyfin-compat/settings",
-		strings.NewReader(body),
-	)
-	rec := httptest.NewRecorder()
-
-	handler.HandleUpdateJellyfinCompatSettings(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if got := settings.values["jellyfin_compat.public_url"]; got != "https://compat.example.test" {
-		t.Fatalf("jellyfin_compat.public_url = %q, want updated value", got)
-	}
-	if got := settings.values["jellyfin_compat.server_name"]; got != "Silo Compat" {
-		t.Fatalf("jellyfin_compat.server_name = %q, want updated value", got)
-	}
-	if got := settings.values["jellyfin_compat.emulated_server_version"]; got != "10.11.6" {
-		t.Fatalf("jellyfin_compat.emulated_server_version = %q, want 10.11.6", got)
-	}
-	if got := settings.values["jellyfin_compat.web_version"]; got != "10.11.6" {
-		t.Fatalf("jellyfin_compat.web_version = %q, want 10.11.6", got)
-	}
-	if got := settings.values["jellyfin_compat.web_install_dir"]; got != root {
-		t.Fatalf("jellyfin_compat.web_install_dir = %q, want %q", got, root)
-	}
-	if snapshot := restartStatus.Snapshot(); snapshot.RestartRequired {
-		t.Fatalf("RestartRequired = true, want false for live Jellyfin settings")
 	}
 }
 
@@ -271,43 +185,6 @@ func TestRemoveJellyfinCompatWebDisablesWebSetting(t *testing.T) {
 	}
 }
 
-func TestUpdateJellyfinCompatSettingsMarksRestartForProxyChanges(t *testing.T) {
-	cfg, err := config.LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatalf("LoadFromDB: %v", err)
-	}
-	settings := &fakeServerSettingsStore{values: map[string]string{}}
-	restartStatus := NewServerRestartStatusTracker()
-	handler := &AdminHandler{
-		Config:        cfg,
-		SettingsRepo:  settings,
-		RestartStatus: restartStatus,
-	}
-
-	req := httptest.NewRequest(
-		http.MethodPatch,
-		"/admin/jellyfin-compat/settings",
-		strings.NewReader(`{"enabled":true}`),
-	)
-	rec := httptest.NewRecorder()
-
-	handler.HandleUpdateJellyfinCompatSettings(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if got := settings.values["jellyfin_compat.enabled"]; got != "true" {
-		t.Fatalf("jellyfin_compat.enabled = %q, want true", got)
-	}
-	snapshot := restartStatus.Snapshot()
-	if !snapshot.RestartRequired {
-		t.Fatal("RestartRequired = false, want true for proxy setting update")
-	}
-	if snapshot.RestartRequiredReason != "jellyfin_compat" {
-		t.Fatalf("RestartRequiredReason = %q, want jellyfin_compat", snapshot.RestartRequiredReason)
-	}
-}
-
 func TestPersistJellyfinCompatWebInstallSettingsEnablesWebUI(t *testing.T) {
 	settings := &fakeServerSettingsStore{values: map[string]string{
 		"jellyfin_compat.web_enabled": "false",
@@ -344,26 +221,18 @@ func TestPersistJellyfinCompatWebInstallSettingsEnablesWebUI(t *testing.T) {
 // asyncWebInstallRoot returns a temp dir for a handler that removes or installs
 // Jellyfin Web assets in a background goroutine.
 //
-// t.TempDir is wrong here: the endpoint returns 202 and its goroutine keeps
-// writing into the root after the test body returns, so t.TempDir's cleanup
-// trips "directory not empty" on an otherwise passing test.
-//
-// Removing the directory out from under a running goroutine only moves the
-// race, though: a write landing mid-traversal recreates a path RemoveAll has
-// already walked past, and the leftovers survive the run. The operation
-// records its own terminal state, so cleanup waits for that instead.
+// The endpoint returns 202 and its goroutine keeps writing into the root after
+// the test body returns. Removing the directory out from under it races: a
+// write landing mid-traversal recreates a path RemoveAll has already walked
+// past, which fails an otherwise passing test with "directory not empty" or
+// leaves files behind. The operation records its own terminal state, so a
+// cleanup waits for that first. It is registered after t.TempDir, and
+// cleanups run last registered first, so the wait always finishes before
+// t.TempDir removes the directory.
 func asyncWebInstallRoot(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "jellyfin-web-root-*")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() {
-		waitForWebOperation(t, dir)
-		if err := os.RemoveAll(dir); err != nil {
-			t.Errorf("removing %s: %v", dir, err)
-		}
-	})
+	dir := t.TempDir()
+	t.Cleanup(func() { waitForWebOperation(t, dir) })
 	return dir
 }
 

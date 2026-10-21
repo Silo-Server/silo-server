@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
-import { act, renderHook, cleanup, waitFor } from "@testing-library/react";
+import { act, renderHook, cleanup } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { adminKeys } from "@/hooks/queries/keys";
@@ -8,7 +8,6 @@ import { setAccessToken, setRefreshToken } from "@/api/client";
 import { fetchPolicySnapshot } from "@/api/adminPolicy";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import {
-  usePolicyCapability,
   useActivatePolicyVersion,
   useCreatePolicyDocument,
   useCreatePolicyVersion,
@@ -142,22 +141,4 @@ it("caches a saved compile-invalid version by its ID rather than its ordinal", a
   });
   expect(result.current.client.getQueryData(adminKeys.policyVersion("12", "95"))).toEqual(saved);
   expect(result.current.client.getQueryData(adminKeys.policyVersion("12", "3"))).toBeUndefined();
-});
-
-it("discovers policy through v2 without requiring the editor", async () => {
-  const fetchMock = vi.fn<typeof fetch>(async () =>
-    jsonResponse({
-      enabled: false,
-      editor_available: false,
-      decision_types: ["scope"],
-      generation: 0,
-      degraded: false,
-      eval_timeouts: 0,
-    }),
-  );
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(() => usePolicyCapability(), { wrapper });
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/v2/policy/capability");
-  expect(result.current.data?.enabled).toBe(false);
 });

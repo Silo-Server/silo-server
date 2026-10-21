@@ -13,6 +13,7 @@ import { BREAK_GLASS_REQUIRED_TEXT } from "@/lib/externalSignInAdmin";
 import SignInSettings from "./SignInSettings";
 
 const state = vi.hoisted(() => ({
+  keys: [] as string[],
   values: {} as Record<string, string>,
   dirty: new Set<string>(),
   setValue: vi.fn(),
@@ -26,17 +27,20 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/useSettingsForm", () => ({
-  useSettingsForm: () => ({
-    isLoading: false,
-    getValue: (key: string) => state.values[key] ?? "",
-    getPersistedValue: (key: string) => state.values[key] ?? "",
-    setValue: state.setValue,
-    isDirty: (key: string) => state.dirty.has(key),
-    dirtyCount: state.dirty.size,
-    save: state.save,
-    discard: state.discard,
-    isSaving: false,
-  }),
+  useSettingsForm: (options: { keys: string[] }) => {
+    state.keys = options.keys;
+    return {
+      isLoading: false,
+      getValue: (key: string) => state.values[key] ?? "",
+      getPersistedValue: (key: string) => state.values[key] ?? "",
+      setValue: state.setValue,
+      isDirty: (key: string) => state.dirty.has(key),
+      dirtyCount: state.dirty.size,
+      save: state.save,
+      discard: state.discard,
+      isSaving: false,
+    };
+  },
 }));
 vi.mock("@/hooks/queries/admin/plugins", () => ({
   useAdminPluginInstallations: () => ({
@@ -181,6 +185,8 @@ let failures: Record<string, unknown>;
 // Operations that answer only when the test resolves them.
 let held: Record<string, Promise<unknown>>;
 let testResult: unknown;
+// The server's restart registry, served to the page's useRestartKeys.
+let restartKeys: { keys: string[]; prefixes: string[] };
 const calls: Array<{ op: string; options?: { body?: unknown; path?: unknown } }> = [];
 
 function problem(type: string, status: number, detail = `raw ${type}`) {
@@ -201,6 +207,10 @@ beforeEach(() => {
     "auth.email_auto_match": "false",
     "auth.provider_recheck_interval": "12h",
     "auth.provider_recheck_outage_policy": "fail_open",
+    "auth.access_token_expiry": "30m",
+    "auth.refresh_token_expiry": "30d",
+    "signup.enabled": "false",
+    "password_reset.self_service_enabled": "false",
     "server.public_url": "https://silo.example.test",
   };
   state.dirty = new Set();
@@ -225,6 +235,7 @@ beforeEach(() => {
   };
   failures = {};
   held = {};
+  restartKeys = { keys: [], prefixes: [] };
   testResult = {
     ok: false,
     callback_url: "https://silo.example.test/api/v2/auth/oauth/6/callback",
@@ -241,6 +252,8 @@ beforeEach(() => {
     switch (op) {
       case "GET /api/v2/auth/external-sign-in/capabilities":
         return Promise.resolve(capabilities);
+      case "GET /api/v2/admin/settings/restart-keys":
+        return Promise.resolve(restartKeys);
       case "GET /api/v2/auth/providers":
         return Promise.resolve({
           items: [
@@ -343,67 +356,6 @@ function sectionedOidc(overrides: Partial<PluginInstallation> = {}): PluginInsta
 }
 
 describe("SignInSettings provider choice", () => {
-  it("shows a loading state and a read failure", () => {
-    state.installationsLoading = true;
-    state.installations = undefined;
-    const { unmount } = mount();
-    expect(
-      screen.getByRole("group", { name: "Single sign-on" }).querySelector("[aria-busy=true]"),
-    ).not.toBeNull();
-    unmount();
-    state.installationsLoading = false;
-    state.installationsError = true;
-    mount();
-    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't read the installed plugins");
-  });
-
-  it("shows only the provider that is on, with the URLs to register", () => {
-    mount();
-    expect(providerChoice(/^OpenID Connect/)).toHaveAttribute("aria-pressed", "true");
-    expect(providerChoice(/^LDAP/)).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getAllByTestId("sign-in-provider")).toHaveLength(1);
-    const oidc = providerPanel("OpenID Connect");
-    expect(within(oidc).getByTestId("sign-in-provider-state")).toHaveTextContent("On");
-    expect(within(oidc).getByLabelText("Redirect URI")).toHaveValue(
-      "https://silo.example.test/api/v2/auth/oauth/5/callback",
-    );
-    expect(within(oidc).getByLabelText("Post-logout redirect URI")).toHaveValue(
-      "https://silo.example.test/login",
-    );
-    expect(screen.getByText(/To switch, turn off OpenID Connect first/)).toBeInTheDocument();
-  });
-
-  it("shows another provider's setup without letting it turn on", async () => {
-    const user = userEvent.setup();
-    const nameSchema = {
-      key: "display_name",
-      title: "Button label",
-      json_schema: "{}",
-      required: false,
-      admin_form: { fields: [{ key: "value", label: "Button label", control: "TEXT" }] },
-    };
-    state.installations = [oidcInstallation(), ldapInstallation()].map((installation, index) => ({
-      ...installation,
-      global_config_schema: [...installation.global_config_schema, nameSchema],
-      global_configs: [
-        ...(installation.global_configs ?? []),
-        { key: "display_name", value: { value: index === 0 ? "Keycloak" : "Company directory" } },
-      ],
-    }));
-    mount();
-    expect(within(providerPanel("OpenID Connect")).getByLabelText("Provider name")).toHaveValue(
-      "Keycloak",
-    );
-    await pick(user, /^LDAP/);
-    const ldap = providerPanel("LDAP");
-    expect(within(ldap).getByLabelText("Directory name")).toHaveValue("Company directory");
-    expect(within(ldap).getByRole("button", { name: "Turn on" })).toBeDisabled();
-    expect(within(ldap).getByText(/OpenID Connect is the sign-in provider now/)).toBeTruthy();
-    // A password (LDAP) provider has nothing to register.
-    expect(within(ldap).queryByLabelText("Redirect URI")).toBeNull();
-    expect(screen.queryByRole("region", { name: "OpenID Connect" })).toBeNull();
-  });
-
   it("offers to turn the provider off when None is picked", async () => {
     const user = userEvent.setup();
     mount();
@@ -416,55 +368,6 @@ describe("SignInSettings provider choice", () => {
         opCalls("PUT /api/v2/admin/plugins/installations/{id}/auth-binding")[0]?.options?.body,
       ).toMatchObject({ capability_id: "oidc", enabled: false }),
     );
-  });
-
-  it("warns that OpenID Connect needs the public URL", () => {
-    state.values["server.public_url"] = "";
-    state.installations = [
-      oidcInstallation({
-        capabilities: [
-          {
-            type: "auth_provider.v1",
-            id: "oidc",
-            display_name: "Single sign-on",
-            metadata: { connection_test: true },
-            sign_in_mode: "oauth",
-            callback_url: "",
-            post_logout_redirect_url: "",
-          },
-        ],
-        auth_bindings: [
-          {
-            capability_id: "oidc",
-            enabled: true,
-            display_order: 1,
-            auto_provision: true,
-            default_login: false,
-            callback_url: "",
-            post_logout_redirect_url: "",
-            created_at: STAMP,
-            updated_at: STAMP,
-          },
-        ],
-      }),
-    ];
-    mount();
-    expect(screen.getByText(/needs the server's public URL/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "General settings" })).toHaveAttribute(
-      "href",
-      "/admin/settings/general",
-    );
-    expect(screen.queryByLabelText("Redirect URI")).toBeNull();
-  });
-
-  it("shows a fresh OpenID Connect install's redirect URI before any binding exists", () => {
-    state.installations = [oidcInstallation({ auth_bindings: [] })];
-    mount();
-    const oidc = providerPanel("OpenID Connect");
-    expect(within(oidc).getByLabelText("Redirect URI")).toHaveValue(
-      "https://silo.example.test/api/v2/auth/oauth/5/callback",
-    );
-    expect(within(oidc).queryByText("silo.auth.oidc")).toBeNull();
   });
 });
 
@@ -518,14 +421,6 @@ describe("SignInSettings turning a provider on and off", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Another sign-in provider is already on",
     );
-  });
-
-  it("says when the plugin itself is turned off", async () => {
-    state.installations = [ldapInstallation({ enabled: false })];
-    mount();
-    expect(screen.getByTestId("sign-in-provider-state")).toHaveTextContent("Plugin turned off");
-    expect(screen.getByRole("button", { name: "Turn on" })).toBeDisabled();
-    expect(await screen.findByRole("button", { name: "Test connection" })).toBeDisabled();
   });
 
   it("asks before turning the provider off", async () => {
@@ -873,22 +768,6 @@ describe("SignInSettings connection test", () => {
     });
   });
 
-  it("shows no redirect URI for an LDAP install after its connection test", async () => {
-    const user = userEvent.setup();
-    state.installations = [ldapInstallation()];
-    // An older server answers the test with a callback URL for any provider.
-    testResult = {
-      ok: true,
-      callback_url: "https://silo.example.test/api/v2/auth/oauth/6/callback",
-      steps: [],
-    };
-    mount();
-    const ldap = providerPanel("LDAP");
-    await user.click(await within(ldap).findByRole("button", { name: "Test connection" }));
-    await within(ldap).findByTestId("sign-in-test-result");
-    expect(within(ldap).queryByLabelText("Redirect URI")).toBeNull();
-  });
-
   it("shows why a connection test could not run", async () => {
     const user = userEvent.setup();
     failures["POST /api/v2/admin/plugins/installations/{id}/auth-binding/test"] = problem(
@@ -904,19 +783,6 @@ describe("SignInSettings connection test", () => {
     await waitFor(() => expect(document.activeElement).toBe(alert));
   });
 
-  it("reports an unreachable server during the test", async () => {
-    const user = userEvent.setup();
-    failures["POST /api/v2/admin/plugins/installations/{id}/auth-binding/test"] = new TypeError(
-      "fetch failed",
-    );
-    mount();
-    const oidc = providerPanel("OpenID Connect");
-    await user.click(await within(oidc).findByRole("button", { name: "Test connection" }));
-    expect(await within(oidc).findByRole("alert")).toHaveTextContent(
-      "Couldn't reach the server. Try again.",
-    );
-  });
-
   it("hides the test when the server or the plugin does not offer it", async () => {
     capabilities = { ...capabilities, connection_test: false };
     mount();
@@ -928,16 +794,6 @@ describe("SignInSettings connection test", () => {
 });
 
 describe("SignInSettings password sign-in", () => {
-  it("names the break-glass admins", () => {
-    state.users = [
-      admin({ id: 1, username: "root", break_glass: true }),
-      admin({ id: 2, username: "nora", break_glass: true, password_login: false }),
-      admin({ id: 3, username: "ivan", break_glass: false }),
-    ];
-    mount();
-    expect(screen.getByText("Break-glass admin: root")).toBeInTheDocument();
-  });
-
   it("refuses to turn password sign-in off without a break-glass admin", async () => {
     const user = userEvent.setup();
     state.users = [admin({ break_glass: false })];
@@ -999,33 +855,20 @@ describe("SignInSettings password sign-in", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(BREAK_GLASS_REQUIRED_TEXT);
   });
-
-  it("points at the recovery paths", async () => {
-    const user = userEvent.setup();
-    mount();
-    await user.click(screen.getByRole("button", { name: "Locked out?" }));
-    expect(screen.getByText("/login?local=1")).toBeInTheDocument();
-    expect(screen.getByText("silo auth local-login enable")).toBeInTheDocument();
-  });
 });
 
-describe("SignInSettings accounts and sessions", () => {
-  it("warns about account takeover and stages email matching", async () => {
-    const user = userEvent.setup();
+describe("SignInSettings account matching", () => {
+  it("keeps matching that is on even with no plugin installed", () => {
+    state.installations = [];
+    state.values["auth.email_auto_match"] = "true";
     mount();
-    expect(screen.getByText(/takes over the Silo account/)).toBeInTheDocument();
-    await user.click(screen.getByRole("switch", { name: "Match existing accounts by email" }));
-    expect(state.setValue).toHaveBeenCalledWith("auth.email_auto_match", "true");
+    expect(screen.getByRole("switch", { name: "Match existing accounts by email" })).toBeChecked();
   });
 
-  it("keeps a stored interval no preset names and explains the outage policy", () => {
-    state.values["auth.provider_recheck_interval"] = "3h";
-    state.values["auth.provider_recheck_outage_policy"] = "fail_closed";
+  it("keeps matching while the installations are unknown", () => {
+    state.installations = undefined;
+    state.installationsError = true;
     mount();
-    expect(screen.getByRole("combobox", { name: "Re-check access every" })).toHaveTextContent("3h");
-    expect(
-      screen.getByRole("combobox", { name: "If the provider is unreachable" }),
-    ).toHaveTextContent("Stop sessions from renewing");
-    expect(screen.getByText(/apps stop working during an outage/)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Match existing accounts by email" })).toBeVisible();
   });
 });

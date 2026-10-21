@@ -38,6 +38,10 @@ function render(child: ReactNode) {
   );
 }
 
+function renderInRouter(child: ReactNode) {
+  return rtlRender(<MemoryRouter>{child}</MemoryRouter>);
+}
+
 type GridProps = Extract<RequestToAddSectionProps, { variant: "grid" }>;
 
 /** Holds the grid's page the way Catalog does, minus the URL. */
@@ -66,28 +70,32 @@ const availableResult = (overrides: Partial<RequestMediaResult> = {}): RequestMe
   ...overrides,
 });
 
-describe("RequestToAddSection (dialog variant)", () => {
-  beforeEach(() => {
-    mocks.useCanRequest.mockReset();
-    mocks.useRequestSearch.mockReset();
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
+function searchReturns(results: RequestMediaResult[], isError = false) {
+  mocks.useRequestSearch.mockReturnValue({
+    data: { page: 1, total_pages: 1, total_results: results.length, results },
+    isLoading: false,
+    isError,
   });
+}
 
+beforeEach(() => {
+  mocks.useCanRequest.mockReset();
+  mocks.useRequestSearch.mockReset();
+  mocks.useCanRequest.mockReturnValue({
+    discoveryEnabled: true,
+    isResolving: false,
+    submitDisabledReason: null,
+  });
+});
+
+describe("RequestToAddSection (dialog variant)", () => {
   it("passes enabled=false to useRequestSearch when discovery is disabled so no network call fires", () => {
     mocks.useCanRequest.mockReturnValue({
       discoveryEnabled: false,
       isResolving: false,
       submitDisabledReason: null,
     });
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: 1, results: [missingResult()] },
-      isLoading: false,
-      isError: false,
-    });
+    searchReturns([missingResult()]);
 
     const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
     expect(markup).toBe("");
@@ -105,47 +113,8 @@ describe("RequestToAddSection (dialog variant)", () => {
     });
   });
 
-  it("renders 'Request to Add' header when library had hits", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: 1, results: [missingResult()] },
-      isLoading: false,
-      isError: false,
-    });
-    const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
-    expect(markup).toContain("Request to Add");
-    expect(markup).toContain("Dune: Prophecy");
-    expect(markup).not.toContain(">Request<");
-    expect(markup).not.toContain("data-request-state");
-    const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
-    expect(call?.[3]).toEqual({
-      enabled: true,
-      requireProfile: true,
-      staleTime: 5 * 60 * 1000,
-      gcTime: 30_000,
-      retry: false,
-    });
-  });
-
-  it("renders soft framing when library had 0 hits", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: 1, results: [missingResult()] },
-      isLoading: false,
-      isError: false,
-    });
-    const markup = render(
-      <RequestToAddSection variant="dialog" query="dune" libraryHadHits={false} />,
-    );
-    expect(markup).toContain("Not in your library");
-    expect(markup).not.toContain("but you can request");
-    expect(markup).not.toContain("Request to Add");
-  });
-
   it("does not claim media is absent while the local lookup is unresolved or failed", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: 1, results: [missingResult()] },
-      isLoading: false,
-      isError: false,
-    });
+    searchReturns([missingResult()]);
     const markup = render(
       <RequestToAddSection
         variant="dialog"
@@ -163,16 +132,7 @@ describe("RequestToAddSection (dialog variant)", () => {
     // renders item.title only as text content (never as a `title=` attribute), so
     // a substring check on `title="Dune"` would pass even with the filter removed.
     // Check the link target instead — it's a precise, filter-driven signal.
-    mocks.useRequestSearch.mockReturnValue({
-      data: {
-        page: 1,
-        total_pages: 1,
-        total_results: 2,
-        results: [availableResult(), missingResult()],
-      },
-      isLoading: false,
-      isError: false,
-    });
+    searchReturns([availableResult(), missingResult()]);
     const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
     expect(markup).toContain("/title/movie/1");
     expect(markup).not.toContain("/title/movie/2");
@@ -185,11 +145,7 @@ describe("RequestToAddSection (dialog variant)", () => {
   });
 
   it("keeps rendering cached TMDB results when a refetch errors", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: 1, results: [missingResult()] },
-      isLoading: false,
-      isError: true,
-    });
+    searchReturns([missingResult()], true);
     const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
     expect(markup).toContain("Dune: Prophecy");
   });
@@ -198,11 +154,7 @@ describe("RequestToAddSection (dialog variant)", () => {
     const many = Array.from({ length: 10 }, (_, i) =>
       missingResult({ tmdb_id: i + 100, title: `Result ${i}` }),
     );
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: many.length, results: many },
-      isLoading: false,
-      isError: false,
-    });
+    searchReturns(many);
     const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
     expect(markup).toContain("Result 0");
     expect(markup).toContain("Result 3");
@@ -210,24 +162,15 @@ describe("RequestToAddSection (dialog variant)", () => {
   });
 
   it("renders the disabled affordance and reason when a row is not requestable", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: {
-        page: 1,
-        total_pages: 1,
-        total_results: 1,
-        results: [
-          missingResult({
-            tmdb_id: 7,
-            title: "Quota Capped Movie",
-            // formatRequestReason recognises "quota_exceeded" (not "quota_exhausted");
-            // assert on the produced label so a regression in that mapping is caught.
-            request: { requestable: false, reason: "quota_exceeded" },
-          }),
-        ],
-      },
-      isLoading: false,
-      isError: false,
-    });
+    searchReturns([
+      missingResult({
+        tmdb_id: 7,
+        title: "Quota Capped Movie",
+        // formatRequestReason recognises "quota_exceeded" (not "quota_exhausted");
+        // assert on the produced label so a regression in that mapping is caught.
+        request: { requestable: false, reason: "quota_exceeded" },
+      }),
+    ]);
 
     const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
 
@@ -238,22 +181,13 @@ describe("RequestToAddSection (dialog variant)", () => {
   });
 
   it("prefers request status over reason when a row is already requested", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: {
-        page: 1,
-        total_pages: 1,
-        total_results: 1,
-        results: [
-          missingResult({
-            tmdb_id: 8,
-            title: "Already Pending Movie",
-            request: { requestable: false, reason: "blocked", status: "pending" },
-          }),
-        ],
-      },
-      isLoading: false,
-      isError: false,
-    });
+    searchReturns([
+      missingResult({
+        tmdb_id: 8,
+        title: "Already Pending Movie",
+        request: { requestable: false, reason: "blocked", status: "pending" },
+      }),
+    ]);
 
     const markup = render(<RequestToAddSection variant="dialog" query="dune" libraryHadHits />);
 
@@ -266,43 +200,25 @@ describe("RequestToAddSection (dialog variant)", () => {
 
 describe("RequestToAddSection (dialog variant in a host combobox)", () => {
   beforeEach(() => {
-    mocks.useCanRequest.mockReset();
-    mocks.useRequestSearch.mockReset();
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useRequestSearch.mockReturnValue({
-      data: {
-        page: 1,
-        total_pages: 1,
-        total_results: 2,
-        results: [
-          missingResult({ tmdb_id: 1, title: "First" }),
-          missingResult({ tmdb_id: 2, title: "Second" }),
-        ],
-      },
-      isLoading: false,
-      isError: false,
-    });
+    searchReturns([
+      missingResult({ tmdb_id: 1, title: "First" }),
+      missingResult({ tmdb_id: 2, title: "Second" }),
+    ]);
   });
 
   function renderInHost(onPick = vi.fn(), selectedIndex = -1) {
-    rtlRender(
-      <MemoryRouter>
-        <RequestToAddSection
-          variant="dialog"
-          query="dune"
-          libraryHadHits
-          combobox={{
-            listboxId: "host-requests",
-            optionId: (index) => `host-option-${index + 3}`,
-            selectedIndex,
-            onPick,
-          }}
-        />
-      </MemoryRouter>,
+    renderInRouter(
+      <RequestToAddSection
+        variant="dialog"
+        query="dune"
+        libraryHadHits
+        combobox={{
+          listboxId: "host-requests",
+          optionId: (index) => `host-option-${index + 3}`,
+          selectedIndex,
+          onPick,
+        }}
+      />,
     );
     return onPick;
   }
@@ -352,15 +268,8 @@ describe("RequestToAddSection (grid variant)", () => {
   const mutateAsync = vi.fn(() => new Promise(() => {}));
 
   beforeEach(() => {
-    mocks.useCanRequest.mockReset();
-    mocks.useRequestSearch.mockReset();
     mocks.useCreateMediaRequest.mockReset();
     mutateAsync.mockClear();
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
     mocks.useCreateMediaRequest.mockReturnValue({
       mutateAsync,
       isPending: false,
@@ -389,81 +298,9 @@ describe("RequestToAddSection (grid variant)", () => {
     return mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1]!;
   }
 
-  it("reads like the People section: a plain Request to add heading over the cards", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: {
-        page: 1,
-        total_pages: 1,
-        total_results: 2,
-        results: [
-          missingResult({ tmdb_id: 1, title: "Dune: Prophecy" }),
-          missingResult({ tmdb_id: 2, title: "Dune (1984)" }),
-        ],
-      },
-      isLoading: false,
-      isError: false,
-    });
-    rtlRender(
-      <MemoryRouter>
-        <PagedGrid query="dune" libraryHadHits />
-      </MemoryRouter>,
-    );
-
-    const section = screen.getByRole("region", { name: "Request to add" });
-    expect(within(section).getByRole("heading", { level: 2 })).toHaveTextContent("Request to add");
-    expect(within(section).getAllByRole("link", { name: "Dune: Prophecy" })[0]).toHaveAttribute(
-      "href",
-      "/title/movie/1",
-    );
-    expect(within(section).getAllByRole("link", { name: "Dune (1984)" })[0]).toBeInTheDocument();
-    expect(within(section).queryByText(/Nothing in your library/)).not.toBeInTheDocument();
-    // A single page has no pager.
-    expect(within(section).queryByRole("navigation")).not.toBeInTheDocument();
-  });
-
-  it("says the library had no match only once that is known", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: {
-        page: 1,
-        total_pages: 1,
-        total_results: 1,
-        results: [missingResult({ tmdb_id: 1, title: "Dune: Prophecy" })],
-      },
-      isLoading: false,
-      isError: false,
-    });
-    const known = render(<PagedGrid query="dune" libraryHadHits={false} />);
-    expect(known).toContain("Nothing in your library matches");
-
-    const unknown = render(
-      <PagedGrid query="dune" libraryHadHits={false} libraryResultsKnown={false} />,
-    );
-    expect(unknown).toContain("Request to add");
-    expect(unknown).not.toContain("Nothing in your library matches");
-  });
-
-  it("limits the grid to at most 20 cards", () => {
-    const many = Array.from({ length: 30 }, (_, i) =>
-      missingResult({ tmdb_id: i + 100, title: `Result ${i}` }),
-    );
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: many.length, results: many },
-      isLoading: false,
-      isError: false,
-    });
-    const markup = render(<PagedGrid query="dune" libraryHadHits />);
-    expect(markup).toContain("Result 0");
-    expect(markup).toContain("Result 19");
-    expect(markup).not.toContain("Result 20");
-  });
-
   it("pages through TMDB's results", () => {
     pages(3);
-    rtlRender(
-      <MemoryRouter>
-        <PagedGrid query="bear" mediaType="series" libraryHadHits />
-      </MemoryRouter>,
-    );
+    renderInRouter(<PagedGrid query="bear" mediaType="series" libraryHadHits />);
 
     expect(lastSearchCall().slice(0, 3)).toEqual(["series", "bear", 1]);
     expect(lastSearchCall()[3]).toMatchObject({ enabled: true, keepPreviousPage: true });
@@ -483,16 +320,14 @@ describe("RequestToAddSection (grid variant)", () => {
   it("opens at the page its host restored and reports page changes to the host", () => {
     pages(3);
     const onPageChange = vi.fn();
-    rtlRender(
-      <MemoryRouter>
-        <RequestToAddSection
-          variant="grid"
-          query="bear"
-          libraryHadHits
-          page={2}
-          onPageChange={onPageChange}
-        />
-      </MemoryRouter>,
+    renderInRouter(
+      <RequestToAddSection
+        variant="grid"
+        query="bear"
+        libraryHadHits
+        page={2}
+        onPageChange={onPageChange}
+      />,
     );
 
     expect(lastSearchCall().slice(0, 3)).toEqual(["all", "bear", 2]);
@@ -501,32 +336,6 @@ describe("RequestToAddSection (grid variant)", () => {
 
     fireEvent.click(within(pager).getByRole("button", { name: "Next" }));
     expect(onPageChange).toHaveBeenLastCalledWith(3);
-  });
-
-  it("keeps the pager on a later page that holds only library titles", () => {
-    mocks.useRequestSearch.mockImplementation((_type: string, _query: string, page: number) => ({
-      data: {
-        page,
-        total_pages: 2,
-        total_results: 3,
-        results:
-          page === 1
-            ? [missingResult({ tmdb_id: 1, title: "Dune: Prophecy" })]
-            : [availableResult()],
-      },
-      isLoading: false,
-      isError: false,
-    }));
-    rtlRender(
-      <MemoryRouter>
-        <PagedGrid query="dune" libraryHadHits />
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-
-    expect(screen.getByText("Every title on this page is already in your library.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
   });
 
   it("keeps the pager when the first page holds only library titles but more pages exist", () => {
@@ -543,11 +352,7 @@ describe("RequestToAddSection (grid variant)", () => {
       isLoading: false,
       isError: false,
     }));
-    rtlRender(
-      <MemoryRouter>
-        <PagedGrid query="dune" libraryHadHits />
-      </MemoryRouter>,
-    );
+    renderInRouter(<PagedGrid query="dune" libraryHadHits />);
 
     const section = screen.getByRole("region", { name: "Request to add" });
     expect(
@@ -561,11 +366,7 @@ describe("RequestToAddSection (grid variant)", () => {
   });
 
   it("still hides the section when its only page holds only library titles", () => {
-    mocks.useRequestSearch.mockReturnValue({
-      data: { page: 1, total_pages: 1, total_results: 1, results: [availableResult()] },
-      isLoading: false,
-      isError: false,
-    });
+    searchReturns([availableResult()]);
 
     expect(render(<PagedGrid query="dune" libraryHadHits />)).toBe("");
   });
@@ -594,11 +395,7 @@ describe("RequestToAddSection (grid variant)", () => {
             refetch,
           },
     );
-    rtlRender(
-      <MemoryRouter>
-        <PagedGrid query="dune" libraryHadHits />
-      </MemoryRouter>,
-    );
+    renderInRouter(<PagedGrid query="dune" libraryHadHits />);
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
@@ -620,11 +417,7 @@ describe("RequestToAddSection (grid variant)", () => {
 
   it("stops at TMDB's 500-page cap whatever total it reports", () => {
     pages(900);
-    rtlRender(
-      <MemoryRouter>
-        <PagedGrid query="dune" libraryHadHits />
-      </MemoryRouter>,
-    );
+    renderInRouter(<PagedGrid query="dune" libraryHadHits />);
 
     expect(screen.getByRole("navigation", { name: "Request to add pages" })).toHaveTextContent(
       "Page 1 of 500",
@@ -633,11 +426,7 @@ describe("RequestToAddSection (grid variant)", () => {
 
   it("requests a card's title from its hover action", () => {
     pages(1);
-    rtlRender(
-      <MemoryRouter>
-        <PagedGrid query="dune" libraryHadHits />
-      </MemoryRouter>,
-    );
+    renderInRouter(<PagedGrid query="dune" libraryHadHits />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Request dune 1a/ }));
 

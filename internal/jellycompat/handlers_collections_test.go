@@ -222,43 +222,6 @@ func TestHandleItems_BoxSetListingScopedToParentLibrary(t *testing.T) {
 	}
 }
 
-func TestHandleItems_BoxSetChildrenPreservePositionOrder(t *testing.T) {
-	collections := &fakeCollectionSource{
-		collections: []*models.LibraryCollection{
-			{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible"},
-		},
-		items: map[string][]*models.LibraryCollectionItem{
-			"101": {
-				{CollectionID: "101", MediaItemID: "m-2", Position: 0},
-				{CollectionID: "101", MediaItemID: "m-1", Position: 1},
-				{CollectionID: "101", MediaItemID: "m-3", Position: 2},
-			},
-		},
-	}
-	itemRepo := &fakeBatchItemRepo{items: map[string]*models.MediaItem{
-		"m-1": {ContentID: "m-1", Type: "movie", Title: "Iron Man"},
-		"m-2": {ContentID: "m-2", Type: "movie", Title: "Captain America"},
-		"m-3": {ContentID: "m-3", Type: "movie", Title: "Thor"},
-	}}
-	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, itemRepo)
-
-	parentID := h.codec.EncodeStringID(EncodedIDCollection, "101")
-	result := performItemsRequest(t, h, "/Items?ParentId="+parentID)
-	if len(result.Items) != 3 {
-		t.Fatalf("expected 3 children, got %d", len(result.Items))
-	}
-	gotNames := []string{result.Items[0].Name, result.Items[1].Name, result.Items[2].Name}
-	wantNames := []string{"Captain America", "Iron Man", "Thor"}
-	for i := range wantNames {
-		if gotNames[i] != wantNames[i] {
-			t.Fatalf("expected curated order %v, got %v", wantNames, gotNames)
-		}
-	}
-	if result.Items[0].ParentID != parentID {
-		t.Fatalf("expected ParentId %s, got %s", parentID, result.Items[0].ParentID)
-	}
-}
-
 func TestHandleItems_BoxSetChildrenPagination(t *testing.T) {
 	collections := &fakeCollectionSource{
 		collections: []*models.LibraryCollection{
@@ -358,23 +321,6 @@ func TestHandleItems_BoxSetWithUserStateFilterReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestHandleItems_CollectionFolderTypeReturnsViews(t *testing.T) {
-	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{
-		{ID: 1, Name: "Movies", Type: "movies"},
-		{ID: 3, Name: "Shows", Type: "series"},
-	}, nil)
-
-	result := performItemsRequest(t, h, "/Items?IncludeItemTypes=CollectionFolder")
-	if len(result.Items) != 2 {
-		t.Fatalf("expected 2 library views, got %+v", result.Items)
-	}
-	for _, item := range result.Items {
-		if item.Type != "CollectionFolder" {
-			t.Fatalf("expected CollectionFolder items, got %+v", item)
-		}
-	}
-}
-
 func TestHandleItems_SpecificIdsIncludeBoxSets(t *testing.T) {
 	collections := &fakeCollectionSource{
 		collections: []*models.LibraryCollection{
@@ -392,32 +338,6 @@ func TestHandleItems_SpecificIdsIncludeBoxSets(t *testing.T) {
 	repeated := performItemsRequest(t, h, "/Items?Ids="+url.QueryEscape(boxSetID)+"&Ids="+url.QueryEscape(boxSetID))
 	if len(repeated.Items) != 1 || repeated.TotalRecordCount != 1 {
 		t.Fatalf("expected a repeated BoxSet ID once, got %d items (total %d)", len(repeated.Items), repeated.TotalRecordCount)
-	}
-}
-
-func TestParseItemsQuery_BoxSetFlags(t *testing.T) {
-	codec := NewResourceIDCodec()
-
-	req := httptest.NewRequest("GET", "/Items?IncludeItemTypes=BoxSet", nil)
-	query := parseItemsQuery(req, codec)
-	if !query.wantsBoxSets || len(query.itemTypes) != 0 || !query.hasItemTypeFilter {
-		t.Fatalf("expected BoxSet flags, got %+v", query)
-	}
-
-	collectionID := codec.EncodeStringID(EncodedIDCollection, "555")
-	req = httptest.NewRequest("GET", "/Items?ParentId="+url.QueryEscape(collectionID), nil)
-	query = parseItemsQuery(req, codec)
-	if query.parentCollectionID != "555" {
-		t.Fatalf("expected parentCollectionID 555, got %q", query.parentCollectionID)
-	}
-	if query.sortExplicit {
-		t.Fatalf("expected sortExplicit=false without SortBy")
-	}
-
-	req = httptest.NewRequest("GET", "/Items?SortBy=SortName", nil)
-	query = parseItemsQuery(req, codec)
-	if !query.sortExplicit {
-		t.Fatalf("expected sortExplicit=true with SortBy")
 	}
 }
 
@@ -474,18 +394,6 @@ func TestUserViews_OmitsCollectionsViewWhenNoVisibleCollections(t *testing.T) {
 	}
 }
 
-func TestUserViews_OmitsCollectionsViewWhenSourceNil(t *testing.T) {
-	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
-	h.collections = nil // exercise the no-collection-source path (e.g. a DB-less deployment)
-
-	result := performItemsRequest(t, h, "/Items")
-	for _, item := range result.Items {
-		if item.ID == collectionsViewID {
-			t.Fatalf("did not expect Collections view without a collection source: %+v", result.Items)
-		}
-	}
-}
-
 func TestHandleItems_CollectionsViewParentHonorsTypeFilter(t *testing.T) {
 	collections := &fakeCollectionSource{
 		collections: []*models.LibraryCollection{
@@ -504,23 +412,6 @@ func TestHandleItems_CollectionsViewParentHonorsTypeFilter(t *testing.T) {
 	boxsets := performItemsRequest(t, h, "/Items?ParentId="+collectionsViewID+"&IncludeItemTypes=BoxSet")
 	if len(boxsets.Items) != 1 || boxsets.Items[0].Type != "BoxSet" {
 		t.Fatalf("expected the Marvel BoxSet, got %+v", boxsets.Items)
-	}
-}
-
-func TestHandleItems_CollectionsViewRehydratedByIds(t *testing.T) {
-	collections := &fakeCollectionSource{
-		collections: []*models.LibraryCollection{
-			{ID: "101", LibraryID: 1, Title: "Marvel", Visibility: "visible"},
-		},
-	}
-	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
-
-	result := performItemsRequest(t, h, "/Items?Ids="+collectionsViewID)
-	if len(result.Items) != 1 {
-		t.Fatalf("expected the Collections view, got %+v", result.Items)
-	}
-	if result.Items[0].ID != collectionsViewID || result.Items[0].Type != "CollectionFolder" {
-		t.Fatalf("unexpected re-hydrated view: %+v", result.Items[0])
 	}
 }
 

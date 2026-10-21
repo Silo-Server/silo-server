@@ -245,11 +245,14 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	}
 	identity := populationIdentity(file, ids, entries)
 	request := Request{
-		Kind:          ids.Kind,
-		ExternalIDs:   ids.AsRequestMap(),
-		SeasonNumber:  ids.SeasonNumber,
-		EpisodeNumber: ids.EpisodeNumber,
-		Duration:      time.Duration(file.Duration) * time.Second,
+		Kind:               ids.Kind,
+		ExternalIDs:        ids.AsRequestMap(),
+		SeasonNumber:       ids.SeasonNumber,
+		EpisodeNumber:      ids.EpisodeNumber,
+		EpisodeExternalIDs: ids.Episode.AsRequestMap(),
+		EpisodeNumbering:   ids.EpisodeNumbering,
+		EpisodeTitle:       ids.EpisodeTitle,
+		Duration:           time.Duration(file.Duration) * time.Second,
 	}
 	cached := make(map[string]Result)
 	if storage == OnlineStorageStored {

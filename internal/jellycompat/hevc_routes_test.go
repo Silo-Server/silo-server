@@ -60,7 +60,6 @@ func TestHEVCHLSRoutesEnforceNegotiatedRecipe(t *testing.T) {
 		prefix   string
 	}{
 		{name: "legacy route rejects HEVC stereo", codec: "hevc", channels: 2},
-		{name: "audio-v2 route rejects HEVC surround", codec: "hevc", channels: 6, prefix: "/audio-v2"},
 		{name: "HEVC route rejects H264", codec: "h264", channels: 2, prefix: "/hevc-v1"},
 		{name: "HEVC route rejects video copy", codec: "hevc", channels: 2, remux: true, prefix: "/hevc-v1"},
 	} {

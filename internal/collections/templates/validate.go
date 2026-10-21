@@ -30,23 +30,15 @@ func validate(t Template) error {
 		if t.TMDB == nil {
 			return errors.New("tmdb spec is required for tmdb source")
 		}
-		if t.Trakt != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil || t.TMDBList != nil {
+		if t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil || t.TMDBList != nil {
 			return errors.New("only one source spec may be set")
 		}
 		return validateTMDB(*t.TMDB)
-	case SourceTrakt:
-		if t.Trakt == nil {
-			return errors.New("trakt spec is required for trakt source")
-		}
-		if t.TMDB != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil || t.TMDBList != nil {
-			return errors.New("only one source spec may be set")
-		}
-		return validateTrakt(*t.Trakt, t.RequiresProfile)
 	case SourceMDBList:
 		if t.MDBList == nil {
 			return errors.New("mdblist spec is required for mdblist source")
 		}
-		if t.TMDB != nil || t.Trakt != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil || t.TMDBList != nil {
+		if t.TMDB != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil || t.TMDBList != nil {
 			return errors.New("only one source spec may be set")
 		}
 		return validateMDBList(*t.MDBList)
@@ -54,7 +46,7 @@ func validate(t Template) error {
 		if t.TMDBDiscover == nil {
 			return errors.New("tmdb_discover spec is required for tmdb_discover source")
 		}
-		if t.TMDB != nil || t.Trakt != nil || t.MDBList != nil || t.TMDBCollection != nil || t.TMDBList != nil {
+		if t.TMDB != nil || t.MDBList != nil || t.TMDBCollection != nil || t.TMDBList != nil {
 			return errors.New("only one source spec may be set")
 		}
 		return validateTMDBDiscover(*t.TMDBDiscover)
@@ -62,7 +54,7 @@ func validate(t Template) error {
 		if t.TMDBCollection == nil {
 			return errors.New("tmdb_collection spec is required for tmdb_collection source")
 		}
-		if t.TMDB != nil || t.Trakt != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBList != nil {
+		if t.TMDB != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBList != nil {
 			return errors.New("only one source spec may be set")
 		}
 		return validateTMDBCollection(*t.TMDBCollection)
@@ -70,7 +62,7 @@ func validate(t Template) error {
 		if t.TMDBList == nil {
 			return errors.New("tmdb_list spec is required for tmdb_list source")
 		}
-		if t.TMDB != nil || t.Trakt != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil {
+		if t.TMDB != nil || t.MDBList != nil || t.TMDBDiscover != nil || t.TMDBCollection != nil {
 			return errors.New("only one source spec may be set")
 		}
 		return validateTMDBList(*t.TMDBList)
@@ -141,27 +133,6 @@ func validateTMDB(spec TMDBSpec) error {
 		}
 	default:
 		return fmt.Errorf("tmdb: unsupported preset %q", spec.Preset)
-	}
-	return nil
-}
-
-func validateTrakt(spec TraktSpec, requiresProfile bool) error {
-	switch spec.Preset {
-	case "trending", "popular":
-		if requiresProfile {
-			return errors.New("trakt: trending/popular do not require a profile")
-		}
-	case "recommended":
-		if !requiresProfile {
-			return errors.New("trakt: recommended must set requires_profile=true")
-		}
-	default:
-		return fmt.Errorf("trakt: unsupported preset %q", spec.Preset)
-	}
-	switch spec.MediaType {
-	case "movie", "tv":
-	default:
-		return fmt.Errorf("trakt: media_type must be movie or tv (got %q)", spec.MediaType)
 	}
 	return nil
 }

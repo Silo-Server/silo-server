@@ -83,8 +83,12 @@ type TranscodeStartRequest struct {
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
 	SubtitleBurnIn             bool                   `json:"subtitle_burn_in"`
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
-	TotalDuration              float64                `json:"total_duration"`
-	RequireReady               bool                   `json:"require_ready,omitempty"`
+	// SubtitleRendition asks the executor to emit the selected text track as
+	// the playlist's WebVTT subtitle rendition. Only nodes advertising
+	// playback.TransportFeatureHLSSubtitleRenditionV1 receive it.
+	SubtitleRendition bool    `json:"subtitle_rendition,omitempty"`
+	TotalDuration     float64 `json:"total_duration"`
+	RequireReady      bool    `json:"require_ready,omitempty"`
 	// AutoFallbackReady asks the node to wait for the first manifest only when
 	// its own hw_accel=auto fallback is enabled for this start, so an early
 	// hardware failure can move to a safer path. The node decides from its
@@ -123,6 +127,10 @@ type TranscodeStartResponse struct {
 	// serve FFmpeg's growing playlist under a recipe that records the planned
 	// one.
 	KeyframePlaylist bool `json:"keyframe_playlist,omitempty"`
+	// SubtitleRendition attests that the executor emits the requested subtitle
+	// rendition. Older nodes omit it and are rejected before the plan
+	// promises a rendition their playlist does not carry.
+	SubtitleRendition bool `json:"subtitle_rendition,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
@@ -191,6 +199,20 @@ func ValidateCopyFMP4RecipeAttestation(req TranscodeStartRequest, response Trans
 func ValidateKeyframePlaylistAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
 	if req.KeyframePlaylist && !response.KeyframePlaylist {
 		return ErrKeyframePlaylistAttestationMismatch
+	}
+	return nil
+}
+
+// ErrSubtitleRenditionAttestationMismatch reports an executor that ignored a
+// requested subtitle rendition.
+var ErrSubtitleRenditionAttestationMismatch = errors.New("transcode node subtitle rendition attestation mismatch")
+
+// ValidateSubtitleRenditionAttestation rejects an executor that silently
+// ignored a requested subtitle rendition. Requests without one stay compatible
+// with older nodes, which omit the field.
+func ValidateSubtitleRenditionAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	if req.SubtitleRendition && !response.SubtitleRendition {
+		return ErrSubtitleRenditionAttestationMismatch
 	}
 	return nil
 }
@@ -311,6 +333,11 @@ type Server struct {
 	// Guarded by mu alongside sessions; the idle reaper closes jobs whose entry
 	// is older than sessionIdleTTL.
 	lastAccess map[string]time.Time
+	// startedAs records, per registered session id, the identity this node had
+	// when it registered the job. Guarded by mu alongside sessions. A teardown
+	// judges the stored card against it, because the node's registration can
+	// change while the job runs.
+	startedAs  map[string]playback.RecipeExecutor
 	reaperOnce sync.Once
 	// mediaSamples admits media sampling runs up to the configured per-node
 	// capacity, whichever API servers send them.
@@ -678,6 +705,16 @@ func (s *Server) noteSessionAccessLocked(sessionID string) {
 	s.lastAccess[sessionID] = time.Now()
 }
 
+// noteStartedAsLocked records the identity a job was registered under. Callers
+// must hold s.mu for writing; recipeExecutor reads the watcher, so call it
+// before taking s.mu.
+func (s *Server) noteStartedAsLocked(sessionID string, executor playback.RecipeExecutor) {
+	if s.startedAs == nil {
+		s.startedAs = make(map[string]playback.RecipeExecutor)
+	}
+	s.startedAs[sessionID] = executor
+}
+
 // touchSession refreshes a registered job's idle clock so the reaper spares
 // it. Unknown ids are ignored — a reconstruct records its own first access
 // when it registers the rebuilt job.
@@ -776,6 +813,7 @@ func (s *Server) reapSession(sessionID string, session *playback.TranscodeSessio
 	}
 	delete(s.sessions, sessionID)
 	delete(s.lastAccess, sessionID)
+	delete(s.startedAs, sessionID)
 	s.mu.Unlock()
 
 	if err := s.closeSessionOffGPU(session); err != nil {
@@ -825,10 +863,13 @@ func (s *Server) retireGPUSession(close func() error) error {
 // authority before spawning FFmpeg. *noderecipe.Store implements it.
 type recipeStore interface {
 	Get(ctx context.Context, sessionID string) (*playback.RecipeCard, bool)
-	// Delete drops a session's recipe so a buffered/retrying request after a node
-	// restart cannot reconstruct a brand-new ffmpeg for an already-stopped session.
-	// Called only on deliberate teardown; nil-safe and a missing key is a no-op.
-	Delete(ctx context.Context, sessionID string) error
+	// DeleteUnlessMoved drops a session's recipe so a buffered/retrying request
+	// after a node restart cannot reconstruct a brand-new ffmpeg for an
+	// already-stopped session. It keeps, and reports kept, a card that names
+	// another node: the API stores the card of the node a transport moved to
+	// under the same id. Called only on deliberate teardown; nil-safe and a
+	// missing key is a no-op.
+	DeleteUnlessMoved(ctx context.Context, sessionID string, executor playback.RecipeExecutor) (kept bool, err error)
 	// RevokeNode invalidates all recipes issued for a node before a destructive
 	// reload under its legacy URL identity.
 	RevokeNode(ctx context.Context, nodeURL string) error
@@ -1449,7 +1490,8 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		}
 	}
 	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1,
-		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2)
+		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2,
+		playback.TransportFeatureHLSSubtitleRenditionV1)
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
 }
@@ -1702,6 +1744,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		SubtitleTrackIndex: req.SubtitleTrackIndex,
 		SubtitleBurnIn:     req.SubtitleBurnIn,
 		SubtitleCodec:      req.SubtitleCodec,
+		SubtitleRendition:  req.SubtitleRendition,
 		TotalDuration:      req.TotalDuration,
 		FastStart:          true,
 		NodeType:           "transcode",
@@ -1801,10 +1844,12 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 	// The replacement has successfully spawned, so retire the old session and
 	// publish the new one under the same ID.
+	executor := s.recipeExecutor()
 	s.mu.Lock()
 	if old, ok := s.sessions[req.SessionID]; ok {
 		delete(s.sessions, req.SessionID)
 		delete(s.lastAccess, req.SessionID)
+		delete(s.startedAs, req.SessionID)
 		s.mu.Unlock()
 		_ = s.closeSessionOffGPU(old)
 		staleDir := outputDir + ".stale-" + strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -1821,6 +1866,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	s.sessions[req.SessionID] = session
 	published = true
 	s.noteSessionAccessLocked(req.SessionID)
+	s.noteStartedAsLocked(req.SessionID, executor)
 	s.mu.Unlock()
 	unlock()
 	s.activeJobs.Add(1)
@@ -1857,6 +1903,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ThrottleSeconds:       req.ThrottleSeconds,
 		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,
 		KeyframePlaylist:      session.Opts().KeyframePlaylist,
+		SubtitleRendition:     session.HasSubtitleRendition(),
 	})
 }
 
@@ -2152,6 +2199,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 
 	// Yield to a winner registered by another path; close only the duplicate ffmpeg,
 	// never the shared output directory the winner is actively serving.
+	executor := s.recipeExecutor()
 	s.mu.Lock()
 	if existing, ok := s.sessions[sessionID]; ok {
 		s.mu.Unlock()
@@ -2160,6 +2208,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	}
 	s.sessions[sessionID] = session
 	s.noteSessionAccessLocked(sessionID)
+	s.noteStartedAsLocked(sessionID, executor)
 	s.mu.Unlock()
 	s.activeJobs.Add(1)
 	s.armSessionThrottler(session, card.ThrottleSeconds)
@@ -2519,6 +2568,43 @@ func (s *Server) pruneStoppedProgressiveRemuxesLocked(now time.Time) {
 	}
 }
 
+// recipeExecutor names this node to the recipe store, so a teardown can tell
+// a card issued for another node from its own.
+func (s *Server) recipeExecutor() playback.RecipeExecutor {
+	var executor playback.RecipeExecutor
+	if s.nodeRowID != nil {
+		if nodeID, known := s.nodeRowID(); known {
+			executor.NodeID = nodeID
+		}
+	}
+	if s.registeredNodeURL != nil {
+		if nodeURL, known := s.registeredNodeURL(); known {
+			executor.NodeURL = nodeURL
+		}
+	}
+	return executor
+}
+
+// deleteRecipeUnlessMoved deletes the recipe stored under transportID unless
+// it names another node, which happens when a stop reaches this node after the
+// API moved the transport away. startedAs is the identity the job was
+// registered under, if any; a field it lacks comes from the node's current
+// registration.
+func (s *Server) deleteRecipeUnlessMoved(ctx context.Context, transportID string, startedAs playback.RecipeExecutor) error {
+	executor := s.recipeExecutor()
+	if startedAs.NodeID > 0 {
+		executor.NodeID = startedAs.NodeID
+	}
+	if startedAs.NodeURL != "" {
+		executor.NodeURL = startedAs.NodeURL
+	}
+	kept, err := s.recipeStore.DeleteUnlessMoved(ctx, transportID, executor)
+	if kept {
+		slog.InfoContext(ctx, "kept a transcode recipe that names another node", "component", "transcodenode", "session", transportID, "playback_session_id", transportID)
+	}
+	return err
+}
+
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 
@@ -2557,10 +2643,12 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		s.stoppedProgressiveRemuxes[sessionID] = now.Add(playback.MaxTokenTTL)
 	}
 	session, ok := s.sessions[sessionID]
+	startedAs := s.startedAs[sessionID]
 	found := ok || progressiveFound || authorityFound
 	if ok {
 		delete(s.sessions, sessionID)
 		delete(s.lastAccess, sessionID)
+		delete(s.startedAs, sessionID)
 	}
 	s.mu.Unlock()
 	if progressiveFound {
@@ -2586,7 +2674,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	// this process exits.
 	var authorityErr error
 	if s.recipeStore != nil {
-		authorityErr = s.recipeStore.Delete(r.Context(), sessionID)
+		authorityErr = s.deleteRecipeUnlessMoved(r.Context(), sessionID, startedAs)
 		if authorityErr != nil {
 			slog.WarnContext(r.Context(), "delete transcode recipe on stop", "component", "transcodenode", "error", authorityErr, "session", sessionID, "playback_session_id", sessionID)
 		}
@@ -2688,6 +2776,8 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		requestedSegment := -1
 		if n, parseErr := playback.ParseSegmentNumber(name); parseErr == nil {
 			requestedSegment = n
+		} else if n, ok := playback.ParseSubtitleSegmentNumber(name); ok {
+			requestedSegment = n
 		}
 		var reconstructErr error
 		session, reconstructErr = s.reconstructFromToken(r, sessionID, requestedSegment)
@@ -2705,8 +2795,14 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 	}
 	s.attachTelemetrySession(r, sessionID)
 
+	if subtitleSegment, ok := playback.ParseSubtitleSegmentNumber(name); ok {
+		// Subtitle rendition segments never wait out or restart the video
+		// pipeline: they are answered from the cues already on disk.
+		session.ServeSubtitleSegment(w, r, subtitleSegment)
+		return
+	}
 	segmentLease, err := session.OpenSegment(name)
-	if err != nil && err == playback.ErrSegmentNotFound {
+	if errors.Is(err, playback.ErrSegmentNotFound) { //nolint:nestif // pre-existing depth; splitting the segment recovery path is a separate change
 		segNum, parseErr := playback.ParseSegmentNumber(name)
 		if parseErr == nil {
 			now := time.Now()
@@ -2741,7 +2837,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 					"playback_session_id", sessionID,
 				)
 				segmentLease, err = session.WaitForOpenSegment(name, decision.WaitTimeout)
-				if err != nil && err == playback.ErrSegmentNotFound {
+				if errors.Is(err, playback.ErrSegmentNotFound) {
 					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "transcodenode",
 						"segment", name,
 						"requested_segment", segNum,
@@ -2757,7 +2853,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			if err != nil && err == playback.ErrSegmentNotFound && decision.RestartOnTimeout {
+			if errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
 				target, ok, restartErr := s.restartSegmentLocked(
 					r.Context(),
 					sessionID,
@@ -2980,8 +3076,10 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 			unlock()
 			continue
 		}
+		startedAs := s.startedAs[victim.id]
 		delete(s.sessions, victim.id)
 		delete(s.lastAccess, victim.id)
+		delete(s.startedAs, victim.id)
 		s.mu.Unlock()
 
 		_ = s.closeSessionOffGPU(victim.session)
@@ -2995,7 +3093,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 		// concurrent same-ID start cannot have its newly written recipe removed.
 		if s.recipeStore != nil {
 			id := victim.id
-			if err := s.recipeStore.Delete(ctx, id); err != nil {
+			if err := s.deleteRecipeUnlessMoved(ctx, id, startedAs); err != nil {
 				slog.WarnContext(ctx, "delete transcode recipe on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
 			}
 		}
@@ -3025,7 +3123,7 @@ func (s *Server) teardownForForceReload(ctx context.Context, previousRegisteredU
 	for id, request := range progressiveVictims {
 		request.cancel()
 		if s.recipeStore != nil {
-			if err := s.recipeStore.Delete(ctx, id); err != nil {
+			if err := s.deleteRecipeUnlessMoved(ctx, id, playback.RecipeExecutor{}); err != nil {
 				slog.WarnContext(ctx, "delete progressive remux authority on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
 			}
 		}

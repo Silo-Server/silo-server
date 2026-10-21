@@ -129,9 +129,10 @@ type WatchedExporter interface {
 	ExportHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
 
-// singleBatchWatchedExporter bounds one synchronization run to one provider
-// batch. This is used for plugin RPCs with independent per-call deadlines.
-type singleBatchWatchedExporter interface {
+// batchedWatchedExporter caps how many plays one ExportHistory call takes.
+// Plugin providers declare it, since each call is one RPC with its own
+// deadline.
+type batchedWatchedExporter interface {
 	ExportBatchSize() int
 }
 
@@ -515,6 +516,9 @@ type RemoteFavorite struct {
 	SeasonNumber  int
 	EpisodeNumber int
 	FavoritedAt   time.Time
+	// FavoritedAtGuessed marks a FavoritedAt the provider did not send, which
+	// the host filled in with the import time.
+	FavoritedAtGuessed bool
 }
 
 type RemotePlay struct {

@@ -165,7 +165,7 @@ func writeRejectingFFmpeg(t *testing.T) (bin, runLog string) {
 	runLog = filepath.Join(dir, "runs")
 	script := "#!/bin/sh\n" +
 		"echo run >> " + runLog + "\n" +
-		"sleep 1\n" +
+		"sleep 0.2\n" +
 		"echo '[dovi_rpu @ 0x55] Failed to read unit 1 (type 39).' >&2\n" +
 		"exit 0\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {

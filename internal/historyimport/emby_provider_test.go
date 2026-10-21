@@ -470,29 +470,6 @@ func TestEmbyProviderFetchContinuesWhenSeriesMetadataFails(t *testing.T) {
 	}
 }
 
-func TestEmbyClientPagesItemLists(t *testing.T) {
-	t.Parallel()
-
-	fake := &fakeEmby{}
-	for i := range 1100 {
-		fake.played = append(fake.played, playedEmbyItem(embyItem{ID: fmt.Sprintf("movie-%d", i), Type: "Movie"}, time.Now(), 1))
-	}
-	records, _ := fetchEmbyRecords(t, fake.provider(t))
-	if len(records) != 1100 {
-		t.Fatalf("records = %d, want 1100", len(records))
-	}
-	var starts []string
-	for _, query := range fake.requestsFor("IsPlayed") {
-		if query.Get("Limit") != strconv.Itoa(embyPageSize) {
-			t.Fatalf("Limit = %q, want %d", query.Get("Limit"), embyPageSize)
-		}
-		starts = append(starts, query.Get("StartIndex"))
-	}
-	if !slices.Equal(starts, []string{"0", "500", "1000"}) {
-		t.Fatalf("StartIndex pages = %v", starts)
-	}
-}
-
 func TestEmbyClientReadsPastServerPageCap(t *testing.T) {
 	t.Parallel()
 

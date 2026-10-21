@@ -9,20 +9,29 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/net/idna"
 
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
+
+// adminMeilisearchRedirectMessage answers a credentialed Meilisearch check
+// that was redirected to another scheme, host or port, which it does not follow.
+const adminMeilisearchRedirectMessage = "Meilisearch redirected the check to another address. Enter the address it redirects to, such as its https:// URL, and enter the API key again."
 
 const adminTextAIConnectionFailureMessage = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
 
@@ -77,6 +86,10 @@ var newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
 	return llm.NewClient(cfg)
 }
 
+var checkAdminMeilisearchSettingsConnection = func(ctx context.Context, settings catalog.CatalogSearchSettings) error {
+	return catalog.NewCatalogSearchIndexer(nil, nil).CheckConnection(ctx, settings)
+}
+
 func (h *AdminHandler) HandleCheckSettingsConnection(w http.ResponseWriter, r *http.Request) {
 	if h.SettingsRepo == nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Settings store not configured")
@@ -128,7 +141,7 @@ func (h *AdminHandler) runAdminSettingsConnectionCheck(ctx context.Context, kind
 	case "redis":
 		response = checkRedisConnection(ctx, cfg)
 	case "recommendations_embedding":
-		response = checkRecommendationsEmbeddingConnection(ctx, cfg)
+		response = checkRecommendationsEmbeddingConnection(ctx, cfg, effectiveSettings[recommendations.EmbeddingLockSettingKey])
 	case "ai_chat":
 		if cfg.AI.AuthMode == llm.AuthModeChatGPT {
 			if h.ChatGPT == nil {
@@ -307,8 +320,10 @@ func checkMeilisearchConnection(ctx context.Context, settings map[string]string)
 		return connectionCheckResponse{Success: false, Message: "Meilisearch URL is required"}
 	}
 	searchSettings.Provider = catalog.SearchProviderMeilisearch
-	indexer := catalog.NewCatalogSearchIndexer(nil, nil)
-	if err := indexer.CheckConnection(ctx, searchSettings); err != nil {
+	if err := checkAdminMeilisearchSettingsConnection(ctx, searchSettings); err != nil {
+		if errors.Is(err, catalog.ErrMeilisearchCheckRedirected) {
+			return connectionCheckResponse{Message: adminMeilisearchRedirectMessage, safeMessage: adminMeilisearchRedirectMessage}
+		}
 		return connectionCheckResponse{Success: false, Message: err.Error()}
 	}
 	return connectionCheckResponse{Success: true, Message: "Meilisearch connection successful"}
@@ -335,6 +350,7 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 		merged[key] = value
 	}
 
+	storedMeilisearchURL := merged[catalog.SearchSettingMeilisearchURL]
 	var storedAIConfig *config.Config
 	if kind == "ai_chat" || kind == "ai_transcription" {
 		storedAIConfig, err = config.LoadFromDB(merged)
@@ -342,7 +358,20 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 			return nil, err
 		}
 	}
+	// A stored configuration that does not load has no base URL its
+	// embedding token may go to.
+	storedEmbeddingBaseURL := ""
+	if kind == "recommendations_embedding" {
+		if stored, loadErr := config.LoadFromDB(merged); loadErr == nil {
+			storedEmbeddingBaseURL = stored.Recommendations.EmbeddingBaseURL
+		}
+	}
 	for _, key := range req.DirtyKeys {
+		if key == recommendations.EmbeddingLockSettingKey {
+			// The lock is server state the embedding check compares a draft
+			// against, not a value a draft can replace.
+			continue
+		}
 		merged[key] = req.Values[key]
 	}
 	if storedAIConfig != nil {
@@ -352,8 +381,37 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 		}
 		protectAIConnectionCheckSecrets(kind, req, storedAIConfig, draftAIConfig, merged)
 	}
+	if kind == "recommendations_embedding" {
+		protectEmbeddingConnectionCheckSecret(req, storedEmbeddingBaseURL, merged)
+	}
+	if kind == "meilisearch" &&
+		(storedMeilisearchURL == "" || endpointAuthority(storedMeilisearchURL) != endpointAuthority(merged[catalog.SearchSettingMeilisearchURL])) &&
+		!hasExplicitDraftSecret(req, catalog.SearchSettingMeilisearchAPIKey) {
+		merged[catalog.SearchSettingMeilisearchAPIKey] = ""
+	}
 
 	return merged, nil
+}
+
+// embeddingTokenSettingKeys hold the embedding provider's token: the token,
+// then the legacy OpenAI key it falls back to.
+var embeddingTokenSettingKeys = []string{"recommendations.embedding_auth_token", "recommendations.openai_api_key"}
+
+// protectEmbeddingConnectionCheckSecret sends the stored embedding token only
+// to the base URL it was saved for (same scheme, host and port). A draft that
+// points the check elsewhere, by its base URL or a legacy provider setting,
+// is checked with the token it carries itself, or none, so a check cannot
+// hand the saved token to another server.
+func protectEmbeddingConnectionCheckSecret(req adminSettingsConnectionCheckRequest, storedBaseURL string, settings map[string]string) {
+	draft, err := config.LoadFromDB(settings)
+	if err == nil && storedBaseURL != "" && endpointAuthority(draft.Recommendations.EmbeddingBaseURL) == endpointAuthority(storedBaseURL) {
+		return
+	}
+	for _, key := range embeddingTokenSettingKeys {
+		if !hasExplicitDraftSecret(req, key) {
+			settings[key] = ""
+		}
+	}
 }
 
 func protectAIConnectionCheckSecrets(
@@ -401,7 +459,30 @@ func endpointAuthority(rawURL string) string {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return strings.ToLower(trimmed)
 	}
-	return strings.ToLower(parsed.Scheme + "://" + parsed.Host)
+	scheme := strings.ToLower(parsed.Scheme)
+	// Compare the name net/http dials. It converts a non-ASCII host with IDNA
+	// lookup, which Unicode lowercasing does not match: "İ" lowercases to "i"
+	// but dials a punycode name. A host IDNA rejects equals only itself.
+	host := parsed.Hostname()
+	if strings.ContainsFunc(host, func(r rune) bool { return r >= utf8.RuneSelf }) {
+		ascii, idnaErr := idna.Lookup.ToASCII(host)
+		if idnaErr != nil {
+			return trimmed
+		}
+		host = ascii
+	}
+	host = strings.ToLower(host)
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	port := parsed.Port()
+	if number, _ := strconv.Atoi(port); (scheme == eventsSchemeHTTPS && number == 443) || (scheme == eventsSchemeHTTP && number == 80) {
+		port = ""
+	}
+	if port != "" {
+		host += ":" + port
+	}
+	return scheme + "://" + host
 }
 
 func checkS3PublicConnection(ctx context.Context, cfg *config.Config) connectionCheckResponse {
@@ -558,21 +639,7 @@ func checkRedisConnection(ctx context.Context, cfg *config.Config) connectionChe
 		return connectionCheckResponse{Success: false, Message: "Redis URL is required."}
 	}
 
-	client, err := cache.NewRedisClientForRole(cfg.Redis, "checks")
-	if err != nil {
-		return connectionCheckResponse{
-			Success: false,
-			Message: fmt.Sprintf("Redis connection check failed: %v", err),
-		}
-	}
-	if client == nil {
-		return connectionCheckResponse{Success: false, Message: "Redis URL is required."}
-	}
-	defer func() { _ = cache.CloseRedisClient(client) }()
-
-	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := client.Ping(checkCtx).Err(); err != nil {
+	if err := probeRedis(ctx, cfg.Redis); err != nil {
 		return connectionCheckResponse{
 			Success: false,
 			Message: fmt.Sprintf("Redis connection check failed: %v", err),
@@ -585,9 +652,52 @@ func checkRedisConnection(ctx context.Context, cfg *config.Config) connectionChe
 	}
 }
 
+// errRedisChannelsRefused wraps the error Redis answers a subscription to the
+// event bus channels with.
+var errRedisChannelsRefused = errors.New("redis refused a subscription to Silo's event channels")
+
+// errRedisURLUnreadable wraps the error a redis.url the Redis clients cannot
+// read gives, such as a bare host:port an older build saved.
+var errRedisURLUnreadable = errors.New("redis URL cannot be read")
+
+// probeRedis does what a starting server needs from the Redis cfg names, with
+// the client Silo's services use: it connects, sends a PING and subscribes to
+// the event bus channels. Connecting selects the database number, so a number
+// the server does not have fails as well, and the subscription fails for a
+// user whose ACL does not grant the channels. The Redis connection check and a
+// save that changes the connection both run it.
+var probeRedis = func(ctx context.Context, cfg config.RedisConfig) error {
+	// The deadline client stops waiting when the check's time is up, even
+	// for a URL whose read_timeout disables the socket timeout.
+	client, err := cache.NewDeadlineRedisClientForRole(cfg, "checks")
+	if err != nil {
+		return fmt.Errorf("%w: %w", errRedisURLUnreadable, err)
+	}
+	if client == nil {
+		return errors.New("redis URL is required")
+	}
+	defer func() { _ = cache.CloseRedisClient(client) }()
+
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := client.Ping(checkCtx).Err(); err != nil {
+		return err
+	}
+	if err := cache.CheckEventBusChannels(checkCtx, client); err != nil {
+		return fmt.Errorf("%w: %w", errRedisChannelsRefused, err)
+	}
+	return nil
+}
+
+// checkRecommendationsEmbeddingConnection embeds a test string and checks
+// that Silo can store what the model returns and that the stored embedding
+// lock (rawLock, empty when none) accepts the configuration. Its failure
+// messages are authored here and never quote the base URL, so the v2 boundary
+// returns them as they are.
 func checkRecommendationsEmbeddingConnection(
 	ctx context.Context,
 	cfg *config.Config,
+	rawLock string,
 ) connectionCheckResponse {
 	if strings.TrimSpace(cfg.Recommendations.EmbeddingBaseURL) == "" {
 		return connectionCheckResponse{
@@ -610,15 +720,35 @@ func checkRecommendationsEmbeddingConnection(
 
 	checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	if _, err := client.Embed(checkCtx, []string{"silo connection test"}); err != nil {
+	vectors, err := client.Embed(checkCtx, []string{"silo connection test"})
+	if err != nil {
 		return connectionCheckResponse{
 			Success: false,
 			Message: fmt.Sprintf("Embedding connection check failed: %v", err),
 		}
 	}
+	failed := func(message string) connectionCheckResponse {
+		return connectionCheckResponse{Success: false, Message: message, safeMessage: message}
+	}
+	if len(vectors) == 0 || len(vectors[0]) == 0 {
+		return failed("The embedding provider returned no vector for the test text.")
+	}
+	dimensions := len(vectors[0])
+	if dimensions > embeddingvectors.CanonicalDimensions {
+		return failed(fmt.Sprintf("The model returns %d dimensions; Silo stores at most %d.", dimensions, embeddingvectors.CanonicalDimensions))
+	}
+	lock, err := recommendations.ParseEmbeddingLock(rawLock)
+	if err != nil {
+		return failed("The stored embedding lock cannot be read. Reset embeddings to clear it.")
+	}
+	if lock != nil {
+		if conflict := recommendations.DescribeEmbeddingLockConflict(*lock, cfg.Recommendations.EmbeddingBaseURL, cfg.Recommendations.EmbeddingModel, dimensions); conflict != "" {
+			return failed(conflict)
+		}
+	}
 
 	return connectionCheckResponse{
 		Success: true,
-		Message: "Embedding connection successful.",
+		Message: fmt.Sprintf("Embedding connection successful. The model returns %d dimensions.", dimensions),
 	}
 }

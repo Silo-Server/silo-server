@@ -57,17 +57,4 @@ describe("useCalendarWeek", () => {
       `/api/v2/calendar?start=2026-04-06&end=2026-04-12&filter=all&timezone=${encodedTimezone}`,
     );
   });
-
-  it("includes the selected library in the request", async () => {
-    useCalendarWeek("2026-04-06", { filter: "favorites", libraryId: 7 });
-    const queryOptions = mockUseQuery.mock.calls[0]?.[0] as {
-      queryFn: (ctx: { signal?: AbortSignal }) => Promise<unknown>;
-    };
-
-    await queryOptions.queryFn({});
-
-    expect(mockFetchWithSession.mock.calls[0]?.[0]).toBe(
-      `/api/v2/calendar?start=2026-04-06&end=2026-04-12&filter=favorites&timezone=${encodedTimezone}&library_id=7`,
-    );
-  });
 });

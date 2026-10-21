@@ -75,7 +75,7 @@ export const RIBBON_OVERLAYS: readonly OverlayDef[] = [
     defaultPosition: "top-left",
     defaultEnabled: false,
     iconCapable: true,
-    introducedInManifest: 18,
+    introducedInManifest: 23,
     getValue: (d) => formatAvailability(d.availability_have, d.availability_total),
     getIcon: (d) =>
       d.availability_have != null &&

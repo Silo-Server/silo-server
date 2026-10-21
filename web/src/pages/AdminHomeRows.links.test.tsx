@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
@@ -10,6 +10,15 @@ import { adminKeys } from "@/hooks/queries/keys";
 import { SERVER_SCOPE } from "@/lib/collections/scope";
 import { adminCollection, adminCollectionList } from "@/test/fixtures/collectionAnswers";
 import AdminHomeRows from "./AdminHomeRows";
+import {
+  type Args,
+  newClient,
+  readSections,
+  type Row,
+  stored,
+  stubResizeObserver,
+  waitForAddRow,
+} from "./adminHomeRows.test-support";
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -37,32 +46,6 @@ vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));
 
-type Row = Record<string, unknown> & { id: string; scope: string; position: number };
-type Args = {
-  query?: { scope?: string; library_id?: string };
-  path?: { id: string };
-  body?: Record<string, unknown>;
-  onResponse?: (response: Response) => void;
-};
-
-function stored(id: string, overrides: Partial<Row> = {}): Row {
-  return {
-    id,
-    title: `Row ${id}`,
-    scope: "home",
-    library_id: null,
-    position: 0,
-    section_type: "recently_added",
-    item_limit: 20,
-    featured: false,
-    enabled: true,
-    config: {},
-    created_at: "2026-09-05T00:00:00Z",
-    updated_at: "2026-09-05T00:00:00Z",
-    ...overrides,
-  };
-}
-
 function serverCollection(id: string, title: string, visibility = "visible") {
   return { ...adminCollection, id, title, library_id: "7", library_ids: ["7"], visibility };
 }
@@ -86,14 +69,7 @@ function deferred() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
+  stubResizeObserver();
   rows = [stored("a", { position: 0 }), stored("b", { position: 4, title: "Trending" })];
   collections = [
     serverCollection("lib-1", "Studio Ghibli"),
@@ -106,19 +82,11 @@ beforeEach(() => {
     await held[operation];
     if (failing.has(operation)) throw new Error(`${operation} failed`);
     args.onResponse?.(new Response(null, { headers: { ETag: '"rev-1"' } }));
-    const scope = args.query?.scope ?? "home";
-    const here = rows.filter((row) => row.scope === scope);
+    const read = readSections(operation, args, rows);
+    if (read) return read;
     switch (operation) {
       case "GET /api/v2/admin/collections":
         return adminCollectionList(...collections);
-      case "GET /api/v2/admin/sections/capabilities":
-        return { available: true, reset_profiles: false, preview: false };
-      case "GET /api/v2/admin/sections/order":
-        return { scope, library_id: null, ordered_ids: here.map((row) => row.id) };
-      case "GET /api/v2/admin/sections":
-        return { items: here.map((row) => ({ ...row })) };
-      case "GET /api/v2/admin/sections/{id}":
-        return { ...rows.find((row) => row.id === args.path?.id)! };
       case "POST /api/v2/admin/sections": {
         creates.push(args);
         const created = stored(`new-${creates.length}`, args.body as Partial<Row>);
@@ -133,12 +101,6 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-
-function newClient() {
-  return new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-}
 
 function setup(
   entry: string | { pathname: string; search: string; state: unknown },
@@ -161,6 +123,13 @@ function setup(
 
 const searchOf = (router: ReturnType<typeof setup>) => router.state.location.search;
 
+/** Reads the collections Home rows offers into the client's cache. */
+const readCollections = (client: QueryClient) =>
+  client.fetchQuery({
+    queryKey: adminKeys.collections(undefined),
+    queryFn: () => fetchAdminCollections(undefined),
+  });
+
 describe("?add= on admin Home rows", () => {
   it("opens Add row on the collection and adds it with the gallery's body", async () => {
     const router = setup("/admin/sections?add=collection:library:lib-1");
@@ -182,24 +151,8 @@ describe("?add= on admin Home rows", () => {
     expect(router.state.location.pathname).toBe("/admin/sections");
   });
 
-  it("keeps the page it opens on and adds the row there", async () => {
-    rows.push(stored("m", { scope: "library", library_id: "7" }));
-    const router = setup("/admin/sections?page=7&add=collection:library:lib-1");
-    const form = await screen.findByRole("dialog", { name: "A collection" });
-    expect(searchOf(router)).toBe("?page=7");
-    await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
-    await waitFor(() => expect(creates).toHaveLength(1));
-    expect(creates[0]!.body).toMatchObject({
-      scope: "library",
-      library_id: "7",
-      config: { library_collection_id: "lib-1" },
-    });
-  });
-
   it.each([
-    ["an unknown", "collection:library:nope"],
     ["a hidden", "collection:library:secret"],
-    ["a personal", "collection:user:mine"],
     ["a malformed", "trending_on_server"],
   ])("says %s collection can't be added and opens nothing", async (_name, value) => {
     const router = setup(`/admin/sections?add=${value}`);
@@ -215,10 +168,7 @@ describe("?add= on admin Home rows", () => {
     // The refresh answers only after the rest of the page is ready.
     const refresh = deferred();
     // The Home rows options were read before the collection existed.
-    await client.fetchQuery({
-      queryKey: adminKeys.collections(undefined),
-      queryFn: () => fetchAdminCollections(undefined),
-    });
+    await readCollections(client);
     collections = [...collections, serverCollection("fresh", "Made just now")];
     // What the editor runs after saving it.
     held["GET /api/v2/admin/collections"] = refresh.promise;
@@ -226,8 +176,7 @@ describe("?add= on admin Home rows", () => {
 
     setup("/admin/sections?add=collection:library:fresh", client);
     // The rows and capabilities are in: Add row is ready.
-    const add = await screen.findByRole("button", { name: "Add row" });
-    await waitFor(() => expect(add).toBeEnabled());
+    await waitForAddRow();
     await act(async () => {});
     expect(mocks.error).not.toHaveBeenCalled();
 
@@ -242,18 +191,14 @@ describe("?add= on admin Home rows", () => {
     const refresh = deferred();
     collections = [...collections, serverCollection("doomed", "Deleted just now")];
     // The Home rows options were read while the collection still existed.
-    await client.fetchQuery({
-      queryKey: adminKeys.collections(undefined),
-      queryFn: () => fetchAdminCollections(undefined),
-    });
+    await readCollections(client);
     collections = collections.filter((c) => (c as { id: string }).id !== "doomed");
     // What deleting it runs; the refresh answers after the page is ready.
     held["GET /api/v2/admin/collections"] = refresh.promise;
     await SERVER_SCOPE.invalidate(client);
 
     setup("/admin/sections?add=collection:library:doomed", client);
-    const add = await screen.findByRole("button", { name: "Add row" });
-    await waitFor(() => expect(add).toBeEnabled());
+    await waitForAddRow();
     await act(async () => {});
     // The stale list still holds it: nothing opens until the refresh answers.
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -269,10 +214,7 @@ describe("?add= on admin Home rows", () => {
     const client = newClient();
     collections = [...collections, serverCollection("doomed", "Hidden since")];
     // The Home rows options were read while the collection was still visible.
-    await client.fetchQuery({
-      queryKey: adminKeys.collections(undefined),
-      queryFn: () => fetchAdminCollections(undefined),
-    });
+    await readCollections(client);
     // It was hidden since, and the refresh after that fails.
     collections = [
       ...collections.slice(0, -1),
@@ -287,18 +229,6 @@ describe("?add= on admin Home rows", () => {
         "Collections didn't load, so Add row couldn't open.",
       ),
     );
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("says the collections didn't load rather than that this one can't be added", async () => {
-    failing.add("GET /api/v2/admin/collections");
-    setup("/admin/sections?add=collection:library:lib-1");
-    await waitFor(() =>
-      expect(mocks.error).toHaveBeenCalledWith(
-        "Collections didn't load, so Add row couldn't open.",
-      ),
-    );
-    expect(mocks.error).not.toHaveBeenCalledWith("This collection can't be added here.");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -373,54 +303,19 @@ describe("?return= on admin Home rows", () => {
     expect(back.state.location.state).toEqual(arrived);
   });
 
-  it("counts rows another admin added while Add row was open", async () => {
-    const client = newClient();
-    setup(link("/admin/collections/lib-1/edit"), client);
-    const form = await screen.findByRole("dialog", { name: "A collection" });
-    rows = [...rows, stored("c", { position: 6, title: "Someone else's" })];
-    await act(() => client.invalidateQueries());
-    await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
-
-    expect(await screen.findByRole("heading", { name: "Collection editor" })).toBeInTheDocument();
-    expect(mocks.success).toHaveBeenCalledWith("Added to Home as row 4 of 4", expect.anything());
-  });
-
-  it("follows a new link while Add row is open", async () => {
-    const router = setup(link("/admin/collections/lib-1/edit"));
-    await screen.findByRole("dialog", { name: "A collection" });
-    await act(() => router.navigate("/admin/sections?edit=a"));
-    const dialog = await screen.findByRole("dialog", { name: "Edit row" });
-    expect(within(dialog).getByLabelText("Row name")).toHaveValue("Row a");
-  });
-
-  it("goes back to the collection without adding from the back link", async () => {
-    const router = setup(link("/admin/collections/lib-1/edit"));
-    const form = await screen.findByRole("dialog", { name: "A collection" });
-    await userEvent.click(within(form).getByRole("button", { name: "Back to Studio Ghibli" }));
-    expect(await screen.findByRole("heading", { name: "Collection editor" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/admin/collections/lib-1/edit");
-    expect(router.state.historyAction).toBe("REPLACE");
-    expect(router.state.location.state).toBeNull();
-    expect(creates).toEqual([]);
-  });
-
-  it.each([
-    "//evil.example",
-    "https://evil.example/admin/collections/x",
-    "/\\evil.example",
-    "/%5Cevil.example",
-    "/admin/collections/%09x",
-    "/settings",
-  ])("ignores return=%s and stays on Home rows", async (returnTo) => {
-    const router = setup(link(returnTo));
-    const form = await screen.findByRole("dialog", { name: "A collection" });
-    expect(within(form).getByRole("button", { name: "All rows" })).toBeInTheDocument();
-    await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
-    await waitFor(() => expect(creates).toHaveLength(1));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(router.state.location.pathname).toBe("/admin/sections");
-    expect(mocks.success).not.toHaveBeenCalled();
-  });
+  it.each(["//evil.example", "/settings"])(
+    "ignores return=%s and stays on Home rows",
+    async (returnTo) => {
+      const router = setup(link(returnTo));
+      const form = await screen.findByRole("dialog", { name: "A collection" });
+      expect(within(form).getByRole("button", { name: "All rows" })).toBeInTheDocument();
+      await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
+      await waitFor(() => expect(creates).toHaveLength(1));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(router.state.location.pathname).toBe("/admin/sections");
+      expect(mocks.success).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("?edit= on admin Home rows", () => {

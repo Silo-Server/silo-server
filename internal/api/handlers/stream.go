@@ -64,6 +64,10 @@ type StreamHandler struct {
 	// PlaybackHandler's); an aborted session's attempt row is marked stopped
 	// through it. May be nil (tests / minimal setups).
 	PlanStoreV3 playback.PlanStoreV3
+	// SessionRecipeStore is the PlaybackHandler's store of header-authenticated
+	// session recipes (same instance), the only reconstruction source for a
+	// session whose URLs carry no stream token. May be nil.
+	SessionRecipeStore sessionRecipeStoreV3
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
@@ -150,9 +154,20 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		// let stale recipe routing override the current session, and do not revive
 		// the stale recipe if the live session disappears during this request.
 		loadCard = nil
-	} else if errors.Is(err, playback.ErrSessionNotFound) && !requireNativeRecipeAPIEgressV3(w, card) {
-		return
-	} else if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+	} else if errors.Is(err, playback.ErrSessionNotFound) {
+		if loadCard == nil {
+			// A header-authenticated session carries no token; its recipe is the
+			// server-side recovery card.
+			var recipeErr error
+			if loadCard, recipeErr = h.storedSessionRecipeV3(r.Context(), sessionID, userID); recipeErr != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+				return
+			}
+		}
+		if !requireNativeRecipeAPIEgressV3(w, loadCard) {
+			return
+		}
+	} else {
 		// Do not turn an inconsistent backend read into authority to reconstruct
 		// from a recipe whose route was never checked against a clean miss.
 		loadCard = nil
@@ -295,6 +310,12 @@ func (h *StreamHandler) loadSidecarSession(ctx context.Context, reference, sessi
 		loadCard = nil
 	} else if !errors.Is(err, playback.ErrSessionNotFound) {
 		loadCard = nil
+	} else if loadCard == nil {
+		// A header-authenticated session's sidecar URLs carry no reference either.
+		var recipeErr error
+		if loadCard, recipeErr = h.storedSessionRecipeV3(ctx, sessionID, userID); recipeErr != nil {
+			return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+		}
 	}
 	session, status, _ := h.TM.LoadOrReconstructSessionDetail(ctx, h.sessionMgr.GetSession, sessionID, userID, loadCard)
 	switch status {
@@ -810,6 +831,7 @@ func (h *StreamHandler) abortPlaybackSession(ctx context.Context, session *playb
 	}
 	h.finalizeSessionAbort(ctx, session, true, "stream_abort")
 	markAttemptStoppedServerSide(ctx, h.PlanStoreV3, h.StreamDeny, session.ID)
+	deleteSessionRecipeV3(ctx, h.SessionRecipeStore, session.ID)
 }
 
 func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session *playback.Session, file *models.MediaFile, err error) {

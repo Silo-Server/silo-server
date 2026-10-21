@@ -26,6 +26,7 @@ import {
 } from "@/components/UserPolicyFields";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -223,6 +224,61 @@ function AdminUsersPage() {
           onError={setActionError}
         />
       )}
+      <PageHeader
+        title="Users"
+        subtitle="Manage access, defaults, and invite flow for the people using Silo."
+        actions={
+          <>
+            {serverSettings !== undefined && (
+              <Link
+                to="/admin/settings/sign-in"
+                className="inline-flex w-fit items-center gap-1 hover:opacity-80"
+              >
+                <Badge
+                  variant={signupsEnabled ? "outline" : "secondary"}
+                  className={
+                    signupsEnabled
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+                      : undefined
+                  }
+                >
+                  {signupsEnabled ? "Public signups on" : "Public signups off"}
+                  <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                </Badge>
+              </Link>
+            )}
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/admin/access-groups">
+                <Settings2 className="mr-1 h-4 w-4" /> Access Groups
+              </Link>
+            </Button>
+            <Dialog
+              open={dialogOpen}
+              onOpenChange={(open) => {
+                if (formBusy.current || (open && !available)) return;
+                setDialogOpen(open);
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="mr-1 h-4 w-4" /> Add User
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Create User</DialogTitle>
+                </DialogHeader>
+                <CreateUserForm
+                  onBusy={(value) => {
+                    formBusy.current = value;
+                  }}
+                  onClose={() => setDialogOpen(false)}
+                />
+              </DialogContent>
+            </Dialog>
+          </>
+        }
+      />
       {actionError && <p role="alert">{actionError}</p>}
       {usersQuery.isError && (
         <div role="alert">
@@ -231,63 +287,6 @@ function AdminUsersPage() {
         </div>
       )}
       {!available && <p role="status">User administration is unavailable.</p>}
-      <div className="page-header">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Users</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Manage access, defaults, and invite flow for the people using Silo.
-          </p>
-          {serverSettings !== undefined && (
-            <Link
-              to="/admin/settings/general"
-              className="inline-flex w-fit items-center gap-1 hover:opacity-80"
-            >
-              <Badge
-                variant={signupsEnabled ? "outline" : "secondary"}
-                className={
-                  signupsEnabled
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
-                    : undefined
-                }
-              >
-                {signupsEnabled ? "Public signups on" : "Public signups off"}
-                <ArrowRight className="h-3 w-3" aria-hidden="true" />
-              </Badge>
-            </Link>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/admin/access-groups">
-              <Settings2 className="mr-1 h-4 w-4" /> Access Groups
-            </Link>
-          </Button>
-          <Dialog
-            open={dialogOpen}
-            onOpenChange={(open) => {
-              if (formBusy.current || (open && !available)) return;
-              setDialogOpen(open);
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="mr-1 h-4 w-4" /> Add User
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Create User</DialogTitle>
-              </DialogHeader>
-              <CreateUserForm
-                onBusy={(value) => {
-                  formBusy.current = value;
-                }}
-                onClose={() => setDialogOpen(false)}
-              />
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList variant="line" className="border-border w-full justify-start border-b">

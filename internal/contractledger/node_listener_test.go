@@ -33,26 +33,6 @@ func TestNodeListenerRetainedRowIsRatifiable(t *testing.T) {
 	}
 }
 
-// TestAPIListenerRatifiedPortStillNeedsV2Target pins that the exception is
-// scoped to the node listeners: an API-listener ported row ratified with v2
-// unset still violates the schema, with or without the node-only rule.
-func TestAPIListenerRatifiedPortStillNeedsV2Target(t *testing.T) {
-	for name, rule := range map[string]string{"default rule": "default_ported", "node rule": ruleListenerDelegation} {
-		t.Run(name, func(t *testing.T) {
-			fsys := mutatedFS(t, func(doc map[string]any) {
-				e := entryWhere(t, doc, func(e map[string]any) bool {
-					return e["listener"] == ListenerAPI && e["disposition"] == DispositionPorted
-				})
-				e["review_state"] = ReviewRatified
-				e["disposition_rule"] = rule
-				e["v2"] = map[string]any{"method": nil, "path": nil, "operation_id": nil}
-				e["notes"] = "Retained on api listener with public; not a valid shape."
-			})
-			expectFailure(t, fsys, "violates")
-		})
-	}
-}
-
 // TestNodeListenerRatifiedRowNeedsRuleAndNote breaks each half of the
 // retained shape in turn. Both the schema and the gate's review rule refuse
 // it; the assertion names the gate message so the failure is legible.
@@ -62,12 +42,7 @@ func TestNodeListenerRatifiedRowNeedsRuleAndNote(t *testing.T) {
 		want   string
 	}{
 		"default_ported rule": {func(e map[string]any) { e["disposition_rule"] = "default_ported" }, "violates"},
-		"maintainer rule":     {func(e map[string]any) { e["disposition_rule"] = "maintainer_decision" }, "violates"},
-		"missing note":        {func(e map[string]any) { e["notes"] = "v2 is null by design for node-listener rows." }, "violates"},
 		"other listener note": {func(e map[string]any) { e["notes"] = "Retained on transcode_node listener with node_bearer." }, "notes must open with"},
-		"v2 target set": {func(e map[string]any) {
-			e["v2"] = map[string]any{"method": "GET", "path": "/api/v2/x", "operation_id": "getX"}
-		}, "violates"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

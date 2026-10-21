@@ -1,6 +1,7 @@
 import { useAuth } from "@/hooks/useAuth";
 import { notificationScope } from "@/api/v2/notifications";
 import { Fragment, useState, useRef } from "react";
+import { useSearchParams } from "react-router";
 import { Bell, BellOff, Check, CheckCheck, Loader2, Settings2 } from "lucide-react";
 import type { AppNotification } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -18,10 +19,13 @@ import {
   useUpdateNotificationPreferences,
 } from "@/hooks/queries/notifications";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { decodeThumbhash } from "@/lib/thumbhash";
 import { preferredDateLocale } from "@/lib/datetime";
 import { requestDetailHref } from "@/lib/mediaRequests";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { NotifiedSeriesList } from "@/components/notifications/NotifiedSeriesList";
+import { useNotificationCapability } from "@/hooks/queries/notificationWebhooks";
+import { NotificationPoster } from "@/components/notifications/NotificationPoster";
+import { NOTIFICATION_REASONS } from "@/components/notifications/reasons";
 
 function formatNotificationTime(value: string): string {
   const date = new Date(value);
@@ -113,20 +117,7 @@ function notificationHref(notification: AppNotification): string | null {
 
 function reasonLabels(notification: AppNotification): string[] {
   const flags = notification.reason_flags ?? {};
-  const labels: string[] = [];
-  if (flags.favorite) {
-    labels.push("Favorite");
-  }
-  if (flags.watchlist) {
-    labels.push("Watchlist");
-  }
-  if (flags.continue_watching) {
-    labels.push("Continue Watching");
-  }
-  if (flags.next_up) {
-    labels.push("Next Up");
-  }
-  return labels;
+  return NOTIFICATION_REASONS.filter((reason) => flags[reason.key]).map((reason) => reason.label);
 }
 
 function NotificationRow({
@@ -137,34 +128,11 @@ function NotificationRow({
   onMarkRead: (id: string) => void;
 }) {
   const unread = !notification.read_at;
-  const thumbhashUrl = notification.poster_thumbhash
-    ? decodeThumbhash(notification.poster_thumbhash)
-    : "";
   const detailHref = notificationHref(notification);
 
   const body = (
     <>
-      <div
-        className="bg-muted relative h-16 w-11 shrink-0 overflow-hidden rounded-md"
-        style={
-          thumbhashUrl
-            ? {
-                backgroundImage: `url(${thumbhashUrl})`,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-              }
-            : undefined
-        }
-      >
-        {notification.poster_url && (
-          <img
-            src={notification.poster_url}
-            alt=""
-            className="h-full w-full object-cover"
-            loading="lazy"
-          />
-        )}
-      </div>
+      <NotificationPoster url={notification.poster_url} thumbhash={notification.poster_thumbhash} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           {unread && (
@@ -237,7 +205,16 @@ function NotificationRow({
   );
 }
 
-function NotificationPreferencesPopover() {
+function NotificationPreferencesPopover({
+  open,
+  onOpenChange,
+  onSeeSeries,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Opens the Series view; absent when the server has none. */
+  onSeeSeries?: () => void;
+}) {
   const { data: prefs, isLoading, refetch } = useNotificationPreferences();
   const updatePrefs = useUpdateNotificationPreferences();
 
@@ -279,7 +256,7 @@ function NotificationPreferencesPopover() {
   ];
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm">
           <Settings2 className="mr-1.5 h-4 w-4" />
@@ -322,6 +299,22 @@ function NotificationPreferencesPopover() {
                 </div>
               </Fragment>
             ))}
+            {onSeeSeries && (
+              <>
+                <Separator />
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onSeeSeries();
+                  }}
+                >
+                  See which series notify you
+                </Button>
+              </>
+            )}
           </div>
         )}
       </PopoverContent>
@@ -336,6 +329,12 @@ export default function Notifications() {
 function NotificationsInbox() {
   useDocumentTitle("Notifications");
   const [statusFilter, setStatusFilter] = useState<"all" | "unread">("all");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const { data: capability } = useNotificationCapability();
+  const seriesAvailable = capability?.series?.available === true;
+  const showSeries = seriesAvailable && searchParams.get("view") === "series";
+  const openSeries = seriesAvailable ? () => setSearchParams({ view: "series" }) : undefined;
   const list = useNotifications(statusFilter);
   const { data: unreadCount } = useUnreadNotificationCount();
   const markRead = useMarkNotificationRead();
@@ -364,7 +363,7 @@ function NotificationsInbox() {
           Notifications
         </h1>
         <div className="ml-auto flex items-center gap-2">
-          {(unreadCount ?? 0) > 0 && (
+          {!showSeries && (unreadCount ?? 0) > 0 && (
             <Button
               variant="outline"
               size="sm"
@@ -375,7 +374,11 @@ function NotificationsInbox() {
               Mark all read
             </Button>
           )}
-          <NotificationPreferencesPopover />
+          <NotificationPreferencesPopover
+            open={preferencesOpen}
+            onOpenChange={setPreferencesOpen}
+            onSeeSeries={openSeries}
+          />
         </div>
       </div>
 
@@ -383,79 +386,101 @@ function NotificationsInbox() {
         {(["all", "unread"] as const).map((status) => (
           <Button
             key={status}
-            variant={statusFilter === status ? "secondary" : "ghost"}
+            variant={!showSeries && statusFilter === status ? "secondary" : "ghost"}
             size="sm"
-            onClick={() => setStatusFilter(status)}
+            onClick={() => {
+              setStatusFilter(status);
+              if (showSeries) setSearchParams({}, { replace: true });
+            }}
           >
             {status === "all" ? "All" : `Unread${unreadCount ? ` (${unreadCount})` : ""}`}
           </Button>
         ))}
+        {openSeries && (
+          <Button variant={showSeries ? "secondary" : "ghost"} size="sm" onClick={openSeries}>
+            Series
+          </Button>
+        )}
       </div>
 
-      {markAllRead.isError && (
-        <p role="alert">
-          Could not mark the displayed notifications read.{" "}
-          <Button
-            onClick={() => {
-              void list.restart().then(() => markAllRead.reset());
-            }}
-          >
-            Reload inbox
-          </Button>{" "}
-          before trying again.
-        </p>
-      )}
-      {list.isError && (
-        <div role="alert">
-          Could not load notifications.{" "}
-          <Button
-            onClick={() => {
-              void list.restart().then(() => markAllRead.reset());
-            }}
-          >
-            Reload notifications
-          </Button>
-        </div>
-      )}
-      {list.isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <Skeleton key={index} className="h-20 w-full rounded-xl" />
-          ))}
-        </div>
-      ) : notifications.length === 0 && !list.isError ? (
-        <div className="text-muted-foreground flex flex-col items-center gap-3 py-20 text-center">
-          <BellOff className="h-10 w-10 opacity-50" />
-          <div className="text-sm">
-            {statusFilter === "unread" ? "No unread notifications" : "No notifications yet"}
-          </div>
-          <div className="max-w-sm text-xs">
-            You will be notified here when new episodes arrive for series you favorite, watchlist,
-            or are watching.
-          </div>
-        </div>
+      {showSeries ? (
+        <NotifiedSeriesList
+          onOpenPreferences={() => setPreferencesOpen(true)}
+          canMute={capability?.series?.mute === true}
+        />
       ) : (
         <>
-          <ul className="list-none space-y-1">
-            {notifications.map((notification) => (
-              <NotificationRow
-                key={notification.id}
-                notification={notification}
-                onMarkRead={(id) => markRead.mutate(id)}
-              />
-            ))}
-          </ul>
-          {list.hasNextPage && (
-            <div className="mt-6 flex justify-center">
+          {markAllRead.isError && (
+            <p role="alert">
+              Could not mark the displayed notifications read.{" "}
               <Button
-                variant="outline"
-                onClick={() => list.fetchNextPage()}
-                disabled={list.isFetchingNextPage}
+                onClick={() => {
+                  void list.restart().then(() => markAllRead.reset());
+                }}
               >
-                {list.isFetchingNextPage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Load more
+                Reload inbox
+              </Button>{" "}
+              before trying again.
+            </p>
+          )}
+          {list.isError && (
+            <div role="alert">
+              Could not load notifications.{" "}
+              <Button
+                onClick={() => {
+                  void list.restart().then(() => markAllRead.reset());
+                }}
+              >
+                Reload notifications
               </Button>
             </div>
+          )}
+          {list.isLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <Skeleton key={index} className="h-20 w-full rounded-xl" />
+              ))}
+            </div>
+          ) : notifications.length === 0 && !list.isError ? (
+            <div className="text-muted-foreground flex flex-col items-center gap-3 py-20 text-center">
+              <BellOff className="h-10 w-10 opacity-50" />
+              <div className="text-sm">
+                {statusFilter === "unread" ? "No unread notifications" : "No notifications yet"}
+              </div>
+              <div className="max-w-sm text-xs">
+                You will be notified here when new episodes arrive for series you favorite,
+                watchlist, or are watching.
+              </div>
+              {openSeries && (
+                <Button variant="link" size="sm" onClick={openSeries}>
+                  See which series can notify you
+                </Button>
+              )}
+            </div>
+          ) : (
+            <>
+              <ul className="list-none space-y-1">
+                {notifications.map((notification) => (
+                  <NotificationRow
+                    key={notification.id}
+                    notification={notification}
+                    onMarkRead={(id) => markRead.mutate(id)}
+                  />
+                ))}
+              </ul>
+              {list.hasNextPage && (
+                <div className="mt-6 flex justify-center">
+                  <Button
+                    variant="outline"
+                    onClick={() => list.fetchNextPage()}
+                    disabled={list.isFetchingNextPage}
+                  >
+                    {list.isFetchingNextPage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Load more
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </>
       )}

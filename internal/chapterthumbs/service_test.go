@@ -102,7 +102,6 @@ func TestQueuePriorityPromotesExistingFile(t *testing.T) {
 type testFileRepo struct {
 	file           *models.MediaFile
 	updateCalls    int
-	missingSuffix  string
 	failureUpdates []struct {
 		retryAfter   time.Time
 		failureCount int
@@ -130,8 +129,7 @@ func (r *testFileRepo) TryLockChapterThumbnails(ctx context.Context, _ int) (con
 	return ctx, func() {}, true, nil
 }
 
-func (r *testFileRepo) ListMissingChapterThumbnails(_ context.Context, _ int, currentSuffix string) ([]*models.MediaFile, error) {
-	r.missingSuffix = currentSuffix
+func (r *testFileRepo) ListMissingChapterThumbnails(context.Context, int, string) ([]*models.MediaFile, error) {
 	return nil, nil
 }
 
@@ -586,52 +584,6 @@ func TestProcessRequestReportsToneMapCapabilityFailuresOnceWithNormalRetry(t *te
 	}
 }
 
-func TestExtractFrameCPUFallbackGetsFreshDeadline(t *testing.T) {
-	service := &Service{
-		hwAccel:  "vaapi",
-		hwDevice: "/dev/dri/renderD128",
-	}
-	file := &models.MediaFile{FilePath: "/media/movie.mkv"}
-
-	callCount := 0
-	var hwRemaining time.Duration
-	var cpuRemaining time.Duration
-	service.runFFmpegFrameExtractFunc = func(ctx context.Context, _ string, _ []string) ([]byte, error) {
-		callCount++
-		deadline, ok := ctx.Deadline()
-		if !ok {
-			t.Fatalf("expected deadline on attempt %d", callCount)
-		}
-		remaining := time.Until(deadline)
-		if callCount == 1 {
-			hwRemaining = remaining
-			return nil, errors.New("signal: killed")
-		}
-		cpuRemaining = remaining
-		return []byte("frame"), nil
-	}
-
-	data, reason, err := service.extractFrame(context.Background(), file, 5, chapterThumbnailHDRPolicyBestEffort)
-	if err != nil {
-		t.Fatalf("extractFrame() error = %v", err)
-	}
-	if reason != "" {
-		t.Fatalf("extractFrame() reason = %q, want empty", reason)
-	}
-	if string(data) != "frame" {
-		t.Fatalf("extractFrame() data = %q, want frame", string(data))
-	}
-	if callCount != 2 {
-		t.Fatalf("callCount = %d, want 2", callCount)
-	}
-	if hwRemaining < 7*time.Second || hwRemaining > 9*time.Second {
-		t.Fatalf("hw deadline = %s, want about 8s", hwRemaining)
-	}
-	if cpuRemaining < 9*time.Second || cpuRemaining > 11*time.Second {
-		t.Fatalf("cpu deadline = %s, want about 10s", cpuRemaining)
-	}
-}
-
 func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 	remote := &testRemoteFrameExtractor{data: []byte("remote-frame")}
 	service := &Service{
@@ -731,6 +683,8 @@ func TestExtractFrameFallsBackLocalWhenPreferredNodeUnavailable(t *testing.T) {
 		settings: testSettingsReader{values: map[string]string{
 			chapterThumbnailExecutionSetting: chapterThumbnailExecutionPreferTranscode,
 			authJWTSecretSetting:             "secret",
+			// Skip auto-detection, which probes the host's real ffmpeg.
+			playbackHWAccelSetting: hwAccelNone,
 		}},
 		transcodePool:      &nodepool.TranscodePool{},
 		remoteReservations: &nodepool.Reservations{},

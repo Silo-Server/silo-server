@@ -51,6 +51,14 @@ var ignoredMovieSupplementalDirNames = map[string]bool{
 	"subtitles": true,
 }
 
+// extraDirLabel and extrasDirLabel are the normalized names of an Extras/
+// folder, the one extras folder where an episode code can keep a file an
+// episode (see keepsEpisodeToken).
+const (
+	extraDirLabel  = "extra"
+	extrasDirLabel = "extras"
+)
+
 // extrasDirKinds classifies supplemental directory names (normalized via
 // normalizeScannerDirLabel) into the shared extra-kind vocabulary. The set
 // mirrors the Jellyfin/Plex extras folder convention ("other" included: both
@@ -60,11 +68,11 @@ var ignoredMovieSupplementalDirNames = map[string]bool{
 // Convention labels can also appear as content-scope folder names ("movies/
 // other/<Movie>/<file>", "movies/shorts/..."); those never classify as extras
 // because extrasClassifier only honors a convention-named dir owned by a
-// title folder — one that holds media of its own, which library roots and
-// organizational folders do not.
+// title folder — one that holds media of its own or belongs to a show, which
+// library roots and organizational folders do not.
 var extrasDirKinds = map[string]models.ExtraKind{
-	"extra":             models.ExtraKindOther,
-	"extras":            models.ExtraKindOther,
+	extraDirLabel:       models.ExtraKindOther,
+	extrasDirLabel:      models.ExtraKindOther,
 	"other":             models.ExtraKindOther,
 	"featurette":        models.ExtraKindFeaturette,
 	"featurettes":       models.ExtraKindFeaturette,
@@ -116,11 +124,13 @@ func shouldSkipMovieSupplementalFile(path string) bool {
 }
 
 // Scanner discovers and indexes media files in media folders.
-// scannerImageCacher is the slice of imagecache.Cacher the book scanners use.
+// scannerImageCacher is the slice of imagecache.Cacher the book scanners and
+// local extras use.
 // Wired via SetImageCacher; nil-safe when absent.
 type scannerImageCacher interface {
 	audiobookCoverCacher
 	ebookCoverCacher
+	extraStillCacher
 }
 
 type Scanner struct {
@@ -984,9 +994,6 @@ func (s *Scanner) scanPaths(
 		Unchanged:       result.Unchanged,
 		Errors:          result.Errors,
 	})
-	if walkErr != nil {
-		return nil, walkErr
-	}
 
 	// If the scan was cancelled, return partial results without marking
 	// files as missing or deleting records — that would corrupt state.
@@ -994,7 +1001,7 @@ func (s *Scanner) scanPaths(
 		return result, ctx.Err()
 	}
 
-	extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath)
+	extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath, sidecars)
 	result.New += extraStats.New
 	result.Updated += extraStats.Updated
 	result.Unchanged += extraStats.Unchanged
@@ -1847,7 +1854,7 @@ func (s *Scanner) scanScope(
 	})
 
 	if ctx.Err() == nil {
-		extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath)
+		extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath, sidecars)
 		result.New += extraStats.New
 		result.Updated += extraStats.Updated
 		result.Unchanged += extraStats.Unchanged
@@ -2721,7 +2728,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	// A local extra (Trailers/ dir, -trailer suffix, ...) bypasses identity
 	// inference and matching entirely.
 	if candidate, isExtra := newWatchExtrasClassifier(folder.Type, folder.Paths).classify(cleanFile); isExtra {
-		stats := s.processExtraFiles(ctx, folder, []extraCandidate{candidate}, existingByPath)
+		stats := s.processExtraFiles(ctx, folder, []extraCandidate{candidate}, existingByPath, nil)
 		if stats.Errors > 0 {
 			return fmt.Errorf("processing extra file %s failed", cleanFile)
 		}
@@ -3200,22 +3207,7 @@ func (s *Scanner) processFile(
 		mf.SubtitleTracks = []models.SubtitleTrack{}
 	}
 
-	// Convert external subtitles to model type.
-	modelExternalSubs := make([]models.ExternalSubtitle, len(externalSubs))
-	for i, es := range externalSubs {
-		modelExternalSubs[i] = models.ExternalSubtitle{
-			Path:     es.Path,
-			Language: es.Language,
-			Format:   es.Format,
-			Title:    es.Title,
-			Forced:   es.Forced,
-		}
-	}
-	mf.ExternalSubtitles = modelExternalSubs
-
-	if mf.ExternalSubtitles == nil {
-		mf.ExternalSubtitles = []models.ExternalSubtitle{}
-	}
+	mf.ExternalSubtitles = externalSubtitleModels(externalSubs)
 
 	// Upsert into DB.
 	upserted, upsertErr := s.fileRepo.Upsert(ctx, mf)
@@ -3641,7 +3633,7 @@ func externalSubtitleModels(externalSubs []ExternalSubtitleInfo) []models.Extern
 	for i, es := range externalSubs {
 		result[i] = models.ExternalSubtitle{
 			Path: es.Path, Language: es.Language, Format: es.Format,
-			Title: es.Title, Forced: es.Forced,
+			Title: es.Title, Forced: es.Forced, HearingImpaired: es.HearingImpaired,
 		}
 	}
 	return result

@@ -32,8 +32,9 @@ bytes never change.
   so effects keep pace with their stretched event. Other formats cannot be synced or retimed.
 - A timing change bumps the row's revision like any other update, so
   validators captured before it go stale.
-- Players already apply a per-device delay (`player.subtitle_sync_ms`); it
-  stacks on top of the stored correction.
+- Players already apply the profile's subtitle offset
+  (`player.subtitle_sync_ms`, which a device can override); it stacks on top
+  of the stored correction.
 
 ## Sidecar subtitles
 

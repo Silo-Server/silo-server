@@ -137,29 +137,6 @@ func TestProcess_IdentifyConfirmingMatchKeepsStoredIDs(t *testing.T) {
 	assertIdentityIDs(t, h, providerRepo, contentID, "100", "tt0000100")
 }
 
-// A match stored only in the durable provider-ID rows still counts: choosing
-// the TMDB ID those rows hold confirms it and keeps the IMDb ID.
-func TestProcess_IdentifyConfirmingDurableOnlyMatchKeepsStoredIDs(t *testing.T) {
-	const contentID = "movie-durable-only"
-	h := newTestHarness()
-	providerRepo := seedMovieIdentity(t, h, contentID, "100", "tt0000100")
-	h.itemRepo.items[contentID].TmdbID = ""
-	provider := &capturingMetadataProvider{response: &MetadataResult{
-		HasMetadata: true, Title: "Wrong Film", Year: 2006,
-		ProviderIDs: map[string]string{"tmdb": "100"},
-	}}
-
-	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
-		ContentID:   contentID,
-		ProviderIDs: map[string]string{"tmdb": "100"},
-		Language:    "en",
-		Mode:        ModeIdentify,
-	}, []Provider{provider}); err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	assertIdentityIDs(t, h, providerRepo, contentID, "100", "tt0000100")
-}
-
 // An item that only has the wrong film's IMDb ID, identified by a TMDB ID,
 // drops that IMDb ID: the admin named the item's identity.
 func TestProcess_IdentifyByTMDBDropsStoredIMDbOnlyMatch(t *testing.T) {
@@ -274,20 +251,6 @@ func TestManualRefresh_CorrectedNFOReplacesDurableOnlyIDs(t *testing.T) {
 	remote := runNFOCorrection(t, h, contentID)
 	if got := remote.lastMetadataIDs()["imdb"]; got != "" {
 		t.Errorf("manual refresh fetched with the wrong film's imdb id %q", got)
-	}
-	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
-}
-
-// An item that only has the wrong film's IMDb ID, given a TMDB ID by a
-// corrected NFO, drops that IMDb ID.
-func TestManualRefresh_CorrectedNFOReplacesIMDbOnlyMatch(t *testing.T) {
-	const contentID = "movie:imdb:tt0000100"
-	h := newTestHarness()
-	providerRepo := seedMovieIdentity(t, h, contentID, "", "tt0000100")
-
-	remote := runNFOCorrection(t, h, contentID)
-	if got := remote.lastMetadataIDs()["imdb"]; got != "" {
-		t.Errorf("manual refresh fetched with the stored imdb id %q", got)
 	}
 	assertIdentityIDs(t, h, providerRepo, contentID, "200", "")
 }

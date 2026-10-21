@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { RefreshCw } from "lucide-react";
 import type { MarkerEditAuditEntry, MarkerSegment } from "@/api/types";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,41 +33,39 @@ export default function AdminMarkerHistory() {
   const rows = history.data ?? [];
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-2">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Marker History</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Recent manual intro, recap, credits, and preview marker edits across the server.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select value={limit} onValueChange={setLimit}>
-            <SelectTrigger className="w-[8rem]" aria-label="History limit">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LIMIT_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {option} rows
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void history.refetch();
-            }}
-            disabled={history.isFetching}
-          >
-            <RefreshCw className={`size-4 ${history.isFetching ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-6 pb-4 sm:pb-6">
+      <PageHeader
+        title="Marker History"
+        subtitle="Recent manual intro, recap, credits, and preview marker edits across the server."
+        actions={
+          <div className="flex items-center gap-2">
+            <Select value={limit} onValueChange={setLimit}>
+              <SelectTrigger className="w-[8rem]" aria-label="History limit">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LIMIT_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option} rows
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void history.refetch();
+              }}
+              disabled={history.isFetching}
+            >
+              <RefreshCw className={`size-4 ${history.isFetching ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </div>
+        }
+      />
 
       <div className="border-border bg-surface overflow-hidden rounded-lg border">
         {history.isLoading ? (

@@ -8,8 +8,8 @@ import {
   type OverlayPreviewVariant,
 } from "@/components/overlays/OverlayPreviewCard";
 import { OverlayPreviewVariantToggle } from "@/components/overlays/OverlayPreviewVariantToggle";
-import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
+import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import {
   Select,
   SelectContent,
@@ -38,6 +38,8 @@ import {
   type OverlayPosition,
   type PresetId,
 } from "@/lib/overlays";
+import { adminDefaultServerKey } from "@/lib/settingsAdminDefaults";
+import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
@@ -61,6 +63,13 @@ const ACCENT_PRESETS = [
 const ACCENT_KEY = "branding.accent_color";
 const OVERLAYS_ENABLED_KEY = "overlays.enabled";
 const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
+/**
+ * The server-wide default for ui.title_art, which its manifest definition marks
+ * admin_default. Unset means the contract default; viewers who chose their own
+ * keep it.
+ */
+const TITLE_ART_DEFAULT_KEY = adminDefaultServerKey(SETTING_KEYS.UI_TITLE_ART);
+const TITLE_ART = SETTING_DEFINITIONS[SETTING_KEYS.UI_TITLE_ART];
 
 /**
  * Every appearance key the page stages, saved as one batch by the shared
@@ -71,7 +80,8 @@ const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
  * server identity, not look and feel.
  */
 const OVERLAY_KEYS = [OVERLAYS_ENABLED_KEY, OVERLAY_DEFAULTS_KEY];
-const KEYS = [ACCENT_KEY, ...OVERLAY_KEYS];
+const TITLE_ART_KEYS = [TITLE_ART_DEFAULT_KEY];
+const KEYS = [ACCENT_KEY, ...OVERLAY_KEYS, ...TITLE_ART_KEYS];
 
 /**
  * Silo's built-in overlay configuration, derived from the registry's own
@@ -86,7 +96,6 @@ export default function AppearanceSettings() {
   const restartKeys = useRestartKeys();
   const shownRatingSources = useShownRatingSources();
 
-  const [overlayItemsTouched, setOverlayItemsTouched] = useState(false);
   const [confirmRestoreOverlaysOpen, setConfirmRestoreOverlaysOpen] = useState(false);
   // Which sample the badge preview stands in for. View state only — show-only
   // overlays (network, show status) are otherwise impossible to see here.
@@ -116,7 +125,6 @@ export default function AppearanceSettings() {
     id: OverlayId,
     patch: Partial<CardOverlayPrefs["items"][OverlayId]>,
   ) => {
-    setOverlayItemsTouched(true);
     setOverlayPrefs({
       ...overlayPrefs,
       items: { ...overlayPrefs.items, [id]: { ...overlayPrefs.items[id], ...patch } },
@@ -137,7 +145,7 @@ export default function AppearanceSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Appearance" className="mb-8" />
+      <SettingsPageHeader title="Appearance" />
 
       <div className="flex-1 space-y-5">
         <FieldGroup label="Logos and icons">
@@ -149,9 +157,8 @@ export default function AppearanceSettings() {
                   <>Restart the server to finish enabling image uploads.</>
                 ) : (
                   <>
-                    Image uploads need a public S3 bucket, set in{" "}
-                    <span className="text-foreground font-medium">Storage &amp; Database</span>{" "}
-                    settings.
+                    Image uploads need artwork storage (local disk or S3), set in{" "}
+                    <span className="text-foreground font-medium">Storage</span> settings.
                   </>
                 )}
               </p>
@@ -285,7 +292,7 @@ export default function AppearanceSettings() {
         >
           <SettingField
             label="Show badges on poster art"
-            description="Off hides badges for everyone."
+            description="The default for every profile. A profile that turns badges on or off for itself keeps its own choice."
             type="toggle"
             value={form.getValue(OVERLAYS_ENABLED_KEY) || "true"}
             onChange={(v) => form.setValue(OVERLAYS_ENABLED_KEY, v)}
@@ -321,7 +328,7 @@ export default function AppearanceSettings() {
             </SettingFieldRow>
             <div className="border-border/70 bg-foreground/[0.02] mb-4 rounded-xl border p-3">
               <div className="flex items-center justify-between gap-3 px-1">
-                <span className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+                <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                   Preview
                 </span>
                 <OverlayPreviewVariantToggle value={previewVariant} onChange={setPreviewVariant} />
@@ -336,67 +343,67 @@ export default function AppearanceSettings() {
             inert={!overlaysEnabled}
             className={cn(overlaysEnabled ? "" : "pointer-events-none opacity-50")}
           >
-            <AdvancedSection
-              id="appearance.overlays"
-              count={OVERLAY_REGISTRY.length}
-              forceOpen={overlayItemsTouched}
-            >
-              {OVERLAY_CATEGORIES.map((category) => {
-                const overlays = OVERLAY_REGISTRY.filter(
-                  (d) => d.category === category && isOverlayOffered(d, shownRatingSources),
-                );
-                if (overlays.length === 0) return null;
-                return (
-                  <div key={category} className="min-w-0">
-                    <p className="text-muted-foreground pt-3.5 pb-1 text-xs font-medium">
-                      {CATEGORY_META[category].title}
-                    </p>
-                    <div className="settings-field-list">
-                      {overlays.map((def) => {
-                        const config = overlayPrefs.items[def.id];
-                        return (
-                          <SettingFieldRow
-                            key={def.id}
-                            label={def.label}
-                            description={def.description}
+            {OVERLAY_CATEGORIES.map((category) => {
+              const overlays = OVERLAY_REGISTRY.filter(
+                (d) => d.category === category && isOverlayOffered(d, shownRatingSources),
+              );
+              if (overlays.length === 0) return null;
+              return (
+                <div key={category} className="min-w-0">
+                  <SettingsSubheading>{CATEGORY_META[category].title}</SettingsSubheading>
+                  <div className="settings-field-list">
+                    {overlays.map((def) => {
+                      const config = overlayPrefs.items[def.id];
+                      return (
+                        <SettingFieldRow
+                          key={def.id}
+                          label={def.label}
+                          description={def.description}
+                        >
+                          <Select
+                            value={config.position}
+                            disabled={!config.enabled}
+                            onValueChange={(pos) =>
+                              updateOverlayItem(def.id, { position: pos as OverlayPosition })
+                            }
                           >
-                            <Select
-                              value={config.position}
-                              disabled={!config.enabled}
-                              onValueChange={(pos) =>
-                                updateOverlayItem(def.id, { position: pos as OverlayPosition })
-                              }
-                            >
-                              <SelectTrigger
-                                className="w-[130px]"
-                                aria-label={`${def.label} corner`}
-                              >
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {POSITION_OPTIONS.map((opt) => (
-                                  <SelectItem key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <Switch
-                              checked={config.enabled}
-                              aria-label={`Show ${def.label}`}
-                              onCheckedChange={(checked) =>
-                                updateOverlayItem(def.id, { enabled: checked })
-                              }
-                            />
-                          </SettingFieldRow>
-                        );
-                      })}
-                    </div>
+                            <SelectTrigger className="w-[130px]" aria-label={`${def.label} corner`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {POSITION_OPTIONS.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Switch
+                            checked={config.enabled}
+                            aria-label={`Show ${def.label}`}
+                            onCheckedChange={(checked) =>
+                              updateOverlayItem(def.id, { enabled: checked })
+                            }
+                          />
+                        </SettingFieldRow>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </AdvancedSection>
+                </div>
+              );
+            })}
           </div>
+        </FieldGroup>
+
+        <FieldGroup label="Title pages" restartAll={allRestart(TITLE_ART_KEYS)}>
+          <SettingField
+            label={TITLE_ART.label}
+            description="Default for people who have not chosen their own. Anyone can still change it for themselves."
+            type="toggle"
+            value={form.getValue(TITLE_ART_DEFAULT_KEY) || String(TITLE_ART.defaultValue)}
+            onChange={(v) => form.setValue(TITLE_ART_DEFAULT_KEY, v)}
+            restartRequired={restartKeys.has(TITLE_ART_DEFAULT_KEY)}
+          />
         </FieldGroup>
       </div>
 

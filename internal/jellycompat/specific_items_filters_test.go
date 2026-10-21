@@ -133,3 +133,46 @@ func TestMixedSpecificIDsFilterAllSelectedPages(t *testing.T) {
 		t.Fatalf("membership: count=%d calls=%d err=%v", len(got), calls, err)
 	}
 }
+
+func TestSpecificIDsWithoutLimitReturnEveryNamedItem(t *testing.T) {
+	ids := make([]string, 30)
+	for i := range ids {
+		ids[i] = strconv.Itoa(i)
+	}
+	for _, tc := range []struct {
+		name, query string
+		wantCount   int
+		wantLimit   string // catalog browse limit; empty when the request must not browse
+	}{
+		{name: "by ID", wantCount: 30},
+		{name: "by ID with Limit", query: "&Limit=10", wantCount: 10},
+		{name: "by ID from StartIndex", query: "&StartIndex=24", wantCount: 6},
+		{name: "with type filter", query: "&IncludeItemTypes=Series", wantCount: 30, wantLimit: "30"},
+		{name: "with type filter and Limit", query: "&IncludeItemTypes=Series&Limit=10", wantCount: 10, wantLimit: "10"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newCollectionsTestHandler(&fakeCollectionSource{}, nil, nil)
+			content := &mixedIDsContent{librariesContentService: h.content.(*librariesContentService)}
+			content.browse = func(p url.Values) (*upstreamBrowseResponse, error) {
+				if tc.wantLimit == "" || p.Get("limit") != tc.wantLimit {
+					t.Fatalf("browse limit=%q, want %q", p.Get("limit"), tc.wantLimit)
+				}
+				limit, _ := strconv.Atoi(p.Get("limit"))
+				result := &upstreamBrowseResponse{Total: len(ids)}
+				for _, id := range ids[:limit] {
+					result.Items = append(result.Items, upstreamListItem{ContentID: id, Type: "series"})
+				}
+				return result, nil
+			}
+			h.content = content
+			encoded := make([]string, len(ids))
+			for i, id := range ids {
+				encoded[i] = h.codec.EncodeStringID(EncodedIDItem, id)
+			}
+			result := performItemsRequest(t, h, "/Items?Ids="+url.QueryEscape(strings.Join(encoded, ","))+tc.query)
+			if len(result.Items) != tc.wantCount || result.TotalRecordCount != len(ids) {
+				t.Fatalf("items=%d total=%d, want %d/%d", len(result.Items), result.TotalRecordCount, tc.wantCount, len(ids))
+			}
+		})
+	}
+}

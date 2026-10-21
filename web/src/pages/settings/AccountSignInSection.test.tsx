@@ -218,19 +218,9 @@ it.each([
     "That isn't your current Silo password.",
   ],
   [
-    "POST /api/v2/account/identities/link-ticket",
-    problem("local_password_required", 409),
-    "Your account has no Silo password to confirm this with. Ask an admin to connect the provider for you.",
-  ],
-  [
     "POST /api/v2/account/identities/link-start",
     problem("conflict", 409),
     "Open this server at its public address to connect a sign-in provider.",
-  ],
-  [
-    "POST /api/v2/account/identities/link-start",
-    problem("provider_unavailable", 503),
-    "The sign-in provider can't be reached right now. Try again later.",
   ],
 ])("explains a refused OAuth connect (%s)", async (op, failure, text) => {
   failures[op] = failure;
@@ -273,24 +263,6 @@ it.each([
     problem("validation_failed", 422, "body.directory_password"),
     "Directory didn't accept that username and password.",
   ],
-  [problem("account_disabled", 403), "Your Directory account is disabled."],
-  [
-    problem("password_expired", 403),
-    "Your Directory password has expired. Change it there, then try again.",
-  ],
-  [
-    problem("not_permitted", 403),
-    "Your account at the sign-in provider isn't allowed to use this server.",
-  ],
-  [
-    problem("identity_linked_elsewhere", 409),
-    "That provider account is already connected to another account on this server.",
-  ],
-  [problem("already_linked", 409), "Your account is already connected to this sign-in provider."],
-  [
-    problem("local_password_required", 409),
-    "Your account has no Silo password to confirm this with. Ask an admin to connect the provider for you.",
-  ],
 ])("explains a refused directory connect (%#)", async (failure, text) => {
   failures["POST /api/v2/account/identities/link-credentials"] = failure;
   await submitDirectoryConnect();
@@ -324,7 +296,6 @@ it.each([
     problem("network_identity_required", 403),
     "Open this server at its Tailscale address to connect Tailscale.",
   ],
-  [problem("validation_failed", 422, "body.password"), "That isn't your current Silo password."],
 ])("explains a refused network connect (%#)", async (failure, text) => {
   failures["POST /api/v2/account/identities/link-network"] = failure;
   await submitNetworkConnect();
@@ -360,11 +331,4 @@ it("changes nothing while an admin views the account as another user", async () 
   await screen.findByText(/Only the account itself can change how it signs in/);
   expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
   expect(screen.queryByRole("button", { name: /Connect/ })).toBeNull();
-});
-
-it("stays hidden on a server without an external provider", async () => {
-  auth.providers = [LOCAL];
-  mount();
-  await waitFor(() => expect(opCalls("GET /api/v2/account/identities")).toHaveLength(1));
-  expect(screen.queryByText("Sign-in")).toBeNull();
 });

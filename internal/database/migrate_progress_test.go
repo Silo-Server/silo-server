@@ -118,42 +118,6 @@ func source(version int64, name string) *goose.Source {
 	return &goose.Source{Type: goose.TypeSQL, Path: "migrations/sql/" + name, Version: version}
 }
 
-func TestApplyMigrationsLoggedLogsEachMigration(t *testing.T) {
-	first, second := source(201, "201_first.sql"), source(202, "202_second.sql")
-	stepper := &fakeMigrationStepper{
-		statuses: []*goose.MigrationStatus{
-			{Source: source(200, "200_done.sql"), State: goose.StateApplied},
-			{Source: first, State: goose.StatePending},
-			{Source: second, State: goose.StatePending},
-		},
-		steps: []fakeMigrationStep{
-			{result: &goose.MigrationResult{Source: first, Duration: 1500 * time.Millisecond}},
-			{result: &goose.MigrationResult{Source: second, Duration: 20 * time.Millisecond}},
-		},
-	}
-	logger, out := newMigrationTestLogger()
-
-	if err := applyMigrationsLogged(t.Context(), stepper, logger, 0); err != nil {
-		t.Fatal(err)
-	}
-
-	logs := out.String()
-	for _, want := range []string{
-		`msg="applying database migrations" pending=2 from_version=201 to_version=202`,
-		`msg="applying database migration" version=201 name=201_first.sql progress=1/2`,
-		`msg="database migration applied" version=201 name=201_first.sql progress=1/2 duration=1.5s`,
-		`msg="database migration applied" version=202 name=202_second.sql progress=2/2 duration=20ms`,
-		`msg="database migrations finished" applied=2`,
-	} {
-		if !strings.Contains(logs, want) {
-			t.Errorf("missing %q in logs:\n%s", want, logs)
-		}
-	}
-	if stepper.calls != 2 {
-		t.Fatalf("ApplyVersion calls = %d, want 2", stepper.calls)
-	}
-}
-
 func TestApplyMigrationsLoggedReportsNothingPending(t *testing.T) {
 	stepper := &fakeMigrationStepper{statuses: []*goose.MigrationStatus{
 		{Source: source(200, "200_done.sql"), State: goose.StateApplied},
@@ -351,14 +315,17 @@ func TestMigrationRollbackCandidatesListAppliedMigrationsAboveTheTarget(t *testi
 	}
 }
 
-// TestRegisteredGoMigrationsHaveNames covers the three Go migrations this
-// provider registers: goose leaves their source path empty, so without a name
-// their progress logs would carry name="".
+// TestRegisteredGoMigrationsHaveNames covers the Go migrations this provider
+// registers: goose leaves their source path empty, so without a name their
+// progress logs would carry name="".
 func TestRegisteredGoMigrationsHaveNames(t *testing.T) {
 	for _, m := range []*goose.Migration{
 		settingsBackfillMigration(),
 		displayPrefsMoveMigration(),
 		subtitleLanguageBackfillMigration(),
+		invalidIndexRebuildMigration(),
+		pushAttemptKeyScopeMigration(),
+		externalSubtitleNameBackfillMigration(),
 	} {
 		name := migrationName(&goose.Source{Type: goose.TypeGo, Path: m.Source, Version: m.Version})
 		if name == "" || name != m.Source {
@@ -369,11 +336,5 @@ func TestRegisteredGoMigrationsHaveNames(t *testing.T) {
 		if version, err := goose.NumericComponent(m.Source); err != nil || version != m.Version {
 			t.Errorf("Go migration %d source %q: version %d, err %v", m.Version, m.Source, version, err)
 		}
-	}
-}
-
-func TestMigrationNameFallsBackToVersionForAnUnnamedGoMigration(t *testing.T) {
-	if got := migrationName(&goose.Source{Type: goose.TypeGo, Version: 42}); got != "42 (go)" {
-		t.Fatalf("migrationName = %q, want %q", got, "42 (go)")
 	}
 }

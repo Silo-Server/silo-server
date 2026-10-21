@@ -242,6 +242,25 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 			summary.MovieCreditsMarkersWritten++
 		}
 	}
+	// A silence pass killed at its deadline leaves the video start in place
+	// but does not settle the movie: the tail is recorded as failed, so the
+	// movie is analyzed again after its backoff instead of keeping the
+	// unrefined start for good.
+	if sampled && mediasample.Classify(silenceErr) == mediasample.ReasonTimeout {
+		summary.CreditsTailScanErrors++
+		spec := movieTailSpec(candidate)
+		if err := a.repo.RecordArtifactFailure(ctx, mediaartifact.Failure{
+			MediaFileID: candidate.FileID,
+			Key:         spec.key,
+			Identity:    spec.window.identity(candidate),
+			RecordedBy:  a.nodeName(),
+			Error:       silenceErr.Error(),
+			At:          time.Now().UTC(),
+		}); err != nil {
+			summary.Errors = append(summary.Errors, err.Error())
+		}
+		return summary
+	}
 	if sampled {
 		if err := a.storeCreditsTail(ctx, candidate, movieTailSpec(candidate), *tail); err != nil {
 			summary.Errors = append(summary.Errors, err.Error())

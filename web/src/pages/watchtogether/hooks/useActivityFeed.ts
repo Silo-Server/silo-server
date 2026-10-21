@@ -207,7 +207,7 @@ export function useActivityFeed(
   const logRef = useRef<FeedLog>(emptyLog);
   const log = useMemo(
     () => foldActivity(logRef.current, room, suggestions, connectionState, now()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the clock and the previous fold are read per input change, not tracked
     [room, suggestions, connectionState],
   );
   logRef.current = log;

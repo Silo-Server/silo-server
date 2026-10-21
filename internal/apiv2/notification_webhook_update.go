@@ -39,12 +39,16 @@ func registerNotificationWebhookUpdate(reg *Registry) {
 		if reg.deps.NotificationDestinations == nil {
 			return nil, unavailable("notification destinations")
 		}
-		row, err := reg.deps.NotificationDestinations.UpdateNotificationWebhook(ctx, profileFrom(ctx), in.ID, notifications.WebhookInput{
+		user, profile, p := viewerIdentity(ctx)
+		if p != nil {
+			return nil, p
+		}
+		row, err := reg.deps.NotificationDestinations.UpdateNotificationWebhook(ctx, user, profile, in.ID, notifications.WebhookInput{
 			Name: in.Body.Name, URL: in.Body.URL, Enabled: in.Body.Enabled,
 			NotifyFavorites: in.Body.NotifyFavorites, NotifyWatchlist: in.Body.NotifyWatchlist,
 			NotifyContinueWatching: in.Body.NotifyContinueWatching, NotifyNextUp: in.Body.NotifyNextUp, NotifyRequests: in.Body.NotifyRequests,
 		}, func(revision int64) error {
-			if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, notificationWebhookTag(profileFrom(ctx), in.ID, revision)); p != nil {
+			if p := EvaluateGuardedPreconditions(in.IfMatch, in.IfNoneMatch, notificationWebhookTag(profile, in.ID, revision)); p != nil {
 				return p
 			}
 			return nil

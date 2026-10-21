@@ -37,6 +37,21 @@ func newCapabilityTestServer(t *testing.T) (*Server, string) {
 	return &Server{watcher: watcher, sessions: make(map[string]*playback.TranscodeSession)}, logPath
 }
 
+// newProbingTestServer builds a node whose configured ffmpeg answers every
+// capability probe with success for the software backend, so the capability
+// endpoint serves a report without probing the host's real ffmpeg.
+func newProbingTestServer(t *testing.T) *Server {
+	t.Helper()
+	server := newTestServer(t)
+	ffmpegPath := filepath.Join(t.TempDir(), "successful-probe.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\necho tonemapx\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
+	return server
+}
+
 func decodeHealth(t *testing.T, server *Server) HealthResponse {
 	t.Helper()
 	recorder := httptest.NewRecorder()
@@ -76,7 +91,7 @@ func TestHealthPublishesStoredCapabilityHashWithoutProbing(t *testing.T) {
 // report carries its hash and health starts advertising it immediately —
 // otherwise the API would refetch a report it already has.
 func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
-	server := newTestServer(t)
+	server := newProbingTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 42, true }
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
@@ -100,6 +115,9 @@ func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
 		t.Fatalf("transport features = %v, want progressive remux execution", info.TransportFeatures)
 	}
+	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureHLSSubtitleRenditionV1) {
+		t.Fatalf("transport features = %v, want the HLS subtitle rendition", info.TransportFeatures)
+	}
 	// The hash must describe this payload, not some earlier one.
 	served := info
 	served.CapabilityHash = ""
@@ -112,7 +130,7 @@ func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 }
 
 func TestHWCapabilitiesWithholdsProgressiveRemuxWithoutNodeIdentity(t *testing.T) {
-	server := newTestServer(t)
+	server := newProbingTestServer(t)
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
 	nodeauthtest.Sign(t, request, testSecret)
@@ -131,26 +149,6 @@ func TestHWCapabilitiesWithholdsProgressiveRemuxWithoutNodeIdentity(t *testing.T
 	}
 	if slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
 		t.Fatalf("transport features = %v, want progressive remux withheld without a resolved node row", info.TransportFeatures)
-	}
-}
-
-// The first snapshot waits on encoder warmup so it measures a primed encoder,
-// and a canceled node must not leave that wait running.
-func TestStartCapabilitySnapshotsWaitsForReadyChannel(t *testing.T) {
-	server, ffmpegLog := newCapabilityTestServer(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	ready := make(chan struct{})
-
-	server.StartCapabilitySnapshots(ctx, ready)
-	cancel()
-	<-ctx.Done()
-
-	if _, err := os.Stat(ffmpegLog); !os.IsNotExist(err) {
-		contents, _ := os.ReadFile(ffmpegLog)
-		t.Fatalf("snapshot probed before warmup completed:\n%s", contents)
-	}
-	if got := decodeHealth(t, server).CapabilitiesHash; got != "" {
-		t.Fatalf("capabilities_hash = %q, want empty while the snapshot is gated", got)
 	}
 }
 

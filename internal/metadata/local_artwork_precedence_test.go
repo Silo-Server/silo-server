@@ -147,11 +147,44 @@ func writeTestBytes(t *testing.T, path string) {
 	}
 }
 
+const testFilmContentID = "movie:tmdb:7"
+
+// newTestFilmHarness returns a harness whose item repository holds existing
+// as the matched movie "Film" (movie:tmdb:7) with TMDB ID 7 on record.
+func newTestFilmHarness(ctx context.Context, t *testing.T, existing models.MediaItem) *testHarness {
+	t.Helper()
+	h := newTestHarness()
+	existing.ContentID, existing.Type, existing.Title, existing.Status, existing.TmdbID = testFilmContentID, "movie", "Film", "matched", "7"
+	existing.Studios, existing.Networks, existing.Countries, existing.Genres = []string{}, []string{}, []string{}, []string{}
+	if err := h.itemRepo.Upsert(ctx, &existing); err != nil {
+		t.Fatalf("upsert existing item: %v", err)
+	}
+	providerRepo := newFakeProviderIDRepo()
+	providerRepo.set(testFilmContentID, &models.MediaItemProviderID{ContentID: testFilmContentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
+	h.service.providerIDRepo = providerRepo
+	return h
+}
+
+// mergeTestFilm merges a TMDB result for the film offering images and
+// returns the stored item.
+func mergeTestFilm(ctx context.Context, t *testing.T, h *testHarness, mode RefreshMode, images []RemoteImage) *models.MediaItem {
+	t.Helper()
+	if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: testFilmContentID, Mode: mode, Language: "en"},
+		&MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
+		images, nil, nil, "movie"); err != nil {
+		t.Fatalf("mergeAndPersist: %v", err)
+	}
+	got, err := h.itemRepo.GetByID(ctx, testFilmContentID)
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	return got
+}
+
 // A refresh that does not rediscover cached local art (the provider found no
 // sidecar) keeps it unless the sidecar is confirmed gone.
 func TestMergeAndPersistKeepsCachedLocalArtworkUntilSidecarIsGone(t *testing.T) {
 	const (
-		contentID    = "movie:tmdb:7"
 		cachedPoster = "local/movies/movie:tmdb:7/0badf00d/poster/original.webp"
 		remotePoster = "tmdb://remote-poster.jpg"
 	)
@@ -159,48 +192,15 @@ func TestMergeAndPersistKeepsCachedLocalArtworkUntilSidecarIsGone(t *testing.T) 
 		for _, tc := range retentionCases {
 			t.Run(fmt.Sprintf("mode %d/%s", mode, tc.name), func(t *testing.T) {
 				localSource := "file://" + tc.layout(t, t.TempDir()) + "?v=12-1"
-				h := newTestHarness()
 				ctx := withLocalArtworkSearched(context.Background(), localArtworkItem)
-				if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-					ContentID:        contentID,
-					Type:             "movie",
-					Title:            "Film",
-					Status:           "matched",
-					TmdbID:           "7",
-					PosterPath:       cachedPoster,
-					PosterSourcePath: localSource,
-					PosterThumbhash:  "local-thumb",
-					Studios:          []string{},
-					Networks:         []string{},
-					Countries:        []string{},
-					Genres:           []string{},
-				}); err != nil {
-					t.Fatalf("upsert existing item: %v", err)
-				}
-				providerRepo := newFakeProviderIDRepo()
-				providerRepo.set(contentID, &models.MediaItemProviderID{
-					ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7",
+				h := newTestFilmHarness(ctx, t, models.MediaItem{
+					PosterPath: cachedPoster, PosterSourcePath: localSource, PosterThumbhash: "local-thumb",
 				})
-				h.service.providerIDRepo = providerRepo
+				h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
+				h.service.SetAutoCacheImages(true)
 
-				if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{
-					ContentID: contentID,
-					Mode:      mode,
-					Language:  "en",
-				}, &MetadataResult{
-					HasMetadata: true,
-					Title:       "Film",
-					ProviderIDs: map[string]string{"tmdb": "7"},
-				}, []RemoteImage{
-					{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"},
-				}, nil, nil, "movie"); err != nil {
-					t.Fatalf("mode %d: mergeAndPersist: %v", mode, err)
-				}
-
-				got, err := h.itemRepo.GetByID(ctx, contentID)
-				if err != nil {
-					t.Fatalf("load item: %v", err)
-				}
+				got := mergeTestFilm(ctx, t, h, mode,
+					[]RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}})
 				if tc.keep {
 					if got.PosterPath != cachedPoster || got.PosterSourcePath != localSource || got.PosterThumbhash != "local-thumb" {
 						t.Fatalf("mode %d: poster = path %q source %q thumb %q, want the cached local poster kept",
@@ -426,38 +426,19 @@ func TestLocalizationRefreshKeepsProviderSeasonPoster(t *testing.T) {
 // remote image replaces it, and no library folder is consulted.
 func TestCachedLocalArtworkNotKeptWithoutLocalSearch(t *testing.T) {
 	const (
-		contentID    = "movie:tmdb:7"
 		cachedPoster = "local/movies/movie:tmdb:7/0badf00d/poster/original.webp"
 		remotePoster = "tmdb://remote-poster.jpg"
 	)
 	unmounted := "file://" + filepath.Join(t.TempDir(), "missing-mount", "Film", "poster.jpg") + "?v=12-1"
-	h := newTestHarness()
 	ctx := context.Background()
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
-		PosterPath: cachedPoster, PosterSourcePath: unmounted, PosterThumbhash: "local-thumb",
-		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
-	h.service.providerIDRepo = providerRepo
+	h := newTestFilmHarness(ctx, t, models.MediaItem{PosterPath: cachedPoster, PosterSourcePath: unmounted, PosterThumbhash: "local-thumb"})
 
-	if _, err := h.service.mergeAndPersist(ctx, ProcessRequest{ContentID: contentID, Mode: ModeManualRefresh, Language: "en"},
-		&MetadataResult{HasMetadata: true, Title: "Film", ProviderIDs: map[string]string{"tmdb": "7"}},
-		[]RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}},
-		nil, nil, "movie"); err != nil {
-		t.Fatalf("mergeAndPersist: %v", err)
-	}
-	got, err := h.itemRepo.GetByID(ctx, contentID)
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
+	got := mergeTestFilm(ctx, t, h, ModeManualRefresh,
+		[]RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Rating: 7.5, Language: "en"}})
 	if got.PosterSourcePath != remotePoster {
 		t.Fatalf("poster source = %q, want the remote poster when the refresh did not search local art", got.PosterSourcePath)
 	}
-	retention := newLocalArtworkRetention(ctx, contentID, localArtworkItem)
+	retention := newLocalArtworkRetention(ctx, testFilmContentID, localArtworkItem)
 	if retention.keep(ImagePoster, remotePoster, unmounted) || len(retention.probes) != 0 {
 		t.Fatalf("an unmarked refresh kept local art or probed a folder (%d probes)", len(retention.probes))
 	}
@@ -496,7 +477,6 @@ func (p *localHintArtProvider) IdentityHints(context.Context, SearchQuery) map[s
 
 func TestRefreshMarksLocalArtworkSearchOnlyWhenTheLocalProviderRan(t *testing.T) {
 	const (
-		contentID    = "movie:tmdb:7"
 		cachedPoster = "local/movies/movie:tmdb:7/0badf00d/poster/original.webp"
 		remotePoster = "tmdb://remote-poster.jpg"
 	)
@@ -518,27 +498,19 @@ func TestRefreshMarksLocalArtworkSearchOnlyWhenTheLocalProviderRan(t *testing.T)
 		{"local provider not in the chain", []Provider{remote}, remotePoster},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newTestHarness()
 			ctx := context.Background()
-			h.service.SetAutoCacheImages(true)
-			h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
-			providerRepo := newFakeProviderIDRepo()
-			providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
-			h.service.providerIDRepo = providerRepo
-			if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-				ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
+			h := newTestFilmHarness(ctx, t, models.MediaItem{
 				DefaultMetadataLanguage: "en",
 				PosterPath:              cachedPoster, PosterSourcePath: unmounted, PosterThumbhash: "local-thumb",
-				Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-			}); err != nil {
-				t.Fatalf("seed item: %v", err)
-			}
+			})
+			h.service.SetAutoCacheImages(true)
+			h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
 			if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-				ContentID: contentID, Mode: ModeManualRefresh, Language: "en",
+				ContentID: testFilmContentID, Mode: ModeManualRefresh, Language: "en",
 			}, tc.chain); err != nil {
 				t.Fatalf("refresh: %v", err)
 			}
-			got, err := h.itemRepo.GetByID(ctx, contentID)
+			got, err := h.itemRepo.GetByID(ctx, testFilmContentID)
 			if err != nil {
 				t.Fatalf("load item: %v", err)
 			}

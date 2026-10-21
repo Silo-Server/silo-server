@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,9 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/logstream"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/gorilla/websocket"
 )
 
@@ -210,4 +214,39 @@ func TestAuditSocketDomainFilterValidationMatchesHistory(t *testing.T) {
 	if err != nil || opts.ActorUserID == nil || *opts.ActorUserID != 1 {
 		t.Fatalf("valid actor rejected: %+v, %v", opts, err)
 	}
+}
+
+// The log stream follows the acting-admin rule: a profile-less admin session
+// on a household that requires a profile cannot mint, and a ticket it minted
+// before the household gained a PIN or limit no longer connects.
+func TestAdminLogsSocketV2RefusesProfileLessAdminOnHouseholdRequiringProfile(t *testing.T) {
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileVerified: true, PolicyRevision: 1}}
+	var requiresProfile atomic.Bool
+	decide := apimw.NewActingAdminDecider(
+		func(context.Context, int, string) (bool, bool, error) { return true, true, nil },
+		func(context.Context, int) (bool, error) { return requiresProfile.Load(), nil })
+	h := NewAdminLogsSocketV2(NewAdminLogsHandler(nil, nil, logstream.NewHub("admin-logs-household", nil)), evt.NewSocketTicketStore(nil), sessions, users, viewer, decide, "")
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "admin", AccessExpiresAt: time.Now().Add(time.Minute)}
+	stale, err := h.Mint(t.Context(), identity)
+	if err != nil {
+		t.Fatalf("household without a requirement: %v", err)
+	}
+
+	requiresProfile.Store(true)
+	if _, err := h.Mint(t.Context(), identity); !errors.Is(err, ErrAdminLogsSocketForbidden) {
+		t.Fatalf("profile-less mint on a household that requires a profile: %v", err)
+	}
+	server := httptest.NewServer(h)
+	defer server.Close()
+	dialer := websocket.Dialer{Subprotocols: []string{AdminLogsSocketProtocol, eventsTicketProtocolPrefix + stale}}
+	conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"?stream=audit", nil)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil || resp == nil || resp.StatusCode == http.StatusSwitchingProtocols {
+		t.Fatal("ticket minted before the household gained a PIN still connected")
+	}
+	_ = resp.Body.Close()
 }

@@ -270,9 +270,9 @@ export const DASHBOARD_WIDGETS: DashboardWidgetDefinition[] = [
     minSpan: 6,
     maxSpan: 12,
     defaultSpan: 12,
-    // One compact row per provider. It starts at the single row it occupied as
-    // a Trakt-only strip and grows to three for a deployment running several
-    // providers; past that the list scrolls like the other list widgets.
+    // One compact row per provider. It starts at a single row and grows to
+    // three for a deployment running several providers; past that the list
+    // scrolls like the other list widgets.
     minRows: 1,
     maxRows: 3,
     defaultRows: 1,
@@ -409,8 +409,7 @@ export function getDashboardWidget(id: WidgetId): DashboardWidgetDefinition {
  * both the old and the new id collapses to one entry.
  */
 const LEGACY_WIDGET_IDS: Record<string, WidgetId> = {
-  // Became the pluggable per-provider widget; the payload it reads is no
-  // longer Trakt-specific.
+  // The old single-provider sync widget, replaced by the per-provider one.
   "trakt-sync": "watch-providers",
 };
 

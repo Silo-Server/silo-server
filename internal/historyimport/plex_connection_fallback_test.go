@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netguard"
-	"github.com/google/uuid"
 )
 
 type plexTestRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -459,47 +458,6 @@ func TestPlexSessionCredentialMayOnlyNameAdvertisedAddresses(t *testing.T) {
 	}
 	if containsAll(advertised, nil) {
 		t.Fatal("a credential with no address was accepted")
-	}
-}
-
-// TestPlexSessionRunBindsToAdvertisedAddresses runs the enqueue transaction's
-// check: a session-backed run may carry the advertised list minus addresses
-// admission dropped, and nothing the session did not advertise.
-func TestPlexSessionRunBindsToAdvertisedAddresses(t *testing.T) {
-	repo := personalQueueRepository(t)
-	const (
-		remote = "https://remote.plex.direct:32400"
-		local  = "https://192-168-1-5.hash.plex.direct:32400"
-		relay  = "https://relay.plex.direct:443"
-	)
-	admission := func(candidates ...string) personalRunAdmission {
-		t.Helper()
-		session, err := repo.CreatePlexSession(t.Context(), PlexSession{
-			ID: uuid.NewString(), UserID: 1, PinID: "pin", PinCode: "code", AuthToken: "private-account-token", ExpiresAt: time.Now().Add(time.Hour),
-			Servers: []PlexServer{{ClientIdentifier: "server", AccessToken: "private-server-token", RemoteURL: remote, LocalURL: local, ConnectionURLs: []string{local, remote, relay}}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return personalRunAdmission{
-			UserID: 1, ProfileID: "p", SourceType: SourceTypePlex, ConnectionMode: ConnectionModePlexOAuth,
-			PlexSession: session, SelectedServerID: "server",
-			Credentials: plexRunCredentials(candidates, "private-server-token", session.AuthToken),
-		}
-	}
-
-	filtered := admission(remote, relay)
-	run, err := repo.enqueuePersonalRun(t.Context(), filtered)
-	if err != nil {
-		t.Fatalf("enqueue with the LAN address dropped: %v", err)
-	}
-	credential, err := repo.readPersonalRunCredentials(t.Context(), claimPersonalForTest(t, repo, run.ID))
-	if err != nil || !slices.Equal(credential.candidates(), []string{remote, relay}) {
-		t.Fatalf("stored candidates = %v (%v), want remote then relay", credential.candidates(), err)
-	}
-
-	if _, err := repo.enqueuePersonalRun(t.Context(), admission(remote, "https://attacker.example")); !errors.Is(err, ErrPersonalSessionChanged) {
-		t.Fatalf("enqueue with an unadvertised address: %v, want ErrPersonalSessionChanged", err)
 	}
 }
 

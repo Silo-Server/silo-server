@@ -15,6 +15,11 @@ Authorization: Bearer sa_your_api_key_here
 A key always acts as the user who owns it: the account's role and permissions
 still apply, so an admin-only route needs a key owned by an admin account.
 
+Every key also shares its owner's [authenticated account allowance](auth-api.md#authenticated-account-allowance)
+with that account's other keys, profiles, sessions and devices. On the native API,
+the key's own tier, IP and global budgets still apply. Raising a key's tier does not
+raise its owner's shared allowance.
+
 ## Scopes
 
 By default a key is **unscoped** and can reach every route its owner can. A key

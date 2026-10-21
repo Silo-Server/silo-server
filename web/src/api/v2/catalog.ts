@@ -98,6 +98,8 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
       : undefined,
     manga_chapter_count: item.manga_chapter_count,
     manga_volume_count: item.manga_volume_count,
+    pending_translation_language: item.pending_translation_language,
+    machine_translated_fields: item.machine_translated_fields,
   };
 }
 
@@ -274,6 +276,7 @@ export function catalogItemDetailFromV2(item: CatalogItemDetailV2): ItemDetail {
     overview: item.overview ?? "",
     tagline: item.tagline,
     pending_translation_language: item.pending_translation_language,
+    machine_translated_fields: item.machine_translated_fields,
     runtime: item.runtime ?? 0,
     content_rating: item.content_rating ?? "",
     advisory_age: item.advisory_age ?? null,
@@ -372,6 +375,8 @@ export function episodeFromV2(episode: EpisodeV2): EpisodeListItem {
     user_data: episode.user_data ? watchRollupFromV2(episode.user_data) : undefined,
     files: (episode.files ?? []).map(episodeFileFromV2),
     overlay_summary: episode.overlay_summary,
+    machine_translated_fields: episode.machine_translated_fields,
+    pending_translation_language: episode.pending_translation_language,
   };
 }
 
@@ -388,7 +393,8 @@ export function seasonFromV2(season: SeasonV2): Season {
     poster_url: season.poster_url ?? "",
     poster_thumbhash: season.poster_thumbhash ?? "",
     user_data: season.user_data ? watchRollupFromV2(season.user_data) : undefined,
-    availability: season.availability,
+		availability: season.availability,
+		machine_translated_fields: season.machine_translated_fields,
   };
 }
 

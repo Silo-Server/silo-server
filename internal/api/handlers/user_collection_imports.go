@@ -92,12 +92,6 @@ type UserImportTMDBListRequest struct {
 	URL string `json:"url"`
 }
 
-type UserImportTraktRequest struct {
-	UserImportSharedFields
-	Preset    string `json:"preset"`
-	MediaType string `json:"media_type"`
-}
-
 type UserImportView struct {
 	Collection PersonalCollectionView      `json:"collection"`
 	Sync       *usercollections.SyncResult `json:"sync,omitempty"`
@@ -139,22 +133,15 @@ func (h *UserCollectionImportHandler) HandleImportTMDB(w http.ResponseWriter, r 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+// HandleImportTrakt answers the frozen v1 profile Trakt import route. Silo no
+// longer supports Trakt, so every well-formed request is refused.
 func (h *UserCollectionImportHandler) HandleImportTrakt(w http.ResponseWriter, r *http.Request) {
-	var req UserImportTraktRequest
+	var req struct{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	userID := apimw.GetUserID(r.Context())
-	resp, err := h.ImportTrakt(r.Context(), userID, apimw.GetProfileID(r.Context()), req)
-	if err == nil {
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp.Collection)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, resp)
+	writeAPIError(w, traktImportRetired())
 }
 
 // ImportMDBList creates an MDBList-backed collection for the profile and
@@ -227,36 +214,6 @@ func (h *UserCollectionImportHandler) ImportTMDBList(ctx context.Context, userID
 		LibraryIDs: req.LibraryIDs,
 	}
 	return h.createImportedCollection(ctx, userID, profileID, "tmdb", cfg, req.UserImportSharedFields)
-}
-
-// ImportTrakt creates a Trakt-preset collection for the profile and runs its
-// first sync.
-func (h *UserCollectionImportHandler) ImportTrakt(ctx context.Context, userID int, profileID string, req UserImportTraktRequest) (UserImportView, error) {
-	var none UserImportView
-	return none, apiError(http.StatusGone, "unsupported_source", "new Trakt collections are not supported")
-	/* Legacy implementation retained below so existing Trakt collections can
-	continue to sync while creation is disabled.
-	if strings.TrimSpace(req.Title) == "" {
-		return none, fieldError("title", "title is required")
-	}
-	preset, mediaType, normalizedProfileID, err := normalizeTraktPresetRequest(req.Preset, req.MediaType, profileID)
-	if err != nil {
-		return none, apiError(http.StatusBadRequest, policyErrorBadRequest, err.Error())
-	}
-	if err := validateOptionalLimit(req.Limit); err != nil {
-		return none, err
-	}
-	cfg := usercollections.SourceConfig{
-		Mode:       usercollections.SourceModeTraktPreset,
-		Provider:   "trakt",
-		Preset:     preset,
-		MediaType:  mediaType,
-		ProfileID:  normalizedProfileID,
-		Limit:      req.Limit,
-		LibraryIDs: req.LibraryIDs,
-	}
-	return h.createImportedCollection(ctx, userID, profileID, "trakt", cfg, req.UserImportSharedFields)
-	*/
 }
 
 func (h *UserCollectionImportHandler) createImportedCollection(
@@ -501,8 +458,8 @@ func validateOptionalLimit(limit *int) error {
 	if limit == nil {
 		return nil
 	}
-	if *limit <= 0 || *limit > collectionutil.MaxExplicitItemLimit {
-		return fieldError("limit", fmt.Sprintf("limit must be between 1 and %d", collectionutil.MaxExplicitItemLimit))
+	if *limit <= 0 {
+		return fieldError("limit", "limit must be at least 1")
 	}
 	return nil
 }

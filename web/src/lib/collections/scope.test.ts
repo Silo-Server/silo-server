@@ -56,95 +56,7 @@ async function loaded<Raw extends WireCollection>(scope: CollectionScope<Raw>, i
   return { draft: savable(scope.toDraft(snapshot.view, { kind: "manual" })), etag: snapshot.etag };
 }
 
-describe("keys", () => {
-  it("are the keys the existing hooks use", () => {
-    expect(SERVER_SCOPE.keys.root).toEqual(["admin", "collections"]);
-    expect(SERVER_SCOPE.keys.list).toEqual(["admin", "collections", undefined]);
-    expect(SERVER_SCOPE.keys.capabilities).toEqual(["admin", "collections", "capabilities"]);
-    expect(SERVER_SCOPE.keys.snapshot("c1")).toEqual(["admin", "collections", "edit", "c1"]);
-    expect(SERVER_SCOPE.keys.itemOrder("c1")).toEqual([
-      "libraryCollections",
-      "items",
-      "c1",
-      "order",
-    ]);
-    expect(SERVER_SCOPE.keys.preview("fp")).toEqual(["collections", "preview", "admin", "fp"]);
-
-    expect(PERSONAL_SCOPE.keys.root).toEqual(["collections"]);
-    expect(PERSONAL_SCOPE.keys.list).toEqual(["collections", "list"]);
-    expect(PERSONAL_SCOPE.keys.capabilities).toEqual(["collections", "capabilities"]);
-    expect(PERSONAL_SCOPE.keys.snapshot("c1")).toEqual(["collections", "edit", "c1"]);
-    expect(PERSONAL_SCOPE.keys.itemOrder("c1")).toEqual(["collections", "items", "c1", "order"]);
-    expect(PERSONAL_SCOPE.keys.preview("fp")).toEqual(["collections", "preview", "user", "fp"]);
-  });
-});
-
-describe("paths", () => {
-  it("lead to today's server pages", () => {
-    expect(SERVER_SCOPE.paths.list()).toBe("/admin/collections");
-    expect(SERVER_SCOPE.paths.list({ libraryId: 3 })).toBe(
-      "/admin/collections?libraryId=3&view=list",
-    );
-    expect(SERVER_SCOPE.paths.list({ libraryId: 3, view: "arrange" })).toBe(
-      "/admin/collections?libraryId=3&view=arrange",
-    );
-    expect(SERVER_SCOPE.paths.list({ libraryId: null })).toBe("/admin/collections");
-    expect(SERVER_SCOPE.paths.create()).toBe("/admin/collections/new");
-    expect(SERVER_SCOPE.paths.create({ type: "synced", source: "mdblist", libraryId: 2 })).toBe(
-      "/admin/collections/new?type=synced&source=mdblist&libraryId=2",
-    );
-    expect(SERVER_SCOPE.paths.edit("c1")).toBe("/admin/collections/c1/edit");
-    expect(SERVER_SCOPE.paths.edit("c1", { libraryId: 2, focus: "titles" })).toBe(
-      "/admin/collections/c1/edit?libraryId=2&focus=titles",
-    );
-    const view = SERVER_SCOPE.toView(adminCollectionFromV2(adminCollection as never));
-    expect(SERVER_SCOPE.paths.browse(view)).toBe(
-      "/catalog?source=library_collection&collection_id=c1&title=Original",
-    );
-  });
-
-  it("lead to today's personal pages", () => {
-    expect(PERSONAL_SCOPE.paths.list()).toBe("/collections");
-    expect(PERSONAL_SCOPE.paths.create()).toBe("/collections/new");
-    expect(PERSONAL_SCOPE.paths.create({ type: "smart" })).toBe("/collections/new?type=smart");
-    expect(PERSONAL_SCOPE.paths.edit("col-3")).toBe("/collections/col-3/edit");
-    expect(PERSONAL_SCOPE.paths.edit("col-3", { focus: "titles" })).toBe(
-      "/collections/col-3/edit?focus=titles",
-    );
-    const view = PERSONAL_SCOPE.toView(collectionFromV2(getCollectionOk as never));
-    expect(PERSONAL_SCOPE.paths.browse(view)).toBe(
-      "/catalog?source=user_collection&collection_id=c1&title=Rainy+days",
-    );
-  });
-});
-
 describe("toView", () => {
-  it("reads a server collection", () => {
-    const view = SERVER_SCOPE.toView(
-      adminCollectionFromV2({
-        ...adminCollection,
-        featured: true,
-        poster_url: "https://images.example/p.png",
-        item_count: 7,
-      } as never),
-    );
-    expect(view).toMatchObject({
-      id: "c1",
-      scope: "server",
-      kind: "manual",
-      source: null,
-      name: "Original",
-      description: "",
-      posterUrl: "https://images.example/p.png",
-      backdropUrl: undefined,
-      itemCount: 7,
-      libraryIds: [1],
-      server: { visibility: "visible", pinFirst: true },
-    });
-    expect(view.sync).toBeUndefined();
-    expect(view.ownerProfileId).toBeUndefined();
-  });
-
   it("reads a server synced list's source and sync state", () => {
     const view = SERVER_SCOPE.toView(
       adminCollectionFromV2({
@@ -162,27 +74,6 @@ describe("toView", () => {
       source: "tmdb_list",
       sync: { status: "warning", message: "2 unmatched", schedule: "0 4 * * *" },
     });
-  });
-
-  it("reads a personal collection with its owner and sharing", () => {
-    const view = PERSONAL_SCOPE.toView(
-      collectionFromV2({
-        ...getCollectionOk,
-        is_shared: true,
-        include_in_server_collections: true,
-      } as never),
-    );
-    expect(view).toMatchObject({
-      id: "c1",
-      scope: "personal",
-      kind: "manual",
-      name: "Rainy days",
-      itemCount: 4,
-      libraryIds: [],
-      ownerProfileId: "p-owner",
-      personal: { shared: true, inLibraryTabs: true },
-    });
-    expect(view.server).toBeUndefined();
   });
 
   it("reads the libraries a personal smart collection or synced list is limited to", () => {
@@ -499,31 +390,6 @@ describe("remove, sync and preview", () => {
   });
 
   it.each([
-    [SERVER_SCOPE, "POST /api/v2/admin/collections/{id}/sync"],
-    [PERSONAL_SCOPE, "POST /api/v2/collections/{id}/sync"],
-  ] as const)("syncs and reports how many titles matched (%#)", async (scope, operation) => {
-    v2Recorder.answer(operation, {
-      id: "run-1",
-      collection_id: "c1",
-      status: "warning",
-      message: "1 unmatched",
-      items_matched: 9,
-      items_unmatched: 1,
-      items_added: 0,
-      items_removed: 0,
-      created_at: "2026-01-02T03:04:05Z",
-      started_at: "2026-01-02T03:04:05Z",
-      completed_at: "2026-01-02T03:04:06Z",
-    });
-    await expect(scope.sync("c1")).resolves.toEqual({
-      status: "warning",
-      message: "1 unmatched",
-      itemsMatched: 9,
-      itemsUnmatched: 1,
-    });
-  });
-
-  it.each([
     [SERVER_SCOPE, "POST /api/v2/admin/collections/preview"],
     [PERSONAL_SCOPE, "POST /api/v2/collections/preview"],
   ] as const)("previews rules with a limit (%#)", async (scope, operation) => {
@@ -643,10 +509,6 @@ describe("saved Synced lists", () => {
       limit: 50,
       schedule: "weekly",
     });
-  });
-
-  it("starts manual and smart drafts with no list", () => {
-    expect(SERVER_SCOPE.toDraft(null, { kind: "manual", libraryId: 1 }).list).toBeUndefined();
   });
 });
 

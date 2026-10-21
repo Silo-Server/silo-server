@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
+import { PageHeader } from "@/components/page/PageHeader";
 import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import { useOperationalLogs } from "@/hooks/queries/admin/logs";
@@ -66,6 +67,21 @@ type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
+
+// The stream table's header and rows share one column template, whose minimums
+// add up to 977px plus 4rem of gaps and padding (1041px at a 16px root font,
+// 1057px at 20px). Keep the spacing in rem in the container breakpoint so larger
+// fonts show stacked rows until the columns fit, regardless of sidebar width.
+const STREAM_TABLE_COLUMNS =
+  "grid-cols-[minmax(120px,1.1fr)_minmax(190px,1.7fr)_minmax(220px,1.9fr)_minmax(90px,0.8fr)_minmax(125px,0.9fr)_minmax(232px,1.4fr)]";
+
+const STACKED_SORT_FIELDS: [SortField, string][] = [
+  ["username", "User"],
+  ["media", "Stream"],
+  ["method", "Playback"],
+  ["node", "Route"],
+  ["started", "Time"],
+];
 
 function routeSortValue(session: AdminSession): string {
   return getSessionRouteNodes(session)
@@ -240,49 +256,48 @@ export default function AdminActivity() {
   if (searchParams.get("view") === "preparations") {
     return <Navigate to="/admin/downloads?tab=preparation" replace />;
   }
-  if (isLoading) return <div className="text-muted-foreground p-8">Loading activity...</div>;
+  if (isLoading) return <div className="text-muted-foreground pb-8">Loading activity...</div>;
 
   return (
     <div className="space-y-5 lg:space-y-6">
-      {/* Header */}
-      <div className="page-header">
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <h1 className="page-title text-[clamp(2rem,4vw,3.25rem)]">Activity</h1>
+      <PageHeader
+        title="Activity"
+        subtitle={
+          sessions.length === 0
+            ? "No active streams"
+            : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${routeNodes.length} node${routeNodes.length !== 1 ? "s" : ""}`
+        }
+        actions={
+          <>
             {sessions.length > 0 && (
               <span className="live-badge flex items-center gap-1.5">
                 <Radio className="h-3 w-3" />
                 {sessions.length} live
               </span>
             )}
-          </div>
-          <p className="page-subtitle text-sm sm:text-base">
-            {sessions.length === 0
-              ? "No active streams"
-              : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${routeNodes.length} node${routeNodes.length !== 1 ? "s" : ""}`}
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-w-[8.25rem] justify-center"
-            onClick={() => void refreshActivity({ manual: true })}
-            disabled={isManualRefreshPending}
-            aria-busy={isManualRefreshPending}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`} />
-            {isManualRefreshPending ? "Refreshing..." : "Refresh"}
-          </Button>
-          <div className="min-w-[8.75rem] px-1 text-right">
-            <div className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-              Realtime Updates
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-w-[8.25rem] justify-center"
+              onClick={() => void refreshActivity({ manual: true })}
+              disabled={isManualRefreshPending}
+              aria-busy={isManualRefreshPending}
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
+              />
+              {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+            </Button>
+            <div className="min-w-[8.75rem] px-1 text-right">
+              <div className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
+                Realtime Updates
+              </div>
+              <div className="text-[12px]">{formatConnectionState(connectionState)}</div>
+              {error && <div className="text-muted-foreground text-[11px]">{error}</div>}
             </div>
-            <div className="text-[12px]">{formatConnectionState(connectionState)}</div>
-            {error && <div className="text-muted-foreground text-[11px]">{error}</div>}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* IP Lookup */}
       <details
@@ -522,9 +537,33 @@ export default function AdminActivity() {
       {filtered.length === 0 ? (
         <EmptyState hasData={sessions.length > 0} />
       ) : (
-        <div className="bg-card border-border overflow-hidden rounded-lg border">
+        <div className="bg-card border-border @container overflow-hidden rounded-lg border">
+          {/* Sort controls for the stacked rows, which have no column headers */}
+          <div
+            role="group"
+            aria-label="Sort streams"
+            className="border-border bg-surface/50 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b px-4 py-2.5 @min-[calc(977px+4rem)]:hidden"
+          >
+            <span className="text-muted-foreground/70 text-[10px] font-semibold tracking-wider uppercase">
+              Sort
+            </span>
+            {STACKED_SORT_FIELDS.map(([field, label]) => (
+              <SortHeader
+                key={field}
+                field={field}
+                current={sortField}
+                dir={sortDir}
+                onClick={toggleSort}
+              >
+                {label}
+              </SortHeader>
+            ))}
+          </div>
+
           {/* Table header */}
-          <div className="border-border bg-surface/50 hidden grid-cols-[minmax(120px,1.1fr)_minmax(190px,1.7fr)_minmax(220px,1.9fr)_minmax(90px,0.8fr)_minmax(125px,0.9fr)_minmax(220px,1.4fr)] items-center gap-2 border-b px-3 py-2.5 sm:grid">
+          <div
+            className={`border-border bg-surface/50 hidden ${STREAM_TABLE_COLUMNS} items-center gap-2 border-b px-3 py-2.5 @min-[calc(977px+4rem)]:grid`}
+          >
             <SortHeader field="username" current={sortField} dir={sortDir} onClick={toggleSort}>
               User
             </SortHeader>
@@ -649,7 +688,9 @@ function StreamRow({
       }`}
     >
       {/* Desktop row */}
-      <div className="hidden grid-cols-[minmax(120px,1.1fr)_minmax(190px,1.7fr)_minmax(220px,1.9fr)_minmax(90px,0.8fr)_minmax(125px,0.9fr)_minmax(220px,1.4fr)] items-center gap-2 px-3 py-2.5 sm:grid">
+      <div
+        className={`hidden ${STREAM_TABLE_COLUMNS} items-center gap-2 px-3 py-2.5 @min-[calc(977px+4rem)]:grid`}
+      >
         {/* User */}
         <div className="flex min-w-0 items-center gap-2">
           <Link to={userHref} className="hover:text-primary shrink-0 transition-colors">
@@ -832,7 +873,7 @@ function StreamRow({
       </div>
 
       {/* Mobile row */}
-      <div className="flex gap-3 px-4 py-3 sm:hidden">
+      <div className="flex gap-3 px-4 py-3 @min-[calc(977px+4rem)]:hidden">
         <Link
           to={userHref}
           className="text-primary-foreground flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold"

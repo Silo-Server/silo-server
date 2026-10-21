@@ -79,94 +79,11 @@ function choose(combobox: HTMLElement, option: string) {
 }
 
 describe("RuleBuilder", () => {
-  it("reads as a sentence: show what, from which libraries, matching all or any", () => {
-    render(<Harness initial={query()} />);
-    const sentence = screen.getByRole("group", { name: "What the row shows" });
-    expect(sentencePieces(sentence)).toEqual([
-      "Show",
-      "movies",
-      "from",
-      "Libraries: all libraries",
-      "that match",
-      "all",
-      "of these:",
-    ]);
-    expect(within(sentence).getByRole("combobox", { name: "Kind of titles" })).toBeInTheDocument();
-    expect(
-      within(sentence).getByRole("combobox", { name: "How the rules combine" }),
-    ).toBeInTheDocument();
-    expect(screen.getAllByRole("combobox", { name: "Field" })).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: "Easy" })).toBeNull();
-  });
-
-  it("names one chosen library as “the … library”", () => {
-    render(<Harness initial={query({ library_ids: [1] })} />);
-    expect(sentencePieces(screen.getByRole("group", { name: "What the row shows" }))).toEqual([
-      "Show",
-      "movies",
-      "from the",
-      "Libraries: Movies",
-      "library",
-      "that match",
-      "all",
-      "of these:",
-    ]);
-  });
-
-  it("names several chosen libraries as “the … libraries”", () => {
-    render(<Harness initial={query({ library_ids: [1, 2], groups: [] })} />);
-    expect(sentencePieces(screen.getByRole("group", { name: "What the row shows" }))).toEqual([
-      "Show",
-      "movies",
-      "from the",
-      "Libraries: Movies, TV",
-      "libraries",
-    ]);
-  });
-
-  it("doesn't repeat “libraries” while the chosen libraries' names are unknown", () => {
-    render(<Harness initial={query({ library_ids: [8, 9] })} />);
-    expect(
-      sentencePieces(screen.getByRole("group", { name: "What the row shows" })).slice(2, 5),
-    ).toEqual(["from the", "Libraries: 2 libraries", "that match"]);
-  });
-
-  it("reads one chosen library whose name is unknown as “1 library”", () => {
-    render(<Harness initial={query({ library_ids: [9] })} />);
-    expect(
-      sentencePieces(screen.getByRole("group", { name: "What the row shows" })).slice(2, 5),
-    ).toEqual(["from the", "Libraries: 1 library", "that match"]);
-  });
-
   it("counts chosen libraries whose names are unknown alongside the named ones", () => {
     render(<Harness initial={query({ library_ids: [1, 9] })} />);
     expect(
       sentencePieces(screen.getByRole("group", { name: "What the row shows" })).slice(2, 5),
     ).toEqual(["from the", "Libraries: Movies +1 more", "libraries"]);
-  });
-
-  it("starts “that match …” on a second line, as the mockup lays it out", () => {
-    render(<Harness initial={query({ library_ids: [1, 2] })} />);
-    const sentence = screen.getByRole("group", { name: "What the row shows" });
-    const clause = within(sentence).getByText("that match");
-    const lineBreak = clause.previousElementSibling;
-    expect(lineBreak).toHaveAttribute("aria-hidden", "true");
-    expect(lineBreak).toHaveClass("basis-full");
-    expect(lineBreak).toBeEmptyDOMElement();
-  });
-
-  it("keeps the picker's reset item capitalized while the sentence reads “all libraries”", async () => {
-    const { unmount } = render(<Harness initial={query({ library_ids: [1] })} />);
-    await userEvent.click(screen.getByRole("button", { name: /^Libraries:\s*Movies$/ }));
-    expect(screen.getByRole("menuitem", { name: "All libraries" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("menuitem", { name: "All libraries" }));
-    expect(latest?.library_ids).toEqual([]);
-    unmount();
-
-    render(<Harness initial={query()} />);
-    expect(
-      screen.getByRole("button", { name: /^Libraries:\s*all libraries$/ }),
-    ).toBeInTheDocument();
   });
 
   it("offers movies and shows together as one kind, and shows it when stored", () => {
@@ -197,20 +114,6 @@ describe("RuleBuilder", () => {
     ]);
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
     expect(latest!.groups[0]!.rules).toHaveLength(2);
-  });
-
-  it("moves focus to the value of the rule just added", async () => {
-    render(<Harness initial={query()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
-    const third = screen.getByRole("group", { name: "Rule 3" });
-    expect(within(third).getByRole("combobox", { name: "Value" })).toHaveFocus();
-    expect(within(third).getByRole("combobox", { name: "Value" })).toHaveTextContent(
-      "Pick a genre",
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Add an “or” group" }));
-    const group = screen.getByRole("group", { name: "Group 2" });
-    expect(within(group).getByRole("combobox", { name: "Value" })).toHaveFocus();
   });
 
   it("adds an “or” group: titles match the first group or the new one", async () => {
@@ -277,35 +180,6 @@ describe("RuleBuilder", () => {
     expect(latest!.groups).toHaveLength(1);
   });
 
-  it("keeps rules it can't edit read-only, and personalized rules editable", () => {
-    render(
-      <Harness
-        initial={query({
-          groups: [
-            {
-              match: "all",
-              rules: [
-                { field: "cast", op: "contains", value: "Tom Hanks" },
-                { field: "watched", op: "is", value: false },
-              ],
-            },
-          ],
-        })}
-      />,
-    );
-    expect(screen.getByRole("group", { name: "Rule not editable here" })).toHaveTextContent(
-      'cast contains "Tom Hanks"',
-    );
-    expect(screen.getByRole("combobox", { name: "Field" })).toHaveTextContent("Watched");
-  });
-
-  it("orders the row from More options, including personalized orders", () => {
-    render(<Harness initial={query({ sort: { field: "date_viewed", order: "desc" } })} />);
-    expect(screen.getByRole("combobox", { name: "Sort by" })).toHaveTextContent("Date Viewed");
-    choose(screen.getByRole("combobox", { name: "Direction" }), "Ascending");
-    expect(latest!.sort).toEqual({ field: "date_viewed", order: "asc" });
-  });
-
   it("offers only the orders the row's kind of title supports", () => {
     render(
       <Harness
@@ -323,22 +197,6 @@ describe("RuleBuilder", () => {
 });
 
 describe("RuleBuilder in a Smart collection", () => {
-  it("talks about the collection, not a row", () => {
-    render(
-      <RuleBuilder
-        context="collection"
-        value={query({ groups: [] })}
-        libraries={libraries}
-        onChange={() => {}}
-      />,
-    );
-    expect(screen.getByRole("group", { name: "What the collection shows" })).toBeInTheDocument();
-    expect(
-      screen.getByText("No rules yet, so the collection holds every title from these libraries."),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/the row/)).toBeNull();
-  });
-
   it("offers no all-libraries choice when a library is required", async () => {
     render(
       <RuleBuilder

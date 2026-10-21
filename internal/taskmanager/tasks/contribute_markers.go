@@ -23,10 +23,10 @@ type AutoContributeConfigReader interface {
 	List() []markers.ProviderConfig
 }
 
-// ContributionCandidateSource lists local-intro files eligible for auto
+// ContributionCandidateSource lists local-marker files eligible for auto
 // contribution (satisfied by *markers.ContributionStore).
 type ContributionCandidateSource interface {
-	CandidateLocalIntroFiles(ctx context.Context, minConfidence float64, providers []string, after *markers.ContributionCandidate, limit int) ([]markers.ContributionCandidate, error)
+	CandidateLocalMarkerFiles(ctx context.Context, kind markers.MarkerKind, minConfidence float64, providers []string, after *markers.ContributionCandidate, limit int) ([]markers.ContributionCandidate, error)
 }
 
 // ContributionFileLoader loads files by id (satisfied by *scanner.FileRepository).
@@ -34,8 +34,9 @@ type ContributionFileLoader interface {
 	GetByIDs(ctx context.Context, ids []int) ([]*models.MediaFile, error)
 }
 
-// ContributeMarkersTask submits high-confidence local intro markers to providers
-// that have auto-contribution enabled. It is a no-op when no provider opts in.
+// ContributeMarkersTask submits high-confidence local intro and credits markers
+// to providers that have auto-contribution enabled. It is a no-op when no
+// provider opts in.
 type ContributeMarkersTask struct {
 	service    ContributionRunner
 	config     AutoContributeConfigReader
@@ -72,9 +73,9 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 }
 
 func (t *ContributeMarkersTask) Key() string  { return "contribute_markers" }
-func (t *ContributeMarkersTask) Name() string { return "Share intro markers" }
+func (t *ContributeMarkersTask) Name() string { return "Share detected markers" }
 func (t *ContributeMarkersTask) Description() string {
-	return "Sends eligible intros detected on this server to providers with automatic sharing enabled."
+	return "Sends eligible intros and credits detected on this server to providers with automatic sharing enabled."
 }
 func (t *ContributeMarkersTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
@@ -110,16 +111,41 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 	}
 
 	var counts contributionCounts
-	var after *markers.ContributionCandidate
 	rateLimitWaits := 0
+	// One pass per kind, intros first, so a pass asks each file for the one
+	// segment it was selected for.
+	for _, kind := range markers.AutoContributedKinds() {
+		stopped, err := t.contributeKind(ctx, progress, kind, minConfidence, providers, &counts, &rateLimitWaits)
+		if err != nil || stopped {
+			return err
+		}
+	}
 
+	counts.write(progress, 0)
+	progress.Report(100, fmt.Sprintf("Contributed %d, skipped %d, invalid %d, failed %d", counts.submitted, counts.skipped, counts.invalid, counts.failed))
+	return nil
+}
+
+// contributeKind submits one segment kind for every candidate file. It reports
+// stopped when a provider's usage limit ends the run.
+func (t *ContributeMarkersTask) contributeKind(
+	ctx context.Context,
+	progress taskmanager.ProgressReporter,
+	kind markers.MarkerKind,
+	minConfidence float64,
+	providers []string,
+	counts *contributionCounts,
+	rateLimitWaits *int,
+) (bool, error) {
+	opts := markers.ContributeOptions{Segments: []markers.MarkerKind{kind}, Auto: true}
+	var after *markers.ContributionCandidate
 	for {
-		candidates, err := t.candidates.CandidateLocalIntroFiles(ctx, minConfidence, providers, after, contributionCandidateBatch)
+		candidates, err := t.candidates.CandidateLocalMarkerFiles(ctx, kind, minConfidence, providers, after, contributionCandidateBatch)
 		if err != nil {
-			return fmt.Errorf("load contribution candidates: %w", err)
+			return false, fmt.Errorf("load contribution candidates: %w", err)
 		}
 		if len(candidates) == 0 {
-			break
+			return false, nil
 		}
 		ids := make([]int, len(candidates))
 		for i, c := range candidates {
@@ -127,7 +153,7 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 		}
 		files, err := t.files.GetByIDs(ctx, ids)
 		if err != nil {
-			return fmt.Errorf("load candidate files: %w", err)
+			return false, fmt.Errorf("load candidate files: %w", err)
 		}
 		byID := make(map[int]*models.MediaFile, len(files))
 		for _, f := range files {
@@ -143,36 +169,32 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 			// that already finished report skips that must not be counted twice.
 			tallied := map[string]string{}
 			for {
-				outcomes, err := t.service.ContributeFile(ctx, file, markers.ContributeOptions{Auto: true})
+				outcomes, err := t.service.ContributeFile(ctx, file, opts)
 				if err != nil {
 					counts.failed++
 					break
 				}
 				retryAfter, limited := counts.add(outcomes, tallied)
 				if !limited {
-					rateLimitWaits = 0
+					*rateLimitWaits = 0
 					break
 				}
-				if retryAfter <= 0 || retryAfter > contributionMaxInlineWait || rateLimitWaits >= contributionMaxRateLimitWaits {
+				if retryAfter <= 0 || retryAfter > contributionMaxInlineWait || *rateLimitWaits >= contributionMaxRateLimitWaits {
 					counts.write(progress, retryAfter)
 					progress.Report(100, fmt.Sprintf("Contribution usage-limited; retry after %s", formatRetryAfter(retryAfter)))
-					return nil
+					return true, nil
 				}
-				rateLimitWaits++
+				*rateLimitWaits++
 				progress.Report(50, fmt.Sprintf("Contribution rate-limited; waiting %s", retryAfter))
 				if err := t.wait(ctx, retryAfter); err != nil {
-					return err
+					return false, err
 				}
 			}
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return false, ctx.Err()
 		}
 	}
-
-	counts.write(progress, 0)
-	progress.Report(100, fmt.Sprintf("Contributed %d, skipped %d, invalid %d, failed %d", counts.submitted, counts.skipped, counts.invalid, counts.failed))
-	return nil
 }
 
 type contributionCounts struct {

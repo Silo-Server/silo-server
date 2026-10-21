@@ -175,7 +175,6 @@ export function useProfileHomeRows(): ProfileHomeRows {
         )?.overrides,
         baseline: entry.baseline,
         newId: newOverrideId.current,
-        changedSectionIds: entry.changedIds,
       });
       await replaceProfileSectionOverrides({
         scope,

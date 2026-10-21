@@ -131,7 +131,9 @@ Stored subtitle IDs and file IDs are strings. Search result IDs remain opaque
 provider identifiers. Timestamps use UTC with millisecond precision; an unknown
 search upload date is omitted. Arrays are empty rather than null. Stored object
 keys and uploader identities are not exposed. Provider failures preserve partial
-results with a generic warning; their raw error details are not part of v2.
+results with a generic warning; their raw error details are not part of v2. The
+`/api/v1` bridge names each failed provider as `<provider>: search failed`, and
+the server log keeps the cause with credentials masked.
 
 Search accepts compatibility inputs including ISO 639-2 aliases (`ara`), case
 and underscore variants, and legacy English display names (`Arabic`). The
@@ -561,8 +563,9 @@ subtitle menu can still show the result and offer a reset.
 Corrected bytes reach every delivery path: playback subtitle routes, the
 Jellyfin subtitle stream, offline downloads (see [downloads](downloads-api.md)),
 and AI translation sources. Those responses are `Cache-Control: private,
-no-cache`, since the bytes change behind the same URL. Device delays
-(`player.subtitle_sync_ms`) still apply on top. The frozen v1 bridge exposes
+no-cache`, since the bytes change behind the same URL. The player's subtitle
+offset (`player.subtitle_sync_ms`, a profile value a device can override from
+settings manifest revision 19) still applies on top. The frozen v1 bridge exposes
 neither timing nor sync but serves corrected bytes.
 
 Replacing the media file (a new file hash or size at the same path) resets the

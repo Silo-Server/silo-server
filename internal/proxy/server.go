@@ -1177,7 +1177,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		req.Header.Set("X-Silo-Stream-Token", forwardToken)
 	}
 
-	resp, err := telemetry.DoTrustedNode(s.httpClient, req, "stream")
+	resp, err := transcodeproxy.DoNode(s.httpClient, req, claims.TranscodeNode, "stream")
 	if err != nil {
 		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", err, "url", targetURL, "playback_session_id", claims.SessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)

@@ -67,7 +67,13 @@ field errors that explain the affected source roots.
 
 Direct import runs the existing catalog transaction and returns its committed
 counts. If a response is lost, callers must inspect the catalog before deciding
-whether to submit again. The web explicitly offers background execution or
+whether to submit again.
+
+Import keeps a bundle's embeddings only when they come from this installation's
+embedding model: the model in the recommendations embedding lock, or the
+configured embedding model when nothing is locked yet. `embeddings_skipped`
+counts the others; the embedding backfill embeds those items with the local
+model. Import never writes the embedding lock. The web explicitly offers background execution or
 "Import and wait"; it does not fall back between them after an error. All transfer
 mutations disable automatic mutation and authentication retries.
 
@@ -178,12 +184,19 @@ is checked by the same permission middleware used by the frozen v1 routes.
 | `POST /api/v2/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel` | Empty `204` after a cancellation request |
 
 Enqueue accepts `target_language`, optional `include_children`, and optional
-`force`. Children default to included for item targets; season and episode
-targets never include children. The requesting account is recorded by the
-service. A matching active job can be reused; otherwise the service persists
-and dispatches a job. `Location` identifies the item's recent-job listing.
-Success does not mean translation has completed. The existing metadata AI
-capability endpoint describes whether the translation provider is configured.
+`force`. A job fills only fields with no localized text; `force` also replaces
+text an earlier AI translation wrote. Provider and manual text is never
+replaced, and the repository enforces the same rule on every AI write.
+Children default to included for item targets; season and episode targets
+never include children, and neither do movies. The requesting account is
+recorded by the service. When a pending or running job for the same target
+and language already covers the request (it includes children whenever the
+request does, and is forced whenever the request is), the service returns that
+job, so its `include_children` and `force` can differ from the request;
+otherwise the service persists and dispatches a job. `Location` identifies the
+item's recent-job listing. Success does not mean translation has completed.
+The existing metadata AI capability endpoint describes whether the translation
+provider is configured.
 
 Job IDs use opaque strings and timestamps use UTC millisecond instants. The web
 polls while jobs are pending or running. Cancellation checks that the job belongs
@@ -194,6 +207,36 @@ promise that a running job has already stopped. Existing terminal jobs are a no-
 Enqueue and cancellation have no durable request replay receipt. The web enqueue
 mutation disables both mutation retries and authentication replay. No existing
 web cancel control, native administrator caller, or Jellyfin equivalent exists.
+
+### Library prewarm
+
+A server administrator can fill a whole library's missing translations ahead
+of browsing. These routes require the acting-administrator role, not the
+per-item curation permission.
+
+| Endpoint | Result |
+| --- | --- |
+| `POST /api/v2/admin/libraries/{library_id}/metadata-translation` | `202` with the canonical translation job |
+| `GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs` | `jobs`: the newest 50 prewarm jobs of the library |
+| `POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel` | Empty `204` after a cancellation request |
+
+Enqueue accepts only `target_language`. The job's `target_kind` is `library`
+and its `content_id` is `library:{library_id}`. It walks the library's items that still
+miss an overview, tagline, season overview, or episode overview in that
+language, in title order, and translates each item with its seasons and
+episodes. Items already in that language are skipped. A prewarm never forces:
+provider, manual, and earlier AI text is kept. `fields_done` and `fields_total`
+count items, and `progress_message` names the current one.
+
+One prewarm translates one item at a time on a slot of the shared AI job
+bound, and gives the slot back between items so queued on-view and subtitle
+jobs run in the meantime. An item that fails is skipped and named in the
+server log; three failures in a row stop the job, since then the provider
+itself is failing. Translated items stay. Re-running after a failure, a cancellation, or a
+restart resumes with whatever is still missing. An active prewarm for the same
+library and language is reused. Enqueue and list answer `404` for an unknown
+library; cancel finds the job by `library:{library_id}` alone, so a job of a
+library deleted while it ran can still be stopped.
 
 ## Item metadata edits and refresh
 
@@ -445,6 +488,18 @@ disables mutation retries and authentication replay, including dry runs. All
 three operations require acting-administrator access. No native or Jellyfin
 administration caller was found; frozen v1 adapters retain their original wire
 shapes and behavior.
+
+Explicit split/merge and match/apply re-check each existing source and destination
+against the current transaction's complete library memberships before identity or
+state movement. Delegated metadata curators must cover every library of each item;
+an existing item with no memberships is refused. A newly inserted split target
+inherits only the authorized selected-file libraries. Concurrent target creation
+is treated as an existing target. V2 split/merge retain acting-administrator access;
+the frozen v1 bridge retains delegated curation under the same library policy.
+A policy refusal returns 403: the v1 bridge uses its legacy `forbidden` error
+envelope, and v2 match/apply a `permission_denied` problem. Each refused
+transaction rolls back; the multi-step match pipeline has no whole-request atomicity
+guarantee. Detached split identification retains the originating curation authority.
 
 ### Match repair
 
