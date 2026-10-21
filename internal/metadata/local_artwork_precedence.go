@@ -92,7 +92,8 @@ type localMetadataUnreadableKey struct{}
 // withLocalMetadataUnreadable marks ctx as serving a fill-empty refresh that
 // went on without a local sidecar (an NFO) it could not read at levels. An
 // image URL that NFO names cannot be confirmed gone there, so its cached copy
-// stays (see sidecarGone).
+// stays (see sidecarGone), and an item localization keeps values that match
+// the canonical text (see buildItemLocalizationRecord).
 func withLocalMetadataUnreadable(ctx context.Context, levels localArtworkLevel) context.Context {
 	if levels == 0 {
 		return ctx

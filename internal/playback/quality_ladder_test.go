@@ -325,14 +325,18 @@ func TestResolveQualityPolicyV3OriginalIsAuto(t *testing.T) {
 }
 
 // Automatic streaming quality re-encodes a source over a bitrate cap or over
-// an estimate's budget at the ladder class that limit earns, the same ladder
-// as download presets, keeping a fifth of the limit as headroom when choosing
-// the class. The cap is a hard delivery ceiling on the bitrate too.
+// an estimate's budget at a class of the same ladder as download presets. An
+// estimate keeps a fifth of itself as headroom when choosing the class. A cap
+// keeps none: it earns the tallest class whose encode bitrate fits within it,
+// so a cap between two classes gets the lower one (#2643: every cap from 2500
+// to 6249 kbps used to play 720p). The cap is a hard delivery ceiling on the
+// bitrate too.
 func TestResolveQualityPolicyV3AutoUsesTheLadder(t *testing.T) {
 	uhd := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 23.976}
 	scope := SourceDescriptorV3{Width: 3840, Height: 1600, BitrateKbps: 30_000, FrameRate: 23.976}
 	uhd60 := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 60}
 	hd8M := SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 8_000, FrameRate: 24}
+	hd12M := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 12_000, FrameRate: 23.976}
 	for _, tc := range []struct {
 		name        string
 		source      SourceDescriptorV3
@@ -346,9 +350,23 @@ func TestResolveQualityPolicyV3AutoUsesTheLadder(t *testing.T) {
 		{"cap: 7 Mbps reaches 1080p", uhd, true, 7_000, 1920, 1080, "1080p", 6_000},
 		{"cap: 10 Mbps encodes 1080p at the class bitrate", uhd, true, 10_000, 1920, 1080, "1080p", 6_000},
 		{"cap: 4 Mbps is 720p", uhd, true, 4_000, 1280, 720, "720p", 2_000},
+		{"cap: 2 Mbps is 720p", uhd, true, 2_000, 1280, 720, "720p", 2_000},
 		{"cap: 1 Mbps is 480p", uhd, true, 1_000, 854, 480, "480p", 1_000},
+		{"cap: 20 Mbps reaches 2160p", uhd, true, 20_000, 3840, 2160, "2160p", 20_000},
+		{"cap: just under 2160p is 1080p", uhd, true, 19_999, 1920, 1080, "1080p", 6_000},
+		{"cap: 6249 kbps is 1080p", hd12M, true, 6_249, 1920, 1080, "1080p", 6_000},
+		{"cap: 6 Mbps is 1080p", hd12M, true, 6_000, 1920, 1080, "1080p", 6_000},
+		{"cap: just under 1080p is 720p", hd12M, true, 5_999, 1280, 720, "720p", 2_000},
+		{"cap: 3 Mbps is 720p", hd12M, true, 3_000, 1280, 720, "720p", 2_000},
+		{"cap: 2500 kbps is 720p", hd12M, true, 2_500, 1280, 720, "720p", 2_000},
+		{"cap: just under 720p is 540p", hd12M, true, 1_999, 960, 540, "540p", 1_800},
+		{"cap: 1800 kbps is 540p", hd12M, true, 1_800, 960, 540, "540p", 1_800},
+		{"cap: just under 540p is 480p", hd12M, true, 1_799, 854, 480, "480p", 1_500},
+		{"cap: 1500 kbps is 480p", hd12M, true, 1_500, 854, 480, "480p", 1_500},
+		{"cap: under 480p lowers the bitrate", hd12M, true, 1_499, 854, 480, "480p", 1_499},
 		{"cap: scope keeps its shape", scope, true, 10_000, 1920, 800, "800p", 6_000},
-		{"cap: 60 fps drops a class", uhd60, true, 7_000, 1280, 720, "720p", 2_000},
+		{"cap: a cropped source shorter than the cap's class fits that class", SourceDescriptorV3{Width: 1920, Height: 600, BitrateKbps: 12_000, FrameRate: 24}, true, 2_000, 1280, 400, "400p", 2_000},
+		{"cap: 60 fps keeps the class the cap pays for", uhd60, true, 7_000, 1920, 1080, "1080p", 6_000},
 		{"cap: a source over the cap is re-encoded at its own size", hd8M, true, 7_000, 1920, 1080, "1080p", 6_000},
 		{"cap: a 720p source over the cap keeps the 720p bitrate", SourceDescriptorV3{Width: 1280, Height: 720, BitrateKbps: 8_000, FrameRate: 24}, true, 7_000, 1280, 720, "720p", 2_000},
 		{"cap: an odd source frame is re-encoded at an even size", SourceDescriptorV3{Width: 1920, Height: 1079, BitrateKbps: 8_000, FrameRate: 24}, true, 7_000, 1918, 1078, "1078p", 6_000},

@@ -1673,9 +1673,9 @@ type QualityResultV3 struct {
 // A fixed rung or plain resolution never reads the estimate.
 //
 // bandwidth_cap_kbps is a hard delivery ceiling honored in every quality mode:
-// a source whose bitrate exceeds it is re-encoded at the cap's rung, and a
-// fixed rung whose ladder bitrate exceeds it is lowered. A source that fits
-// under the cap is still sent as-is.
+// a source whose bitrate exceeds it is re-encoded at the tallest class whose
+// encode bitrate fits within the cap, and a fixed rung whose ladder bitrate
+// exceeds it is lowered. A source that fits under the cap is still sent as-is.
 func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) QualityResultV3 {
 	quality, changed := NormalizeQualityV3(request.QualityPreference)
 	var warnings []DegradationWarningV3
@@ -1743,10 +1743,12 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		wouldPreserve := source.Height > 0 && targetHeight >= source.Height
 		if (wouldPreserve && capExceededBySource) || (!wouldPreserve && ladderClassBitrateKbpsV3(targetHeight) > capKbps) {
 			capApplied = true
-			if capHeight := streamLadderClassV3(capKbps, source); capHeight < targetHeight {
-				targetHeight = capHeight
-				classLimit = minPositiveV3(classLimit, capHeight)
-			}
+			// The class limit applies even when the source is already shorter
+			// than the cap's class, so a cropped source wider than that class
+			// still fits its box.
+			capHeight := capLadderClassV3(capKbps)
+			targetHeight = min(targetHeight, capHeight)
+			classLimit = minPositiveV3(classLimit, capHeight)
 		}
 	}
 	if capApplied {
@@ -2144,6 +2146,20 @@ func resolutionLabelV3(h int) string {
 // bandwidth as headroom and plans H.264, the output every route can decode.
 func streamLadderClassV3(kbps int, source SourceDescriptorV3) int {
 	return LadderClassForBitrate(streamBudgetKbpsV3(kbps), source.FrameRate, transcodeCodecH264)
+}
+
+// capLadderClassV3 is the tallest ladder class whose encode bitrate fits
+// within a bandwidth cap, or the lowest class when none does. A cap is a
+// ceiling the viewer chose, not a measured link, so unlike an estimate it keeps
+// no headroom: a 6000 kbps cap earns 1080p at 6000 kbps. The encode bitrate
+// does not depend on frame rate, so neither does the class a cap earns.
+func capLadderClassV3(capKbps int) int {
+	for _, class := range bitrateLadder {
+		if ladderClassBitrateKbpsV3(class.Height) <= capKbps {
+			return class.Height
+		}
+	}
+	return bitrateLadder[len(bitrateLadder)-1].Height
 }
 
 // streamBudgetKbpsV3 is the part of a bandwidth figure automatic quality

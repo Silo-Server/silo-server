@@ -2475,7 +2475,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Request cancellation of a cancellable administrator job. Completed effects and verified storage-copy checkpoints are retained. */
+    /** Request cancellation of a job that reports cancelable: library refresh, storage transition, or image cache cleanup. Completed effects and verified storage-copy checkpoints are retained. */
     post: operations["cancelAdminJob"];
     delete?: never;
     options?: never;

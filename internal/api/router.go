@@ -1146,7 +1146,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// collage of their titles; it needs artwork storage and poster signing.
 	var personalCollages *catalog.PersonalCollectionCollages
 	if deps.DB != nil && detailSvc != nil {
-		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, nil); gen != nil {
+		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, deps.ArtworkSigner, nil); gen != nil {
 			personalCollages = deps.PersonalCollectionCollages
 			if personalCollages == nil {
 				personalCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
@@ -2151,6 +2151,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		)
 		libraryCollectionHandler.ArtworkStore = deps.Blobs.Assets
 		libraryCollectionHandler.ArtworkResolver = deps.ArtworkResolver
+		libraryCollectionHandler.ArtworkSigner = deps.ArtworkSigner
 		libraryCollectionHandler.FrontendFS = deps.FrontendFS
 		libraryCollectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
 		libraryCollectionHandler.SectionRepo = sectionRepo

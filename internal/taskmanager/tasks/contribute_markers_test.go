@@ -23,6 +23,12 @@ type fakeContribRunner struct {
 	// sequence, when set, returns one entry per call before falling back to
 	// outcomes.
 	sequence [][]markers.ContributionOutcome
+	// fetchOnly lists providers that are registered without submit support.
+	fetchOnly map[string]bool
+}
+
+func (f *fakeContribRunner) AcceptsContributions(provider string) bool {
+	return !f.fetchOnly[provider]
 }
 
 func (f *fakeContribRunner) ContributeFile(_ context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
@@ -90,15 +96,28 @@ func (fakeFileLoader) GetByIDs(_ context.Context, ids []int) ([]*models.MediaFil
 }
 
 func TestContributeMarkersTaskNoAutoProvider(t *testing.T) {
-	runner := &fakeContribRunner{}
-	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: false}}
-	task := NewContributeMarkersTask(runner, cfg, &fakeCandidates{ids: []int{1}}, fakeFileLoader{})
+	for _, test := range []struct {
+		name      string
+		cfg       markers.ProviderConfig
+		fetchOnly bool
+	}{
+		{name: "auto disabled", cfg: markers.ProviderConfig{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: false}},
+		// A plugin that later declares supports_contribution=false keeps the
+		// sharing flags it saved while it was a submitter.
+		{name: "fetch-only provider with saved auto flags", cfg: markers.ProviderConfig{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}, fetchOnly: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &fakeContribRunner{fetchOnly: map[string]bool{"introdb": test.fetchOnly}}
+			cands := &fakeCandidates{ids: []int{1}}
+			task := NewContributeMarkersTask(runner, fakeAutoConfig{test.cfg}, cands, fakeFileLoader{})
 
-	if err := task.Execute(context.Background(), &contribTestProgress{}); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if len(runner.calls) != 0 {
-		t.Errorf("expected no contributions when auto disabled, got %d", len(runner.calls))
+			if err := task.Execute(context.Background(), &contribTestProgress{}); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if len(runner.calls) != 0 || len(cands.kinds) != 0 {
+				t.Errorf("contributions = %d, candidate passes = %d, want none", len(runner.calls), len(cands.kinds))
+			}
+		})
 	}
 }
 

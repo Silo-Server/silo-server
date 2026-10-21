@@ -82,6 +82,9 @@ export function adminPlaybackHistoryItemFromV2(
     duration_seconds: entry.duration_seconds,
     completed: entry.completed,
     played_seconds: entry.played_seconds,
+    series_title: entry.series_title,
+    season_number: entry.season_number,
+    episode_number: entry.episode_number,
   };
 }
 

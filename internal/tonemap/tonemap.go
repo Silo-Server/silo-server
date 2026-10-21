@@ -496,6 +496,18 @@ func IsSDRSource(kind SourceKind) bool {
 	return kind == SourceSDRBT709 || kind == SourceSDRBT2020
 }
 
+// SoftwareUploadFilter moves CPU-decoded frames onto a QSV or VAAPI device
+// ahead of the hardware tone-map graph: 8-bit nv12 for SDR sources, 10-bit
+// p010le for HDR ones. Playback and the source preflight share it so the
+// preflight tests the upload playback actually runs.
+func SoftwareUploadFilter(kind SourceKind) string {
+	format := "p010le"
+	if IsSDRSource(kind) {
+		format = "nv12"
+	}
+	return "format=" + format + ",hwupload,"
+}
+
 // AllSourceKinds returns every base signal supported by capability probes.
 func AllSourceKinds() []SourceKind {
 	return append(StandardSourceKinds(), SourceDolbyVision)

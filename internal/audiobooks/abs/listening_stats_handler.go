@@ -102,7 +102,7 @@ func (h *Handler) handleListeningSessionDetail(w http.ResponseWriter, r *http.Re
 	}
 	sid := chi.URLParam(r, "sid")
 	sess, err := h.deps.PlaybackSessionStore.GetPlaybackSession(r.Context(), sid)
-	if err != nil || sess.UserID != a.UserID {
+	if err != nil || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}

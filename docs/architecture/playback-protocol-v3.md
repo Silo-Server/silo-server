@@ -1348,7 +1348,12 @@ The last two come from the node-routing resolver:
 `routing_policy_unsatisfied` means no route shape is legal under the configured
 execution and egress policy and is never retryable, while
 `route_capacity_unavailable` means a legal shape exists but no node could serve
-it right now and is always retryable.
+it right now and is always retryable. When every route that ran rejected the
+file in the tone-map source preflight, the start ends in a non-retryable
+`transcode_start_failed` whose message says the file failed the conversion
+check. A route skipped only because its executor cannot run the recipe does
+not change that answer; a route that failed in a way a retry could clear keeps
+the start retryable, with that route's message.
 
 ### 7.4 Route event names
 
@@ -1520,7 +1525,11 @@ It is then answered as a valid WebVTT document with no cues, which a player
 keeps, so the longer wait is what keeps cues after a slow seek restart.
 Subtitle segments never return `503` and never trigger a seek restart. Each seek restart writes a new cue file and
 keeps the earlier ones, so a backward seek into output an earlier generation
-produced keeps its cues. Bitmap tracks keep their sidecar or burn-in routes.
+produced keeps its cues. The output directory records each generation's cue
+file and the segments it finished (`subtitle_spans.json`), so a session
+rebuilt from its recipe on the same directory serves the cues of every video
+segment it serves from disk, and names its own cue files after the recorded
+ones. Bitmap tracks keep their sidecar or burn-in routes.
 
 The rendition is part of the transcode recipe. Turning subtitles on or
 choosing another track therefore starts a new HLS generation at the current
@@ -1696,16 +1705,19 @@ fixed rung or plain resolution never reads the estimate, so a viewer who wants
 the source whatever the estimate says picks a resolution. `original` used to be
 that choice; it is now an alias of `auto`.
 
-A source over the estimate's budget, or over `bandwidth_cap_kbps`, is
-re-encoded at the class that 80% of the estimate or cap earns on the shared
-bitrate ladder ([quality-ladder.md](quality-ladder.md)) for the source's frame
-rate. A source of unknown bitrate counts as needing its class's full bitrate
-against an estimate, and is always re-encoded under a cap, since it cannot be
-shown to fit. A source whose height already fits the earned class keeps its own
-size, even when it is wider than the 16:9 box (a 2560x1080 film at the 1080p
-class). Otherwise automatic and plain-label targets fit the source into that
-class's 16:9 box, so a 3840x1600 film at the 1080p class streams at 1920x800,
-and encode at the class bitrate: 20000 kbps for 2160p, 6000 for 1080p, 2000 for
+A source over the estimate's budget is re-encoded at the class that 80% of the
+estimate earns on the shared bitrate ladder ([quality-ladder.md](quality-ladder.md))
+for the source's frame rate. A source over `bandwidth_cap_kbps` is re-encoded at
+the tallest class whose class bitrate (below) fits within the cap, with no
+headroom and whatever the frame rate: a 6000 kbps cap earns 1080p at 6000 kbps,
+and a cap between two classes earns the lower one. A source of unknown bitrate
+counts as needing its class's full bitrate against an estimate, and is always
+re-encoded under a cap, since it cannot be shown to fit. A source whose bitrate
+the estimate and cap allow is sent as-is, even when it is wider than the 16:9
+box (a 2560x1080 film). Otherwise automatic and plain-label targets fit the
+source into the earned class's 16:9 box, so a 3840x1600 film at the 1080p class
+streams at 1920x800 and a 2560x1080 film at 1920x810, and encode at the class
+bitrate: 20000 kbps for 2160p, 6000 for 1080p, 2000 for
 720p, 1800 for 540p and 1500 for 480p, never above the estimate's 80% budget or
 the cap. A transcode also never targets more than the source's own bitrate,
 counted in the output codec (H.264 for a scaled encode, or HEVC for any encode

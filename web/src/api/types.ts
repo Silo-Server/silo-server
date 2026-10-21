@@ -3294,6 +3294,9 @@ export interface AdminPlaybackHistoryItem {
   completed: boolean;
   /** Measured watch time; null for a play recorded before it was measured. */
   played_seconds: number | null;
+  series_title: string;
+  season_number: number | null;
+  episode_number: number | null;
 }
 
 export interface AdminUserProfile {

@@ -178,7 +178,6 @@ export default function MovieContent({
     setSubtitlePreference.mutate({
       prefId: item.content_id,
       selection,
-      showForcedSubtitles: item.effective_show_forced_subtitles,
     });
   };
 
@@ -188,7 +187,6 @@ export default function MovieContent({
     setSubtitlePreference.mutate({
       prefId: item.content_id,
       selection: null,
-      showForcedSubtitles: item.effective_show_forced_subtitles,
     });
   };
 

@@ -61,9 +61,9 @@ task's triggers with its configured poll interval.
 
 Uploadable images white-label the server: the sidebar wordmark, the square
 mark (collapsed sidebar and installed PWA), the browser favicon, and the login
-background. Each is stored in the public S3 bucket and referenced from a
-`server_settings` row, so uploads return `503 unavailable` until
-`s3.public_bucket` is configured.
+background. Each is stored in artwork storage (`artwork.storage_backend`: a
+local directory, or the public S3 bucket when the backend is S3) and referenced
+from a `server_settings` row, so uploads work without an S3 bucket.
 
 | Route                                         | Auth   | Purpose                                                              |
 | --------------------------------------------- | ------ | -------------------------------------------------------------------- |

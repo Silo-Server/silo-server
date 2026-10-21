@@ -460,7 +460,12 @@ Caching and refresh:
   the best remote candidate by the `applyBestImages` rules, for seasons and
   episodes the first remote poster or still that the local one displaced while
   provider results merged, or, when the refresh kept a local source it could
-  not see, the remote one it chose. The slot's source stays the local file, so the
+  not see, the remote one it chose. When the refresh offers no remote image for
+  an item slot, which is always so for a local re-apply because it asks no
+  remote provider, the remote image the slot was serving stays as the stand-in,
+  as a cached copy would, so a copy that keeps failing never leaves the slot
+  blank; clear art stored as the logo is the exception and never stands in. The
+  slot's source stays the local file, so the
   copy replaces the stand-in through the source-matched update, and a refresh
   that offers no artwork at all leaves the slot, local source included, as it
   is. Locked artwork gets no stand-in, and neither does an image URL an NFO

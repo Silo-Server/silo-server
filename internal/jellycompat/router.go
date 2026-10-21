@@ -278,6 +278,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Items/{id}/SpecialFeatures", itemsHandler.HandleSpecialFeatures)
 			r.Get("/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
+			r.Get("/Videos/{id}/AdditionalParts", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/ThemeMedia", itemsHandler.HandleThemeMedia)
 			r.Get("/Users/{userId}/Items/{id}/ThemeVideos", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Users/{userId}/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongs)
