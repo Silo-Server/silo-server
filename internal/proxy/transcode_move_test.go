@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -17,24 +18,30 @@ import (
 )
 
 // fakeMoveStore is the shared node recipe store with a scripted API server
-// behind it: a published move request rewrites the record to name movedTo.
+// behind it: a published move request rewrites the record to name movedTo,
+// or the next of moves when that is set.
 type fakeMoveStore struct {
-	mu       sync.Mutex
-	cards    map[string]playback.RecipeCard
-	movedTo  string
-	requests []noderecipe.MoveRequest
-	reads    atomic.Int32
+	mu        sync.Mutex
+	cards     map[string]playback.RecipeCard
+	movedTo   string
+	moves     []string
+	lookupErr error
+	requests  []noderecipe.MoveRequest
+	reads     atomic.Int32
 }
 
-func (s *fakeMoveStore) Get(_ context.Context, id string) (*playback.RecipeCard, bool) {
+func (s *fakeMoveStore) Lookup(_ context.Context, id string) (*playback.RecipeCard, bool, error) {
 	s.reads.Add(1)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.lookupErr != nil {
+		return nil, false, s.lookupErr
+	}
 	card, ok := s.cards[id]
 	if !ok {
-		return nil, false
+		return nil, false, nil
 	}
-	return &card, true
+	return &card, true, nil
 }
 
 func (s *fakeMoveStore) Publish(_ context.Context, channel string, event cache.Event) error {
@@ -48,9 +55,13 @@ func (s *fakeMoveStore) Publish(_ context.Context, channel string, event cache.E
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.requests = append(s.requests, request)
-	if s.movedTo != "" {
+	movedTo := s.movedTo
+	if len(s.moves) > 0 {
+		movedTo, s.moves = s.moves[0], s.moves[1:]
+	}
+	if movedTo != "" {
 		card := s.cards[request.TransportID]
-		card.TranscodeNodeURL = s.movedTo
+		card.TranscodeNodeURL = movedTo
 		s.cards[request.TransportID] = card
 	}
 	return nil
@@ -298,21 +309,38 @@ func TestProxyFollowRechecksRecord(t *testing.T) {
 	if rr := relaySegment(server, claims); rr.Body.String() != "third" {
 		t.Fatalf("relay after the recheck served by %q, want third", rr.Body.String())
 	}
+	// An unreadable store says nothing about where the transport runs.
+	store.mu.Lock()
+	store.lookupErr = errors.New("redis unavailable")
+	store.mu.Unlock()
+	now = now.Add(movedTranscodeRecheck)
+	if rr := relaySegment(server, claims); rr.Body.String() != "third" {
+		t.Fatalf("relay during a store outage served by %q (%d), want third", rr.Body.String(), rr.Code)
+	}
 }
 
-func TestTranscodeRecipeInStore(t *testing.T) {
-	for _, tt := range []struct {
-		name   string
-		claims *streamtoken.Claims
-		want   bool
-	}{
-		{"compat identity token", &streamtoken.Claims{SessionID: "s", TranscodeNode: "http://node"}, true},
-		{"native recipe token", &streamtoken.Claims{SessionID: "s", TranscodeNode: "http://node", SegmentDuration: 6, TargetCodec: "h264"}, false},
-		{"no transcode node", &streamtoken.Claims{SessionID: "s"}, false},
-	} {
-		if got := transcodeRecipeInStore(tt.claims); got != tt.want {
-			t.Errorf("%s: transcodeRecipeInStore = %v, want %v", tt.name, got, tt.want)
-		}
+// A request that moves past several dead nodes tells each move about the
+// nodes it already could not reach, which the API can still list as healthy.
+func TestProxyFollowCarriesFailedNodes(t *testing.T) {
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("live"))
+	}))
+	defer live.Close()
+	first, second := deadNodeURL(t), deadNodeURL(t)
+	store := &fakeMoveStore{
+		cards: map[string]playback.RecipeCard{"upstream-1": {SessionID: "upstream-1", TranscodeNodeURL: first}},
+		moves: []string{second, live.URL},
+	}
+	server := newMoveTestProxy(t, store)
+	claims := &streamtoken.Claims{SessionID: "upstream-1", PlayMethod: "transcode", TranscodeNode: first}
+
+	if rr := relaySegment(server, claims); rr.Code != http.StatusOK || rr.Body.String() != "live" {
+		t.Fatalf("relay = %d %q, want 200 from the live node", rr.Code, rr.Body.String())
+	}
+	requests := store.moveRequests()
+	if len(requests) != 2 || requests[1].NodeURL != second ||
+		len(requests[1].FailedNodes) != 1 || requests[1].FailedNodes[0] != first {
+		t.Fatalf("move requests = %+v, want the second to name %s and leave out %s", requests, second, first)
 	}
 }
 

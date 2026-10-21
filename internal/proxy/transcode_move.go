@@ -46,6 +46,12 @@ const (
 	maxTranscodeMoveHops = 3
 )
 
+// recipeRecordReader reads the shared node recipe store, keeping read errors
+// apart from a missing record. *noderecipe.Store implements it.
+type recipeRecordReader interface {
+	Lookup(ctx context.Context, sessionID string) (*playback.RecipeCard, bool, error)
+}
+
 // transcodeMovePublisher publishes cluster events. cache.EventBus implements it.
 type transcodeMovePublisher interface {
 	Publish(ctx context.Context, channel string, event cache.Event) error
@@ -60,7 +66,7 @@ type movedTranscode struct {
 }
 
 type transcodeMoveFollower struct {
-	recipes   recipeCardLookup
+	recipes   recipeRecordReader
 	publisher transcodeMovePublisher
 	now       func() time.Time
 	// wait, poll and republish are transcodeMoveWait, transcodeMovePoll and
@@ -76,7 +82,7 @@ type transcodeMoveFollower struct {
 // SetTranscodeMoveFollower wires the node recipe store and the event bus this
 // proxy uses to follow a transcode that moved off a dead transcode node. Call
 // it during construction. Either nil leaves relays failing as before.
-func (s *Server) SetTranscodeMoveFollower(recipes recipeCardLookup, publisher transcodeMovePublisher) {
+func (s *Server) SetTranscodeMoveFollower(recipes recipeRecordReader, publisher transcodeMovePublisher) {
 	if recipes == nil || publisher == nil {
 		s.moves = nil
 		return
@@ -120,7 +126,15 @@ func (f *transcodeMoveFollower) current(ctx context.Context, transportID, tokenN
 		return entry.nodeURL
 	}
 	nodeURL := tokenNode
-	if card, found := f.recipes.Get(ctx, transportID); found && card != nil && card.TranscodeNodeURL != "" {
+	card, found, err := f.recipes.Lookup(ctx, transportID)
+	switch {
+	case err != nil:
+		// The store is unreadable, which says nothing about where the
+		// transport runs: keep relaying where it last ran.
+		if ok && sameNode(entry.tokenNode, tokenNode) {
+			nodeURL = entry.nodeURL
+		}
+	case found && card != nil && card.TranscodeNodeURL != "":
 		nodeURL = card.TranscodeNodeURL
 	}
 	f.mu.Lock()
@@ -132,9 +146,10 @@ func (f *transcodeMoveFollower) current(ctx context.Context, transportID, tokenN
 
 // follow finds where a transport runs after deadNode stopped answering. It
 // returns another node once the store names one, asking the API to move the
-// transport while the record still names deadNode. ok is false when no record
-// named another node within transcodeMoveWait.
-func (f *transcodeMoveFollower) follow(ctx context.Context, transportID, tokenNode, deadNode string) (string, bool) {
+// transport while the record still names deadNode. failedNodes are nodes this
+// request already could not reach, which the move must not pick either. ok is
+// false when no record named another node within transcodeMoveWait.
+func (f *transcodeMoveFollower) follow(ctx context.Context, transportID, tokenNode, deadNode string, failedNodes []string) (string, bool) {
 	if f == nil {
 		return "", false
 	}
@@ -142,7 +157,7 @@ func (f *transcodeMoveFollower) follow(ctx context.Context, transportID, tokenNo
 	results := f.group.DoChan(key, func() (any, error) {
 		waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), f.wait)
 		defer cancel()
-		return f.awaitMove(waitCtx, transportID, deadNode), nil
+		return f.awaitMove(waitCtx, transportID, deadNode, failedNodes), nil
 	})
 	select {
 	case result := <-results:
@@ -160,7 +175,7 @@ func (f *transcodeMoveFollower) follow(ctx context.Context, transportID, tokenNo
 	}
 }
 
-func (f *transcodeMoveFollower) awaitMove(ctx context.Context, transportID, deadNode string) string {
+func (f *transcodeMoveFollower) awaitMove(ctx context.Context, transportID, deadNode string, failedNodes []string) string {
 	var requestedAt time.Time
 	ticker := time.NewTicker(f.poll)
 	defer ticker.Stop()
@@ -170,13 +185,13 @@ func (f *transcodeMoveFollower) awaitMove(ctx context.Context, transportID, dead
 		// writes it again), so keep polling until the deadline. A transport
 		// that really stopped is denied before it reaches this relay, or costs
 		// one request the wait.
-		card, found := f.recipes.Get(ctx, transportID)
+		card, found, _ := f.recipes.Lookup(ctx, transportID)
 		if found && card != nil && card.TranscodeNodeURL != "" && !sameNode(card.TranscodeNodeURL, deadNode) {
 			return card.TranscodeNodeURL
 		}
 		if now := f.now(); found && card != nil && (requestedAt.IsZero() || now.Sub(requestedAt) >= f.republish) {
 			requestedAt = now
-			f.requestMove(ctx, transportID, deadNode)
+			f.requestMove(ctx, transportID, deadNode, failedNodes)
 		}
 		select {
 		case <-ctx.Done():
@@ -186,8 +201,8 @@ func (f *transcodeMoveFollower) awaitMove(ctx context.Context, transportID, dead
 	}
 }
 
-func (f *transcodeMoveFollower) requestMove(ctx context.Context, transportID, deadNode string) {
-	payload, err := noderecipe.EncodeMoveRequest(noderecipe.MoveRequest{TransportID: transportID, NodeURL: deadNode})
+func (f *transcodeMoveFollower) requestMove(ctx context.Context, transportID, deadNode string, failedNodes []string) {
+	payload, err := noderecipe.EncodeMoveRequest(noderecipe.MoveRequest{TransportID: transportID, NodeURL: deadNode, FailedNodes: failedNodes})
 	if err != nil {
 		return
 	}

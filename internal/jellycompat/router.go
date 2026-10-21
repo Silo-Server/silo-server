@@ -187,7 +187,6 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	playbackHandler.SettingsRepo = deps.SettingsRepo
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
-	subscribeTranscodeMoveRequests(deps, playbackHandler)
 	itemsHandler.themeRouter = compatThemeRouter(deps, playbackHandler)
 	itemsHandler.themeFFmpegPath = func() string { return playback.ResolveFFmpegPath(playbackHandler.FFmpegPath) }
 	playbackHandler.SessionSyncer = deps.SessionSyncer
@@ -203,6 +202,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.ExternalTimings = timings
 		}
 	}
+	// Last: move requests run on the event bus's goroutine and read the
+	// handler's fields.
+	subscribeTranscodeMoveRequests(deps, playbackHandler)
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	if deps.DB != nil {
 		imagesHandler.extraRepo = catalog.NewExtraRepository(deps.DB)

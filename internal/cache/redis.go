@@ -290,7 +290,7 @@ func redisChannel(channel string, db int) string {
 // eventBusChannels are the channels a starting server subscribes to. Redis
 // refuses a subscription that the user's ACL does not grant, and a refused
 // subscription stops the start.
-var eventBusChannels = []string{ChannelCatalog, ChannelAdmin, ChannelPlayback, ChannelLogs, ChannelEvents}
+var eventBusChannels = []string{ChannelCatalog, ChannelAdmin, ChannelPlayback, ChannelTranscodeMove, ChannelLogs, ChannelEvents}
 
 // CheckEventBusChannels subscribes client to every event bus channel on its
 // database number, as a starting server does, and returns the error Redis

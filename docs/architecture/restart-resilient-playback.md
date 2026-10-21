@@ -733,7 +733,7 @@ working (`internal/jellycompat/transcode_failover.go`):
   nothing moves.
 - **Move.** Central resolves a new executor with the session's frozen recipe
   requirements (the tone-map mode it runs, audio and HEVC capabilities; this
-  process only when it can run that tone-map mode), the dead node and any node
+  process only when it can run that tone-map mode and audio downmix), the dead node and any node
   the same request already failed on excluded, and without changing the egress
   the client sees: an API-egress
   transcode may move to another node or to this process, a proxy-egress one only
@@ -741,7 +741,9 @@ working (`internal/jellycompat/transcode_failover.go`):
   lock, and only while the transport still runs on the dead node, it rewrites the
   `noderecipe` record to name the new node (or deletes it for a local move), then
   the compat row's recipe and route and the upstream session. Moves are
-  single-flighted per session.
+  single-flighted per session. A move skips an ended play, and a stop deletes
+  the record under the same lock, so a stop that races a move still leaves no
+  record behind.
 - **Rebuild.** Nothing is started eagerly. The new node rebuilds the transcode
   from the rewritten record on the next request, seeked to the requested
   segment, exactly as after its own restart; a local move goes through the
@@ -752,12 +754,14 @@ working (`internal/jellycompat/transcode_failover.go`):
   cannot reach the node for a transport whose token carries no recipe, it
   publishes `transcode_move_requested` (`noderecipe.MoveRequest`) on
   `silo:transcode-move`, polls the record until it names another node (bounded
-  at 8 seconds per request), and relays there. The API process that owns the session
+  at 8 seconds per request), and relays there. The request lists the nodes the
+  same relay request already could not reach, which the move leaves out too. The API process that owns the session
   (`FindByUpstreamSessionID` is process-local) runs the move; other processes
   ignore the request. For every such transport the proxy reads the record on
   the first request it sees and relays to the node the record names, then
   re-reads it every 5 seconds, so later moves are followed too, and a proxy that
-  starts after a move never relays to the old node once it answers again. Native
+  starts after a move never relays to the old node once it answers again. A
+  read that fails keeps the node it last found. Native
   tokens carry their recipe; the proxy does not follow them, because native
   clients replan.
 - **Old node.** Central asks the dead node to stop the transport in the

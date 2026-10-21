@@ -33,10 +33,9 @@ import (
 // stream any session; a valid login alone says nothing about which session's
 // bytes the caller is entitled to.
 
-// recipeCardLookup reads a recipe card central stored for a session:
-// *noderecipe.Store implements it. As the media grant authority it fails
+// proxyGrantLookup reads the recipe central authorized for a session. It fails
 // closed: a miss is a 404, never a guess.
-type recipeCardLookup interface {
+type proxyGrantLookup interface {
 	Get(ctx context.Context, sessionID string) (*playback.RecipeCard, bool)
 }
 

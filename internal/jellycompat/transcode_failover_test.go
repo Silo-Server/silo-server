@@ -567,3 +567,47 @@ func TestCompatMoveRewriteAfterOldNodeStopKeepsNewerRecipe(t *testing.T) {
 			card.AudioTrackIndex, card.TranscodeNodeURL, switchedTrack, f.liveURL)
 	}
 }
+
+// putHookRecipeStore runs onPut once, before the first record write.
+type putHookRecipeStore struct {
+	*stubRecipeNodeStore
+	once  sync.Once
+	onPut func()
+}
+
+func (s *putHookRecipeStore) Put(ctx context.Context, sessionID string, card playback.RecipeCard) error {
+	s.once.Do(s.onPut)
+	return s.stubRecipeNodeStore.Put(ctx, sessionID, card)
+}
+
+// A stop that lands while a move rewrites the node recipe record must still
+// leave no record behind: a record of a stopped play lets a node that comes
+// back, or a still-valid proxy token, rebuild the transcode.
+func TestCompatStopDuringMoveLeavesNoRecipe(t *testing.T) {
+	f := newCompatMoveFixture(t, true, noderouting.EgressAPI)
+	playSession := f.playSession(t)
+	stopped := make(chan struct{})
+	f.handler.RecipeNodeStore = &putHookRecipeStore{stubRecipeNodeStore: f.recipes, onPut: func() {
+		go func() {
+			defer close(stopped)
+			f.store.Delete(playSession.ID)
+			f.handler.cleanupPlaySession(context.Background(), playSession, nil, f.deadURL)
+		}()
+		// Give the stop the chance to finish before the move writes, which it
+		// does when nothing orders the two.
+		select {
+		case <-stopped:
+		case <-time.After(200 * time.Millisecond):
+		}
+	}}
+
+	_, _ = f.handler.moveCompatTranscodeOffNode(t.Context(), "upstream-1", f.deadURL)
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the stop never finished")
+	}
+	if card, ok := f.recipes.Get("upstream-1"); ok {
+		t.Fatalf("a stopped play kept a node recipe naming %q (operations %v)", card.TranscodeNodeURL, f.recipes.Operations())
+	}
+}

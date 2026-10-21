@@ -24,6 +24,10 @@ type MoveRequest struct {
 	TransportID string `json:"transport_id"`
 	// NodeURL is the transcode node the relay could not reach.
 	NodeURL string `json:"node_url"`
+	// FailedNodes are nodes the same relay request could not reach before
+	// NodeURL. The API can still list them as healthy, so the move leaves them
+	// out too.
+	FailedNodes []string `json:"failed_nodes,omitempty"`
 }
 
 // EncodeMoveRequest renders a move request as an event payload.

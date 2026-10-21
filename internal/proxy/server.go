@@ -63,7 +63,7 @@ type Server struct {
 	// grant says what to serve, the login-session validator says whether the
 	// caller may still have it. Both nil in a deployment that predates the
 	// mode, which is why those routes answer 503 rather than assuming either.
-	grants        recipeCardLookup
+	grants        proxyGrantLookup
 	loginSessions loginSessionValidator
 	// streamDeny revokes a session's still-valid stream tokens once central
 	// stopped, expired, or terminated it. Nil disables the check, which is the
@@ -166,7 +166,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 // It must be called during construction, before the server begins handling
 // requests. Either argument may be nil, which leaves those routes unavailable
 // (503) while the token routes keep working unchanged.
-func (s *Server) SetMediaGrantAuthority(grants recipeCardLookup, sessions loginSessionValidator) {
+func (s *Server) SetMediaGrantAuthority(grants proxyGrantLookup, sessions loginSessionValidator) {
 	s.grants = grants
 	s.loginSessions = sessions
 }
@@ -1225,6 +1225,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		nodeURL = s.moves.current(r.Context(), transportID, claims.TranscodeNode)
 	}
 	var resp *http.Response
+	var failedNodes []string
 	for hop := 0; ; hop++ {
 		var targetURL string
 		var err error
@@ -1239,7 +1240,8 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		if followMoves && hop < maxTranscodeMoveHops && r.Context().Err() == nil && nodepool.IsConnectFailure(err) {
 			slog.WarnContext(r.Context(), "transcode node unreachable; following the transport to its new node", "component", "proxy",
 				"node", logredact.SanitizeURL(nodeURL), "error", logredact.SanitizeText(err.Error()), "playback_session_id", claims.SessionID)
-			if next, ok := s.moves.follow(r.Context(), transportID, claims.TranscodeNode, nodeURL); ok {
+			if next, ok := s.moves.follow(r.Context(), transportID, claims.TranscodeNode, nodeURL, failedNodes); ok {
+				failedNodes = append(failedNodes, nodeURL)
 				nodeURL = next
 				continue
 			}

@@ -193,13 +193,8 @@ func (h *PlaybackHandler) resolveCompatMoveRoute(
 		}
 	}
 	excludedShapes := map[string]struct{}{}
-	if !proxyEgress && recipe.ToneMapMode != "" {
-		// The candidate filter checks transcode nodes only. A local rebuild
-		// fails on a tone-map mode this process cannot run, so leave it out.
-		local, err := h.localToneMapCapabilities(ctx)
-		if err != nil || !local.Supports(recipe.ToneMapMode, recipe.ToneMapSourceKind) {
-			excludedShapes["hls_video_api"] = struct{}{}
-		}
+	if !proxyEgress && !h.compatMoveCanRunLocally(ctx, source, recipe) {
+		excludedShapes["hls_video_api"] = struct{}{}
 	}
 	policy := h.playbackRoutingPolicy()
 	for range compatMaxMoveRouteAttempts {
@@ -233,6 +228,20 @@ func (h *PlaybackHandler) resolveCompatMoveRoute(
 	return noderouting.Decision{}, errCompatMoveNoRoute
 }
 
+// compatMoveCanRunLocally reports whether this process can rebuild the frozen
+// recipe. The candidate filter checks transcode nodes only, and a local
+// rebuild fails on every request for a tone-map mode or an audio downmix this
+// process cannot run.
+func (h *PlaybackHandler) compatMoveCanRunLocally(ctx context.Context, source PlaybackMediaSource, recipe playback.RecipeCard) bool {
+	if recipe.ToneMapMode != "" {
+		local, err := h.localToneMapCapabilities(ctx)
+		if err != nil || !local.Supports(recipe.ToneMapMode, recipe.ToneMapSourceKind) {
+			return false
+		}
+	}
+	return h.requireLocalAudioDownmixCapability(ctx, compatHLSRecipeSourceAudioChannels(source)) == nil
+}
+
 func compatMoveRouteUsable(decision noderouting.Decision, proxyEgress bool, assignment playback.NodeRoutingAssignment) bool {
 	if proxyEgress {
 		return decision.Shape.Egress == noderouting.EgressProxy &&
@@ -255,9 +264,11 @@ func compatMoveRouteUsable(decision noderouting.Decision, proxyEgress bool, assi
 
 // commitCompatTranscodeMove re-points the transport at its new executor and
 // returns the executor the session runs on afterwards. It holds the session
-// lifecycle lock that a remote start's publication and a local start hold, and
-// re-checks that the transport still runs on the dead node, so a concurrent
-// audio switch or restart wins and the move commits nothing.
+// lifecycle lock that a remote start's publication, a local start, and a
+// stop's recipe delete (cleanupPlaySession) hold, and re-checks that the play
+// is live and the transport still runs on the dead node, so a concurrent audio
+// switch, restart, or stop wins and the move commits nothing. A stop that
+// lands during the commit deletes the record after it.
 //
 // The node recipe record is written first: it is what the new node rebuilds
 // from and what a proxy follows, and its failure leaves everything else as it
@@ -271,7 +282,7 @@ func (h *PlaybackHandler) commitCompatTranscodeMove(
 	defer unlock()
 
 	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.UpstreamSessionID != upstreamSessionID || playSession.Recipe == nil {
+	if !ok || playSession.Terminal || playSession.UpstreamSessionID != upstreamSessionID || playSession.Recipe == nil {
 		return "", errCompatMoveNoSession
 	}
 	if !sameCompatNode(playSession.Recipe.TranscodeNodeURL, deadNodeURL) {
@@ -416,9 +427,15 @@ func (h *PlaybackHandler) retireCompatTranscodeOnDeadNode(
 		}
 		unlock := h.tm.LockSessionLifecycle(upstreamSessionID)
 		defer unlock()
+		// Under the lock a stop's recipe delete takes: a stop that already
+		// ran has ended the play or its upstream session, and a later one
+		// deletes what this writes.
 		current, ok := h.playbackStore.Get(playSessionID)
-		if !ok || current.UpstreamSessionID != upstreamSessionID || current.Recipe == nil ||
+		if !ok || current.Terminal || current.UpstreamSessionID != upstreamSessionID || current.Recipe == nil ||
 			!sameCompatNode(current.Recipe.TranscodeNodeURL, nodeURL) {
+			return
+		}
+		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err != nil || upstream == nil {
 			return
 		}
 		if err := h.RecipeNodeStore.Put(stopCtx, upstreamSessionID, *current.Recipe); err != nil {
@@ -444,7 +461,7 @@ func (h *PlaybackHandler) HandleTranscodeMoveRequest(ctx context.Context, event 
 		return
 	}
 	go func() {
-		if _, err := h.moveCompatTranscodeOffNode(ctx, request.TransportID, request.NodeURL); err != nil {
+		if _, err := h.moveCompatTranscodeOffNode(ctx, request.TransportID, request.NodeURL, request.FailedNodes...); err != nil {
 			slog.WarnContext(ctx, "could not move a Jellyfin-compatible transcode a proxy could not reach", "component", "jellycompat",
 				"node", logredact.SanitizeURL(request.NodeURL), "playback_session_id", request.TransportID,
 				"error", logredact.SanitizeText(err.Error()))

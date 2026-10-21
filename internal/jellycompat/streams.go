@@ -2002,10 +2002,15 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	// Deliberate stop: drop the node recipe so a buffered/retrying request after
 	// a node restart cannot reconstruct a fresh ffmpeg for this stopped session.
 	// Best effort and bounded — never fail teardown on a recipe-store hiccup.
+	// The session lifecycle lock orders the delete after a transcode move that
+	// is rewriting the record (commitCompatTranscodeMove).
 	if h.RecipeNodeStore != nil {
+		unlock := h.tm.LockSessionLifecycle(playSession.UpstreamSessionID)
 		delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
-		defer cancel()
-		if err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID); err != nil {
+		err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID)
+		cancel()
+		unlock()
+		if err != nil {
 			slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
 				"playback_session_id", playSession.UpstreamSessionID)
 		}
