@@ -218,14 +218,21 @@ type WebhookAttemptOutcome struct {
 
 // finalizeAttemptCTE writes a WebhookAttemptOutcome ($1-$6) in the same
 // statement as the webhook's streak update, so a crash between the two
-// cannot leave the streaks disagreeing with the attempt history.
+// cannot leave the streaks disagreeing with the attempt history. Claims do
+// not change attempt_number, so it fences the write: when a lease expired
+// mid-send and another worker already finished this send, the row has moved
+// on and neither the attempt nor the streaks change.
 const finalizeAttemptCTE = `
 	WITH finalized AS (
 		UPDATE webhook_delivery_attempts
 		SET outcome = $2, attempt_number = $3, attempted_at = now(),
 		    http_status = $4, failure_message = left($5, 256), next_retry_at = $6
-		WHERE id = $1
+		WHERE id = $1 AND attempt_number = $3 - 1
+		RETURNING 1
 	)`
+
+// errAttemptSuperseded reports that another worker already finished the send.
+var errAttemptSuperseded = errors.New("webhook attempt already finalized")
 
 func (o WebhookAttemptOutcome) args() []any {
 	var message *string
@@ -235,20 +242,25 @@ func (o WebhookAttemptOutcome) args() []any {
 	return []any{o.AttemptID, o.Outcome, o.AttemptNumber, o.HTTPStatus, message, o.NextRetryAt}
 }
 
-// RecordSuccess finalizes a delivered attempt and resets both streaks.
+// RecordSuccess finalizes a delivered attempt and resets both streaks. It
+// returns errAttemptSuperseded when another worker already finished the send.
 func (r *WebhookRepository) RecordSuccess(ctx context.Context, webhookID string, done WebhookAttemptOutcome) error {
-	_, err := r.pool.Exec(ctx, finalizeAttemptCTE+`
+	tag, err := r.pool.Exec(ctx, finalizeAttemptCTE+`
 		UPDATE notification_webhooks
 		SET last_success_at = now(), consecutive_failures = 0, consecutive_rejections = 0,
 		    updated_at = now()
-		WHERE id = $7`, append(done.args(), webhookID)...)
+		WHERE id = $7 AND EXISTS (SELECT 1 FROM finalized)`, append(done.args(), webhookID)...)
+	if err == nil && tag.RowsAffected() == 0 {
+		return errAttemptSuperseded
+	}
 	return err
 }
 
 // RecordFailure finalizes a failed attempt, increments the failure streak,
 // and stores the diagnostic. A rejected delivery (a non-retryable 4xx) also
 // extends the rejection streak, whose new length is returned. Success,
-// re-enabling, and a URL change reset both streaks.
+// re-enabling, and a URL change reset both streaks. It returns
+// errAttemptSuperseded when another worker already finished the send.
 func (r *WebhookRepository) RecordFailure(ctx context.Context, webhookID string, done WebhookAttemptOutcome, rejected bool) (int, error) {
 	var rejections int
 	err := r.pool.QueryRow(ctx, finalizeAttemptCTE+`
@@ -259,8 +271,11 @@ func (r *WebhookRepository) RecordFailure(ctx context.Context, webhookID string,
 		    consecutive_failures = consecutive_failures + 1,
 		    consecutive_rejections = consecutive_rejections + CASE WHEN $8 THEN 1 ELSE 0 END,
 		    updated_at = now()
-		WHERE id = $7
+		WHERE id = $7 AND EXISTS (SELECT 1 FROM finalized)
 		RETURNING consecutive_rejections`, append(done.args(), webhookID, rejected)...).Scan(&rejections)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, errAttemptSuperseded
+	}
 	return rejections, err
 }
 

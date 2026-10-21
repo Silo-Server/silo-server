@@ -191,6 +191,15 @@ func TestWebhookRejectionStreak(t *testing.T) {
 	}
 	fail(true, 1) // re-enabled: the old rejections do not count
 
+	// A send another worker already finished (its lease expired mid-send)
+	// changes neither the attempt nor the streak.
+	late := WebhookAttemptOutcome{AttemptID: "attempt-" + strconv.Itoa(attempts), Outcome: WebhookOutcomeFailed,
+		AttemptNumber: 1, HTTPStatus: &status}
+	if _, err := repo.RecordFailure(ctx, "wh", late, true); !errors.Is(err, errAttemptSuperseded) {
+		t.Fatalf("second finalize of one send = %v; want errAttemptSuperseded", err)
+	}
+	fail(true, 2)
+
 	delivered := WebhookAttemptOutcome{AttemptID: newAttempt(), Outcome: WebhookOutcomeDelivered, AttemptNumber: 1}
 	if err := repo.RecordSuccess(ctx, "wh", delivered); err != nil {
 		t.Fatal(err)

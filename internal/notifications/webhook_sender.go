@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -195,7 +196,7 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	if result.OK {
 		done := WebhookAttemptOutcome{AttemptID: attempt.ID, Outcome: WebhookOutcomeDelivered,
 			AttemptNumber: attemptNumber, HTTPStatus: &result.HTTPStatus}
-		if err := s.webhooks.RecordSuccess(ctx, hook.ID, done); err != nil {
+		if err := s.webhooks.RecordSuccess(ctx, hook.ID, done); err != nil && !errors.Is(err, errAttemptSuperseded) {
 			s.logger.WarnContext(ctx, "webhook success bookkeeping failed", "webhook_id", hook.ID, "error", err)
 		}
 		return
@@ -223,6 +224,9 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		done.Outcome = WebhookOutcomeAutoDisabled
 	}
 	rejections, err := s.webhooks.RecordFailure(ctx, hook.ID, done, rejected)
+	if errors.Is(err, errAttemptSuperseded) {
+		return // the worker that finished this send owns its outcome
+	}
 	if err != nil {
 		// Nothing was written: the lease expires and the retry worker
 		// reclaims the attempt.
