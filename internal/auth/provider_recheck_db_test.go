@@ -1059,7 +1059,7 @@ func TestProviderRecheckScheduledPassDB(t *testing.T) {
 	}
 
 	// An API key makes it due; an active answer keeps the key.
-	exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'idle', $2, 1)`, env.user.ID, "sa_idle_"+env.suffix)
+	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'idle', $2, 1)`, env.user.ID, HashLinkToken("sa_idle_"+env.suffix))
 	if !due() {
 		t.Fatal("an account with an API key is not due")
 	}
@@ -1101,7 +1101,7 @@ func TestProviderRecheckScheduledPassDB(t *testing.T) {
 
 	// A refused account loses its login and Audiobookshelf sessions and its
 	// API keys.
-	exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'idle', $2, 1)`, env.user.ID, "sa_idle2_"+env.suffix)
+	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'idle', $2, 1)`, env.user.ID, HashLinkToken("sa_idle2_"+env.suffix))
 	exec(`INSERT INTO abs_sessions (user_id, token_hash, device_id) VALUES ($1, $2, 'abs-device')`, env.user.ID, "abs-"+env.suffix)
 	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_FOUND, "")
 	if counts := run(); counts[CheckStatusNotFound] != 1 {
@@ -1343,7 +1343,7 @@ func TestProviderRecheckUnsupportedBoundsCredentialsDB(t *testing.T) {
 	if time.Since(lastAuthenticated()) > time.Minute {
 		t.Fatal("the sign-in did not stamp last_authenticated_at")
 	}
-	exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'bound', $2, 1)`, env.user.ID, "sa_bound_"+env.suffix)
+	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'bound', $2, 1)`, env.user.ID, HashLinkToken("sa_bound_"+env.suffix))
 	exec(`INSERT INTO abs_sessions (user_id, token_hash, device_id) VALUES ($1, $2, 'abs-device')`, env.user.ID, "abs-bound-"+env.suffix)
 
 	// Authenticated through the provider within the absolute age (default
@@ -1382,7 +1382,7 @@ func TestProviderRecheckUnsupportedBoundsCredentialsDB(t *testing.T) {
 
 	// A refresh-driven re-check applies the same bound, and the refresh
 	// itself goes on under the absolute age.
-	exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'bound2', $2, 1)`, env.user.ID, "sa_bound2_"+env.suffix)
+	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'bound2', $2, 1)`, env.user.ID, HashLinkToken("sa_bound2_"+env.suffix))
 	env.makeDue(t)
 	if _, err := env.svc.Refresh(ctx, refresh); err != nil {
 		t.Fatalf("refresh = %v", err)
@@ -1393,7 +1393,7 @@ func TestProviderRecheckUnsupportedBoundsCredentialsDB(t *testing.T) {
 
 	// A shorter absolute age applies too.
 	exec(`INSERT INTO server_settings (key, value) VALUES ($1, '7d') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, config.AuthRefreshTokenExpirySettingKey)
-	exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'bound3', $2, 1)`, env.user.ID, "sa_bound3_"+env.suffix)
+	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'bound3', $2, 1)`, env.user.ID, HashLinkToken("sa_bound3_"+env.suffix))
 	ageAuthentication(8)
 	env.makeDue(t)
 	if _, err := env.recheck.RecheckIdleIdentities(ctx); err != nil {
@@ -1411,7 +1411,7 @@ func TestProviderRecheckUnsupportedBoundsCredentialsDB(t *testing.T) {
 	if time.Since(lastAuthenticated()) > time.Minute {
 		t.Fatal("a sign-in did not stamp last_authenticated_at")
 	}
-	exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'bound4', $2, 1)`, env.user.ID, "sa_bound4_"+env.suffix)
+	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'bound4', $2, 1)`, env.user.ID, HashLinkToken("sa_bound4_"+env.suffix))
 	env.makeDue(t)
 	if _, err := env.recheck.RecheckIdleIdentities(ctx); err != nil {
 		t.Fatal(err)
@@ -1516,7 +1516,7 @@ func TestProviderRecheckUnsupportedSkipsLocalPasswordAccountsDB(t *testing.T) {
 	exec(`UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID)
 	exec(`DELETE FROM server_settings WHERE key = $1`, config.AuthRefreshTokenExpirySettingKey)
 	exec(`UPDATE users SET local_password_login_enabled = true WHERE id = $1`, env.user.ID)
-	exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'local', $2, 1)`, env.user.ID, "sa_local_"+env.suffix)
+	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'local', $2, 1)`, env.user.ID, HashLinkToken("sa_local_"+env.suffix))
 	exec(`INSERT INTO abs_sessions (user_id, token_hash, device_id) VALUES ($1, $2, 'abs-device')`, env.user.ID, "abs-local-"+env.suffix)
 	exec(`UPDATE plugin_auth_identities SET last_authenticated_at = NOW() - INTERVAL '40 days' WHERE id = $1`, env.identityID)
 	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNSUPPORTED, "")
@@ -1836,7 +1836,7 @@ func TestProviderRecheckUpgradedIdentityKeepsAPIKeysDB(t *testing.T) {
 			exec(`UPDATE plugin_auth_identities SET created_at = NOW() - INTERVAL '60 days', linked_at = NOW() - INTERVAL '60 days',
 				last_sign_in_at = NULL, last_authenticated_at = NULL, last_checked_at = NULL, last_check_status = '', refresh_state = ''
 				WHERE id = $1`, env.identityID)
-			exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'upgraded', $2, 1)`, env.user.ID, "sa_upgraded_"+name+env.suffix)
+			exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'upgraded', $2, 1)`, env.user.ID, HashLinkToken("sa_upgraded_"+name+env.suffix))
 			exec(lastAuthenticatedBackfill(t), env.identityID)
 			env.checker.respond = respond
 
@@ -2098,7 +2098,7 @@ func TestProviderRecheckDisabledProviderBoundsCredentialsDB(t *testing.T) {
 	env.recheck.source = fakeCheckerSource{err: ErrProviderNotLoaded}
 	exec(`DELETE FROM server_settings WHERE key = $1`, config.AuthRefreshTokenExpirySettingKey)
 	exec(`UPDATE users SET local_password_login_enabled = false WHERE id = $1`, env.user.ID)
-	exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'disabled', $2, 1)`, env.user.ID, "sa_disabled_"+env.suffix)
+	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'disabled', $2, 1)`, env.user.ID, HashLinkToken("sa_disabled_"+env.suffix))
 	exec(`INSERT INTO abs_sessions (user_id, token_hash, device_id) VALUES ($1, $2, 'abs-device')`, env.user.ID, "abs-disabled-"+env.suffix)
 	env.makeDue(t)
 	before := env.identityState(t)
@@ -2135,7 +2135,7 @@ func TestProviderRecheckDisabledProviderBoundsCredentialsDB(t *testing.T) {
 	// A refresh of a session opened through the identity applies the same
 	// bound and goes on under the absolute age.
 	_, refresh := env.session(t, true)
-	exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'disabled2', $2, 1)`, env.user.ID, "sa_disabled2_"+env.suffix)
+	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'disabled2', $2, 1)`, env.user.ID, HashLinkToken("sa_disabled2_"+env.suffix))
 	if _, err := env.svc.Refresh(ctx, refresh); err != nil {
 		t.Fatalf("refresh = %v", err)
 	}
@@ -2145,7 +2145,7 @@ func TestProviderRecheckDisabledProviderBoundsCredentialsDB(t *testing.T) {
 
 	// An account with local password sign-in is not the provider's to bound.
 	exec(`UPDATE users SET local_password_login_enabled = true WHERE id = $1`, env.user.ID)
-	exec(`INSERT INTO api_keys (user_id, label, api_key, revision) VALUES ($1, 'disabled3', $2, 1)`, env.user.ID, "sa_disabled3_"+env.suffix)
+	exec(`INSERT INTO api_keys (user_id, label, key_hash, revision) VALUES ($1, 'disabled3', $2, 1)`, env.user.ID, HashLinkToken("sa_disabled3_"+env.suffix))
 	if due() {
 		t.Fatal("an account with local password sign-in is due")
 	}

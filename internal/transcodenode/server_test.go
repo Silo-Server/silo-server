@@ -2879,14 +2879,17 @@ func (s *stubRecipeStore) Get(context.Context, string) (*playback.RecipeCard, bo
 	return s.card, s.ok
 }
 
-func (s *stubRecipeStore) Delete(_ context.Context, sessionID string) error {
+func (s *stubRecipeStore) DeleteUnlessMoved(_ context.Context, sessionID string, executor playback.RecipeExecutor) (bool, error) {
+	if s.card != nil && executor.NamesAnotherNode(*s.card) {
+		return true, nil
+	}
 	s.deletes = append(s.deletes, sessionID)
 	if s.delErr != nil {
-		return s.delErr
+		return false, s.delErr
 	}
 	s.card = nil
 	s.ok = false
-	return nil
+	return false, nil
 }
 
 func (s *stubRecipeStore) RevokeNode(_ context.Context, nodeURL string) error {
@@ -3063,6 +3066,143 @@ func TestHandleStop_DeletesRecipe(t *testing.T) {
 	}
 	if _, ok := s.sessions[sid]; ok {
 		t.Fatalf("session %q still registered after stop", sid)
+	}
+}
+
+// A stop that stalls on a hung node can run after the API has moved the
+// transport to another node and stored that node's card under the same
+// transport id. The stop deletes this node's own card, never the successor's.
+func TestHandleStop_KeepsRecipeMovedToAnotherNode(t *testing.T) {
+	const sid = "stop-moved-1"
+	for _, tc := range []struct {
+		name       string
+		nodeRowID  int
+		card       playback.RecipeCard
+		wantDelete bool
+	}{
+		{"own card", 1, playback.RecipeCard{TranscodeNodeURL: "http://old:9000", RoutingExecutionNodeID: 1}, true},
+		{"moved to another node", 1, playback.RecipeCard{TranscodeNodeURL: "http://new:9000", RoutingExecutionNodeID: 2}, false},
+		// Without a row id on the card a move cannot be told from a URL edit,
+		// so the stop deletes it as before.
+		{"card without a row id", 1, playback.RecipeCard{TranscodeNodeURL: "http://new:9000"}, true},
+		// A node deleted and added again gets a new row; the cards it issued
+		// before still name its URL.
+		{"node re-added under a new row", 3, playback.RecipeCard{TranscodeNodeURL: "http://old:9000", RoutingExecutionNodeID: 1}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t)
+			s.tracker = nodesessions.NewTracker(nil, "node-url", "node-name", "transcode")
+			s.nodeRowID = func() (int, bool) { return tc.nodeRowID, true }
+			s.registeredNodeURL = func() (string, bool) { return "http://old:9000", true }
+			card := tc.card
+			store := &stubRecipeStore{card: &card, ok: true}
+			s.SetRecipeStore(store)
+			s.sessions[sid] = &playback.TranscodeSession{}
+			s.activeJobs.Store(1)
+
+			r := httptest.NewRequest(http.MethodDelete, "/transcode/"+sid, nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("session_id", sid)
+			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+			rec := httptest.NewRecorder()
+			s.handleStop(rec, r)
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("handleStop status = %d, want %d", rec.Code, http.StatusNoContent)
+			}
+			if deleted := len(store.deletes) == 1; deleted != tc.wantDelete {
+				t.Fatalf("recipe deletes = %v, want delete %v", store.deletes, tc.wantDelete)
+			}
+		})
+	}
+}
+
+// The node's registration can change while a job runs. A stop judges the
+// stored card against the identity the job was registered under, so a node
+// re-created under a new row and URL still deletes its own card, and one whose
+// registration is no longer resolved still keeps the card of the node the
+// transport moved to.
+func TestHandleStop_JudgesRecipeByTheIdentityTheJobStartedUnder(t *testing.T) {
+	const sid = "stop-started-as-1"
+	startedAs := playback.RecipeExecutor{NodeID: 1, NodeURL: "http://old:9000"}
+	for _, tc := range []struct {
+		name       string
+		currentID  int
+		currentURL string
+		card       playback.RecipeCard
+		wantDelete bool
+	}{
+		{"re-created under a new row and URL", 5, "http://alias:9000", playback.RecipeCard{TranscodeNodeURL: "http://old:9000", RoutingExecutionNodeID: 1}, true},
+		{"registration unresolved since, card moved", 0, "", playback.RecipeCard{TranscodeNodeURL: "http://new:9000", RoutingExecutionNodeID: 2}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t)
+			s.tracker = nodesessions.NewTracker(nil, "node-url", "node-name", "transcode")
+			s.nodeRowID = func() (int, bool) { return tc.currentID, tc.currentID > 0 }
+			s.registeredNodeURL = func() (string, bool) { return tc.currentURL, tc.currentURL != "" }
+			card := tc.card
+			store := &stubRecipeStore{card: &card, ok: true}
+			s.SetRecipeStore(store)
+			s.sessions[sid] = &playback.TranscodeSession{}
+			s.noteStartedAsLocked(sid, startedAs)
+			s.activeJobs.Store(1)
+
+			r := httptest.NewRequest(http.MethodDelete, "/transcode/"+sid, nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("session_id", sid)
+			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+			rec := httptest.NewRecorder()
+			s.handleStop(rec, r)
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("handleStop status = %d, want %d", rec.Code, http.StatusNoContent)
+			}
+			if deleted := len(store.deletes) == 1; deleted != tc.wantDelete {
+				t.Fatalf("recipe deletes = %v, want delete %v", store.deletes, tc.wantDelete)
+			}
+			if _, recorded := s.startedAs[sid]; recorded {
+				t.Fatal("the stop left the job's start identity behind")
+			}
+		})
+	}
+}
+
+// A hung node that resumes keeps the transport it lost in its session map
+// when the API's late stop is refused. A force reload of that node tears the
+// job down but leaves the card of the node the transport moved to.
+func TestForceReloadTeardownKeepsRecipeMovedToAnotherNode(t *testing.T) {
+	const sid = "reload-moved-1"
+	for _, tc := range []struct {
+		name       string
+		card       playback.RecipeCard
+		wantDelete bool
+	}{
+		{"own card", playback.RecipeCard{TranscodeNodeURL: "http://old:9000", RoutingExecutionNodeID: 1}, true},
+		{"moved to another node", playback.RecipeCard{TranscodeNodeURL: "http://new:9000", RoutingExecutionNodeID: 2}, false},
+		// The node's URL was edited since it started this transport.
+		{"own URL-only card under an edited URL", playback.RecipeCard{TranscodeNodeURL: "http://before-edit:9000"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t)
+			s.tracker = nodesessions.NewTracker(nil, "node-url", "node-name", "transcode")
+			s.nodeRowID = func() (int, bool) { return 1, true }
+			s.registeredNodeURL = func() (string, bool) { return "http://old:9000", true }
+			card := tc.card
+			store := &stubRecipeStore{card: &card, ok: true}
+			s.SetRecipeStore(store)
+			s.sessions[sid] = &playback.TranscodeSession{}
+			s.activeJobs.Store(1)
+
+			if err := s.teardownForForceReload(t.Context(), "http://old:9000", 1); err != nil {
+				t.Fatalf("teardown: %v", err)
+			}
+			if _, running := s.sessions[sid]; running {
+				t.Fatal("force reload left the job running")
+			}
+			if deleted := len(store.deletes) == 1; deleted != tc.wantDelete {
+				t.Fatalf("recipe deletes = %v, want delete %v", store.deletes, tc.wantDelete)
+			}
+		})
 	}
 }
 

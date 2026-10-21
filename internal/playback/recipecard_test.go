@@ -590,3 +590,27 @@ func TestCopyFMP4RecipeCardsFailClosedAcrossReaderGenerations(t *testing.T) {
 		t.Fatalf("ordinary encoded recipe rejected: %v", err)
 	}
 }
+
+func TestRecipeExecutorNamesAnotherNode(t *testing.T) {
+	oldNode := RecipeExecutor{NodeID: 1, NodeURL: "http://old:9000"}
+	for _, tc := range []struct {
+		name     string
+		executor RecipeExecutor
+		card     RecipeCard
+		want     bool
+	}{
+		{"own card", oldNode, RecipeCard{RoutingExecutionNodeID: 1, TranscodeNodeURL: "http://old:9000/"}, false},
+		{"moved to another node", oldNode, RecipeCard{RoutingExecutionNodeID: 2, TranscodeNodeURL: "http://new:9000"}, true},
+		// Without a row id on the card the move cannot be told from a URL edit.
+		{"card without a row id", oldNode, RecipeCard{TranscodeNodeURL: "http://new:9000"}, false},
+		{"node URL edited, URL-only card", RecipeExecutor{NodeID: 1, NodeURL: "http://alias:9000"}, RecipeCard{TranscodeNodeURL: "http://old:9000"}, false},
+		{"node re-added under a new row", RecipeExecutor{NodeID: 3, NodeURL: "http://old:9000"}, RecipeCard{RoutingExecutionNodeID: 1, TranscodeNodeURL: "http://old:9000"}, false},
+		{"node URL repointed on the same row", RecipeExecutor{NodeID: 1, NodeURL: "http://renamed:9000"}, RecipeCard{RoutingExecutionNodeID: 1, TranscodeNodeURL: "http://old:9000"}, false},
+		{"node identity unresolved", RecipeExecutor{}, RecipeCard{RoutingExecutionNodeID: 2, TranscodeNodeURL: "http://new:9000"}, false},
+		{"node URL unresolved", RecipeExecutor{NodeID: 1}, RecipeCard{RoutingExecutionNodeID: 2, TranscodeNodeURL: "http://new:9000"}, false},
+	} {
+		if got := tc.executor.NamesAnotherNode(tc.card); got != tc.want {
+			t.Errorf("%s: NamesAnotherNode = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

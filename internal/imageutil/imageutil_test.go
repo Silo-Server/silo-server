@@ -38,8 +38,12 @@ func largeTestJPEG(t testing.TB, width, height int) []byte {
 }
 
 func TestThumbhashRejectsGarbage(t *testing.T) {
-	if _, err := Thumbhash([]byte("not an image at all")); err == nil {
+	_, err := Thumbhash([]byte("not an image at all"))
+	if err == nil {
 		t.Fatal("Thumbhash accepted garbage input")
+	}
+	if !errors.Is(err, ErrInvalidImage) {
+		t.Fatalf("err = %v, want ErrInvalidImage", err)
 	}
 }
 

@@ -102,7 +102,9 @@ affected repositories in the issue and pull request.
 2. One concern per pull request. No unrelated cleanup or refactors.
 3. Follow existing patterns; comment only where behavior is not obvious from the
    code.
-4. Add tests that fail before the fix and pass after it.
+4. Add or extend a test only where [Decide what to test](#decide-what-to-test)
+   calls for one. That test must fail before the change and pass after it.
+   Delete tests the change makes redundant.
 5. Exercise user-facing behavior in a running application when you can.
 6. Review the whole diff for unintended behavior, generated-file drift, local
    paths, credentials, and stray edits.
@@ -112,6 +114,72 @@ affected repositories in the issue and pull request.
 Tests are evidence, not proof. Think about effects beyond the files you touched,
 and be ready to explain the implementation, alternatives, and tradeoffs in
 review.
+
+## Decide what to test
+
+Every test costs CI time, and every later change to the code it covers has to
+keep it passing. A test is worth that only if it would catch a regression that
+matters and that no other test, type check, or lint would catch. Before you add
+one, name the bug it would catch. If you can't, or the bug is a change of
+wording, don't add the test.
+
+Add or extend a test when a change touches:
+
+- Security and authority: authentication, role and household checks, account
+  and profile isolation, tokens and API keys, path and network guards, secret
+  redaction.
+- Data integrity: migrations that move or delete data, deletes and cascades,
+  content IDs, idempotency.
+- A public contract: `/api/v2` shapes and problem codes, jellycompat wire
+  shapes, the plugin protocol.
+- Failure handling: concurrency, retries, cancellation, timeouts, a node lost
+  mid-stream.
+- Logic with real edge cases: parsers, time and position math, ranking,
+  playback decisions.
+
+A bug fix in one of these areas gets a test that drives the path that broke.
+Outside these areas, don't add a test. That includes:
+
+- Small changes, UI layout, styling, or copy.
+- Code with no logic of its own: constants, defaults, field copies, getters,
+  constructors, handlers and adapters that pass values through.
+- `/api/v1` beyond its own authorization checks. It is frozen; test shared
+  behavior through the service or `/api/v2`.
+- Migrations that only add a table, column, or index.
+- Behavior an existing test already covers, at this layer or another.
+- The language, the standard library, or a dependency.
+
+Keep the tests you add cheap:
+
+- Test a behavior once, in the package that owns it, plus at most one wiring
+  test at the edge. A web page test covers what the page itself decides; hooks,
+  helpers, and shared components have their own tests.
+- Write one case per branch. Several bad inputs that reach the same error path
+  are one case.
+- Add a row to an existing table before writing a new test, and add a test to
+  an existing file before creating a file.
+- Assert outcomes, not incidental detail such as exact log text, whole SQL
+  statements, call order, CSS classes, or DOM structure. When generated SQL is
+  the only place a property shows, such as a profile filter on a query
+  builder, assert that property rather than the statement.
+- Don't read source, CSS, or docs files and match strings. Enforce a rule like
+  that with lint or a generator check.
+- Don't replace everything around the code with fakes and then assert that a
+  fake received the test's own inputs.
+- Keep tests fast. Don't wait on the real clock for retries, backoff, or
+  timeouts; use `testing/synctest` or an injected clock. Give a Go test that
+  takes more than a second, or a web test file that takes more than a few
+  seconds, a comment saying why. Use real FFmpeg or real media only for what
+  nothing else can show, and only once per behavior.
+- A test that needs Postgres runs in CI only when a CI list or job selects it
+  (see [Validate your change](#validate-your-change)). Name a new one in
+  `scripts/ci/db-contracts.txt`, or `scripts/ci/db-pins.txt` for a query
+  budget, in the same change, or don't write it. No CI job has Redis, so don't
+  add tests that need a live Redis.
+
+When a change makes a test redundant, delete it in the same change. Reviewers,
+human or agent, should ask for a test only when its absence lets a regression
+these rules cover go unnoticed.
 
 ## Development setup
 

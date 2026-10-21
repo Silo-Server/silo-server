@@ -196,6 +196,16 @@ describe("DeviceSettingGroups", () => {
     expect(screen.queryByText(/From your profile/)).not.toBeInTheDocument();
   });
 
+  it("names the server default for a setting an administrator can set", () => {
+    renderGroups({
+      "ui.title_art": effective({ key: "ui.title_art", value: false, source: "default" }),
+    });
+
+    expect(screen.getByText("Server default")).toBeInTheDocument();
+    expect(screen.queryByText("App default")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Show title art" })).not.toBeChecked();
+  });
+
   it("shows only the device badge for a value changed on this device", () => {
     renderGroups({
       "playback.audio_language": effective({

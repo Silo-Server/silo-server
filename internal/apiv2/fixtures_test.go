@@ -2138,6 +2138,7 @@ func fixtureDeps() Dependencies {
 	deps.NotificationDiscordLinks = new(fakeNotificationDiscordLinks)
 	deps.NotificationRelay = new(fakeNotificationRelay)
 	deps.NotificationChannels = new(fakeNotificationChannels)
+	deps.NotificationDiscordManagement = discordManagement([]userstore.Profile{{ID: "p-primary", IsPrimary: true}})
 	deps.NotificationDestinations = new(fakeNotificationDestinations)
 	accounts := fixtureAdminAccounts()
 	accounts.allowImpersonation = true

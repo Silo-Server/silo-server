@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -22,6 +23,29 @@ type fakeAdminAccessGroups struct {
 	last    access.UpdateGroupInput
 	created access.CreateGroupInput
 	guard   access.GroupPrecondition
+}
+
+func TestAdminAccessGroupLibraryPolicyStates(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want *[]int
+	}{
+		{"omitted", `{}`, nil},
+		{"null", `{"library_ids":null}`, new([]int(nil))},
+		{"empty", `{"library_ids":[]}`, new([]int{})},
+		{"populated", `{"library_ids":["2"]}`, new([]int{2})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := fixtureAdminAccessGroups()
+			deps := requestDeps(fixtureRequests())
+			deps.AdminAccessGroups = f
+			rec := do(t, NewHandler(deps), http.MethodPut, Prefix+"/admin/access-groups/7", tc.body, with(actingRequestAdmin, "If-Match", "*"))
+			if rec.Code != http.StatusOK || !reflect.DeepEqual(f.last.LibraryIDs, tc.want) {
+				t.Fatalf("status = %d, library_ids = %#v, want %#v; body %s", rec.Code, f.last.LibraryIDs, tc.want, rec.Body.String())
+			}
+		})
+	}
 }
 
 func fixtureAdminAccessGroups() *fakeAdminAccessGroups {

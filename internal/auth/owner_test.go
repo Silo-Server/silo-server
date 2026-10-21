@@ -281,8 +281,8 @@ func TestOwnershipMoveRevokesPendingAdminInvitationsPostgres(t *testing.T) {
 func issueTestCredentials(t *testing.T, r *UserRepository, id int) {
 	t.Helper()
 	if _, err := r.pool.Exec(t.Context(), `
-		INSERT INTO api_keys (id, user_id, label, api_key, revision) VALUES ($1, $2, 'held', $3, 1)`,
-		time.Now().UnixNano(), id, uuid.NewString()); err != nil {
+		INSERT INTO api_keys (id, user_id, label, key_hash, revision) VALUES ($1, $2, 'held', $3, 1)`,
+		time.Now().UnixNano(), id, HashLinkToken(uuid.NewString())); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.pool.Exec(t.Context(), `

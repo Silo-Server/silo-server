@@ -56,6 +56,14 @@ func apiKeyHTTPRepository(t *testing.T) *auth.APIKeyRepository {
 	if _, err = pool.Exec(t.Context(), up); err != nil {
 		t.Fatal(err)
 	}
+	migration, err = os.ReadFile("../../migrations/sql/20261019181724_hash_api_key_verifiers.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, _, _ = strings.Cut(string(migration), "-- +goose Down")
+	if _, err = pool.Exec(t.Context(), up); err != nil {
+		t.Fatal(err)
+	}
 	return auth.NewAPIKeyRepository(pool)
 }
 

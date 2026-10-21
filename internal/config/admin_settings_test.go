@@ -563,3 +563,29 @@ func TestNormalizeAdminSettingLocalURLIsAnOrigin(t *testing.T) {
 		}
 	}
 }
+
+// An administrator default is validated against the value schema of the
+// setting it stands in for, so the resolver never has to discard one.
+func TestNormalizeAdminSettingValidatesAdminDefaults(t *testing.T) {
+	const key = "defaults.ui.title_art"
+	for _, tc := range []struct{ in, want string }{
+		{"false", "false"},
+		{" true ", "true"},
+		{"", ""},
+	} {
+		got, err := NormalizeAdminSetting(key, tc.in)
+		if err != nil || got != tc.want {
+			t.Errorf("NormalizeAdminSetting(%q, %q) = %q, %v; want %q", key, tc.in, got, err, tc.want)
+		}
+	}
+	for _, bad := range []string{"off", `"false"`, "1", "null"} {
+		if _, err := NormalizeAdminSetting(key, bad); err == nil {
+			t.Errorf("NormalizeAdminSetting(%q, %q) accepted a value ui.title_art rejects", key, bad)
+		}
+	}
+	// A defaults.* key for a setting without admin_default is not an
+	// administrator default and passes through untouched, as before.
+	if got, err := NormalizeAdminSetting("defaults.ui.theme", "anything"); err != nil || got != "anything" {
+		t.Errorf("defaults.ui.theme = %q, %v; want passthrough", got, err)
+	}
+}

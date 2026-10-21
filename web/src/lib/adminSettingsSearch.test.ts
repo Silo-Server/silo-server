@@ -12,4 +12,14 @@ describe("adminSettingsSearch", () => {
       { label: "Database number" },
     ]);
   });
+
+  it("finds the shared account allowance under its current label", () => {
+    const page = ADMIN_SETTINGS_NAV.find((item) =>
+      item.settings?.some((s) => s.label === "Rate limiting"),
+    );
+
+    expect(filterSettingsSearchEntries(page?.settings, "per address")).toEqual([
+      { label: "Per address and account" },
+    ]);
+  });
 });

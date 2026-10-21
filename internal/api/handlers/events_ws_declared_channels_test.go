@@ -124,8 +124,8 @@ func TestEventsWebSocketDeclaredChannelsSkipHandshake(t *testing.T) {
 		t.Fatalf("snapshot channel = %s, want user_settings", snapshot["channel"])
 	}
 
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Errorf("event channel = %s, want user_settings", event["channel"])
@@ -205,8 +205,8 @@ func TestEventsWebSocketPartialDeclarationSurvives(t *testing.T) {
 
 	time.Sleep(subscribeGracePeriod + time.Second)
 
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatalf("setting read deadline: %v", err)
@@ -299,8 +299,8 @@ func TestEventsWebSocketDeclaredChannelsCannotEscalate(t *testing.T) {
 		evt.PublishOptions{AdminOnly: true}); err != nil {
 		t.Fatalf("publishing admin-only event: %v", err)
 	}
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	event := readFrame("event")
 	if string(event["channel"]) != `"user_settings"` {
@@ -315,7 +315,7 @@ func TestEventsWebSocketDeclaredChannelsCannotEscalate(t *testing.T) {
 func TestEventsWebSocketAdminAccountChildProfileIsNotAdmin(t *testing.T) {
 	hub := evt.NewHub("test", &cache.NoopEventBus{})
 	_, readFrame := eventsWSTestConnActing(t, &EventsHandler{hub: hub},
-		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=sessions,user_settings", actingAdminIs(false))
+		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=sessions,history_import", actingAdminIs(false))
 
 	hello := readFrame("hello")
 	if strings.Contains(string(hello["available_channels"]), `"sessions"`) {
@@ -325,15 +325,23 @@ func TestEventsWebSocketAdminAccountChildProfileIsNotAdmin(t *testing.T) {
 	if strings.Contains(string(subscribed["channels"]), `"sessions"`) {
 		t.Fatalf("child profile was granted the sessions channel: %s", subscribed["channels"])
 	}
-	readFrame("snapshot") // user_settings
+	readFrame("snapshot") // history_import
 
 	// Another account's event first, then this account's: receiving the
-	// second without the first proves the first was filtered.
-	publishUserSettingsEvent(context.Background(), hub, 2, "profile-2", "playback.subtitle_language", "profile")
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1", "playback.subtitle_language", "profile")
+	// second without the first proves the first was filtered. history_import
+	// still reaches an acting admin across accounts, so only the demotion
+	// filters it here.
+	for _, env := range []evt.Envelope{
+		{Channel: evt.ChannelHistoryImport, Event: "foreign-import", UserID: 2},
+		{Channel: evt.ChannelHistoryImport, Event: "own-import", UserID: 1},
+	} {
+		if err := hub.Publish(context.Background(), env); err != nil {
+			t.Fatalf("publishing %s: %v", env.Event, err)
+		}
+	}
 	event := readFrame("event")
-	if !strings.Contains(string(event["data"]), `"profile-1"`) {
-		t.Fatalf("child profile received another account's event: %s", event["data"])
+	if string(event["event"]) != `"own-import"` {
+		t.Fatalf("child profile received another account's event: %s", event["event"])
 	}
 }
 
@@ -390,8 +398,8 @@ func TestEventsWebSocketUnknownChannelDoesNotCloseConnection(t *testing.T) {
 
 	// The connection is still usable.
 	readFrame("snapshot")
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Errorf("event channel = %s, want user_settings", event["channel"])
 	}

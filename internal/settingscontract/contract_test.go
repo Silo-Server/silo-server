@@ -1031,6 +1031,12 @@ func TestValidateRejectsMalformedManifests(t *testing.T) {
 			d.AllowedScopes = []ScopeEntry{{Scope: ScopeProfile, IntroducedIn: 1}}
 			d.IntroducedIn = 2
 		},
+		"admin default on a client_local setting": func(d *Definition) {
+			d.Persistence = PersistenceClientLocal
+			d.AllowedScopes = []ScopeEntry{{Scope: ScopeClientLocal}}
+			d.ResolutionOrder = []Scope{ScopeClientLocal, ScopeDefault}
+			d.AdminDefault = true
+		},
 	}
 
 	for name, mutate := range cases {
@@ -1658,5 +1664,35 @@ func TestQualityIsTwoIndependentAxes(t *testing.T) {
 				t.Errorf("bitrate %d is out of range: %v", tc.kbps, err)
 			}
 		})
+	}
+}
+
+// TestAdminDefaultForNamesOnlyDeclaredDefinitions keeps the server-settings
+// namespace for administrator defaults closed: only a definition that declares
+// admin_default can be given one, so an admin write cannot invent a default
+// the resolver would never read.
+func TestAdminDefaultForNamesOnlyDeclaredDefinitions(t *testing.T) {
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+
+	if got := AdminDefaultSettingKey("ui.title_art"); got != "defaults.ui.title_art" {
+		t.Fatalf("AdminDefaultSettingKey = %q", got)
+	}
+	def, ok := manifest.AdminDefaultFor("defaults.ui.title_art")
+	if !ok || def.Key != "ui.title_art" {
+		t.Fatalf("AdminDefaultFor(defaults.ui.title_art) = %v, %v; want ui.title_art", def, ok)
+	}
+
+	for _, key := range []string{
+		"ui.title_art",            // the setting itself, not its default
+		"defaults.ui.theme",       // a definition without admin_default
+		"defaults.card_overlays",  // a legacy server setting, not a contract key
+		"defaults.ui.unknown_key", // no such definition
+	} {
+		if _, ok := manifest.AdminDefaultFor(key); ok {
+			t.Errorf("AdminDefaultFor(%q) = true, want false", key)
+		}
 	}
 }

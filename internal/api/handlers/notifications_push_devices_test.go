@@ -301,3 +301,35 @@ func TestHandleRegisterApplePushDeviceErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestLegacyMobilePushOwnershipConflict(t *testing.T) {
+	for _, platform := range []string{notifications.PushPlatformApple, notifications.PushPlatformAndroid} {
+		t.Run(platform, func(t *testing.T) {
+			store := &handlerPushStore{err: notifications.ErrPushGenerationConflict}
+			handler := NewNotificationsHandler(&notifications.System{
+				PushDevices: notifications.NewPushDeviceService(store, handlerPushCipher(t)),
+			}, nil)
+			rr := httptest.NewRecorder()
+			if platform == notifications.PushPlatformApple {
+				body := `{"device_id":"fixture-phone","apns_token":"` + strings.Repeat("a", 64) + `","apns_environment":"production","apns_topic":"org.siloserver.silo"}`
+				handler.HandleRegisterApplePushDevice(rr, newApplePushRequest(body))
+			} else {
+				body := `{"device_id":"fixture-phone","platform":"android","token":"` + strings.Repeat("a", 64) + `"}`
+				handler.HandleRegisterPushDevice(rr, newApplePushRequest(body))
+			}
+			if rr.Code != http.StatusConflict || store.calls != 1 {
+				t.Fatalf("status=%d calls=%d", rr.Code, store.calls)
+			}
+			var response struct {
+				Error   string `json:"error"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Error != "conflict" || response.Message != "Push registration conflicts with the current installation" {
+				t.Fatalf("unexpected refusal: %s", rr.Body.String())
+			}
+		})
+	}
+}

@@ -41,6 +41,7 @@ func TestPublicAuthHandlersRejectOversizedBody(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, tc.path, oversizedAuthBody())
+			r.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			// The handlers' services are unset: reaching them would panic,
 			// so a 413 also proves the request stopped at the decoder.

@@ -162,8 +162,8 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 
 	// Browsers cannot set custom headers on websocket handshakes, so profile
 	// identity arrives as a short-lived single-use ticket minted via
-	// POST /events/ws-ticket. A connection without a ticket stays unbound and
-	// simply cannot subscribe to the profile-scoped notifications channel.
+	// POST /events/ws-ticket. An unbound connection cannot subscribe to
+	// notifications or receive profile-addressed state and settings events.
 	var bound notifications.Ticket
 	if ticket := r.URL.Query().Get("ticket"); ticket != "" && h.notifications != nil {
 		binding, ok := h.notifications.Tickets.Consume(r.Context(), ticket)
@@ -184,7 +184,7 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Admin channels and other accounts' events follow the acting profile, as
+	// Admin channels follow the acting profile, as
 	// on the v2 socket: another profile on an admin's account connects with
 	// the user role. A handshake that declares no profile acts as the profile
 	// its ticket was minted for, which the viewer gate verified then. Either
@@ -730,6 +730,26 @@ func allowsEventForClaims(claims *auth.Claims, boundProfileID string, env evt.En
 		return boundProfileID != "" &&
 			env.UserID == claims.UserID &&
 			env.ProfileID == boundProfileID
+	}
+	switch env.Channel {
+	case evt.ChannelUserState:
+		// Personal state never inherits the administrator's account-wide reach.
+		if env.UserID <= 0 || env.UserID != claims.UserID || boundProfileID == "" || env.ProfileID != boundProfileID {
+			return false
+		}
+	case evt.ChannelUserSettings:
+		// An administrator default reaches every viewer: it names no account
+		// or profile and carries the key, never a value.
+		if env.AllViewers && env.UserID == 0 && env.ProfileID == "" {
+			return true
+		}
+		// An empty profile identifies an account-scoped settings change.
+		if env.UserID <= 0 || env.UserID != claims.UserID {
+			return false
+		}
+		if env.ProfileID != "" && (boundProfileID == "" || env.ProfileID != boundProfileID) {
+			return false
+		}
 	}
 	if env.UserID > 0 && claims.Role != "admin" && env.UserID != claims.UserID {
 		return false
