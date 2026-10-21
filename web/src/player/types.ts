@@ -327,7 +327,6 @@ export interface QualityOption {
   sublabel: string;
   resolution: string;
   bitrateKbps: number;
-  isOriginal: boolean;
 }
 
 /** Context for series playback (episode navigation). */

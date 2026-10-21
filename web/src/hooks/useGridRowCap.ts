@@ -20,7 +20,7 @@ import { useCallback, useLayoutEffect, useRef } from "react";
  */
 export function useGridRowCap<T extends HTMLElement>(visibleRows: number, itemCount: number) {
   const gridRef = useRef<T | null>(null);
-  const observerRef = useRef<ResizeObserver | null>(null);
+  const observersRef = useRef<{ resize: ResizeObserver; items: MutationObserver } | null>(null);
 
   const applyCap = useCallback(() => {
     const grid = gridRef.current;
@@ -79,16 +79,27 @@ export function useGridRowCap<T extends HTMLElement>(visibleRows: number, itemCo
 
   const setGrid = useCallback(
     (node: T | null) => {
-      observerRef.current?.disconnect();
-      observerRef.current = null;
+      observersRef.current?.resize.disconnect();
+      observersRef.current?.items.disconnect();
+      observersRef.current = null;
       gridRef.current = node;
       if (!node || typeof ResizeObserver === "undefined") return;
 
       // Width changes move the breakpoint, which changes both the column count
-      // and the row height. Observing the grid covers both.
-      const observer = new ResizeObserver(applyCap);
-      observer.observe(node);
-      observerRef.current = observer;
+      // and the row height; observing the grid covers both. A capped grid keeps
+      // its box when an item grows or shrinks (a description appearing once
+      // spoiler settings load, say), so each item is observed too, and the
+      // items are observed afresh whenever they are replaced.
+      const resize = new ResizeObserver(applyCap);
+      const observeGridAndItems = () => {
+        resize.disconnect();
+        resize.observe(node);
+        for (const child of node.children) resize.observe(child);
+      };
+      observeGridAndItems();
+      const items = new MutationObserver(observeGridAndItems);
+      items.observe(node, { childList: true });
+      observersRef.current = { resize, items };
     },
     [applyCap],
   );

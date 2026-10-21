@@ -73,6 +73,38 @@ connection results and frames after that authority changes.
 Native socket/ticket adoption and independent domain review are required before
 these two migration rows can be ratified. No bridge socket or ticket was removed.
 
+### Personal event recipients
+
+Both event socket versions restrict `user_state` to a positive account ID
+matching the connection and a non-empty profile ID matching its bound profile.
+`user_settings` requires the same account match; a non-empty event profile must
+match the bound profile, while an empty event profile reaches that account's
+connections for account-scoped settings changes. These rules also apply to
+administrator connections. Notifications retain their exact account/profile
+match and require a profile-bound subscription.
+
+One `user_settings` event is addressed to every viewer instead: an
+administrator-default change (`scope: "default"`, see
+[settings-api.md](settings-api.md)) names no account or profile and reaches
+every connection subscribed to `user_settings`, bound or unbound, including a
+remote-playback handoff. Like other settings events it carries the key and
+scope, not the value. The server marks it for every viewer explicitly, so a
+personal event that lacks its account still reaches no one. In a cluster, the
+event reaches every viewer only once all nodes run a server that sets and
+honors that marker.
+
+An unbound socket can still subscribe to `user_state` and `user_settings`, but
+receives only account-scoped and administrator-default settings changes from
+those channels. A `user_state` producer without a profile, including an
+unmanaged download's `download` event, reaches no socket. Settings events name
+the changed key and scope; they do not carry its value. Channel eligibility,
+snapshots and socket authority/lifetime checks are unchanged.
+
+On the bridge socket, only a ticket from `POST /api/v1/events/ws-ticket` binds a
+profile. The handshake's `X-Profile-Id` decides administrator access but binds
+nothing, so a bridge socket opened with that header and no ticket is unbound and
+receives no `user_state`, including its own profile's.
+
 ### Access changes
 
 When the recheck finds that the login session is still valid but the access the
@@ -116,8 +148,8 @@ sign out. The new ticket carries the new role, so the socket does not close
 again for the same change.
 
 The bridge events socket never sends this frame. It picks its channels once, at
-the handshake: an admin account gets the administrator channels and other
-accounts' events only while it is the acting admin (see
+the handshake: an admin account gets the administrator channels only while
+it is the acting admin (see
 [api-contract.md](architecture/api-contract.md)), judged on the handshake's
 `X-Profile-Id` or, without one, on the profile its ticket was minted for. That
 profile's PIN proof must still verify: the ticket keeps the `X-Profile-Token`

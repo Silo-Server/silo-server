@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TitleArtSettingsGroup } from "./TitleArtSettingsGroup";
 
 const mocks = vi.hoisted(() => ({
-  setting: { value: true, source: "default" as string },
+  setting: { value: true, source: "default" as string, isPending: false, isError: false },
   supported: true,
   set: vi.fn(),
   clear: vi.fn(),
@@ -22,8 +22,8 @@ vi.mock("@/hooks/queries/settingValues", () => ({
   useSettingValue: () => ({
     value: mocks.setting.value,
     source: mocks.setting.source,
-    isPending: false,
-    isError: false,
+    isPending: mocks.setting.isPending,
+    isError: mocks.setting.isError,
   }),
   useSetSettingValue: () => ({ mutateAsync: mocks.set, isPending: false }),
   useClearSettingValue: () => ({ mutateAsync: mocks.clear, isPending: false }),
@@ -38,7 +38,7 @@ const KEY = "ui.title_art";
 
 describe("TitleArtSettingsGroup", () => {
   beforeEach(() => {
-    mocks.setting = { value: true, source: "default" };
+    mocks.setting = { value: true, source: "default", isPending: false, isError: false };
     mocks.supported = true;
     mocks.profileActive = true;
     mocks.set.mockReset().mockResolvedValue(undefined);
@@ -56,7 +56,7 @@ describe("TitleArtSettingsGroup", () => {
     render(<TitleArtSettingsGroup />);
 
     expect(screen.getByRole("switch", { name: "Apply to all devices" })).not.toBeChecked();
-    expect(screen.getByText(/Only affects this browser/)).toBeInTheDocument();
+    expect(screen.getByText(/Using the server default \(on\)/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("switch", { name: "Show title art" }));
 
@@ -68,7 +68,7 @@ describe("TitleArtSettingsGroup", () => {
   });
 
   it("explains and edits the profile-wide choice", async () => {
-    mocks.setting = { value: false, source: "profile" };
+    mocks.setting = { value: false, source: "profile", isPending: false, isError: false };
     render(<TitleArtSettingsGroup />);
 
     expect(screen.getByRole("switch", { name: "Apply to all devices" })).toBeChecked();
@@ -84,7 +84,7 @@ describe("TitleArtSettingsGroup", () => {
   });
 
   it("applies the current choice to every device", async () => {
-    mocks.setting = { value: false, source: "profile_device" };
+    mocks.setting = { value: false, source: "profile_device", isPending: false, isError: false };
     render(<TitleArtSettingsGroup />);
 
     await userEvent.click(screen.getByRole("switch", { name: "Apply to all devices" }));
@@ -98,7 +98,7 @@ describe("TitleArtSettingsGroup", () => {
   });
 
   it("leaves another profile's choice alone after a profile switch mid-change", async () => {
-    mocks.setting = { value: false, source: "profile" };
+    mocks.setting = { value: false, source: "profile", isPending: false, isError: false };
     mocks.set.mockImplementation(async () => {
       mocks.profileActive = false;
     });
@@ -110,8 +110,64 @@ describe("TitleArtSettingsGroup", () => {
     expect(mocks.clear).not.toHaveBeenCalled();
   });
 
+  it("says when this browser follows the server default and offers no reset", () => {
+    mocks.setting = { value: false, source: "default", isPending: false, isError: false };
+    render(<TitleArtSettingsGroup />);
+
+    expect(screen.getByRole("switch", { name: "Show title art" })).not.toBeChecked();
+    expect(screen.getByText(/Using the server default \(off\)/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use server default" })).not.toBeInTheDocument();
+  });
+
+  it.each(["profile_device", "profile"])(
+    "returns a %s choice to the server default without saving it",
+    async (source) => {
+      mocks.setting = { value: true, source, isPending: false, isError: false };
+      mocks.clear.mockImplementation(async ({ identity }: { identity: { scope: string } }) => {
+        if (identity.scope !== source) throw mocks.missing;
+      });
+      render(<TitleArtSettingsGroup />);
+
+      expect(screen.queryByText(/Using the server default/)).not.toBeInTheDocument();
+      if (source === "profile_device") {
+        expect(screen.getByText(/Only affects this browser/)).toBeInTheDocument();
+      }
+      await userEvent.click(screen.getByRole("button", { name: "Use server default" }));
+
+      // A device value means no profile value exists, so only the profile
+      // source also clears the profile-wide choice.
+      const clears = source === "profile" ? 2 : 1;
+      await waitFor(() => expect(mocks.clear).toHaveBeenCalledTimes(clears));
+      expect(mocks.clear).toHaveBeenNthCalledWith(1, {
+        key: KEY,
+        identity: { scope: "profile_device" },
+      });
+      if (source === "profile") {
+        expect(mocks.clear).toHaveBeenNthCalledWith(2, {
+          key: KEY,
+          identity: { scope: "profile" },
+        });
+      }
+      expect(mocks.set).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["loading", { isPending: true, isError: false }],
+    ["failed", { isPending: false, isError: true }],
+  ])("claims neither the server default nor an own choice while %s", (_, state) => {
+    // useSettingValue reports the contract default with source "default" here,
+    // which says nothing about what this server would answer.
+    mocks.setting = { value: true, source: "default", ...state };
+    render(<TitleArtSettingsGroup />);
+
+    expect(screen.queryByText(/Using the server default/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Only affects this browser/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use server default" })).not.toBeInTheDocument();
+  });
+
   it("pins this browser before handing control back to each device", async () => {
-    mocks.setting = { value: false, source: "profile" };
+    mocks.setting = { value: false, source: "profile", isPending: false, isError: false };
     mocks.clear.mockRejectedValue(mocks.missing);
     render(<TitleArtSettingsGroup />);
 

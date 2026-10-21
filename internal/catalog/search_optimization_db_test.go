@@ -255,7 +255,7 @@ func TestSearchOptimizedAccuracyPostgres(t *testing.T) {
 				}
 				candidateUnion := regexp.MustCompile(`mi.content_id IN \(SELECT title_mi.content_id FROM media_items title_mi WHERE (?s:.*?) UNION SELECT alias_scores.content_id FROM alias_scores\)`)
 				baselineSQL := originalExpressions.Replace(candidateUnion.ReplaceAllStringFunc(dataSQL, func(string) string { return oldMatch }))
-				rows, err := pool.Query(ctx, baselineSQL, args...)
+				rows, err := pool.Query(ctx, baselineSQL, args...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 				if err != nil {
 					t.Fatal(err)
 				}

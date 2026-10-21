@@ -141,10 +141,21 @@ release event's episode key:
   when access changes later.
 
 Multiple matching reasons produce one delivery with merged reason flags.
-Deliveries are deduplicated per `(profile, release event)` and, for
-`episode.available`, per `(profile, episode)` across libraries, so
+Deliveries are deduplicated per `(account, profile, release event)` and, for
+`episode.available`, per `(account, profile, episode)` across libraries, so
 dual-quality library setups notify at most once. Reprocessing an event is
 idempotent.
+
+A profile ID is unique only within its account: every account from before
+profiles has a profile named `default`. Interest rows, preferences, mutes,
+the delivery dedupe keys, and every inbox read, count, and mark-read are
+therefore keyed by account and profile, and profile deletion removes those
+for the deleted profile's account only. The email channel reads a profile's
+deliveries on the account that owns its email settings. Still keyed by
+profile ID alone: the inbox clock (`notification_inbox_clocks`), which only
+orders inserts, so two accounts' same-ID profiles share it and serialize
+their inserts without changing either inbox's order; and the email settings,
+push devices, web push subscriptions, and webhooks.
 
 The notified-series list (`GET /api/v2/notifications/series`) shows a profile
 the same index fanout evaluates, plus the series it muted. `ActiveReasons` is
@@ -223,8 +234,8 @@ the destination URL is attacker-controllable input against that server's
 network position:
 
 - HTTPS only; TLS verification is not user-overridable.
-- The destination host must never resolve to a private or special-purpose
-  address. The deny set covers the IPv4 private/special ranges (loopback,
+- By default, the destination host must never resolve to a private or
+  special-purpose address. The deny set covers the IPv4 private/special ranges (loopback,
   RFC 1918, link-local, CGNAT, TEST-NETs, benchmarking, multicast, reserved)
   and the IPv6 equivalents (unspecified, loopback, ULA, site-local, link-local,
   documentation, NAT64, multicast). IPv4-mapped IPv6 addresses are unwrapped
@@ -235,7 +246,12 @@ network position:
   re-validates the resolved address) to defeat DNS rebinding. Redirects are
   bounded and each hop is re-checked.
 - An admin-only `notifications.webhooks.allow_private_destinations` setting
-  exists for development environments.
+  exists for development environments. It permits the shared Private class;
+  Blocked addresses remain refused at registration and every connection.
+  Registration in either mode requires every resolved address to be allowed;
+  lookup failure, an empty answer, or the two-second lookup deadline rejects
+  the destination. Public-only requests also refuse the server's own interface
+  addresses, as required by the shared policy.
 
 Webhook URLs and generic signing secrets are encrypted at rest, never
 returned by the API after creation (only the host is readable — a Discord

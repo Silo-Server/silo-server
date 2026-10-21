@@ -48,8 +48,8 @@ func assertUserSettingsEnvelope(t *testing.T, env evt.Envelope, wantKey, wantSco
 	if string(payload["profile_id"]) != `"profile-1"` {
 		t.Errorf("payload profile_id = %s, want \"profile-1\"", payload["profile_id"])
 	}
-	// The value must never ride along: admins receive every user's user-scoped
-	// events, so a value here would leak private settings to admins.
+	// Events only invalidate the cache; recipients fetch values over HTTP
+	// under their current session and profile authority.
 	if raw, present := payload["value"]; present {
 		t.Errorf("payload carries a value (%s); it must never leak into events", raw)
 	}

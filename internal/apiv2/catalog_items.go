@@ -48,7 +48,7 @@ type CatalogBrowseInput struct {
 	Sort          string   `query:"sort" doc:"sort=field or -field; one term. Fields: title, year, release_date, added_at, rating, runtime, random, … (see the filters document); absent applies the source's saved or default order" example:"-release_date"`
 	Group         string   `query:"group" enum:"work" doc:"group=work collapses editions of one book into one card"`
 	SkipTotal     bool     `query:"skip_total" doc:"true skips the exact count; the total is then an estimate"`
-	ImageSize     string   `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign"`
+	ArtworkQuery
 	LimitParam
 	Cursor      string `query:"cursor" doc:"Opaque cursor from page.next_cursor"`
 	Groups      string `query:"groups" maxLength:"32768" doc:"JSON array of structured rule groups; use POST catalog/query for larger queries"`
@@ -86,7 +86,7 @@ type AudiobookGroupsInput struct {
 	Sort      string `query:"sort" enum:"name,count,duration" doc:"Default name"`
 	Q         string `query:"q" doc:"Case-insensitive prefix on the group name"`
 	SkipTotal bool   `query:"skip_total" doc:"true skips the exact count; the total is then an estimate"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original"`
+	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor"`
 }
@@ -94,8 +94,8 @@ type AudiobookGroupsInput struct {
 // CatalogQueryInput is the queryCatalogItems request: the JSON form of a
 // filtered, sorted page.
 type CatalogQueryInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original"`
-	Body      CatalogQuery
+	ArtworkQuery
+	Body CatalogQuery
 }
 
 // CatalogQuery is the queryCatalogItems body.
@@ -136,10 +136,10 @@ type CatalogQueryRule struct {
 
 // CatalogItemInput names one item.
 type CatalogItemInput struct {
-	ID        string `path:"id" doc:"Content id" example:"movie:heat-1995"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original"`
-	LibraryID ID     `query:"library_id" doc:"The library the item is being viewed in; picks its presentation when the item is in several"`
-	FileID    ID     `query:"file_id" doc:"The version the viewer selected; affects the effective playback answer"`
+	ID string `path:"id" doc:"Content id" example:"movie:heat-1995"`
+	ArtworkQuery
+	LibraryID ID `query:"library_id" doc:"The library the item is being viewed in; picks its presentation when the item is in several"`
+	FileID    ID `query:"file_id" doc:"The version the viewer selected; affects the effective playback answer"`
 }
 
 // CatalogItemDeviceInput names one item whose answer carries the effective
@@ -152,9 +152,9 @@ type CatalogItemDeviceInput struct {
 
 // CatalogSeriesInput names one series.
 type CatalogSeriesInput struct {
-	ID        string `path:"id" doc:"Series content id" example:"series:severance"`
-	ImageSize string `query:"image_size" enum:"small,medium,large,original"`
-	LibraryID ID     `query:"library_id" doc:"The library the series is being viewed in"`
+	ID string `path:"id" doc:"Series content id" example:"series:severance"`
+	ArtworkQuery
+	LibraryID ID `query:"library_id" doc:"The library the series is being viewed in"`
 }
 
 // CatalogSeasonsInput selects artwork for a season list.
@@ -297,6 +297,32 @@ type WatchRollup struct {
 	LastEditionKey  *string `json:"last_edition_key,omitempty"`
 }
 
+// ItemExtraInfo is a local extra: a trailer, featurette or other video file
+// that belongs to a movie or series. Its content_id is a watch target.
+type ItemExtraInfo struct {
+	ContentID       string `json:"content_id"`
+	Kind            string `json:"kind"`
+	Title           string `json:"title,omitempty"`
+	DurationSeconds int    `json:"duration_seconds,omitempty"`
+	FileID          int    `json:"file_id,omitempty"`
+	StillURL        string `json:"still_url,omitempty" doc:"Presigned, short-lived. 16:9 image of the extra; absent when it has none"`
+	StillThumbhash  string `json:"still_thumbhash,omitempty"`
+}
+
+func itemExtrasOf(extras []catalogpkg.ItemExtraInfo) []ItemExtraInfo {
+	if extras == nil {
+		return nil
+	}
+	out := make([]ItemExtraInfo, 0, len(extras))
+	for _, e := range extras {
+		out = append(out, ItemExtraInfo{
+			ContentID: e.ContentID, Kind: e.Kind, Title: e.Title, DurationSeconds: e.DurationSeconds, FileID: e.FileID,
+			StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
+		})
+	}
+	return out
+}
+
 // FileVersion is one playable file of an item.
 type FileVersion struct {
 	FileID                   ID                                `json:"file_id" example:"120"`
@@ -399,7 +425,7 @@ type CatalogItemDetail struct {
 	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
 	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series; absent when there are none. Only the sources clients show, in the same order as ratings, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list."`
 	Ratings                         []CatalogRating                      `json:"ratings" doc:"The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null"`
-	Extras                          []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
+	Extras                          []ItemExtraInfo                      `json:"extras,omitempty"`
 	FolderPaths                     []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
 	Subtitles                       []catalogpkg.SubtitleInfo            `json:"subtitles" doc:"Empty, never null"`
 	Intro                           *catalogpkg.Marker                   `json:"intro,omitempty"`
@@ -592,11 +618,10 @@ type SeasonOutput struct {
 // --- registration ---
 
 const (
-	opListCatalogItems     = "listCatalogItems"
-	opQueryCatalogItems    = "queryCatalogItems"
-	locationQueryImageSize = "query.image_size"
-	locationQueryGroups    = "query.groups"
-	opListAudiobookGroups  = "listAudiobookGroups"
+	opListCatalogItems    = "listCatalogItems"
+	opQueryCatalogItems   = "queryCatalogItems"
+	locationQueryGroups   = "query.groups"
+	opListAudiobookGroups = "listAudiobookGroups"
 )
 
 func registerCatalogItems(reg *Registry) {
@@ -664,14 +689,14 @@ func (reg *Registry) catalogItems() (CatalogItemService, *Problem) {
 // context, access policy from the access seam, artwork size and
 // presentation hints from the query. The filter carries no device id; reads
 // that resolve device-scoped preferences use itemViewerOnDevice.
-func (reg *Registry) itemViewer(ctx context.Context, imageSize string, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
-	return reg.itemViewerOnDevice(ctx, "", imageSize, libraryID, fileID)
+func (reg *Registry) itemViewer(ctx context.Context, art imagesize.Request, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
+	return reg.itemViewerOnDevice(ctx, "", art, libraryID, fileID)
 }
 
 // itemViewerOnDevice is itemViewer for the caller's declared
 // X-Silo-Device-Id, so device-scoped playback preferences resolve as they
 // do on v1 and in getWatchState. The id is clamped like v1's header read.
-func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID, imageSize string, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
+func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID string, art imagesize.Request, libraryID, fileID ID) (handlers.ItemViewer, *Problem) {
 	_, profileID, p := viewerIdentity(ctx)
 	if p != nil {
 		return handlers.ItemViewer{}, p
@@ -696,11 +721,8 @@ func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID, imageSize
 	if err != nil {
 		return handlers.ItemViewer{}, NewProblem(TypeInternalError, "An unexpected error occurred.")
 	}
-	size, err := imagesize.Parse(imageSize)
-	if err != nil {
-		size = imagesize.Unset
-	}
-	filter.ImageSize = size
+	filter.ImageSize = art.Size
+	filter.ImageWidths = art.Widths
 	return handlers.ItemViewer{Access: filter, ProfileID: profileID}, nil
 }
 
@@ -938,7 +960,7 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, "", "")
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), "", "")
 	if p != nil {
 		return nil, p
 	}
@@ -976,7 +998,7 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	scope := CursorScope{
 		OperationID: operationID,
 		Security:    strconv.Itoa(claims.UserID) + "/" + viewer.ProfileID + "/" + viewerScopeDigest(ctx),
-		Filter:      values.Encode() + "&group=" + in.Group + "&image_size=" + in.ImageSize,
+		Filter:      values.Encode() + "&group=" + in.Group + "&image_size=" + in.ImageSize + in.widthsCursorFilter(),
 		Sort:        req.Query.Sort.Field + "," + req.Query.Sort.Order,
 		Tiebreaker:  tiebreakerOffset,
 	}
@@ -1043,7 +1065,7 @@ func (reg *Registry) listAudiobookGroups(ctx context.Context, cursors *Cursors, 
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, "", "")
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), "", "")
 	if p != nil {
 		return nil, p
 	}
@@ -1056,7 +1078,7 @@ func (reg *Registry) listAudiobookGroups(ctx context.Context, cursors *Cursors, 
 	scope := CursorScope{
 		OperationID: opListAudiobookGroups,
 		Security:    strconv.Itoa(claims.UserID) + "/" + viewer.ProfileID + "/" + viewerScopeDigest(ctx),
-		Filter:      "library_id=" + strconv.Itoa(libraryID) + "&group_by=" + in.GroupBy + "&q=" + in.Q + "&image_size=" + in.ImageSize + "&limit=" + strconv.Itoa(in.Limit),
+		Filter:      "library_id=" + strconv.Itoa(libraryID) + "&group_by=" + in.GroupBy + "&q=" + in.Q + "&image_size=" + in.ImageSize + in.widthsCursorFilter() + "&limit=" + strconv.Itoa(in.Limit),
 		Sort:        in.Sort,
 		Tiebreaker:  "group_key",
 	}
@@ -1099,7 +1121,7 @@ func (reg *Registry) getCatalogFilters(ctx context.Context, in *CatalogFiltersIn
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, "", "", "")
+	viewer, p := reg.itemViewer(ctx, imagesize.Request{}, "", "")
 	if p != nil {
 		return nil, p
 	}
@@ -1127,7 +1149,7 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, "", "", "")
+	viewer, p := reg.itemViewer(ctx, imagesize.Request{}, "", "")
 	if p != nil {
 		return nil, p
 	}
@@ -1167,13 +1189,13 @@ func (reg *Registry) queryCatalogItems(ctx context.Context, cursors *Cursors, in
 		Source: body.Source, Scope: body.Scope, SectionID: body.SectionID,
 		LibraryID: body.LibraryID, CollectionID: body.CollectionID, PersonID: body.PersonID,
 		Q: body.Q, NamePrefix: body.NamePrefix, Match: body.Match, Type: body.Type,
-		Sort: sort, Group: body.Group, SkipTotal: body.SkipTotal, ImageSize: in.ImageSize,
+		Sort: sort, Group: body.Group, SkipTotal: body.SkipTotal, ArtworkQuery: in.ArtworkQuery,
 		LimitParam: LimitParam{Limit: limit}, Cursor: body.Cursor, Groups: string(groups),
 		QueryLimit: body.QueryLimit, Seek: body.Seek, operationID: opQueryCatalogItems,
 	})
 	if p, ok := errors.AsType[*Problem](err); ok {
 		for i := range p.Errors {
-			if strings.HasPrefix(p.Errors[i].Location, "query.") && p.Errors[i].Location != locationQueryImageSize {
+			if strings.HasPrefix(p.Errors[i].Location, "query.") && !isArtworkQueryLocation(p.Errors[i].Location) {
 				p.Errors[i].Location = "body." + strings.TrimPrefix(p.Errors[i].Location, "query.")
 			}
 		}
@@ -1186,7 +1208,7 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceIn
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.Artwork(), in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1214,7 +1236,7 @@ func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogIte
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewerOnDevice(ctx, in.DeviceID, in.Artwork(), in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1230,7 +1252,7 @@ func (reg *Registry) listCatalogItemMangaFiles(ctx context.Context, in *CatalogI
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1251,7 +1273,7 @@ func (reg *Registry) listCatalogItemEpisodes(ctx context.Context, in *CatalogIte
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, in.FileID)
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), in.LibraryID, in.FileID)
 	if p != nil {
 		return nil, p
 	}
@@ -1267,7 +1289,7 @@ func (reg *Registry) listSeriesSeasons(ctx context.Context, in *CatalogSeasonsIn
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, "")
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), in.LibraryID, "")
 	if p != nil {
 		return nil, p
 	}
@@ -1287,7 +1309,7 @@ func (reg *Registry) getSeriesSeason(ctx context.Context, in *CatalogSeasonInput
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, "")
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), in.LibraryID, "")
 	if p != nil {
 		return nil, p
 	}
@@ -1303,7 +1325,7 @@ func (reg *Registry) listSeasonEpisodes(ctx context.Context, in *CatalogSeasonIn
 	if p != nil {
 		return nil, p
 	}
-	viewer, p := reg.itemViewer(ctx, in.ImageSize, in.LibraryID, "")
+	viewer, p := reg.itemViewer(ctx, in.Artwork(), in.LibraryID, "")
 	if p != nil {
 		return nil, p
 	}
@@ -1424,7 +1446,7 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 		ClearArtURL: d.ClearArtURL, DiscURL: d.DiscURL, BackdropURLs: d.BackdropURLs,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
-		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
+		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: itemExtrasOf(d.Extras),
 		FolderPaths: d.FolderPaths, Subtitles: NonNil(d.Subtitles), Intro: d.Intro, Credits: d.Credits, Recap: d.Recap, Preview: d.Preview,
 		EffectiveVersionResolution: d.EffectiveVersionResolution,
 		EffectiveVersionHDR:        d.EffectiveVersionHDR, EffectiveVersionCodecVideo: d.EffectiveVersionCodecVideo, EffectiveVersionEditionKey: d.EffectiveVersionEditionKey,

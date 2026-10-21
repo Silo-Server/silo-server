@@ -224,13 +224,14 @@ func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, p
 		return WatchTonightView{}, recommendationsUnavailable("Failed to fetch item details")
 	}
 
+	artwork := h.featuredCardArtwork(ctx, enriched.items, filter.Artwork())
 	for _, m := range merged {
 		mi, ok := enriched.items[m.scored.MediaItemID]
 		if !ok || mi == nil {
 			continue
 		}
 
-		item := h.buildSectionItem(ctx, mi, enriched.overlays, enriched.states)
+		item := h.buildSectionItem(mi, enriched.overlays, enriched.states, artwork[mi.ContentID])
 		item.ItemSource = m.source
 
 		// Apply CW/Next-Up metadata (position, duration, progress).
@@ -464,9 +465,9 @@ func (h *RecommendationsHandler) enrichItems(ctx context.Context, userID int, pr
 	return out, nil
 }
 
-// buildSectionItem constructs a sectionItemResponse from a MediaItem,
-// applying presigning and overlay/state lookups.
-func (h *RecommendationsHandler) buildSectionItem(ctx context.Context, mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse) sectionItemResponse {
+// buildSectionItem constructs a sectionItemResponse from a MediaItem with its
+// resolved artwork (see featuredCardArtwork) and overlay/state lookups.
+func (h *RecommendationsHandler) buildSectionItem(mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse, urls sectionItemImageURLs) sectionItemResponse {
 	item := sectionItemResponse{
 		ContentID:              mi.ContentID,
 		Type:                   mi.Type,
@@ -488,11 +489,7 @@ func (h *RecommendationsHandler) buildSectionItem(ctx context.Context, mi *model
 	if item.Genres == nil {
 		item.Genres = []string{}
 	}
-	if h.DetailSvc != nil {
-		item.PosterURL = h.DetailSvc.PresignURL(ctx, featuredPosterPath(mi.PosterPath), "featured")
-		item.BackdropURL = h.DetailSvc.PresignURL(ctx, featuredBackdropPath(mi.BackdropPath), "featured")
-		item.LogoURL = h.DetailSvc.PresignURL(ctx, mi.LogoPath, "featured")
-	}
+	item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
 	if overlayMap != nil {
 		item.OverlaySummary = overlayMap[mi.ContentID]
 	}

@@ -563,8 +563,9 @@ subtitle menu can still show the result and offer a reset.
 Corrected bytes reach every delivery path: playback subtitle routes, the
 Jellyfin subtitle stream, offline downloads (see [downloads](downloads-api.md)),
 and AI translation sources. Those responses are `Cache-Control: private,
-no-cache`, since the bytes change behind the same URL. Device delays
-(`player.subtitle_sync_ms`) still apply on top. The frozen v1 bridge exposes
+no-cache`, since the bytes change behind the same URL. The player's subtitle
+offset (`player.subtitle_sync_ms`, a profile value a device can override from
+settings manifest revision 19) still applies on top. The frozen v1 bridge exposes
 neither timing nor sync but serves corrected bytes.
 
 Replacing the media file (a new file hash or size at the same path) resets the

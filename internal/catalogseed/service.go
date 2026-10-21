@@ -866,18 +866,18 @@ func encodeBundle(bundle Bundle) ([]byte, error) {
 func decodeBundle(data []byte) (*Bundle, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("%w: opening catalog seed bundle: %v", ErrInvalidBundle, err)
+		return nil, fmt.Errorf("%w: opening catalog seed bundle: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on an uploaded bundle; the decode error is only reported
 	}
 	defer gz.Close()
 
 	payload, err := io.ReadAll(gz)
 	if err != nil {
-		return nil, fmt.Errorf("%w: reading catalog seed bundle: %v", ErrInvalidBundle, err)
+		return nil, fmt.Errorf("%w: reading catalog seed bundle: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on an uploaded bundle; the decode error is only reported
 	}
 
 	var bundle Bundle
 	if err := json.Unmarshal(payload, &bundle); err != nil {
-		return nil, fmt.Errorf("%w: decoding catalog seed bundle: %v", ErrInvalidBundle, err)
+		return nil, fmt.Errorf("%w: decoding catalog seed bundle: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on an uploaded bundle; the decode error is only reported
 	}
 	return &bundle, nil
 }

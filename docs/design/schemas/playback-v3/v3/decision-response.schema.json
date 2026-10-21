@@ -626,10 +626,73 @@
             }
           },
           "additionalProperties": true
+        },
+        "hls_rendition": {
+          "type": "object",
+          "description": "The selected track is carried by the plan's HLS stream: a multivariant playlist whose SUBTITLES group group_id holds it as one WebVTT rendition. Published only on server_transcode_hls plans to clients that negotiated hls_subtitle_renditions_v1. Mutually exclusive with artifact and embedded; inventory URLs remain available for other selections.",
+          "required": [
+            "group_id",
+            "name",
+            "format",
+            "mime_type"
+          ],
+          "properties": {
+            "group_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "format": {
+              "type": "string",
+              "const": "vtt"
+            },
+            "mime_type": {
+              "type": "string",
+              "const": "text/vtt"
+            }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": true,
       "allOf": [
+        {
+          "if": {
+            "required": [
+              "hls_rendition"
+            ]
+          },
+          "then": {
+            "required": [
+              "track_id"
+            ],
+            "properties": {
+              "mode": {
+                "enum": [
+                  "render",
+                  "convert"
+                ]
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "artifact"
+                  ]
+                },
+                {
+                  "required": [
+                    "embedded"
+                  ]
+                }
+              ]
+            }
+          }
+        },
         {
           "if": {
             "required": [

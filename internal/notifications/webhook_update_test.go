@@ -67,7 +67,7 @@ func TestWebhookGuardedUpdatePG(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := NewWebhookRepository(scoped)
-	original, err := repo.GetByID(ctx, "owner", "row")
+	original, err := repo.GetByID(ctx, 1, "owner", "row")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestWebhookGuardedUpdatePG(t *testing.T) {
 	stale := errors.New("stale original validator")
 	result := make(chan error, 1)
 	go func() {
-		_, e := repo.UpdateGuarded(ctx, "owner", "row", func(row *Webhook) error {
+		_, e := repo.UpdateGuarded(ctx, 1, "owner", "row", func(row *Webhook) error {
 			if row.Revision != original.Revision {
 				return stale
 			}
@@ -107,7 +107,7 @@ func TestWebhookGuardedUpdatePG(t *testing.T) {
 	if err = <-result; !errors.Is(err, stale) {
 		t.Fatalf("stale update: %v", err)
 	}
-	current, err := repo.GetByID(ctx, "owner", "row")
+	current, err := repo.GetByID(ctx, 1, "owner", "row")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestWebhookGuardedUpdatePG(t *testing.T) {
 		t.Fatal("stale update overwrote concurrent state")
 	}
 	svc := &WebhookService{repo: repo}
-	updated, err := svc.UpdateGuarded(ctx, "owner", "row", WebhookInput{Name: new("renamed")}, func(rev int64) error {
+	updated, err := svc.UpdateGuarded(ctx, 1, "owner", "row", WebhookInput{Name: new("renamed")}, func(rev int64) error {
 		if rev != current.Revision {
 			return stale
 		}
@@ -127,7 +127,7 @@ func TestWebhookGuardedUpdatePG(t *testing.T) {
 	if updated.Revision <= current.Revision || updated.Name != "renamed" || *updated.SigningSecretCiphertext != "new-secret" || updated.Enabled || updated.ConsecutiveFailures != 9 {
 		t.Fatal("configuration update lost state or returned stale revision")
 	}
-	_, err = svc.UpdateGuarded(ctx, "owner", "row", WebhookInput{Name: new("again")}, func(rev int64) error {
+	_, err = svc.UpdateGuarded(ctx, 1, "owner", "row", WebhookInput{Name: new("again")}, func(rev int64) error {
 		if rev != current.Revision {
 			return stale
 		}
@@ -136,21 +136,25 @@ func TestWebhookGuardedUpdatePG(t *testing.T) {
 	if !errors.Is(err, stale) {
 		t.Fatalf("replay: %v", err)
 	}
-	enabled, err := svc.UpdateGuarded(ctx, "owner", "row", WebhookInput{Enabled: new(true)}, func(int64) error { return nil })
+	enabled, err := svc.UpdateGuarded(ctx, 1, "owner", "row", WebhookInput{Enabled: new(true)}, func(int64) error { return nil })
 	if err != nil || !enabled.Enabled || enabled.ConsecutiveFailures != 0 || enabled.DisabledReason != nil {
 		t.Fatalf("reenable: %v", err)
 	}
-	for _, scope := range []struct{ profile, id string }{{"foreign", "row"}, {"owner", "missing"}} {
-		_, err = repo.UpdateGuarded(ctx, scope.profile, scope.id, func(*Webhook) error { t.Error("hidden precondition invoked"); return nil })
+	// Another profile, the same profile ID on another account, a missing row.
+	for _, scope := range []struct {
+		user        int
+		profile, id string
+	}{{1, "foreign", "row"}, {2, "owner", "row"}, {1, "owner", "missing"}} {
+		_, err = repo.UpdateGuarded(ctx, scope.user, scope.profile, scope.id, func(*Webhook) error { t.Error("hidden precondition invoked"); return nil })
 		if !errors.Is(err, ErrWebhookNotFound) {
 			t.Fatalf("hidden: %v", err)
 		}
 	}
-	_, err = svc.UpdateGuarded(ctx, "owner", "row", WebhookInput{Name: new(" ")}, func(int64) error { return nil })
+	_, err = svc.UpdateGuarded(ctx, 1, "owner", "row", WebhookInput{Name: new(" ")}, func(int64) error { return nil })
 	if !errors.Is(err, ErrWebhookInvalid) {
 		t.Fatalf("invalid: %v", err)
 	}
-	after, err := repo.GetByID(ctx, "owner", "row")
+	after, err := repo.GetByID(ctx, 1, "owner", "row")
 	if err != nil || after.Revision != enabled.Revision {
 		t.Fatal("invalid update was stored")
 	}

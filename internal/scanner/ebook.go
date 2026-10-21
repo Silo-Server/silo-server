@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -610,7 +611,7 @@ func parseEbookMOBI(path string) (parsedEbook, error) {
 
 	header := make([]byte, maxMOBIHeaderScanSize)
 	n, err := io.ReadFull(file, header)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return book, err
 	}
 	header = header[:n]

@@ -154,7 +154,10 @@ When `Limit` is omitted, episode listings on this route and series/season
 `/Items?ParentId=` requests use a 1,000-row page. Explicit limits retain their
 requested page size, subject to the 1,000-row cap; `Limit=0` requests only the
 count. Longer lists still require paging using `TotalRecordCount` and
-`StartIndex`. Other `/Items` browsing retains the 24-row default.
+`StartIndex`. An `/Items?Ids=` request without `Limit` returns every named
+item the viewer can see, as in Jellyfin. When it names no collection and also
+filters, searches, or sorts, that list is capped at 1,000 rows. Other `/Items`
+browsing retains the 24-row default.
 
 `/Items?ParentId={boxSetId}` lists a collection's members (movies, series, and
 the episodes of episode-scoped smart collections) in collection order unless
@@ -208,6 +211,12 @@ request disables Primary images. Episodes also set `ParentLogoItemId` and
 since clients read an episode's show logo there; both are removed when a list
 request disables Logo images. `/Shows/Upcoming` episodes carry no series
 artwork, so they have neither these nor the parent poster and backdrop.
+
+Local extras in `/Items/{id}/SpecialFeatures` and `/Items/{id}/LocalTrailers`
+carry a `Primary` tag in `ImageTags` when they have a still: the image beside
+the extra's file, or a frame the server took from it. `/Items/{extraId}/Images/Primary`
+serves that 16:9 still, `Backdrop` and `Logo` serve the parent item's, and the
+request is allowed only when the parent item is.
 
 ### Extended artwork
 
@@ -475,10 +484,19 @@ state is unaffected, and signing in works again once the password is changed.
 Each sign-in, by password or Quick Connect, opens its own Silo login session, and the
 compat session lives only as long as it (see
 [login sessions](auth-api.md#login-sessions)). Every authenticated request, stream
-grant, and socket re-check looks the login session up, one indexed read, on whichever
-node answers. A revoked or expired login session ends the compat session with `401`; a
-lookup that fails is a retryable `503` and keeps it. `sa_` API keys have no login
-session and are checked as keys instead.
+grant, and socket re-check reads the stored compatibility session and looks its login
+session up, two indexed reads, on whichever node answers. A revoked or expired
+login session ends the compat session with `401`; a lookup that fails is a
+retryable `503` and keeps it. `sa_` API keys have no login session and are checked
+as keys instead.
+
+Once token logout deletes the stored compatibility row, later checks through the
+session store refuse it on every node, including media requests and playback-grant
+resolution. Cached copies and missed eviction events do not grant authority. Other
+compatibility sessions and the linked native login session are unchanged. A request
+whose authority read preceded a concurrent logout may finish. Already issued signed
+node stream URLs retain their existing lifetime; logout does not withdraw them or
+cancel a transfer already authorized. Socket re-check timing is unchanged.
 
 ### Quick Connect
 

@@ -34,6 +34,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -225,6 +226,7 @@ type Dependencies struct {
 	AdminRecommendations          AdminRecommendationsService
 	AdminLiteraryWorks            AdminLiteraryWorkService
 	NotificationChannels          NotificationChannelService
+	NotificationDiscordManagement NotificationDiscordManagementService
 	NotificationRelay             NotificationRelayService
 	AdminNotificationPush         AdminNotificationPushService
 	NotificationInbox             NotificationInboxService
@@ -390,6 +392,10 @@ type Dependencies struct {
 	HomeSections HomeSectionService
 	// Recipes answers the section recipe gallery (*handlers.RecipeHandler).
 	Recipes RecipeService
+	// SeasonalThemes is the holiday catalog listSeasonalThemes serves; nil
+	// serves recipes.SeasonalThemes. Contract fixtures pass their own so the
+	// committed bodies name no real list hosts.
+	SeasonalThemes []recipes.SeasonalTheme
 	// PersonalLists reads and edits a profile's favorites
 	// (*handlers.PersonalDataHandler).
 	PersonalLists PersonalListService

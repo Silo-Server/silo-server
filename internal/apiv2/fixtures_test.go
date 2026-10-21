@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
@@ -1762,7 +1763,35 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, unmatchedItemIgnoreFixtureCases()...)
 	cases = append(cases, notInterestedFixtureCases()...)
 	cases = append(cases, notificationSeriesFixtureCases()...)
-	return append(cases, notificationSeriesMuteFixtureCases()...)
+	cases = append(cases, notificationSeriesMuteFixtureCases()...)
+	return append(cases, seasonalThemeFixtureCases()...)
+}
+
+// fixtureSeasonalThemes is recipes.SeasonalThemes with every list link moved
+// to a reserved host, so the committed fixture names no real list site. The
+// web editor tests use the resulting fixture as their catalog.
+func fixtureSeasonalThemes() []recipes.SeasonalTheme {
+	themes := make([]recipes.SeasonalTheme, 0, len(recipes.SeasonalThemes))
+	for _, theme := range recipes.SeasonalThemes {
+		vibes := make([]recipes.SeasonalVibe, len(theme.Vibes))
+		for i, vibe := range theme.Vibes {
+			vibe.ListURL = strings.Replace(vibe.ListURL, "https://mdblist.com/", "https://lists.example.test/", 1)
+			vibes[i] = vibe
+		}
+		theme.Vibes = vibes
+		themes = append(themes, theme)
+	}
+	return themes
+}
+
+// seasonalThemeFixtureCases pin the Seasonal Picks holiday catalog.
+func seasonalThemeFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "list_seasonal_themes_ok", operationID: opListSeasonalThemes,
+			scenario: "The holidays a Seasonal Picks row can follow in calendar order, each with its curated vibes; a holiday that moves or recurs weekly has no start and end, and a weekly one cannot take a row's own dates.",
+			method:   http.MethodGet, path: "/api/v2/sections/seasonal-themes", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/SeasonalThemeCatalog"},
+	}
 }
 
 // notInterestedFixtureCases pin the Not interested marks: the paged list, one
@@ -2001,6 +2030,7 @@ func fixtureDeps() Dependencies {
 		LocalTLSPin: "n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg=",
 	}
 	deps.SubtitleAIReads = &fakeSubtitleAIReads{}
+	deps.SeasonalThemes = fixtureSeasonalThemes()
 	deps.Downloads = &fakeDownloadRegistry{}
 	deps.DownloadCreation = &fakeDownloadCreation{row: &downloads.Download{ID: "entry", ContentID: "movie", MediaFileID: 42, Revision: 1, CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Status: downloads.StatusReady, Quality: downloads.QualityOriginal, EffectiveQuality: downloads.QualityOriginal, Format: downloads.FormatOriginal, DeviceID: "device-one"}, page: downloads.CreatePage{BatchID: "intent", Skipped: []downloads.SkippedDownload{{EpisodeID: "missing", Reason: "no_file"}}}}
 	deps.DownloadSubscriptionMutations = &fakeSubscriptionMutations{row: syntheticDownloadSubscription()}
@@ -2108,6 +2138,7 @@ func fixtureDeps() Dependencies {
 	deps.NotificationDiscordLinks = new(fakeNotificationDiscordLinks)
 	deps.NotificationRelay = new(fakeNotificationRelay)
 	deps.NotificationChannels = new(fakeNotificationChannels)
+	deps.NotificationDiscordManagement = discordManagement([]userstore.Profile{{ID: "p-primary", IsPrimary: true}})
 	deps.NotificationDestinations = new(fakeNotificationDestinations)
 	accounts := fixtureAdminAccounts()
 	accounts.allowImpersonation = true

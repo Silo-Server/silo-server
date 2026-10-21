@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // fakeCoverageModels is an in-memory CatalogSemanticModelProvider. It returns a
@@ -493,5 +495,47 @@ func TestNewSemanticCoverageTrackerCoverageDBSmoke(t *testing.T) {
 	}
 	if cov.Vectorized > cov.Eligible {
 		t.Fatalf("vectorized %d exceeds eligible %d", cov.Vectorized, cov.Eligible)
+	}
+}
+
+// fakeCountRows yields (type, count) rows, then reports err from Err.
+type fakeCountRows struct {
+	pgx.Rows
+	rows   []catalogTypeCoverage
+	err    error
+	closed bool
+}
+
+func (r *fakeCountRows) Next() bool { return len(r.rows) > 0 }
+
+func (r *fakeCountRows) Scan(dest ...any) error {
+	mediaType, okType := dest[0].(*string)
+	count, okCount := dest[1].(*int)
+	if !okType || !okCount {
+		return errors.New("fakeCountRows: scan wants *string, *int")
+	}
+	*mediaType, *count = r.rows[0].Type, r.rows[0].Eligible
+	r.rows = r.rows[1:]
+	return nil
+}
+
+func (r *fakeCountRows) Err() error { return r.err }
+func (r *fakeCountRows) Close()     { r.closed = true }
+
+// TestScanCoverageCountsReportsIterationError pins that a query failing
+// mid-stream fails the count instead of returning the rows read so far.
+func TestScanCoverageCountsReportsIterationError(t *testing.T) {
+	streamErr := errors.New("connection reset")
+	rows := &fakeCountRows{rows: []catalogTypeCoverage{{Type: "movie", Eligible: 3}}, err: streamErr}
+	got := map[string]int{}
+	err := scanCoverageCounts(rows, func(mediaType string, count int) { got[mediaType] = count })
+	if !errors.Is(err, streamErr) {
+		t.Fatalf("err = %v, want %v", err, streamErr)
+	}
+	if got["movie"] != 3 {
+		t.Fatalf("counts = %v, want the row read before the failure", got)
+	}
+	if !rows.closed {
+		t.Fatal("rows were not closed")
 	}
 }

@@ -57,6 +57,7 @@ const (
 	audioLayout71     = "7.1"
 	filmFrameRate     = "24000/1001"
 	languageEnglish   = "eng"
+	titleEnglish      = "English"
 	videoRangeSDR     = "SDR"
 	categoryMidSeek   = "mid_seek_replan"
 )
@@ -75,6 +76,7 @@ func main() {
 	write(*out, "replan_request.json", goldenReplanRequest())
 	write(*out, "decision_response.json", goldenDecisionResponse())
 	write(*out, "native-decision_response.json", goldenNativeDecisionResponse())
+	write(*out, "hls-subtitle-rendition-decision_response.json", goldenHLSSubtitleRenditionDecisionResponse())
 	write(*out, "capability_response.json", goldenCapabilityResponse())
 	write(*out, "error_response.json", goldenErrorResponse())
 	write(*out, "route_event.json", goldenRouteEvent())
@@ -231,7 +233,7 @@ func goldenMediaFile() *models.MediaFile {
 	return &models.MediaFile{
 		ID: goldenMediaFileID,
 		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: "/library/movie.en.srt", Language: languageEnglish, Format: "srt", Title: "English"},
+			{Path: "/library/movie.en.srt", Language: languageEnglish, Format: "srt", Title: titleEnglish},
 		},
 		SubtitleTracks: []models.SubtitleTrack{
 			{Index: 0, Language: languageEnglish, Codec: "ass", Title: "English (Signs)", Forced: true},
@@ -309,11 +311,15 @@ func goldenNativeDecisionResponse() playback.DecisionResponseV3 {
 }
 
 func goldenDecisionForSource(file *models.MediaFile, request playback.StartRequestV3, additional []playback.SubtitleInventoryEntryV3) playback.DecisionResponseV3 {
+	return goldenDecisionForSourceWith(file, request, additional, nil)
+}
+
+func goldenDecisionForSourceWith(file *models.MediaFile, request playback.StartRequestV3, additional []playback.SubtitleInventoryEntryV3, configure func(*playback.PlannerInputV3)) playback.DecisionResponseV3 {
 	now, err := time.Parse(time.RFC3339, "2029-12-31T23:55:00Z")
 	if err != nil {
 		failf("parse golden planner time: %v", err)
 	}
-	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
+	input := playback.PlannerInputV3{
 		Request:             request,
 		RequestedFile:       file,
 		EffectiveFile:       file,
@@ -322,7 +328,11 @@ func goldenDecisionForSource(file *models.MediaFile, request playback.StartReque
 		Registry:            conformanceRegistry(),
 		Now:                 now,
 		AdditionalSubtitles: additional,
-	})
+	}
+	if configure != nil {
+		configure(&input)
+	}
+	result := playback.PlanPlaybackV3(input)
 	if result.Plan == nil {
 		failf("golden planner returned terminal: %#v", result.Terminal)
 	}
@@ -728,7 +738,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	planner = append(planner, makePlannerScenario("embedded_ass_authored_render", "subtitle_matrix", assRequest, assFile, nil, settings, registry))
 
 	dvdFile := conformanceVideoFile()
-	dvdFile.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Language: languageEnglish, Codec: "dvd_subtitle", Title: "English"}}
+	dvdFile.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Language: languageEnglish, Codec: "dvd_subtitle", Title: titleEnglish}}
 	dvdRequest := conformanceStartRequest()
 	dvdRequest.PlaybackAttemptID = "attempt-dvd-burn-in"
 	dvdIndex := 0

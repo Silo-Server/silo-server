@@ -12,7 +12,7 @@ import (
 
 type demandAdminLister struct{ sections []*PageSection }
 
-func (l demandAdminLister) ListTrendingDiscoverSections(context.Context) ([]*PageSection, error) {
+func (l demandAdminLister) ListEnabledSections(context.Context, SectionType) ([]*PageSection, error) {
 	return l.sections, nil
 }
 
@@ -50,7 +50,7 @@ func TestTrendingDemandSkipsBrokenAccountAndKeepsOtherDemand(t *testing.T) {
 		},
 		errs: map[int]error{1: errors.New("broken user database")},
 	}
-	lister := NewTrendingDemandLister(
+	lister := NewSectionDemandLister(
 		demandAdminLister{sections: []*PageSection{{ID: "admin", SectionType: SectionTrendingDiscover, Config: json.RawMessage(`{"source":"tmdb","window":"week"}`)}}},
 		demandUserLister{users: []*models.User{{ID: 1}, {ID: 2}}},
 		provider,
@@ -75,7 +75,7 @@ func TestTrendingDemandIncludesActiveProfileOnlySections(t *testing.T) {
 			{ID: "removed", Removed: true, IsUserAdded: true, UserSectionType: "trending_discover", UserConfig: `{"source":"tmdb","window":"week"}`},
 		}},
 	}}
-	lister := NewTrendingDemandLister(
+	lister := NewSectionDemandLister(
 		demandAdminLister{},
 		demandUserLister{users: []*models.User{{ID: 7}}},
 		provider,
@@ -109,7 +109,7 @@ func TestTrendingDemandIncludesLinkedProfileConfig(t *testing.T) {
 			ID: "override", SectionID: "admin-trending", Config: `{"source":"tmdb","window":"day"}`,
 		}}},
 	}}
-	lister := NewTrendingDemandLister(
+	lister := NewSectionDemandLister(
 		demandAdminLister{sections: []*PageSection{{ID: "admin-trending", SectionType: SectionTrendingDiscover, Config: json.RawMessage(`{"source":"tmdb","window":"week"}`)}}},
 		demandUserLister{users: []*models.User{{ID: 9}}},
 		provider,
@@ -132,7 +132,7 @@ func TestTrendingDemandEmptySectionIDPrefersExplicitUserConfig(t *testing.T) {
 			UserSectionType: "trending_discover", UserConfig: `{"source":"tmdb","window":"day"}`,
 		}}},
 	}}
-	lister := NewTrendingDemandLister(
+	lister := NewSectionDemandLister(
 		demandAdminLister{},
 		demandUserLister{users: []*models.User{{ID: 11}}},
 		provider,

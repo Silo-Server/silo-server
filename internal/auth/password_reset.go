@@ -79,8 +79,8 @@ func revokeAudiobookshelfSessionsInTransaction(ctx context.Context, tx pgx.Tx, u
 
 // deleteJellyfinSessionsInTransaction deletes the accounts' stored
 // Jellyfin-compatible sessions, so no replica can load one again once the
-// transaction commits. Copies a replica already holds in memory stay usable
-// until the OnUserSessionsRevoked hook drops them.
+// transaction commits. Persistent compatibility lookups check the stored row;
+// the OnUserSessionsRevoked hook also discards replicas' cached copies.
 func deleteJellyfinSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM jellycompat_sessions WHERE streamapp_user_id = ANY($1::int[])`, userIDs); err != nil {

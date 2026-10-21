@@ -280,6 +280,26 @@ describe("PlaybackSettings", () => {
     );
   });
 
+  it("shows a stored original quality as Auto and no longer offers Original", async () => {
+    mocks.useEffectiveSettings.mockReturnValue({
+      data: resolved(SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY, "original", "profile"),
+      isLoading: false,
+    });
+    render(<PlaybackSettings />);
+
+    const select = screen.getByRole("combobox", { name: "Preferred quality" });
+    expect(select).toHaveTextContent("Auto");
+    expect(
+      screen.getByText(
+        "Plays the original file whenever your device and connection can handle it.",
+      ),
+    ).toBeInTheDocument();
+
+    await userEvent.click(select);
+    expect(await screen.findByRole("option", { name: "Auto" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Original/ })).toBeNull();
+  });
+
   it("saves the bandwidth cap as a number", async () => {
     render(<PlaybackSettings />);
 

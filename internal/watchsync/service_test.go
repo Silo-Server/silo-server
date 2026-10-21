@@ -51,6 +51,7 @@ type serviceFakeRepo struct {
 	historyExports         []HistoryExport
 	historyLookupIDs       []string
 	historyLookupLimit     int
+	historyPageSizes       []int
 	listItemStates         []ListItemState
 	ratingStates           []RatingSyncState
 	droppedStates          []DroppedSyncState
@@ -195,6 +196,13 @@ func (r *serviceFakeRepo) DeferConnectionsForAccount(
 		deferred++
 	}
 	return deferred, nil
+}
+
+// withConnection stores conn the way a connected profile's row exists before
+// a sync, and returns it.
+func (r *serviceFakeRepo) withConnection(conn Connection) Connection {
+	r.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+	return conn
 }
 
 func (r *serviceFakeRepo) GetConnectionByID(_ context.Context, id string) (Connection, bool, error) {
@@ -374,16 +382,25 @@ func (r *serviceFakeRepo) UpsertHistoryExports(_ context.Context, exports []Hist
 	return nil
 }
 
-func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectionID string, limit int) ([]HistoryExport, error) {
+func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectionID string, after HistoryExportCursor, limit int) ([]HistoryExport, error) {
+	r.historyPageSizes = append(r.historyPageSizes, limit)
 	var exports []HistoryExport
 	for _, export := range r.historyExports {
 		if export.ConnectionID == connectionID &&
-			(export.Status == historyExportStatusPending || export.Status == historyExportStatusFailed) && export.AttemptCount < 5 {
+			(export.Status == historyExportStatusPending || export.Status == historyExportStatusFailed) && export.AttemptCount < 5 &&
+			(after.ID == "" || export.WatchedAt.After(after.WatchedAt) ||
+				(export.WatchedAt.Equal(after.WatchedAt) && export.ID > after.ID)) {
 			exports = append(exports, export)
-			if limit > 0 && len(exports) >= limit {
-				break
-			}
 		}
+	}
+	slices.SortStableFunc(exports, func(a, b HistoryExport) int {
+		if c := a.WatchedAt.Compare(b.WatchedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if limit > 0 && len(exports) > limit {
+		exports = exports[:limit]
 	}
 	return exports, nil
 }
@@ -1129,12 +1146,12 @@ type watchedExporterStub struct {
 	source       userstore.WatchHistorySource
 }
 
-type singleBatchWatchedExporterStub struct {
+type batchedWatchedExporterStub struct {
 	watchedExporterStub
 	batchSize int
 }
 
-func (p singleBatchWatchedExporterStub) ExportBatchSize() int {
+func (p batchedWatchedExporterStub) ExportBatchSize() int {
 	return p.batchSize
 }
 
@@ -2566,12 +2583,12 @@ func TestServiceExportWatchedDrainsPendingBatches(t *testing.T) {
 	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
 		store: userdb.NewSQLiteUserStore(db),
 	})
-	result, err := service.ExportWatched(context.Background(), Connection{
+	result, err := service.ExportWatched(context.Background(), repo.withConnection(Connection{
 		ID:        "conn-1",
 		Provider:  "simkl",
 		UserID:    7,
 		ProfileID: "profile-1",
-	}, ServerConfig{}, watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl})
+	}), ServerConfig{}, watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl})
 	if err != nil {
 		t.Fatalf("ExportWatched: %v", err)
 	}
@@ -2637,12 +2654,12 @@ func TestServiceExportWatchedMatchesRemotePlaysAtProviderPrecision(t *testing.T)
 			service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
 				store: userdb.NewSQLiteUserStore(db),
 			})
-			result, err := service.ExportWatched(context.Background(), Connection{
+			result, err := service.ExportWatched(context.Background(), repo.withConnection(Connection{
 				ID:        "conn-1",
 				Provider:  "trakt",
 				UserID:    7,
 				ProfileID: "profile-1",
-			}, ServerConfig{}, provider)
+			}), ServerConfig{}, provider)
 			if err != nil {
 				t.Fatalf("ExportWatched: %v", err)
 			}
@@ -2943,7 +2960,7 @@ func TestServiceExportWatchedSendsCatalogTitles(t *testing.T) {
 	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
 	var exported []LocalPlay
 	exporter := recordingWatchedExporter{watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl}, &exported, nil}
-	if _, err := service.ExportWatched(context.Background(), Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}, ServerConfig{}, exporter); err != nil {
+	if _, err := service.ExportWatched(context.Background(), repo.withConnection(Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}), ServerConfig{}, exporter); err != nil {
 		t.Fatal(err)
 	}
 	if len(exported) != 1 || exported[0].Title != "17 Again" || exported[0].Year != 2009 {
@@ -3673,7 +3690,7 @@ func TestServiceExportWatchedKeepsDeadlineForProviderWhenTitlesStall(t *testing.
 	exporter := recordingWatchedExporter{watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl}, &exported, &ctxErrs}
 	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 	defer cancel()
-	if _, err := service.ExportWatched(ctx, Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}, ServerConfig{}, exporter); err != nil {
+	if _, err := service.ExportWatched(ctx, repo.withConnection(Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}), ServerConfig{}, exporter); err != nil {
 		t.Fatal(err)
 	}
 	if len(ctxErrs) != 1 || ctxErrs[0] != nil || len(exported) != 1 || exported[0].Title != "" {
@@ -4157,7 +4174,7 @@ func TestServiceLocalWatchEventBoundsHistoryLookupToProviderBatch(t *testing.T) 
 		context.Background(),
 		Connection{ID: "conn-1"},
 		ServerConfig{},
-		singleBatchWatchedExporterStub{
+		batchedWatchedExporterStub{
 			watchedExporterStub: watchedExporterStub{exported: &exported},
 			batchSize:           1,
 		},

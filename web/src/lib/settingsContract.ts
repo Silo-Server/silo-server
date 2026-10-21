@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 18;
+export const SETTINGS_REVISION = 22;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -216,6 +216,10 @@ export const SETTING_KEYS = {
   PLAYBACK_AUTO_SKIP_INTRO: "playback.auto_skip_intro",
   /** Auto-skip recaps */
   PLAYBACK_AUTO_SKIP_RECAP: "playback.auto_skip_recap",
+  /** Cellular maximum bitrate */
+  PLAYBACK_CELLULAR_MAX_BITRATE_KBPS: "playback.cellular_max_bitrate_kbps",
+  /** Cellular quality */
+  PLAYBACK_CELLULAR_PREFERRED_QUALITY: "playback.cellular_preferred_quality",
   /** Skip intros */
   PLAYBACK_INTRO_SKIP_MODE: "playback.intro_skip_mode",
   /** Maximum bitrate */
@@ -344,6 +348,9 @@ export interface SettingDefinition {
   scopeIntroducedIn: readonly number[];
   resolutionOrder: readonly string[];
   defaultValue: unknown;
+  /** The server administrator may replace defaultValue for the whole server,
+   * so a value with source "default" can differ from it. */
+  adminDefault?: boolean;
   label: string;
   description: string;
   category: string;
@@ -355,7 +362,8 @@ export interface SettingDefinition {
   platforms?: readonly string[];
   suggestedOptions?: SettingOptionSetId;
   unsetLabel?: string;
-  values?: readonly { value: unknown; label: string; introducedIn: number }[];
+  /** A deprecated member stays a valid stored value but is no longer offered. */
+  values?: readonly { value: unknown; label: string; introducedIn: number; deprecated?: boolean }[];
   /** Present on enums whose members are ranked, so a ceiling or floor has a direction. */
   ordered?: boolean;
   minimum?: number;
@@ -668,6 +676,50 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "playback",
     control: "switch",
   },
+  "playback.cellular_max_bitrate_kbps": {
+    key: "playback.cellular_max_bitrate_kbps",
+    type: "integer",
+    nullable: true,
+    persistence: "remote",
+    introducedIn: 20,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [20, 20],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: 2000,
+    label: "Cellular maximum bitrate",
+    description: "Cap how much data playback may use on mobile data or another metered connection.",
+    category: "playback",
+    control: "select",
+    unit: "kbps",
+    platforms: ["ios", "android", "web"],
+    minimum: 100,
+    maximum: 200000,
+  },
+  "playback.cellular_preferred_quality": {
+    key: "playback.cellular_preferred_quality",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 20,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [20, 20],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: "720p",
+    label: "Cellular quality",
+    description: "The resolution to play at on mobile data or another metered connection.",
+    category: "playback",
+    control: "select",
+    platforms: ["ios", "android", "web"],
+    values: [
+      { value: "auto", label: "Auto", introducedIn: 20 },
+      { value: "480p", label: "480p", introducedIn: 20 },
+      { value: "720p", label: "720p", introducedIn: 20 },
+      { value: "1080p", label: "1080p", introducedIn: 20 },
+      { value: "2160p", label: "2160p / 4K", introducedIn: 20 },
+    ],
+    ordered: true,
+    constrainedBy: { policyInput: "max_playback_quality", constraint: "ceiling" },
+  },
   "playback.intro_skip_mode": {
     key: "playback.intro_skip_mode",
     type: "enum",
@@ -746,7 +798,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "720p", label: "720p", introducedIn: 1 },
       { value: "1080p", label: "1080p", introducedIn: 1 },
       { value: "2160p", label: "2160p / 4K", introducedIn: 1 },
-      { value: "original", label: "Original quality", introducedIn: 1 },
+      { value: "original", label: "Original quality", introducedIn: 1, deprecated: true },
     ],
     ordered: true,
     constrainedBy: { policyInput: "max_playback_quality", constraint: "ceiling" },
@@ -1101,16 +1153,17 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     nullable: false,
     persistence: "remote",
     introducedIn: 1,
-    scopes: ["profile_device"],
-    scopeIntroducedIn: [1],
-    resolutionOrder: ["profile_device", "default"],
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [19, 1],
+    resolutionOrder: ["profile_device", "profile", "default"],
     defaultValue: 0,
     label: "Subtitle sync offset",
-    description: "Shift subtitles earlier or later on this device.",
+    description:
+      "Shift subtitles earlier or later for this profile. A device can keep its own offset.",
     category: "player",
     control: "slider",
     unit: "milliseconds",
-    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
     minimum: -10000,
     maximum: 10000,
   },
@@ -1448,6 +1501,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [1],
     resolutionOrder: ["profile", "default"],
     defaultValue: "combined",
+    adminDefault: true,
     label: "Next up episodes",
     description: "Whether upcoming episodes stay with Continue Watching or get their own row.",
     category: "navigation",
@@ -1467,6 +1521,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [18],
     resolutionOrder: ["profile", "default"],
     defaultValue: false,
+    adminDefault: true,
     label: "Show new episodes first",
     description:
       "Move a show you've caught up on to the front of Continue Watching and Next Up when a new episode or season arrives.",
@@ -1632,6 +1687,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopeIntroducedIn: [16, 16],
     resolutionOrder: ["profile", "profile_device", "default"],
     defaultValue: true,
+    adminDefault: true,
     label: "Show title art",
     description:
       "Use a title's logo artwork as its name on detail pages when one is available. When off, the name is always shown as text.",

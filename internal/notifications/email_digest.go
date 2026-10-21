@@ -31,7 +31,7 @@ type emailChannel struct {
 
 // The assertion also keeps staticcheck's unused-analysis aware that the
 // adapter methods are consumed through the generic engine interface.
-var _ accountChannel[string] = (*emailChannel)(nil)
+var _ accountChannel[profileKey] = (*emailChannel)(nil)
 
 func (c *emailChannel) name() string { return "email" }
 
@@ -47,46 +47,46 @@ func (c *emailChannel) digestHour(ctx context.Context) int {
 	return c.settings.EmailDigestHour(ctx)
 }
 
-func (c *emailChannel) listRecipients(ctx context.Context) ([]accountRecipient[string], error) {
+func (c *emailChannel) listRecipients(ctx context.Context) ([]accountRecipient[profileKey], error) {
 	return c.prefs.ListActiveRecipients(ctx)
 }
 
-func (c *emailChannel) hasPendingSince(ctx context.Context, profileID string, since Cursor) (bool, error) {
-	return c.deliveries.HasForProfileSince(ctx, profileID, since)
+func (c *emailChannel) hasPendingSince(ctx context.Context, key profileKey, since Cursor) (bool, error) {
+	return c.deliveries.HasForProfileSince(ctx, key.userID, key.profileID, since)
 }
 
-func (c *emailChannel) hasTransactionalPendingSince(ctx context.Context, profileID string, since Cursor) (bool, error) {
-	return c.deliveries.HasTransactionalForProfileSince(ctx, profileID, since)
+func (c *emailChannel) hasTransactionalPendingSince(ctx context.Context, key profileKey, since Cursor) (bool, error) {
+	return c.deliveries.HasTransactionalForProfileSince(ctx, key.userID, key.profileID, since)
 }
 
-func (c *emailChannel) listSince(ctx context.Context, tx pgx.Tx, profileID string, since Cursor, until time.Time, limit int) ([]DeliveryRow, error) {
-	return c.deliveries.ListForProfileSince(ctx, tx, profileID, since, until, limit)
+func (c *emailChannel) listSince(ctx context.Context, tx pgx.Tx, key profileKey, since Cursor, until time.Time, limit int) ([]DeliveryRow, error) {
+	return c.deliveries.ListForProfileSince(ctx, tx, key.userID, key.profileID, since, until, limit)
 }
 
-func (c *emailChannel) claim(ctx context.Context, tx pgx.Tx, profileID string) (*accountRecipient[string], error) {
-	return c.prefs.claimForUpdate(ctx, tx, profileID)
+func (c *emailChannel) claim(ctx context.Context, tx pgx.Tx, key profileKey) (*accountRecipient[profileKey], error) {
+	return c.prefs.claimForUpdate(ctx, tx, key)
 }
 
-func (c *emailChannel) markSent(ctx context.Context, tx pgx.Tx, profileID string, watermark Cursor, digestAt *time.Time) error {
-	return c.prefs.markSent(ctx, tx, profileID, watermark, digestAt)
+func (c *emailChannel) markSent(ctx context.Context, tx pgx.Tx, key profileKey, watermark Cursor, digestAt *time.Time) error {
+	return c.prefs.markSent(ctx, tx, key, watermark, digestAt)
 }
 
-func (c *emailChannel) markFailure(ctx context.Context, tx pgx.Tx, profileID string, _ error) error {
-	return c.prefs.markFailure(ctx, tx, profileID)
+func (c *emailChannel) markFailure(ctx context.Context, tx pgx.Tx, key profileKey, _ error) error {
+	return c.prefs.markFailure(ctx, tx, key)
 }
 
 // send composes and sends one profile's pending notifications. The
 // destination is re-read under the claim so a mid-pass address removal fails
 // cleanly instead of sending to a stale recipient.
-func (c *emailChannel) send(ctx context.Context, tx pgx.Tx, profileID string, mode string, rows []DeliveryRow) (sendErr error) {
+func (c *emailChannel) send(ctx context.Context, tx pgx.Tx, key profileKey, mode string, rows []DeliveryRow) (sendErr error) {
 	ctx, finishObservation := telemetry.StartDependency(ctx, "notifications", "worker", "email")
 	defer func() { finishObservation(deliveryObservationError(ctx, sendErr == nil)) }()
-	email, userID, unsubscribeToken, err := c.prefs.destinationForSend(ctx, tx, profileID)
+	email, unsubscribeToken, err := c.prefs.destinationForSend(ctx, tx, key)
 	if err != nil {
 		return err
 	}
 	if email == "" {
-		return fmt.Errorf("profile %s has no usable email address", profileID)
+		return fmt.Errorf("profile %s has no usable email address", key)
 	}
 	// The token is minted lazily, under the claim lock, right before the
 	// first email that embeds it — this is the only mint point.
@@ -95,7 +95,7 @@ func (c *emailChannel) send(ctx context.Context, tx pgx.Tx, profileID string, mo
 		if err != nil {
 			return err
 		}
-		if err := c.prefs.setUnsubscribeToken(ctx, tx, profileID, unsubscribeToken); err != nil {
+		if err := c.prefs.setUnsubscribeToken(ctx, tx, key, unsubscribeToken); err != nil {
 			return err
 		}
 	}
@@ -107,7 +107,7 @@ func (c *emailChannel) send(ctx context.Context, tx pgx.Tx, profileID string, mo
 		UnsubscribeURL: emailUnsubscribeURL(baseURL, unsubscribeToken),
 	}
 	if c.profileName != nil {
-		opts.ProfileName = c.profileName(ctx, userID, profileID)
+		opts.ProfileName = c.profileName(ctx, key.userID, key.profileID)
 	}
 
 	content := composeNotificationEmail(mode, rows, opts)

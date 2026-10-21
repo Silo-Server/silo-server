@@ -24,7 +24,6 @@ import {
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
 import {
-  networkInformation,
   onMeteredConnection,
   readMeasuredBandwidthKbps,
   readMeteredObservedLimitKbps,
@@ -93,7 +92,7 @@ export interface WebCapabilityProbe {
   codecsAudio: string[];
   /** Audio codecs supported specifically inside progressive MP4 delivery. */
   progressiveCodecsAudio: string[];
-  /** Best-effort screen-derived resolution ceiling. */
+  /** Largest video size the browser decodes; never derived from the screen. */
   maxResolution: string;
   /** Best-effort HDR display detection. */
   hdr: boolean;
@@ -242,48 +241,20 @@ export function buildDeliveriesV3(
 }
 
 /**
- * Whether the user is on a connection they would rather not spend: Data Saver
- * is on, or the browser reports cellular. `connection.type` is missing on
- * desktop browsers, so its absence means "unknown, assume unmetered". The
- * same test decides when a probe measurement is ignored, so a link without
- * one is still flagged and the planner's metered limit can apply.
- */
-export function detectMeteredV3(): boolean {
-  return onMeteredConnection();
-}
-
-/**
- * Browsers clamp `connection.downlink` to this ceiling (Chromium caps it at
- * 10 Mbps), so a reading at the ceiling means "at least this fast", not a
- * measured limit.
- */
-const DOWNLINK_CEILING_MBPS = 10;
-
-/**
- * Best-effort downlink estimate in kbps for the planner's ladder choice.
+ * Measured downlink in kbps for the planner's Auto choice: a source that fits
+ * the estimate plays as-is, and only one that does not is converted.
  *
  * A fresh measurement from the background bandwidth probe wins, unless the
  * link is metered (Data Saver or cellular): that measurement was taken on
- * another link, and the planner applies its metered limit only when no
- * estimate is sent. Otherwise
- * `connection.downlink` is a coarse, rounded, deliberately fingerprint-resistant
- * hint, used only below the browser's ceiling. Returns undefined rather than a
- * fabricated value when neither source has a usable reading, which lets Auto
- * plan from the device and the source alone.
+ * another link, so only a limit playback observed on this kind of link counts
+ * there. `connection.downlink` is never used: browsers round and cap it
+ * (Chromium at 10 Mbps), so it is a guess, not a measurement. Returns
+ * undefined when nothing was measured, which lets Auto send the source.
  */
 export function detectBandwidthEstimateKbpsV3(): number | undefined {
   // On a metered link a probe result describes another link; only a limit
   // playback observed on a metered link describes this one.
-  const measured = onMeteredConnection()
-    ? readMeteredObservedLimitKbps()
-    : readMeasuredBandwidthKbps();
-  if (measured !== undefined) return measured;
-  const downlinkMbps = networkInformation()?.downlink;
-  if (typeof downlinkMbps !== "number" || !Number.isFinite(downlinkMbps)) return undefined;
-  if (downlinkMbps >= DOWNLINK_CEILING_MBPS) return undefined;
-  const kbps = Math.round(downlinkMbps * 1000);
-  if (kbps < 100) return undefined;
-  return kbps;
+  return onMeteredConnection() ? readMeteredObservedLimitKbps() : readMeasuredBandwidthKbps();
 }
 
 /** Coarse form factor, used by the server only for quirk lookups. */

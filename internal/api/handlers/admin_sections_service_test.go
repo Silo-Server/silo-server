@@ -244,3 +244,37 @@ func TestAdminSectionV1WritesSkipRecipeConfigDB(t *testing.T) {
 		t.Fatalf("v1 update of an empty Editor's Picks row: %v", err)
 	}
 }
+
+func TestAdminSectionCreateRefusesNextUp(t *testing.T) {
+	_, err := (&SectionHandler{}).CreateAdminSection(t.Context(), AdminSectionCreate{
+		Title: "On Deck", SectionType: string(sections.SectionNextUp), ValidateRecipe: true,
+	})
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Status != http.StatusBadRequest || !strings.Contains(apiErr.Message, "next_up") {
+		t.Fatalf("error = %#v, want a 400 naming next_up", err)
+	}
+}
+
+func TestAdminSectionUpdateRefusesChangeToNextUpDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	repo := sections.NewRepository(f.pool)
+	h := NewSectionHandler(repo, nil)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM page_sections WHERE library_id=$1`, f.library)
+	})
+	row, err := h.CreateAdminSection(t.Context(), AdminSectionCreate{Scope: "library", LibraryID: &f.library, Title: "New", SectionType: string(sections.SectionRecentlyAdded), Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.UpdateAdminSection(t.Context(), row.ID, AdminSectionUpdate{SectionType: string(sections.SectionNextUp)})
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("changing a row to next_up: error = %#v, want 400", err)
+	}
+	stored, err := repo.GetByID(t.Context(), row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.SectionType != sections.SectionRecentlyAdded {
+		t.Fatalf("refused update changed the row to %q", stored.SectionType)
+	}
+}

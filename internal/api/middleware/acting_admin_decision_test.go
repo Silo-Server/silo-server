@@ -113,8 +113,8 @@ func TestActingAdminNeedsAVerifiedProfile(t *testing.T) {
 			access.Scope{UserID: 7, ProfileID: "parent"}),
 	} {
 		t.Run(name, func(t *testing.T) {
-			ctx = SetActingAdminDecider(SetClaims(ctx, adminClaims()), decide)
-			if ok, err := ActingAdmin(ctx); ok || err != nil {
+			decided := SetActingAdminDecider(SetClaims(ctx, adminClaims()), decide)
+			if ok, err := ActingAdmin(decided); ok || err != nil {
 				t.Fatalf("ActingAdmin = %v, %v; want false", ok, err)
 			}
 		})

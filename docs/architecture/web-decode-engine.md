@@ -7,8 +7,10 @@ a non-default audio track. The server then sends the untouched file
 (`original_http`) instead of converting it. Paths are repository-relative.
 
 The engine is a per-browser beta setting (Settings → Playback → This browser),
-stored in `localStorage` under `silo-player-browser-decoding`, off by default.
-With it off, nothing below loads and the player behaves as before.
+stored in `localStorage` under `silo-player-browser-decoding`. It is on unless
+the stored value is `"false"`, so a browser that never touched the switch uses
+the engine and one that turned it off keeps it off. With it off, nothing below
+loads and the player behaves as before.
 
 ## Capability contract
 
@@ -92,17 +94,27 @@ VideoPlayer (page)
   which context time; the page reads that mapping at the context time reaching
   the speakers (`AudioContext.getOutputTimestamp`). Video frames are pulled
   against it on every animation frame, and late frames are released undrawn.
-  Without audio, the clock runs from `performance.now()` and holds while the
-  decoder is starved.
+  Each report carries the rate the worklet rendered at, and the page reads
+  from the newest report at or before the audible time, so a speed change
+  takes effect when its audio reaches the speakers. Without audio, the clock
+  runs from `performance.now()` and holds while the decoder is starved.
 - **Credits.** The worker keeps at most 6 decoded frames outstanding and 1.5 s
-  of audio ahead of what the worklet has played. A seek starts a new
-  generation; every message carries one, and stale ones are dropped wherever
-  they land.
+  of audio ahead of what the worklet has played. While the tab is hidden,
+  frames are presented on a 100 ms timer, so due frames are also released as
+  they arrive; otherwise fast playback would outrun the credits. A seek starts
+  a new generation; every message carries one, and stale ones are dropped
+  wherever they land.
 - **Audio.** The AudioContext opens at the track's sample rate. Surround
   passes through when `destination.maxChannelCount` allows it; otherwise the
   worker downmixes with ATSC A/52 Lo/Ro coefficients and the worklet soft-limits
-  overs. A playback rate other than 1 (Watch Together catch-up) resamples, so
-  pitch shifts.
+  overs. At a playback rate other than 1 the worklet's read head still steps
+  through the queue at that rate, which keeps the clock and the credits as at
+  1x, but the samples come from a WSOLA time stretcher (`timeStretch.ts`) that
+  keeps the pitch. Above 1x each sequence starts half its skip past the head,
+  so the audio stays centred on the clock. It builds each 40–60 ms sequence
+  only from PCM already queued (gaps in the timestamps count as silence), so
+  running short is an underrun rather than silence played as audio. Watch
+  Together still corrects the engine by seeking rather than by rate nudges.
 - **Picture.** Each session draws on canvases it creates inside a box under the
   `<video>`: one for SDR, and for HDR a WebGPU canvas plus a 2D canvas added
   when needed, because a canvas keeps the first context type it hands out. The

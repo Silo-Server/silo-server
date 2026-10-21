@@ -195,7 +195,7 @@ func TestFanoutResolvesOnlyEligibleRecipients(t *testing.T) {
 	pool := inboxPageDB(t)
 	c := seedAccessCatalog(t, pool)
 	seedFanoutEvent(t, pool, c, []string{"open", "muted"})
-	muted := DefaultPreferences("muted")
+	muted := DefaultPreferences(1, "muted")
 	muted.Enabled = false
 	if err := NewPreferencesRepository(pool).Upsert(t.Context(), muted); err != nil {
 		t.Fatalf("mute profile: %v", err)

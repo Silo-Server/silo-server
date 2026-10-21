@@ -95,6 +95,33 @@ func canManageHouseholdAs(
 	return true, nil
 }
 
+// mayManageHouseholdOf is canManageHouseholdAs for a caller that holds only
+// the account ID: it opens that account's store first. It fails closed when
+// the stores are not wired or the account has no store, and a nil verify
+// treats a PIN-locked primary profile as unverified.
+func mayManageHouseholdOf(
+	ctx context.Context,
+	stores userstore.UserStoreProvider,
+	userID int,
+	activeProfileID string,
+	verify func(profileID string) error,
+) (bool, error) {
+	if stores == nil {
+		return false, nil
+	}
+	store, err := stores.ForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("opening user store: %w", err)
+	}
+	if store == nil {
+		return false, nil
+	}
+	if verify == nil {
+		verify = func(string) error { return access.ErrProfileUnverified }
+	}
+	return canManageHouseholdAs(ctx, store, activeProfileID, verify)
+}
+
 // profileLessAdminMayManage is the household rule for a request that names no
 // profile: only an admin account may manage, and a login session only while
 // no profile on the household is limited. Once one is, the session must name

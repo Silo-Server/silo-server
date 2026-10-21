@@ -262,6 +262,11 @@
 # DATABASE_URL already chose jit.
 ./internal/database TestNewPoolDisablesJITUnlessConfiguredPostgres
 
+# Pool connections move vectors in binary, report a NULL vector as an error
+# rather than a panic, still connect before the vector extension exists, and
+# switch to binary once the migrations create it.
+./internal/database TestNewPoolMovesVectorsInBinaryPostgres
+
 # Operational log pages: a cursor prunes the partitions newer than it.
 ./internal/opslog TestListCursorPrunesNewerPartitionsDB
 
@@ -279,3 +284,8 @@
 # the frozen legacy bridge alike.
 ./internal/webhooksync TestProcessWebhookBoundedAppliesDefaultLimitDB
 ./internal/api/handlers TestLegacyWebhookReceiverRejectsOversizedBodyDB
+
+# A person write reindexes the person's titles only when it changes the name,
+# the only person field search documents carry.
+./internal/catalog TestPersonWriteReindexesTitlesOnlyOnRenamePostgres
+./internal/catalog TestPersonWriteWaitingOnARenameReindexesTitlesPostgres
