@@ -107,7 +107,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 // membership state alone.
 func (s *Scanner) scanPodcastSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*ScanResult, error) {
 	if s == nil || folder == nil || s.fileRepo == nil {
-		return nil, fmt.Errorf("scanPodcastSubtree: scanner, folder or file repository not configured")
+		return nil, errors.New("scanPodcastSubtree: scanner, folder or file repository not configured")
 	}
 	result := &ScanResult{}
 	showPath := podcastShowFolder(subtreePath, folder.Paths)
@@ -230,7 +230,7 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 	}
 
 	if s.fileRepo == nil {
-		return nil, fmt.Errorf("fileRepo not configured on Scanner")
+		return nil, errors.New("fileRepo not configured on Scanner")
 	}
 	// Scans of one library run side by side, on this node or another: a
 	// show folder scan next to a full scan, or scans of two folders inside

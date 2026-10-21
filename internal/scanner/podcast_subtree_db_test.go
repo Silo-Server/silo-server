@@ -30,7 +30,7 @@ type podcastSubtreeFixture struct {
 
 func newPodcastSubtreeFixture(t *testing.T) *podcastSubtreeFixture {
 	t.Helper()
-	pool := newDeadRootTestPool(t)
+	pool := newScannerTestPool(t)
 	ctx := context.Background()
 
 	base := t.TempDir()
@@ -492,11 +492,6 @@ func TestConcurrentScansOfANewPodcastShowCreateOneShow(t *testing.T) {
 		// blocked behind it, or has finished without waiting.
 		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
-			select {
-			case <-secondFinished:
-				return
-			default:
-			}
 			var blocked bool
 			if err := f.pool.QueryRow(ctx, `
 				SELECT EXISTS (
@@ -509,7 +504,11 @@ func TestConcurrentScansOfANewPodcastShowCreateOneShow(t *testing.T) {
 			if blocked {
 				return
 			}
-			time.Sleep(10 * time.Millisecond)
+			select {
+			case <-secondFinished:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
 		}
 		t.Error("the second scan neither blocked nor finished")
 	}})
