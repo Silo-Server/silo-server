@@ -40,7 +40,7 @@ function decoderRecovering(video: HTMLVideoElement): boolean {
 }
 
 /** Media buffered past the playhead, in milliseconds; 0 when none is. */
-function bufferedAheadMs(video: HTMLVideoElement): number {
+export function bufferedAheadMs(video: HTMLVideoElement): number {
   const position = video.currentTime;
   const ranges = video.buffered;
   for (let i = 0; i < ranges.length; i++) {

@@ -1,5 +1,9 @@
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
-import { MEDIA_ENDED_EVENT, useAutoQualityDownshift } from "../hooks/useAutoQualityDownshift";
+import {
+  MEDIA_ENDED_EVENT,
+  bufferedAheadMs,
+  useAutoQualityDownshift,
+} from "../hooks/useAutoQualityDownshift";
 import { BUFFERING_QUALITY_COPY } from "../buffering-quality";
 import type {
   BufferingAnswer,
@@ -336,7 +340,7 @@ const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
  * With less than this buffered past the playhead the link is slow, which the
  * buffering controller handles, so the fallback waits.
  */
-const FIREFOX_STALL_BUFFERED_SECONDS = 2;
+const FIREFOX_STALL_BUFFERED_MS = 2_000;
 
 /** Adds `[start, end]` to sorted, disjoint spans, merging any it overlaps. */
 function mergeSpan(spans: [number, number][], span: [number, number]): [number, number][] {
@@ -358,15 +362,6 @@ function spanLength(spans: [number, number][]): number {
   return spans.reduce((total, [a, b]) => total + (b - a), 0);
 }
 
-/** Media buffered past the playhead, in seconds; 0 when none is. */
-function bufferedAheadSeconds(video: HTMLVideoElement): number {
-  const position = video.currentTime;
-  for (let i = 0; i < video.buffered.length; i++) {
-    if (video.buffered.start(i) <= position && position < video.buffered.end(i))
-      return video.buffered.end(i) - position;
-  }
-  return 0;
-}
 // A progressive remux is one forward-only response. A paused browser stops
 // reading it, and the server closes it once it has made no progress for its
 // stall window (180s by default, see internal/httpstream). The browser cannot
@@ -1289,7 +1284,7 @@ export function VideoPlayer({
       }
       // Still waiting for data: a slow start, not a Firefox stall.
       const video = videoRef.current;
-      if (video && bufferedAheadSeconds(video) < FIREFOX_STALL_BUFFERED_SECONDS) {
+      if (video && bufferedAheadMs(video) < FIREFOX_STALL_BUFFERED_MS) {
         timer = setTimeout(check, 1_000);
         return;
       }
