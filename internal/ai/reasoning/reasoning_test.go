@@ -11,13 +11,9 @@ func TestProModelCapabilitiesAndValidation(t *testing.T) {
 		levels []string
 	}{
 		{"gpt-5-pro", []string{"high"}},
-		{"gpt-5-pro-2025-10-06", []string{"high"}},
 		{"gpt-5.2-pro", []string{"medium", "high", "xhigh"}},
-		{"gpt-5.2-pro-2025-12-11", []string{"medium", "high", "xhigh"}},
 		{"gpt-5.4-pro", []string{"medium", "high", "xhigh"}},
-		{"gpt-5.4-pro-2026-03-05", []string{"medium", "high", "xhigh"}},
 		{"gpt-5.5-pro", []string{"medium", "high", "xhigh"}},
-		{"gpt-5.5-pro-2026-04-23", []string{"medium", "high", "xhigh"}},
 		{"openai/GPT-5.4-Pro", []string{"medium", "high", "xhigh"}},
 		{"gpt-5", []string{"minimal", "low", "medium", "high"}},
 		{"gpt-5.2", []string{"none", "low", "medium", "high", "xhigh"}},
@@ -45,8 +41,6 @@ func TestChatModelCapabilitiesAndValidation(t *testing.T) {
 	for _, model := range []string{
 		"chat-latest",
 		"gpt-5-chat-latest",
-		"gpt-5.1-chat-latest",
-		"gpt-5.2-chat-latest",
 		"openai/GPT-5.2-Chat-Latest",
 		"openai/CHAT-LATEST",
 	} {

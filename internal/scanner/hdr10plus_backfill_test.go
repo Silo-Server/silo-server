@@ -119,7 +119,7 @@ func insertHDR10PlusBackfillRow(t *testing.T, ctx context.Context, pool *pgxpool
 // and leaves the rest of the row as it found it. A failed read leaves the
 // file a candidate; a second pass reads only those.
 func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
-	pool := newDeadRootTestPool(t)
+	pool := newScannerTestPool(t)
 	ctx := context.Background()
 	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("hdr10plus-backfill-%d", time.Now().UnixNano()))
 
@@ -265,7 +265,7 @@ func checkHDR10PlusBackfillFirstPass(t *testing.T, track func(string) map[string
 
 // A row rewritten while its frame was read keeps what the rewrite stored.
 func TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB(t *testing.T) {
-	pool := newDeadRootTestPool(t)
+	pool := newScannerTestPool(t)
 	ctx := context.Background()
 	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("hdr10plus-rewrite-%d", time.Now().UnixNano()))
 	path := t.TempDir() + "/rewritten.mkv"
@@ -301,7 +301,7 @@ func TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB(t *testing.T) {
 // Consecutive timeouts mean stalled storage: the pass ends rather than wait
 // out every remaining file.
 func TestHDR10PlusBackfillStopsWhenStorageStallsDB(t *testing.T) {
-	pool := newDeadRootTestPool(t)
+	pool := newScannerTestPool(t)
 	ctx := context.Background()
 	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("hdr10plus-stall-%d", time.Now().UnixNano()))
 	dir := t.TempDir()

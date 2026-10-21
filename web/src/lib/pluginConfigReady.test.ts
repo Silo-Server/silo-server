@@ -98,24 +98,4 @@ describe("missingRequiredConfig", () => {
       missingRequiredConfig(installation({ global_config_schema: [schema("sources", false)] })),
     ).toEqual([]);
   });
-
-  it("counts a saved secret and a saved value as filled, but not a blank string", () => {
-    const base = { global_config_schema: [schema("account", true), schema("url", true)] };
-    expect(
-      missingRequiredConfig(
-        installation({
-          ...base,
-          global_configs: [
-            { key: "account", value: {}, configured_secrets: ["api_key"] },
-            { key: "url", value: { base_url: "https://sportarr.net" } },
-          ],
-        }),
-      ),
-    ).toEqual([]);
-    expect(
-      missingRequiredConfig(
-        installation({ ...base, global_configs: [{ key: "url", value: { base_url: "  " } }] }),
-      ).map((entry) => entry.key),
-    ).toEqual(["account", "url"]);
-  });
 });

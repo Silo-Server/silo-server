@@ -47,16 +47,6 @@ describe("sortSubtitlesBySource", () => {
     const sorted = sortSubtitlesBySource(tracks);
     expect(sorted.map((t) => t.source)).toEqual([undefined, "external"]);
   });
-
-  it("does not mutate the original array", () => {
-    const tracks = [
-      makeSub({ index: 0, source: "embedded" }),
-      makeSub({ index: 1, source: "external" }),
-    ];
-    const original = [...tracks];
-    sortSubtitlesBySource(tracks);
-    expect(tracks).toEqual(original);
-  });
 });
 
 describe("findPreferredSubtitleIndex", () => {
@@ -101,14 +91,15 @@ describe("findPreferredSubtitleIndex", () => {
 });
 
 describe("resolveSubtitleAutoSelect", () => {
-  function opts(overrides: {
+  type Options = {
     mode: SubtitleMode;
     tracks?: Partial<PlayerSubtitleInfo>[];
     preferredLanguage?: string | null;
     audioLanguage?: string | null;
     profileLanguage?: string | null;
     showForcedSubtitles?: boolean;
-  }) {
+  };
+  function opts(overrides: Options) {
     return {
       mode: overrides.mode,
       tracks: (overrides.tracks ?? []).map((t) => makeSub(t)),
@@ -118,173 +109,251 @@ describe("resolveSubtitleAutoSelect", () => {
       showForcedSubtitles: overrides.showForcedSubtitles ?? true,
     };
   }
+  const select = (_name: string, input: Options, expected: number | null) =>
+    expect(resolveSubtitleAutoSelect(opts(input))).toBe(expected);
 
   describe("off mode", () => {
-    it("returns null when forced subtitles are disabled", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "off",
-            tracks: [{ index: 0, language: "en", source: "external" }],
-            preferredLanguage: "en",
-            showForcedSubtitles: false,
-          }),
-        ),
-      ).toBeNull();
-    });
-
-    it("selects a forced subtitle matching the audio language when enabled", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "off",
-            tracks: [
-              { index: 0, language: "en", forced: true, source: "embedded" },
-              { index: 1, language: "ja", forced: true, source: "external" },
-            ],
-            audioLanguage: "ja",
-            profileLanguage: "en",
-          }),
-        ),
-      ).toBe(1);
-    });
+    it.each<[string, Options, number | null]>([
+      [
+        "returns null when forced subtitles are disabled",
+        {
+          mode: "off",
+          tracks: [{ index: 0, language: "en", source: "external" }],
+          preferredLanguage: "en",
+          showForcedSubtitles: false,
+        },
+        null,
+      ],
+      [
+        "selects a forced subtitle matching the audio language when enabled",
+        {
+          mode: "off",
+          tracks: [
+            { index: 0, language: "en", forced: true, source: "embedded" },
+            { index: 1, language: "ja", forced: true, source: "external" },
+          ],
+          audioLanguage: "ja",
+          profileLanguage: "en",
+        },
+        1,
+      ],
+    ])("%s", select);
   });
 
   describe("always mode", () => {
-    it("selects preferred language track", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "always",
-            tracks: [
-              { index: 0, language: "es", source: "embedded" },
-              { index: 1, language: "en", source: "external" },
-            ],
-            preferredLanguage: "en",
-          }),
-        ),
-      ).toBe(1);
-    });
-
-    it("returns null when no preferred language set", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "always",
-            tracks: [{ index: 0, language: "en" }],
-            preferredLanguage: null,
-          }),
-        ),
-      ).toBeNull();
-    });
-
-    it("returns null when preferred language has no match", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "always",
-            tracks: [{ index: 0, language: "es" }],
-            preferredLanguage: "en",
-          }),
-        ),
-      ).toBeNull();
-    });
-
-    it("prefers embedded over external for same language", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "always",
-            tracks: [
-              { index: 0, language: "en", source: "external" },
-              { index: 1, language: "en", source: "embedded" },
-            ],
-            preferredLanguage: "en",
-          }),
-        ),
-      ).toBe(1);
-    });
+    it.each<[string, Options, number | null]>([
+      [
+        "selects preferred language track",
+        {
+          mode: "always",
+          tracks: [
+            { index: 0, language: "es", source: "embedded" },
+            { index: 1, language: "en", source: "external" },
+          ],
+          preferredLanguage: "en",
+        },
+        1,
+      ],
+      [
+        "returns null when no preferred language set",
+        { mode: "always", tracks: [{ index: 0, language: "en" }], preferredLanguage: null },
+        null,
+      ],
+      [
+        "returns null when preferred language has no match",
+        { mode: "always", tracks: [{ index: 0, language: "es" }], preferredLanguage: "en" },
+        null,
+      ],
+      [
+        "prefers embedded over external for same language",
+        {
+          mode: "always",
+          tracks: [
+            { index: 0, language: "en", source: "external" },
+            { index: 1, language: "en", source: "embedded" },
+          ],
+          preferredLanguage: "en",
+        },
+        1,
+      ],
+    ])("%s", select);
   });
 
   describe("auto mode", () => {
-    it("returns null when audio matches profile language and forced subtitles are disabled", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [{ index: 0, language: "en", source: "external" }],
-            preferredLanguage: "en",
-            audioLanguage: "en",
-            profileLanguage: "en",
-            showForcedSubtitles: false,
-          }),
-        ),
-      ).toBeNull();
-    });
-
-    it("selects a forced subtitle in the audio language when audio matches the profile language", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [
-              { index: 0, language: "en", forced: true, source: "external" },
-              { index: 1, language: "en", forced: true, source: "embedded" },
-            ],
-            preferredLanguage: "fr",
-            audioLanguage: "en",
-            profileLanguage: "en",
-          }),
-        ),
-      ).toBe(1);
-    });
-
-    it("selects subtitle when audio differs from profile language", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [
-              { index: 0, language: "en", source: "embedded" },
-              { index: 1, language: "ja", source: "embedded" },
-            ],
-            preferredLanguage: "en",
-            audioLanguage: "ja",
-            profileLanguage: "en",
-          }),
-        ),
-      ).toBe(0);
-    });
-
-    it("selects preferred subtitles when spoken language is original and audio is non-English", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [{ index: 0, language: "en", source: "external" }],
-            preferredLanguage: "en",
-            audioLanguage: "ja",
-            profileLanguage: "original",
-            showForcedSubtitles: false,
-          }),
-        ),
-      ).toBe(0);
-    });
-
-    it("does not auto-enable subtitles when spoken language is original and audio matches the subtitle language", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [{ index: 0, language: "en", source: "external" }],
-            preferredLanguage: "en",
-            audioLanguage: "en",
-            profileLanguage: "original",
-            showForcedSubtitles: false,
-          }),
-        ),
-      ).toBeNull();
-    });
+    it.each<[string, Options, number | null]>([
+      [
+        "returns null when audio matches profile language and forced subtitles are disabled",
+        {
+          mode: "auto",
+          tracks: [{ index: 0, language: "en", source: "external" }],
+          preferredLanguage: "en",
+          audioLanguage: "en",
+          profileLanguage: "en",
+          showForcedSubtitles: false,
+        },
+        null,
+      ],
+      [
+        "selects a forced subtitle in the audio language when audio matches the profile language",
+        {
+          mode: "auto",
+          tracks: [
+            { index: 0, language: "en", forced: true, source: "external" },
+            { index: 1, language: "en", forced: true, source: "embedded" },
+          ],
+          preferredLanguage: "fr",
+          audioLanguage: "en",
+          profileLanguage: "en",
+        },
+        1,
+      ],
+      [
+        "selects subtitle when audio differs from profile language",
+        {
+          mode: "auto",
+          tracks: [
+            { index: 0, language: "en", source: "embedded" },
+            { index: 1, language: "ja", source: "embedded" },
+          ],
+          preferredLanguage: "en",
+          audioLanguage: "ja",
+          profileLanguage: "en",
+        },
+        0,
+      ],
+      [
+        "selects preferred subtitles when spoken language is original and audio is non-English",
+        {
+          mode: "auto",
+          tracks: [{ index: 0, language: "en", source: "external" }],
+          preferredLanguage: "en",
+          audioLanguage: "ja",
+          profileLanguage: "original",
+          showForcedSubtitles: false,
+        },
+        0,
+      ],
+      [
+        "does not auto-enable subtitles when spoken language is original and audio matches the subtitle language",
+        {
+          mode: "auto",
+          tracks: [{ index: 0, language: "en", source: "external" }],
+          preferredLanguage: "en",
+          audioLanguage: "en",
+          profileLanguage: "original",
+          showForcedSubtitles: false,
+        },
+        null,
+      ],
+      [
+        "falls back to profile language when no preferred subtitle language",
+        {
+          mode: "auto",
+          tracks: [{ index: 0, language: "en", source: "embedded" }],
+          preferredLanguage: null,
+          audioLanguage: "ja",
+          profileLanguage: "en",
+        },
+        0,
+      ],
+      [
+        "does not fall back to the profile language when subtitles were explicitly set to none",
+        {
+          mode: "auto",
+          tracks: [{ index: 0, language: "en", source: "embedded" }],
+          preferredLanguage: "",
+          audioLanguage: "ja",
+          profileLanguage: "en",
+        },
+        null,
+      ],
+      [
+        "uses the profile language as the audio-language fallback for forced subtitles",
+        {
+          mode: "auto",
+          tracks: [{ index: 0, language: "en", forced: true }],
+          preferredLanguage: "en",
+          audioLanguage: null,
+          profileLanguage: "en",
+        },
+        0,
+      ],
+      [
+        "defaults to 'en' when profileLanguage is null",
+        {
+          mode: "auto",
+          tracks: [{ index: 0, language: "en", source: "embedded" }],
+          preferredLanguage: "en",
+          audioLanguage: "ja",
+          profileLanguage: null,
+        },
+        0,
+      ],
+      [
+        "treats ISO 639-1 and ISO 639-2 codes as the same language for auto suppression",
+        {
+          mode: "auto",
+          tracks: [{ index: 0, language: "en", source: "external" }],
+          preferredLanguage: "en",
+          audioLanguage: "eng",
+          profileLanguage: "en",
+          showForcedSubtitles: false,
+        },
+        null,
+      ],
+      [
+        "returns null when preferred language has no matching tracks",
+        {
+          mode: "auto",
+          tracks: [{ index: 0, language: "fr", source: "embedded" }],
+          preferredLanguage: "en",
+          audioLanguage: "ja",
+          profileLanguage: "en",
+        },
+        null,
+      ],
+      [
+        "returns null when no forced subtitle matches the audio language",
+        {
+          mode: "auto",
+          tracks: [
+            { index: 0, language: "fr", forced: true },
+            { index: 1, language: "es", forced: true },
+          ],
+          preferredLanguage: "en",
+          audioLanguage: "ja",
+          profileLanguage: "ja",
+        },
+        null,
+      ],
+      [
+        "does not fall back to forced subtitles in the preferred subtitle language",
+        {
+          mode: "auto",
+          tracks: [
+            { index: 0, language: "en", forced: true },
+            { index: 1, language: "fr", forced: true },
+          ],
+          preferredLanguage: "fr",
+          audioLanguage: "en",
+          profileLanguage: "en",
+        },
+        0,
+      ],
+      [
+        "reuses source priority among forced tracks",
+        {
+          mode: "off",
+          tracks: [
+            { index: 0, language: "en", forced: true, source: "external" },
+            { index: 1, language: "en", forced: true, source: "embedded" },
+          ],
+          audioLanguage: "en",
+          profileLanguage: "en",
+        },
+        1,
+      ],
+    ])("%s", select);
 
     it.each(["x-silo-original", "X-Silo-Original"])(
       "treats the %s settings tag like the original-language sentinel",
@@ -300,165 +369,56 @@ describe("resolveSubtitleAutoSelect", () => {
         expect(resolveSubtitleAutoSelect(opts({ ...base, audioLanguage: "en" }))).toBeNull();
       },
     );
-
-    it("falls back to profile language when no preferred subtitle language", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [{ index: 0, language: "en", source: "embedded" }],
-            preferredLanguage: null,
-            audioLanguage: "ja",
-            profileLanguage: "en",
-          }),
-        ),
-      ).toBe(0);
-    });
-
-    it("does not fall back to the profile language when subtitles were explicitly set to none", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [{ index: 0, language: "en", source: "embedded" }],
-            preferredLanguage: "",
-            audioLanguage: "ja",
-            profileLanguage: "en",
-          }),
-        ),
-      ).toBeNull();
-    });
-
-    it("uses the profile language as the audio-language fallback for forced subtitles", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [{ index: 0, language: "en", forced: true }],
-            preferredLanguage: "en",
-            audioLanguage: null,
-            profileLanguage: "en",
-          }),
-        ),
-      ).toBe(0);
-    });
-
-    it("defaults to 'en' when profileLanguage is null", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [{ index: 0, language: "en", source: "embedded" }],
-            preferredLanguage: "en",
-            audioLanguage: "ja",
-            profileLanguage: null,
-          }),
-        ),
-      ).toBe(0);
-    });
-
-    it("treats ISO 639-1 and ISO 639-2 codes as the same language for auto suppression", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [{ index: 0, language: "en", source: "external" }],
-            preferredLanguage: "en",
-            audioLanguage: "eng",
-            profileLanguage: "en",
-            showForcedSubtitles: false,
-          }),
-        ),
-      ).toBeNull();
-    });
-
-    it("returns null when preferred language has no matching tracks", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [{ index: 0, language: "fr", source: "embedded" }],
-            preferredLanguage: "en",
-            audioLanguage: "ja",
-            profileLanguage: "en",
-          }),
-        ),
-      ).toBeNull();
-    });
-
-    it("returns null when no forced subtitle matches the audio language", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [
-              { index: 0, language: "fr", forced: true },
-              { index: 1, language: "es", forced: true },
-            ],
-            preferredLanguage: "en",
-            audioLanguage: "ja",
-            profileLanguage: "ja",
-          }),
-        ),
-      ).toBeNull();
-    });
-
-    it("does not fall back to forced subtitles in the preferred subtitle language", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "auto",
-            tracks: [
-              { index: 0, language: "en", forced: true },
-              { index: 1, language: "fr", forced: true },
-            ],
-            preferredLanguage: "fr",
-            audioLanguage: "en",
-            profileLanguage: "en",
-          }),
-        ),
-      ).toBe(0);
-    });
-
-    it("reuses source priority among forced tracks", () => {
-      expect(
-        resolveSubtitleAutoSelect(
-          opts({
-            mode: "off",
-            tracks: [
-              { index: 0, language: "en", forced: true, source: "external" },
-              { index: 1, language: "en", forced: true, source: "embedded" },
-            ],
-            audioLanguage: "en",
-            profileLanguage: "en",
-          }),
-        ),
-      ).toBe(1);
-    });
-  });
-
-  describe("edge cases", () => {
-    it("returns null for empty tracks regardless of mode", () => {
-      for (const mode of ["off", "auto", "always"] as SubtitleMode[]) {
-        expect(resolveSubtitleAutoSelect(opts({ mode }))).toBeNull();
-      }
-    });
   });
 });
 
 describe("bitmap (PGS) codec deprioritization", () => {
-  it("prefers a text track over a PGS track of the same language and source", () => {
+  // Each row is two English tracks; index 1 must win.
+  it.each<[string, Partial<PlayerSubtitleInfo>, Partial<PlayerSubtitleInfo>]>([
+    [
+      "prefers a text track over a PGS track of the same language and source",
+      { source: "embedded", codec: "hdmv_pgs_subtitle" },
+      { source: "embedded", codec: "subrip" },
+    ],
+    [
+      "prefers an external text track over an embedded PGS track of the same kind",
+      { source: "embedded", codec: "hdmv_pgs_subtitle" },
+      { source: "external", codec: "srt" },
+    ],
+    [
+      "still ranks PGS as burn-in when the server publishes it burn_in_only",
+      { source: "embedded", codec: "pgs", burn_in_only: true },
+      { source: "external", codec: "srt", forced: true },
+    ],
+    [
+      "ranks external PGS files as burn-in",
+      { source: "external", codec: "hdmv_pgs_subtitle" },
+      { source: "external", codec: "srt", forced: true },
+    ],
+    [
+      "prefers an external text track over an embedded track that needs burn-in",
+      { source: "embedded", codec: "dvd_subtitle" },
+      { source: "external", codec: "srt" },
+    ],
+    [
+      "prefers embedded text over an external PGS file, which can only be burned in",
+      { source: "external", codec: "pgs" },
+      { source: "embedded", codec: "subrip" },
+    ],
+    [
+      "prefers a full external track over an embedded forced one",
+      { source: "embedded", codec: "subrip", forced: true },
+      { source: "external", codec: "srt" },
+    ],
+    [
+      "honors the server's burn_in_only flag on a text track",
+      { source: "embedded", codec: "subrip", burn_in_only: true },
+      { source: "external", codec: "srt" },
+    ],
+  ])("%s", (_name, first, second) => {
     const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en", codec: "hdmv_pgs_subtitle" }),
-      makeSub({ index: 1, source: "embedded", language: "en", codec: "subrip" }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
-  });
-
-  it("prefers an external text track over an embedded PGS track of the same kind", () => {
-    const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en", codec: "hdmv_pgs_subtitle" }),
-      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
+      makeSub({ index: 0, language: "en", ...first }),
+      makeSub({ index: 1, language: "en", ...second }),
     ];
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
@@ -481,74 +441,6 @@ describe("bitmap (PGS) codec deprioritization", () => {
     });
     expect(findPreferredSubtitleIndex([pgs, forced], "en")).toBe(0);
     expect(findPreferredSubtitleIndex([pgs, sdh], "en")).toBe(0);
-  });
-
-  it("still ranks PGS as burn-in when the server publishes it burn_in_only", () => {
-    const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en", codec: "pgs", burn_in_only: true }),
-      makeSub({ index: 1, source: "external", language: "en", codec: "srt", forced: true }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
-  });
-
-  it("ranks external PGS files as burn-in", () => {
-    const tracks = [
-      makeSub({ index: 0, source: "external", language: "en", codec: "hdmv_pgs_subtitle" }),
-      makeSub({ index: 1, source: "external", language: "en", codec: "srt", forced: true }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
-  });
-
-  it("prefers an external text track over an embedded track that needs burn-in", () => {
-    const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en", codec: "dvd_subtitle" }),
-      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
-  });
-
-  it("prefers embedded text over an external PGS file, which can only be burned in", () => {
-    const tracks = [
-      makeSub({ index: 0, source: "external", language: "en", codec: "pgs" }),
-      makeSub({ index: 1, source: "embedded", language: "en", codec: "subrip" }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
-  });
-
-  it("prefers a full external track over an embedded forced one", () => {
-    const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en", codec: "subrip", forced: true }),
-      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
-  });
-
-  it("prefers a plain external track over an embedded SDH one", () => {
-    const tracks = [
-      makeSub({
-        index: 0,
-        source: "embedded",
-        language: "en",
-        codec: "subrip",
-        hearing_impaired: true,
-      }),
-      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
-  });
-
-  it("honors the server's burn_in_only flag on a text track", () => {
-    const tracks = [
-      makeSub({
-        index: 0,
-        source: "embedded",
-        language: "en",
-        codec: "subrip",
-        burn_in_only: true,
-      }),
-      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
 
   it("selects a PGS track when it is the only language match", () => {

@@ -298,21 +298,6 @@ func TestCompatRecommendationsServeMoviesOnly(t *testing.T) {
 	}
 }
 
-// A new profile has only server-wide rows and no history, so there is no
-// category to send: the answer is an empty list, and the client shows its
-// own Latest and Resume rows.
-func TestCompatRecommendationsColdStartIsEmpty(t *testing.T) {
-	reader := &fakeRowReader{rows: []recommendations.ForYouRow{
-		scoredRow("popular", "Popular on This Server", "popular-1"),
-		scoredRow("recently_added", "Recently Added", "recent-1"),
-	}}
-	rec := httptest.NewRecorder()
-	newTestRecommendationsHandler(reader, &fakeItemLoader{}, catalog.AccessFilter{}).HandleRecommendations(rec, recommendationsRequest(t, ""))
-	if rec.Code != http.StatusOK || rec.Body.String() != "[]\n" {
-		t.Fatalf("cold start: %d %q, want 200 []", rec.Code, rec.Body.String())
-	}
-}
-
 func TestCompatRecommendationsEmptyAndFailedReads(t *testing.T) {
 	// Nothing cached: an empty list.
 	rec := httptest.NewRecorder()

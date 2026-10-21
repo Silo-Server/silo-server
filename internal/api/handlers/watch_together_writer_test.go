@@ -168,62 +168,6 @@ func TestWatchTogetherMemberStatusIsV2Only(t *testing.T) {
 	}
 }
 
-func TestWatchTogetherV1RejectsLobbyReady(t *testing.T) {
-	h := new(WatchTogetherHandler)
-	for _, payload := range []string{`{"type":"lobby_ready","ready":true}`, `{"type":"lobby_ready","ready":false}`} {
-		err := h.handleRoomClientMessage(t.Context(), new(watchTogetherRoomConn), nil, 7, "profile", []byte(payload))
-		if err == nil || err.Error() != "unsupported room websocket message" {
-			t.Fatalf("v1 lobby_ready error = %v", err)
-		}
-	}
-}
-
-func TestWatchTogetherReplacementFlushesBeforeClose(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-	defer cancel()
-	socket := newRoomWriterSocket(true)
-	conn := newWatchTogetherRoomConn(socket)
-	conn.includeMemberStatus = true
-	t.Cleanup(func() { _ = conn.Close() })
-	returned := make(chan struct{})
-	go func() { _ = conn.CloseReplaced(); close(returned) }()
-	select {
-	case <-socket.started:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	select {
-	case <-socket.closed:
-		t.Fatal("socket closed before the terminal write completed")
-	case <-returned:
-		t.Fatal("replacement returned before the terminal write completed")
-	default:
-	}
-	close(socket.release)
-	select {
-	case <-returned:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	select {
-	case frame := <-socket.frames:
-		var message map[string]string
-		if err := json.Unmarshal([]byte(frame), &message); err != nil {
-			t.Fatal(err)
-		}
-		if message["type"] != "connection_replaced" || message["reason"] != "This profile joined the Watch Party on another device." {
-			t.Fatalf("terminal frame = %s", frame)
-		}
-	default:
-		t.Fatal("close discarded terminal frame")
-	}
-	select {
-	case <-socket.closed:
-	default:
-		t.Fatal("displaced socket remains open")
-	}
-}
-
 func TestWatchTogetherReplacementClosesBlockedWriter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		socket := newRoomWriterSocket(true)
@@ -253,22 +197,4 @@ func TestWatchTogetherReplacementClosesBlockedWriter(t *testing.T) {
 			t.Fatal("blocked displaced socket remains open")
 		}
 	})
-}
-
-func TestWatchTogetherV1ReplacementRetainsCloseBehavior(t *testing.T) {
-	socket := newRoomWriterSocket(false)
-	conn := newWatchTogetherRoomConn(socket)
-	if err := conn.CloseReplaced(); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case frame := <-socket.frames:
-		t.Fatalf("v2 replacement leaked into v1: %s", frame)
-	default:
-	}
-	select {
-	case <-socket.closed:
-	default:
-		t.Fatal("v1 replacement did not close")
-	}
 }

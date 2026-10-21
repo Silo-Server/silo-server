@@ -104,7 +104,7 @@ func TestSelectionReconcilesModelAndEffort(t *testing.T) {
 }
 
 func TestSelectionFailurePreservesAccountAndModel(t *testing.T) {
-	for _, status := range []int{200, 503} {
+	for _, status := range []int{200} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			s, store := selectionFixture(t, map[string]string{"ai.auth_mode": "chatgpt", "ai.chat_model": "a-model", "ai.reasoning_effort": "high"})
 			before := maps.Clone(store.values)

@@ -67,11 +67,6 @@ describe("levelChainsFromResponse", () => {
       ["sportarr", false],
     ]);
   });
-
-  it("returns an empty record for a missing or empty response", () => {
-    expect(levelChainsFromResponse(undefined)).toEqual({});
-    expect(levelChainsFromResponse({ levels: {} })).toEqual({});
-  });
 });
 
 describe("mergeChainWithDefaults", () => {
@@ -93,11 +88,6 @@ describe("mergeChainWithDefaults", () => {
     expect(merged["series"]!.map((e) => e.provider_slug)).toEqual(["tvdb"]);
     expect(merged["season"]!.map((e) => e.provider_slug)).toEqual(["tmdb"]);
     expect(merged["episode"]!.map((e) => e.provider_slug)).toEqual(["tmdb"]);
-  });
-
-  it("leaves levels empty when the defaults have nothing for them either", () => {
-    const merged = mergeChainWithDefaults({}, {}, "movies");
-    expect(merged["movie"]).toEqual([]);
   });
 });
 

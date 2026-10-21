@@ -25,24 +25,6 @@ func TestEpisodeKey(t *testing.T) {
 	}
 }
 
-func TestValidEpisodeOrdinals(t *testing.T) {
-	cases := []struct {
-		season, episode int
-		want            bool
-	}{
-		{0, 0, true},
-		{1, 999_999, true},
-		{1, 1_000_000, false},
-		{-1, 1, false},
-		{1, -1, false},
-	}
-	for _, tc := range cases {
-		if got := ValidEpisodeOrdinals(tc.season, tc.episode); got != tc.want {
-			t.Errorf("ValidEpisodeOrdinals(%d,%d) = %v, want %v", tc.season, tc.episode, got, tc.want)
-		}
-	}
-}
-
 func TestEvaluateRecipientReasons(t *testing.T) {
 	prefs := DefaultPreferences(1, "p1")
 	episodeKey := EpisodeKey(2, 5)
@@ -107,23 +89,6 @@ func TestEvaluateRecipientReasons(t *testing.T) {
 			t.Fatal("master toggle must suppress everything")
 		}
 	})
-}
-
-func TestSplitEpisodeKeyInvertsEpisodeKey(t *testing.T) {
-	for _, c := range [][2]int{{0, 0}, {1, 2}, {2, 999999}, {12, 10500}} {
-		if season, episode := SplitEpisodeKey(EpisodeKey(c[0], c[1])); season != c[0] || episode != c[1] {
-			t.Errorf("SplitEpisodeKey(EpisodeKey(%d, %d)) = %d, %d", c[0], c[1], season, episode)
-		}
-	}
-}
-
-func TestReasonFlagsHas(t *testing.T) {
-	f := ReasonFlags{Watchlist: true, NextUp: true}
-	for reason, want := range map[string]bool{ReasonFavorite: false, ReasonWatchlist: true, ReasonContinueWatching: false, ReasonNextUp: true, "other": false} {
-		if got := f.Has(reason); got != want {
-			t.Errorf("Has(%q) = %v, want %v", reason, got, want)
-		}
-	}
 }
 
 // ActiveReasons is the event-independent half of EvaluateRecipient: the

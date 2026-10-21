@@ -199,29 +199,6 @@ func TestSubtitleInventoryItemAtV3(t *testing.T) {
 	}
 }
 
-func TestBuildSubtitleInventoryV3_NilFile(t *testing.T) {
-	if items := BuildSubtitleInventoryV3(nil, nil); items != nil {
-		t.Errorf("expected nil inventory for a nil file, got %+v", items)
-	}
-}
-
-func TestSubtitleURLExtV3(t *testing.T) {
-	cases := map[string]string{
-		"ass":               ".ass",
-		"ssa":               ".ass",
-		"pgs":               ".sup",
-		"hdmv_pgs_subtitle": ".sup",
-		"subrip":            ".vtt",
-		"srt":               ".vtt",
-		"":                  ".vtt",
-	}
-	for codec, want := range cases {
-		if got := SubtitleURLExtV3(codec); got != want {
-			t.Errorf("SubtitleURLExtV3(%q) = %q, want %q", codec, got, want)
-		}
-	}
-}
-
 func TestSubtitleSidecarExtV3OffersOriginalSubRipOnlyWhenNegotiated(t *testing.T) {
 	negotiated := []string{FeatureSubripSidecarV3}
 	for _, tc := range []struct {

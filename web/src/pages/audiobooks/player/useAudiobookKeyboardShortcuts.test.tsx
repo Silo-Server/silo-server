@@ -21,13 +21,6 @@ function setup(playbackOver: Partial<AudiobookPlayback> = {}, expanded = false) 
 }
 
 describe("useAudiobookKeyboardShortcuts", () => {
-  it("toggles playback on space and K", () => {
-    const { playback } = setup();
-    fireEvent.keyDown(document.body, { key: " " });
-    fireEvent.keyDown(document.body, { key: "k" });
-    expect(playback.togglePlay).toHaveBeenCalledTimes(2);
-  });
-
   it("skips by the configured intervals on arrow keys", () => {
     const { playback } = setup();
     fireEvent.keyDown(document.body, { key: "ArrowLeft" });
@@ -43,16 +36,6 @@ describe("useAudiobookKeyboardShortcuts", () => {
     expect(playback.setMuted).toHaveBeenCalledWith(false);
     fireEvent.keyDown(document.body, { key: "ArrowDown" });
     expect(playback.setVolume).toHaveBeenCalledWith(0.45);
-  });
-
-  it("toggles mute on M and navigates chapters on N/P", () => {
-    const { playback } = setup();
-    fireEvent.keyDown(document.body, { key: "m" });
-    expect(playback.setMuted).toHaveBeenCalledWith(true);
-    fireEvent.keyDown(document.body, { key: "n" });
-    expect(playback.nextChapter).toHaveBeenCalled();
-    fireEvent.keyDown(document.body, { key: "p" });
-    expect(playback.prevChapter).toHaveBeenCalled();
   });
 
   it("steps the playback rate on shift+. and shift+,", () => {

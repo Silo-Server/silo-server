@@ -130,8 +130,13 @@ documents for this job type.
 
 The existing `POST /api/v2/library-jobs/{job_id}/cancel` contract remains intact.
 `POST /api/v2/admin/jobs/{id}/cancel` (`cancelAdminJob`) requests cancellation
-for storage-transition and image cache cleanup jobs. Library refresh
-cancellation uses its separate library-job endpoint above. Cancellation retains
+for library refresh, storage-transition, and image cache cleanup jobs. A job's
+`cancelable` field is true exactly when it is one of these types and not
+terminal, and every job resource that reports `cancelable: true` accepts the
+cancellation through its own cancel operation. A library refresh can therefore
+be canceled through either `cancelAdminJob` or the library-job endpoint; both
+record the same request. Other job types return `409 job_not_cancelable`.
+Cancellation retains
 completed effects and verified storage-copy checkpoints. An accepted
 cancellation returns `202`; an already canceled job returns `200`; a succeeded
 or failed job returns `409 job_not_cancelable`. A queued storage-transition

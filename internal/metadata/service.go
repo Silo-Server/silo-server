@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -791,7 +792,7 @@ func (s *MetadataService) maybeAutoTranslate(ctx context.Context, folderID int, 
 	if strings.EqualFold(strings.TrimSpace(item.DefaultMetadataLanguage), library) {
 		return
 	}
-	go s.autoTranslator.AutoEnqueue(context.WithoutCancel(ctx), contentID, library)
+	go s.autoTranslator.AutoEnqueue(queryattr.Detach(context.WithoutCancel(ctx)), contentID, library)
 }
 
 // adoptableFolderLanguage reports whether a folder-scoped refresh should
@@ -2965,7 +2966,7 @@ func (s *MetadataService) mergeAndPersist(
 	if handleArtwork {
 		prepareItemImagesForQueue(item, existingItem, keepStored)
 		dropGoneItemOnlyArtwork(localArt, item, images)
-		applyLocalArtworkFallback(item, images, req.Language)
+		applyLocalArtworkFallback(item, existingItem, images, req.Language)
 	}
 
 	if isNew && contentID == "" {
@@ -3244,11 +3245,15 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	providerIDs map[string]string,
 	identityChosen bool,
 ) error {
-	tx, err := s.dbPool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.dbPool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin metadata item/provider transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, item.ContentID); err != nil {
+		return err
+	}
 
 	if err := itemRepo.UpsertTx(ctx, tx, item); err != nil {
 		return fmt.Errorf("upserting item: %w", err)
@@ -8275,11 +8280,22 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 		return fmt.Errorf("rebind skeleton requires database pool")
 	}
 
-	tx, err := s.dbPool.Begin(ctx)
+	tx, err := s.dbPool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin skeleton rebind transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.LockMetadataCurationFiles(ctx, tx, fromContentID); err != nil {
+		return err
+	}
+	err = catalog.GuardMetadataCurationItems(ctx, tx, fromContentID, toContentID)
+	if errors.Is(err, catalog.ErrItemNotFound) {
+		return rebindOntoAfterMissingItem(ctx, tx, fromContentID, toContentID, markIdentity, err)
+	}
+	if err != nil {
+		return err
+	}
 
 	steps := []struct {
 		name string
@@ -8439,6 +8455,36 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 		return fmt.Errorf("commit skeleton rebind transaction: %w", err)
 	}
 	MarkRecommendationsStale(ctx, s.recsStaler, MovedStateTargets(report, toContentID, episodePairs)...)
+	return nil
+}
+
+// rebindOntoAfterMissingItem finishes a curated rebind whose guard found the
+// source or the target missing (notFound).
+func rebindOntoAfterMissingItem(ctx context.Context, tx pgx.Tx, fromContentID, toContentID string, markIdentity bool, notFound error) error {
+	// Lock and authorize the target again: one created since the guard's read
+	// is visible now. A missing target still fails.
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, toContentID); err != nil {
+		return err
+	}
+	var sourceExists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_items WHERE content_id = $1)`, fromContentID).Scan(&sourceExists); err != nil {
+		return err
+	}
+	if sourceExists {
+		return notFound
+	}
+	// A source merged or deleted after the caller found it leaves nothing to
+	// move. An Identify still marks the target, as without curation authority;
+	// no source rows are touched.
+	if !markIdentity {
+		return nil
+	}
+	if err := catalog.MarkIdentityChosenTx(ctx, tx, toContentID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit skeleton rebind transaction: %w", err)
+	}
 	return nil
 }
 

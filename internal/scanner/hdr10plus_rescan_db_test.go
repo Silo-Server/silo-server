@@ -2,11 +2,8 @@ package scanner
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -16,15 +13,7 @@ import (
 // the HDR10+ status an earlier read recorded must survive.
 func TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB(t *testing.T) {
 	ctx := t.Context()
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
+	pool := newScannerTestPool(t)
 
 	root := t.TempDir()
 	moviePath := filepath.Join(root, "Heat (1995) {tmdb-949}", "Heat (1995) {tmdb-949} [Bluray-2160p].mkv")

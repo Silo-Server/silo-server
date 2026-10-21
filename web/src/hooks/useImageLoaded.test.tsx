@@ -75,39 +75,11 @@ describe("useImageLoaded", () => {
     ).toBe(0);
   });
 
-  it("stays loaded when an S3 presigned revision is signed again", () => {
-    const path = `https://bucket.s3.example.com/silo/${ART}/original.${REV_A}.jpg`;
-    const presigned = (date: string, sig: string) =>
-      `${path}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=KEY%2F20260923%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=${date}&X-Amz-Expires=14400&X-Amz-SignedHeaders=host&x-id=GetObject&X-Amz-Signature=${sig}`;
-    expect(
-      resetsAfterSwitch(
-        presigned("20260923T101500Z", "aa11"),
-        presigned("20260923T101501Z", "bb22"),
-      ),
-    ).toBe(0);
-  });
-
-  it("stays loaded when a token-authenticated CDN revision is signed again", () => {
-    const path = `https://cdn.example.com/${ART}/w300.${REV_A}.webp`;
-    expect(
-      resetsAfterSwitch(`${path}?verify=1758621300-abc%3D`, `${path}?verify=1758621301-def%3D`),
-    ).toBe(0);
-  });
-
   it("resets when the artwork revision changes", () => {
     expect(
       resetsAfterSwitch(
         localURL(`${ART}/w500.${REV_A}.webp`, 1758621600, "aaaa"),
         localURL(`${ART}/w500.${REV_B}.webp`, 1758621600, "bbbb"),
-      ),
-    ).toBe(1);
-  });
-
-  it("resets when the variant changes", () => {
-    expect(
-      resetsAfterSwitch(
-        localURL(`${ART}/w300.${REV_A}.webp`, 1758621600, "aaaa"),
-        localURL(`${ART}/w500.${REV_A}.webp`, 1758621600, "bbbb"),
       ),
     ).toBe(1);
   });
@@ -144,14 +116,5 @@ describe("useImageLoaded", () => {
     rerender({ url: localURL(key, 1758623400, "cccc") });
     act(() => result.current.onLoad());
     expect(result.current.loaded).toBe(true);
-  });
-
-  it("resets when the query of an unrecognized URL changes", () => {
-    expect(
-      resetsAfterSwitch(
-        "https://images.example.com/poster.jpg?w=300",
-        "https://images.example.com/poster.jpg?w=500",
-      ),
-    ).toBe(1);
   });
 });

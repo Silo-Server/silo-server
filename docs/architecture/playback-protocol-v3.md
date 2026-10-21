@@ -1374,7 +1374,12 @@ The last two come from the node-routing resolver:
 `routing_policy_unsatisfied` means no route shape is legal under the configured
 execution and egress policy and is never retryable, while
 `route_capacity_unavailable` means a legal shape exists but no node could serve
-it right now and is always retryable.
+it right now and is always retryable. When every route that ran rejected the
+file in the tone-map source preflight, the start ends in a non-retryable
+`transcode_start_failed` whose message says the file failed the conversion
+check. A route skipped only because its executor cannot run the recipe does
+not change that answer; a route that failed in a way a retry could clear keeps
+the start retryable, with that route's message.
 
 ### 7.4 Route event names
 
@@ -1624,6 +1629,22 @@ does not publish its preimage.
 selection, sends a `quality_change` replan with the entry's `label`. It does not
 compute rungs.
 
+On `/api/v2`, `playback_plan.active_quality` names the entry the plan delivers,
+so the client marks that row instead of re-deriving the planner's choice from
+its own request. A rung that `quality_preference` named is active while the
+plan keeps its resolution: by an encode a bandwidth cap or server limit may have
+lowered, or by a source that already fits the rung. Otherwise an encode names the
+rung of its own resolution class and bitrate, so a plain `1080p`, or a
+`1080p-medium` that the client's decoder held, encoded at 720p and 2000 kbps
+names `720p-medium`, and a lower version played unchanged names its
+plain resolution entry. The field is absent when the plan delivers no entry: the
+source plays unchanged, or a cap set the encode of a plain resolution or `auto`
+between two rungs. The client
+marks Auto while the session's preference is `auto`, whatever `active_quality`
+says. Servers that publish the field advertise `plan_active_quality_v1`; without
+that feature an absent field says nothing. The frozen `/api/v1` response never
+carries it.
+
 On `/api/v2` the menu lists only fixed rungs. The source is not an entry,
 because `auto` already returns to it. The frozen `/api/v1` response still leads
 with an unnamed source entry labelled `original` (`preserves_source: true`),
@@ -1706,16 +1727,19 @@ fixed rung or plain resolution never reads the estimate, so a viewer who wants
 the source whatever the estimate says picks a resolution. `original` used to be
 that choice; it is now an alias of `auto`.
 
-A source over the estimate's budget, or over `bandwidth_cap_kbps`, is
-re-encoded at the class that 80% of the estimate or cap earns on the shared
-bitrate ladder ([quality-ladder.md](quality-ladder.md)) for the source's frame
-rate. A source of unknown bitrate counts as needing its class's full bitrate
-against an estimate, and is always re-encoded under a cap, since it cannot be
-shown to fit. A source whose height already fits the earned class keeps its own
-size, even when it is wider than the 16:9 box (a 2560x1080 film at the 1080p
-class). Otherwise automatic and plain-label targets fit the source into that
-class's 16:9 box, so a 3840x1600 film at the 1080p class streams at 1920x800,
-and encode at the class bitrate: 20000 kbps for 2160p, 6000 for 1080p, 2000 for
+A source over the estimate's budget is re-encoded at the class that 80% of the
+estimate earns on the shared bitrate ladder ([quality-ladder.md](quality-ladder.md))
+for the source's frame rate. A source over `bandwidth_cap_kbps` is re-encoded at
+the tallest class whose class bitrate (below) fits within the cap, with no
+headroom and whatever the frame rate: a 6000 kbps cap earns 1080p at 6000 kbps,
+and a cap between two classes earns the lower one. A source of unknown bitrate
+counts as needing its class's full bitrate against an estimate, and is always
+re-encoded under a cap, since it cannot be shown to fit. A source whose bitrate
+the estimate and cap allow is sent as-is, even when it is wider than the 16:9
+box (a 2560x1080 film). Otherwise automatic and plain-label targets fit the
+source into the earned class's 16:9 box, so a 3840x1600 film at the 1080p class
+streams at 1920x800 and a 2560x1080 film at 1920x810, and encode at the class
+bitrate: 20000 kbps for 2160p, 6000 for 1080p, 2000 for
 720p, 1800 for 540p and 1500 for 480p, never above the estimate's 80% budget or
 the cap. A transcode also never targets more than the source's own bitrate,
 counted in the output codec (H.264 for a scaled encode, or HEVC for any encode
@@ -1852,6 +1876,13 @@ pooled executors. The generic tone-map transformation does not reveal hardware
 selection policy; the server freezes a validated executor into each accepted
 recipe. Heterogeneous pools are filtered again at transport startup, and a stale
 or older node advertisement is rejected instead of silently changing modes.
+When its device list includes an Intel GPU (PCI vendor `0x8086` in sysfs), the
+VAAPI executor tone maps HDR with `tonemap_opencl`, the graph QSV uses, and
+hands the frames straight to the VAAPI encoder: Intel's `tonemap_vaapi` turns
+HLG teal and inverted and crushes PQ midtones. FFmpeg maps VAAPI frames to OpenCL only on Intel, so a
+non-Intel device in the same list fails the HDR smoke. Lists without an Intel
+GPU keep `tonemap_vaapi`, as does a device whose vendor can't be read. The
+executor's advertised filter names the choice.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
 legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
@@ -1859,9 +1890,9 @@ A plain HLG source resolves to BT.2100 HLG, or to the BT.709-gamut HLG kind
 when its primaries and matrix are both tagged BT.709.
 Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
 resolve to the `dolby_vision` source kind. Only executors that apply the RPU
-advertise it: software `tonemapx`, QSV `tonemap_opencl`, and NVENC
-`tonemap_cuda`. VAAPI `tonemap_vaapi` and VideoToolbox `scale_vt` cannot, so a
-pool of those executors still refuses these sources with
+advertise it: software `tonemapx`, `tonemap_opencl` on QSV and Intel VAAPI, and
+NVENC `tonemap_cuda`. VAAPI `tonemap_vaapi` and VideoToolbox `scale_vt` cannot,
+so a pool of those executors still refuses these sources with
 `hdr_transcode_unsupported`. A source without an RPU, or with a declared absent
 base layer, remains unsupported. Profile 5 is accepted from its configuration
 record. ID `0` on any other profile says nothing about the base, so it is

@@ -20,7 +20,8 @@
     "plan_source_duration_v1",
     "subrip_sidecar_v1",
     "marker_thumbnails_v1",
-    "hls_subtitle_renditions_v1"
+    "hls_subtitle_renditions_v1",
+    "plan_active_quality_v1"
   ],
   "outcome": "playable",
   "session_id": "11111111-1111-4111-8111-111111111111",
@@ -206,6 +207,7 @@
       "audio_channels": 2,
       "audio_layout": "stereo"
     },
-    "subtitle_fidelity_policy": "allow_simplified_rendering"
+    "subtitle_fidelity_policy": "allow_simplified_rendering",
+    "active_quality": "720p-medium"
   }
 }

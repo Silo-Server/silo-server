@@ -17,30 +17,55 @@ export function pluginPagePath(
   return `${path}?${query}`;
 }
 
+/**
+ * A plugin's tier: its repository's source kind, or `unverified` for an
+ * installation with no repository (an uploaded file or archive link, or a
+ * repository since removed). Those never auto-update (1.0 plugin-management AC5).
+ */
+export type PluginTier = PluginSourceKind | "unverified";
+
+export function installationTier(installation: PluginInstallation): PluginTier {
+  return installation.repository_id == null ? "unverified" : installation.source_kind;
+}
+
+/**
+ * The newer version an admin can install now. A version recorded before the
+ * repository was removed or the community catalog was hidden can't be
+ * applied, so it is not offered.
+ */
+export function pendingUpdateVersion(installation: PluginInstallation): string | null {
+  if (installationTier(installation) === "unverified" || installation.updates_paused) return null;
+  return installation.available_version || null;
+}
+
 /** The plugin's tier, shown on every plugin (1.0 plugin-management AC4). */
-export function sourceLabel(sourceKind: string): string {
-  switch (sourceKind) {
+export function sourceLabel(tier: string): string {
+  switch (tier) {
     case "silo":
       return "Silo maintained";
     case "approved_community":
       return "Approved community";
+    case "unverified":
+      return "Unverified";
     default:
       return "External source";
   }
 }
 
 /**
- * The notice community and external plugins carry on their page. Silo's own
- * plugins have none.
+ * The notice community, external, and unverified plugins carry on their page.
+ * Silo's own plugins have none.
  */
-export function tierNotice(sourceKind: string): string | null {
-  switch (sourceKind) {
+export function tierNotice(tier: string): string | null {
+  switch (tier) {
     case "silo":
       return null;
     case "approved_community":
       return "Reviewed by Silo maintainers to work as described and be safe for its documented use. Its author maintains and supports it, not the Silo project.";
+    case "unverified":
+      return "It isn't linked to any of your catalogs, so Silo can't verify it or check it for updates. Only run it if you trust its source. To update it, upload the new version.";
     default:
-      return "Silo has not reviewed this plugin. It comes from a repository or file you added, so only run it if you trust its source.";
+      return "Silo has not reviewed this plugin. It comes from a repository you added, so only run it if you trust its source.";
   }
 }
 

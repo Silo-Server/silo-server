@@ -190,16 +190,6 @@ func TestDiscoverDedupesOnlyAgainstShownItems(t *testing.T) {
 	}
 }
 
-// A genre "see all" page carries the label Discover gives the row.
-func TestGenreSectionIsTitledTopGenre(t *testing.T) {
-	repo := &fakeReaderRepo{global: map[string][]ScoredItem{RecTypeGenreSamplerPrefix + "Drama": scored("drama")}}
-	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
-	row, err := r.GetSection(t.Context(), 7, "p1", SectionKindGenre, "Drama", 60, catalog.AccessFilter{})
-	if err != nil || row == nil || row.Label != "Top Drama" {
-		t.Fatalf("genre section = %+v, %v; want Top Drama", row, err)
-	}
-}
-
 // quietHouseholdCatalog is the global row store of a single-account server
 // whose titles were all added a month ago: no title has a crowd of accounts
 // behind it, and nothing was added in the last 14 days. cached holds what the

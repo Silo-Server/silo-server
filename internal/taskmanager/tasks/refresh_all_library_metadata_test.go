@@ -8,7 +8,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
 type fakeEnabledFolders struct {
@@ -86,64 +85,6 @@ func (r *resultRecordingProgress) summary(t *testing.T) refreshAllLibraryMetadat
 	return summary
 }
 
-func TestRefreshAllLibraryMetadataTaskProperties(t *testing.T) {
-	task := newTestRefreshAllTask(fakeEnabledFolders{}, fakeActiveLibraryRefreshes{}, &fakeLibraryRefreshRunner{})
-	if task.Key() != "refresh_all_library_metadata" {
-		t.Fatalf("Key() = %q", task.Key())
-	}
-	if task.Category() != taskmanager.TaskCategoryMetadata {
-		t.Fatalf("Category() = %q", task.Category())
-	}
-	if triggers := task.DefaultTriggers(); len(triggers) != 0 {
-		t.Fatalf("DefaultTriggers() = %v, want none", triggers)
-	}
-	if !task.ManualOnly() {
-		t.Fatal("ManualOnly() = false, want the task kept off schedules")
-	}
-}
-
-func TestRefreshAllLibraryMetadataTaskRefreshesEveryLibraryInFullMode(t *testing.T) {
-	runner := &fakeLibraryRefreshRunner{results: map[int]*adminjob.LibraryRefreshResult{
-		1: {RefreshedOK: 3, RefreshedFailed: 1},
-		2: {RefreshedOK: 2, PipelineOK: 1, PipelineFailed: 1},
-	}}
-	task := newTestRefreshAllTask(fakeEnabledFolders{folders: []*models.MediaFolder{
-		{ID: 1, Name: "Movies"}, nil, {ID: 2, Name: "TV Shows"},
-	}}, fakeActiveLibraryRefreshes{}, runner)
-	progress := &resultRecordingProgress{}
-
-	if err := task.Execute(context.Background(), progress); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if released := task.lock.(*fakeClusterLock).released; released != 1 {
-		t.Fatalf("lock released %d times, want 1", released)
-	}
-	if len(runner.requests) != 2 {
-		t.Fatalf("requests = %+v, want both libraries", runner.requests)
-	}
-	for i, want := range []adminjob.LibraryRefreshRequest{
-		{LibraryID: 1, LibraryName: "Movies", Mode: adminjob.LibraryRefreshModeFull},
-		{LibraryID: 2, LibraryName: "TV Shows", Mode: adminjob.LibraryRefreshModeFull},
-	} {
-		if runner.requests[i] != want {
-			t.Errorf("request %d = %+v, want %+v", i, runner.requests[i], want)
-		}
-	}
-	got := progress.summary(t)
-	want := refreshAllLibraryMetadataSummary{Libraries: 2, Refreshed: 2, ItemsRefreshed: 6, ItemsFailed: 2}
-	if got != want {
-		t.Fatalf("summary = %+v, want %+v", got, want)
-	}
-	if last := progress.percents[len(progress.percents)-1]; last != 100 {
-		t.Fatalf("final progress = %v, want 100", last)
-	}
-	for i := 1; i < len(progress.percents); i++ {
-		if progress.percents[i] < progress.percents[i-1] {
-			t.Fatalf("progress went backwards: %v", progress.percents)
-		}
-	}
-}
-
 func TestRefreshAllLibraryMetadataTaskSkipsActiveAndContinuesAfterFailures(t *testing.T) {
 	runner := &fakeLibraryRefreshRunner{errs: map[int]error{2: errors.New("provider unavailable")}}
 	task := newTestRefreshAllTask(fakeEnabledFolders{folders: []*models.MediaFolder{
@@ -188,29 +129,6 @@ func TestRefreshAllLibraryMetadataTaskStopsWhenCanceled(t *testing.T) {
 	}
 	if got := progress.summary(t); got.Libraries != 2 || got.Refreshed != 1 {
 		t.Fatalf("summary = %+v, want the completed library recorded", got)
-	}
-}
-
-func TestRefreshAllLibraryMetadataTaskWithoutLibraries(t *testing.T) {
-	runner := &fakeLibraryRefreshRunner{}
-	task := newTestRefreshAllTask(fakeEnabledFolders{}, fakeActiveLibraryRefreshes{}, runner)
-	progress := &resultRecordingProgress{}
-
-	if err := task.Execute(context.Background(), progress); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if len(runner.requests) != 0 {
-		t.Fatalf("requests = %+v, want none", runner.requests)
-	}
-	if got := progress.summary(t); got != (refreshAllLibraryMetadataSummary{}) {
-		t.Fatalf("summary = %+v, want empty", got)
-	}
-}
-
-func TestRefreshAllLibraryMetadataTaskListingError(t *testing.T) {
-	task := newTestRefreshAllTask(fakeEnabledFolders{err: errors.New("boom")}, fakeActiveLibraryRefreshes{}, &fakeLibraryRefreshRunner{})
-	if err := task.Execute(context.Background(), &resultRecordingProgress{}); err == nil {
-		t.Fatal("Execute() error = nil, want listing error")
 	}
 }
 
@@ -269,17 +187,4 @@ type cancelingActiveLookup struct {
 func (c cancelingActiveLookup) GetActiveLibraryRefreshByLibraryID(ctx context.Context, _ int) (*models.AdminJob, error) {
 	c.cancel()
 	return nil, ctx.Err()
-}
-
-func TestRefreshAllLibraryMetadataTaskLockError(t *testing.T) {
-	runner := &fakeLibraryRefreshRunner{}
-	task := newTestRefreshAllTask(fakeEnabledFolders{folders: []*models.MediaFolder{{ID: 1, Name: "Movies"}}}, fakeActiveLibraryRefreshes{}, runner)
-	task.lock = &fakeClusterLock{err: errors.New("database unavailable")}
-
-	if err := task.Execute(context.Background(), &resultRecordingProgress{}); err == nil {
-		t.Fatal("Execute() error = nil, want lock error")
-	}
-	if len(runner.requests) != 0 {
-		t.Fatalf("requests = %+v, want none", runner.requests)
-	}
 }

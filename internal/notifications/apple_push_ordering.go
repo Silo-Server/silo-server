@@ -128,15 +128,8 @@ func (r *PushDeviceRepository) ApplyApplePushAndFinalize(ctx context.Context, cm
 			}
 			return result, tx.Commit(ctx)
 		}
-	} else {
-		var foreign bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM push_devices WHERE device_id=$1 AND platform=$2 AND user_id<>$3)`, cmd.DeviceID, PushPlatformApple, cmd.UserID).Scan(&foreign)
-		if err != nil {
-			return result, err
-		}
-		if foreign {
-			return ApplePushReceipt{}, ErrPushGenerationConflict
-		}
+	} else if err = checkPushInstallationOwner(ctx, tx, cmd.DeviceID, PushPlatformApple, cmd.UserID); err != nil {
+		return ApplePushReceipt{}, err
 	}
 	// Fresh row identity also retires pending attempts through their existing FK.
 	// An external request already dispatched cannot be recalled by this transaction.

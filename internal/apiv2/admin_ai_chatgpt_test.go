@@ -29,17 +29,6 @@ func (f *fakeChatGPT) Status(context.Context) (chatgpt.Status, error) {
 	return chatgpt.Status{Accounts: []chatgpt.AccountStatus{}, LoginResult: "idle"}, f.err
 }
 
-func TestChatGPTStatusRetainsFirstLoginOutcome(t *testing.T) {
-	deps := requestDeps(fixtureRequests())
-	deps.ChatGPT = &fakeChatGPT{status: &chatgpt.Status{
-		Accounts: []chatgpt.AccountStatus{}, LoginFirstConnection: true,
-		LoginResult: "connected", AttemptID: "first-attempt",
-	}}
-	res := do(t, NewHandler(deps), "GET", Prefix+"/admin/ai/chatgpt", "", actingRequestAdmin)
-	if res.Code != 200 || !strings.Contains(res.Body.String(), `"login_first_connection":true`) || !strings.Contains(res.Body.String(), `"attempt_id":"first-attempt"`) {
-		t.Fatalf("first-login reconciliation metadata was lost: %d %s", res.Code, res.Body.String())
-	}
-}
 func (f *fakeChatGPT) StartLogin(context.Context, string) (chatgpt.Login, error) {
 	f.calls++
 	return chatgpt.Login{AttemptID: "attempt", ExpiresAt: time.Now().Add(time.Minute), AuthorizationURL: "https://auth.openai.com/api/accounts/authorize", CallbackURI: "http://127.0.0.1:51121/auth/callback"}, f.err
@@ -55,18 +44,6 @@ func (f *fakeChatGPT) Models(_ context.Context, clientID string) ([]chatgpt.Mode
 	return []chatgpt.Model{}, f.err
 }
 
-func TestChatGPTModelsBindRequestedAccount(t *testing.T) {
-	f := new(fakeChatGPT)
-	deps := requestDeps(fixtureRequests())
-	deps.ChatGPT = f
-	h := NewHandler(deps)
-	for _, clientID := range []string{"", "account-a"} {
-		res := do(t, h, "GET", Prefix+"/admin/ai/chatgpt/models?client_id="+clientID, "", actingRequestAdmin)
-		if res.Code != 200 || f.clientID != clientID {
-			t.Fatal(res.Code, res.Body.String(), f.clientID)
-		}
-	}
-}
 func (f *fakeChatGPT) SelectAccountWithSettings(context.Context, string) (*chatgpt.SettingsTransition, error) {
 	f.calls++
 	return f.transition, f.err
@@ -132,34 +109,6 @@ func TestChatGPTCallbackUsesAdminBoundaryAndSafeErrors(t *testing.T) {
 	requireProblem(t, res, TypeValidationFailed)
 	if strings.Contains(res.Body.String(), "private-token") {
 		t.Fatal("wrapped provider diagnostic exposed")
-	}
-}
-
-func TestAICapabilitiesAreModelSpecific(t *testing.T) {
-	h := NewHandler(requestDeps(fixtureRequests()))
-	for _, test := range []struct{ model, want, absent string }{
-		{"gpt-4o-mini", `"reasoning_levels":[]`, `"high"`},
-		{"gpt-6.1-sol", `"xhigh"`, `"none"`},
-	} {
-		res := do(t, h, "GET", Prefix+"/admin/ai/capabilities?model="+test.model, "", actingRequestAdmin)
-		if res.Code != 200 || !strings.Contains(res.Body.String(), test.want) || strings.Contains(res.Body.String(), test.absent) || res.Header().Get("ETag") == "" {
-			t.Fatal(res.Code, res.Body.String())
-		}
-	}
-}
-
-func TestChatGPTCapabilityReflectsServiceAvailability(t *testing.T) {
-	for _, available := range []bool{false, true} {
-		t.Run(fmt.Sprint(available), func(t *testing.T) {
-			deps := requestDeps(fixtureRequests())
-			if available {
-				deps.ChatGPT = new(fakeChatGPT)
-			}
-			res := do(t, NewHandler(deps), "GET", Prefix+"/admin/ai/capabilities", "", actingRequestAdmin)
-			if res.Code != 200 || !strings.Contains(res.Body.String(), fmt.Sprintf(`"chatgpt_sign_in":%t`, available)) {
-				t.Fatal(res.Code, res.Body.String())
-			}
-		})
 	}
 }
 

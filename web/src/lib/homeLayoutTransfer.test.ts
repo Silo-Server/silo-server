@@ -9,12 +9,14 @@ import {
   buildHomeLayoutFile,
   importPage,
   mergeImportedPage,
+  overrideToWrite,
   parseHomeLayoutFile,
   planHomeLayoutImport,
   fileReferences,
   HOME_LAYOUT_MAX_LENGTH,
   type HomeLayoutFile,
   type HomeLayoutImportTarget,
+  type SectionOverrideWrite,
 } from "./homeLayoutTransfer";
 
 type SectionOverrideRead = components["schemas"]["SectionOverride"];
@@ -83,7 +85,7 @@ function sequentialIds() {
 }
 
 describe("buildHomeLayoutFile", () => {
-  it("writes each customized page without IDs or timestamps", () => {
+  it("writes every page without IDs or timestamps", () => {
     const libraries = [{ id: 1, name: "Movies", type: "movie", sort_order: 0 }];
     const file = buildHomeLayoutFile({
       serverId: "server-a",
@@ -130,6 +132,7 @@ describe("buildHomeLayoutFile", () => {
             },
           ],
         },
+        { scope: "library", library_id: 1, overrides: [] },
       ],
     });
   });
@@ -196,6 +199,8 @@ describe("parseHomeLayoutFile", () => {
             ],
           },
           { scope: "home", overrides: [{ section_id: "duplicate-page" }] },
+          // Empty after dropping its damaged entries, so not a page to reset.
+          { scope: "library", library_id: 2, overrides: [null, 7] },
           { scope: "library", overrides: [] },
           { scope: "admin", overrides: [] },
         ],
@@ -476,6 +481,26 @@ describe("planHomeLayoutImport on the same server", () => {
     ]);
   });
 
+  it("skips a Next up row, which the server adds only itself", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [{ user_section_type: "next_up", user_title: "On deck" }],
+          },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.skippedSections).toEqual([
+      { page: "Home", title: "On deck", reason: "unknown_recipe" },
+    ]);
+    expect(plan.pages).toEqual([]);
+  });
+
   it("skips sections limited to libraries this profile can't open", () => {
     const plan = planHomeLayoutImport(
       layoutFile({
@@ -525,6 +550,103 @@ describe("planHomeLayoutImport on the same server", () => {
       { page: "Home", title: "None", reason: "library" },
       { page: "Home", title: "Single", reason: "library" },
     ]);
+  });
+});
+
+describe("home layout round trip on the same profile", () => {
+  const libraries = [
+    { id: 1, name: "Movies", type: "movie" },
+    { id: 2, name: "TV Shows", type: "series" },
+  ];
+  const customHome = [
+    stored({ id: "o1", section_id: "admin-1", hidden: true }),
+    stored({ id: "o2", section_id: "admin-2", position: 0, title: "Renamed" }),
+    stored({
+      id: "o3",
+      position: 1,
+      is_user_added: true,
+      user_section_type: "hidden_gems",
+      user_title: "Gems",
+      user_config: {},
+    }),
+  ];
+  const customMovies = [stored({ id: "o4", section_id: "admin-9", removed: true })];
+  // Changes made after the export, which the import must undo.
+  const changedSince = {
+    home: [
+      stored({ id: "c1", section_id: "admin-1", position: 4 }),
+      stored({ id: "c2", is_user_added: true, user_section_type: "trending_discover" }),
+    ],
+    library: [stored({ id: "c3", section_id: "admin-8", hidden: true })],
+  };
+
+  // Exports the given saved pages, then imports the file over `changedSince`
+  // and returns what each page saves.
+  async function roundTrip(saved: { home: SectionOverrideRead[]; movies: SectionOverrideRead[] }) {
+    const exported = buildHomeLayoutFile({
+      serverId: "server-a",
+      exportedAt: new Date("2026-09-29T12:00:00.000Z"),
+      libraries,
+      pages: [
+        { scope: "home", overrides: saved.home },
+        { scope: "library", libraryId: 1, overrides: saved.movies },
+        { scope: "library", libraryId: 2, overrides: [] },
+      ],
+    });
+    const parsed = parseHomeLayoutFile(JSON.stringify(exported));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const plan = planHomeLayoutImport(parsed.file, target(), sequentialIds());
+    const saves = new Map<string, unknown>();
+    for (const page of plan.pages) {
+      await importPage(
+        page,
+        plan.sameServer,
+        {
+          listSaved: async () => changedSince[page.scope],
+          save: async (overrides) => saves.set(page.label, overrides),
+        },
+        sequentialIds(),
+      );
+    }
+    return { plan, saves };
+  }
+
+  it("restores the server's rows from an export of the default layout", async () => {
+    const { plan, saves } = await roundTrip({ home: [], movies: [] });
+
+    expect(plan.pages.map((page) => page.label)).toEqual(["Home", "Movies", "TV Shows"]);
+    expect(plan.skippedPages).toEqual([]);
+    expect(plan.skippedSections).toEqual([]);
+    expect(Object.fromEntries(saves)).toEqual({ Home: [], Movies: [], "TV Shows": [] });
+  });
+
+  it("restores a custom layout, including pages left on the server's rows", async () => {
+    const { plan, saves } = await roundTrip({ home: customHome, movies: customMovies });
+
+    expect(plan.pages.map((page) => page.label)).toEqual(["Home", "Movies", "TV Shows"]);
+    // IDs are new or reused from the profile's saved rows; the rows match.
+    const withoutIds = (overrides: unknown) =>
+      (overrides as SectionOverrideWrite[]).map(({ id: _id, ...rest }) => rest);
+    expect(withoutIds(saves.get("Home"))).toEqual(customHome.map(overrideToWrite));
+    expect(withoutIds(saves.get("Movies"))).toEqual(customMovies.map(overrideToWrite));
+    expect(saves.get("TV Shows")).toEqual([]);
+  });
+
+  it("leaves pages alone when the file comes from another server", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        server_id: "server-b",
+        pages: [
+          { scope: "home", overrides: [] },
+          { scope: "library", library_id: 1, overrides: [{ section_id: "their-admin-1" }] },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.pages).toEqual([]);
+    expect(plan.skippedServerSectionChanges).toBe(1);
   });
 });
 
@@ -785,14 +907,6 @@ describe("importPage", () => {
     });
     return { listSaved: vi.fn(async () => [removedUnlisted]), save };
   }
-
-  it("saves the merged page once", async () => {
-    const api = fakeApi([undefined]);
-
-    await importPage(page, true, api, sequentialIds());
-    expect(api.save).toHaveBeenCalledTimes(1);
-    expect(api.save).toHaveBeenCalledWith([{ id: "new-custom", user_section_type: "hidden_gems" }]);
-  });
 
   it("refuses a page over the save endpoint's override limit", async () => {
     const big = {

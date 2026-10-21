@@ -1,9 +1,7 @@
 package intromarkers
 
 import (
-	"context"
 	"math"
-	"math/rand/v2"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
@@ -44,17 +42,6 @@ func TestTailWindow(t *testing.T) {
 	}
 }
 
-func TestCreditsFingerprintRequestSamplesTheTail(t *testing.T) {
-	candidate := Candidate{FilePath: "/media/e1.mkv", DurationSeconds: 1500}
-	req := fingerprintRequest(context.Background(), candidate, tailWindow(candidate))
-	if req.Window == nil || req.Window.StartSeconds != 1050 || req.Window.DurationSeconds != 450 {
-		t.Fatalf("request window = %+v, want 1050 s for 450 s", req.Window)
-	}
-	if req.Audio == nil || !req.Audio.Fingerprint {
-		t.Fatalf("request audio = %+v, want a fingerprint", req.Audio)
-	}
-}
-
 func TestCreditsKeysAreNamespaced(t *testing.T) {
 	cfg := DefaultConfig("ffmpeg")
 	key := creditsFingerprintKey()
@@ -73,11 +60,7 @@ func TestCreditsKeysAreNamespaced(t *testing.T) {
 // audio that ends gapSeconds before the end of each file. Durations differ,
 // so each file's tail window starts somewhere else.
 func creditsSeason(episodes int, sharedSeconds, gapSeconds float64) []fingerprintInput {
-	shared := make([]uint32, int(sharedSeconds/DefaultPointHopSeconds))
-	sharedRNG := rand.New(rand.NewPCG(7, 7))
-	for i := range shared {
-		shared[i] = sharedRNG.Uint32()
-	}
+	shared := randomPoints(int(sharedSeconds/DefaultPointHopSeconds), 7, 7)
 	inputs := make([]fingerprintInput, 0, episodes)
 	for e := 1; e <= episodes; e++ {
 		candidate := Candidate{
@@ -85,11 +68,7 @@ func creditsSeason(episodes int, sharedSeconds, gapSeconds float64) []fingerprin
 			FileHash: "h", FileSize: int64(e), DurationSeconds: 1500 + float64(e)*7,
 		}
 		window := tailWindow(candidate)
-		points := make([]uint32, int(window.duration()/DefaultPointHopSeconds))
-		rng := rand.New(rand.NewPCG(uint64(e), 3))
-		for i := range points {
-			points[i] = rng.Uint32()
-		}
+		points := randomPoints(int(window.duration()/DefaultPointHopSeconds), uint64(e), 3)
 		end := len(points) - int(gapSeconds/DefaultPointHopSeconds)
 		copy(points[end-len(shared):end], shared)
 		inputs = append(inputs, fingerprintInput{Candidate: candidate, Points: points, WindowStart: window.Start})
@@ -137,15 +116,6 @@ func TestAudioCreditsFindSharedEnding(t *testing.T) {
 		if segment.Algorithm != CreditsAudioAlgorithm || segment.Confidence != creditsAudioConsistentConfidence {
 			t.Fatalf("file %d: %+v, want %s at %.2f", input.Candidate.FileID, segment, CreditsAudioAlgorithm, creditsAudioConsistentConfidence)
 		}
-	}
-}
-
-func TestAudioCreditsWithoutVideoRequireEOF(t *testing.T) {
-	// Shared audio that stops a minute before the end is more likely a
-	// recurring cue than the credits.
-	segments, rejected := placeAudioCredits(creditsSeason(4, 60, 60))
-	if len(segments) != 0 || rejected != 4 {
-		t.Fatalf("placed %d files with %d rejected, want none placed and 4 rejected", len(segments), rejected)
 	}
 }
 

@@ -27,6 +27,7 @@ import {
 } from "@/api/adminSections";
 import { V2ProblemError } from "@/api/v2/request";
 import { HomeRowsPage, type SharedRowMenuItems } from "@/components/homeRows/HomeRowsPage";
+import { AdminNextUpDefaultsCard } from "@/components/homeRows/AdminNextUpDefaultsCard";
 import { DeleteRowDialog, DeleteRowsDialog } from "@/components/homeRows/DeleteRowDialog";
 import type { PageMoreMenuItem } from "@/components/calm/PageMoreMenu";
 import { RestoreDialog } from "@/components/homeRows/RestoreDialog";
@@ -510,6 +511,7 @@ export default function AdminHomeRows() {
           ) : null
         }
       >
+        <AdminNextUpDefaultsCard />
         <DeleteRowDialog
           rowTitle={confirmDeleteSection?.title ?? ""}
           pageLabel={currentPageLabel}

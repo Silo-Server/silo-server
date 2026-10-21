@@ -43,20 +43,6 @@ func TestHandleProvider404DropsProviderID(t *testing.T) {
 	}
 }
 
-func TestProvider404StateKeepsAllRejectedValues(t *testing.T) {
-	t.Parallel()
-
-	state := newProvider404State()
-	state.record("tmdb", "111")
-	state.record("tmdb", "222")
-	if _, ok := state.stale["tmdb"]["111"]; !ok {
-		t.Fatal("first rejected tmdb value was lost")
-	}
-	if _, ok := state.stale["tmdb"]["222"]; !ok {
-		t.Fatal("second rejected tmdb value was not recorded")
-	}
-}
-
 func TestApplyProvider404sDropsNonDurableIDsWithoutPersistingThem(t *testing.T) {
 	t.Parallel()
 

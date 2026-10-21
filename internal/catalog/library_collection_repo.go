@@ -667,7 +667,13 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 			if len(updatedLibraryIDs) > 0 {
 				legacyLibraryID = updatedLibraryIDs[0]
 			}
-			if _, err := tx.Exec(ctx, "UPDATE library_collections SET library_id = $2 WHERE id = $1", input.ID, legacyLibraryID); err != nil {
+			// Keep a legacy library_id that is still in scope: the collection's
+			// slug is unique within it, and another scope library may already
+			// use the same slug.
+			if _, err := tx.Exec(ctx, `
+				UPDATE library_collections
+				SET library_id = CASE WHEN library_id = ANY($3::int[]) THEN library_id ELSE $2 END
+				WHERE id = $1`, input.ID, legacyLibraryID, updatedLibraryIDs); err != nil {
 				return fmt.Errorf("updating legacy library_id: %w", err)
 			}
 		}

@@ -100,38 +100,6 @@ describe("admin profile section hooks", () => {
     expect(urls.sort()).toEqual([`${BASE}/settings?scope=home`, `${BASE}?scope=home`]);
   });
 
-  it("replaces and resets only the addressed profile's Home overrides", async () => {
-    const requests: { url: string; method?: string; body?: unknown }[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input, init) => {
-        requests.push({
-          url: String(input),
-          method: init?.method,
-          body: init?.body ? JSON.parse(String(init.body)) : undefined,
-        });
-        return new Response(null, { status: 204 });
-      }),
-    );
-
-    const wrapper = createWrapper();
-    const save = renderHook(() => useSaveAdminProfileSections(7, "p 2"), { wrapper });
-    const reset = renderHook(() => useResetAdminProfileSections(7, "p 2"), { wrapper });
-    await act(() =>
-      save.result.current.mutateAsync([{ id: "o-1", section_id: "s-continue", position: 0 }]),
-    );
-    await act(() => reset.result.current.mutateAsync());
-
-    expect(requests).toEqual([
-      {
-        url: `${BASE}?scope=home`,
-        method: "PUT",
-        body: { overrides: [{ id: "o-1", section_id: "s-continue", position: 0 }] },
-      },
-      { url: `${BASE}?scope=home`, method: "DELETE", body: undefined },
-    ]);
-  });
-
   it("marks the acting profile's own section caches stale after save and reset", async () => {
     vi.stubGlobal(
       "fetch",

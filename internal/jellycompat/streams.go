@@ -2434,14 +2434,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// point, matching the native playback persistence rule.
 	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
-			// Find the duration from the media source
-			var duration float64
-			for _, src := range playSession.MediaSources {
-				if src.Version.Duration > 0 {
-					duration = float64(src.Version.Duration)
-					break
-				}
-			}
+			duration := playedSourceDuration(playSession, req.MediaSourceID)
 			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context()))
 			if err == nil && completed {
 				refreshTasteProfile = true
@@ -2528,7 +2521,7 @@ func (h *PlaybackHandler) reviveUpstreamForReport(ctx context.Context, session *
 	if playSession.UpstreamPlayMethod == "" {
 		return nil
 	}
-	source := findMediaSource(playSession, mediaSourceID)
+	source := playedMediaSource(playSession, mediaSourceID)
 	if source == nil {
 		source = firstMediaSource(playSession)
 	}
@@ -3679,6 +3672,48 @@ func firstMediaSource(session *PlaybackSession) *PlaybackMediaSource {
 	}
 	source := session.MediaSources[0]
 	return &source
+}
+
+// playedMediaSource returns the version a play is streaming: the source the
+// report's MediaSourceId names, or else the one whose file the upstream session
+// streams. A play negotiated without a MediaSourceId (PlaybackInfo without
+// one, or Static=true direct play) lists every version, so the first one
+// listed can be another cut. Nil when neither identifies a source.
+func playedMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {
+	if source := findMediaSource(session, mediaSourceID); source != nil {
+		return source
+	}
+	if session == nil || session.UpstreamMediaFileID == 0 {
+		return nil
+	}
+	return mediaSourceByFileID(session, session.UpstreamMediaFileID)
+}
+
+// mediaSourceByFileID returns a copy of the play's source for fileID, or nil.
+func mediaSourceByFileID(session *PlaybackSession, fileID int) *PlaybackMediaSource {
+	for _, source := range session.MediaSources {
+		if source.FileID == fileID {
+			copy := source
+			return &copy
+		}
+	}
+	return nil
+}
+
+// playedSourceDuration returns the runtime in seconds that a progress report
+// is judged against: the played version's (see playedMediaSource), which is 0
+// when that version has none, or the first listed runtime when no version can
+// be identified.
+func playedSourceDuration(session *PlaybackSession, mediaSourceID string) float64 {
+	if source := playedMediaSource(session, mediaSourceID); source != nil {
+		return float64(source.Version.Duration)
+	}
+	for _, source := range session.MediaSources {
+		if source.Version.Duration > 0 {
+			return float64(source.Version.Duration)
+		}
+	}
+	return 0
 }
 
 func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {

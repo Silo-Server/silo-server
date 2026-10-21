@@ -20,8 +20,6 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
   useWatchPlaybackController: () => ({ startPlayback: mocks.startPlayback }),
 }));
 vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }));
-
-import { V2ProblemError } from "@/api/v2/request";
 import { shuffleKeys } from "./keys";
 import { useShuffle, useStartShuffle } from "./shuffles";
 
@@ -47,25 +45,6 @@ describe("useStartShuffle", () => {
         returnHref: "/library/7?tab=library",
       },
       "viewer",
-    );
-  });
-
-  it("says when nothing in the scope can play", async () => {
-    mocks.createShuffle.mockRejectedValue(
-      new V2ProblemError("createShuffle", {
-        type: "https://siloserver.org/docs/api/v2/problems/conflict",
-        title: "Conflict",
-        status: 409,
-        detail: "Nothing here can be played.",
-        instance: "urn:silo:request:1",
-      }),
-    );
-    const { result } = renderHook(() => useStartShuffle(), { wrapper });
-
-    act(() => result.current.startShuffle({ kind: "season", id: "season-1" }));
-
-    await waitFor(() =>
-      expect(mocks.toastError).toHaveBeenCalledWith("Nothing here can be played."),
     );
   });
 

@@ -31777,6 +31777,13 @@
           "kind": {
             "type": "string"
           },
+          "still_thumbhash": {
+            "type": "string"
+          },
+          "still_url": {
+            "description": "Presigned, short-lived. 16:9 image of the extra; absent when it has none",
+            "type": "string"
+          },
           "title": {
             "type": "string"
           }
@@ -38584,6 +38591,10 @@
       "PlaybackPlan": {
         "additionalProperties": false,
         "properties": {
+          "active_quality": {
+            "description": "The available_qualities label this plan delivers, so a client can mark that menu entry: the label quality_preference named while the menu lists it and the encode keeps its resolution, otherwise the rung whose resolution class and bitrate the encode matches. Absent when the plan delivers no listed entry, such as the source played unchanged or a plain-resolution or auto request whose capped encode falls between two rungs. Present on servers that advertise plan_active_quality_v1.",
+            "type": "string"
+          },
           "applied_quirks": {
             "items": {
               "$ref": "#/components/schemas/AppliedQuirkV3"
@@ -43740,6 +43751,135 @@
         ],
         "type": "object"
       },
+      "SeasonalTheme": {
+        "additionalProperties": false,
+        "properties": {
+          "dates_editable": {
+            "description": "Whether a row may set its own yearly window for this holiday in theme_dates. False for weekly themes.",
+            "type": "boolean"
+          },
+          "end": {
+            "description": "Last day of the default window, MM-DD, inclusive; before start when the window wraps across New Year",
+            "examples": [
+              "10-31"
+            ],
+            "type": "string"
+          },
+          "key": {
+            "description": "Stored in the row's enabled_themes config; stable",
+            "examples": [
+              "halloween"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Halloween"
+            ],
+            "type": "string"
+          },
+          "start": {
+            "description": "First day of the default window, MM-DD. Absent when the holiday moves (Easter) or recurs weekly.",
+            "examples": [
+              "10-01"
+            ],
+            "type": "string"
+          },
+          "vibes": {
+            "description": "The first vibe is the default; never empty",
+            "items": {
+              "$ref": "#/components/schemas/SeasonalVibe"
+            },
+            "type": "array"
+          },
+          "when": {
+            "description": "When the holiday is in season by default, for display",
+            "examples": [
+              "October"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "when",
+          "dates_editable",
+          "vibes"
+        ],
+        "type": "object"
+      },
+      "SeasonalThemeCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "max_custom_holidays": {
+            "description": "The most custom holidays one row may define",
+            "examples": [
+              12
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "themes": {
+            "description": "In calendar order, for display: dated holidays by their usual start, then the weekly ones",
+            "items": {
+              "$ref": "#/components/schemas/SeasonalTheme"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "themes",
+          "max_custom_holidays"
+        ],
+        "type": "object"
+      },
+      "SeasonalVibe": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "examples": [
+              "Spooky fun for all ages."
+            ],
+            "type": "string"
+          },
+          "key": {
+            "description": "Stored in the row's vibes config; stable",
+            "examples": [
+              "family"
+            ],
+            "type": "string"
+          },
+          "list_url": {
+            "description": "The MDBList list behind the vibe",
+            "examples": [
+              "https://mdblist.com/lists/purple_smurf/halloween-family2"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Family Halloween"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "The row's title while this vibe is in season, unless the row sets its own",
+            "examples": [
+              "Family Halloween"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "title",
+          "description",
+          "list_url"
+        ],
+        "type": "object"
+      },
       "Section": {
         "additionalProperties": false,
         "properties": {
@@ -48626,7 +48766,7 @@
             "type": "string"
           },
           "poster_url": {
-            "description": "The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls",
+            "description": "The item's poster, an episode's still, or a local extra's still (its parent's poster when it has none), sized by image_size; for system media controls",
             "type": "string"
           },
           "preview": {
@@ -85213,7 +85353,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Request cancellation of a cancellable administrator job. Completed effects and verified storage-copy checkpoints are retained.",
+        "summary": "Request cancellation of a job that reports cancelable: library refresh, storage transition, or image cache cleanup. Completed effects and verified storage-copy checkpoints are retained.",
         "tags": [
           "admin-tasks"
         ],
@@ -134895,12 +135035,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -135267,12 +135407,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -136148,12 +136288,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -136431,12 +136571,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -136714,12 +136854,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -138174,12 +138314,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -139142,12 +139282,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -139639,12 +139779,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -139919,12 +140059,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -140203,12 +140343,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -159458,12 +159598,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -160185,12 +160325,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -162634,12 +162774,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -162876,12 +163016,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -163132,12 +163272,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -170322,12 +170462,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -170592,12 +170732,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -172046,12 +172186,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -173062,6 +173202,7 @@
     },
     "/api/v2/notifications/discord-link": {
       "delete": {
+        "description": "Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "unlinkNotificationDiscord",
         "parameters": [
           {
@@ -173339,6 +173480,7 @@
         "x-silo-service-backed": true
       },
       "put": {
+        "description": "Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "updateNotificationDiscordPreferences",
         "parameters": [
           {
@@ -173588,6 +173730,7 @@
     },
     "/api/v2/notifications/discord/link/init": {
       "post": {
+        "description": "Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "beginNotificationDiscordLink",
         "parameters": [
           {
@@ -176333,12 +176476,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -187541,12 +187684,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -187783,12 +187926,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -188042,12 +188185,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -188301,12 +188444,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -188576,12 +188719,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -188851,12 +188994,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -189145,12 +189288,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -189404,12 +189547,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -189677,12 +189820,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -190277,12 +190420,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -190536,12 +190679,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -190851,12 +190994,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -195037,6 +195180,147 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/sections/seasonal-themes": {
+      "get": {
+        "operationId": "listSeasonalThemes",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeasonalThemeCatalog"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The holidays a Seasonal Picks row can follow, with the curated vibes each offers.",
+        "tags": [
+          "home"
+        ],
+        "x-silo-class": "profile_scoped"
+      }
+    },
     "/api/v2/settings/contract": {
       "get": {
         "operationId": "getSettingsContract",
@@ -198660,12 +198944,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -199316,12 +199600,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -199578,12 +199862,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -199881,12 +200165,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -213962,12 +214246,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -214688,12 +214972,12 @@
             }
           },
           {
-            "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
             "explode": false,
             "in": "query",
             "name": "still_width",
             "schema": {
-              "description": "Width in device pixels the client draws an episode's still_url at. Overrides image_size for episode stills",
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
               "examples": [
                 720
               ],
@@ -221596,7 +221880,7 @@
             }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/remux/{token}",
@@ -221732,7 +222016,7 @@
             }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/remux/{token}",
@@ -221787,7 +222071,7 @@
             }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/remux/audio-v2/{token}",
@@ -221923,7 +222207,7 @@
             }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/remux/audio-v2/{token}",
@@ -222340,7 +222624,7 @@
             }
           }
         ],
-        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/v3/{session_id}",
@@ -222497,7 +222781,7 @@
             }
           }
         ],
-        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/v3/{session_id}",

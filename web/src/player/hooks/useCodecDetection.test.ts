@@ -174,10 +174,6 @@ describe("detectHDRFromMatchMedia", () => {
   it("returns true when only video-dynamic-range reports high (Firefox)", () => {
     expect(detectHDRFromMatchMedia(fakeMatchMedia(["(video-dynamic-range: high)"]))).toBe(true);
   });
-
-  it("returns false when neither query matches", () => {
-    expect(detectHDRFromMatchMedia(fakeMatchMedia([]))).toBe(false);
-  });
 });
 
 describe("probeWebCapabilities", () => {

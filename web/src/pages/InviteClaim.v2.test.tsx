@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { useNavigate } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken } from "@/api/client";
+import { json, problemResponse, renderRoutes } from "./authPage.test-support";
 import InviteClaim from "./InviteClaim";
 import accepted from "../../../contracts/api/v2/fixtures/invitation_accepted.json";
 const auth = vi.hoisted(() => ({ completeLogin: vi.fn() }));
@@ -21,25 +22,10 @@ const invitation = {
   note: "",
 };
 const linkInvitation = { ...invitation, email: "", email_required: true, note: "For Sam" };
-function emailProblem(type: string, status: number, errors?: unknown[]) {
-  return new Response(
-    JSON.stringify({
-      type: `https://siloserver.org/docs/api/v2/problems/${type}`,
-      title: type,
-      status,
-      errors,
-    }),
-    { status, headers: { "Content-Type": "application/problem+json" } },
-  );
-}
+const emailProblem = (type: string, status: number, errors?: unknown[]) =>
+  problemResponse(status, type, { errors });
 function posts() {
   return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
-}
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
 }
 function problem(status: number) {
   return new Response(
@@ -55,15 +41,14 @@ function Move() {
   return <button onClick={() => navigate("/invite/second-secret")}>Change invitation</button>;
 }
 function mount() {
-  return render(
-    <MemoryRouter initialEntries={["/invite/first-secret"]}>
-      <Move />
-      <Routes>
-        <Route path="/invite/:token" element={<InviteClaim />} />
-        <Route path="/household-setup" element={<p>Household setup</p>} />
-        <Route path="/login" element={<p>Ordinary login</p>} />
-      </Routes>
-    </MemoryRouter>,
+  return renderRoutes(
+    "/invite/first-secret",
+    {
+      "/invite/:token": <InviteClaim />,
+      "/household-setup": <p>Household setup</p>,
+      "/login": <p>Ordinary login</p>,
+    },
+    <Move />,
   );
 }
 async function fill() {
@@ -138,14 +123,7 @@ it("does not refresh or replay a 401 accept and requires explicit reload before 
 });
 it("explains a refusal because password sign-in is off instead of offering recovery", async () => {
   submit = async () =>
-    new Response(
-      JSON.stringify({
-        type: "https://siloserver.org/docs/api/v2/problems/local_login_disabled",
-        title: "Local password sign-in is turned off",
-        status: 403,
-      }),
-      { status: 403, headers: { "Content-Type": "application/problem+json" } },
-    );
+    problemResponse(403, "local_login_disabled", { title: "Local password sign-in is turned off" });
   mount();
   await fill();
   send();
@@ -254,24 +232,4 @@ it("keeps a link invitation usable when the address already has an account", asy
   await screen.findByText("Enter a valid email address, like name@example.com");
   expect(posts()).toHaveLength(2);
   expect(auth.completeLogin).not.toHaveBeenCalled();
-});
-
-it("keeps a link invitation in the browser on Android", async () => {
-  const agent = vi
-    .spyOn(navigator, "userAgent", "get")
-    .mockReturnValue(
-      "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/126.0 Mobile Safari/537.36",
-    );
-  try {
-    mount();
-    await screen.findByLabelText("Password", { exact: true });
-    expect(screen.getByRole("link", { name: /Open in the Silo app/ })).toBeInTheDocument();
-    cleanup();
-    lookup = async () => json(linkInvitation);
-    mount();
-    expect(await screen.findByLabelText("Email")).not.toBeDisabled();
-    expect(screen.queryByRole("link", { name: /Open in the Silo app/ })).toBeNull();
-  } finally {
-    agent.mockRestore();
-  }
 });

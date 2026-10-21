@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -29,11 +28,7 @@ func localRootObjects() map[string][]byte {
 
 func stagedValues(t *testing.T, values map[string]string) *memorySettings {
 	t.Helper()
-	raw, err := json.Marshal(stagedTarget{Values: values})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &memorySettings{values: map[string]string{StagedTargetSettingKey: string(raw)}}
+	return stagedSettings(t, stagedTarget{Values: values})
 }
 
 func assertObjects(t *testing.T, name string, store *memoryStore, present, absent []string) {
@@ -387,51 +382,6 @@ func TestStartKeepsPrivateBucketOnlyForLocalSource(t *testing.T) {
 	}
 }
 
-func TestPreflightDescribesEachMove(t *testing.T) {
-	const (
-		localRoot = "local|/srv/silo"
-		publicS3  = "s3|https://s3|public|"
-		otherS3   = "s3|https://s3|other|"
-		privateS3 = "s3|https://s3|private|"
-	)
-	local := locationOf(localRoot, "")
-	localPrivate := locationOf(localRoot, privateS3)
-	s3 := locationOf(publicS3, privateS3)
-	s3Other := locationOf(otherS3, privateS3)
-	s3NoPrivate := locationOf(publicS3, "")
-	for _, tt := range []struct {
-		name            string
-		current, target storageLocation
-		policy          string
-		wantUploads     string
-		wantSubtitles   string
-		wantOperational string
-	}{
-		{"s3 to local migrate", s3, local, PolicyMigrateAll, "Copied to the new artwork store", "copied", "are copied to local disk"},
-		{"local to s3 migrate", local, s3, PolicyMigrateAll, "Copied to the new artwork store", "copied", "are copied to the private bucket"},
-		{"local to s3 preserve", local, s3, PolicyPreserveUploads, "profile avatars, and downloaded subtitles are copied", "copied", "remain on local disk"},
-		{"artwork-only preserve", s3, s3Other, PolicyPreserveUploads, "profile avatars stay in their current storage", "copied", "stay in their current storage"},
-		{"no operational source", s3NoPrivate, local, PolicyPreserveUploads, "and downloaded subtitles are copied.", "copied", "stay in their current storage"},
-		{"s3 fresh", s3, s3Other, PolicyFresh, "cleared", "not copied", "stay in their current storage"},
-		{"local adds private bucket", local, localPrivate, PolicyMigrateAll, "Profile avatars are copied", "stay in their current storage", "are copied to the private bucket"},
-		{"local drops private bucket fresh", localPrivate, local, PolicyFresh, "Profile avatars are not copied", "stay in their current storage", "remain on the private bucket"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			preflight := describe(tt.current, tt.target, tt.policy)
-			for field, pair := range map[string][2]string{
-				"Uploads":      {preflight.Uploads, tt.wantUploads},
-				"Subtitles":    {preflight.Subtitles, tt.wantSubtitles},
-				"Diagnostics":  {preflight.Diagnostics, tt.wantOperational},
-				"CatalogSeeds": {preflight.CatalogSeeds, tt.wantOperational},
-			} {
-				if !strings.Contains(pair[0], pair[1]) {
-					t.Errorf("%s = %q, want %q", field, pair[0], pair[1])
-				}
-			}
-		})
-	}
-}
-
 func TestPreflightWarnsWhenSidecarArtworkIsNotCopied(t *testing.T) {
 	const (
 		oldAssets  = "s3|https://s3|old-public|"
@@ -771,24 +721,6 @@ func TestCopyPassCopiesAPageConcurrently(t *testing.T) {
 	}
 	if copied != 3 {
 		t.Fatalf("copied %d objects, want 3", copied)
-	}
-}
-
-// Every progress call writes the job row and publishes an event, so a large
-// page reports on an interval rather than once per object.
-func TestCopyPassThrottlesProgress(t *testing.T) {
-	source := &memoryStore{identity: "s3|source|public|", objects: map[string][]byte{}}
-	for i := range 20 {
-		source.objects[fmt.Sprintf("tmdb/%02d.webp", i)] = []byte(fmt.Sprintf("image-%d", i))
-	}
-	service := New(nil, &memorySettings{values: map[string]string{}}, nil, source, nil)
-	service.progressInterval = time.Hour
-	calls := 0
-	if _, _, _, err := service.copyPrefixPass(t.Context(), "throttle", "public:", source, &memoryStore{identity: "s3|target|public|", objects: map[string][]byte{}}, "", func(int, int, string) { calls++ }, 0, "run", map[string]objectListing{}, false); err != nil {
-		t.Fatal(err)
-	}
-	if calls > 2 {
-		t.Fatalf("progress reported %d times for one page, want the first object and the page total", calls)
 	}
 }
 

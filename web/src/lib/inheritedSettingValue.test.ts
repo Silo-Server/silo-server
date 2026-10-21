@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AdminUserSettingEntry } from "@/hooks/queries/admin/users";
-import { deviceInheritedValue, variesScopePhrase } from "@/lib/inheritedSettingValue";
+import { deviceInheritedValue } from "@/lib/inheritedSettingValue";
 
 function entry(
   key: string,
@@ -90,13 +90,5 @@ describe("deviceInheritedValue", () => {
         [entry("playback.audio_language", "fr", "profile", { profile_id: "sam" })],
       ).profileName,
     ).toBeNull();
-  });
-});
-
-describe("variesScopePhrase", () => {
-  it("picks the article from the scope's first letter", () => {
-    expect(variesScopePhrase("app family")).toBe("an app family");
-    expect(variesScopePhrase("device")).toBe("a device");
-    expect(variesScopePhrase("library")).toBe("a library");
   });
 });

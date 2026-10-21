@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -138,12 +139,16 @@ type Dependencies struct {
 	// admin live-session table right after compat playback starts/stops, so
 	// the activity dashboard doesn't wait for the periodic reconciler tick.
 	// Optional.
-	SessionSyncer          PlaybackSessionSyncer
-	MarkerPopulation       MarkerPopulationService
-	FileResolver           FilePathResolver
-	MediaSourceOwners      MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids
-	Downloads              DownloadServer         // serves /Items/{id}/Download; nil refuses every download
-	UserStoreProvider      userstore.UserStoreProvider
+	SessionSyncer     PlaybackSessionSyncer
+	MarkerPopulation  MarkerPopulationService
+	FileResolver      FilePathResolver
+	MediaSourceOwners MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids
+	Downloads         DownloadServer         // serves /Items/{id}/Download; nil refuses every download
+	UserStoreProvider userstore.UserStoreProvider
+	// AdminDefaults supplies the administrator's defaults for settings that
+	// declare admin_default, such as Next Up ordering (the node's shared
+	// *config.AdminDefaults). Nil uses the contract defaults.
+	AdminDefaults          settingsresolve.ServerSettings
 	WatchScrobbler         PlaybackWatchScrobbler
 	StableIdentityResolver watchsync.ScrobbleIdentityResolver
 	AccessFilterFn         AccessFilterResolver

@@ -306,26 +306,13 @@ func TestPlaybackDecisionV2ProjectsSubtitleURLsWithoutMutatingSource(t *testing.
 	}
 }
 
-func TestPlaybackDecisionV2EmptySubtitleInventoryIsArray(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		inventory []playback.SubtitleInventoryItemV3
-	}{{"nil", nil}, {"empty", []playback.SubtitleInventoryItemV3{}}} {
-		t.Run(tc.name, func(t *testing.T) {
-			in := playback.DecisionResponseV3{PlaybackPlan: &playback.PlanV3{
-				Subtitle: playback.SubtitleDecisionV3{Mode: playback.SubtitleOffV3, Inventory: tc.inventory},
-			}}
-			out := playbackDecision(in)
-			raw, err := json.Marshal(out.PlaybackPlan.Subtitle)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(raw), `"inventory":[]`) {
-				t.Fatalf("v2 inventory must be an array: %s", raw)
-			}
-			if (in.PlaybackPlan.Subtitle.Inventory == nil) != (tc.inventory == nil) || len(in.PlaybackPlan.Subtitle.Inventory) != 0 {
-				t.Fatal("projection mutated the source inventory")
-			}
-		})
+func TestPlaybackDecisionV2PublishesTheActiveQuality(t *testing.T) {
+	in := playback.DecisionResponseV3{PlaybackPlan: &playback.PlanV3{ActiveQuality: playback.QualityRung1080pLowV3}}
+	raw, err := json.Marshal(playbackDecision(in).PlaybackPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"active_quality":"1080p-low"`) {
+		t.Fatalf("v2 plan must carry active_quality: %s", raw)
 	}
 }

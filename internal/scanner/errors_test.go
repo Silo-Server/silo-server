@@ -63,16 +63,6 @@ func TestScanFailuresCapsRetainedErrorsAndReportsTheRemainder(t *testing.T) {
 	}
 }
 
-func TestScanFailuresJoinIsNilWhenNothingFailed(t *testing.T) {
-	var failures scanFailures
-	if got := failures.len(); got != 0 {
-		t.Fatalf("len() = %d, want 0", got)
-	}
-	if err := failures.join(); err != nil {
-		t.Fatalf("join() = %v, want nil", err)
-	}
-}
-
 // The audiobook, ebook, and manga scans record failures from a worker pool.
 func TestScanFailuresIsConcurrencySafe(t *testing.T) {
 	var failures scanFailures

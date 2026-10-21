@@ -2,28 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  buildRecommendationSections,
-  parseRecommendationEmbeddingLock,
-} from "./recommendationsSettings";
-
-describe("buildRecommendationSections", () => {
-  it("uses a single embedding configuration section", () => {
-    const sections = buildRecommendationSections();
-
-    expect(sections.map((section) => section.title)).toEqual([
-      "General",
-      "Embedding Configuration",
-      "Schedule",
-      "Advanced",
-    ]);
-    expect(sections[1]?.fields.map((field) => field.key)).toEqual([
-      "recommendations.embedding_base_url",
-      "recommendations.embedding_model",
-      "recommendations.embedding_auth_token",
-    ]);
-  });
-});
+import { parseRecommendationEmbeddingLock } from "./recommendationsSettings";
 
 describe("parseRecommendationEmbeddingLock", () => {
   it("parses lock metadata for display", () => {

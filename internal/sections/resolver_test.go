@@ -2,57 +2,35 @@ package sections
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
 
-func TestResolve_NoOverrides(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
-		{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "Favorites", ItemLimit: 10, Config: json.RawMessage(`{}`)},
-	}
-
-	result := Resolve(admin, nil)
-	if len(result) != 2 {
-		t.Fatalf("expected 2 sections, got %d", len(result))
-	}
-	if result[0].Title != "Recently Added" {
-		t.Errorf("first section title = %q", result[0].Title)
-	}
-}
-
-func TestResolve_HiddenOverride(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
-		{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "Favorites", ItemLimit: 10, Config: json.RawMessage(`{}`)},
-	}
-
-	overrides := []ProfileSectionOverride{
-		{SectionID: "1", Hidden: true},
-	}
-
-	result := Resolve(admin, overrides)
-	if len(result) != 1 {
-		t.Fatalf("expected 1 section (1 hidden), got %d", len(result))
-	}
-	if result[0].ID != "2" {
-		t.Errorf("remaining section ID = %q, want %q", result[0].ID, "2")
-	}
-}
-
-func TestResolve_RemovedOverrideSkipsAdminSection(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
-		{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "Favorites", ItemLimit: 10, Config: json.RawMessage(`{}`)},
-	}
-
-	overrides := []ProfileSectionOverride{
-		{SectionID: "1", Removed: true},
-	}
-
-	result := Resolve(admin, overrides)
-	if len(result) != 1 || result[0].ID != "2" {
-		t.Fatalf("resolved IDs = %#v, want only section 2", result)
+// Hidden and removed overrides drop a row at runtime; settings drop only
+// removed rows, admin or custom.
+func TestResolveDropsHiddenAndRemovedSections(t *testing.T) {
+	recent := &PageSection{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)}
+	favorites := &PageSection{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "Favorites", ItemLimit: 10, Config: json.RawMessage(`{}`)}
+	for _, tc := range []struct {
+		name     string
+		resolve  func([]*PageSection, []ProfileSectionOverride) []ResolvedSection
+		admin    []*PageSection
+		override ProfileSectionOverride
+		wantIDs  []string
+	}{
+		{"hidden override", Resolve, []*PageSection{recent, favorites}, ProfileSectionOverride{SectionID: "1", Hidden: true}, []string{"2"}},
+		{"removed override skips admin section", Resolve, []*PageSection{recent, favorites}, ProfileSectionOverride{SectionID: "1", Removed: true}, []string{"2"}},
+		{"settings skip removed section", ResolveForSettings, []*PageSection{recent}, ProfileSectionOverride{SectionID: "1", Removed: true}, nil},
+		{"settings skip removed custom section", ResolveForSettings, []*PageSection{recent}, ProfileSectionOverride{ID: "custom-1", SectionType: "genre", Title: "My Action", Removed: true}, []string{"1"}},
+	} {
+		var got []string
+		for _, section := range tc.resolve(tc.admin, []ProfileSectionOverride{tc.override}) {
+			got = append(got, section.ID)
+		}
+		if !slices.Equal(got, tc.wantIDs) {
+			t.Fatalf("%s: resolved IDs = %v, want %v", tc.name, got, tc.wantIDs)
+		}
 	}
 }
 
@@ -97,24 +75,6 @@ func TestResolve_UserAddedSection(t *testing.T) {
 	}
 	if !result[1].IsCustom {
 		t.Error("user-added section should be marked IsCustom")
-	}
-}
-
-func TestResolve_RemovedCustomSection(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "A", ItemLimit: 20, Config: json.RawMessage(`{}`)},
-	}
-
-	overrides := []ProfileSectionOverride{
-		{ID: "custom-1", SectionType: "genre", Title: "My Action", Removed: true},
-	}
-
-	result := Resolve(admin, overrides)
-	if len(result) != 1 {
-		t.Fatalf("expected removed custom section to be skipped, got %d sections", len(result))
-	}
-	if result[0].ID != "1" {
-		t.Fatalf("remaining section ID = %q, want %q", result[0].ID, "1")
 	}
 }
 
@@ -199,39 +159,6 @@ func TestResolveForSettings_KeepsAdminTitleAsDefault(t *testing.T) {
 	}
 }
 
-func TestResolveForSettings_SkipsRemovedSection(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
-	}
-
-	overrides := []ProfileSectionOverride{
-		{SectionID: "1", Removed: true},
-	}
-
-	result := ResolveForSettings(admin, overrides)
-	if len(result) != 0 {
-		t.Fatalf("expected removed section to be omitted from settings, got %d entries", len(result))
-	}
-}
-
-func TestResolveForSettings_SkipsRemovedCustomSection(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
-	}
-
-	overrides := []ProfileSectionOverride{
-		{ID: "custom-1", SectionType: "genre", Title: "My Action", Removed: true},
-	}
-
-	result := ResolveForSettings(admin, overrides)
-	if len(result) != 1 {
-		t.Fatalf("expected removed custom section to be omitted from settings, got %d entries", len(result))
-	}
-	if result[0].ID != "1" {
-		t.Fatalf("remaining section ID = %q, want %q", result[0].ID, "1")
-	}
-}
-
 func TestResolveIncludesUserAddedRecipeFromOverride(t *testing.T) {
 	admin := []*PageSection{}
 	overrides := []ProfileSectionOverride{
@@ -279,26 +206,6 @@ func TestResolveEmptySectionIDPrefersExplicitUserFields(t *testing.T) {
 	}
 	if resolved[0].SectionType != SectionTrendingDiscover || string(resolved[0].Config) != `{"source":"tmdb","window":"day"}` {
 		t.Fatalf("resolved = %+v, want explicit TMDB user fields", resolved[0])
-	}
-}
-
-func TestResolveBackwardCompatLegacyUserAdded(t *testing.T) {
-	// An override with the OLD shape (no IsUserAdded flag, but SectionID empty)
-	// should still resolve correctly using the legacy fields.
-	admin := []*PageSection{}
-	overrides := []ProfileSectionOverride{
-		{
-			ID:          "u2",
-			ProfileID:   "p1",
-			Scope:       "home",
-			SectionID:   "",
-			SectionType: "recently_added",
-			Title:       "My recents",
-		},
-	}
-	resolved := Resolve(admin, overrides)
-	if len(resolved) != 1 || resolved[0].SectionType != "recently_added" || resolved[0].Title != "My recents" {
-		t.Fatalf("legacy user-added not resolved correctly: %+v", resolved)
 	}
 }
 

@@ -176,18 +176,24 @@ func TestTranscribeOmitsVADFilterForStrictHostedEndpoints(t *testing.T) {
 	}
 }
 
-func TestTranscribeParsesPerSegmentWords(t *testing.T) {
-	// speaches/faster-whisper shape: words nested inside each segment.
+// transcribeStub transcribes against a server that answers with status and body.
+func transcribeStub(t *testing.T, status int, body string) (*Transcription, error) {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"language":"en","text":"hi there","segments":[
-			{"start":0.0,"end":3.0,"text":" hi there","words":[
-				{"start":0.2,"end":0.5,"word":" hi"},{"start":0.6,"end":1.0,"word":" there"}]}]}`))
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
 	}))
 	defer srv.Close()
-
 	cfg := chatConfig(srv.URL)
 	cfg.ASRModel = "whisper-test"
-	tr, err := NewClient(cfg).Transcribe(context.Background(), TranscribeRequest{Filename: "c.wav", Audio: []byte("x")})
+	return NewClient(cfg).Transcribe(context.Background(), TranscribeRequest{Filename: "c.wav", Audio: []byte("x")})
+}
+
+func TestTranscribeParsesPerSegmentWords(t *testing.T) {
+	// speaches/faster-whisper shape: words nested inside each segment.
+	tr, err := transcribeStub(t, http.StatusOK, `{"language":"en","text":"hi there","segments":[
+			{"start":0.0,"end":3.0,"text":" hi there","words":[
+				{"start":0.2,"end":0.5,"word":" hi"},{"start":0.6,"end":1.0,"word":" there"}]}]}`)
 	if err != nil {
 		t.Fatalf("Transcribe: %v", err)
 	}
@@ -199,17 +205,10 @@ func TestTranscribeParsesPerSegmentWords(t *testing.T) {
 
 func TestTranscribeAttachesTopLevelWordsBySegmentTime(t *testing.T) {
 	// OpenAI shape: words in a top-level array, segments without words.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"language":"en","text":"hi there friend","segments":[
+	tr, err := transcribeStub(t, http.StatusOK, `{"language":"en","text":"hi there friend","segments":[
 			{"start":0.0,"end":1.5,"text":" hi there"},{"start":1.5,"end":3.0,"text":" friend"}],
 			"words":[{"start":0.2,"end":0.5,"word":"hi"},{"start":0.6,"end":1.0,"word":"there"},
-			{"start":1.8,"end":2.2,"word":"friend"}]}`))
-	}))
-	defer srv.Close()
-
-	cfg := chatConfig(srv.URL)
-	cfg.ASRModel = "whisper-test"
-	tr, err := NewClient(cfg).Transcribe(context.Background(), TranscribeRequest{Filename: "c.wav", Audio: []byte("x")})
+			{"start":1.8,"end":2.2,"word":"friend"}]}`)
 	if err != nil {
 		t.Fatalf("Transcribe: %v", err)
 	}
@@ -222,14 +221,7 @@ func TestTranscribeAttachesTopLevelWordsBySegmentTime(t *testing.T) {
 }
 
 func TestTranscribeEmptySegmentsIsNotAnError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"language":"english","text":"","segments":[]}`))
-	}))
-	defer srv.Close()
-
-	cfg := chatConfig(srv.URL)
-	cfg.ASRModel = "whisper-test"
-	tr, err := NewClient(cfg).Transcribe(context.Background(), TranscribeRequest{Filename: "c.wav", Audio: []byte("x")})
+	tr, err := transcribeStub(t, http.StatusOK, `{"language":"english","text":"","segments":[]}`)
 	if err != nil {
 		t.Fatalf("Transcribe: %v", err)
 	}
@@ -246,15 +238,7 @@ func TestTranscribeRequiresConfig(t *testing.T) {
 }
 
 func TestTranscribeChatOnlyGatewayGetsConfigHint(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error":{"message":"invalid content-type: multipart/form-data","code":400}}`))
-	}))
-	defer srv.Close()
-
-	cfg := chatConfig(srv.URL)
-	cfg.ASRModel = "whisper-test"
-	_, err := NewClient(cfg).Transcribe(context.Background(), TranscribeRequest{Filename: "c.wav", Audio: []byte("x")})
+	_, err := transcribeStub(t, http.StatusBadRequest, `{"error":{"message":"invalid content-type: multipart/form-data","code":400}}`)
 	if err == nil || !strings.Contains(err.Error(), "Whisper-compatible Transcription base URL") {
 		t.Fatalf("err = %v, want configuration hint", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,7 +35,7 @@ func NewPoolForRole(ctx context.Context, cfg config.DatabaseConfig, role string)
 	}
 	poolCfg.AfterConnect = prepareConnection
 
-	poolCfg.ConnConfig.Tracer = postgresTracer{role: role}
+	poolCfg.ConnConfig.Tracer = postgresTracer{role: role, attribute: queryattr.Initialize()}
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating connection pool: %w", err)

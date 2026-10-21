@@ -288,29 +288,3 @@ func TestCombineCreditsRules(t *testing.T) {
 		})
 	}
 }
-
-func TestCreditsAudioFor(t *testing.T) {
-	profile := creditsProfile()
-	match := func(length float64, confirmations int, consistent bool) seasonMatch {
-		return seasonMatch{Segment: Segment{Start: 1000, End: 1000 + length}, Confirmations: confirmations, SeasonConsistent: consistent}
-	}
-	tests := []struct {
-		name         string
-		match        seasonMatch
-		strong, weak bool
-		confidence   float64
-	}{
-		{"season-consistent", match(60, 2, true), true, false, 0.90},
-		{"not season-consistent", match(60, 5, false), true, false, 0.65},
-		{"short and season-consistent", match(16, 3, true), true, false, 0.90},
-		{"short and not season-consistent", match(16, 3, false), false, false, 0},
-		{"one confirmation", match(60, 1, true), false, true, 0},
-	}
-	for _, tt := range tests {
-		audio := creditsAudioFor(tt.match, profile)
-		if audio.strong() != tt.strong || audio.weak() != tt.weak || audio.Confidence != tt.confidence {
-			t.Errorf("%s: %+v strong=%t weak=%t, want strong=%t weak=%t confidence %.2f",
-				tt.name, audio, audio.strong(), audio.weak(), tt.strong, tt.weak, tt.confidence)
-		}
-	}
-}

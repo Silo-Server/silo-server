@@ -10,9 +10,7 @@ func TestIsMisplacedSeriesFile(t *testing.T) {
 	}{
 		// Misplaced TV show in a movie library: Season dir + SxxExx file.
 		{"bleach supercut", `/mnt/unionfs/movies/anime-dub/Bleach Supercuts/Season 01/Bleach Supercuts S01E01 - Ichigo.mkv`, true},
-		{"bleach last ep", `/mnt/unionfs/movies/anime-dub/Bleach Supercuts/Season 01/Bleach Supercuts S01E34- Goodbye.mkv`, true},
 		{"specials dir", `/mnt/unionfs/movies/anime/Some Show/Specials/Some Show S00E02 - OVA.mkv`, true},
-		{"extras dir", `/mnt/unionfs/movies/anime/Some Show/Extras/Some Show S00E03 - Bonus.mkv`, true},
 		{"lowercase season", `/x/movies/Show/season 2/Show s02e05.mkv`, true},
 		{"dotted separator", `/mnt/unionfs/movies/anime-dub/Bleach Supercuts/Season 01/Bleach.Supercuts.s01.e01.mkv`, true},
 

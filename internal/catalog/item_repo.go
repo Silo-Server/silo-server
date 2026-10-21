@@ -19,6 +19,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
@@ -1055,48 +1056,133 @@ type ExternalIDLookup struct {
 	ByTVDB map[string]string
 }
 
-// GetByExternalIDs fetches media items matching any of the given external IDs
-// of the specified type, in a single query. Replaces N×3 GetByExternalID
-// calls in MDBList collection sync (audit 2026-05-01 §3.7).
-func (r *ItemRepository) GetByExternalIDs(ctx context.Context, batch ExternalIDBatch, itemType string) (*ExternalIDLookup, error) {
-	if len(batch.TMDBIDs) == 0 && len(batch.IMDbIDs) == 0 && len(batch.TVDBIDs) == 0 {
-		return &ExternalIDLookup{
-			ByTMDB: map[string]string{},
-			ByIMDb: map[string]string{},
-			ByTVDB: map[string]string{},
-		}, nil
+// Resolve picks the content_id a source entry names, trying its IDs in the
+// itemType's anchor precedence (contentid.AnchorPrecedence): TVDB → TMDB →
+// IMDb for a series, TMDB → IMDb → TVDB otherwise. It returns "" when no ID
+// matches or the lookup is nil.
+func (l *ExternalIDLookup) Resolve(itemType, tvdbID, tmdbID, imdbID string) string {
+	if l == nil {
+		return ""
 	}
-	sql, args := r.buildGetByExternalIDsSQL(batch, itemType)
-	rows, err := r.pool.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, fmt.Errorf("fetching media items by external IDs: %w", err)
+	for _, provider := range contentid.AnchorPrecedence(itemType) {
+		var id string
+		switch provider {
+		case contentid.ProviderTVDB:
+			id = lookupExternalID(l.ByTVDB, tvdbID)
+		case contentid.ProviderTMDB:
+			id = lookupExternalID(l.ByTMDB, tmdbID)
+		case contentid.ProviderIMDB:
+			id = lookupExternalID(l.ByIMDb, imdbID)
+		}
+		if id != "" {
+			return id
+		}
 	}
-	defer rows.Close()
+	return ""
+}
 
+func lookupExternalID(byID map[string]string, id string) string {
+	if id == "" {
+		return ""
+	}
+	return byID[id]
+}
+
+// externalIDLookupChunk caps how many IDs of each provider one
+// GetByExternalIDs statement carries.
+const externalIDLookupChunk = 1000
+
+// GetByExternalIDs fetches media items matching any of the given external IDs
+// of the specified type. Repeated IDs are looked up once, and each statement
+// carries at most externalIDLookupChunk IDs per provider, so a long list costs
+// a bounded number of bounded statements. Replaces N×3 GetByExternalID calls
+// in MDBList collection sync (audit 2026-05-01 §3.7).
+func (r *ItemRepository) GetByExternalIDs(ctx context.Context, batch ExternalIDBatch, itemType string) (*ExternalIDLookup, error) {
 	out := &ExternalIDLookup{
 		ByTMDB: map[string]string{},
 		ByIMDb: map[string]string{},
 		ByTVDB: map[string]string{},
 	}
+	tmdbIDs, imdbIDs, tvdbIDs := uniqueExternalIDs(batch.TMDBIDs), uniqueExternalIDs(batch.IMDbIDs), uniqueExternalIDs(batch.TVDBIDs)
+	for start := 0; start < max(len(tmdbIDs), len(imdbIDs), len(tvdbIDs)); start += externalIDLookupChunk {
+		chunk := ExternalIDBatch{
+			TMDBIDs: externalIDChunk(tmdbIDs, start),
+			IMDbIDs: externalIDChunk(imdbIDs, start),
+			TVDBIDs: externalIDChunk(tvdbIDs, start),
+		}
+		if err := r.getByExternalIDsChunk(ctx, chunk, itemType, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// getByExternalIDsChunk adds to out the best title for each ID in batch.
+// Rows arrive best first, so a shared ID keeps the title GetByExternalID
+// would pick. A row can carry another chunk's ID in a column it did not match
+// on; only IDs this chunk asked for are kept, so that ID is decided by its own
+// chunk's ordering.
+func (r *ItemRepository) getByExternalIDsChunk(ctx context.Context, batch ExternalIDBatch, itemType string, out *ExternalIDLookup) error {
+	sql, args := r.buildGetByExternalIDsSQL(batch, itemType)
+	rows, err := r.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return fmt.Errorf("fetching media items by external IDs: %w", err)
+	}
+	defer rows.Close()
+
+	tmdbAsked, imdbAsked, tvdbAsked := externalIDSet(batch.TMDBIDs), externalIDSet(batch.IMDbIDs), externalIDSet(batch.TVDBIDs)
+	keep := func(by map[string]string, asked map[string]struct{}, id, contentID string) {
+		if _, ok := asked[id]; !ok {
+			return
+		}
+		if _, taken := by[id]; !taken {
+			by[id] = contentID
+		}
+	}
 	for rows.Next() {
 		var contentID, tmdb, imdb, tvdb string
 		if err := rows.Scan(&contentID, &tmdb, &imdb, &tvdb); err != nil {
-			return nil, fmt.Errorf("scanning external-ID row: %w", err)
+			return fmt.Errorf("scanning external-ID row: %w", err)
 		}
-		if tmdb != "" {
-			out.ByTMDB[tmdb] = contentID
-		}
-		if imdb != "" {
-			out.ByIMDb[imdb] = contentID
-		}
-		if tvdb != "" {
-			out.ByTVDB[tvdb] = contentID
-		}
+		keep(out.ByTMDB, tmdbAsked, tmdb, contentID)
+		keep(out.ByIMDb, imdbAsked, imdb, contentID)
+		keep(out.ByTVDB, tvdbAsked, tvdb, contentID)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating external-ID rows: %w", err)
+		return fmt.Errorf("iterating external-ID rows: %w", err)
 	}
-	return out, nil
+	return nil
+}
+
+// uniqueExternalIDs drops empty and repeated IDs, keeping first-seen order.
+func uniqueExternalIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, dup := seen[id]; id == "" || dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// externalIDChunk returns the externalIDLookupChunk IDs starting at start, or
+// nil past the end.
+func externalIDChunk(ids []string, start int) []string {
+	if start >= len(ids) {
+		return nil
+	}
+	return ids[start:min(start+externalIDLookupChunk, len(ids))]
+}
+
+func externalIDSet(ids []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		set[id] = struct{}{}
+	}
+	return set
 }
 
 // buildGetByExternalIDsSQL pins the exact SQL shape used by GetByExternalIDs:
@@ -1105,11 +1191,100 @@ func (r *ItemRepository) GetByExternalIDs(ctx context.Context, batch ExternalIDB
 // the column is NULL (imdb_id/tmdb_id/tvdb_id are nullable text on
 // media_items per migration 001).
 func (r *ItemRepository) buildGetByExternalIDsSQL(batch ExternalIDBatch, itemType string) (string, []any) {
-	sql := `SELECT content_id, COALESCE(tmdb_id, ''), COALESCE(imdb_id, ''), COALESCE(tvdb_id, '')
-            FROM media_items
-            WHERE (tmdb_id = ANY($1) OR imdb_id = ANY($2) OR tvdb_id = ANY($3))
-              AND type = $4`
+	// Titles match on their own ID columns and on their provider ID rows; a
+	// title can be known to a provider only through the latter. Rows arrive
+	// best first: direct columns before provider rows, then the order
+	// GetByExternalID prefers.
+	sql := `SELECT content_id, tmdb, imdb, tvdb FROM (
+                SELECT mi.content_id, COALESCE(mi.tmdb_id, '') AS tmdb, COALESCE(mi.imdb_id, '') AS imdb,
+                       COALESCE(mi.tvdb_id, '') AS tvdb, 0 AS source_rank, mi.status, mi.updated_at
+                FROM media_items mi
+                WHERE (mi.tmdb_id = ANY($1) OR mi.imdb_id = ANY($2) OR mi.tvdb_id = ANY($3))
+                  AND mi.type = $4
+                UNION ALL
+                SELECT mi.content_id,
+                       CASE WHEN mip.provider = 'tmdb' THEN mip.provider_id ELSE '' END,
+                       CASE WHEN mip.provider = 'imdb' THEN mip.provider_id ELSE '' END,
+                       CASE WHEN mip.provider = 'tvdb' THEN mip.provider_id ELSE '' END,
+                       1, mi.status, mi.updated_at
+                FROM media_item_provider_ids mip
+                JOIN media_items mi ON mi.content_id = mip.content_id AND mi.type = $4
+                WHERE mip.item_type = $4
+                  AND ((mip.provider = 'tmdb' AND mip.provider_id = ANY($1))
+                    OR (mip.provider = 'imdb' AND mip.provider_id = ANY($2))
+                    OR (mip.provider = 'tvdb' AND mip.provider_id = ANY($3)))
+            ) matches
+            ORDER BY
+                source_rank,
+                CASE lower(trim(status))
+                    WHEN 'matched' THEN 0
+                    WHEN 'pending' THEN 1
+                    WHEN 'unmatched' THEN 2
+                    ELSE 3
+                END,
+                updated_at DESC,
+                content_id ASC`
 	return sql, []any{batch.TMDBIDs, batch.IMDbIDs, batch.TVDBIDs, itemType}
+}
+
+// TitleWithoutTMDBID is a catalog title known by IMDb or TVDB ID but not by
+// TMDB ID.
+type TitleWithoutTMDBID struct {
+	ContentID string
+	IMDbID    string
+	TVDBID    string
+}
+
+// TitlesWithoutTMDBID returns up to limit titles of itemType that have no bare
+// numeric TMDB ID in their own columns or provider ID rows but do have an IMDb
+// or TVDB ID. Only these titles can match a TMDB entry through another
+// provider's ID. A TMDB ID stored in TMDB's "id-slug" URL form (see
+// sameTMDBID) never equals an entry's ID, so such a title is listed too.
+// Titles arrive in GetByExternalID's preference order, so when two of them
+// resolve to one TMDB ID the caller can keep the first.
+func (r *ItemRepository) TitlesWithoutTMDBID(ctx context.Context, itemType string, limit int) ([]TitleWithoutTMDBID, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT mi.content_id,
+		       COALESCE(NULLIF(mi.imdb_id, ''), imdb.provider_id, ''),
+		       COALESCE(NULLIF(mi.tvdb_id, ''), tvdb.provider_id, '')
+		FROM media_items mi
+		LEFT JOIN media_item_provider_ids imdb ON imdb.content_id = mi.content_id AND imdb.provider = 'imdb'
+		LEFT JOIN media_item_provider_ids tvdb ON tvdb.content_id = mi.content_id AND tvdb.provider = 'tvdb'
+		WHERE mi.type = $1
+		  AND COALESCE(mi.tmdb_id, '') !~ '^[0-9]+$'
+		  AND NOT EXISTS (
+		      SELECT 1 FROM media_item_provider_ids tmdb
+		      WHERE tmdb.content_id = mi.content_id AND tmdb.provider = 'tmdb'
+		        AND tmdb.provider_id ~ '^[0-9]+$'
+		  )
+		  AND (COALESCE(NULLIF(mi.imdb_id, ''), imdb.provider_id, '') <> ''
+		       OR COALESCE(NULLIF(mi.tvdb_id, ''), tvdb.provider_id, '') <> '')
+		ORDER BY
+		    CASE lower(trim(mi.status))
+		        WHEN 'matched' THEN 0
+		        WHEN 'pending' THEN 1
+		        WHEN 'unmatched' THEN 2
+		        ELSE 3
+		    END,
+		    mi.updated_at DESC,
+		    mi.content_id ASC
+		LIMIT $2`, itemType, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing titles without a TMDB ID: %w", err)
+	}
+	defer rows.Close()
+	var out []TitleWithoutTMDBID
+	for rows.Next() {
+		var title TitleWithoutTMDBID
+		if err := rows.Scan(&title.ContentID, &title.IMDbID, &title.TVDBID); err != nil {
+			return nil, fmt.Errorf("scanning title without a TMDB ID: %w", err)
+		}
+		out = append(out, title)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating titles without a TMDB ID: %w", err)
+	}
+	return out, nil
 }
 
 // GetByTitleYearType finds a media item by exact title, year, and type match.

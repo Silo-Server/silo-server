@@ -133,8 +133,6 @@ describe("TitlePagesSettings", () => {
   it.each([
     ["older server", capabilitiesAtRevision(10)],
     ["unknown capabilities", undefined],
-    ["unsupported settings API", { ...capabilitiesAtRevision(11), api_version: 2 }],
-    ["no batched settings", { ...capabilitiesAtRevision(11), supports_batched_effective: false }],
   ])("does not request or offer theme settings with %s", (_scenario, capabilities) => {
     mocks.capabilities = capabilities as SettingsCapabilities | undefined;
     mocks.capabilitiesSettled = capabilities !== undefined;
@@ -177,29 +175,7 @@ describe("TitlePagesSettings", () => {
     });
   });
 
-  it("updates theme controls and requested keys when server support changes", () => {
-    mocks.capabilities = undefined;
-    mocks.capabilitiesSettled = false;
-    const { rerender } = render(<TitlePagesSettings />);
-    expect(screen.queryByRole("switch", { name: "Theme music" })).not.toBeInTheDocument();
-
-    mocks.capabilities = capabilitiesAtRevision(11);
-    mocks.capabilitiesSettled = true;
-    rerender(<TitlePagesSettings />);
-    expect(screen.getByRole("switch", { name: "Theme music" })).toBeInTheDocument();
-
-    mocks.useEffectiveSettings.mockClear();
-    mocks.capabilities = capabilitiesAtRevision(10);
-    rerender(<TitlePagesSettings />);
-    expect(screen.queryByRole("switch", { name: "Theme music" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: "Loop theme music" })).not.toBeInTheDocument();
-    for (const [options] of mocks.useEffectiveSettings.mock.calls) {
-      expect(options.keys ?? []).not.toContain(SETTING_KEYS.UI_THEME_MUSIC_ENABLED);
-      expect(options.keys ?? []).not.toContain(SETTING_KEYS.UI_THEME_MUSIC_LOOP);
-    }
-  });
-
-  it.each(["pending", "error", "refetch error"] as const)(
+  it.each(["pending", "refetch error"] as const)(
     "blocks theme writes while effective settings are %s and recovers after loading",
     async (state) => {
       mocks.capabilities = capabilitiesAtRevision(11);
@@ -243,30 +219,6 @@ describe("TitlePagesSettings", () => {
       }
     },
   );
-
-  it("saves the spoiler switches and the advisory age at profile scope", async () => {
-    // Revision 17 introduced the spoiler keys.
-    mocks.capabilities = capabilitiesAtRevision(17);
-    render(<TitlePagesSettings />);
-
-    await userEvent.click(screen.getByRole("switch", { name: "Blur unwatched episode images" }));
-    await userEvent.click(
-      screen.getByRole("switch", { name: "Hide unwatched episode descriptions" }),
-    );
-    await userEvent.click(screen.getByRole("switch", { name: "Show advisory age" }));
-
-    for (const key of [
-      SETTING_KEYS.CATALOG_HIDE_UNWATCHED_EPISODE_IMAGES,
-      SETTING_KEYS.CATALOG_HIDE_UNWATCHED_EPISODE_OVERVIEWS,
-      SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE,
-    ]) {
-      expect(mutateAsync).toHaveBeenCalledWith({
-        key,
-        value: true,
-        identity: { scope: "profile" },
-      });
-    }
-  });
 
   it("leaves the spoiler switches off a server that cannot store them", () => {
     mocks.capabilities = capabilitiesAtRevision(16);

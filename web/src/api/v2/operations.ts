@@ -471,6 +471,7 @@ export const v2Operations = {
   "GET /api/v2/scan/capabilities": "getScanCapabilities",
   "GET /api/v2/sections/recipes": "listSectionRecipes",
   "GET /api/v2/sections/recipes/{type}/candidates": "listSectionRecipeCandidates",
+  "GET /api/v2/sections/seasonal-themes": "listSeasonalThemes",
   "GET /api/v2/settings/contract": "getSettingsContract",
   "GET /api/v2/settings/contract/capabilities": "getSettingsContractCapabilities",
   "GET /api/v2/settings/overlay-config": "getOverlayConfig",

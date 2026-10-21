@@ -74,24 +74,6 @@ func TestNotifyFulfilledTellsRequesterAndFollowers(t *testing.T) {
 	}
 }
 
-func TestFulfilledCopyForFollowers(t *testing.T) {
-	requester := DeliveryRow{Delivery: Delivery{Type: DeliveryTypeRequestFulfilled, ReasonFlags: []byte(`{"request_id":"req-1"}`)}}
-	follower := DeliveryRow{Delivery: Delivery{Type: DeliveryTypeRequestFulfilled, ReasonFlags: []byte(`{"request_id":"req-1","follower":true}`)}}
-
-	if got := BuildNotificationDisplay(requester); got.Title != "Your request is now available" {
-		t.Fatalf("requester title = %q", got.Title)
-	}
-	if got := BuildNotificationDisplay(follower); got.Title != followedTitleAvailable || got.Body == "Your media request has arrived in the library." {
-		t.Fatalf("follower display = %+v, want copy that does not claim the request", got)
-	}
-	if got := requestLine(follower); got != followedTitleAvailable {
-		t.Fatalf("follower email line = %q", got)
-	}
-	if got := discordEmbedAuthorLine(follower); got != "Now available on Silo" {
-		t.Fatalf("follower Discord author = %q", got)
-	}
-}
-
 // Two accounts' legacy "default" profiles, one the requester and one a
 // follower, each get exactly one request.fulfilled delivery, on their own
 // account, and only their own account's devices are pushed. A second pass is

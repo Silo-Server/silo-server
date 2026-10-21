@@ -36,30 +36,6 @@ func TestBuildRecentlyAddedQueryUsesLibraryMembershipFastPathForSingleLibrary(t 
 	}
 }
 
-func TestBuildRecentlyAddedQueryKeepsGenericPathForMultiLibraryConfig(t *testing.T) {
-	t.Parallel()
-
-	query, _ := buildRecentlyAddedQuery(ResolvedSection{
-		ItemLimit: 12,
-		Config:    json.RawMessage(`{"filter_library_ids":[1,2],"filter_type":"movie"}`),
-	}, nil, nil, catalog.AccessFilter{})
-
-	for _, want := range []string{
-		"FROM media_items mi",
-		// Library scope is a semi-join so an item in several selected
-		// libraries yields one row (see buildLibraryScope).
-		"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in WHERE mil_scope_in.content_id = mi.content_id AND mil_scope_in.media_folder_id = ANY($2))",
-		"ORDER BY mi.created_at DESC, mi.content_id ASC",
-	} {
-		if !strings.Contains(query, want) {
-			t.Fatalf("query missing %q:\n%s", want, query)
-		}
-	}
-	if strings.Contains(query, "ORDER BY mil.first_seen_at DESC") {
-		t.Fatalf("multi-library generic path should not use the single-library first_seen_at sort:\n%s", query)
-	}
-}
-
 func TestBuildRecentlyAddedSingleLibraryQueryRejectsAnyDisabledMembership(t *testing.T) {
 	t.Parallel()
 

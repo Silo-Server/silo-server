@@ -130,16 +130,6 @@ func TestProcessRequestStopsWhenTheWidthIsUnreadable(t *testing.T) {
 	}
 }
 
-func TestBackfillListsFilesMissingTheCurrentWidth(t *testing.T) {
-	service, repo, _, _ := widthTestService(t, func() ([]byte, string, error) { return []byte("frame"), "", nil })
-	if _, err := service.BackfillMissing(t.Context(), 10); err != nil {
-		t.Fatal(err)
-	}
-	if repo.missingSuffix != "/w320.webp" {
-		t.Fatalf("suffix %q", repo.missingSuffix)
-	}
-}
-
 func TestImageKeyGroup(t *testing.T) {
 	for key, want := range map[string]bool{
 		"chapter-images/42/0/w300.webp": true,

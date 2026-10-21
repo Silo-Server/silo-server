@@ -432,8 +432,8 @@ export default function SecurityAccessSettings() {
           </SettingFieldRow>
 
           <RateTriadRow
-            label="Per client address"
-            description="Budget one IP address gets."
+            label="Per address and account"
+            description="Each IP has a budget. Signed-in requests also share an account budget, four times larger, across profiles, sessions, devices and API keys."
             disabled={savingRateLimits}
             perSecond={{
               value: config.ip_requests_per_second,

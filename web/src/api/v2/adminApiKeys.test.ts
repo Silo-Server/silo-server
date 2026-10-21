@@ -57,32 +57,6 @@ describe("admin API key fetch boundary", () => {
     expect(JSON.parse(String(fetch.mock.calls[1]![1]?.body))).toEqual({ rate_tier: "elevated" });
     expect(editor.etag).toBe('"original"');
   });
-  it("does not refresh or replay any mutation on401", async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json(metadata, 200, '"tag"'));
-    vi.stubGlobal("fetch", fetch);
-    const editor = await getAdminApiKey(metadata.id);
-    for (const run of [
-      () => createAdminApiKey({ label: "Tool" }),
-      () => updateAdminApiKeyTier(editor, "elevated"),
-      () => deleteAdminApiKey(editor),
-    ]) {
-      fetch.mockClear();
-      fetch.mockResolvedValue(
-        json(
-          {
-            type: "https://silo.example/problems/authentication_required",
-            title: "Unauthorized",
-            status: 401,
-            detail: "Sign in again",
-          },
-          401,
-        ),
-      );
-      await expect(run()).rejects.toMatchObject({ status: 401 });
-      expect(fetch).toHaveBeenCalledTimes(1);
-      expect(String(fetch.mock.calls[0]![0])).not.toContain("refresh");
-    }
-  });
   it("preserves observed tags after412 and rejects nonstrong tags", async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

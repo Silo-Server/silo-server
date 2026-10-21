@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -37,10 +38,7 @@ func TestStreamingProtocolOriginResponses(t *testing.T) {
 				_, _ = io.WriteString(w, "origin refusal")
 			}))
 			defer origin.Close()
-			token, err := streamtoken.Sign(streamtoken.Claims{SessionID: "session", TranscodeTransportID: "transport", PlayMethod: "transcode", TranscodeNode: origin.URL}, secret, time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
+			token := signToken(t, streamtoken.Claims{SessionID: "session", TranscodeTransportID: "transport", PlayMethod: "transcode", TranscodeNode: origin.URL}, secret, time.Minute)
 			server := httptest.NewServer(newSocketProxyServer(t, secret, clientip.NewResolver(nil)).Handler())
 			defer server.Close()
 			response := socketProxyRequest(t, server.Client(), tc.method, server.URL+"/stream/transcode/"+token+"/"+tc.suffix+"?opaque=1", map[string]string{"Range": "bytes=0-2"})
@@ -70,7 +68,7 @@ func TestStreamingProtocolOriginResponses(t *testing.T) {
 	}
 }
 
-func TestStreamingProtocolLocalRemuxHeadStartsWork(t *testing.T) {
+func TestStreamingProtocolLocalRemuxHeadDoesNotStartWork(t *testing.T) {
 	const secret = "synthetic-remux-head"
 	proxy := newSocketProxyServer(t, secret, clientip.NewResolver(nil))
 	binary := filepath.Join(t.TempDir(), "remux.sh")
@@ -78,17 +76,14 @@ func TestStreamingProtocolLocalRemuxHeadStartsWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	proxy.watcher.Config().Playback.FFmpegPath = binary
-	token, err := streamtoken.Sign(streamtoken.Claims{SessionID: "remux", MediaPath: writeSocketProxyMedia(t), PlayMethod: "remux"}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := signToken(t, streamtoken.Claims{SessionID: "remux", MediaPath: writeSocketProxyMedia(t), PlayMethod: "remux"}, secret, time.Minute)
 	server := httptest.NewServer(proxy.Handler())
 	defer server.Close()
 	response := socketProxyRequest(t, server.Client(), http.MethodHead, server.URL+"/stream/remux/"+token, nil)
 	if response.status != 200 || response.body != "" {
 		t.Fatal(response.status, response.body)
 	}
-	if _, err := os.Stat(binary + ".started"); err != nil {
-		t.Fatal("existing local HEAD execution behavior changed", err)
+	if _, err := os.Stat(binary + ".started"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("local HEAD started remux work", err)
 	}
 }

@@ -242,6 +242,10 @@ type transportErrorV3 struct {
 	message   string
 	retryable bool
 	cause     error
+	// executorIneligible marks a route skipped because its executor
+	// definitely cannot run the recipe, so nothing was attempted there.
+	// combineTransportErrorsV3 lets an attempted route's verdict win over it.
+	executorIneligible bool
 }
 
 func subtitleArtifactErrorV3(message string, cause error) *transportErrorV3 {
@@ -300,10 +304,18 @@ func (e *transportErrorV3) Error() string {
 }
 
 func (h *PlaybackHandler) transformationRegistryV3(ctx context.Context) *playback.TransformationRegistryV3 {
+	registry, _ := h.probedTransformationRegistryV3(ctx)
+	return registry
+}
+
+// probedTransformationRegistryV3 also returns the error of a probe that just
+// failed. That probe's registry reports what it couldn't read as unavailable,
+// which a later probe may clear.
+func (h *PlaybackHandler) probedTransformationRegistryV3(ctx context.Context) (*playback.TransformationRegistryV3, error) {
 	h.v3RegistryMu.Lock()
 	defer h.v3RegistryMu.Unlock()
 	if !h.v3Registry.NeedsRefresh(time.Now()) {
-		return h.v3Registry
+		return h.v3Registry, nil
 	}
 	probe := playback.ProbeTransformationRegistryWithToneMapV3Result
 	if h.v3RegistryProbe != nil {
@@ -313,7 +325,7 @@ func (h *PlaybackHandler) transformationRegistryV3(ctx context.Context) *playbac
 	if err == nil {
 		h.v3Registry = registry
 	}
-	return registry
+	return registry, err
 }
 
 // localToneMapCapabilitiesV3 returns a defensive copy of the capabilities
@@ -1669,7 +1681,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	if response.Outcome == playback.OutcomePlayableV3 {
 		h.recordStartingDevice(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), deviceMetadataFromRequest(r))
 	}
-	writeJSON(w, http.StatusCreated, response)
+	writeJSON(w, http.StatusCreated, frozenV1DecisionV3(response))
 }
 
 // recordStartingDevice registers the device that started playback, so a
@@ -2445,8 +2457,12 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 		plan := decision.Plan
 		nodeURL := plan.TranscodeNode.URL
 		transformations, capabilityErr := h.remoteTransformationsV3(r.Context(), nodeURL)
+		// A failed capability read may be transient; only a node whose
+		// advertised capabilities rule the recipe out is ineligible.
+		ineligible := false
 		if capabilityErr == nil {
 			capabilityErr = validateAdvertisedTransformationsV3(result.Plan, transformations)
+			ineligible = capabilityErr != nil
 		}
 		if capabilityErr == nil && planRequiresToneMapV3(result.Plan) {
 			capabilities, err := h.remoteToneMapCapabilitiesV3(r.Context(), nodeURL, false)
@@ -2454,6 +2470,7 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 				capabilityErr = err
 			} else {
 				capabilityErr = validateToneMapExecutorV3(result, capabilities)
+				ineligible = capabilityErr != nil
 			}
 		}
 		if capabilityErr != nil {
@@ -2462,7 +2479,7 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 				releaser.ReleaseSession(session.ID)
 			}
 			excludedNodes[nodeURL] = struct{}{}
-			lastErr = combineTransportErrorsV3(lastErr, &transportErrorV3{reason: routeCapabilityUnavailableReasonV3, message: "No available worker can execute the selected playback recipe.", retryable: true, cause: capabilityErr})
+			lastErr = combineTransportErrorsV3(lastErr, &transportErrorV3{reason: routeCapabilityUnavailableReasonV3, message: "No available worker can execute the selected playback recipe.", retryable: true, cause: capabilityErr, executorIneligible: ineligible})
 			continue
 		}
 
@@ -2502,7 +2519,16 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 		}
 		lastErr = combineTransportErrorsV3(lastErr, transportErr)
 	}
-	return preparedTransportV3{}, &transportErrorV3{reason: "route_preparation_failed", message: "Playback route preparation exhausted every candidate.", retryable: true, cause: lastErr}
+	return preparedTransportV3{}, exhaustedRoutesErrorV3(lastErr)
+}
+
+// exhaustedRoutesErrorV3 ends a route loop that ran out of attempts. A final
+// preflight rejection stays final; anything else may clear on a retry.
+func exhaustedRoutesErrorV3(lastErr *transportErrorV3) *transportErrorV3 {
+	if lastErr != nil && !lastErr.retryable && errors.Is(lastErr.cause, tonemap.ErrSourcePreflightRejected) {
+		return lastErr
+	}
+	return &transportErrorV3{reason: "route_preparation_failed", message: "Playback route preparation exhausted every candidate.", retryable: true, cause: lastErr}
 }
 
 func (h *PlaybackHandler) checkReplacementAdmissionV3(
@@ -2562,7 +2588,7 @@ func (h *PlaybackHandler) validateLocalTransportCapabilitiesV3(ctx context.Conte
 	// is checked against the base registry, so an SDR transcode never waits on
 	// a cold probe or fails when one times out.
 	requiresToneMap := planRequiresToneMapV3(result.Plan)
-	localRegistry := h.transformationRegistryV3(ctx)
+	localRegistry, registryErr := h.probedTransformationRegistryV3(ctx)
 	if requiresToneMap {
 		var capabilityErr error
 		localRegistry, capabilityErr = h.localHLSExecutionRegistryV3(ctx)
@@ -2571,7 +2597,8 @@ func (h *PlaybackHandler) validateLocalTransportCapabilitiesV3(ctx context.Conte
 		}
 	}
 	if err := validateAdvertisedTransformationsV3(result.Plan, localRegistry.Advertised()); err != nil {
-		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected playback recipe.", retryable: true, cause: err}
+		// A mismatch read from a failed probe may clear on a retry.
+		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected playback recipe.", retryable: true, cause: errors.Join(err, registryErr), executorIneligible: registryErr == nil}
 	}
 	if !requiresToneMap {
 		return nil
@@ -2581,7 +2608,7 @@ func (h *PlaybackHandler) validateLocalTransportCapabilitiesV3(ctx context.Conte
 		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "Local tone-map capability validation is temporarily unavailable.", retryable: true, cause: capabilityErr}
 	}
 	if err := validateToneMapExecutorV3(result, capabilities); err != nil {
-		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected tone-map recipe.", retryable: true, cause: err}
+		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected tone-map recipe.", retryable: true, cause: err, executorIneligible: true}
 	}
 	return nil
 }
@@ -4063,7 +4090,16 @@ func manifestStartupTransportErrorV3(running bool, cause error) *transportErrorV
 	return &transportErrorV3{reason: transcodeStartFailedReasonV3, message: message, retryable: running, cause: cause}
 }
 
+// sourcePreflightRejectedMessageV3 tells the viewer, and an admin reading the
+// log, that the file failed the tone-map check, so a retry gets the same
+// answer. The check also rejects an executor's bad output, so the message
+// names both causes.
+const sourcePreflightRejectedMessageV3 = "This file's HDR video failed Silo's conversion check, so trying again won't help. Its HDR metadata may not match the video, or the transcoder may not convert it correctly."
+
 func toneMapExecutionTransportErrorV3(cause error, message string) *transportErrorV3 {
+	if errors.Is(cause, tonemap.ErrSourcePreflightRejected) {
+		message = sourcePreflightRejectedMessageV3
+	}
 	return &transportErrorV3{
 		reason:    transcodeStartFailedReasonV3,
 		message:   message,
@@ -4079,7 +4115,24 @@ func combineTransportErrorsV3(first, second *transportErrorV3) *transportErrorV3
 	if second == nil {
 		return first
 	}
+	// A route skipped because its executor can't run the recipe says nothing
+	// about the file, so a route that ran keeps its reason, message and
+	// retryability. Otherwise any retryable failure makes the result retryable,
+	// and the reason and message come from a retryable side, so a final
+	// verdict's "won't help" message never rides on a retryable result.
+	if first.executorIneligible != second.executorIneligible {
+		attempted := first
+		if first.executorIneligible {
+			attempted = second
+		}
+		combined := *attempted
+		combined.cause = errors.Join(first.cause, second.cause)
+		return &combined
+	}
 	combined := *second
+	if first.retryable && !second.retryable {
+		combined = *first
+	}
 	combined.retryable = first.retryable || second.retryable
 	combined.cause = errors.Join(first.cause, second.cause)
 	return &combined
@@ -4103,7 +4156,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	if result.ToneMapMode != "" {
 		capabilities, err := h.remoteToneMapCapabilitiesV3(r.Context(), node.URL, false)
 		if err != nil || !capabilities.Supports(result.ToneMapMode, result.ToneMapSourceKind) {
-			return preparedTransportV3{}, &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "The selected node cannot run the tone-map recipe.", retryable: true, cause: err}
+			return preparedTransportV3{}, &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "The selected node cannot run the tone-map recipe.", retryable: true, cause: err, executorIneligible: err == nil}
 		}
 		toneMapFilter = capabilities.FilterFor(result.ToneMapMode, result.ToneMapSourceKind)
 		if result.ToneMapMode == tonemap.ModeHardware {
@@ -4739,7 +4792,7 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		writePlaybackOperationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, frozenV1DecisionV3(response))
 }
 
 // replanPlaybackApplicationV3 is the replan application shared by the v1
@@ -6901,6 +6954,17 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 		plan.RuntimeCorrections = []string{}
 	}
 	return normalizeDecisionResponseV3(playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: record.SessionID, PlaybackPlan: &plan})
+}
+
+// frozenV1DecisionV3 removes what only /api/v2 publishes from a decision
+// written on the frozen /api/v1 surface.
+func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
+	if response.PlaybackPlan != nil && response.PlaybackPlan.ActiveQuality != "" {
+		plan := *response.PlaybackPlan
+		plan.ActiveQuality = ""
+		response.PlaybackPlan = &plan
+	}
+	return response
 }
 
 func normalizeDecisionResponseV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {

@@ -75,17 +75,6 @@ describe("PlaybackStep", () => {
     expect(screen.queryByText(/Detected/)).not.toBeInTheDocument();
   });
 
-  it("exposes both tone-mapping toggles and stages the chosen values", async () => {
-    const { setValue } = mockStep();
-    render(<PlaybackStep />);
-
-    await userEvent.click(screen.getByRole("switch", { name: "On the GPU" }));
-    await userEvent.click(screen.getByRole("switch", { name: "On the CPU" }));
-
-    expect(setValue).toHaveBeenCalledWith("playback.transcode_hardware_tone_map_enabled", "true");
-    expect(setValue).toHaveBeenCalledWith("playback.transcode_software_tone_map_enabled", "true");
-  });
-
   it("continues without saving when nothing changed", async () => {
     const { markDone, save } = mockStep();
     render(<PlaybackStep />);

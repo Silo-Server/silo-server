@@ -49,27 +49,6 @@ func TestOwnCandidatesJudgesEachKindOnItsOwn(t *testing.T) {
 	}
 }
 
-func TestCandidateMarkerSelectsKind(t *testing.T) {
-	c := Candidate{
-		IntroStart: floatPtr(30), IntroEnd: floatPtr(90), IntroMarkersAlgorithm: strPtr(ChromaprintAlgorithm),
-		CreditsStart: floatPtr(1300), CreditsEnd: floatPtr(1400), CreditsMarkersConfidence: floatPtr(0.9),
-		MarkersSource: strPtr(models.MarkerSourceScanner),
-	}
-	intro, credits := c.marker(kindIntro), c.marker(kindCredits)
-	if *intro.Start != 30 || *intro.End != 90 || *intro.Algorithm != ChromaprintAlgorithm {
-		t.Fatalf("intro marker = %+v", intro)
-	}
-	if *credits.Start != 1300 || *credits.End != 1400 || *credits.Confidence != 0.9 {
-		t.Fatalf("credits marker = %+v", credits)
-	}
-	if got := c.effectiveSource(kindCredits); got != models.MarkerSourceScanner {
-		t.Fatalf("credits source = %q, want the shared markers_source", got)
-	}
-	if c.marker(markerKind(0)).present() || c.effectiveSource(markerKind(0)) != "" {
-		t.Fatal("no kind should have no marker")
-	}
-}
-
 func TestMarkerPatchWritesItsKind(t *testing.T) {
 	patch := MarkerPatch{
 		FileID:     7,

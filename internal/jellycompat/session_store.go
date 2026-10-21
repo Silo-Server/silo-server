@@ -56,7 +56,8 @@ type loginSessionChecker interface {
 	LoginSessionActive(ctx context.Context, sessionID string) (bool, error)
 }
 
-// SessionStore keeps compat sessions in memory.
+// SessionStore keeps compat sessions in memory or validates them against a
+// persistent repository. Persistent lookups never authorize from memory alone.
 type SessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]Session
@@ -92,9 +93,9 @@ func newSessionStore(ttl time.Duration, now func() time.Time, repo sessionPersis
 	}
 }
 
-// WithLoginSessions makes every lookup check the login session a compat
-// session's sign-in opened, so a sign-out of that one login session, or its
-// expiry, ends the compat session on every replica. It returns s.
+// WithLoginSessions additionally checks the login session a compat session's
+// sign-in opened on every lookup. Its revocation or expiry ends the compat
+// session on every replica. It returns s.
 func (s *SessionStore) WithLoginSessions(c loginSessionChecker) *SessionStore {
 	s.loginSessions = c
 	return s
@@ -176,12 +177,14 @@ func (s *SessionStore) GetContext(ctx context.Context, token string) (*Session, 
 // or whose login session was signed out or expired), any other error for a
 // store that could not be read or a login session that could not be checked,
 // which judges nothing about the token.
+// Persistent lookups always read the stored row, so a completed durable token
+// deletion is observed on every replica, regardless of cached copies or events.
 func (s *SessionStore) Lookup(ctx context.Context, token string) (*Session, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[token]
 	evictions := s.evictions
 	s.mu.RUnlock()
-	if ok {
+	if ok && s.repo == nil {
 		if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(s.now()) {
 			s.Delete(token)
 			return nil, ErrSessionNotFound
@@ -204,6 +207,9 @@ func (s *SessionStore) Lookup(ctx context.Context, token string) (*Session, erro
 
 	persisted, err := s.loadStored(ctx, token)
 	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			s.uncache(token)
+		}
 		return nil, err
 	}
 
@@ -274,9 +280,9 @@ func (s *SessionStore) checkLoginSession(ctx context.Context, session *Session) 
 
 // maybeExtendSession extends the session's ExpiresAt if more than half the TTL
 // has elapsed. The stored row is updated, never re-created: when it is gone,
-// the session was signed out, possibly by an account-wide revocation this
-// replica has not evicted yet, so the copy is dropped and ErrSessionNotFound
-// returned. Any other store error keeps the session and is only logged.
+// the session was signed out, possibly after the lookup read it, so the copy
+// is dropped and ErrSessionNotFound returned. Any other store error keeps
+// the session and is only logged.
 func (s *SessionStore) maybeExtendSession(session *Session, token string, evictions uint64) error {
 	if s.ttl <= 0 || session.ExpiresAt.IsZero() {
 		return nil
@@ -304,6 +310,7 @@ func (s *SessionStore) maybeExtendSession(session *Session, token string, evicti
 // cache stores a session read when EvictUser had run evictions times. If it
 // has run since, the copy may predate the revocation that evicted the
 // account, so it is left out and the next request reads the stored row.
+// Persistent Lookup always reads that row even when a copy is cached here.
 func (s *SessionStore) cache(token string, session Session, evictions uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -335,7 +342,8 @@ func (s *SessionStore) delete(ctx context.Context, token string) {
 // EvictUser drops a Silo account's compat sessions from this store's memory.
 // Signing an account out deletes its stored sessions in the revoking
 // transaction (auth.RevokeSignInsInTransaction); each replica then calls
-// EvictUser so the copies it already loaded stop working too.
+// EvictUser to discard its copies. Persistent lookups independently validate
+// the stored row even if the eviction event is missed.
 func (s *SessionStore) EvictUser(userID int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

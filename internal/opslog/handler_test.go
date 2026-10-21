@@ -16,20 +16,15 @@ import (
 // the entry later on its own goroutine, so the entry must not share them.
 func TestHandlerSnapshotsValuesTheCallerOwns(t *testing.T) {
 	t.Parallel()
-	writer := &recordingWriter{}
-	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
-
-	counts := map[string]int{"movies": 1}
-	ids := []int{1, 2}
-	logger.With("static", counts).InfoContext(context.Background(), "probe: snapshot",
-		"counts", counts, "ids", ids, "error", errors.New("boom"), "status", 200)
-	counts["movies"] = 2
-	counts["shows"] = 3
-	ids[0] = 9
-
-	writer.mu.Lock()
-	entry := writer.entries[0]
-	writer.mu.Unlock()
+	entry := logEntry(t, func(logger *slog.Logger) {
+		counts := map[string]int{"movies": 1}
+		ids := []int{1, 2}
+		logger.With("static", counts).InfoContext(context.Background(), "probe: snapshot",
+			"counts", counts, "ids", ids, "error", errors.New("boom"), "status", 200)
+		counts["movies"] = 2
+		counts["shows"] = 3
+		ids[0] = 9
+	})
 	got, err := json.Marshal(entry.Attrs)
 	if err != nil {
 		t.Fatal(err)
@@ -45,14 +40,9 @@ func TestHandlerSnapshotsValuesTheCallerOwns(t *testing.T) {
 // rejects is kept as text instead of emptying the entry's attrs.
 func TestHandlerKeepsAValueItCannotEncode(t *testing.T) {
 	t.Parallel()
-	writer := &recordingWriter{}
-	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
-
-	logger.InfoContext(context.Background(), "probe: unencodable", "ch", make(chan int), "status", 200)
-
-	writer.mu.Lock()
-	entry := writer.entries[0]
-	writer.mu.Unlock()
+	entry := logEntry(t, func(logger *slog.Logger) {
+		logger.InfoContext(context.Background(), "probe: unencodable", "ch", make(chan int), "status", 200)
+	})
 	if s, ok := entry.Attrs["ch"].(string); !ok || s == "" {
 		t.Fatalf("attrs[ch] = %#v, want its text form", entry.Attrs["ch"])
 	}
@@ -66,15 +56,10 @@ func TestHandlerKeepsAValueItCannotEncode(t *testing.T) {
 // JSON encode would store {} and hide why the logged operation failed.
 func TestHandlerRecordsErrorText(t *testing.T) {
 	t.Parallel()
-	writer := &recordingWriter{}
-	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
-
-	wrapped := fmt.Errorf("loading overlay summaries: %w", errors.New("connection refused"))
-	logger.With("static_err", errors.New("static")).ErrorContext(context.Background(), "probe: error", "error", wrapped)
-
-	writer.mu.Lock()
-	entry := writer.entries[0]
-	writer.mu.Unlock()
+	entry := logEntry(t, func(logger *slog.Logger) {
+		wrapped := fmt.Errorf("loading overlay summaries: %w", errors.New("connection refused"))
+		logger.With("static_err", errors.New("static")).ErrorContext(context.Background(), "probe: error", "error", wrapped)
+	})
 	if got := entry.Attrs["error"]; got != "loading overlay summaries: connection refused" {
 		t.Fatalf("attrs[error] = %#v, want the error text", got)
 	}
@@ -91,15 +76,10 @@ func (e *nilPtrErr) Error() string { return e.msg }
 // is recorded instead of panicking when Error dereferences the receiver.
 func TestHandlerRecordsTypedNilError(t *testing.T) {
 	t.Parallel()
-	writer := &recordingWriter{}
-	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
-
-	var err *nilPtrErr
-	logger.ErrorContext(context.Background(), "probe: error", "error", err)
-
-	writer.mu.Lock()
-	entry := writer.entries[0]
-	writer.mu.Unlock()
+	entry := logEntry(t, func(logger *slog.Logger) {
+		var err *nilPtrErr
+		logger.ErrorContext(context.Background(), "probe: error", "error", err)
+	})
 	if got := entry.Attrs["error"]; got != "<nil *opslog.nilPtrErr>" {
 		t.Fatalf("attrs[error] = %#v, want a nil placeholder", got)
 	}
@@ -109,15 +89,10 @@ func TestHandlerRecordsTypedNilError(t *testing.T) {
 // chain loses its query string and credentials before it is stored.
 func TestHandlerSanitizesErrorURLs(t *testing.T) {
 	t.Parallel()
-	writer := &recordingWriter{}
-	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
-
-	urlErr := &url.Error{Op: "Get", URL: "https://user:pass@cdn.example/v.mp4?token=s3cret&sig=abc", Err: errors.New("timeout")}
-	logger.ErrorContext(context.Background(), "probe: error", "error", fmt.Errorf("fetch stream: %w", urlErr))
-
-	writer.mu.Lock()
-	entry := writer.entries[0]
-	writer.mu.Unlock()
+	entry := logEntry(t, func(logger *slog.Logger) {
+		urlErr := &url.Error{Op: "Get", URL: "https://user:pass@cdn.example/v.mp4?token=s3cret&sig=abc", Err: errors.New("timeout")}
+		logger.ErrorContext(context.Background(), "probe: error", "error", fmt.Errorf("fetch stream: %w", urlErr))
+	})
 	got, _ := entry.Attrs["error"].(string)
 	if strings.Contains(got, "s3cret") || strings.Contains(got, "pass") || strings.Contains(got, "sig=") {
 		t.Fatalf("attrs[error] = %q leaks a secret", got)
@@ -132,17 +107,22 @@ func TestHandlerSanitizesErrorURLs(t *testing.T) {
 // carries it, is masked before the entry is stored.
 func TestHandlerRedactsSecretAssignmentsInErrorText(t *testing.T) {
 	t.Parallel()
-	writer := &recordingWriter{}
-	logger := slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a"))
-
-	err := errors.New("rpc error: code = Unauthenticated desc = api_key=FAKE_FIXTURE_SECRET rejected")
-	logger.ErrorContext(context.Background(), "probe: error", "error", fmt.Errorf("metadata lookup: %w", err))
-
-	writer.mu.Lock()
-	entry := writer.entries[0]
-	writer.mu.Unlock()
+	entry := logEntry(t, func(logger *slog.Logger) {
+		err := errors.New("rpc error: code = Unauthenticated desc = api_key=FAKE_FIXTURE_SECRET rejected")
+		logger.ErrorContext(context.Background(), "probe: error", "error", fmt.Errorf("metadata lookup: %w", err))
+	})
 	got, _ := entry.Attrs["error"].(string)
 	if want := "metadata lookup: rpc error: code = Unauthenticated desc = api_key=[REDACTED] rejected"; got != want {
 		t.Fatalf("attrs[error] = %q, want %q", got, want)
 	}
+}
+
+// logEntry logs through a fresh handler and returns the entry it recorded.
+func logEntry(t *testing.T, log func(*slog.Logger)) Entry {
+	t.Helper()
+	writer := &recordingWriter{}
+	log(slog.New(NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "node-a")))
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return writer.entries[0]
 }

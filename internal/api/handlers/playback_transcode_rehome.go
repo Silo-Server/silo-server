@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -28,8 +29,10 @@ import (
 // the transport identity the node serves under does not change either.
 //
 // The boundary is deliberate. Only a relay that never got an HTTP response
-// counts: a refused or failed connection, or any transport failure while the
-// pool already lists the node as unhealthy or no longer has it. A node that
+// counts: a refused or failed connection, a node that left the relay waiting
+// and then did not answer a health probe either (transcodeproxy.DoNode), or any
+// transport failure while the pool already lists the node as unhealthy or no
+// longer has it. A node that
 // answers with an HTTP error is alive, and its answer is relayed as before.
 // Sessions whose media URLs point at a proxy origin are not relayed here; they
 // keep the replan-and-remint rule for failover.
@@ -66,10 +69,12 @@ type transcodeNodeHealthReaderV3 interface {
 
 // transcodeNodeUnreachable reports whether a relay transport error means the
 // node is gone rather than slow or mid-response. A connection that could not be
-// opened always counts. Any other transport failure counts only when the pool
-// already lists the node as unhealthy or no longer pools it.
+// opened, or a node that stopped answering the relay and a health probe
+// (nodepool.ErrNodeNotAnswering), always counts. Any other transport failure
+// counts only when the pool already lists the node as unhealthy or no longer
+// pools it.
 func (h *PlaybackHandler) transcodeNodeUnreachable(nodeURL string, err error) bool {
-	if isConnectFailure(err) {
+	if isConnectFailure(err) || errors.Is(err, nodepool.ErrNodeNotAnswering) {
 		return true
 	}
 	if reader, ok := h.NodePlanner.(transcodeNodeHealthReaderV3); ok {
@@ -226,6 +231,14 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 		if _, skip := excludedNodes[nodepool.NormalizeNodeURL(node.URL)]; skip {
 			return false
 		}
+		// The move keeps the transport id, and a node tells its own card from
+		// another's by row id and URL. A row repointed at a replacement process
+		// keeps the dead node's row id, so the old process could still delete
+		// the replacement's card: a replan, which mints a new transport id,
+		// reaches that row instead.
+		if node.ID > 0 && node.ID == session.RoutingExecutionNodeID {
+			return false
+		}
 		return capable == nil || capable(node)
 	}
 	var lastErr error
@@ -279,7 +292,7 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 		}
 		slog.WarnContext(ctx, "transcode node rejected a moved transcode", "component", "api",
 			"node", logredact.SanitizeURL(node.URL), "playback_session_id", sessionID, "error", logredact.SanitizeText(moveErr.Error()))
-		if isConnectFailure(moveErr) {
+		if isConnectFailure(moveErr) || errors.Is(moveErr, nodepool.ErrNodeNotAnswering) {
 			// A candidate that cannot be reached is as dead as the node the
 			// session left: keep every other move from trying it too.
 			if marker, ok := h.NodePlanner.(transcodeNodeHealthMarkerV3); ok {
@@ -507,7 +520,9 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 		next.SoftwareVideoDecode = req.SoftwareVideoDecode || response.SoftwareVideoDecode
 		next.ToneMapFilter = toneMapFilter
 		// The old node deletes this transport's stored recipe when the retire
-		// reaches it, so the new card is written only after that.
+		// reaches it, so the new card is written only after that. A hung node
+		// that resumes and runs the retire later finds the new node's card and
+		// leaves it, because the card names another row and URL.
 		h.retireUnreachableTransportV3(ctx, dead.NodeURL, transportID, func(ctx context.Context) {
 			h.putNodeRecipeIfRouteV3(ctx, session.ID, playback.TranscodeRoute{NodeURL: node.URL, TransportID: transportID}, next)
 		})
@@ -599,19 +614,61 @@ func (h *PlaybackHandler) rollBackMovedStartV3(ctx context.Context, sessionID, d
 }
 
 // putNodeRecipeIfRouteV3 writes a transport's stored recipe only while the
-// session still runs route. It holds the session lifecycle lock, under which a
-// stop or a replan deletes the recipe of the transport it ends, so a write
-// that lands after either cannot bring a stopped transport's recipe back.
+// session still runs route and has not been stopped on any replica. It holds
+// the session lifecycle lock, under which a stop or a replan on this replica
+// deletes the recipe of the transport it ends. A user or admin stop on another
+// replica writes the shared deny marker before it deletes the recipe, so the
+// marker is read before the write and again after it: either that stop's
+// delete lands after the write, or the second read sees the marker and the
+// write is undone.
 // route.TransportID is the resolved transport id, the store key, never the
 // empty route field of a legacy session.
 func (h *PlaybackHandler) putNodeRecipeIfRouteV3(ctx context.Context, sessionID string, route playback.TranscodeRoute, card playback.RecipeCard) {
+	if h == nil || h.NodeRecipeStore == nil || route.TransportID == "" {
+		return
+	}
 	unlock := h.tm.LockSessionLifecycle(sessionID)
 	defer unlock()
 	current, err := h.sessionMgr.GetSession(sessionID)
 	if err != nil || current.TranscodeNodeURL != route.NodeURL || remoteTransportID(current) != route.TransportID {
 		return
 	}
+	// A marker that cannot be read skips the write, but never undoes one:
+	// deleting a written card on a read error would cost the session its
+	// restart recovery without any stop having happened.
+	if stopped, err := h.sessionStopMarkedV3(ctx, sessionID); stopped || err != nil {
+		return
+	}
 	h.putNodeRecipeV3(ctx, route.TransportID, card)
+	if stopped, _ := h.sessionStopMarkedV3(ctx, sessionID); stopped {
+		h.deleteNodeRecipeV3(ctx, route.TransportID)
+	}
+}
+
+// stopMarkerReaderV3 reads a session's shared deny marker past the local cache.
+type stopMarkerReaderV3 func(ctx context.Context, deny *playback.StreamDeny, sessionID string) (bool, error)
+
+// readStopMarkerV3 holds the reader. Tests replace it; it is atomic because a
+// move's detached recipe write from an earlier test can still be reading it.
+var readStopMarkerV3 = newStopMarkerReaderV3(func(ctx context.Context, deny *playback.StreamDeny, sessionID string) (bool, error) {
+	return deny.Lookup(ctx, sessionID)
+})
+
+func newStopMarkerReaderV3(reader stopMarkerReaderV3) *atomic.Pointer[stopMarkerReaderV3] {
+	var holder atomic.Pointer[stopMarkerReaderV3]
+	holder.Store(&reader)
+	return &holder
+}
+
+// sessionStopMarkedV3 reports whether a user or admin stop on any replica has
+// ended the session, and the error when the marker could not be read.
+func (h *PlaybackHandler) sessionStopMarkedV3(ctx context.Context, sessionID string) (bool, error) {
+	stopped, err := (*readStopMarkerV3.Load())(context.WithoutCancel(ctx), h.StreamDeny, sessionID)
+	if err != nil {
+		slog.WarnContext(ctx, "could not read the playback stop marker for a node transcode recipe write",
+			"component", "api", "playback_session_id", sessionID, "error", logredact.SanitizeText(err.Error()))
+	}
+	return stopped, err
 }
 
 // releaseMoveReservationV3 gives back the reservation Resolve made for a move,

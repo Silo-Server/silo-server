@@ -9,10 +9,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/net/idna"
 
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
@@ -25,6 +28,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
+
+// adminMeilisearchRedirectMessage answers a credentialed Meilisearch check
+// that was redirected to another scheme, host or port, which it does not follow.
+const adminMeilisearchRedirectMessage = "Meilisearch redirected the check to another address. Enter the address it redirects to, such as its https:// URL, and enter the API key again."
 
 const adminTextAIConnectionFailureMessage = "Text AI connection failed. Check the model, reasoning level, account connection, and provider usage limits."
 
@@ -77,6 +84,10 @@ var newAdminMDBListSettingsCheckClient = func(apiKey string) mdblistSettingsChec
 
 var newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
 	return llm.NewClient(cfg)
+}
+
+var checkAdminMeilisearchSettingsConnection = func(ctx context.Context, settings catalog.CatalogSearchSettings) error {
+	return catalog.NewCatalogSearchIndexer(nil, nil).CheckConnection(ctx, settings)
 }
 
 func (h *AdminHandler) HandleCheckSettingsConnection(w http.ResponseWriter, r *http.Request) {
@@ -309,8 +320,10 @@ func checkMeilisearchConnection(ctx context.Context, settings map[string]string)
 		return connectionCheckResponse{Success: false, Message: "Meilisearch URL is required"}
 	}
 	searchSettings.Provider = catalog.SearchProviderMeilisearch
-	indexer := catalog.NewCatalogSearchIndexer(nil, nil)
-	if err := indexer.CheckConnection(ctx, searchSettings); err != nil {
+	if err := checkAdminMeilisearchSettingsConnection(ctx, searchSettings); err != nil {
+		if errors.Is(err, catalog.ErrMeilisearchCheckRedirected) {
+			return connectionCheckResponse{Message: adminMeilisearchRedirectMessage, safeMessage: adminMeilisearchRedirectMessage}
+		}
 		return connectionCheckResponse{Success: false, Message: err.Error()}
 	}
 	return connectionCheckResponse{Success: true, Message: "Meilisearch connection successful"}
@@ -337,6 +350,7 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 		merged[key] = value
 	}
 
+	storedMeilisearchURL := merged[catalog.SearchSettingMeilisearchURL]
 	var storedAIConfig *config.Config
 	if kind == "ai_chat" || kind == "ai_transcription" {
 		storedAIConfig, err = config.LoadFromDB(merged)
@@ -369,6 +383,11 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 	}
 	if kind == "recommendations_embedding" {
 		protectEmbeddingConnectionCheckSecret(req, storedEmbeddingBaseURL, merged)
+	}
+	if kind == "meilisearch" &&
+		(storedMeilisearchURL == "" || endpointAuthority(storedMeilisearchURL) != endpointAuthority(merged[catalog.SearchSettingMeilisearchURL])) &&
+		!hasExplicitDraftSecret(req, catalog.SearchSettingMeilisearchAPIKey) {
+		merged[catalog.SearchSettingMeilisearchAPIKey] = ""
 	}
 
 	return merged, nil
@@ -440,7 +459,30 @@ func endpointAuthority(rawURL string) string {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return strings.ToLower(trimmed)
 	}
-	return strings.ToLower(parsed.Scheme + "://" + parsed.Host)
+	scheme := strings.ToLower(parsed.Scheme)
+	// Compare the name net/http dials. It converts a non-ASCII host with IDNA
+	// lookup, which Unicode lowercasing does not match: "İ" lowercases to "i"
+	// but dials a punycode name. A host IDNA rejects equals only itself.
+	host := parsed.Hostname()
+	if strings.ContainsFunc(host, func(r rune) bool { return r >= utf8.RuneSelf }) {
+		ascii, idnaErr := idna.Lookup.ToASCII(host)
+		if idnaErr != nil {
+			return trimmed
+		}
+		host = ascii
+	}
+	host = strings.ToLower(host)
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	port := parsed.Port()
+	if number, _ := strconv.Atoi(port); (scheme == eventsSchemeHTTPS && number == 443) || (scheme == eventsSchemeHTTP && number == 80) {
+		port = ""
+	}
+	if port != "" {
+		host += ":" + port
+	}
+	return scheme + "://" + host
 }
 
 func checkS3PublicConnection(ctx context.Context, cfg *config.Config) connectionCheckResponse {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -205,6 +206,31 @@ func TestRelayMovesTranscodeOffUnreachableNodeToAnotherNode(t *testing.T) {
 	}
 	if got := healthy.starts.Load(); got != 1 {
 		t.Fatalf("starts = %d, want 1", got)
+	}
+}
+
+// TestRelayMoveSkipsTheDeadNodesRow covers a stream_nodes row repointed at a
+// replacement process while the old one hangs. The replacement shares the
+// dead node's row id, so a move there under the same transport id would leave
+// its card deletable by the old process; the move picks another node.
+func TestRelayMoveSkipsTheDeadNodesRow(t *testing.T) {
+	replacement := newFakeRehomeNode(t, false)
+	healthy := newFakeRehomeNode(t, false)
+	f := newRehomeFixture(t, []*nodepool.Node{
+		pooledNode(1, unreachableNodeURL(t)),
+		pooledNode(1, replacement.server.URL),
+		pooledNode(2, healthy.server.URL),
+	}, "ffmpeg")
+
+	rr := f.segment("seg_00003.ts")
+	if rr.Code != http.StatusOK || rr.Body.String() != "moved:seg_00003.ts" {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if got := replacement.starts.Load(); got != 0 {
+		t.Fatalf("starts on the dead node's row = %d, want 0", got)
+	}
+	if got := healthy.starts.Load(); got != 1 {
+		t.Fatalf("starts on the other node = %d, want 1", got)
 	}
 }
 
@@ -662,6 +688,99 @@ func TestMovedRecipeWriteRequiresTheLiveRoute(t *testing.T) {
 	f.handler.putNodeRecipeIfRouteV3(context.Background(), f.session.ID, live, *stored)
 	if _, ok := store.Get(context.Background(), rehomeTestTransport); ok {
 		t.Fatal("wrote the recipe back after the session stopped")
+	}
+}
+
+// sharedStopMarkers stands in for the deny markers every replica shares
+// (Redis in production). afterRead, when set, runs once each read has been
+// answered, with the read's number. failRead, when set, fails the read with
+// that number.
+type sharedStopMarkers struct {
+	mu        sync.Mutex
+	stopped   map[string]bool
+	afterRead func(read int)
+	failRead  int
+	reads     int
+}
+
+func useSharedStopMarkers(t *testing.T) *sharedStopMarkers {
+	t.Helper()
+	markers := &sharedStopMarkers{stopped: map[string]bool{}}
+	previous := readStopMarkerV3.Load()
+	reader := stopMarkerReaderV3(func(_ context.Context, _ *playback.StreamDeny, sessionID string) (bool, error) {
+		markers.mu.Lock()
+		markers.reads++
+		read, hook, stopped := markers.reads, markers.afterRead, markers.stopped[sessionID]
+		failed := markers.failRead != 0 && read == markers.failRead
+		markers.mu.Unlock()
+		if hook != nil {
+			hook(read)
+		}
+		if failed {
+			return false, errors.New("redis: i/o timeout")
+		}
+		return stopped, nil
+	})
+	readStopMarkerV3.Store(&reader)
+	t.Cleanup(func() { readStopMarkerV3.Store(previous) })
+	return markers
+}
+
+func (m *sharedStopMarkers) stop(sessionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopped[sessionID] = true
+}
+
+// TestMovedRecipeWriteUndoesItselfWhenAStopLandsMidWrite covers the stop on
+// another replica landing after this replica read the marker and before it
+// wrote: that stop's delete has already run, so the write re-reads the marker
+// and removes the card itself.
+func TestMovedRecipeWriteUndoesItselfWhenAStopLandsMidWrite(t *testing.T) {
+	healthy := newFakeRehomeNode(t, false)
+	f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, healthy.server.URL)}, "ffmpeg")
+	stored, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+	store := &sharedRecipeStore{cards: map[string]playback.RecipeCard{}}
+	f.handler.NodeRecipeStore = store
+	markers := useSharedStopMarkers(t)
+	markers.afterRead = func(read int) {
+		if read == 1 {
+			// The other replica's stop runs right after the first read.
+			markers.stop(f.session.ID)
+			_ = store.Delete(context.Background(), rehomeTestTransport)
+		}
+	}
+	live := playback.TranscodeRoute{NodeURL: f.deadURL, TransportID: rehomeTestTransport}
+	f.handler.putNodeRecipeIfRouteV3(context.Background(), f.session.ID, live, *stored)
+	if card, ok := store.Get(context.Background(), rehomeTestTransport); ok {
+		t.Fatalf("a write racing a stop elsewhere left the card: %+v", card)
+	}
+}
+
+// TestMovedRecipeWriteSurvivesAnUnreadableMarker pins the two reads around a
+// moved-card write. A marker that cannot be read before the write skips it; one
+// that cannot be read after it keeps the card, because deleting it would cost a
+// live session its restart recovery without any stop having happened.
+func TestMovedRecipeWriteSurvivesAnUnreadableMarker(t *testing.T) {
+	for _, tc := range []struct {
+		failRead int
+		wantCard bool
+	}{
+		{failRead: 1, wantCard: false},
+		{failRead: 2, wantCard: true},
+	} {
+		healthy := newFakeRehomeNode(t, false)
+		f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, healthy.server.URL)}, "ffmpeg")
+		stored, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+		store := &sharedRecipeStore{cards: map[string]playback.RecipeCard{}}
+		f.handler.NodeRecipeStore = store
+		markers := useSharedStopMarkers(t)
+		markers.failRead = tc.failRead
+		live := playback.TranscodeRoute{NodeURL: f.deadURL, TransportID: rehomeTestTransport}
+		f.handler.putNodeRecipeIfRouteV3(context.Background(), f.session.ID, live, *stored)
+		if _, ok := store.Get(context.Background(), rehomeTestTransport); ok != tc.wantCard {
+			t.Fatalf("read %d unreadable: card stored = %v, want %v", tc.failRead, ok, tc.wantCard)
+		}
 	}
 }
 

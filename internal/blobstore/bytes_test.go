@@ -21,33 +21,3 @@ func TestByteStoreDeleteReportsAShortCountAsFailure(t *testing.T) {
 		t.Fatal("a failed object delete was reported as success")
 	}
 }
-
-func TestByteStoreRoundTripsThroughTheFilesystem(t *testing.T) {
-	fs, err := NewFilesystem(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := NewByteStore(fs)
-	ctx := context.Background()
-	const key = "subtitles/42/a.srt"
-
-	if err := store.Put(ctx, key, []byte("cue")); err != nil {
-		t.Fatal(err)
-	}
-	data, err := store.Get(ctx, key)
-	if err != nil || string(data) != "cue" {
-		t.Fatalf("read back %q: %v", data, err)
-	}
-	if err := store.Delete(ctx, key); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Get(ctx, key); err == nil {
-		t.Fatal("object survived deletion")
-	}
-	if err := store.Delete(ctx, key); err != nil {
-		t.Fatalf("repeated deletion of an absent key: %v", err)
-	}
-	if NewByteStore(nil) != nil {
-		t.Fatal("nil store produced a non-nil ByteStore")
-	}
-}

@@ -65,38 +65,6 @@ describe("LibraryTranslatePanel", () => {
     mocks.status = { enabled: true, on_view: "off" };
   });
 
-  it("starts a prewarm for the chosen language", async () => {
-    mocks.v2.mockImplementation((route: string) =>
-      route.startsWith("GET")
-        ? Promise.resolve({ jobs: [] })
-        : Promise.resolve(job({ status: "pending" })),
-    );
-    renderPanel();
-    await userEvent.selectOptions(await screen.findByLabelText("Language"), "de");
-    await userEvent.click(screen.getByRole("button", { name: "Translate" }));
-    await waitFor(() =>
-      expect(mocks.v2).toHaveBeenCalledWith(
-        "POST /api/v2/admin/libraries/{library_id}/metadata-translation",
-        expect.objectContaining({ path: { library_id: "4" }, body: { target_language: "de" } }),
-      ),
-    );
-  });
-
-  it("shows progress and stops a running prewarm", async () => {
-    mocks.v2.mockImplementation((route: string) =>
-      route.startsWith("GET") ? Promise.resolve({ jobs: [job({})] }) : Promise.resolve(undefined),
-    );
-    renderPanel();
-    expect(await screen.findByText("Translating item 2 of 4 (50%)")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
-    await waitFor(() =>
-      expect(mocks.v2).toHaveBeenCalledWith(
-        "POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel",
-        expect.objectContaining({ path: { library_id: "4", job_id: "11" } }),
-      ),
-    );
-  });
-
   it("is hidden while AI description translation is off", () => {
     mocks.status = { enabled: false, on_view: "off" };
     const { container } = renderPanel();

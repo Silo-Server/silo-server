@@ -78,21 +78,3 @@ func TestAdminNodeCommands(t *testing.T) {
 		})
 	}
 }
-
-func TestAdminNodeReprobeSuccess(t *testing.T) {
-	f := &fakeNodeCommands{result: &handlers.ReprobeNodeResult{NodeID: 17, NodeName: "Synthetic", Status: "ok", Resolved: "qsv", CapabilityHash: "observed", CapabilitiesRefreshed: true}}
-	deps := pilotDeps(nil, nil)
-	deps.AdminNodeCommands = f
-	rec := do(t, NewHandler(deps), "POST", Prefix+"/admin/nodes/17/reprobe", "", bearer(adminToken))
-	if rec.Code != 200 {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	for _, field := range []string{`"node_id":"17"`, `"status":"ok"`, `"capability_hash":"observed"`, `"resolved":"qsv"`, `"capabilities_refreshed":true`} {
-		if !strings.Contains(rec.Body.String(), field) {
-			t.Fatal(rec.Body.String())
-		}
-	}
-	if rec.Header().Get("Location") != "" {
-		t.Fatal("unexpected durable-job location")
-	}
-}

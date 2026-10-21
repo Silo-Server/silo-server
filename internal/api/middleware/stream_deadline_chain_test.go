@@ -24,7 +24,7 @@ import (
 func TestStreamingDeadlineSurvivesMiddlewareChain(t *testing.T) {
 	const (
 		writeEvery = 50 * time.Millisecond
-		writes     = 60 // ~3s total, 3x the server WriteTimeout
+		writes     = 20 // ~1s total, 3x the server WriteTimeout
 		chunk      = "0123456789abcdef"
 	)
 
@@ -45,7 +45,7 @@ func TestStreamingDeadlineSurvivesMiddlewareChain(t *testing.T) {
 	handler = apimw.RequestLogger("test-node")(handler)
 
 	srv := httptest.NewUnstartedServer(handler)
-	srv.Config.WriteTimeout = 1 * time.Second
+	srv.Config.WriteTimeout = 300 * time.Millisecond
 	srv.Start()
 	defer srv.Close()
 

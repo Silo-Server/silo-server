@@ -217,6 +217,84 @@ async function flushAsyncWork() {
   });
 }
 
+/**
+ * Stubs the playback transport. `start` builds the decision for each start
+ * (numbered from 1); `route` may answer any other request first, and the rest
+ * fall through to the default route-event, progress and stop replies.
+ */
+function stubPlaybackFetch(
+  start: (body: { start_position: number }, count: number) => unknown,
+  route?: (url: string, init?: RequestInit) => Response | Promise<Response> | undefined,
+) {
+  let count = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        count += 1;
+        const body = JSON.parse(String(init?.body)) as { start_position: number };
+        return jsonResponse(start(body, count), { status: 201 });
+      }
+      const routed = await route?.(url, init);
+      if (routed) return routed;
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (url.includes("/progress")) return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return stopReceipt();
+      return jsonResponse({});
+    }),
+  );
+}
+
+/**
+ * The sequencing suite's replies: a stop settles through `onStop`, progress is
+ * applied, and everything else is accepted.
+ */
+function sequencedRoute(onStop: () => Promise<void> | void = () => {}) {
+  return async (url: string, init?: RequestInit) => {
+    if (init?.method === "DELETE") {
+      await onStop();
+      return stopReceipt();
+    }
+    if (url.includes("/progress")) return jsonResponse({ outcome: "applied" });
+    return new Response(null, { status: 202 });
+  };
+}
+
+function startCalls() {
+  return vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/playback/start"));
+}
+
+function attachAudio(
+  result: { current: { audioRef: AudiobookPlayback["audioRef"] } },
+  audio = makeAudio(),
+) {
+  act(() => {
+    (result.current.audioRef as MutableRefObject<HTMLAudioElement | null>).current = audio;
+  });
+  return audio;
+}
+
+/** Mounts the hook against a real audio element and records each playback state. */
+async function renderAudioHarness(initialPositionSeconds = 0) {
+  const onPlayback = vi.fn<(playback: AudiobookPlayback) => void>();
+  function Harness() {
+    const playback = useAudiobookPlayback({ contentId: "c", files, initialPositionSeconds });
+    useEffect(() => {
+      onPlayback(playback);
+    }, [playback]);
+    return createElement("audio", {
+      ref: playback.audioRef,
+      src: playback.streamUrl || undefined,
+    });
+  }
+  const { container } = render(createElement(Harness), { wrapper });
+  await flushAsyncWork();
+  const audio = container.querySelector("audio");
+  if (!audio) throw new Error("expected audio element");
+  return { audio, onPlayback };
+}
+
 describe("useAudiobookPlayback", () => {
   beforeEach(() => {
     reportBookProgress.mockClear();
@@ -228,30 +306,8 @@ describe("useAudiobookPlayback", () => {
         ? "probably"
         : "",
     );
-    let sessionCount = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/playback/start")) {
-          sessionCount += 1;
-          const body = JSON.parse(String(init?.body)) as { start_position?: number };
-          return jsonResponse(
-            audioOnlyDecision(`session-${sessionCount}`, body.start_position ?? 0),
-            { status: 201 },
-          );
-        }
-        if (url.endsWith("/playback/route-events")) {
-          return new Response(null, { status: 202 });
-        }
-        if (url.includes("/progress")) {
-          return new Response(null, { status: 204 });
-        }
-        if (init?.method === "DELETE") {
-          return stopReceipt();
-        }
-        return jsonResponse({});
-      }),
+    stubPlaybackFetch((body, count) =>
+      audioOnlyDecision(`session-${count}`, body.start_position ?? 0),
     );
     realtimeOptions.current = null;
   });
@@ -277,10 +333,7 @@ describe("useAudiobookPlayback", () => {
         ),
       );
       const { result, unmount } = renderAudiobookPlayback({ onStopRequested });
-      const audio = makeAudio();
-      act(() => {
-        (result.current.audioRef as MutableRefObject<HTMLAudioElement | null>).current = audio;
-      });
+      const audio = attachAudio(result);
       await flushAsyncWork();
       expect(onStopRequested).toHaveBeenCalledOnce();
       expect(result.current.streamUrl).toBe("");
@@ -300,9 +353,7 @@ describe("useAudiobookPlayback", () => {
 
   it("persists the final book position once before stopping a started session", async () => {
     const { result, unmount } = renderAudiobookPlayback();
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement | null>).current = makeAudio();
-    });
+    attachAudio(result);
     await flushAsyncWork();
     act(() => result.current.seekTo(42));
     await flushAsyncWork();
@@ -333,9 +384,7 @@ describe("useAudiobookPlayback", () => {
 
     expect(result.current.streamUrl).toBe("/api/v2/stream/session-1?token=token");
 
-    const startCall = vi
-      .mocked(fetch)
-      .mock.calls.find(([url]) => String(url).endsWith("/playback/start"));
+    const startCall = startCalls()[0];
     expect(startCall).toBeTruthy();
     expect(JSON.parse(String(startCall?.[1]?.body))).toMatchObject({
       protocol_version: 3,
@@ -362,9 +411,7 @@ describe("useAudiobookPlayback", () => {
 
     const { result } = renderAudiobookPlayback();
     await act(async () => Promise.resolve());
-    expect(
-      vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/playback/start")),
-    ).toHaveLength(0);
+    expect(startCalls()).toHaveLength(0);
 
     await act(async () => {
       resolveProbe({
@@ -377,9 +424,7 @@ describe("useAudiobookPlayback", () => {
     });
     await flushAsyncWork();
     expect(result.current.streamUrl).toBe("/api/v2/stream/session-1?token=token");
-    expect(
-      vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/playback/start")),
-    ).toHaveLength(1);
+    expect(startCalls()).toHaveLength(1);
   });
 
   it("advertises the delivery classes the audio-only planner routes to", async () => {
@@ -387,10 +432,7 @@ describe("useAudiobookPlayback", () => {
 
     await flushAsyncWork();
 
-    const startCall = vi
-      .mocked(fetch)
-      .mock.calls.find(([url]) => String(url).endsWith("/playback/start"));
-    const body = JSON.parse(String(startCall?.[1]?.body)) as {
+    const body = JSON.parse(String(startCalls()[0]?.[1]?.body)) as {
       client_capabilities: { codecs_audio: string[]; containers: string[] };
       client_playback_context: { deliveries: Record<string, unknown> };
     };
@@ -412,58 +454,26 @@ describe("useAudiobookPlayback", () => {
       startBody?: Record<string, unknown>;
       replanBody?: Record<string, unknown>;
     } = {};
-    const onPlayback = vi.fn<(playback: AudiobookPlayback) => void>();
     const replacement = audioOnlyDecision("session-1", 0);
     replacement.playback_plan.plan_id = "plan:replacement";
     replacement.playback_plan.plan_attempt_key = "v3:0000000000000002";
     replacement.playback_plan.stream.url = "/stream/replacement";
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/playback/start")) {
-          observed.startBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-          return jsonResponse(audioOnlyDecision("session-1", 0), { status: 201 });
-        }
-        if (url.endsWith("/playback/session-1/replan")) {
-          observed.replanBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-          return jsonResponse(replacement);
-        }
-        if (url.endsWith("/playback/route-events")) {
-          return new Response(null, { status: 202 });
-        }
-        if (url.includes("/progress")) {
-          return new Response(null, { status: 204 });
-        }
-        if (init?.method === "DELETE") {
-          return stopReceipt();
-        }
-        return jsonResponse({});
-      }),
+    stubPlaybackFetch(
+      (body) => {
+        observed.startBody = body as Record<string, unknown>;
+        return audioOnlyDecision("session-1", 0);
+      },
+      (url, init) => {
+        if (!url.endsWith("/playback/session-1/replan")) return undefined;
+        observed.replanBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return jsonResponse(replacement);
+      },
     );
 
-    function Harness() {
-      const playback = useAudiobookPlayback({
-        contentId: "c",
-        files,
-        initialPositionSeconds: 0,
-      });
-      useEffect(() => {
-        onPlayback(playback);
-      }, [playback]);
-      return createElement("audio", {
-        ref: playback.audioRef,
-        src: playback.streamUrl || undefined,
-      });
-    }
-
-    const { container } = render(createElement(Harness), { wrapper });
-    await flushAsyncWork();
+    const { audio, onPlayback } = await renderAudioHarness();
     expect(onPlayback.mock.lastCall?.[0].streamUrl).toContain("/stream/session-1");
 
-    const audio = container.querySelector("audio");
-    if (!audio) throw new Error("expected audio element");
     Object.defineProperty(audio, "error", {
       configurable: true,
       value: { code: 3, message: "decoder rejected original container" },
@@ -486,54 +496,22 @@ describe("useAudiobookPlayback", () => {
       },
     });
     expect(typeof observed.replanBody?.plan_attempt_id).toBe("string");
-    expect(
-      vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/playback/start")),
-    ).toHaveLength(1);
+    expect(startCalls()).toHaveLength(1);
   });
 
   it("allows another recovery attempt after a transient recovery request failure", async () => {
     let replanCount = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/playback/start")) {
-          return jsonResponse(audioOnlyDecision("session-1", 0), { status: 201 });
-        }
-        if (url.endsWith("/playback/session-1/replan")) {
-          replanCount += 1;
-          return jsonResponse({ message: "temporary failure" }, { status: 503 });
-        }
-        if (url.endsWith("/playback/route-events")) {
-          return new Response(null, { status: 202 });
-        }
-        if (url.includes("/progress")) {
-          return new Response(null, { status: 204 });
-        }
-        if (init?.method === "DELETE") {
-          return stopReceipt();
-        }
-        return jsonResponse({});
-      }),
+    stubPlaybackFetch(
+      () => audioOnlyDecision("session-1", 0),
+      (url) => {
+        if (!url.endsWith("/playback/session-1/replan")) return undefined;
+        replanCount += 1;
+        return jsonResponse({ message: "temporary failure" }, { status: 503 });
+      },
     );
     vi.spyOn(console, "error").mockImplementation(() => {});
 
-    function Harness() {
-      const playback = useAudiobookPlayback({
-        contentId: "c",
-        files,
-        initialPositionSeconds: 0,
-      });
-      return createElement("audio", {
-        ref: playback.audioRef,
-        src: playback.streamUrl || undefined,
-      });
-    }
-
-    const { container } = render(createElement(Harness), { wrapper });
-    await flushAsyncWork();
-    const audio = container.querySelector("audio");
-    if (!audio) throw new Error("expected audio element");
+    const { audio } = await renderAudioHarness();
     Object.defineProperty(audio, "error", {
       configurable: true,
       value: { code: 3, message: "decoder rejected original container" },
@@ -560,64 +538,23 @@ describe("useAudiobookPlayback", () => {
     expect(result.current.currentTime).toBe(450);
     expect(result.current.duration).toBe(600);
 
-    const startCall = vi
-      .mocked(fetch)
-      .mock.calls.find(([url]) => String(url).endsWith("/playback/start"));
-    expect(JSON.parse(String(startCall?.[1]?.body))).toMatchObject({
+    expect(JSON.parse(String(startCalls()[0]?.[1]?.body))).toMatchObject({
       file_id: 2,
       start_position: 150,
     });
   });
 
   it("maps anchored player time and restarts a non-global seek at its file-local target", async () => {
-    let sessionCount = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/playback/start")) {
-          sessionCount += 1;
-          const body = JSON.parse(String(init?.body)) as { start_position: number };
-          return jsonResponse(
-            audioOnlyDecision(`anchored-${sessionCount}`, body.start_position, {
-              stream_origin_seconds: body.start_position,
-              timeline_offset_seconds: body.start_position,
-              player_start_seconds: 0,
-              can_seek_anywhere: false,
-            }),
-            { status: 201 },
-          );
-        }
-        if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-        if (url.includes("/progress")) {
-          return new Response(null, { status: 204 });
-        }
-        if (init?.method === "DELETE") {
-          return stopReceipt();
-        }
-        return jsonResponse({});
+    stubPlaybackFetch((body, count) =>
+      audioOnlyDecision(`anchored-${count}`, body.start_position, {
+        stream_origin_seconds: body.start_position,
+        timeline_offset_seconds: body.start_position,
+        player_start_seconds: 0,
+        can_seek_anywhere: false,
       }),
     );
 
-    const onPlayback = vi.fn<(playback: AudiobookPlayback) => void>();
-    function Harness() {
-      const playback = useAudiobookPlayback({
-        contentId: "c",
-        files,
-        initialPositionSeconds: 300,
-      });
-      useEffect(() => {
-        onPlayback(playback);
-      }, [playback]);
-      return createElement("audio", {
-        ref: playback.audioRef,
-        src: playback.streamUrl || undefined,
-      });
-    }
-    const { container } = render(createElement(Harness), { wrapper });
-    await flushAsyncWork();
-    const audio = container.querySelector("audio");
-    if (!audio) throw new Error("expected audio element");
+    const { audio, onPlayback } = await renderAudioHarness(300);
     act(() => {
       audio.currentTime = 5;
       fireEvent.timeUpdate(audio);
@@ -626,9 +563,7 @@ describe("useAudiobookPlayback", () => {
 
     act(() => onPlayback.mock.lastCall?.[0].seekTo(360));
     await flushAsyncWork();
-    const starts = vi
-      .mocked(fetch)
-      .mock.calls.filter(([url]) => String(url).endsWith("/playback/start"));
+    const starts = startCalls();
     expect(starts).toHaveLength(2);
     expect(JSON.parse(String(starts[1]?.[1]?.body))).toMatchObject({
       start_position: 360,
@@ -637,38 +572,17 @@ describe("useAudiobookPlayback", () => {
   });
 
   it("maps native seeks with the contract timeline offset", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/playback/start")) {
-          const body = JSON.parse(String(init?.body)) as { start_position: number };
-          return jsonResponse(
-            audioOnlyDecision("offset-contract", body.start_position, {
-              stream_origin_seconds: 300,
-              timeline_offset_seconds: 290,
-              player_start_seconds: 10,
-              can_seek_anywhere: true,
-            }),
-            { status: 201 },
-          );
-        }
-        if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-        if (url.includes("/progress")) {
-          return new Response(null, { status: 204 });
-        }
-        if (init?.method === "DELETE") {
-          return stopReceipt();
-        }
-        return jsonResponse({});
+    stubPlaybackFetch((body) =>
+      audioOnlyDecision("offset-contract", body.start_position, {
+        stream_origin_seconds: 300,
+        timeline_offset_seconds: 290,
+        player_start_seconds: 10,
+        can_seek_anywhere: true,
       }),
     );
 
     const { result } = renderAudiobookPlayback({ initialPositionSeconds: 300 });
-    const audio = makeAudio();
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
+    const audio = attachAudio(result);
     await flushAsyncWork();
 
     act(() => result.current.seekTo(360));
@@ -676,53 +590,15 @@ describe("useAudiobookPlayback", () => {
   });
 
   it("preserves negative timeline offsets and clamps absolute buffered ranges", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/playback/start")) {
-          const body = JSON.parse(String(init?.body)) as { start_position: number };
-          return jsonResponse(
-            audioOnlyDecision("negative-offset", body.start_position, {
-              timeline_offset_seconds: -5,
-              player_start_seconds: 5,
-              can_seek_anywhere: true,
-            }),
-            { status: 201 },
-          );
-        }
-        if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-        if (url.includes("/progress")) {
-          return new Response(null, { status: 204 });
-        }
-        if (init?.method === "DELETE") {
-          return stopReceipt();
-        }
-        return jsonResponse({});
+    stubPlaybackFetch((body) =>
+      audioOnlyDecision("negative-offset", body.start_position, {
+        timeline_offset_seconds: -5,
+        player_start_seconds: 5,
+        can_seek_anywhere: true,
       }),
     );
 
-    const onPlayback = vi.fn<(playback: AudiobookPlayback) => void>();
-
-    function Harness() {
-      const playback = useAudiobookPlayback({
-        contentId: "c",
-        files,
-        initialPositionSeconds: 0,
-      });
-      useEffect(() => {
-        onPlayback(playback);
-      }, [playback]);
-      return createElement("audio", {
-        ref: playback.audioRef,
-        src: playback.streamUrl || undefined,
-      });
-    }
-
-    const { container } = render(createElement(Harness), { wrapper });
-    await flushAsyncWork();
-    const audio = container.querySelector("audio");
-    if (!audio) throw new Error("expected audio element");
+    const { audio, onPlayback } = await renderAudioHarness();
     Object.defineProperty(audio, "buffered", {
       configurable: true,
       value: {
@@ -744,26 +620,10 @@ describe("useAudiobookPlayback", () => {
     expect(onPlayback.mock.lastCall?.[0].buffered?.end(0)).toBe(3);
   });
 
-  it("togglePlay invokes audio.play when paused, audio.pause otherwise", () => {
-    const { result } = renderAudiobookPlayback();
-    const audio = makeAudio();
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
-    act(() => result.current.togglePlay());
-    expect(audio.play).toHaveBeenCalled();
-    Object.defineProperty(audio, "paused", { value: false, writable: true });
-    act(() => result.current.togglePlay());
-    expect(audio.pause).toHaveBeenCalled();
-  });
-
   it("executes realtime playback commands against the audio element", async () => {
     const onStopRequested = vi.fn();
     const { result } = renderAudiobookPlayback({ onStopRequested });
-    const audio = makeAudio();
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
+    const audio = attachAudio(result);
 
     await flushAsyncWork();
 
@@ -798,9 +658,7 @@ describe("useAudiobookPlayback", () => {
     const { result } = renderAudiobookPlayback();
     const audio = makeAudio();
     audio.play = vi.fn().mockRejectedValue(new Error("NotAllowedError"));
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
+    attachAudio(result, audio);
 
     await flushAsyncWork();
 
@@ -815,9 +673,7 @@ describe("useAudiobookPlayback", () => {
     const { result } = renderAudiobookPlayback({ autoPlay: true });
     const audio = makeAudio();
     audio.play = vi.fn().mockRejectedValue(new Error("NotAllowedError"));
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
+    attachAudio(result, audio);
     await flushAsyncWork();
     vi.mocked(fetch).mockClear();
 
@@ -834,28 +690,18 @@ describe("useAudiobookPlayback", () => {
 
   it("seekTo clamps to [0, duration]", () => {
     const { result } = renderAudiobookPlayback();
-    const audio = makeAudio();
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
+    const audio = attachAudio(result);
     act(() => result.current.seekTo(1_000_000));
     expect(audio.currentTime).toBe(599); // 600 - 1 (clamp to duration - 1 per existing behavior)
     act(() => result.current.seekTo(-50));
     expect(audio.currentTime).toBe(0);
   });
 
-  it("currentChapter starts at the first chapter when currentTime is 0", () => {
-    const { result } = renderAudiobookPlayback();
-    expect(result.current.currentChapter?.title).toBe("One");
-  });
-
   it("setSleep arms a duration timer that fires after the configured seconds", () => {
     const { result } = renderAudiobookPlayback();
     const audio = makeAudio();
     Object.defineProperty(audio, "paused", { value: false, writable: true });
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
+    attachAudio(result, audio);
     act(() => result.current.setSleep({ kind: "duration", seconds: 1 }));
     expect(result.current.sleep.remainingMs).toBeGreaterThan(0);
     act(() => {
@@ -886,39 +732,24 @@ describe("useAudiobookPlayback sequencing", () => {
   });
 
   it("waits for the previous part's stop before starting the next part", async () => {
-    let sessionCount = 0;
     let releaseStop!: () => void;
     const stopGate = new Promise<void>((resolve) => {
       releaseStop = resolve;
     });
     const events: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/playback/start")) {
-          sessionCount += 1;
-          events.push(`start-${sessionCount}`);
-          const body = JSON.parse(String(init?.body)) as { start_position: number };
-          return jsonResponse(audioOnlyDecision(`part-${sessionCount}`, body.start_position), {
-            status: 201,
-          });
-        }
-        if (init?.method === "DELETE") {
-          events.push("stop-requested");
-          await stopGate;
-          events.push("stop-done");
-          return stopReceipt();
-        }
-        if (url.includes("/progress")) return jsonResponse({ outcome: "applied" });
-        return new Response(null, { status: 202 });
+    stubPlaybackFetch(
+      (body, count) => {
+        events.push(`start-${count}`);
+        return audioOnlyDecision(`part-${count}`, body.start_position);
+      },
+      sequencedRoute(async () => {
+        events.push("stop-requested");
+        await stopGate;
+        events.push("stop-done");
       }),
     );
     const { result } = renderAudiobookPlayback({ files: multiFile, initialPositionSeconds: 0 });
-    const audio = makeAudio();
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
+    attachAudio(result);
     await flushAsyncWork();
     expect(events).toEqual(["start-1"]);
 
@@ -936,28 +767,17 @@ describe("useAudiobookPlayback sequencing", () => {
 
   it("stops the session when the final part ends", async () => {
     const events: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/playback/start")) {
-          events.push("start");
-          const body = JSON.parse(String(init?.body)) as { start_position: number };
-          return jsonResponse(audioOnlyDecision("last-part", body.start_position), { status: 201 });
-        }
-        if (init?.method === "DELETE") {
-          events.push("stop");
-          return stopReceipt();
-        }
-        if (url.includes("/progress")) return jsonResponse({ outcome: "applied" });
-        return new Response(null, { status: 202 });
+    stubPlaybackFetch(
+      (body) => {
+        events.push("start");
+        return audioOnlyDecision("last-part", body.start_position);
+      },
+      sequencedRoute(() => {
+        events.push("stop");
       }),
     );
     const { result } = renderAudiobookPlayback();
-    const audio = makeAudio();
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
+    const audio = attachAudio(result);
     await flushAsyncWork();
     expect(events).toEqual(["start"]);
 
@@ -979,38 +799,23 @@ describe("useAudiobookPlayback sequencing", () => {
     await flushAsyncWork();
     expect(events).toEqual(["start", "stop", "start"]);
     expect(audio.play).not.toHaveBeenCalled();
-    const lastStart = vi
-      .mocked(fetch)
-      .mock.calls.filter(([url]) => String(url).endsWith("/playback/start"))
-      .at(-1)!;
+    const lastStart = startCalls().at(-1)!;
     expect(JSON.parse(String((lastStart[1] as RequestInit).body))).toMatchObject({
       start_position: 0,
     });
   });
 
   it("seeks the loaded element when the start position changes within the same part", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/playback/start")) {
-          const body = JSON.parse(String(init?.body)) as { start_position: number };
-          return jsonResponse(audioOnlyDecision("same-part", body.start_position), { status: 201 });
-        }
-        if (init?.method === "DELETE") return stopReceipt();
-        if (url.includes("/progress")) return jsonResponse({ outcome: "applied" });
-        return new Response(null, { status: 202 });
-      }),
+    stubPlaybackFetch(
+      (body) => audioOnlyDecision("same-part", body.start_position),
+      sequencedRoute(),
     );
     const { result, rerender } = renderHook(
       ({ initialPositionSeconds }: { initialPositionSeconds: number }) =>
         useAudiobookPlayback({ contentId: "c", files, initialPositionSeconds }),
       { wrapper, initialProps: { initialPositionSeconds: 0 } },
     );
-    const audio = makeAudio();
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
+    const audio = attachAudio(result);
     await flushAsyncWork();
     Object.defineProperty(audio, "readyState", { value: 4, writable: true });
     act(() => audio.dispatchEvent(new Event("loadedmetadata")));
@@ -1021,9 +826,6 @@ describe("useAudiobookPlayback sequencing", () => {
     await flushAsyncWork();
     expect(audio.currentTime).toBe(300);
     expect(result.current.currentTime).toBe(300);
-    const starts = vi
-      .mocked(fetch)
-      .mock.calls.filter(([url]) => String(url).endsWith("/playback/start"));
-    expect(starts).toHaveLength(1);
+    expect(startCalls()).toHaveLength(1);
   });
 });

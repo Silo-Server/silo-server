@@ -44,18 +44,19 @@ func tmdbListTestServer(entries int, onLookup func()) *httptest.Server {
 	}))
 }
 
-func TestTMDBListAdapterKeepsListOrderWithExternalIDs(t *testing.T) {
+func TestTMDBEnrichExternalIDsFillsEntriesInPlace(t *testing.T) {
 	server := tmdbListTestServer(20, nil)
 	defer server.Close()
 	client := tmdb.NewClient("test-key", 1000)
 	client.SetBaseURL(server.URL)
+	adapter := &tmdbListAdapter{client: client}
 
-	entries, err := (&tmdbListAdapter{client: client}).GetList(t.Context(), 310, 0)
+	entries, err := adapter.GetList(t.Context(), 310, 0)
 	if err != nil {
 		t.Fatalf("GetList: %v", err)
 	}
-	if len(entries) != 20 {
-		t.Fatalf("entries = %d, want 20", len(entries))
+	if err := adapter.EnrichExternalIDs(t.Context(), entries); err != nil {
+		t.Fatalf("EnrichExternalIDs: %v", err)
 	}
 	for i, entry := range entries {
 		id := i + 1
@@ -65,15 +66,20 @@ func TestTMDBListAdapterKeepsListOrderWithExternalIDs(t *testing.T) {
 	}
 }
 
-func TestTMDBListAdapterStopsWhenCancelledDuringLookups(t *testing.T) {
+func TestTMDBEnrichExternalIDsStopsWhenCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	var once sync.Once
 	server := tmdbListTestServer(20, func() { once.Do(cancel) })
 	defer server.Close()
 	client := tmdb.NewClient("test-key", 1000)
 	client.SetBaseURL(server.URL)
+	adapter := &tmdbListAdapter{client: client}
 
-	if _, err := (&tmdbListAdapter{client: client}).GetList(ctx, 310, 0); !errors.Is(err, context.Canceled) {
-		t.Fatalf("GetList error = %v, want context.Canceled", err)
+	entries, err := adapter.GetList(t.Context(), 310, 0)
+	if err != nil {
+		t.Fatalf("GetList: %v", err)
+	}
+	if err := adapter.EnrichExternalIDs(ctx, entries); !errors.Is(err, context.Canceled) {
+		t.Fatalf("EnrichExternalIDs error = %v, want context.Canceled", err)
 	}
 }

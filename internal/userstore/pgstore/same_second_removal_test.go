@@ -1,13 +1,8 @@
 package pgstore
 
 import (
-	"context"
-	"fmt"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -17,22 +12,9 @@ import (
 // write later in the same second as the removal must stay visible, while one
 // at or before the removal stays hidden.
 func TestImportedWritesAfterSameSecondRemovalDB(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
+	pool := testPool(t)
 	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	var userID int
-	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`,
-		fmt.Sprintf("same-second-removal-%d", time.Now().UnixNano())).Scan(&userID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
+	userID := seedTestUser(t, pool, "same-second-removal")
 	store := newStore(pool, userID)
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Viewer"}); err != nil {
 		t.Fatal(err)

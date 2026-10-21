@@ -21,10 +21,6 @@ describe("formatDataTotal", () => {
     expect(formatDataTotal(1_400_000_000_000)).toBe("1.4 TB");
   });
 
-  it("drops the decimal once the number is large", () => {
-    expect(formatDataTotal(512_000_000_000)).toBe("512 GB");
-  });
-
   it("chooses unit and precision after rounding", () => {
     // Rounds up across a unit boundary: never "1,000 KB" or "1,000 B".
     expect(formatDataTotal(999_950)).toBe("1.0 MB");

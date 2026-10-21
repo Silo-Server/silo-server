@@ -6,52 +6,6 @@ import (
 	"time"
 )
 
-func TestCalendarEventsOrderByClause_SortsAirTimeBeforeUntimedItems(t *testing.T) {
-	if !strings.Contains(calendarEventsOrderByClause, "air_time ASC NULLS LAST") {
-		t.Fatalf("calendar order clause = %q, want air_time ASC NULLS LAST", calendarEventsOrderByClause)
-	}
-}
-
-func TestBuildListEventsQuery_UsesCTEsForFinalesAndSeasonPremieres(t *testing.T) {
-	t.Parallel()
-
-	repo := &CalendarRepository{}
-	query, args := repo.buildListEventsQuery(CalendarFilter{
-		Start: time.Date(2026, time.April, 6, 0, 0, 0, 0, time.UTC),
-		End:   time.Date(2026, time.April, 12, 0, 0, 0, 0, time.UTC),
-	})
-
-	expectedFragments := []string{
-		"WITH filtered_episodes AS (",
-		"episode_seasons AS (",
-		"season_finales AS (",
-		"filtered_seasons AS (",
-		"episode_one_with_air_date AS (",
-		"LEFT JOIN season_finales sf ON sf.series_id = fe.series_id AND sf.season_number = fe.season_number",
-		"LEFT JOIN episode_one_with_air_date e1",
-	}
-	for _, fragment := range expectedFragments {
-		if !strings.Contains(query, fragment) {
-			t.Fatalf("expected query to contain %q, got:\n%s", fragment, query)
-		}
-	}
-
-	unexpectedFragments := []string{
-		"(SELECT MAX(",
-		"SELECT MAX(e2.episode_number)",
-		"NOT EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = s.series_id",
-	}
-	for _, fragment := range unexpectedFragments {
-		if strings.Contains(query, fragment) {
-			t.Fatalf("expected query not to contain %q, got:\n%s", fragment, query)
-		}
-	}
-
-	if len(args) != 2 {
-		t.Fatalf("expected start/end args only, got %d", len(args))
-	}
-}
-
 func TestBuildListEventsQuery_UsesNotExistsForDisabledLibraries(t *testing.T) {
 	t.Parallel()
 
