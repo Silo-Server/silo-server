@@ -2040,7 +2040,12 @@ the normalized quality or carries `learned_limit: "clear"`;
 or `subtitle_track_changed` changes the corresponding selected track. Explicit
 `track_change` replans, seeks and recoveries without an intent change do not run
 this search. A plan that the stored limit actually lowered adds
-`bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`.
+`bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`. The server
+plans the same start or replan again without the limit, and without an
+`observed_rebuffer` estimate the request carries, and keeps the field only when
+that plan sends more, so a version that compatibility alone picks carries no
+field. A replan that starts from the version playing and stays on it keeps the
+field when the plan it replaces had it.
 
 `playback_plan_summary_v1` advertises the `plan_summary` route event. It adds
 `played_ms`, `stall_count`, `stall_total_ms`, `stall_longest_ms`,

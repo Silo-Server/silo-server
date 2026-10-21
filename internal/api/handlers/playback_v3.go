@@ -56,6 +56,7 @@ const (
 	subtitleUnavailableReasonV3   = "subtitle_artifact_unavailable"
 	subtitleTrackKindV3           = "subtitle"
 	transcodeStartFailedReasonV3  = "transcode_start_failed"
+	trackUnavailableReasonV3      = "track_unavailable"
 	capabilityUnavailableReasonV3 = "transcode_node_capability_unavailable"
 	// transportStartupReadyV3 is the "outcome" of a transport startup whose
 	// first manifest became ready.
@@ -1942,12 +1943,8 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		alternateBase = effectiveFile
 	}
 	// The start without the limit, planned only when the plan would carry the
-	// limit's label, to check that the limit lowered it. A stall this request
-	// reports becomes the limit, so its estimate goes too.
-	unlimitedReq, unlimitedFile, unlimitedAudioIndex := req, effectiveFile, audioIndex
-	if unlimitedReq.BandwidthEstimateSource == playback.BandwidthEstimateObservedRebufferV3 {
-		unlimitedReq.BandwidthEstimateKbps, unlimitedReq.BandwidthEstimateSource = nil, ""
-	}
+	// limit's label, to check that the limit lowered it.
+	unlimitedReq, unlimitedFile, unlimitedAudioIndex := withoutObservedEstimateV3(req), effectiveFile, audioIndex
 	learnedLimit, limitErr := h.applyLearnedLimit(r, &req, true)
 	if limitErr != nil {
 		return playback.DecisionResponseV3{}, playbackStoreOperationError()
@@ -5046,6 +5043,182 @@ func (h *PlaybackHandler) raceCopySafetyV3(fileID int, plan *playback.PlanV3) {
 	h.CopySafetyRacer.RaceScanForPlan(fileID, plan)
 }
 
+// replanPlanningV3 is what every planning pass of one replan shares: the
+// requested edition (loaded, and as the planner names it), the version playing
+// and its request, for an output change to fall back to, and the lower
+// version, settings and failed routes the planner works from.
+type replanPlanningV3 struct {
+	operation                    playback.ReplanOperationV3
+	requestedFile                *models.MediaFile
+	plannerRequestedFile         *models.MediaFile
+	currentEffectiveFile         *models.MediaFile
+	currentEffectiveStart        playback.StartRequestV3
+	lowerVersion                 *playback.LowerVersionV3
+	settings                     playback.PlannerSettingsV3
+	attemptedKeys                []string
+	keptActiveEditionForSubtitle bool
+}
+
+// replanPassV3 is a replan's plan and how it degraded the viewer's audio and
+// subtitle selection.
+type replanPassV3 struct {
+	alternateCandidateV3
+	audioDegraded, subtitleDegraded, subtitleNotShown bool
+}
+
+// planReplanV3 plans a replan of effectiveFile for start. An output change the
+// planner refuses falls back to the version playing, and a refusal another
+// version can avoid falls back to another version (planReplanAlternateV3).
+// audioDegraded is the audio selection's state before planning.
+func (h *PlaybackHandler) planReplanV3(r *http.Request, p replanPlanningV3, start playback.StartRequestV3, effectiveFile *models.MediaFile, audioIndex int, audioDegraded bool) (replanPassV3, *transportErrorV3) {
+	// An output change that falls back to the playing edition plans under the
+	// same estimate, and so the same limit.
+	currentEffectiveStart := p.currentEffectiveStart
+	currentEffectiveStart.BandwidthEstimateKbps = start.BandwidthEstimateKbps
+	currentEffectiveStart.BandwidthEstimateSource = start.BandwidthEstimateSource
+	additional, inventoryErr := h.listDownloadedSubtitlesV3(r.Context(), effectiveFile)
+	if inventoryErr != nil && (p.operation == playback.ReplanOperationTrackChangeV3 || p.operation == playback.ReplanOperationQualityChangeV3) && selectsDownloadedSubtitleV3(effectiveFile, start) {
+		// A failed lookup says nothing about whether the selected track
+		// exists. Planning without it would turn the subtitle off, and
+		// later replans start from that plan's tracks, so it would stay
+		// off for the rest of the session. The playing plan carries on
+		// and the viewer can repeat the change.
+		return replanPassV3{}, subtitleArtifactErrorV3("Downloaded subtitles are temporarily unavailable.", inventoryErr)
+	}
+	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: p.plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(p.lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: p.settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: additional})
+	if p.operation == playback.ReplanOperationOutputChangeV3 && result.Terminal != nil && effectiveFile.ID != p.currentEffectiveFile.ID {
+		// Returning to the requested edition is speculative during an output
+		// refresh. Any terminal from that probe must fall back to the edition
+		// already playing, not only HDR/alternate-selection terminals: its audio,
+		// subtitle, or delivery constraints may still differ from the active file.
+		start = currentEffectiveStart
+		start.FileID = p.currentEffectiveFile.ID
+		effectiveFile = p.currentEffectiveFile
+		var err error
+		audioIndex, audioDegraded, err = resolveV3AudioIndex(effectiveFile, start.AudioTrackID, start.AudioTrackIndex)
+		if err != nil {
+			return replanPassV3{}, &transportErrorV3{reason: trackUnavailableReasonV3, message: err.Error()}
+		}
+		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: p.plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(p.lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: p.settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+	}
+	planned := replanPassV3{alternateCandidateV3: alternateCandidateV3{file: effectiveFile, request: start, audioIndex: audioIndex, result: result, toneMapErr: toneMapCapabilityErr}, audioDegraded: audioDegraded}
+	if start.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(p.operation) {
+		planned.alternateCandidateV3, planned.subtitleDegraded, planned.subtitleNotShown = h.planReplanAlternateV3(r, p, planned.alternateCandidateV3)
+	}
+	return planned, nil
+}
+
+// planReplanAlternateV3 replaces planned, which the planner refused for a
+// reason another version can avoid, with the first authorized version that
+// plans. A version that drops the viewer's subtitle is held back in case none
+// keeps it; when every version that plays drops it, planned's own file without
+// the subtitle comes first, and when none plays, the first refusal stands.
+func (h *PlaybackHandler) planReplanAlternateV3(r *http.Request, p replanPlanningV3, planned alternateCandidateV3) (chosen alternateCandidateV3, subtitleDegraded, subtitleNotShown bool) {
+	start, effectiveFile, audioIndex, result, toneMapCapabilityErr := planned.request, planned.file, planned.audioIndex, planned.result, planned.toneMapErr
+	accessFilter := requestAccessFilter(r)
+	alternates, alternateErr := h.findAlternateFiles(r.Context(), p.requestedFile, accessFilter)
+	if p.keptActiveEditionForSubtitle {
+		// The requested edition was passed over only to keep the subtitle;
+		// it can still play without it if nothing else can, whether or not
+		// sibling discovery succeeded.
+		alternates = append(alternates, p.requestedFile)
+		alternateErr = nil
+	}
+	if alternateErr != nil {
+		return planned, false, false
+	}
+	baseStart := start
+	baseEffectiveFile := effectiveFile
+	baseAudioIndex := audioIndex
+	var firstFailureResult playback.PlannerResultV3
+	var firstFailureToneMapErr error
+	var firstFailureFile *models.MediaFile
+	var firstFailureStart playback.StartRequestV3
+	firstFailureAudioIndex := 0
+	var droppedSubtitle *alternateCandidateV3
+	for _, alternate := range alternates {
+		if alternate.ID == baseEffectiveFile.ID {
+			continue
+		}
+		candidateFile := h.ensurePlaybackProbe(r.Context(), alternate)
+		// The sibling was authorized on its stored resolution, which
+		// its first probe can fill in above the viewer's ceiling.
+		if !catalog.FileAllowedByAccess(candidateFile, accessFilter) {
+			continue
+		}
+		candidateStart := baseStart
+		candidateAudioIndex := remapAudioIndexV3(baseEffectiveFile, candidateFile, baseAudioIndex)
+		var candidateResult playback.PlannerResultV3
+		var candidateToneMapErr error
+		subtitleDropped, err := h.remapSubtitleSelectionV3(r.Context(), baseEffectiveFile, candidateFile, &candidateStart)
+		if err != nil {
+			candidateResult = playback.PlannerResultV3{Terminal: &playback.TerminalV3{
+				Reason:    terminalSubtitleUnavailableInVersionV3,
+				Message:   "The selected subtitle track is unavailable in the fallback media version.",
+				Retryable: false,
+			}}
+		} else {
+			candidateStart.FileID = candidateFile.ID
+			if err := preflightPlaybackFile(r.Context(), candidateFile, h.MissingMarker, h.EventsHub); err != nil {
+				continue
+			}
+			candidateResult, candidateToneMapErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: candidateStart, RequestedFile: p.plannerRequestedFile, EffectiveFile: candidateFile, LowerVersion: lowerVersionForFileV3(p.lowerVersion, candidateFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: candidateAudioIndex, Settings: p.settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidateFile), Now: time.Now(), AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidateFile)})
+		}
+		if candidateResult.Terminal == nil && subtitleDropped {
+			// Prefer a version that keeps the viewer's subtitle; hold
+			// this one back in case none does. The requested edition,
+			// listed last when it was passed over only for the
+			// subtitle, outranks any other version held back.
+			if droppedSubtitle == nil || candidateFile.ID == p.requestedFile.ID {
+				droppedSubtitle = &alternateCandidateV3{file: candidateFile, request: candidateStart, audioIndex: candidateAudioIndex, result: candidateResult, toneMapErr: candidateToneMapErr}
+			}
+			continue
+		}
+		if candidateResult.Terminal == nil {
+			start = candidateStart
+			effectiveFile = candidateFile
+			audioIndex = candidateAudioIndex
+			result = candidateResult
+			toneMapCapabilityErr = candidateToneMapErr
+			break
+		}
+		if firstFailureFile == nil {
+			firstFailureResult = candidateResult
+			firstFailureToneMapErr = candidateToneMapErr
+			firstFailureFile = candidateFile
+			firstFailureStart = candidateStart
+			firstFailureAudioIndex = candidateAudioIndex
+		}
+	}
+	// A held-back requested edition is already the picture the
+	// viewer asked for, so it keeps its place.
+	if result.Terminal != nil && droppedSubtitle != nil && droppedSubtitle.file.ID != p.requestedFile.ID && subtitleRefusalV3(result.Terminal) {
+		// The planner pinned the effective file's refusal on the
+		// subtitle, and every sibling that plays drops the subtitle
+		// too. Playing the effective file without it keeps its
+		// picture, when that plan can run.
+		if candidate := h.planWithoutSubtitleV3(r.Context(), playback.PlannerInputV3{Request: baseStart, RequestedFile: p.plannerRequestedFile, EffectiveFile: baseEffectiveFile, LowerVersion: lowerVersionForFileV3(p.lowerVersion, baseEffectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: baseAudioIndex, Settings: p.settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), baseEffectiveFile), Now: time.Now(), AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), baseEffectiveFile)}); candidate != nil {
+			droppedSubtitle = candidate
+			subtitleNotShown = true
+		}
+	}
+	if result.Terminal != nil && droppedSubtitle != nil {
+		start = droppedSubtitle.request
+		effectiveFile = droppedSubtitle.file
+		audioIndex = droppedSubtitle.audioIndex
+		result = droppedSubtitle.result
+		toneMapCapabilityErr = droppedSubtitle.toneMapErr
+		subtitleDegraded = true
+	} else if result.Terminal != nil && firstFailureFile != nil {
+		start = firstFailureStart
+		effectiveFile = firstFailureFile
+		audioIndex = firstFailureAudioIndex
+		result = firstFailureResult
+		toneMapCapabilityErr = firstFailureToneMapErr
+	}
+	return alternateCandidateV3{file: effectiveFile, request: start, audioIndex: audioIndex, result: result, toneMapErr: toneMapCapabilityErr}, subtitleDegraded, subtitleNotShown
+}
+
 // executeReplanV3 prepares an atomic replacement for a failed playback route.
 func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.AttemptRecordV3, req playback.ReplanRequestV3) (playback.DecisionResponseV3, playback.AttemptRecordV3, *preparedTransportV3, *transportErrorV3) {
 	r = r.WithContext(withPlaybackRoutingPolicySnapshotV3(r.Context(), h.playbackRoutingPolicyV3()))
@@ -5252,7 +5425,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				// repeated once the downloaded subtitles can be read.
 				return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("Downloaded subtitles are temporarily unavailable.", remapErr)
 			} else if remapErr != nil {
-				return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: remapErr.Error()}
+				return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: trackUnavailableReasonV3, message: remapErr.Error()}
 			} else {
 				start = candidateStart
 				subtitleDegraded = subtitleDegraded || subtitleDropped
@@ -5284,7 +5457,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	if !seekReanchor {
 		audioIndex, audioDegraded, err = resolveV3AudioIndex(effectiveFile, start.AudioTrackID, start.AudioTrackIndex)
 		if err != nil {
-			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
+			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: trackUnavailableReasonV3, message: err.Error()}
 		}
 	}
 	// A recovery whose node stopped answering failed on the node, not on its
@@ -5329,16 +5502,15 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	var plannerSettingsErr error
 	var lowerVersion *playback.LowerVersionV3
 	var learnedLimit *playback.BandwidthLimitV3
+	// The replan without the learned limit, planned again only when the plan
+	// would carry the limit's label, to check that the limit lowered it.
+	unlimitedStart, unlimitedFile, unlimitedAudioIndex := withoutObservedEstimateV3(start), effectiveFile, audioIndex
 	if !seekReanchor {
 		var limitErr error
 		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)
 		if limitErr != nil {
 			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: limitErr}
 		}
-		// An output change that falls back to the playing edition plans under
-		// the same limit.
-		currentEffectiveStart.BandwidthEstimateKbps = start.BandwidthEstimateKbps
-		currentEffectiveStart.BandwidthEstimateSource = start.BandwidthEstimateSource
 		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
 		// A quality change, and an output change that went back to the
 		// requested edition, choose a version again. Under a buffering budget
@@ -5350,6 +5522,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		if requestedEditionResolved {
 			lowerVersion = h.lowerVersionV3(r.Context(), start, requestedFile, plannerSettings, requestAccessFilter(r))
 		}
+	}
+	planning := replanPlanningV3{
+		operation: operation, requestedFile: requestedFile, plannerRequestedFile: plannerRequestedFile,
+		currentEffectiveFile: currentEffectiveFile, currentEffectiveStart: currentEffectiveStart,
+		lowerVersion: lowerVersion, settings: plannerSettings, attemptedKeys: attemptedKeys,
+		keptActiveEditionForSubtitle: keptActiveEditionForSubtitle,
 	}
 	if seekReanchor {
 		if err := h.validateFrozenSubtitleIdentityV3(r.Context(), effectiveFile, record.FrozenRecipe); err != nil {
@@ -5365,132 +5543,13 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			}
 		}
 	} else {
-		additional, inventoryErr := h.listDownloadedSubtitlesV3(r.Context(), effectiveFile)
-		if inventoryErr != nil && (trackChange || qualityChange) && selectsDownloadedSubtitleV3(effectiveFile, start) {
-			// A failed lookup says nothing about whether the selected track
-			// exists. Planning without it would turn the subtitle off, and
-			// later replans start from that plan's tracks, so it would stay
-			// off for the rest of the session. The playing plan carries on
-			// and the viewer can repeat the change.
-			return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("Downloaded subtitles are temporarily unavailable.", inventoryErr)
+		planned, planErr := h.planReplanV3(r, planning, start, effectiveFile, audioIndex, audioDegraded)
+		if planErr != nil {
+			return playback.DecisionResponseV3{}, *record, nil, planErr
 		}
-		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: additional})
-	}
-	if outputChange && result.Terminal != nil && effectiveFile.ID != currentEffectiveFile.ID {
-		// Returning to the requested edition is speculative during an output
-		// refresh. Any terminal from that probe must fall back to the edition
-		// already playing, not only HDR/alternate-selection terminals: its audio,
-		// subtitle, or delivery constraints may still differ from the active file.
-		start = currentEffectiveStart
-		start.FileID = currentEffectiveFile.ID
-		effectiveFile = currentEffectiveFile
-		audioIndex, audioDegraded, err = resolveV3AudioIndex(effectiveFile, start.AudioTrackID, start.AudioTrackIndex)
-		if err != nil {
-			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
-		}
-		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
-	}
-	if start.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(operation) { //nolint:nestif // existing alternate-version fallback; only its quality condition changed
-		accessFilter := requestAccessFilter(r)
-		alternates, alternateErr := h.findAlternateFiles(r.Context(), requestedFile, accessFilter)
-		if keptActiveEditionForSubtitle {
-			// The requested edition was passed over only to keep the subtitle;
-			// it can still play without it if nothing else can, whether or not
-			// sibling discovery succeeded.
-			alternates = append(alternates, requestedFile)
-			alternateErr = nil
-		}
-		if alternateErr == nil {
-			baseStart := start
-			baseEffectiveFile := effectiveFile
-			baseAudioIndex := audioIndex
-			var firstFailureResult playback.PlannerResultV3
-			var firstFailureToneMapErr error
-			var firstFailureFile *models.MediaFile
-			var firstFailureStart playback.StartRequestV3
-			firstFailureAudioIndex := 0
-			var droppedSubtitle *alternateCandidateV3
-			for _, alternate := range alternates {
-				if alternate.ID == baseEffectiveFile.ID {
-					continue
-				}
-				candidateFile := h.ensurePlaybackProbe(r.Context(), alternate)
-				// The sibling was authorized on its stored resolution, which
-				// its first probe can fill in above the viewer's ceiling.
-				if !catalog.FileAllowedByAccess(candidateFile, accessFilter) {
-					continue
-				}
-				candidateStart := baseStart
-				candidateAudioIndex := remapAudioIndexV3(baseEffectiveFile, candidateFile, baseAudioIndex)
-				var candidateResult playback.PlannerResultV3
-				var candidateToneMapErr error
-				subtitleDropped, err := h.remapSubtitleSelectionV3(r.Context(), baseEffectiveFile, candidateFile, &candidateStart)
-				if err != nil {
-					candidateResult = playback.PlannerResultV3{Terminal: &playback.TerminalV3{
-						Reason:    terminalSubtitleUnavailableInVersionV3,
-						Message:   "The selected subtitle track is unavailable in the fallback media version.",
-						Retryable: false,
-					}}
-				} else {
-					candidateStart.FileID = candidateFile.ID
-					if err := preflightPlaybackFile(r.Context(), candidateFile, h.MissingMarker, h.EventsHub); err != nil {
-						continue
-					}
-					candidateResult, candidateToneMapErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: candidateStart, RequestedFile: plannerRequestedFile, EffectiveFile: candidateFile, LowerVersion: lowerVersionForFileV3(lowerVersion, candidateFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: candidateAudioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidateFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidateFile)})
-				}
-				if candidateResult.Terminal == nil && subtitleDropped {
-					// Prefer a version that keeps the viewer's subtitle; hold
-					// this one back in case none does. The requested edition,
-					// listed last when it was passed over only for the
-					// subtitle, outranks any other version held back.
-					if droppedSubtitle == nil || candidateFile.ID == requestedFile.ID {
-						droppedSubtitle = &alternateCandidateV3{file: candidateFile, request: candidateStart, audioIndex: candidateAudioIndex, result: candidateResult, toneMapErr: candidateToneMapErr}
-					}
-					continue
-				}
-				if candidateResult.Terminal == nil {
-					start = candidateStart
-					effectiveFile = candidateFile
-					audioIndex = candidateAudioIndex
-					result = candidateResult
-					toneMapCapabilityErr = candidateToneMapErr
-					break
-				}
-				if firstFailureFile == nil {
-					firstFailureResult = candidateResult
-					firstFailureToneMapErr = candidateToneMapErr
-					firstFailureFile = candidateFile
-					firstFailureStart = candidateStart
-					firstFailureAudioIndex = candidateAudioIndex
-				}
-			}
-			// A held-back requested edition is already the picture the
-			// viewer asked for, so it keeps its place.
-			if result.Terminal != nil && droppedSubtitle != nil && droppedSubtitle.file.ID != requestedFile.ID && subtitleRefusalV3(result.Terminal) {
-				// The planner pinned the effective file's refusal on the
-				// subtitle, and every sibling that plays drops the subtitle
-				// too. Playing the effective file without it keeps its
-				// picture, when that plan can run.
-				if candidate := h.planWithoutSubtitleV3(r.Context(), playback.PlannerInputV3{Request: baseStart, RequestedFile: plannerRequestedFile, EffectiveFile: baseEffectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, baseEffectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: baseAudioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), baseEffectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), baseEffectiveFile)}); candidate != nil {
-					droppedSubtitle = candidate
-					subtitleNotShown = true
-				}
-			}
-			if result.Terminal != nil && droppedSubtitle != nil {
-				start = droppedSubtitle.request
-				effectiveFile = droppedSubtitle.file
-				audioIndex = droppedSubtitle.audioIndex
-				result = droppedSubtitle.result
-				toneMapCapabilityErr = droppedSubtitle.toneMapErr
-				subtitleDegraded = true
-			} else if result.Terminal != nil && firstFailureFile != nil {
-				start = firstFailureStart
-				effectiveFile = firstFailureFile
-				audioIndex = firstFailureAudioIndex
-				result = firstFailureResult
-				toneMapCapabilityErr = firstFailureToneMapErr
-			}
-		}
+		start, effectiveFile, audioIndex, result, toneMapCapabilityErr = planned.request, planned.file, planned.audioIndex, planned.result, planned.toneMapErr
+		audioDegraded, subtitleNotShown = planned.audioDegraded, planned.subtitleNotShown
+		subtitleDegraded = subtitleDegraded || planned.subtitleDegraded
 	}
 	result = retryIncompleteToneMapPlanningV3(result, toneMapCapabilityErr)
 	result = retryIncompletePlaybackSettingsV3(result, plannerSettingsErr)
@@ -5516,6 +5575,18 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	// Marked on the plan that will run, after every fallback that can replace it.
 	markLearnedLimit(&result, learnedLimit, requestedFile, start, serverBitrateCapV3(r.Context()))
+	// A replan that starts from the version playing and stays on it (a track
+	// change, a recovery, Auto again) keeps the version an earlier plan chose:
+	// when the limit lowered that plan, it still lowers this one. Any other
+	// label stands only if the same replan without the limit plays more, as
+	// bitrates alone cannot tell whether the requested file could play.
+	staysLimited := (!intentChange || trackChange) && effectiveFile.ID == record.EffectiveMediaFileID && record.CurrentPlan.BandwidthLimit != nil
+	if result.Plan != nil && result.Plan.BandwidthLimit != nil && !staysLimited {
+		unlimited, unlimitedErr := h.planReplanV3(r, planning, unlimitedStart, unlimitedFile, unlimitedAudioIndex, false)
+		if unlimitedErr != nil || unlimited.result.Plan == nil || deliveredKbpsV3(result.Plan) >= deliveredKbpsV3(unlimited.result.Plan) {
+			result.Plan.BandwidthLimit = nil
+		}
+	}
 	if result.Terminal != nil {
 		return playback.NewTerminalResponseV3(result.Terminal.Reason, result.Terminal.Message, result.Terminal.Retryable), *record, nil, nil
 	}

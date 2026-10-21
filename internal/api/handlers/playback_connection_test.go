@@ -425,6 +425,83 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 	}
 }
 
+// TestLearnedLimitMarksOnlyAReplanItLoweredDB: a replan reports bandwidth_limit
+// only when it plays something lower than the same replan would without the
+// limit. After a stall lowers Auto, a client that cannot decode the 4K HDR HEVC
+// source plays its 1080p H.264 version either way, so no replan is limited. A
+// client that plays the source moves to that version under the limit, and a
+// later track change keeps that version, and so the label, even though the
+// same track change without the limit would stay on it too.
+func TestLearnedLimitMarksOnlyAReplanItLoweredDB(t *testing.T) {
+	pool := catalogTransferPool(t)
+	var user int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-replan-marks-%d", time.Now().UnixNano())).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(t.Context()), `DELETE FROM users WHERE id = $1`, user) })
+
+	for _, tc := range []struct {
+		name          string
+		decodesSource bool
+	}{
+		{"compatibility picks the version", false},
+		{"the limit picks the version", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
+			handler.InstallationID = serviceInstallation
+			handler.JWTSecret = "learned-limit-replan-marks-secret"
+			handler.Connections = &connectionstore.Store{Pool: pool}
+			startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
+			h264 := v3HandlerStartRequest().Capabilities.VideoDecode[0]
+			want := alternate.ID
+			if tc.decodesSource {
+				startRequest.Capabilities.VideoDecode = append(startRequest.Capabilities.VideoDecode, h264)
+				want = source.ID
+			} else {
+				startRequest.Capabilities.VideoDecode = []playback.VideoDecodeCapabilityV3{h264}
+			}
+			caller := PlaybackCaller{UserID: user, ProfileID: "profile-1", InstallationID: serviceInstallation, ConnectionDeviceID: "tv-" + strings.ReplaceAll(tc.name, " ", "-")}
+			ctx := apimw.SetProfileID(apimw.SetClaims(t.Context(), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "profile-1")
+			ctx = clientip.SetContext(ctx, "203.0.113.7")
+			started, err := handler.StartPlaybackV2(ctx, caller, startRequest)
+			if err != nil || started.PlaybackPlan == nil || started.PlaybackPlan.EffectiveMediaFileID != want {
+				t.Fatalf("start: err=%v response=%#v, want file %d", err, started, want)
+			}
+			t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+
+			plan := started.PlaybackPlan
+			for i, step := range []struct {
+				operation playback.ReplanOperationV3
+				estimate  *int
+				source    string
+			}{
+				{playback.ReplanOperationQualityChangeV3, new(44100), playback.BandwidthEstimateObservedRebufferV3},
+				{playback.ReplanOperationTrackChangeV3, nil, ""},
+				{playback.ReplanOperationOutputChangeV3, nil, ""},
+			} {
+				replan := playback.ReplanRequestV3{
+					ProtocolVersion: playback.ProtocolV3, Operation: step.operation,
+					PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: fmt.Sprintf("marks-replan-%04d", i),
+					FailedPlanID: plan.PlanID, PlanAttemptID: fmt.Sprintf("marks-attempt-%04d", i),
+					PlanAttemptKey: plan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
+					QualityPreference: playback.QualityAutoV3, SelectedTracks: plan.SelectedTracks,
+					BandwidthEstimateKbps: step.estimate, BandwidthEstimateSource: step.source,
+					ClientFeatures: startRequest.ClientFeatures, Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+				}
+				response, err := handler.ReplanPlaybackV2(ctx, caller, started.SessionID, PlaybackReplanCommand{Request: replan, Digest: fmt.Sprintf("marks-digest-%d", i)})
+				if err != nil || response.PlaybackPlan == nil {
+					t.Fatalf("%s: err=%v response=%#v", step.operation, err, response)
+				}
+				plan = response.PlaybackPlan
+				if plan.EffectiveMediaFileID != alternate.ID || (plan.BandwidthLimit != nil) != tc.decodesSource {
+					t.Fatalf("%s played file %d with bandwidth_limit %+v, want the lower version %d, limited=%v", step.operation, plan.EffectiveMediaFileID, plan.BandwidthLimit, alternate.ID, tc.decodesSource)
+				}
+			}
+		})
+	}
+}
+
 // TestConnectionReadingsDB: a plan summary's throughput becomes the
 // connection's playback sample, a nonsense figure does not, a probe keeps its
 // lower bound, and only readings within their lifetime count toward the

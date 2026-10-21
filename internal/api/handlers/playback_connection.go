@@ -123,6 +123,16 @@ func deliveredKbpsV3(plan *playback.PlanV3) int {
 	return plan.Source.BitrateKbps
 }
 
+// withoutObservedEstimateV3 is req as it plans without the learned limit. A
+// stall the request reports becomes the limit, so its estimate goes too; a
+// probe estimate stays.
+func withoutObservedEstimateV3(req playback.StartRequestV3) playback.StartRequestV3 {
+	if req.BandwidthEstimateSource == playback.BandwidthEstimateObservedRebufferV3 {
+		req.BandwidthEstimateKbps, req.BandwidthEstimateSource = nil, ""
+	}
+	return req
+}
+
 // A measured stall budget first tries the existing, authorized edition order.
 // Candidate planning proves that the client can copy the video, including HDR,
 // audio and subtitle constraints; a matching bitrate alone is insufficient.
