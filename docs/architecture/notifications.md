@@ -82,7 +82,10 @@ release event's episode key:
     is still the card Home would show: the first episode after the most
     recently completed one that has a present file and that the profile has
     not started (by Home's Postgres progress test, or by the profile's own
-    store).
+    store). Specials (season 0) have no airing position, so when the most
+    recent completion is a special in a series with regular seasons, Home
+    counts from the most recently completed regular episode instead, or from
+    the start of season 1 when the profile has finished none.
 
   Favorites and watchlist are unaffected. The progression cursor is kept, so
   `next_up` resumes from the right episode once a removal lapses. Every

@@ -390,9 +390,12 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	started := make([]string, 0, 16)
 	var completedEpisodes []completedEpisode
 	// Home anchors Next Up on the most recently completed episode, ties going
-	// to the later episode.
+	// to the later episode. A special anchor moves to the most recent regular
+	// one; see below.
 	anchorKey, hasAnchor := 0, false
 	var anchorAt time.Time
+	regularAnchorKey, hasRegularAnchor := 0, false
+	var regularAnchorAt time.Time
 	hasProgression := false
 	lastCompletedKey := 0
 	hasCompleted := false
@@ -423,11 +426,23 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 				if key, ok := episodeKeys[episodeID]; ok {
 					at, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
 					completedEpisodes = append(completedEpisodes, completedEpisode{key: key, at: at})
-					if !hasAnchor || at.After(anchorAt) || (at.Equal(anchorAt) && key > anchorKey) {
+					if !hasAnchor || completedLater(at, key, anchorAt, anchorKey) {
 						anchorKey, anchorAt, hasAnchor = key, at, true
+					}
+					if key >= firstRegularEpisodeKey && (!hasRegularAnchor || completedLater(at, key, regularAnchorAt, regularAnchorKey)) {
+						regularAnchorKey, regularAnchorAt, hasRegularAnchor = key, at, true
 					}
 				}
 			}
+		}
+	}
+	// Specials carry no airing position, so Home doesn't let one anchor a
+	// series that has regular seasons: it resumes after the most recent
+	// regular episode, or at the first one (catalog's nextUpAnchorsCTE).
+	if hasAnchor && anchorKey < firstRegularEpisodeKey && hasRegularEpisodes(episodeKeys) {
+		anchorKey = firstRegularEpisodeKey - 1
+		if hasRegularAnchor {
+			anchorKey = regularAnchorKey
 		}
 	}
 
@@ -536,6 +551,12 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		return err
 	}
 	return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, libraryIDs)
+}
+
+// completedLater reports whether a completion at (at, key) anchors Next Up
+// over the current one: it is newer, or as new and a later episode.
+func completedLater(at time.Time, key int, currentAt time.Time, currentKey int) bool {
+	return at.After(currentAt) || (at.Equal(currentAt) && key > currentKey)
 }
 
 // loadSeriesStructure returns the series' episode keys (content_id ->
