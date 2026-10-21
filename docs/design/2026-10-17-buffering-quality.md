@@ -137,8 +137,11 @@ measured and where it came from, and never do Auto's arithmetic.
     or receives no data for the client's idle or first-byte timeout. A request
     that is still receiving data is not failing, even when it runs past a
     whole-request time limit: a slow link is what the controller exists to
-    catch. While an outage lasts the controller does not evaluate; the next
-    `playing` after it does.
+    catch. An outage ends when the plan's media data arrives again (a segment
+    or range request receives data, or the buffered position advances) or when
+    playback runs. A playlist, subtitle or API request that succeeds does not
+    end it on its own. While an outage lasts the controller does not evaluate;
+    the next `playing` after it does.
   - a renderer wait: one that begins with more than
     `RENDERER_WAIT_BUFFER_MS = 1000` of media buffered past the playhead. The
     decoder or renderer is behind, as when a weak device drops frames to the
@@ -623,6 +626,9 @@ there, which reads low.
 - The server keeps the highest sample, and a sample at least the target proves
   the link, so an overstated one would stand in for a test the link would not
   pass.
+- A summary sent at a later launch carries no sample. The server files a sample
+  under the connection of the request that delivers it, so a replay could
+  credit one network with another's rate.
 - A client that cannot measure this omits it.
 - Apple will measure it on Aether's upstream reader once AetherEngine reports
   it, and omits it until then. AVPlayer reads from Aether on 127.0.0.1, so its
@@ -735,8 +741,10 @@ reloaded, terminated or killed. Send its summary at that moment where the
 platform allows it (a keepalive request, a background task). Otherwise keep the
 summary on the device, updated each time the app leaves the foreground, and
 send it at the next launch while its playback attempt is current (under 24
-hours), without `throughput_kbps`. Each plan's summary has one `event_id`, so a
-resend is a no-op: the server dedupes on `(playback_attempt_id, event_id)`.
+hours). Any `plan_summary` sent at a later launch, whether the summary kept for
+app exit or a live send that failed and is retried, omits `throughput_kbps`.
+Each plan's summary has one `event_id`, so a resend is a no-op: the server
+dedupes on `(playback_attempt_id, event_id)`.
 
 The event adds these keys to the diagnostics allowlist:
 
