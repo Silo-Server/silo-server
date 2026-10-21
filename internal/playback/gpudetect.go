@@ -21,6 +21,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -1521,7 +1522,7 @@ func runFFmpegProbe(ctx context.Context, timeout time.Duration, ffmpegPath strin
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
+	return procgroup.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
 }
 
 func ffmpegOutputHasToken(output []byte, token string) bool {

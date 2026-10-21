@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -396,7 +396,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 			bin = ffmpegBinary()
 		}
 
-		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd := procgroup.CommandContext(ctx, bin, args...)
 		stderr := newBoundedTailBuffer(stderrTailMaxBytes)
 		cmd.Stderr = stderr
 		if logs != nil {

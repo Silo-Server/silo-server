@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 // TextSubtitleTrack names one cached text rendition of an embedded subtitle
@@ -80,7 +81,7 @@ func ExtractTextSubtitlesToFiles(ctx context.Context, inputPath string, outputs 
 	if ffmpegPath == "" {
 		ffmpegPath = defaultFFmpegBinary
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	cmd := procgroup.CommandContext(ctx, ffmpegPath, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

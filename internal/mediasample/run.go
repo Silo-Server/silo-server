@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 // Runner runs sampling requests with one ffmpeg binary.
@@ -51,18 +52,14 @@ type Runner struct {
 // it.
 type ExecFunc func(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error
 
-// waitDelay bounds how long a killed ffmpeg's pipes may stay open.
-const waitDelay = 5 * time.Second
-
 // execFFmpeg runs a real process and returns its exited state (nil when it
 // never started). Background processes start at lowered priority where the
 // platform supports it (see startBackground).
 func execFFmpeg(ctx context.Context, background bool, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) (*os.ProcessState, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := procgroup.CommandContext(ctx, name, args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.WaitDelay = waitDelay
 	if err := startCommand(cmd, background); err != nil {
 		return nil, err
 	}

@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -98,7 +98,7 @@ func ExtractSubtitle(ctx context.Context, filePath string, trackIndex int, ffmpe
 	if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
 		ffmpeg = ffmpegPath[0]
 	}
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	cmd := procgroup.CommandContext(ctx, ffmpeg, args...)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -138,7 +138,7 @@ func ExtractSubtitleWithFormat(ctx context.Context, filePath string, trackIndex 
 	if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
 		ffmpeg = ffmpegPath[0]
 	}
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
+	cmd := procgroup.CommandContext(ctx, ffmpeg, args...)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -237,7 +237,7 @@ func LoadExternalSubtitleAsVTT(ctx context.Context, subtitlePath, format string,
 		if len(ffmpegPath) > 0 && ffmpegPath[0] != "" {
 			ffmpeg = ffmpegPath[0]
 		}
-		cmd := exec.CommandContext(ctx, ffmpeg, args...)
+		cmd := procgroup.CommandContext(ctx, ffmpeg, args...)
 
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -289,7 +289,7 @@ func ConvertToVTTWithFFmpeg(ctx context.Context, input []byte, fromFormat, ffmpe
 	if strings.TrimSpace(ffmpegPath) == "" {
 		ffmpegPath = "ffmpeg"
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := procgroup.CommandContext(ctx, ffmpegPath,
 		"-hide_banner", "-loglevel", "error",
 		"-f", inputFormat, "-i", "pipe:0",
 		"-f", "webvtt", "pipe:1",

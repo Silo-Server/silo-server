@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 // ErrPrimaryVideoNotFound reports that FFprobe completed successfully but did
@@ -119,7 +120,7 @@ func probeFileWithin(ctx context.Context, ffprobePath string, filePath string, l
 	defer cancel()
 	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
 	// can tell an unreadable source from damaged content; stdout stays JSON.
-	cmd := exec.CommandContext(probeCtx, ffprobePath,
+	cmd := procgroup.CommandContext(probeCtx, ffprobePath,
 		"-v", "error",
 		"-print_format", "json",
 		"-show_format",
@@ -127,7 +128,6 @@ func probeFileWithin(ctx context.Context, ffprobePath string, filePath string, l
 		"-show_chapters",
 		filePath,
 	)
-	killProcessGroupOnCancel(cmd)
 	cmd.WaitDelay = limits.waitDelay
 
 	output, err := cmd.Output()
@@ -722,14 +722,13 @@ func probeVideoPacketDuration(
 ) (int, error) {
 	packetCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(packetCtx, ffprobePath,
+	cmd := procgroup.CommandContext(packetCtx, ffprobePath,
 		"-v", "error",
 		"-select_streams", "v:0",
 		"-show_entries", "packet=pts_time",
 		"-of", "csv=p=0",
 		filePath,
 	)
-	killProcessGroupOnCancel(cmd)
 	cmd.WaitDelay = waitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

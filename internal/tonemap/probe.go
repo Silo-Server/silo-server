@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 const (
@@ -542,7 +543,7 @@ func hardwareFilter(backend, hardwareDevice string) string {
 // runCommand executes a probe command and retains stderr alongside stdout for
 // capability detection and bounded diagnostics.
 func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return procgroup.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 // runBounded applies the per-command probe deadline within the caller's total

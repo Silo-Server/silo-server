@@ -10,10 +10,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 // StreamExtractOpts configures a single streaming subtitle extract.
@@ -93,7 +94,7 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 
 	extractCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(extractCtx, bin, streamExtractArgs(opts)...)
+	cmd := procgroup.CommandContext(extractCtx, bin, streamExtractArgs(opts)...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)

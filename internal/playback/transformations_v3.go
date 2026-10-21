@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -51,11 +52,11 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 	// capability advertised here holds for the binary that later runs.
 	ffmpegPath = ResolveFFmpegPath(ffmpegPath)
 	bsfCtx, cancelBSF := context.WithTimeout(ctx, 3*time.Second)
-	bsfs, bsfErr := exec.CommandContext(bsfCtx, ffmpegPath, "-hide_banner", "-bsfs").Output()
+	bsfs, bsfErr := procgroup.CommandContext(bsfCtx, ffmpegPath, "-hide_banner", "-bsfs").Output()
 	bsfContextErr := bsfCtx.Err()
 	cancelBSF()
 	encoderCtx, cancelEncoders := context.WithTimeout(ctx, 3*time.Second)
-	encoders, encoderErr := exec.CommandContext(encoderCtx, ffmpegPath, "-hide_banner", "-encoders").Output()
+	encoders, encoderErr := procgroup.CommandContext(encoderCtx, ffmpegPath, "-hide_banner", "-encoders").Output()
 	encoderContextErr := encoderCtx.Err()
 	cancelEncoders()
 	normalizeRecipeErr, normalizeRecipeContextErr := probeAudioRecipeFilterV3(ctx, ffmpegPath, "stereo", aacTimestampNormalizeFilterV3)
@@ -96,7 +97,7 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 // failures at the registry boundary.
 func probeAudioRecipeFilterV3(ctx context.Context, ffmpegPath, channelLayout, filter string) (error, error) {
 	probeCtx, cancelProbe := context.WithTimeout(ctx, 3*time.Second)
-	probeErr := exec.CommandContext(probeCtx, ffmpegPath,
+	probeErr := procgroup.CommandContext(probeCtx, ffmpegPath,
 		"-hide_banner", "-loglevel", "error",
 		"-f", "lavfi", "-i", "anullsrc=r=8000:cl="+channelLayout,
 		"-frames:a", "1", "-af", filter,
@@ -117,7 +118,7 @@ func probeHEVCRecipeV3(ctx context.Context, ffmpegPath string, encoders []byte) 
 		return errHEVCEncoderUnavailableV3, nil
 	}
 	probeCtx, cancelProbe := context.WithTimeout(ctx, 3*time.Second)
-	probeErr := exec.CommandContext(probeCtx, ffmpegPath, hevcSoftwareSmokeArgsV3()...).Run()
+	probeErr := procgroup.CommandContext(probeCtx, ffmpegPath, hevcSoftwareSmokeArgsV3()...).Run()
 	probeContextErr := probeCtx.Err()
 	cancelProbe()
 	return probeErr, probeContextErr
