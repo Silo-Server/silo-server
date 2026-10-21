@@ -206,32 +206,61 @@ func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, userID int,
 	return err
 }
 
-// RecordSuccess resets the failure streak after a delivered attempt.
-func (r *WebhookRepository) RecordSuccess(ctx context.Context, webhookID string) error {
-	_, err := r.pool.Exec(ctx, `
+// WebhookAttemptOutcome is how one send of a webhook attempt ended.
+type WebhookAttemptOutcome struct {
+	AttemptID     string
+	Outcome       string
+	AttemptNumber int
+	HTTPStatus    *int
+	Message       string
+	NextRetryAt   *time.Time
+}
+
+// finalizeAttemptCTE writes a WebhookAttemptOutcome ($1-$6) in the same
+// statement as the webhook's streak update, so a crash between the two
+// cannot leave the streaks disagreeing with the attempt history.
+const finalizeAttemptCTE = `
+	WITH finalized AS (
+		UPDATE webhook_delivery_attempts
+		SET outcome = $2, attempt_number = $3, attempted_at = now(),
+		    http_status = $4, failure_message = left($5, 256), next_retry_at = $6
+		WHERE id = $1
+	)`
+
+func (o WebhookAttemptOutcome) args() []any {
+	var message *string
+	if o.Message != "" {
+		message = &o.Message
+	}
+	return []any{o.AttemptID, o.Outcome, o.AttemptNumber, o.HTTPStatus, message, o.NextRetryAt}
+}
+
+// RecordSuccess finalizes a delivered attempt and resets both streaks.
+func (r *WebhookRepository) RecordSuccess(ctx context.Context, webhookID string, done WebhookAttemptOutcome) error {
+	_, err := r.pool.Exec(ctx, finalizeAttemptCTE+`
 		UPDATE notification_webhooks
 		SET last_success_at = now(), consecutive_failures = 0, consecutive_rejections = 0,
 		    updated_at = now()
-		WHERE id = $1`, webhookID)
+		WHERE id = $7`, append(done.args(), webhookID)...)
 	return err
 }
 
-// RecordFailure increments the failure streak and stores the diagnostic. A
-// rejected delivery (a non-retryable 4xx) also extends the rejection streak,
-// whose new length is returned. Success, re-enabling, and a URL change reset
-// both streaks.
-func (r *WebhookRepository) RecordFailure(ctx context.Context, webhookID string, httpStatus *int, message string, rejected bool) (int, error) {
+// RecordFailure finalizes a failed attempt, increments the failure streak,
+// and stores the diagnostic. A rejected delivery (a non-retryable 4xx) also
+// extends the rejection streak, whose new length is returned. Success,
+// re-enabling, and a URL change reset both streaks.
+func (r *WebhookRepository) RecordFailure(ctx context.Context, webhookID string, done WebhookAttemptOutcome, rejected bool) (int, error) {
 	var rejections int
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(ctx, finalizeAttemptCTE+`
 		UPDATE notification_webhooks
 		SET last_failure_at = now(),
-		    last_failure_status = $2,
-		    last_failure_message = left($3, 256),
+		    last_failure_status = $4,
+		    last_failure_message = left($5, 256),
 		    consecutive_failures = consecutive_failures + 1,
-		    consecutive_rejections = consecutive_rejections + CASE WHEN $4 THEN 1 ELSE 0 END,
+		    consecutive_rejections = consecutive_rejections + CASE WHEN $8 THEN 1 ELSE 0 END,
 		    updated_at = now()
-		WHERE id = $1
-		RETURNING consecutive_rejections`, webhookID, httpStatus, message, rejected).Scan(&rejections)
+		WHERE id = $7
+		RETURNING consecutive_rejections`, append(done.args(), webhookID, rejected)...).Scan(&rejections)
 	return rejections, err
 }
 
