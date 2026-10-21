@@ -12,6 +12,7 @@ import {
   detectHLSSupport,
   type WebCapabilityProbe,
 } from "./client-context-v3";
+import { readMeasuredBandwidthKbps } from "./bandwidth-probe";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -282,8 +283,9 @@ describe("detectBandwidthEstimateKbpsV3", () => {
 
   it("ignores a cached measurement on cellular without falling back to the downlink", () => {
     vi.stubGlobal("navigator", { connection: { downlink: 4.5, type: "cellular" } });
-    localStorage.setItem("silo-bandwidth-estimate", keptReading(180_000));
+    localStorage.setItem("silo-bandwidth-estimate", keptReading(180_000, "cellular"));
     try {
+      expect(readMeasuredBandwidthKbps()).toBe(180_000);
       expect(detectBandwidthEstimateKbpsV3()).toBeUndefined();
     } finally {
       localStorage.removeItem("silo-bandwidth-estimate");
