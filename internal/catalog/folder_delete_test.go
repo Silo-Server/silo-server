@@ -241,6 +241,11 @@ func TestFolderDeleteKeepsMultiLibraryCollectionsDB(t *testing.T) {
 			if variants != 1 || runs != 1 {
 				t.Fatalf("poster variants=%d sync runs=%d, want 1 and 1", variants, runs)
 			}
+			// An editor save resubmits the scope in ID order.
+			renamed := "Renamed"
+			if err := collections.Update(ctx, UpdateLibraryCollectionInput{ID: multi.ID, Title: &renamed, LibraryIDs: &got.LibraryIDs}); err != nil {
+				t.Fatalf("saving the collection after the delete: %v", err)
+			}
 			if _, err := collections.GetByID(ctx, single.ID); !errors.Is(err, ErrLibraryCollectionNotFound) {
 				t.Fatalf("single-library collection after deleting its library: %v", err)
 			}

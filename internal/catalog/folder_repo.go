@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -752,7 +753,7 @@ func (r *FolderRepository) DeleteWithStats(
 
 	// Phase 4: delete the now-lightweight folder row. Tolerate 0 rows so a
 	// resumed run that already removed it still succeeds.
-	if err := retryOnDeadlock(ctx, func() error {
+	deleteFolder := func() error {
 		tx, e := r.pool.Begin(ctx)
 		if e != nil {
 			return e
@@ -765,7 +766,12 @@ func (r *FolderRepository) DeleteWithStats(
 			return e
 		}
 		return tx.Commit(ctx)
-	}); err != nil {
+	}
+	err = retryOnDeadlock(ctx, deleteFolder)
+	for attempt := 1; errors.Is(err, errFolderCollectionsChanged) && attempt < 5; attempt++ {
+		err = retryOnDeadlock(ctx, deleteFolder)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("deleting folder: %w", err)
 	}
 
@@ -774,6 +780,10 @@ func (r *FolderRepository) DeleteWithStats(
 	}
 	return stats, nil
 }
+
+// errFolderCollectionsChanged reports that a collection started using a folder
+// while its delete waited for the folder lock.
+var errFolderCollectionsChanged = errors.New("collections changed while locking the folder")
 
 // moveCollectionsOffFolder keeps admin collections that cover other libraries
 // when folderID is deleted. library_collections.library_id still holds the
@@ -784,28 +794,40 @@ func moveCollectionsOffFolder(ctx context.Context, tx pgx.Tx, folderID int) erro
 	// Collection writers lock collections in ID order
 	// (lockLibraryCollectionParents) before their foreign keys lock the folder,
 	// so take the collections the cascade touches first, then hold the folder so
-	// no writer adds a reference to it, then take any collection that gained one
-	// in between.
-	lockCollections := func() error {
-		_, err := tx.Exec(ctx, `
-			SELECT c.id FROM library_collections c
-			WHERE c.library_id = $1
-			   OR EXISTS (SELECT 1 FROM library_collection_libraries l WHERE l.collection_id = c.id AND l.library_id = $1)
-			ORDER BY c.id
-			FOR UPDATE OF c`, folderID)
-		return err
+	// no writer adds a reference to it. A collection that gained a reference in
+	// between can't be locked now without breaking the ID order, so the caller
+	// starts over.
+	const touchedCollections = `
+		SELECT c.id FROM library_collections c
+		WHERE c.library_id = $1
+		   OR EXISTS (SELECT 1 FROM library_collection_libraries l WHERE l.collection_id = c.id AND l.library_id = $1)
+		ORDER BY c.id`
+	rows, err := tx.Query(ctx, touchedCollections+` FOR UPDATE OF c`, folderID)
+	if err != nil {
+		return fmt.Errorf("locking folder collections: %w", err)
 	}
-	if err := lockCollections(); err != nil {
+	locked, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
 		return fmt.Errorf("locking folder collections: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_folders WHERE id = $1 FOR UPDATE`, folderID); err != nil {
 		return fmt.Errorf("locking folder: %w", err)
 	}
-	if err := lockCollections(); err != nil {
-		return fmt.Errorf("locking folder collections: %w", err)
+	rows, err = tx.Query(ctx, touchedCollections, folderID)
+	if err != nil {
+		return fmt.Errorf("listing folder collections: %w", err)
+	}
+	touched, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("listing folder collections: %w", err)
+	}
+	for _, id := range touched {
+		if !slices.Contains(locked, id) {
+			return errFolderCollectionsChanged
+		}
 	}
 
-	rows, err := tx.Query(ctx, `
+	rows, err = tx.Query(ctx, `
 		SELECT c.id, c.slug, array_agg(l.library_id ORDER BY l.library_id)
 		FROM library_collections c
 		JOIN library_collection_libraries l ON l.collection_id = c.id AND l.library_id <> $1
