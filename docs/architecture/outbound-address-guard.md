@@ -89,8 +89,11 @@ an upstream response body and stay on the server.
 
 Webhook destinations use the same classes with a stricter rule: Public only,
 HTTPS only, checked at registration and at every connection. The admin-only
-`notifications.webhooks.allow_private_destinations` development switch lifts
-it. See [Notifications](notifications.md#trust-model-and-ssrf-guard).
+`notifications.webhooks.allow_private_destinations` development switch also
+permits Private addresses; Blocked addresses stay refused at registration and
+on every connection, including redirects. Registration requires resolution to
+allowed addresses in both modes, with a two-second lookup deadline. See
+[Notifications](notifications.md#trust-model-and-ssrf-guard).
 
 ## Artwork downloads
 

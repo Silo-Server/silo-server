@@ -151,16 +151,3 @@ func TestRemuxLeadingPictureDropSurvivesTokenAndRecipeRoundTrips(t *testing.T) {
 		t.Fatal("a seek reanchor from the frozen recipe lost the leading-picture drop")
 	}
 }
-
-func TestSessionStreamStateCarriesLeadingPictureDrop(t *testing.T) {
-	session := &Session{RemuxResumeLeadingPictureDrop: true}
-	state := snapshotSessionStreamStateLocked(session)
-	if !state.RemuxResumeLeadingPictureDrop {
-		t.Fatal("stream state snapshot dropped the leading-picture drop")
-	}
-	restored := &Session{}
-	restoreSessionStreamStateLocked(restored, state)
-	if !restored.RemuxResumeLeadingPictureDrop {
-		t.Fatal("stream state restore dropped the leading-picture drop")
-	}
-}

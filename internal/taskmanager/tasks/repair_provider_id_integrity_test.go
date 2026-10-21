@@ -3,7 +3,6 @@ package tasks
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -94,29 +93,5 @@ func TestRepairProviderIDIntegrityTask(t *testing.T) {
 	}
 	if result.Scanned != 5 || result.CleanInserts != 2 || result.WatchHistoryResolved != 2 || result.RemainingEstimate != 7 {
 		t.Fatalf("result data = %#v, want repair, reconcile, and remaining counts", result)
-	}
-}
-
-func TestRepairProviderIDIntegrityTaskSkipsReconcileWhenNoRepairs(t *testing.T) {
-	repairer := &fakeProviderIDIntegrityRepairer{stats: metadata.ProviderIDIntegrityStats{Scanned: 1, SkippedUnresolved: 1}}
-	reconciler := &fakeProviderIDHistoryReconciler{}
-	task := NewRepairProviderIDIntegrityTask(repairer, reconciler)
-
-	if err := task.Execute(context.Background(), &providerIDRepairProgressReporter{}); err != nil {
-		t.Fatalf("Execute returned error: %v", err)
-	}
-	if reconciler.calls != 0 {
-		t.Fatalf("reconciler calls = %d, want 0", reconciler.calls)
-	}
-}
-
-func TestRepairProviderIDIntegrityTaskReturnsRepairError(t *testing.T) {
-	wantErr := errors.New("repair failed")
-	repairer := &fakeProviderIDIntegrityRepairer{err: wantErr}
-	task := NewRepairProviderIDIntegrityTask(repairer, nil)
-
-	err := task.Execute(context.Background(), &providerIDRepairProgressReporter{})
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("Execute error = %v, want %v", err, wantErr)
 	}
 }

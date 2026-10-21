@@ -11,7 +11,7 @@ import (
 // contract diff. New external types need an explicit ownership decision here.
 var approvedDomainSchemaTypes = map[string]string{
 	"github.com/Silo-Server/silo-server/internal/auth":                  "APIKeyScope",
-	"github.com/Silo-Server/silo-server/internal/catalog":               "AudiobookDetailExtension AudiobookNarration AudiobookPerson AudiobookRelatedContent AudiobookRelatedItem AudiobookSeriesGroup CastCredit CrewCredit EbookDetailExtension ItemExtraInfo ItemVideoInfo MangaChapter MangaDetailExtension Marker SubtitleInfo VersionChapter VersionSubtitleTrack",
+	"github.com/Silo-Server/silo-server/internal/catalog":               "AudiobookDetailExtension AudiobookNarration AudiobookPerson AudiobookRelatedContent AudiobookRelatedItem AudiobookSeriesGroup CastCredit CrewCredit EbookDetailExtension ItemVideoInfo MangaChapter MangaDetailExtension Marker SubtitleInfo VersionChapter VersionSubtitleTrack",
 	"github.com/Silo-Server/silo-server/internal/catalogseed":           "ImportResult PathRewrite",
 	"github.com/Silo-Server/silo-server/internal/collections/templates": "Bundle BundleCatalog Catalog CategoryGroup MDBListSpec TMDBCollectionSpec TMDBDiscoverSpec TMDBListSpec TMDBSpec Template",
 	"github.com/Silo-Server/silo-server/internal/diagnostics":           "IngestResult",

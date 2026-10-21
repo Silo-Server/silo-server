@@ -208,6 +208,12 @@ func (input PlannerInputV3) hlsToneMapCapabilities() tonemap.Capabilities {
 
 // PlanPlaybackV3 chooses a playable protocol-v3 route from source and client facts.
 func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
+	// Registered first so it runs last, after any rewrite of the result.
+	defer func() {
+		if result.Plan != nil {
+			result.Plan.ActiveQuality = activeQualityV3(input.Request, *result.Plan)
+		}
+	}()
 	if input.RequestedFile == nil {
 		return terminalPlannerResultV3("source_unavailable", "The requested media source is unavailable.", false)
 	}
@@ -819,6 +825,51 @@ func availableQualitiesV3(input PlannerInputV3, source SourceDescriptorV3) []Ava
 		return lowerVersionQualitiesV3(input)
 	}
 	return append([]AvailableQualityV3{originalQualityEntryV3(source)}, transcodeRungsV3(input, input.EffectiveFile, source)...)
+}
+
+// activeQualityV3 names the AvailableQualities entry plan delivers, so a
+// client checks the row the server chose instead of re-deriving it from its
+// request. A rung the request named stays active while the plan keeps its
+// resolution (an encode a cap lowered, or a source that already fits it):
+// that row is the viewer's pick. Otherwise, as for a rung a decoder held to a
+// smaller class, the delivery names its entry: an encode the rung of its own
+// resolution class and bitrate (a plain 1080p a cap held to 720p at 2000 kbps
+// is 720p Medium), and a lower version played unchanged its
+// plain resolution entry ("720p"). A source played unchanged, or an encode
+// between two rungs, names none; auto already says the source plays.
+func activeQualityV3(request StartRequestV3, plan PlanV3) string {
+	encodes := plan.Delivery == DeliveryTranscodeHLSV3
+	playsLowerVersion := !encodes && plan.EffectiveMediaFileID != plan.RequestedMediaFileID
+	class := ladderClassForSize(optionalValueV3(plan.EffectiveRecipe.Width), optionalValueV3(plan.EffectiveRecipe.Height))
+	bitrate := optionalValueV3(plan.EffectiveRecipe.BitrateKbps)
+	delivered := func(quality AvailableQualityV3) bool {
+		if _, rung := ladderRungForLabelV3(quality.Label); rung {
+			return encodes && class > 0 && quality.Height == class && quality.BitrateKbps == bitrate
+		}
+		return quality.Label != QualityOriginalV3 && playsLowerVersion && quality.Height == plan.Source.Height
+	}
+	requested, _ := NormalizeQualityV3(request.QualityPreference)
+	for _, quality := range plan.AvailableQualities {
+		if quality.Label != requested {
+			continue
+		}
+		if rung, ok := ladderRungForLabelV3(quality.Label); ok {
+			// A decoder bound fits the frame in a smaller class's box. The
+			// rung's own frame never fits one, but keeping the source aspect
+			// can class it higher: 1728x720 from a 2.4:1 film is 1080p.
+			if !encodes || class == 0 || class >= rung.Height {
+				return quality.Label
+			}
+		} else if delivered(quality) {
+			return quality.Label
+		}
+	}
+	for _, quality := range plan.AvailableQualities {
+		if delivered(quality) {
+			return quality.Label
+		}
+	}
+	return ""
 }
 
 // originalQualityEntryV3 is the menu entry that plays source unchanged.
@@ -1622,9 +1673,9 @@ type QualityResultV3 struct {
 // A fixed rung or plain resolution never reads the estimate.
 //
 // bandwidth_cap_kbps is a hard delivery ceiling honored in every quality mode:
-// a source whose bitrate exceeds it is re-encoded at the cap's rung, and a
-// fixed rung whose ladder bitrate exceeds it is lowered. A source that fits
-// under the cap is still sent as-is.
+// a source whose bitrate exceeds it is re-encoded at the tallest class whose
+// encode bitrate fits within the cap, and a fixed rung whose ladder bitrate
+// exceeds it is lowered. A source that fits under the cap is still sent as-is.
 func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) QualityResultV3 {
 	quality, changed := NormalizeQualityV3(request.QualityPreference)
 	var warnings []DegradationWarningV3
@@ -1692,10 +1743,12 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		wouldPreserve := source.Height > 0 && targetHeight >= source.Height
 		if (wouldPreserve && capExceededBySource) || (!wouldPreserve && ladderClassBitrateKbpsV3(targetHeight) > capKbps) {
 			capApplied = true
-			if capHeight := streamLadderClassV3(capKbps, source); capHeight < targetHeight {
-				targetHeight = capHeight
-				classLimit = minPositiveV3(classLimit, capHeight)
-			}
+			// The class limit applies even when the source is already shorter
+			// than the cap's class, so a cropped source wider than that class
+			// still fits its box.
+			capHeight := capLadderClassV3(capKbps)
+			targetHeight = min(targetHeight, capHeight)
+			classLimit = minPositiveV3(classLimit, capHeight)
 		}
 	}
 	if capApplied {
@@ -2093,6 +2146,20 @@ func resolutionLabelV3(h int) string {
 // bandwidth as headroom and plans H.264, the output every route can decode.
 func streamLadderClassV3(kbps int, source SourceDescriptorV3) int {
 	return LadderClassForBitrate(streamBudgetKbpsV3(kbps), source.FrameRate, transcodeCodecH264)
+}
+
+// capLadderClassV3 is the tallest ladder class whose encode bitrate fits
+// within a bandwidth cap, or the lowest class when none does. A cap is a
+// ceiling the viewer chose, not a measured link, so unlike an estimate it keeps
+// no headroom: a 6000 kbps cap earns 1080p at 6000 kbps. The encode bitrate
+// does not depend on frame rate, so neither does the class a cap earns.
+func capLadderClassV3(capKbps int) int {
+	for _, class := range bitrateLadder {
+		if ladderClassBitrateKbpsV3(class.Height) <= capKbps {
+			return class.Height
+		}
+	}
+	return bitrateLadder[len(bitrateLadder)-1].Height
 }
 
 // streamBudgetKbpsV3 is the part of a bandwidth figure automatic quality

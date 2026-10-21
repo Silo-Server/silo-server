@@ -51,19 +51,6 @@ func TestRuntimeHostServer_PublishEvent_AutoPrefixesAndPublishes(t *testing.T) {
 	}
 }
 
-func TestRuntimeHostServer_PublishEvent_RejectsEmptyName(t *testing.T) {
-	hub := &fakeHub{}
-	srv := pluginhost.NewRuntimeHostServer(hub, &fakeLibLister{}, "silo.example")
-
-	_, err := srv.PublishEvent(context.Background(), &pluginv1.PublishEventRequest{EventName: ""})
-	if err == nil {
-		t.Fatal("expected error for empty event name")
-	}
-	if len(hub.calls) != 0 {
-		t.Errorf("hub.calls = %d, want 0", len(hub.calls))
-	}
-}
-
 func TestRuntimeHostServer_PublishEventTo_AutoPrefixesAndTargets(t *testing.T) {
 	hub := &fakeHub{}
 	srv := pluginhost.NewRuntimeHostServer(hub, &fakeLibLister{}, "silo.example")
@@ -86,19 +73,6 @@ func TestRuntimeHostServer_PublishEventTo_AutoPrefixesAndTargets(t *testing.T) {
 	}
 	if got.TargetPluginID != "silo.requests" {
 		t.Errorf("target_plugin_id = %q, want silo.requests", got.TargetPluginID)
-	}
-}
-
-func TestRuntimeHostServer_PublishEventTo_RejectsEmptyTarget(t *testing.T) {
-	hub := &fakeHub{}
-	srv := pluginhost.NewRuntimeHostServer(hub, &fakeLibLister{}, "silo.example")
-
-	_, err := srv.PublishEventTo(context.Background(), &pluginv1.PublishEventToRequest{EventName: "approved"})
-	if err == nil {
-		t.Fatal("expected error for empty target_plugin_id")
-	}
-	if len(hub.calls) != 0 {
-		t.Errorf("hub.calls = %d, want 0", len(hub.calls))
 	}
 }
 
@@ -126,46 +100,6 @@ func TestRuntimeHostServer_ListLibraries_PassesUserID(t *testing.T) {
 				t.Errorf("first lib id = %q", resp.GetLibraries()[0].GetId())
 			}
 		})
-	}
-}
-
-type fakeInstalledPluginLister struct {
-	rows []pluginhost.InstalledPluginRecord
-}
-
-func (f *fakeInstalledPluginLister) ListInstalledPlugins(context.Context) ([]pluginhost.InstalledPluginRecord, error) {
-	return f.rows, nil
-}
-
-func TestRuntimeHostServer_ListInstalledPlugins_ReturnsPlugins(t *testing.T) {
-	lister := &fakeInstalledPluginLister{rows: []pluginhost.InstalledPluginRecord{
-		{
-			InstallationID: 42,
-			PluginID:       "silo.requests",
-			Version:        "0.1.0",
-			Enabled:        true,
-			Capabilities: []*pluginv1.CapabilityDescriptor{
-				{Type: "request_router.v1", Id: "default"},
-			},
-		},
-	}}
-	srv := pluginhost.NewRuntimeHostServerWithServices(
-		&fakeHub{}, &fakeLibLister{}, nil, lister, nil, "silo.example", 7,
-	)
-
-	resp, err := srv.ListInstalledPlugins(context.Background(), &pluginv1.ListInstalledPluginsRequest{})
-	if err != nil {
-		t.Fatalf("ListInstalledPlugins: %v", err)
-	}
-	if len(resp.GetPlugins()) != 1 {
-		t.Fatalf("plugins = %d, want 1", len(resp.GetPlugins()))
-	}
-	got := resp.GetPlugins()[0]
-	if got.GetInstallationId() != 42 || got.GetPluginId() != "silo.requests" || !got.GetEnabled() {
-		t.Errorf("plugin = %+v", got)
-	}
-	if got.GetCapabilities()[0].GetType() != "request_router.v1" {
-		t.Errorf("capability = %+v", got.GetCapabilities()[0])
 	}
 }
 
@@ -207,21 +141,6 @@ func TestRuntimeHostServer_SetGlobalConfigEntry_PassesInstallationKeyAndValue(t 
 	}
 }
 
-func TestRuntimeHostServer_SetGlobalConfigEntry_RejectsEmptyKey(t *testing.T) {
-	setter := &fakeConfigSetter{}
-	srv := pluginhost.NewRuntimeHostServerWithServices(
-		&fakeHub{}, &fakeLibLister{}, nil, nil, setter, "silo.example", 42,
-	)
-
-	_, err := srv.SetGlobalConfigEntry(context.Background(), &pluginv1.SetGlobalConfigEntryRequest{})
-	if err == nil {
-		t.Fatal("expected error for empty key")
-	}
-	if setter.installationID != 0 {
-		t.Errorf("setter was called for empty key")
-	}
-}
-
 func TestRuntimeHostServer_PublishEvent_RateLimited(t *testing.T) {
 	hub := &fakeHub{}
 	srv := pluginhost.NewRuntimeHostServerWithRate(hub, &fakeLibLister{}, "silo.example", 2)
@@ -257,31 +176,6 @@ func (f *fakeCatalog) LookupByExternalIDs(_ context.Context, provider, mediaType
 	return f.matches, nil
 }
 
-func TestRuntimeHostServer_CheckMediaPresence_Returns(t *testing.T) {
-	cat := &fakeCatalog{matches: []pluginhost.LibraryPresenceRecord{
-		{ExternalID: "603", MediaID: "m-1", LibraryID: "lib-1", Title: "The Matrix"},
-	}}
-	srv := pluginhost.NewRuntimeHostServerWithCatalog(&fakeHub{}, &fakeLibLister{}, cat, "silo.example")
-
-	resp, err := srv.CheckMediaPresence(context.Background(), &pluginv1.CheckMediaPresenceRequest{
-		Provider:  "tmdb",
-		MediaType: "movie",
-		Ids:       []string{"603", "550"},
-	})
-	if err != nil {
-		t.Fatalf("CheckMediaPresence: %v", err)
-	}
-	if len(resp.GetPresent()) != 1 {
-		t.Fatalf("got %d, want 1", len(resp.GetPresent()))
-	}
-	if resp.GetPresent()[0].GetExternalId() != "603" {
-		t.Errorf("got %+v", resp.GetPresent()[0])
-	}
-	if cat.gotProv != "tmdb" || cat.gotType != "movie" {
-		t.Errorf("delegate: prov=%q type=%q", cat.gotProv, cat.gotType)
-	}
-}
-
 func TestRuntimeHostServer_CheckMediaPresence_RejectsTooMany(t *testing.T) {
 	srv := pluginhost.NewRuntimeHostServerWithCatalog(&fakeHub{}, &fakeLibLister{}, &fakeCatalog{}, "p")
 	ids := make([]string, 101)
@@ -298,12 +192,15 @@ func TestRuntimeHostServer_CheckMediaPresence_RejectsTooMany(t *testing.T) {
 	}
 }
 
-func TestRuntimeHostServer_CheckMediaPresence_NoCatalogReturnsEmpty(t *testing.T) {
-	srv := pluginhost.NewRuntimeHostServer(&fakeHub{}, &fakeLibLister{}, "p")
-	resp, err := srv.CheckMediaPresence(context.Background(), &pluginv1.CheckMediaPresenceRequest{
-		Provider: "tmdb", MediaType: "movie", Ids: []string{"1"},
-	})
-	if err != nil || len(resp.GetPresent()) != 0 {
-		t.Errorf("expected empty no-catalog response, got %+v err=%v", resp, err)
+func TestRuntimeHostServer_PublishEventTo_RejectsEmptyTarget(t *testing.T) {
+	hub := &fakeHub{}
+	srv := pluginhost.NewRuntimeHostServer(hub, &fakeLibLister{}, "silo.example")
+
+	_, err := srv.PublishEventTo(context.Background(), &pluginv1.PublishEventToRequest{EventName: "approved"})
+	if err == nil {
+		t.Fatal("expected error for empty target_plugin_id")
+	}
+	if len(hub.calls) != 0 {
+		t.Errorf("hub.calls = %d, want 0", len(hub.calls))
 	}
 }

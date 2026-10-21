@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -226,9 +227,9 @@ func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
 // This is a check-then-write guard with no store-level uniqueness constraint
 // (the userstore's dual Postgres/SQLite backends carry no unique index on
 // name), so two concurrent requests can both pass and insert duplicates —
-// the same window the profile_limit_reached check accepts. Good enough for
-// interactive profile management; a functional unique index is the fix if
-// that ever stops being true.
+// unlike the profile limit, which is re-counted inside the creating
+// transaction. Good enough for interactive profile management; a functional
+// unique index is the fix if that ever stops being true.
 func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) bool {
 	trimmed := strings.TrimSpace(name)
 	for _, p := range profiles {
@@ -240,6 +241,12 @@ func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) 
 		}
 	}
 	return false
+}
+
+// profileLimitReached is the 409 for a household already at its limit.
+func profileLimitReached(limit int) *APIError {
+	return apiError(http.StatusConflict, "profile_limit_reached",
+		fmt.Sprintf("This account has reached its profile limit (%d)", limit))
 }
 
 // invalidAdvisoryAgeLimit is the field error for an advisory-age limit outside
@@ -358,6 +365,9 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	if strings.TrimSpace(req.Name) == "" {
 		return none, fieldError("name", "Profile name is required")
 	}
+	if len(req.PIN) > 72 {
+		return none, fieldError("pin", "PIN must be at most 72 bytes")
+	}
 	avatarRef, err := normalizePresetAvatarReference(req.Avatar)
 	if err != nil {
 		return none, fieldError("avatar", err.Error())
@@ -409,6 +419,11 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 			req.MaxPlaybackQuality != "") {
 		return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
 	}
+	// profileLimit is the account's household limit (0 = unlimited). This
+	// early check answers a full household before the name check, as it always
+	// has; the guarantee under concurrency is the re-count inside the creating
+	// transaction (createProfileWithSettingsSync).
+	profileLimit := 0
 	if h.UserRepo != nil {
 		user, err := h.UserRepo.GetByID(ctx, userID)
 		if err != nil {
@@ -419,9 +434,11 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 			if err != nil {
 				return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the account's profile limit")
 			}
-			if limit := effective.MaxProfiles; limit >= 1 && len(existingProfiles) >= limit {
-				return none, apiError(http.StatusConflict, "profile_limit_reached",
-					fmt.Sprintf("This account has reached its profile limit (%d)", limit))
+			if effective.MaxProfiles >= 1 {
+				profileLimit = effective.MaxProfiles
+			}
+			if profileLimit >= 1 && len(existingProfiles) >= profileLimit {
+				return none, profileLimitReached(profileLimit)
 			}
 		}
 	}
@@ -435,12 +452,24 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		showForcedSubtitles = *req.ShowForcedSubtitles
 	}
 
+	// Prepare PIN protection before the transaction publishes the profile. A
+	// failed hash must not leave behind a profile that can be used without proof.
+	var pinHash string
+	if req.PIN != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.PIN), bcrypt.DefaultCost)
+		if err != nil {
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
+		}
+		pinHash = string(hash)
+	}
+
 	profileID := uuid.New().String()
 	profile := userstore.Profile{
 		ID: profileID,
 		// Store the trimmed form the conflict check compared, so " Laura "
 		// doesn't persist with stray whitespace.
 		Name:                       strings.TrimSpace(req.Name),
+		PINHash:                    pinHash,
 		Avatar:                     avatarRef,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
@@ -461,7 +490,10 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		MaxPlaybackQuality:         maxPlaybackQuality,
 	}
 
-	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, settingsSync); err != nil {
+	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, profileLimit, settingsSync); err != nil {
+		if errors.Is(err, errProfileLimitReached) {
+			return none, profileLimitReached(profileLimit)
+		}
 		slog.ErrorContext(ctx, "profile create failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
@@ -474,20 +506,6 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 	created := *createdPtr
 
-	// If PIN was provided, update the profile to set it.
-	if req.PIN != "" {
-		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
-			PIN: &req.PIN,
-		}); err != nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
-		}
-		// Re-read the profile to get the updated state.
-		p, err := store.GetProfile(ctx, created.ID)
-		if err != nil || p == nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve profile after PIN set")
-		}
-		created = *p
-	}
 	if req.ShowForcedSubtitles != nil && !*req.ShowForcedSubtitles {
 		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
 			ShowForcedSubtitles: req.ShowForcedSubtitles,

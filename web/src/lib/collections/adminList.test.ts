@@ -7,7 +7,6 @@ import {
   filterAdminCollections,
   readAdminListState,
   rowTag,
-  showOnTabsLabel,
   writeAdminListState,
   type AdminListState,
 } from "./adminList";
@@ -139,17 +138,5 @@ describe("rowTag", () => {
     expect(rowTag(collection("A", { home_row_count: 2 }))).toBe("home");
     expect(rowTag(collection("A", { visibility: "hidden" }))).toBe("hidden");
     expect(rowTag(collection("A", { visibility: "hidden", home_row_count: 1 }))).toBe("hidden");
-  });
-});
-
-describe("showOnTabsLabel", () => {
-  it("names the effect and every library's tab", () => {
-    expect(showOnTabsLabel("Studio Ghibli", ["Movies", "Kids"])).toBe(
-      "Show Studio Ghibli on the Movies and Kids Collections tabs",
-    );
-    expect(showOnTabsLabel("Studio Ghibli", ["Movies"])).toBe(
-      "Show Studio Ghibli on the Movies Collections tab",
-    );
-    expect(showOnTabsLabel("Studio Ghibli", [])).toBe("Show Studio Ghibli on its Collections tabs");
   });
 });

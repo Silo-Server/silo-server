@@ -146,8 +146,39 @@ Deliberately **not** encrypted (tracked as follow-ups):
 - **Equality-looked-up secrets** — these are matched by exact value
   (`WHERE … = $1`), and AES-GCM is randomized, so encrypting them would break the
   lookup. They need a deterministic **blind-index hash** column instead:
-  `api_keys.api_key`, `webhook_sync_connections.webhook_secret`,
+  `webhook_sync_connections.webhook_secret`,
   `jellycompat_sessions.token`, and `watch_together_rooms.join_token`.
 Excluded (not a gap): `plex_sync_connections.*` is a dead table (zero Go
 references); `oauth_completions.token_ciphertext` is no longer written (a completion code opens its session at redemption and stores no tokens), and `oauth_pending_links.payload` is already AES-GCM;
 `users.password_hash` and the `*_hash` columns are already hashed.
+
+## API key verifiers
+
+Native API keys contain 256 random bits. `api_keys.key_hash` stores their
+SHA-256 hex digest, using the same high-entropy bearer pattern as password-reset
+and invitation link tokens. Authentication hashes the presented bearer and looks
+up the indexed digest; a stored digest is not itself a usable bearer.
+`key_prefix` contains only the existing eleven-character display prefix, or an
+empty string for malformed historical keys. Management projections omit both
+bearer and digest.
+Only creation returns the generated bearer; authentication reads leave the
+model's `Key` empty. Scope and current-owner checks remain at their existing
+authorization boundaries, including Jellyfin-compatible API-key access.
+
+Migration `20261019181724_hash_api_key_verifiers` hashes historical credentials
+without rotating them or changing their configuration revisions. It rebuilds the
+unique index after conversion, replaces the credential-identity trigger in the same transaction,
+and constrains the stored digest and prefix. Its Down migration refuses a
+nonempty key table because the original bearers cannot be recovered.
+
+Release notes for a build containing this migration must require stopping every
+old API replica before migration and prohibit restarting one against the migrated
+database. Old binaries require the removed `api_key` column; this is not a rolling
+upgrade. Follow the existing [backup and rollback policy](../release-versioning.md#backups-and-rollback).
+Existing keys keep working with the new binaries, without changes to clients or
+integrations. Reverting server code requires verifier-aware authentication or the
+existing full-backup recovery procedure, not reconstruction of keys from digests.
+
+This protects current logical rows. It does not scrub pre-upgrade backups,
+replicas or archives retaining old WAL, or obsolete PostgreSQL row versions.
+Their existing confidentiality and retention requirements still apply.

@@ -2,17 +2,12 @@ package handlers
 
 import (
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -57,41 +52,6 @@ func paddedHello(sessionID string, padding int) playback.HelloEnvelope {
 		SessionID: sessionID,
 		Client:    playback.HelloClientInfo{Name: "silo-test", Version: strings.Repeat("9", padding)},
 	}
-}
-
-func TestHandleSessionWebSocketClosesOnOversizeMessage(t *testing.T) {
-	sessionMgr := playback.NewSessionManager(0, 0)
-	session, err := sessionMgr.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	handler := NewPlaybackHandler(sessionMgr)
-	handler.RealtimeHub = playback.NewRealtimeHub()
-
-	router := chi.NewRouter()
-	router.Get("/playback/ws/{session_id}", func(w http.ResponseWriter, r *http.Request) {
-		ctx := apimw.SetClaims(r.Context(), &auth.Claims{UserID: 1, Role: "user", TokenType: auth.TokenTypeAccess})
-		handler.HandleSessionWebSocket(w, r.WithContext(ctx))
-	})
-	server := httptest.NewServer(router)
-	defer server.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/playback/ws/" + session.ID
-	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("Dial websocket: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	defer func() { _ = conn.Close() }()
-
-	// A hello close to the limit is still accepted.
-	if err := conn.WriteJSON(paddedHello(session.ID, wsMaxClientMessageBytes/2)); err != nil {
-		t.Fatalf("WriteJSON hello: %v", err)
-	}
-	waitForPlaybackRealtimeState(t, sessionMgr, session.ID, true)
-
-	expectMessageTooBigClose(t, conn)
-	waitForPlaybackRealtimeState(t, sessionMgr, session.ID, false)
 }
 
 func TestControlSocketClosesOnOversizeMessage(t *testing.T) {

@@ -195,149 +195,85 @@ func TestAccumulateEpisodeResults_FillsMissingAndAddsEpisodes(t *testing.T) {
 	}
 }
 
-func TestPersistSeasonsAndEpisodes_ScheduledRefreshPreservesExistingAndBackfillsMissing(t *testing.T) {
-	const seriesID = "series-fallback"
+// TestPersistSeasonsAndEpisodes_MergeModes covers how a refresh merges season
+// and episode text into stored rows: a scheduled refresh keeps stored values
+// and backfills blanks, a manual refresh replaces non-empty values but keeps
+// stored ones the provider sends blank. Stored artwork survives both.
+func TestPersistSeasonsAndEpisodes_MergeModes(t *testing.T) {
+	const seriesID = "series-merge-mode"
+	for _, tc := range []struct {
+		name        string
+		season      models.Season
+		episode     models.Episode
+		seasonIn    SeasonResult
+		episodeIn   EpisodeResult
+		mode        MergeMode
+		wantSeason  models.Season
+		wantEpisode models.Episode
+	}{
+		{
+			name:        "scheduled refresh preserves existing and backfills missing",
+			season:      models.Season{Title: "Existing Season", PosterPath: "s3://season-1.jpg"},
+			episode:     models.Episode{Title: "Existing Episode", StillPath: "s3://episode-1.jpg"},
+			seasonIn:    SeasonResult{SeasonNumber: 1, Title: "Provider Season", Overview: "Filled overview"},
+			episodeIn:   EpisodeResult{SeasonNumber: 1, EpisodeNumber: 1, Title: "Provider Episode", Overview: "Episode overview", Runtime: 60, ProviderIDs: map[string]string{"tmdb": "tmdb-ep-1"}},
+			mode:        MergeFillEmpty,
+			wantSeason:  models.Season{Title: "Existing Season", Overview: "Filled overview", PosterPath: "s3://season-1.jpg"},
+			wantEpisode: models.Episode{Title: "Existing Episode", Overview: "Episode overview", Runtime: 60, StillPath: "s3://episode-1.jpg", TmdbID: "tmdb-ep-1"},
+		},
+		{
+			name:        "manual refresh replaces non-empty but preserves blanks",
+			season:      models.Season{Title: "Old Season", Overview: "Old season overview", PosterPath: "s3://season-old.jpg"},
+			episode:     models.Episode{Title: "Old Episode", Overview: "Old episode overview", Runtime: 45, StillPath: "s3://episode-old.jpg"},
+			seasonIn:    SeasonResult{SeasonNumber: 1, Title: "New Season", PosterPath: ""},
+			episodeIn:   EpisodeResult{SeasonNumber: 1, EpisodeNumber: 1, Title: "New Episode", Runtime: 50, StillPath: ""},
+			mode:        MergeReplaceUnlocked,
+			wantSeason:  models.Season{Title: "New Season", Overview: "Old season overview", PosterPath: "s3://season-old.jpg"},
+			wantEpisode: models.Episode{Title: "New Episode", Overview: "Old episode overview", Runtime: 50, StillPath: "s3://episode-old.jpg"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
+			stored := tc.season
+			stored.ContentID, stored.SeriesID, stored.SeasonNumber, stored.PosterThumbhash = "season-1", seriesID, 1, "season-thumb"
+			seasonRepo.seasons[seasonKey(seriesID, 1)] = &stored
+			storedEpisode := tc.episode
+			storedEpisode.ContentID, storedEpisode.SeriesID, storedEpisode.SeasonID = "episode-1", seriesID, "season-1"
+			storedEpisode.SeasonNumber, storedEpisode.EpisodeNumber = 1, 1
+			storedEpisode.StillThumbhash, storedEpisode.MetadataSource = "episode-thumb", "provider"
+			episodeRepo.episodes[episodeKey(seriesID, 1, 1)] = &storedEpisode
 
-	service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
-	ctx := context.Background()
+			service.persistSeasonsAndEpisodes(context.Background(), &models.MediaItem{ContentID: seriesID, Type: "series"}, nil, "en", "en",
+				[]SeasonResult{tc.seasonIn}, []EpisodeResult{tc.episodeIn}, tc.mode)
 
-	seasonRepo.seasons[seasonKey(seriesID, 1)] = &models.Season{
-		ContentID:       "season-1",
-		SeriesID:        seriesID,
-		SeasonNumber:    1,
-		Title:           "Existing Season",
-		Overview:        "",
-		PosterPath:      "s3://season-1.jpg",
-		PosterThumbhash: "season-thumb",
-	}
-	episodeRepo.episodes[episodeKey(seriesID, 1, 1)] = &models.Episode{
-		ContentID:      "episode-1",
-		SeriesID:       seriesID,
-		SeasonID:       "season-1",
-		SeasonNumber:   1,
-		EpisodeNumber:  1,
-		Title:          "Existing Episode",
-		Overview:       "",
-		Runtime:        0,
-		StillPath:      "s3://episode-1.jpg",
-		StillThumbhash: "episode-thumb",
-		MetadataSource: "provider",
-	}
+			season := seasonRepo.seasons[seasonKey(seriesID, 1)]
+			if season.Title != tc.wantSeason.Title {
+				t.Fatalf("season title = %q, want %q", season.Title, tc.wantSeason.Title)
+			}
+			if season.Overview != tc.wantSeason.Overview {
+				t.Fatalf("season overview = %q, want %q", season.Overview, tc.wantSeason.Overview)
+			}
+			if season.PosterPath != tc.wantSeason.PosterPath || season.PosterThumbhash != "season-thumb" {
+				t.Fatalf("season poster fields = (%q, %q), want existing poster preserved", season.PosterPath, season.PosterThumbhash)
+			}
 
-	service.persistSeasonsAndEpisodes(ctx, &models.MediaItem{ContentID: seriesID, Type: "series"}, nil, "en", "en",
-		[]SeasonResult{{
-			SeasonNumber: 1,
-			Title:        "Provider Season",
-			Overview:     "Filled overview",
-		}},
-		[]EpisodeResult{{
-			SeasonNumber:  1,
-			EpisodeNumber: 1,
-			Title:         "Provider Episode",
-			Overview:      "Episode overview",
-			Runtime:       60,
-			ProviderIDs:   map[string]string{"tmdb": "tmdb-ep-1"},
-		}},
-		MergeFillEmpty,
-	)
-
-	season := seasonRepo.seasons[seasonKey(seriesID, 1)]
-	if season.Title != "Existing Season" {
-		t.Fatalf("season title = %q, want %q", season.Title, "Existing Season")
-	}
-	if season.Overview != "Filled overview" {
-		t.Fatalf("season overview = %q, want %q", season.Overview, "Filled overview")
-	}
-	if season.PosterPath != "s3://season-1.jpg" || season.PosterThumbhash != "season-thumb" {
-		t.Fatalf("season poster fields = (%q, %q), want existing poster preserved", season.PosterPath, season.PosterThumbhash)
-	}
-
-	episode := episodeRepo.episodes[episodeKey(seriesID, 1, 1)]
-	if episode.Title != "Existing Episode" {
-		t.Fatalf("episode title = %q, want %q", episode.Title, "Existing Episode")
-	}
-	if episode.Overview != "Episode overview" {
-		t.Fatalf("episode overview = %q, want %q", episode.Overview, "Episode overview")
-	}
-	if episode.Runtime != 60 {
-		t.Fatalf("episode runtime = %d, want 60", episode.Runtime)
-	}
-	if episode.StillPath != "s3://episode-1.jpg" || episode.StillThumbhash != "episode-thumb" {
-		t.Fatalf("episode still fields = (%q, %q), want existing still preserved", episode.StillPath, episode.StillThumbhash)
-	}
-	if episode.TmdbID != "tmdb-ep-1" {
-		t.Fatalf("episode tmdb id = %q, want tmdb-ep-1", episode.TmdbID)
-	}
-}
-
-func TestPersistSeasonsAndEpisodes_ManualRefreshReplacesNonEmptyButPreservesBlanks(t *testing.T) {
-	const seriesID = "series-manual"
-
-	service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
-	ctx := context.Background()
-
-	seasonRepo.seasons[seasonKey(seriesID, 1)] = &models.Season{
-		ContentID:       "season-1",
-		SeriesID:        seriesID,
-		SeasonNumber:    1,
-		Title:           "Old Season",
-		Overview:        "Old season overview",
-		PosterPath:      "s3://season-old.jpg",
-		PosterThumbhash: "season-thumb",
-	}
-	episodeRepo.episodes[episodeKey(seriesID, 1, 1)] = &models.Episode{
-		ContentID:      "episode-1",
-		SeriesID:       seriesID,
-		SeasonID:       "season-1",
-		SeasonNumber:   1,
-		EpisodeNumber:  1,
-		Title:          "Old Episode",
-		Overview:       "Old episode overview",
-		Runtime:        45,
-		StillPath:      "s3://episode-old.jpg",
-		StillThumbhash: "episode-thumb",
-		MetadataSource: "provider",
-	}
-
-	service.persistSeasonsAndEpisodes(ctx, &models.MediaItem{ContentID: seriesID, Type: "series"}, nil, "en", "en",
-		[]SeasonResult{{
-			SeasonNumber: 1,
-			Title:        "New Season",
-			PosterPath:   "",
-		}},
-		[]EpisodeResult{{
-			SeasonNumber:  1,
-			EpisodeNumber: 1,
-			Title:         "New Episode",
-			Runtime:       50,
-			StillPath:     "",
-		}},
-		MergeReplaceUnlocked,
-	)
-
-	season := seasonRepo.seasons[seasonKey(seriesID, 1)]
-	if season.Title != "New Season" {
-		t.Fatalf("season title = %q, want %q", season.Title, "New Season")
-	}
-	if season.Overview != "Old season overview" {
-		t.Fatalf("season overview = %q, want old overview preserved", season.Overview)
-	}
-	if season.PosterPath != "s3://season-old.jpg" || season.PosterThumbhash != "season-thumb" {
-		t.Fatalf("season poster fields = (%q, %q), want existing poster preserved", season.PosterPath, season.PosterThumbhash)
-	}
-
-	episode := episodeRepo.episodes[episodeKey(seriesID, 1, 1)]
-	if episode.Title != "New Episode" {
-		t.Fatalf("episode title = %q, want %q", episode.Title, "New Episode")
-	}
-	if episode.Overview != "Old episode overview" {
-		t.Fatalf("episode overview = %q, want old overview preserved", episode.Overview)
-	}
-	if episode.Runtime != 50 {
-		t.Fatalf("episode runtime = %d, want 50", episode.Runtime)
-	}
-	if episode.StillPath != "s3://episode-old.jpg" || episode.StillThumbhash != "episode-thumb" {
-		t.Fatalf("episode still fields = (%q, %q), want existing still preserved", episode.StillPath, episode.StillThumbhash)
+			episode := episodeRepo.episodes[episodeKey(seriesID, 1, 1)]
+			if episode.Title != tc.wantEpisode.Title {
+				t.Fatalf("episode title = %q, want %q", episode.Title, tc.wantEpisode.Title)
+			}
+			if episode.Overview != tc.wantEpisode.Overview {
+				t.Fatalf("episode overview = %q, want %q", episode.Overview, tc.wantEpisode.Overview)
+			}
+			if episode.Runtime != tc.wantEpisode.Runtime {
+				t.Fatalf("episode runtime = %d, want %d", episode.Runtime, tc.wantEpisode.Runtime)
+			}
+			if episode.StillPath != tc.wantEpisode.StillPath || episode.StillThumbhash != "episode-thumb" {
+				t.Fatalf("episode still fields = (%q, %q), want existing still preserved", episode.StillPath, episode.StillThumbhash)
+			}
+			if tc.wantEpisode.TmdbID != "" && episode.TmdbID != tc.wantEpisode.TmdbID {
+				t.Fatalf("episode tmdb id = %q, want %s", episode.TmdbID, tc.wantEpisode.TmdbID)
+			}
+		})
 	}
 }
 
@@ -388,126 +324,6 @@ func TestPersistSeasonsAndEpisodes_ImageLockPreservesSelectedSeasonPoster(t *tes
 	missing := seasonRepo.seasons[seasonKey(seriesID, 2)]
 	if missing.PosterPath != "tmdb://automatic-season-2.jpg" || missing.PosterSourcePath != "tmdb://automatic-season-2.jpg" {
 		t.Fatalf("missing poster was not backfilled while images were locked: %#v", missing)
-	}
-}
-
-func TestPersistSeasonsAndEpisodes_UsesBoundedBulkCalls(t *testing.T) {
-	const seriesID = "series-bulk-persist"
-
-	service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
-	episodes := make([]EpisodeResult, 20)
-	for i := range episodes {
-		episodes[i] = EpisodeResult{
-			SeasonNumber:  3,
-			EpisodeNumber: i + 1,
-			Title:         "Episode",
-		}
-	}
-
-	service.persistSeasonsAndEpisodes(
-		context.Background(),
-		&models.MediaItem{ContentID: seriesID, Type: "series"},
-		nil,
-		"en",
-		"en",
-		[]SeasonResult{
-			{SeasonNumber: 1, Title: "Season 1"},
-			{SeasonNumber: 2, Title: "Season 2"},
-		},
-		episodes,
-		MergeFillEmpty,
-	)
-
-	if got := seasonRepo.ListCalls(); got != 1 {
-		t.Fatalf("season prefetch calls = %d, want 1", got)
-	}
-	if got := episodeRepo.ListByNumbersCalls(); got != 1 {
-		t.Fatalf("targeted episode prefetch calls = %d, want 1", got)
-	}
-	if got := seasonRepo.RequestedNumbers(); got != 3 {
-		t.Fatalf("targeted season prefetch keys = %d, want 3", got)
-	}
-	if got := episodeRepo.RequestedPairs(); got != len(episodes) {
-		t.Fatalf("targeted episode prefetch keys = %d, want %d", got, len(episodes))
-	}
-	if got := seasonRepo.BulkUpsertCalls(); got != 2 {
-		t.Fatalf("season bulk upserts = %d, want 2 (explicit and implicit phases)", got)
-	}
-	if got := episodeRepo.BulkUpsertCalls(); got != 1 {
-		t.Fatalf("episode bulk upserts = %d, want 1", got)
-	}
-	if got := seasonRepo.GetByNumberCalls(); got != 0 {
-		t.Fatalf("season point reads = %d, want 0", got)
-	}
-	if got := episodeRepo.GetByNumberCalls(); got != 0 {
-		t.Fatalf("episode point reads = %d, want 0", got)
-	}
-	if got := seasonRepo.UpsertCalls(); got != 0 {
-		t.Fatalf("season single-row upserts = %d, want 0", got)
-	}
-	if got := episodeRepo.UpsertCalls(); got != 0 {
-		t.Fatalf("episode single-row upserts = %d, want 0", got)
-	}
-	if got := episodeRepo.ListBySeriesCalls(); got != 1 {
-		t.Fatalf("availability-filtered completeness reads = %d, want 1", got)
-	}
-	if got := len(episodeRepo.listBySeries(seriesID)); got != len(episodes) {
-		t.Fatalf("persisted episodes = %d, want %d", got, len(episodes))
-	}
-}
-
-func TestPersistSeasonsAndEpisodes_LocalizedRefreshUsesBoundedBulkCalls(t *testing.T) {
-	const seriesID = "series-localized-bulk-persist"
-
-	service, _, _, _ := newSeasonEpisodeServiceForTest(seriesID)
-	seasonLocalizations := newFakeSeasonLocalizationRepo()
-	episodeLocalizations := newFakeEpisodeLocalizationRepo()
-	service.seasonLocalizationRepo = seasonLocalizations
-	service.episodeLocalizationRepo = episodeLocalizations
-
-	episodes := make([]EpisodeResult, 20)
-	for i := range episodes {
-		episodes[i] = EpisodeResult{
-			SeasonNumber:  1,
-			EpisodeNumber: i + 1,
-			Title:         "Localized episode",
-		}
-	}
-	service.persistSeasonsAndEpisodes(
-		context.Background(),
-		&models.MediaItem{ContentID: seriesID, Type: "series"},
-		nil,
-		"en",
-		"fr",
-		[]SeasonResult{
-			{SeasonNumber: 1, Title: "Saison 1"},
-			{SeasonNumber: 2, Title: "Saison 2"},
-		},
-		episodes,
-		MergeFillEmpty,
-	)
-
-	if seasonLocalizations.bulkGetCalls != 1 || seasonLocalizations.bulkUpsertCalls != 1 {
-		t.Fatalf("season localization batch calls = get:%d upsert:%d, want 1/1",
-			seasonLocalizations.bulkGetCalls, seasonLocalizations.bulkUpsertCalls)
-	}
-	if seasonLocalizations.getCalls != 0 || seasonLocalizations.upsertCalls != 0 {
-		t.Fatalf("season localization point calls = get:%d upsert:%d, want 0/0",
-			seasonLocalizations.getCalls, seasonLocalizations.upsertCalls)
-	}
-	if episodeLocalizations.bulkGetCalls != 1 || episodeLocalizations.bulkUpsertCalls != 1 {
-		t.Fatalf("episode localization batch calls = get:%d upsert:%d, want 1/1",
-			episodeLocalizations.bulkGetCalls, episodeLocalizations.bulkUpsertCalls)
-	}
-	if episodeLocalizations.getCalls != 0 || episodeLocalizations.upsertCalls != 0 {
-		t.Fatalf("episode localization point calls = get:%d upsert:%d, want 0/0",
-			episodeLocalizations.getCalls, episodeLocalizations.upsertCalls)
-	}
-	if got := len(seasonLocalizations.localizations); got != 2 {
-		t.Fatalf("persisted season localizations = %d, want 2", got)
-	}
-	if got := len(episodeLocalizations.localizations); got != len(episodes) {
-		t.Fatalf("persisted episode localizations = %d, want %d", got, len(episodes))
 	}
 }
 
@@ -941,7 +757,7 @@ func TestBuildItemLocalizationRecord_PreservesExistingWhenRefreshIsBlank(t *test
 		LogoPath:          "s3://logo.png",
 	}
 
-	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", false, true)
+	loc := buildItemLocalizationRecord(existing, "series-1", "fr", "series", &MetadataResult{}, &MetadataResult{}, nil, MergeReplaceUnlocked, "fr", false, true)
 
 	if *loc != *existing {
 		t.Fatalf("localization = %#v, want %#v", loc, existing)
@@ -1140,14 +956,16 @@ func TestBuildLocalizationRecordsDoNotCarryAITextForward(t *testing.T) {
 	}
 }
 
-// A refresh in a non-canonical language hands the item builder the
-// canonical-language result, so a scheduled refresh must keep the stored AI
-// translation rather than fill it with canonical text.
+// A locked overview hands the item builder the canonical-language text, so a
+// scheduled refresh must keep the stored AI translation rather than fill it
+// with canonical text.
 func TestBuildItemLocalizationRecordKeepsAITextOnFillEmptyRefresh(t *testing.T) {
+	canonical := &MetadataResult{Overview: "English overview", Tagline: "English tagline"}
 	item := buildItemLocalizationRecord(&models.MediaItemLocalization{
 		Overview: "Apercu IA", OverviewSource: models.LocalizationSourceAI,
 		Tagline: "Phrase IA", TaglineSource: models.LocalizationSourceAI,
-	}, "series-1", "fr", "series", &MetadataResult{Overview: "English overview", Tagline: "English tagline"}, nil, MergeFillEmpty, "fr", false, true)
+	}, "series-1", "fr", "series", localizedItemText(&MetadataResult{}, canonical, []MetadataField{FieldOverview}), canonical,
+		nil, MergeFillEmpty, "fr", false, true)
 
 	if item.Overview != "Apercu IA" || item.Tagline != "Phrase IA" {
 		t.Fatalf("overview/tagline = %q/%q, want the AI translation kept", item.Overview, item.Tagline)

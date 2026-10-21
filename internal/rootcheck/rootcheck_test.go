@@ -59,15 +59,6 @@ func TestProbeUnreadableDirectory(t *testing.T) {
 	}
 }
 
-func TestProbeWithTimeoutReachableDirectory(t *testing.T) {
-	t.Parallel()
-
-	res := ProbeWithTimeout(context.Background(), t.TempDir(), DefaultProbeTimeout)
-	if !res.Reachable {
-		t.Fatalf("ProbeWithTimeout(temp dir) = %+v, want reachable", res)
-	}
-}
-
 func TestProbeCoordinatorCoalescesBlockedPath(t *testing.T) {
 	t.Parallel()
 

@@ -399,6 +399,13 @@ func appendDiscoveryLibraryScope(
 		*conditions = append(*conditions, whereSQL)
 		*args = append(*args, scopeArgs...)
 		*argIdx += len(scopeArgs)
+	} else {
+		// No library named or denied: the item must still belong to one, so a
+		// media_items row whose files were removed stays out of Home rows as
+		// it does out of library rows.
+		*conditions = append(*conditions,
+			"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in WHERE mil_scope_in.content_id = mi.content_id)",
+		)
 	}
 	return true
 }

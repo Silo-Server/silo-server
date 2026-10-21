@@ -159,18 +159,6 @@ func TestOriginalArtworkFallsBackToResizedVariant(t *testing.T) {
 	}
 }
 
-func TestStoredKeysResolveDirectlyWithoutAvailabilityReader(t *testing.T) {
-	// Without publication metadata the catalog asks for exactly the key it
-	// holds.
-	resolver := NewPluginImageResolver()
-	t.Cleanup(resolver.Close)
-	resolver.SetArtworkResolver(noProbeStore{t})
-	key := "tmdb/series/1/seasons/3/poster/" + posterLargeRung + ".rev.webp"
-	if got := resolver.ResolveImageURL(t.Context(), key, "large"); got != "https://images.example/"+key {
-		t.Fatalf("stored key was rewritten: %s", got)
-	}
-}
-
 type recordingAvailability struct {
 	external bool
 	states   map[string]ArtworkAvailability

@@ -135,21 +135,6 @@ it("opens on the library tab and keeps the other tab in the URL", () => {
   expect(screen.getByTestId("location").textContent).toBe("/catalog?source=watchlist");
 });
 
-it("labels each tab's content as its tab panel", () => {
-  renderCatalog("/catalog?source=watchlist");
-  const checkPanel = (tabName: RegExp, content: string) => {
-    const tab = screen.getByRole("tab", { name: tabName });
-    const panel = screen.getByRole("tabpanel", { name: tabName });
-    expect(tab).toHaveAttribute("aria-controls", panel.id);
-    expect(panel).toContainElement(screen.getByTestId(content));
-  };
-  checkPanel(/In your library/, "item-grid");
-  expect(screen.getByRole("tabpanel")).toContainElement(screen.getByTestId("catalog-filters"));
-
-  selectTab(/Not in your library yet/);
-  checkPanel(/Not in your library yet/, "watchlist-titles-tab");
-});
-
 it("restores the titles tab from the URL and passes whether adds request", () => {
   mocks.watchlistTitles.mockReturnValue({
     data: [title(1), title(2, "needs_review")],

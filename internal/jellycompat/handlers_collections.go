@@ -29,6 +29,7 @@ type collectionSource interface {
 	ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error)
 	ListContainingItem(ctx context.Context, mediaItemID string) ([]*models.LibraryCollection, error)
 	AnyVisibleInLibraries(ctx context.Context, libraryIDs []int) (bool, error)
+	ViewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access catalog.AccessFilter) (map[string]catalog.ViewerCollectionCount, error)
 }
 
 // CollectionPosterResolver picks the poster a viewer sees for each server
@@ -218,6 +219,20 @@ func (h *ItemsHandler) loadVisibleCollection(ctx context.Context, session *Sessi
 	return collection, nil
 }
 
+// collectionsForViewer returns the collections the session's viewer is shown,
+// carrying the members it can open (catalog CollectionsShownToViewer), as the
+// native collection lists do.
+func (h *ItemsHandler) collectionsForViewer(ctx context.Context, session *Session, collections []*models.LibraryCollection) []*models.LibraryCollection {
+	if session == nil || h.collections == nil || len(collections) == 0 {
+		return collections
+	}
+	counts, err := h.collections.ViewerCollectionCounts(ctx, collections, h.resolveAccessFilter(ctx, session))
+	if err != nil {
+		slog.WarnContext(ctx, "counting compat collections for the viewer failed", "component", "jellycompat", "error", err)
+	}
+	return catalog.CollectionsShownToViewer(collections, counts)
+}
+
 // boxSetsFromCollections maps collections to BoxSet DTOs carrying the posters
 // the session's viewer sees.
 func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Session, collections []*models.LibraryCollection) []baseItemDTO {
@@ -337,7 +352,7 @@ func (h *ItemsHandler) boxSetsByIDs(ctx context.Context, session *Session, colle
 		}
 		collections = append(collections, collection)
 	}
-	return h.boxSetsFromCollections(ctx, session, collections), nil
+	return h.boxSetsFromCollections(ctx, session, h.collectionsForViewer(ctx, session, collections)), nil
 }
 
 // handleBoxSetsList serves GET /Items with IncludeItemTypes=BoxSet by listing
@@ -401,6 +416,7 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 		}
 		matched = append(matched, c)
 	}
+	matched = h.collectionsForViewer(r.Context(), session, matched)
 
 	if query.sort == "sort_title" {
 		ascending := query.order != "desc"
@@ -455,11 +471,15 @@ func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, 
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	if collection == nil {
+	var shown []*models.LibraryCollection
+	if collection != nil {
+		shown = h.collectionsForViewer(r.Context(), session, []*models.LibraryCollection{collection})
+	}
+	if len(shown) == 0 {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.boxSetsFromCollections(r.Context(), session, []*models.LibraryCollection{collection})[0])
+	writeJSON(w, http.StatusOK, h.boxSetsFromCollections(r.Context(), session, shown)[0])
 }
 
 // HandleItemCollections serves GET /Items/{id}/Collections (Jellyfin 12.0+,
@@ -531,6 +551,7 @@ func (h *ItemsHandler) HandleItemCollections(w http.ResponseWriter, r *http.Requ
 			matched = append(matched, c)
 		}
 	}
+	matched = h.collectionsForViewer(r.Context(), session, matched)
 	sort.SliceStable(matched, func(i, j int) bool {
 		a, b := strings.ToLower(matched[i].Title), strings.ToLower(matched[j].Title)
 		if a != b {

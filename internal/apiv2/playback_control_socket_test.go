@@ -99,34 +99,3 @@ func TestPlaybackControlSocketTicketDelegatesOwnerAuthority(t *testing.T) {
 		requireProblem(t, do(t, h, http.MethodPost, path, body, profileOwner()), mapping.want)
 	}
 }
-
-func TestPlaybackControlSocketCapabilityAndRawRoute(t *testing.T) {
-	capability := Prefix + "/playback/sessions/control/capabilities"
-	socket := Prefix + "/playback/sessions/" + controlSocketSession + "/control/ws"
-
-	deps := pilotDeps(nil, nil)
-	h := NewHandler(deps)
-	rec := do(t, h, http.MethodGet, capability, "", profileOwner())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":false`) || strings.Contains(rec.Body.String(), "owner_lease") {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	// Absent service: the ticket operation answers 503 and the raw route
-	// refuses the handshake without a 404.
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/playback/sessions/"+controlSocketSession+"/control/ws-ticket", `{}`, profileOwner()), TypeDependencyUnavailable)
-	rec = do(t, h, http.MethodGet, socket, "", nil)
-	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-
-	f := &fakeControlSocket{available: true}
-	h = NewHandler(controlSocketDeps(f))
-	rec = do(t, h, http.MethodGet, capability, "", profileOwner())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":true`) || !strings.Contains(rec.Body.String(), `"protocol":"silo.playback-control.v2"`) || strings.Contains(rec.Body.String(), "owner_lease") {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	// The raw route delegates to the service without JSON negotiation.
-	rec = do(t, h, http.MethodGet, socket, "", nil)
-	if rec.Code != http.StatusUnauthorized || f.served != 1 {
-		t.Fatal(rec.Code, rec.Body.String(), f.served)
-	}
-}

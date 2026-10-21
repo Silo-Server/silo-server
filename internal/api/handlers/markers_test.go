@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +12,6 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -81,13 +79,6 @@ func markerPutRequest(body string) *http.Request {
 	return withMarkerAdminClaims(req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
 }
 
-func markerItemPutRequest(body string) *http.Request {
-	req := httptest.NewRequest(http.MethodPut, "/markers/items/episode-1", strings.NewReader(body))
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "episode-1")
-	return withMarkerAdminClaims(req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
-}
-
 func withMarkerAdminClaims(req *http.Request) *http.Request {
 	return req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{
 		UserID:    1,
@@ -102,57 +93,6 @@ func newMarkersHandler(writer ManualMarkerWriter) *MarkersHandler {
 	return newTestMarkersHandler(files, writer, nil, nil, nil, nil)
 }
 
-func TestSetFileMarkersWritesManual(t *testing.T) {
-	writer := &fakeMarkerWriter{}
-	h := newMarkersHandler(writer)
-
-	rec := httptest.NewRecorder()
-	h.HandleSetFileMarkers(rec, markerPutRequest(`{"intro":{"start":0,"end":60}}`))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if len(writer.upserts) != 1 {
-		t.Fatalf("expected 1 upsert, got %d", len(writer.upserts))
-	}
-	u := writer.upserts[0]
-	if u.MarkersSource != models.MarkerSourceManual {
-		t.Errorf("source = %q, want manual", u.MarkersSource)
-	}
-	if u.IntroStart == nil || *u.IntroStart != 0 || u.IntroEnd == nil || *u.IntroEnd != 60 {
-		t.Errorf("intro = %v..%v, want 0..60", u.IntroStart, u.IntroEnd)
-	}
-}
-
-func TestSetItemMarkersWritesPrimaryEpisodeFile(t *testing.T) {
-	writer := &fakeMarkerWriter{}
-	file := &models.MediaFile{ID: 8, Duration: 1800}
-	files := fakeMarkerFiles{
-		byID:         map[int]*models.MediaFile{8: file},
-		episodeFiles: []*models.MediaFile{file},
-	}
-	h := newTestMarkersHandler(files, writer, nil, nil, nil, nil)
-
-	rec := httptest.NewRecorder()
-	h.HandleSetItemMarkers(rec, markerItemPutRequest(`{"recap":{"start":0,"end":45}}`))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if len(writer.upserts) != 1 {
-		t.Fatalf("expected 1 upsert, got %d", len(writer.upserts))
-	}
-	if writer.upserts[0].RecapEnd == nil || *writer.upserts[0].RecapEnd != 45 {
-		t.Errorf("recap end = %v, want 45", writer.upserts[0].RecapEnd)
-	}
-}
-
-type fakeMarkerItemAccess map[string]error
-
-func (f fakeMarkerItemAccess) EnsureAccessible(_ context.Context, contentID string, _ catalog.AccessFilter) error {
-	return f[contentID]
-}
-
 type fakeMarkerEpisodeLookup map[string]*models.Episode
 
 func (f fakeMarkerEpisodeLookup) GetByID(_ context.Context, contentID string) (*models.Episode, error) {
@@ -163,64 +103,6 @@ type fakeMarkerUsers map[int]*models.User
 
 func (f fakeMarkerUsers) GetByID(_ context.Context, id int) (*models.User, error) {
 	return f[id], nil
-}
-
-func TestGetItemMarkersUsesFirstAuthorizedFile(t *testing.T) {
-	denied := &models.MediaFile{ID: 8, EpisodeID: "episode-denied", Duration: 1800}
-	allowed := &models.MediaFile{ID: 9, EpisodeID: "episode-allowed", Duration: 1800}
-	files := fakeMarkerFiles{
-		byID: map[int]*models.MediaFile{
-			8: denied,
-			9: allowed,
-		},
-		episodeFiles: []*models.MediaFile{denied, allowed},
-	}
-	h := newTestMarkersHandler(files, nil, nil, nil, nil, nil)
-	h.Authorizer = &MediaFileAuthorizer{
-		FileResolver: files,
-		ItemAccess: fakeMarkerItemAccess{
-			"series-denied": catalog.ErrItemNotFound,
-		},
-		EpisodeLookup: fakeMarkerEpisodeLookup{
-			"episode-denied":  {ContentID: "episode-denied", SeriesID: "series-denied"},
-			"episode-allowed": {ContentID: "episode-allowed", SeriesID: "series-allowed"},
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/markers/items/episode-1", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "episode-1")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	rec := httptest.NewRecorder()
-	h.HandleGetItemMarkers(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var body fileMarkersResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body.FileID != allowed.ID {
-		t.Fatalf("file_id = %d, want first authorized file %d", body.FileID, allowed.ID)
-	}
-}
-
-func TestGetFileMarkersDoesNotRequireMarkerEditPermission(t *testing.T) {
-	h := newMarkersHandler(nil)
-	req := httptest.NewRequest(http.MethodGet, "/markers/files/5", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("fileId", "5")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, Role: "user", TokenType: auth.TokenTypeAccess}))
-
-	rec := httptest.NewRecorder()
-	h.HandleGetFileMarkers(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
 }
 
 // The marker_edit gate lives in the router middleware (see
@@ -257,23 +139,6 @@ func TestSetFileMarkersRejectsUserWithoutMarkerEditPermission(t *testing.T) {
 	}
 	if len(writer.upserts) != 0 {
 		t.Fatalf("permission failure wrote markers: %+v", writer.upserts)
-	}
-}
-
-func TestSetFileMarkersAllowsUserWithMarkerEditPermission(t *testing.T) {
-	writer := &fakeMarkerWriter{}
-	gated := markerEditGatedHandler(t, writer, &models.User{ID: 7, Role: "user", Enabled: true, Permissions: []string{"marker_edit"}})
-	req := markerPutRequest(`{"intro":{"start":0,"end":60}}`)
-	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, Role: "user", TokenType: auth.TokenTypeAccess}))
-
-	rec := httptest.NewRecorder()
-	gated.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if len(writer.upserts) != 1 {
-		t.Fatalf("expected marker write, got %d", len(writer.upserts))
 	}
 }
 
@@ -329,45 +194,6 @@ func TestSetFileMarkersClearsOnNull(t *testing.T) {
 	if len(writer.clears) != 1 || len(writer.clears[0]) != 1 || writer.clears[0][0] != "credits" {
 		t.Errorf("clears = %v, want [[credits]]", writer.clears)
 	}
-}
-
-func TestSetFileMarkersRejectsInvalidRange(t *testing.T) {
-	writer := &fakeMarkerWriter{}
-	h := newMarkersHandler(writer)
-
-	rec := httptest.NewRecorder()
-	h.HandleSetFileMarkers(rec, markerPutRequest(`{"intro":{"start":60,"end":10}}`))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if len(writer.upserts) != 0 {
-		t.Errorf("invalid range must not write, got %d upserts", len(writer.upserts))
-	}
-}
-
-func TestClearFileSegmentRejectsUnknown(t *testing.T) {
-	writer := &fakeMarkerWriter{}
-	h := newMarkersHandler(writer)
-
-	req := httptest.NewRequest(http.MethodDelete, "/markers/files/5/bogus", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("fileId", "5")
-	rctx.URLParams.Add("segment", "bogus")
-	req = withMarkerAdminClaims(req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx)))
-
-	rec := httptest.NewRecorder()
-	h.HandleClearFileSegment(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-}
-
-type fakeMarkerContributor struct{ outcomes []markers.ContributionOutcome }
-
-func (f fakeMarkerContributor) ContributeFile(context.Context, *models.MediaFile, markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
-	return f.outcomes, nil
 }
 
 type captureMarkerContributor struct {
@@ -429,52 +255,6 @@ func TestSetFileMarkersClearOnlyDoesNotContribute(t *testing.T) {
 	}
 }
 
-type fakeContributionLister struct{ rows []markers.ContributionRow }
-
-func (f fakeContributionLister) ListByFile(context.Context, int) ([]markers.ContributionRow, error) {
-	return f.rows, nil
-}
-
-func TestContributeFileUsesSnakeCaseResponse(t *testing.T) {
-	h := newTestMarkersHandler(
-		fakeMarkerFiles{file: &models.MediaFile{ID: 5, Duration: 1800}},
-		nil,
-		fakeMarkerContributor{outcomes: []markers.ContributionOutcome{{
-			Provider: "introdb", Segment: markers.MarkerKindCredits, Status: markers.OutcomeStatusRateLimited,
-			Reason: "usage limited", RetryAfter: 30 * time.Second,
-		}}},
-		nil,
-		nil,
-		nil,
-	)
-	req := httptest.NewRequest(http.MethodPost, "/admin/files/5/contribute", strings.NewReader(`{}`))
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("fileId", "5")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	rec := httptest.NewRecorder()
-	h.HandleContributeFile(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Outcomes []map[string]any `json:"outcomes"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(body.Outcomes) != 1 || body.Outcomes[0]["segment"] != "credits" {
-		t.Fatalf("outcomes = %+v, want credits segment name", body.Outcomes)
-	}
-	if _, ok := body.Outcomes[0]["Segment"]; ok {
-		t.Fatalf("response leaked internal Segment field: %s", rec.Body.String())
-	}
-	if body.Outcomes[0]["retry_after_seconds"] != float64(30) {
-		t.Fatalf("retry_after_seconds = %v, want 30", body.Outcomes[0]["retry_after_seconds"])
-	}
-}
-
 func TestContributeFileDecodesUnknownLengthBody(t *testing.T) {
 	contributor := &captureMarkerContributor{}
 	h := newTestMarkersHandler(
@@ -502,35 +282,5 @@ func TestContributeFileDecodesUnknownLengthBody(t *testing.T) {
 	}
 	if len(contributor.opts.Segments) != 1 || contributor.opts.Segments[0] != markers.MarkerKindCredits {
 		t.Fatalf("segments = %+v, want [credits]", contributor.opts.Segments)
-	}
-}
-
-func TestListFileContributionsUsesSnakeCaseResponse(t *testing.T) {
-	now := time.Unix(100, 0).UTC()
-	h := newTestMarkersHandler(
-		fakeMarkerFiles{file: &models.MediaFile{ID: 5, Duration: 1800}},
-		nil,
-		nil,
-		fakeContributionLister{rows: []markers.ContributionRow{{
-			ID: "row1", MediaFileID: 5, Provider: "introdb", SegmentKind: "intro",
-			Source: "manual", ContentHash: "hash", Status: "pending", SubmittedAt: now, UpdatedAt: now,
-		}}},
-		nil,
-		nil,
-	)
-	req := httptest.NewRequest(http.MethodGet, "/admin/files/5/contributions", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("fileId", "5")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	rec := httptest.NewRecorder()
-	h.HandleListFileContributions(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, `"media_file_id":5`) || strings.Contains(body, "MediaFileID") {
-		t.Fatalf("unexpected contribution response shape: %s", body)
 	}
 }

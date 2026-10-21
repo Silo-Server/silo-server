@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
+	aitranslate "github.com/Silo-Server/silo-server/internal/ai/translate"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -295,6 +296,25 @@ func testService(t *testing.T, repo *fakeRepo, content *fakeContent, locs *fakeL
 	return NewService(ctx, cfg, repo, content, locs, chat.fn, jobrunner.NewSemaphore(1), nil)
 }
 
+// newService builds a service with the default config whose AI slot is sem.
+func newService(t *testing.T, repo *fakeRepo, content *fakeContent, locs *fakeLocs, chat aitranslate.ChatFn, sem chan struct{}) *Service {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return NewService(ctx, Config{Enabled: true, Configured: true, ChatModel: "test-model"}, repo, content, locs, chat, sem, nil)
+}
+
+// queuedService builds a service whose only AI slot is taken, so every job it
+// accepts stays queued.
+func queuedService(t *testing.T, repo *fakeRepo, content *fakeContent, locs *fakeLocs, chat *upperChat) *Service {
+	t.Helper()
+	sem := jobrunner.NewSemaphore(1)
+	sem <- struct{}{}
+	svc := newService(t, repo, content, locs, chat.fn, sem)
+	t.Cleanup(func() { <-sem })
+	return svc
+}
+
 func waitDone(t *testing.T, repo *fakeRepo) int64 {
 	t.Helper()
 	select {
@@ -459,39 +479,9 @@ func TestPersistFailureFailsJob(t *testing.T) {
 	}
 }
 
-func TestEnqueueDeduplicatesActiveJobs(t *testing.T) {
-	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
-	// Block the runner so the first job stays active during the second enqueue.
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sem := jobrunner.NewSemaphore(1)
-	sem <- struct{}{} // occupy the only slot
-	cfg := Config{Enabled: true, Configured: true, ChatModel: "test-model"}
-	svc := NewService(ctx, cfg, repo, content, locs, chat.fn, sem, nil)
-
-	first, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "series1", TargetLanguage: "fr"})
-	if err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	second, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "series1", TargetLanguage: "fr"})
-	if err != nil {
-		t.Fatalf("Enqueue dup: %v", err)
-	}
-	if second.ID != first.ID {
-		t.Errorf("duplicate enqueue created job %d, want %d", second.ID, first.ID)
-	}
-	<-sem // release so cleanup can proceed
-}
-
 func TestEnqueueDedupeRespectsScopeAndForce(t *testing.T) {
 	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sem := jobrunner.NewSemaphore(1)
-	sem <- struct{}{} // keep every job queued
-	t.Cleanup(func() { <-sem })
-	cfg := Config{Enabled: true, Configured: true, ChatModel: "test-model"}
-	svc := NewService(ctx, cfg, repo, content, locs, chat.fn, sem, nil)
+	svc := queuedService(t, repo, content, locs, chat)
 	enqueue := func(children, force bool) *Job {
 		t.Helper()
 		job, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "series1", TargetLanguage: "fr", IncludeChildren: children, Force: force})
@@ -728,15 +718,12 @@ func TestLibraryPrewarmTranslatesEachMissingItem(t *testing.T) {
 func TestLibraryPrewarmStopsOnProviderFailure(t *testing.T) {
 	repo, content, locs := newFakeRepo(), seriesContent(), &fakeLocs{}
 	content.libraryItems = []string{"series1", "series1", "series1", "series1"}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	var calls atomic.Int32
 	failing := func(context.Context, string, string) (string, error) {
 		calls.Add(1)
 		return "", fmt.Errorf("quota exceeded")
 	}
-	cfg := Config{Enabled: true, Configured: true, ChatModel: "test-model"}
-	svc := NewService(ctx, cfg, repo, content, locs, failing, jobrunner.NewSemaphore(1), nil)
+	svc := newService(t, repo, content, locs, failing, jobrunner.NewSemaphore(1))
 
 	job, err := svc.EnqueueLibrary(context.Background(), 7, "fr", nil)
 	if err != nil {
@@ -760,8 +747,6 @@ func TestLibraryPrewarmStopsOnProviderFailure(t *testing.T) {
 func TestLibraryPrewarmSkipsAFailingItem(t *testing.T) {
 	repo, content, locs := newFakeRepo(), seriesContent(), &fakeLocs{}
 	content.libraryItems = []string{"series1", "series1", "series1"}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	var calls atomic.Int32
 	chat := func(ctx context.Context, system, user string) (string, error) {
 		if calls.Add(1) == 1 {
@@ -769,8 +754,7 @@ func TestLibraryPrewarmSkipsAFailingItem(t *testing.T) {
 		}
 		return (&upperChat{}).fn(ctx, system, user)
 	}
-	cfg := Config{Enabled: true, Configured: true, ChatModel: "test-model"}
-	svc := NewService(ctx, cfg, repo, content, locs, chat, jobrunner.NewSemaphore(1), nil)
+	svc := newService(t, repo, content, locs, chat, jobrunner.NewSemaphore(1))
 
 	job, err := svc.EnqueueLibrary(context.Background(), 7, "fr", nil)
 	if err != nil {
@@ -892,12 +876,7 @@ func TestLibraryPrewarmStopsWhenCanceledElsewhere(t *testing.T) {
 // request, so a rolling deploy does not start duplicate work.
 func TestEnqueueReusesALegacyKeyJobThatCoversTheRequest(t *testing.T) {
 	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sem := jobrunner.NewSemaphore(1)
-	sem <- struct{}{}
-	t.Cleanup(func() { <-sem })
-	svc := NewService(ctx, Config{Enabled: true, Configured: true, ChatModel: "test-model"}, repo, content, locs, chat.fn, sem, nil)
+	svc := queuedService(t, repo, content, locs, chat)
 	legacy := &Job{TargetKind: TargetItem, ContentID: "series1", TargetLanguage: "fr", IncludeChildren: true,
 		Status: jobrunner.StatusRunning, IdempotencyKey: legacyIdempotencyKey(TargetItem, "series1", "fr", "test-model")}
 	if err := repo.InsertJob(context.Background(), legacy); err != nil {
@@ -918,12 +897,7 @@ func TestEnqueueReusesALegacyKeyJobThatCoversTheRequest(t *testing.T) {
 func TestEnqueueTreatsMovieChildrenFlagAsTheSameJob(t *testing.T) {
 	repo, locs, chat := newFakeRepo(), &fakeLocs{}, &upperChat{}
 	content := &fakeContent{item: &ItemText{ContentID: "movie1", Type: "movie", Title: "M", Overview: "An overview."}}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sem := jobrunner.NewSemaphore(1)
-	sem <- struct{}{}
-	t.Cleanup(func() { <-sem })
-	svc := NewService(ctx, Config{Enabled: true, Configured: true, ChatModel: "test-model"}, repo, content, locs, chat.fn, sem, nil)
+	svc := queuedService(t, repo, content, locs, chat)
 	first, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "movie1", TargetLanguage: "fr"})
 	if err != nil {
 		t.Fatal(err)
@@ -939,12 +913,7 @@ func TestEnqueueReturnsTheItemLookupError(t *testing.T) {
 	repo, locs, chat := newFakeRepo(), &fakeLocs{}, &upperChat{}
 	lookupErr := errors.New("item lookup failed")
 	content := &fakeContent{itemErr: lookupErr}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sem := jobrunner.NewSemaphore(1)
-	sem <- struct{}{}
-	t.Cleanup(func() { <-sem })
-	svc := NewService(ctx, Config{Enabled: true, Configured: true, ChatModel: "test-model"}, repo, content, locs, chat.fn, sem, nil)
+	svc := queuedService(t, repo, content, locs, chat)
 	job, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "movie1", TargetLanguage: "fr", IncludeChildren: true})
 	if !errors.Is(err, lookupErr) || job != nil {
 		t.Fatalf("Enqueue = %+v, %v; want the item lookup error", job, err)
@@ -953,12 +922,7 @@ func TestEnqueueReturnsTheItemLookupError(t *testing.T) {
 
 func TestEnqueueTreatsEpisodeChildrenFlagAsTheSameJob(t *testing.T) {
 	repo, locs, chat := newFakeRepo(), &fakeLocs{}, &upperChat{}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sem := jobrunner.NewSemaphore(1)
-	sem <- struct{}{}
-	t.Cleanup(func() { <-sem })
-	svc := NewService(ctx, Config{Enabled: true, Configured: true, ChatModel: "test-model"}, repo, &fakeContent{}, locs, chat.fn, sem, nil)
+	svc := queuedService(t, repo, &fakeContent{}, locs, chat)
 	first, err := svc.Enqueue(context.Background(), JobRequest{TargetKind: TargetEpisode, ContentID: "ep1", TargetLanguage: "fr"})
 	if err != nil {
 		t.Fatal(err)
@@ -972,12 +936,7 @@ func TestEnqueueTreatsEpisodeChildrenFlagAsTheSameJob(t *testing.T) {
 // A series-only on-view job must not swallow a later full-series request.
 func TestEnqueueStartsAFullSeriesJobWhileASeriesOnlyJobRuns(t *testing.T) {
 	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sem := jobrunner.NewSemaphore(1)
-	sem <- struct{}{} // keep every job queued
-	t.Cleanup(func() { <-sem })
-	svc := NewService(ctx, Config{Enabled: true, Configured: true, ChatModel: "test-model"}, repo, content, locs, chat.fn, sem, nil)
+	svc := queuedService(t, repo, content, locs, chat)
 	narrow, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "series1", TargetLanguage: "fr"})
 	if err != nil {
 		t.Fatal(err)

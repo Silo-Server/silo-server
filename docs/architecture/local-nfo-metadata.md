@@ -336,7 +336,34 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
 | Disc art (movies only) | `<basename>-disc`, `<basename>-cdart`, `<basename>-discart`, then `disc`, `cdart`, `discart` |
 | Season poster | `poster`, `folder`, `cover` in the season folder, then `seasonNN-poster` (`season-specials-poster` for season 0) in the series root |
 | Episode still | `<basename>-thumb`, then `<basename>` |
+| Local extra still | `<basename>-thumb`, then `<basename>`, beside the extra's own file (below) |
 
+- A local extra (a trailer or featurette file, `media_extras`) has no metadata
+  refresh, so the scanner reads its image instead
+  (`internal/scanner/extra_stills.go`): every scan that walks the extra checks
+  the folder listing the walk already read (a single-file scan reads the
+  folder), copies a new or changed sidecar into the image cache as a 16:9
+  still, and clears the image when the sidecar is gone. A folder that cannot
+  be read leaves the stored image alone. `media_extras.still_source` records
+  the sidecar's path, size and mtime, so an unchanged image is not read again,
+  and an image that cannot be decoded is recorded without a still until it
+  changes. When the scanner or a library delete removes an extra's last file
+  row, the extra's image is cleared for the artwork revision GC. Adding or replacing the image starts a
+  subtree scan of its folder, like any sidecar change. API v2 detail returns it
+  as `extras[].still_url`, and Jellyfin clients get it as the extra's Primary
+  image.
+- An extra without a sidecar gets a frame of its video instead
+  (`internal/extrastills`, the hidden `generate_extra_stills` task, at startup
+  and every 15 minutes, in every library): a tenth of the way in, between 5
+  seconds and a minute, taken through the chapter-thumbnail extractor and its
+  local or transcode-node routing. The frame is keyed to the file's size and
+  mtime, so a replaced file gets a new one. A file ffmpeg cannot decode is
+  skipped until it changes; other failures are tried again after six hours, and
+  a run stops early when no transcode node can be reserved. Extras in disabled
+  libraries, and files not yet probed, wait. A sidecar always wins: a scan
+  replaces a frame with it, and the task never overwrites one. An extra whose
+  sidecar cannot be decoded gets no frame either; it shows no image until the
+  sidecar is fixed or removed.
 - Basename names attach to one of the item's own media files and beat generic
   names, as in Kodi. A series has no media file of its own (its request lists
   every episode file), so a series uses generic names only and
@@ -433,7 +460,12 @@ Caching and refresh:
   the best remote candidate by the `applyBestImages` rules, for seasons and
   episodes the first remote poster or still that the local one displaced while
   provider results merged, or, when the refresh kept a local source it could
-  not see, the remote one it chose. The slot's source stays the local file, so the
+  not see, the remote one it chose. When the refresh offers no remote image for
+  an item slot, which is always so for a local re-apply because it asks no
+  remote provider, the remote image the slot was serving stays as the stand-in,
+  as a cached copy would, so a copy that keeps failing never leaves the slot
+  blank; clear art stored as the logo is the exception and never stands in. The
+  slot's source stays the local file, so the
   copy replaces the stand-in through the source-matched update, and a refresh
   that offers no artwork at all leaves the slot, local source included, as it
   is. Locked artwork gets no stand-in, and neither does an image URL an NFO

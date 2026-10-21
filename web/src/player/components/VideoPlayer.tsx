@@ -531,6 +531,16 @@ export function VideoPlayer({
   // transport command for the current selection. The drift loop measures
   // against it; snapshots never move it.
   const roomReferenceRef = useRef<RoomPositionReference | null>(null);
+  // Starts a room member's player once its media is playable: true when the
+  // room's latest applied command has it playing and its position is now
+  // applied, so startup may play. The room effect keeps it current.
+  const roomStartRef = useRef<((video: HTMLVideoElement) => boolean) | null>(null);
+  // The current transport has not started or settled paused yet, so its
+  // startup will still run once the media is playable.
+  const transportStartupPendingRef = useRef(false);
+  // Offers a click to join when the browser refuses to start a room member's
+  // player for want of one; the room effect keeps it current.
+  const offerRoomJoinRef = useRef<(() => void) | null>(null);
   // When the latest room command executed or finished executing. The drift
   // loop leaves playback alone for a moment after a command.
   // Local intervals in room sync (this settle, reload staleness and pacing,
@@ -743,11 +753,16 @@ export function VideoPlayer({
       transportFailedForPlanRevisionRef.current = planRevision;
       setError(null);
       // Until this transport has played, the player's position is the
-      // previous route's or 0; recovery resumes where this one was heading.
-      onPlanFailure(
-        failure,
-        streamPlayedRef.current ? currentTimeRef.current : subtitleFetchAnchorRef.current,
-      );
+      // previous route's or 0; recovery resumes where this one was heading,
+      // which for a member of a playing room is where the room is now.
+      let resumeAt = subtitleFetchAnchorRef.current;
+      const roomReference = roomReferenceRef.current;
+      if (streamPlayedRef.current) {
+        resumeAt = currentTimeRef.current;
+      } else if (roomReference?.playing) {
+        resumeAt = roomPositionAt(roomReference, Date.now(), serverTimeOffsetRef.current);
+      }
+      onPlanFailure(failure, resumeAt);
       return true;
     },
     [onPlanFailure, plan.plan_attempt_key, planRevision, sessionId],
@@ -836,9 +851,12 @@ export function VideoPlayer({
   backendDurationRef.current = backendDuration;
   const effectiveInitialPosition = plan.timeline.player_start_seconds;
   const canSeekAnywhere = plan.timeline.can_seek_anywhere;
-  // The menu is the plan's; which entry is lit is the session's own preference,
-  // since `auto` is a valid preference that names no rung.
+  // The menu is the plan's. The session's preference decides whether Auto is
+  // lit, since `auto` names no rung; otherwise the plan names the entry it
+  // delivers.
   const activeQualityId = qualityPreference;
+  const activeQuality = plan.active_quality;
+  const deliveredBitrateKbps = plan.effective_recipe.bitrate_kbps;
   const qualityOptions = useMemo(() => qualityOptionsFromPlanV3(plan), [plan]);
 
   // The file the server actually planned against, which is not necessarily the
@@ -919,6 +937,10 @@ export function VideoPlayer({
     reportCommandId: roomReportCommandId,
   });
   const roomPlaybackActive = !!watchTogetherRoomId && !watchTogether.closedReason;
+  // Read by the transport's startup: a room member's player starts when the
+  // room says so, not when its media is ready.
+  const roomPlaybackActiveRef = useRef(roomPlaybackActive);
+  roomPlaybackActiveRef.current = roomPlaybackActive;
   // Read by timers that must use the newest clock estimate without restarting.
   const serverTimeOffsetRef = useRef(watchTogether.serverTimeOffsetMs);
   serverTimeOffsetRef.current = watchTogether.serverTimeOffsetMs;
@@ -2241,10 +2263,14 @@ export function VideoPlayer({
     transportIdleSinceRef.current = null;
     const video = videoRef.current;
     if (!video || !isPlayerReady || hlsStartupGuardRef.current?.hasFailed()) return;
+    transportStartupPendingRef.current = true;
 
     let hls: HlsType | null = null;
     let engineSession: BrowserEngineSession | null = null;
     let destroyed = false;
+    // Set when startup recovery loads a failed manifest again, so the reload's
+    // own failure is not swallowed by the recovery cooldown.
+    let manifestReloadPending = false;
     let playbackStarted = false;
     let autoplayInFlight = false;
     let autoplayAttempts = 0;
@@ -2263,6 +2289,7 @@ export function VideoPlayer({
     };
 
     const cleanupStartupListeners = () => {
+      transportStartupPendingRef.current = false;
       clearAutoplayRetry();
       video.removeEventListener("loadeddata", attemptAutoplayWhenReady);
       video.removeEventListener("canplay", attemptAutoplayWhenReady);
@@ -2301,7 +2328,16 @@ export function VideoPlayer({
       // the current frame. Starting earlier can produce a visible first-frame
       // freeze where audio advances before video begins moving.
       if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
-      if (!shouldAutoPlay) {
+      if (roomPlaybackActiveRef.current) {
+        // The room decides: its latest command starts this player from where
+        // the room is now. Until one has it playing, the player waits paused;
+        // starting on its own would put it ahead of everyone at the room's
+        // start, or leave it behind from 0 after the room already started.
+        if (!roomStartRef.current?.(video)) {
+          settlePaused();
+          return;
+        }
+      } else if (!shouldAutoPlay) {
         settlePaused();
         return;
       }
@@ -2331,6 +2367,13 @@ export function VideoPlayer({
           // The element is paused now, whatever happens next, so the transport
           // reflects that immediately.
           setPlaying(false);
+          if (roomPlaybackActiveRef.current && isAutoplayPolicyRejection(error)) {
+            // The room's start needs a click in this browser, as when the
+            // room's own play is refused.
+            settlePaused();
+            offerRoomJoinRef.current?.();
+            return;
+          }
           if (autoplayAttempts < MAX_AUTOPLAY_ATTEMPTS) {
             // Deliberately keeps the readiness listeners armed: whichever
             // wakes first — a later `canplay` or this timer — retries.
@@ -2440,13 +2483,30 @@ export function VideoPlayer({
               }
 
               const now = Date.now();
-              if (now - lastRecoveryRef.current < 3000) return;
+              // A reloaded manifest can fail again within the cooldown (a
+              // parse error does at once); that failure must still reach the
+              // startup guard, or the player waits for the startup timeout.
+              const reloadFailed = manifestReloadPending;
+              manifestReloadPending = false;
+              if (!reloadFailed && now - lastRecoveryRef.current < 3000) return;
               lastRecoveryRef.current = now;
 
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                 if (hlsStartupGuardRef.current?.handleFatalNetworkError() ?? true) {
                   console.warn("[hls.js] Fatal network error, attempting recovery...");
-                  hls?.startLoad();
+                  // startLoad() never requests a manifest that failed to load,
+                  // so it would leave the player waiting for the startup
+                  // timeout. Load the source again instead.
+                  if (
+                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
+                    data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR
+                  ) {
+                    manifestReloadPending = !streamPlayedRef.current;
+                    hls?.loadSource(effectiveStreamUrl);
+                  } else {
+                    hls?.startLoad();
+                  }
                 } else {
                   console.error("[hls.js] Fatal startup network error, giving up");
                 }
@@ -3625,27 +3685,30 @@ export function VideoPlayer({
       lastRoomCommandIdRef.current = null;
       appliedRoomCommandIdRef.current = null;
       roomReferenceRef.current = null;
+      roomStartRef.current = null;
+      offerRoomJoinRef.current = null;
       return;
     }
-    if (command.command_id === lastRoomCommandIdRef.current) {
-      return;
-    }
+    // A repeat run for the same command (a clock, plan, or callback update)
+    // only refreshes roomStartRef below; the command is already scheduled or run.
+    const repeat = command.command_id === lastRoomCommandIdRef.current;
+    if (!repeat) {
+      lastRoomCommandIdRef.current = command.command_id;
+      appliedRoomCommandIdRef.current = null;
+      // The room's seek for the held request. A seek for an earlier press in a
+      // burst does not answer it.
+      if (
+        command.action === "seek" &&
+        roomHeldSeekRef.current !== null &&
+        remainingRoomHeldSeek(roomHeldSeekRef.current, command.position_seconds) === null
+      ) {
+        roomHeldSeekAnsweredRef.current = true;
+      }
 
-    lastRoomCommandIdRef.current = command.command_id;
-    appliedRoomCommandIdRef.current = null;
-    // The room's seek for the held request. A seek for an earlier press in a
-    // burst does not answer it.
-    if (
-      command.action === "seek" &&
-      roomHeldSeekRef.current !== null &&
-      remainingRoomHeldSeek(roomHeldSeekRef.current, command.position_seconds) === null
-    ) {
-      roomHeldSeekAnsweredRef.current = true;
-    }
-
-    if (roomCommandTimerRef.current !== null) {
-      window.clearTimeout(roomCommandTimerRef.current);
-      roomCommandTimerRef.current = null;
+      if (roomCommandTimerRef.current !== null) {
+        window.clearTimeout(roomCommandTimerRef.current);
+        roomCommandTimerRef.current = null;
+      }
     }
 
     const serverExecuteAt = Date.parse(command.execute_at);
@@ -3807,6 +3870,46 @@ export function VideoPlayer({
       return true;
     };
 
+    // Startup runs this once the media is playable (see roomStartRef). A play
+    // that executed before then is decided here, against the position and
+    // seekable ranges the element has now.
+    roomStartRef.current = (video) =>
+      reference.playing &&
+      lastRoomCommandIdRef.current === command.command_id &&
+      appliedRoomCommandIdRef.current === command.command_id &&
+      applyRoomPosition(video);
+
+    // The browser refused to start playback without a click: offer one that
+    // joins the room where it is when clicked.
+    const offerJoinPlayback = () => {
+      resetRoomCatchupRate();
+      showWatchTogetherNotice(
+        "Your browser blocked automatic playback. Click to join playback.",
+        "warning",
+        () => {
+          if (!isMountedRef.current || lastRoomCommandIdRef.current !== command.command_id) return;
+          const currentVideo = videoRef.current;
+          if (!currentVideo) return;
+          roomCommandFinishedAtRef.current = performance.now();
+          if (!applyRoomPosition(currentVideo)) return;
+          void currentVideo
+            .play()
+            .then(() => {
+              if (!isMountedRef.current || lastRoomCommandIdRef.current !== command.command_id)
+                return;
+              reportRoomReadyRef.current();
+            })
+            .catch(() => {
+              if (!isMountedRef.current || lastRoomCommandIdRef.current !== command.command_id)
+                return;
+              resetRoomCatchupRate();
+            });
+        },
+      );
+    };
+    offerRoomJoinRef.current = offerJoinPlayback;
+    if (repeat) return;
+
     roomCommandTimerRef.current = window.setTimeout(() => {
       roomCommandTimerRef.current = null;
       void (async () => {
@@ -3826,7 +3929,17 @@ export function VideoPlayer({
           if (command.action === "seek") holdRoomSeek(null);
           else abandonRoomHeldSeek();
         }
-        const playAllowed = applyRoomPosition(video);
+        // A play that runs while this transport is still starting, before it
+        // has playable media, waits for its startup (see roomStartRef): the
+        // position and seekable ranges mean nothing yet, and a source still
+        // loading lands wherever its startup puts it. Once a transport has
+        // started, a play goes ahead as before and starts when data arrives.
+        const awaitingMedia =
+          command.action === "play" &&
+          video.paused &&
+          transportStartupPendingRef.current &&
+          video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
+        const playAllowed = !awaitingMedia && applyRoomPosition(video);
 
         if (command.action === "seek") {
           video.pause();
@@ -3852,37 +3965,7 @@ export function VideoPlayer({
               }, AUTOPLAY_RETRY_DELAY_MS);
               return;
             }
-            resetRoomCatchupRate();
-            showWatchTogetherNotice(
-              "Your browser blocked automatic playback. Click to join playback.",
-              "warning",
-              () => {
-                if (!isMountedRef.current || lastRoomCommandIdRef.current !== command.command_id)
-                  return;
-                const currentVideo = videoRef.current;
-                if (!currentVideo) return;
-                roomCommandFinishedAtRef.current = performance.now();
-                if (!applyRoomPosition(currentVideo)) return;
-                void currentVideo
-                  .play()
-                  .then(() => {
-                    if (
-                      !isMountedRef.current ||
-                      lastRoomCommandIdRef.current !== command.command_id
-                    )
-                      return;
-                    reportRoomReadyRef.current();
-                  })
-                  .catch(() => {
-                    if (
-                      !isMountedRef.current ||
-                      lastRoomCommandIdRef.current !== command.command_id
-                    )
-                      return;
-                    resetRoomCatchupRate();
-                  });
-              },
-            );
+            offerJoinPlayback();
           }
         }
 
@@ -4164,18 +4247,18 @@ export function VideoPlayer({
   }, [activeQualityId, sessionId, watchTogetherRoomId]);
 
   const lowerQualityChoiceRef = useRef(() =>
-    lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe, plan.source),
+    lowerQualityOption(qualityOptions, activeQualityId, activeQuality, deliveredBitrateKbps),
   );
   useEffect(() => {
     lowerQualityChoiceRef.current = () =>
-      lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe, plan.source);
+      lowerQualityOption(qualityOptions, activeQualityId, activeQuality, deliveredBitrateKbps);
     // A replan can leave no lower rung; an offer that cannot act is withdrawn.
     if (!lowerQualityChoiceRef.current()) {
       setNotice((current) =>
         current?.actionLabel === LOWER_QUALITY_ACTION_LABEL ? null : current,
       );
     }
-  }, [activeQualityId, plan.effective_recipe, plan.source, qualityOptions]);
+  }, [activeQuality, activeQualityId, deliveredBitrateKbps, qualityOptions]);
 
   // A viewer who keeps stalling in a room cannot keep up at this quality.
   // Offer one step down, once per quality; the room's shared source is kept.
@@ -4185,7 +4268,7 @@ export function VideoPlayer({
     const recent = roomStallTimesRef.current.filter((at) => now - at < ROOM_STALL_WINDOW_MS);
     roomStallTimesRef.current = recent;
     if (recent.length < ROOM_STALLS_BEFORE_LOWER_QUALITY) return;
-    if (!lowerQualityOption(qualityOptions, activeQualityId, plan.effective_recipe, plan.source)) {
+    if (!lowerQualityOption(qualityOptions, activeQualityId, activeQuality, deliveredBitrateKbps)) {
       return;
     }
     lowerQualityOfferedRef.current = true;
@@ -4201,9 +4284,9 @@ export function VideoPlayer({
       LOWER_QUALITY_ACTION_LABEL,
     );
   }, [
+    activeQuality,
     activeQualityId,
-    plan.effective_recipe,
-    plan.source,
+    deliveredBitrateKbps,
     qualityOptions,
     roomStallSignal,
     showWatchTogetherNotice,
@@ -4925,8 +5008,7 @@ export function VideoPlayer({
           onAudioSelect={onAudioSelect}
           qualityOptions={qualityOptions}
           activeQualityId={activeQualityId}
-          deliveredRecipe={plan.effective_recipe}
-          playbackSource={plan.source}
+          activeQuality={plan.active_quality}
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={handleQualitySelect}

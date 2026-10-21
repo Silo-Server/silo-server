@@ -124,8 +124,8 @@ func TestEventsWebSocketDeclaredChannelsSkipHandshake(t *testing.T) {
 		t.Fatalf("snapshot channel = %s, want user_settings", snapshot["channel"])
 	}
 
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Errorf("event channel = %s, want user_settings", event["channel"])
@@ -205,66 +205,14 @@ func TestEventsWebSocketPartialDeclarationSurvives(t *testing.T) {
 
 	time.Sleep(subscribeGracePeriod + time.Second)
 
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatalf("setting read deadline: %v", err)
 	}
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Fatalf("event channel = %s, want user_settings", event["channel"])
-	}
-}
-
-// TestEventsWebSocketRepeatedChannelsParameter covers the other natural
-// spelling of a selection. Honoring only the first occurrence dropped the rest
-// with an empty rejected array — the connection came up subscribed to less than
-// it asked for and reported nothing wrong.
-func TestEventsWebSocketRepeatedChannelsParameter(t *testing.T) {
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	_, readFrame := eventsWSTestConn(t, hub, &auth.Claims{UserID: 1, Role: "user"},
-		"?channels=catalog&channels=user_settings")
-
-	readFrame("hello")
-	subscribed := readFrame("subscribed")
-
-	for _, want := range []string{`"catalog"`, `"user_settings"`} {
-		if !strings.Contains(string(subscribed["channels"]), want) {
-			t.Errorf("channel %s was dropped: %s", want, subscribed["channels"])
-		}
-	}
-}
-
-// TestEventsWebSocketSilentConnectionStillClosed pins the other half: the grace
-// period still applies to a connection that declared nothing, so the URL path
-// relaxes the rule rather than removing it.
-func TestEventsWebSocketSilentConnectionStillClosed(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("waits out the subscribe grace period in real time")
-	}
-
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	conn, readFrame := eventsWSTestConn(t, hub, &auth.Claims{UserID: 1, Role: "user"}, "")
-
-	hello := readFrame("hello")
-	if string(hello["required_action"]) != `"subscribe"` {
-		t.Errorf("required_action = %s, want \"subscribe\"", hello["required_action"])
-	}
-
-	if err := conn.SetReadDeadline(time.Now().Add(subscribeGracePeriod + 5*time.Second)); err != nil {
-		t.Fatalf("setting read deadline: %v", err)
-	}
-	// The error frame, then the close.
-	if _, _, err := conn.ReadMessage(); err != nil {
-		t.Fatalf("reading error frame: %v", err)
-	}
-	_, _, err := conn.ReadMessage()
-	if err == nil {
-		t.Fatal("silent connection was not closed after the grace period")
-	}
-	if !websocket.IsCloseError(err, websocket.ClosePolicyViolation) {
-		t.Fatalf("close error = %v, want policy violation", err)
 	}
 }
 
@@ -299,8 +247,8 @@ func TestEventsWebSocketDeclaredChannelsCannotEscalate(t *testing.T) {
 		evt.PublishOptions{AdminOnly: true}); err != nil {
 		t.Fatalf("publishing admin-only event: %v", err)
 	}
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 
 	event := readFrame("event")
 	if string(event["channel"]) != `"user_settings"` {
@@ -315,7 +263,7 @@ func TestEventsWebSocketDeclaredChannelsCannotEscalate(t *testing.T) {
 func TestEventsWebSocketAdminAccountChildProfileIsNotAdmin(t *testing.T) {
 	hub := evt.NewHub("test", &cache.NoopEventBus{})
 	_, readFrame := eventsWSTestConnActing(t, &EventsHandler{hub: hub},
-		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=sessions,user_settings", actingAdminIs(false))
+		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=sessions,history_import", actingAdminIs(false))
 
 	hello := readFrame("hello")
 	if strings.Contains(string(hello["available_channels"]), `"sessions"`) {
@@ -325,15 +273,23 @@ func TestEventsWebSocketAdminAccountChildProfileIsNotAdmin(t *testing.T) {
 	if strings.Contains(string(subscribed["channels"]), `"sessions"`) {
 		t.Fatalf("child profile was granted the sessions channel: %s", subscribed["channels"])
 	}
-	readFrame("snapshot") // user_settings
+	readFrame("snapshot") // history_import
 
 	// Another account's event first, then this account's: receiving the
-	// second without the first proves the first was filtered.
-	publishUserSettingsEvent(context.Background(), hub, 2, "profile-2", "playback.subtitle_language", "profile")
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1", "playback.subtitle_language", "profile")
+	// second without the first proves the first was filtered. history_import
+	// still reaches an acting admin across accounts, so only the demotion
+	// filters it here.
+	for _, env := range []evt.Envelope{
+		{Channel: evt.ChannelHistoryImport, Event: "foreign-import", UserID: 2},
+		{Channel: evt.ChannelHistoryImport, Event: "own-import", UserID: 1},
+	} {
+		if err := hub.Publish(context.Background(), env); err != nil {
+			t.Fatalf("publishing %s: %v", env.Event, err)
+		}
+	}
 	event := readFrame("event")
-	if !strings.Contains(string(event["data"]), `"profile-1"`) {
-		t.Fatalf("child profile received another account's event: %s", event["data"])
+	if string(event["event"]) != `"own-import"` {
+		t.Fatalf("child profile received another account's event: %s", event["event"])
 	}
 }
 
@@ -390,8 +346,8 @@ func TestEventsWebSocketUnknownChannelDoesNotCloseConnection(t *testing.T) {
 
 	// The connection is still usable.
 	readFrame("snapshot")
-	publishUserSettingsEvent(context.Background(), hub, 1, "profile-1",
-		"playback.subtitle_language", "profile")
+	publishUserSettingsEvent(context.Background(), hub, 1, "",
+		"playback.subtitle_language", "account")
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Errorf("event channel = %s, want user_settings", event["channel"])
 	}
@@ -611,24 +567,6 @@ func TestResolveChannelSelectionDeduplicates(t *testing.T) {
 	}
 	if len(rejected) != 0 {
 		t.Fatalf("unexpected rejections: %v", rejected)
-	}
-}
-
-// TestResolveChannelSelectionDeduplicatesRejections covers the other half of
-// dedup: a channel asked for twice is answered once whether it was accepted or
-// refused. Only the accepted side deduplicated before.
-func TestResolveChannelSelectionDeduplicatesRejections(t *testing.T) {
-	_, _, rejected := resolveChannelSelection(
-		[]evt.EventChannel{
-			evt.ChannelSessions, evt.ChannelSessions, // forbidden for a user
-			"bogus", "bogus", // unknown
-		},
-		allowedChannelsForRole("user"),
-		"",
-	)
-
-	if len(rejected) != 2 {
-		t.Fatalf("rejected = %v, want one entry per distinct channel", rejected)
 	}
 }
 

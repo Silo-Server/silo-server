@@ -25,6 +25,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -119,6 +120,11 @@ type Fetcher struct {
 	// now has onto the library watchlist before the watchlist section reads
 	// it. Nil skips promotion.
 	WatchlistPromoter catalog.WatchlistPromoter
+
+	// AdminDefaults supplies the administrator's defaults for the Next Up
+	// settings when a request carries no resolved access scope (the node's
+	// shared *config.AdminDefaults). Nil uses the contract defaults.
+	AdminDefaults settingsresolve.ServerSettings
 
 	// CollectionOwners limits a row of another profile's shared personal
 	// collection to its owner's access. Without it such a row fails.
@@ -540,7 +546,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	}
 
 	combined := ContinueTypeAllowsNextUp(continueType) && !resolved.SuppressNextUp &&
-		NextUpMode(ctx, store, profileID) == NextUpModeCombined
+		NextUpMode(ctx, store, f.AdminDefaults, profileID) == NextUpModeCombined
 
 	dropped := f.activeDroppedSeries(ctx, userID, profileID)
 	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, combined, orderedItems, itemMeta, completedCache,
@@ -563,7 +569,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	// leads the row when its next episode was just released, so the lookup is
 	// not bounded.
 	if combined {
-		newReleasesFirst := NextUpNewReleasesFirst(ctx, store, profileID)
+		newReleasesFirst := NextUpNewReleasesFirst(ctx, store, f.AdminDefaults, profileID)
 		var since *time.Time
 		if !newReleasesFirst {
 			since = continueNextUpCutoff(orderedItems, itemMeta, limit)
@@ -864,7 +870,7 @@ func (f *Fetcher) fetchNextUpSection(ctx context.Context, resolved ResolvedSecti
 	}
 
 	// Only resolve if the profile's preference is "separate"
-	if NextUpMode(ctx, store, profileID) != NextUpModeSeparate {
+	if NextUpMode(ctx, store, f.AdminDefaults, profileID) != NextUpModeSeparate {
 		return emptyResult, nil
 	}
 
@@ -873,7 +879,7 @@ func (f *Fetcher) fetchNextUpSection(ctx context.Context, resolved ResolvedSecti
 		limit = 20
 	}
 
-	items, meta, err := f.fetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit, nil, NextUpNewReleasesFirst(ctx, store, profileID))
+	items, meta, err := f.fetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit, nil, NextUpNewReleasesFirst(ctx, store, f.AdminDefaults, profileID))
 	if err != nil {
 		return SectionWithItems{}, err
 	}
@@ -904,7 +910,7 @@ func (f *Fetcher) FetchNextUpItems(ctx context.Context, userID int, profileID st
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting user store: %w", err)
 	}
-	return f.fetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit, nil, NextUpNewReleasesFirst(ctx, store, profileID))
+	return f.fetchNextUpItems(ctx, userID, profileID, libraryID, libraryIDs, filter, limit, nil, NextUpNewReleasesFirst(ctx, store, f.AdminDefaults, profileID))
 }
 
 // fetchNextUpItems is FetchNextUpItems with the profile's new-releases-first
@@ -3680,7 +3686,7 @@ func (f *Fetcher) fetchNewToLibrary(ctx context.Context, s ResolvedSection, libr
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s %s ORDER BY mi.created_at DESC LIMIT $%d`,
+		`SELECT %s FROM %s %s ORDER BY mi.created_at DESC, mi.content_id ASC LIMIT $%d`,
 		itemColumns("mi"), fromClause, whereClause, argIdx,
 	)
 	args = append(args, limit)
@@ -3721,7 +3727,10 @@ func (f *Fetcher) fetchMostWatched(ctx context.Context, s ResolvedSection, libra
 // slots), and the deny check must be item-level — with a row join, an item
 // linked to both an allowed and a disabled library passes via the allowed
 // membership row (see catalog audit 2026-05-01 §3 Pattern D, the same reason
-// catalog's buildLibraryScopeJoin uses semi-joins).
+// catalog's buildLibraryScopeJoin uses semi-joins). With no library named, the
+// item must still belong to some library, so a stale or provisional
+// media_items row left without memberships (its files removed) never shows on
+// Home while its library pages already leave it out.
 func buildLibraryScope(libraryID *int, libraryIDs []int, configLibraryIDs []int, disabledLibraryIDs []int, argIdx int) (string, []string, []any, int) {
 	fromClause := "media_items mi"
 	var conditions []string
@@ -3752,16 +3761,13 @@ func buildLibraryScope(libraryID *int, libraryIDs []int, configLibraryIDs []int,
 		memberOfAny(libraryIDs)
 	}
 
+	if libraryID == nil && libraryIDs == nil && len(configLibraryIDs) == 0 {
+		conditions = append(conditions,
+			"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
+		)
+	}
+
 	if len(disabledLibraryIDs) > 0 {
-		if libraryID == nil && libraryIDs == nil && len(configLibraryIDs) == 0 {
-			// Deny-only mode: still require at least one library membership so
-			// stale or provisional media_items rows with no membership don't
-			// become visible through a vacuous NOT EXISTS (mirrors
-			// appendDiscoveryLibraryScope in package catalog).
-			conditions = append(conditions,
-				"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
-			)
-		}
 		conditions = append(conditions, fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out WHERE mil_scope_out.content_id = mi.content_id AND mil_scope_out.media_folder_id = ANY($%d))",
 			argIdx,

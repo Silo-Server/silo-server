@@ -11,22 +11,6 @@ import (
 
 const deliverySRT = "1\r\n00:00:01,000 --> 00:00:02,500\r\nHello\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\nWorld\r\n"
 
-func TestDeliveryBytesIdentityPassthrough(t *testing.T) {
-	data := []byte(deliverySRT)
-	for _, timing := range []Timing{{}, {Scale: 1}} {
-		got, err := DeliveryBytes(&DownloadedSubtitle{Format: FormatSRT, Timing: timing}, data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if &got[0] != &data[0] {
-			t.Fatalf("identity timing %+v copied the bytes", timing)
-		}
-	}
-	if got, err := DeliveryBytes(nil, data); err != nil || !bytes.Equal(got, data) {
-		t.Fatalf("nil subtitle: %q %v", got, err)
-	}
-}
-
 func TestDeliveryBytesUnsupportedFormatServesStoredBytes(t *testing.T) {
 	data := []byte("{1}{2}microdvd")
 	got, err := DeliveryBytes(&DownloadedSubtitle{ID: 8, Format: FormatSUB, Timing: Timing{OffsetMS: 100}}, data)

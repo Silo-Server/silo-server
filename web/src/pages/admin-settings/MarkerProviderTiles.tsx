@@ -318,7 +318,7 @@ function MarkerProviderTile({
       <SettingField
         label="Allow sharing with this provider"
         type="toggle"
-        value={contributeEnabled ? "true" : "false"}
+        value={provider.is_submitter && contributeEnabled ? "true" : "false"}
         onChange={(value) => {
           const next = value === "true";
           setContributeEnabled(next);
@@ -333,7 +333,7 @@ function MarkerProviderTile({
         <SettingField
           label="Automatically share detected intros and credits"
           type="toggle"
-          value={autoLocal ? "true" : "false"}
+          value={provider.is_submitter && autoLocal ? "true" : "false"}
           onChange={(value) => setAutoLocal(value === "true")}
           disabled={!provider.is_submitter || !contributeEnabled}
           description="Share intros and credits detected on this server that meet the minimum confidence under Advanced."

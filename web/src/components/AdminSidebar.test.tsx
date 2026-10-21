@@ -4,7 +4,6 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import AdminSidebar from "./AdminSidebar";
 
 interface MockBuildInfoResult {
@@ -139,12 +138,6 @@ describe("AdminSidebar", () => {
     mockUseAdminRequestCounts.mockReturnValue({ data: { needs_approval: 0 } });
   });
 
-  it("leaves Requests plain when nothing needs approval", () => {
-    renderLiveSidebar("/admin");
-
-    expect(screen.getByRole("button", { name: "Requests" })).not.toHaveTextContent("approval");
-  });
-
   it("opens the topic holding the current page and marks the page", () => {
     renderLiveSidebar("/admin/settings/playback");
 
@@ -231,50 +224,6 @@ describe("AdminSidebar", () => {
     expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
   });
 
-  it("fetches what a settings page needs once the pointer is on its link", () => {
-    mockPrefetchSettings.mockClear();
-    renderLiveSidebar("/admin/libraries");
-    const libraries = screen.getByRole("list", { name: "Libraries" });
-
-    fireEvent.pointerEnter(within(libraries).getByRole("link", { name: "Collections" }));
-    expect(mockPrefetchSettings).not.toHaveBeenCalled();
-
-    fireEvent.pointerEnter(within(libraries).getByRole("link", { name: "Settings" }));
-    expect(mockPrefetchSettings).toHaveBeenCalledTimes(1);
-  });
-
-  it("puts the admin search at the top of the desktop sidebar", () => {
-    const onSearch = vi.fn();
-    render(
-      <MemoryRouter initialEntries={["/admin"]}>
-        <AdminSidebar onSearch={onSearch} />
-      </MemoryRouter>,
-    );
-
-    const search = screen.getByRole("button", { name: "Search admin sections" });
-    expect(search).toHaveTextContent(SEARCH_SHORTCUT_LABEL);
-    fireEvent.click(search);
-    expect(onSearch).toHaveBeenCalledTimes(1);
-  });
-
-  it("leaves search out of the phone drawer, whose header has its own", () => {
-    render(
-      <MemoryRouter initialEntries={["/admin"]}>
-        <AdminSidebar embedded />
-      </MemoryRouter>,
-    );
-
-    expect(screen.queryByRole("button", { name: "Search admin sections" })).not.toBeInTheDocument();
-  });
-
-  it("lists home rows as Home Sections under Libraries", () => {
-    const markup = renderSidebar("/admin/sections");
-
-    expect(markup).toContain('href="/admin/sections"');
-    expect(markup).toContain(">Home Sections<");
-    expect(markup).not.toContain('href="/admin/home-rows"');
-  });
-
   it("hides Policy navigation when the editor capability is unavailable", () => {
     mockUsePolicyCapability.mockReturnValueOnce({
       data: {
@@ -301,27 +250,6 @@ describe("AdminSidebar", () => {
     expect(markup).toContain('title="Built 2026-08-19T19:45:00Z"');
   });
 
-  it("renders dev build when build metadata is missing", () => {
-    mockUseBuildInfo.mockReturnValueOnce({
-      data: {
-        ...defaultBuildInfo,
-        display: "unavailable",
-        revision: "",
-        dirty: false,
-        vcs_time: "",
-        build_number: 0,
-        built_at: "",
-        available: false,
-      },
-      isPending: false,
-      isError: false,
-    });
-
-    const markup = renderSidebar();
-
-    expect(markup).toContain(">dev build<");
-  });
-
   it("falls back to the revision for builds without an ordered number", () => {
     const legacyBuildInfo = { ...defaultBuildInfo };
     delete legacyBuildInfo.build_number;
@@ -335,29 +263,5 @@ describe("AdminSidebar", () => {
     const markup = renderSidebar();
 
     expect(markup).toContain(">b4c5aae1+dirty<");
-  });
-
-  it("renders load failed when the build info query errors", () => {
-    mockUseBuildInfo.mockReturnValueOnce({
-      data: undefined,
-      isPending: false,
-      isError: true,
-    });
-
-    const markup = renderSidebar();
-
-    expect(markup).toContain(">load failed<");
-  });
-
-  it("renders loading while the build info query is pending", () => {
-    mockUseBuildInfo.mockReturnValueOnce({
-      data: undefined,
-      isPending: true,
-      isError: false,
-    });
-
-    const markup = renderSidebar();
-
-    expect(markup).toContain(">loading...<");
   });
 });

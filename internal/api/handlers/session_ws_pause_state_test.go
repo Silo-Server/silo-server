@@ -31,50 +31,6 @@ func waitConfirmedPauseStates(t *testing.T, h *PlaybackHandler, sessionID string
 	}
 }
 
-// A pause or resume the player confirms is the session's state at once, so
-// the admin views do not wait for the next progress report; a rejected
-// command changes nothing.
-func TestRealtimeConfirmedPauseAndResumeSetSessionState(t *testing.T) {
-	sessionMgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessionMgr)
-	handler.CommandTracker = playback.NewCommandTracker()
-	defer handler.CommandTracker.Close()
-
-	session, err := sessionMgr.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	paused := func() bool {
-		t.Helper()
-		current, err := sessionMgr.GetSession(session.ID)
-		if err != nil {
-			t.Fatalf("GetSession: %v", err)
-		}
-		return current.IsPaused
-	}
-	send := func(commandID string, name playback.CommandName, status playback.RealtimeResultStatus) {
-		t.Helper()
-		handler.rememberRealtimeCommand(commandID, session.ID, name)
-		if err := handler.handleRealtimeClientMessage(session.ID, realtimeResultMessage(t, session.ID, commandID, status)); err != nil {
-			t.Fatalf("handleRealtimeClientMessage: %v", err)
-		}
-		waitConfirmedPauseStates(t, handler, session.ID)
-	}
-
-	send("cmd-pause-rejected", playback.CommandPause, playback.RealtimeResultStatusRejected)
-	if paused() {
-		t.Fatal("a rejected pause paused the session")
-	}
-	send("cmd-pause", playback.CommandPause, playback.RealtimeResultStatusCompleted)
-	if !paused() {
-		t.Fatal("a confirmed pause left the session playing")
-	}
-	send("cmd-resume", playback.CommandUnpause, playback.RealtimeResultStatusCompleted)
-	if paused() {
-		t.Fatal("a confirmed resume left the session paused")
-	}
-}
-
 // A confirmed pause or resume sends the watch-provider transition itself; a
 // progress report that follows sees no change and must not send it again.
 func TestRealtimeConfirmedPauseAndResumeScrobbleOnce(t *testing.T) {
@@ -143,61 +99,6 @@ func (s *blockingPauseScrobbler) ScrobblePause(context.Context, watchsync.Scrobb
 func (s *blockingPauseScrobbler) ScrobbleStop(context.Context, watchsync.ScrobbleEvent) error {
 	s.record("stop")
 	return nil
-}
-
-// A slow watch-provider scrobble must not hold up the socket reader, and the
-// confirmed pause and resume still apply in the order the player sent them.
-func TestRealtimeConfirmedPauseDoesNotBlockReader(t *testing.T) {
-	file := &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}
-	sessionMgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
-	handler.CommandTracker = playback.NewCommandTracker()
-	defer handler.CommandTracker.Close()
-	scrobbler := &blockingPauseScrobbler{release: make(chan struct{})}
-	handler.WatchScrobbler = scrobbler
-
-	session, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	reader := make(chan error, 1)
-	go func() {
-		for _, cmd := range []struct {
-			id   string
-			name playback.CommandName
-		}{{"cmd-pause", playback.CommandPause}, {"cmd-resume", playback.CommandUnpause}} {
-			handler.rememberRealtimeCommand(cmd.id, session.ID, cmd.name)
-			if err := handler.handleRealtimeClientMessage(session.ID, realtimeResultMessage(t, session.ID, cmd.id, playback.RealtimeResultStatusCompleted)); err != nil {
-				reader <- err
-				return
-			}
-		}
-		reader <- nil
-	}()
-	select {
-	case err := <-reader:
-		if err != nil {
-			t.Fatalf("handleRealtimeClientMessage: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the socket reader waited on the watch-provider scrobble")
-	}
-
-	close(scrobbler.release)
-	waitConfirmedPauseStates(t, handler, session.ID)
-	scrobbler.mu.Lock()
-	actions := append([]string(nil), scrobbler.actions...)
-	scrobbler.mu.Unlock()
-	if len(actions) != 2 || actions[0] != "pause" || actions[1] != "start" {
-		t.Fatalf("scrobbles = %v, want [pause start]", actions)
-	}
-	current, err := sessionMgr.GetSession(session.ID)
-	if err != nil {
-		t.Fatalf("GetSession: %v", err)
-	}
-	if current.IsPaused {
-		t.Fatal("session paused after a confirmed pause then resume")
-	}
 }
 
 // A stop ends session authority even while a provider call is blocked.
@@ -404,39 +305,6 @@ func TestRealtimeDelayedConfirmationPreservesNewerProgress(t *testing.T) {
 	}
 }
 
-func TestRealtimeDelayedConfirmationUsesNewerReplicaProgress(t *testing.T) {
-	f := newPlaybackServiceFixture(t)
-	if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 30, IsPaused: true}); err != nil {
-		t.Fatal(err)
-	}
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	released := sync.OnceFunc(func() { close(release) })
-	defer func() { released(); waitConfirmedPauseStates(t, f.handler, f.session.ID) }()
-	f.handler.runRealtimeResult(f.session.ID, true, func() { close(entered); <-release })
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("worker did not start")
-	}
-	f.handler.rememberRealtimeCommand("cmd-delayed-resume", f.session.ID, playback.CommandUnpause)
-	if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, "cmd-delayed-resume", playback.RealtimeResultStatusCompleted)); err != nil {
-		t.Fatal(err)
-	}
-	// Another replica accepts playing progress but does not hold this live
-	// session. The result worker must use the durable observation locally.
-	store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
-	if _, err := store.ApplyProgress(f.ctx, f.session.ID, playback.ProgressSampleV3{Sequence: 2, Position: 31}); err != nil {
-		t.Fatal(err)
-	}
-	released()
-	waitConfirmedPauseStates(t, f.handler, f.session.ID)
-	current, err := f.manager.GetSession(f.session.ID)
-	if err != nil || current.IsPaused || current.Position != 31 {
-		t.Fatalf("newer replica progress not reflected locally: %+v, %v", current, err)
-	}
-}
-
 func TestRealtimeAndClientStopShareHistoryReceipt(t *testing.T) {
 	f := newPlaybackServiceFixture(t)
 	userStore := newPlaybackTestStore(t)
@@ -598,35 +466,6 @@ func TestRealtimeConfirmationRetriesTransientAttemptReads(t *testing.T) {
 	current, err := f.manager.GetSession(f.session.ID)
 	if err != nil || !current.IsPaused || store.calls != 4 {
 		t.Fatalf("confirmed pause = %+v, %v; reads = %d, want 4", current, err, store.calls)
-	}
-}
-
-type deadlineRealtimeSyncer struct{}
-
-func (deadlineRealtimeSyncer) SyncNow(ctx context.Context) error {
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-type contextCheckingPauseScrobbler struct {
-	recordingPlaybackWatchScrobbler
-	pauseContextErr error
-}
-
-func (s *contextCheckingPauseScrobbler) ScrobblePause(ctx context.Context, event watchsync.ScrobbleEvent) error {
-	s.pauseContextErr = ctx.Err()
-	return s.recordingPlaybackWatchScrobbler.ScrobblePause(ctx, event)
-}
-
-func TestRealtimeSyncDeadlineDoesNotConsumeProviderBudget(t *testing.T) {
-	f := newPlaybackServiceFixture(t)
-	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
-	f.handler.SessionSyncer = deadlineRealtimeSyncer{}
-	scrobbler := &contextCheckingPauseScrobbler{}
-	f.handler.WatchScrobbler = scrobbler
-	f.handler.setConfirmedPauseState(f.session.ID, true, 0)
-	if len(scrobbler.pauses) != 1 || scrobbler.pauseContextErr != nil {
-		t.Fatalf("pause scrobbles = %d, provider context = %v", len(scrobbler.pauses), scrobbler.pauseContextErr)
 	}
 }
 

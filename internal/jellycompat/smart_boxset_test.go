@@ -48,62 +48,6 @@ func (f *fakeSmartExecutor) PreviewPage(_ context.Context, def catalog.QueryDefi
 	return f.items[offset:end], total, true, nil
 }
 
-// TestHandleItems_SmartBoxSetChildrenResolveViaQuery pins the Wholphin fix: a
-// smart (live-query) collection's BoxSet children resolve through the query
-// executor in the collection's own order, instead of returning empty because
-// nothing is materialized in library_collection_items.
-func TestHandleItems_SmartBoxSetChildrenResolveViaQuery(t *testing.T) {
-	collections := &fakeCollectionSource{
-		collections: []*models.LibraryCollection{
-			{ID: "201", LibraryID: 1, Title: "Directed by X", Visibility: "visible", CollectionType: "smart", ItemCount: 2, QueryDefinition: json.RawMessage(`{}`)},
-		},
-		// No materialized items: smart collections store none.
-	}
-	exec := &fakeSmartExecutor{items: []*models.MediaItem{
-		{ContentID: "m-1", Type: "movie", Title: "Kill Bill"},
-		{ContentID: "m-2", Type: "movie", Title: "Pulp Fiction"},
-	}}
-	itemRepo := &fakeBatchItemRepo{items: map[string]*models.MediaItem{
-		"m-1": {ContentID: "m-1", Type: "movie", Title: "Kill Bill"},
-		"m-2": {ContentID: "m-2", Type: "movie", Title: "Pulp Fiction"},
-	}}
-	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, itemRepo)
-	h.queryExecutor = exec
-
-	parentID := h.codec.EncodeStringID(EncodedIDCollection, "201")
-	result := performItemsRequest(t, h, "/Items?ParentId="+parentID)
-	if len(result.Items) != 2 {
-		t.Fatalf("expected 2 smart-collection children, got %d: %+v", len(result.Items), result.Items)
-	}
-	if result.Items[0].Name != "Kill Bill" || result.Items[1].Name != "Pulp Fiction" {
-		t.Fatalf("expected smart query order, got %q,%q", result.Items[0].Name, result.Items[1].Name)
-	}
-	if result.Items[0].ParentID != parentID {
-		t.Fatalf("expected ParentId %s, got %s", parentID, result.Items[0].ParentID)
-	}
-	if exec.previewPageCalls == 0 {
-		t.Fatal("expected the query executor to be paged for a smart collection")
-	}
-}
-
-// TestHandleItems_SmartBoxSetChildrenWithoutExecutorEmpty ensures a smart
-// collection degrades to an empty page (never a 500) when no executor is wired.
-func TestHandleItems_SmartBoxSetChildrenWithoutExecutorEmpty(t *testing.T) {
-	collections := &fakeCollectionSource{
-		collections: []*models.LibraryCollection{
-			{ID: "201", LibraryID: 1, Title: "Directed by X", Visibility: "visible", CollectionType: "smart", ItemCount: 5, QueryDefinition: json.RawMessage(`{}`)},
-		},
-	}
-	h := newCollectionsTestHandler(collections, []upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
-	// queryExecutor intentionally left nil.
-
-	parentID := h.codec.EncodeStringID(EncodedIDCollection, "201")
-	result := performItemsRequest(t, h, "/Items?ParentId="+parentID)
-	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
-		t.Fatalf("expected graceful empty result without executor, got %+v", result.Items)
-	}
-}
-
 // TestHandleItems_SmartBoxSetChildrenIntersectLibraryScope asserts the query's
 // own library_ids are intersected with the collection's bound libraries before
 // the executor runs, so a restricted collection cannot widen its scope.

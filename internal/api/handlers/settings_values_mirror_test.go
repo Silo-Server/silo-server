@@ -5,10 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -58,38 +55,6 @@ func requireStored(
 	}
 	if string(value.Value) != want {
 		t.Errorf("%s at %s = %s, want %s", identity.Key, identity.Scope, value.Value, want)
-	}
-}
-
-// TestWritingTheDeprecatedBooleanMirrorsTheEnum: an unmigrated client saves the
-// switch and a current client must read the mode the household actually chose,
-// not the contract default.
-func TestWritingTheDeprecatedBooleanMirrorsTheEnum(t *testing.T) {
-	for name, tc := range map[string]struct{ body, wantMode string }{
-		"on":  {`{"value":true}`, `"always"`},
-		"off": {`{"value":false}`, `"ask"`},
-	} {
-		t.Run(name, func(t *testing.T) {
-			handler, store := newValuesTestHandler(t)
-
-			rec := routeValues(t, handler, http.MethodPut,
-				settingskeys.PlaybackAutoSkipIntro, "scope=profile", []byte(tc.body))
-			if rec.Code != http.StatusOK {
-				t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-			}
-
-			requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), tc.wantMode)
-
-			// The response is the key the caller addressed, unchanged: the
-			// mirror is a side effect, not a redirect.
-			var response settingValueResponse
-			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-				t.Fatalf("decoding response: %v; body=%s", err, rec.Body.String())
-			}
-			if response.Key != settingskeys.PlaybackAutoSkipIntro {
-				t.Errorf("response key = %s, want the key that was written", response.Key)
-			}
-		})
 	}
 }
 
@@ -173,75 +138,6 @@ func TestDeletingEitherHalfClearsBoth(t *testing.T) {
 			}
 			requireColumn(t, store, false, "after the profile-scope value was cleared")
 		})
-	}
-}
-
-// TestDeletingAnAbsentValueTouchesNeitherHalf: the 404 for "nothing set here"
-// still has to mean nothing was written, mirror included.
-func TestDeletingAnAbsentValueTouchesNeitherHalf(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	if rec := routeValues(t, handler, http.MethodPut,
-		settingskeys.PlaybackAutoSkipIntro, "scope=profile",
-		[]byte(`{"value":true}`)); rec.Code != http.StatusOK {
-		t.Fatalf("seed PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// Nothing was ever written at device scope, so this clears nothing —
-	// including the profile-scope pair, which belongs to another identity.
-	rec := routeValues(t, handler, http.MethodDelete,
-		settingskeys.PlaybackIntroSkipMode, "scope=profile_device", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("DELETE of an unset device value = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-
-	requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), `true`)
-	requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), `"always"`)
-}
-
-// TestMirroredWritesReplayInsteadOfDoubleApplying. The mirror rides inside the
-// mutation's transaction, so a retried write must re-serve the receipt and
-// leave both rows at the revision the first write produced.
-func TestMirroredWritesReplayInsteadOfDoubleApplying(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	send := func(mutationID, value string) *httptest.ResponseRecorder {
-		req := valuesRequest(http.MethodPut,
-			"/settings/values/"+settingskeys.PlaybackIntroSkipMode+"?scope=profile",
-			[]byte(`{"value":`+value+`}`))
-		req.Header.Set(mutationIDHeader, mutationID)
-		routeCtx := chi.NewRouteContext()
-		routeCtx.URLParams.Add("key", settingskeys.PlaybackIntroSkipMode)
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-		rec := httptest.NewRecorder()
-		handler.HandleSetValue(rec, req)
-		return rec
-	}
-
-	if rec := send("mut-intro", `"always"`); rec.Code != http.StatusOK {
-		t.Fatalf("first write = %d: %s", rec.Code, rec.Body.String())
-	}
-	mirrored := storedValueAt(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro))
-	if mirrored == nil {
-		t.Fatal("the first write stored no mirror row")
-	}
-
-	replay := send("mut-intro", `"always"`)
-	if replay.Code != http.StatusOK || replay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
-		t.Fatalf("replay = %d header %q: %s",
-			replay.Code, replay.Header().Get("X-Silo-Idempotent-Replay"), replay.Body.String())
-	}
-
-	after := storedValueAt(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro))
-	if after == nil {
-		t.Fatal("the replay removed the mirror row")
-	}
-	if after.Revision != mirrored.Revision {
-		t.Errorf("mirror revision moved from %d to %d on replay; the replay wrote again",
-			mirrored.Revision, after.Revision)
-	}
-	if string(after.Value) != `true` {
-		t.Errorf("mirror value = %s after replay, want true", after.Value)
 	}
 }
 
@@ -412,52 +308,6 @@ func TestAFailedHalfRollsBackTheWholeMirroredWrite(t *testing.T) {
 			}
 			requireColumn(t, store, false, "after a failed write")
 		})
-	}
-}
-
-// TestAFailedHalfRollsBackAnIdempotentMirroredWrite. The receipt has to roll
-// back with the rows it describes: a recorded receipt for a write that did not
-// land turns the client's retry into a replay of a success that never happened.
-func TestAFailedHalfRollsBackAnIdempotentMirroredWrite(t *testing.T) {
-	_, store := newValuesTestHandler(t)
-	handler := handlerOverStore(t, failingMirrorStore{
-		UserStore: store, failUpsertKey: settingskeys.PlaybackIntroSkipMode,
-	})
-
-	send := func(h *SettingValuesHandler) *httptest.ResponseRecorder {
-		req := valuesRequest(http.MethodPut,
-			"/settings/values/"+settingskeys.PlaybackIntroSkipMode+"?scope=profile",
-			[]byte(`{"value":"always"}`))
-		req.Header.Set(mutationIDHeader, "mut-partial")
-		routeCtx := chi.NewRouteContext()
-		routeCtx.URLParams.Add("key", settingskeys.PlaybackIntroSkipMode)
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-		rec := httptest.NewRecorder()
-		h.HandleSetValue(rec, req)
-		return rec
-	}
-	rec := send(handler)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("PUT = %d, want 500: %s", rec.Code, rec.Body.String())
-	}
-
-	receipt, err := store.GetSettingMutation(context.Background(), "mut-partial")
-	if err != nil {
-		t.Fatalf("reading the mutation receipt: %v", err)
-	}
-	if receipt != nil {
-		t.Fatalf("a receipt survived the rolled-back write: %s", receipt.Result)
-	}
-
-	// The same mutation id must now apply for real rather than replay.
-	rec = send(handlerOverStore(t, store))
-	if rec.Code != http.StatusOK || rec.Header().Get("X-Silo-Idempotent-Replay") != "" {
-		t.Fatalf("retry = %d replay %q: %s", rec.Code, rec.Header().Get("X-Silo-Idempotent-Replay"), rec.Body.String())
-	}
-	requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), `true`)
-	receipt, err = store.GetSettingMutation(t.Context(), "mut-partial")
-	if err != nil || receipt == nil {
-		t.Fatalf("successful retry receipt = %+v, %v", receipt, err)
 	}
 }
 

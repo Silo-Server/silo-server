@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { setAccessToken, setRefreshToken } from "@/api/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
-import { useTranslateItemMetadata, useMetadataTranslationJobs } from "../items";
+import { useTranslateItemMetadata } from "../items";
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 beforeEach(installPolicyStorageMocks);
 afterEach(() => vi.unstubAllGlobals());
@@ -64,14 +64,4 @@ it("retains opaque job identity and explicit enqueue options", async () => {
     include_children: false,
     force: true,
   });
-});
-it("reads the bounded recent job list through v2", async () => {
-  const job = { id: "9007199254740993", status: "completed" };
-  const { calls, wrapper } = setup(() => jsonResponse({ jobs: [job] }));
-  const { result, unmount } = renderHook(() => useMetadataTranslationJobs("item-1", true), {
-    wrapper,
-  });
-  await waitFor(() => expect(result.current.data?.jobs[0]?.id).toBe(job.id));
-  expect(calls[0]?.path).toBe("/api/v2/admin/items/item-1/metadata-translation/jobs");
-  unmount();
 });

@@ -63,6 +63,8 @@ func (h *NotificationsHandler) HandleRegisterApplePushDevice(w http.ResponseWrit
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, notifications.ErrPushGenerationConflict):
+			writeError(w, http.StatusConflict, "conflict", "Push registration conflicts with the current installation")
 		case errors.Is(err, notifications.ErrPushLegacyWriter):
 			writeError(w, http.StatusConflict, "push_registration_upgrade_required", "This installation requires ordered push registration")
 		case errors.Is(err, notifications.ErrPushDeviceInvalid):
@@ -132,6 +134,8 @@ func (h *NotificationsHandler) HandleRegisterPushDevice(w http.ResponseWriter, r
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, notifications.ErrPushGenerationConflict):
+			writeError(w, http.StatusConflict, "conflict", "Push registration conflicts with the current installation")
 		case errors.Is(err, notifications.ErrPushLegacyWriter):
 			writeError(w, http.StatusConflict, "push_registration_upgrade_required", "This installation requires ordered push registration")
 		case errors.Is(err, notifications.ErrPushDeviceInvalid):

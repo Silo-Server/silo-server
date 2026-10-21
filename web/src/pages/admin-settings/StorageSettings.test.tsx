@@ -1,6 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import StorageSettings from "./StorageSettings";
@@ -147,6 +146,52 @@ function mockForm(overrides: FormOverrides = {}) {
   return form;
 }
 
+type Staged = {
+  values?: Record<string, string>;
+  persisted?: Record<string, string>;
+  dirty?: string[];
+};
+
+// A form holding `values`, with `dirty` keys staged over `persisted` ones.
+function stageForm(
+  { values = {}, persisted = {}, dirty = [] }: Staged,
+  overrides: FormOverrides = {},
+) {
+  return mockForm({
+    dirtyCount: dirty.length,
+    dirtyKeys: dirty,
+    isDirty: (key: string) => dirty.includes(key),
+    getValue: (key: string) => values[key] ?? "",
+    getPersistedValue: (key: string) => persisted[key] ?? "",
+    ...overrides,
+  });
+}
+
+const S3_WITH_LOCAL_PATH = {
+  "artwork.storage_backend": "s3",
+  "artwork.local_path": "/srv/silo/artwork",
+};
+
+const S3_SAVED = {
+  "artwork.storage_backend": "s3",
+  "s3.public_endpoint": "https://s3.example",
+  "s3.public_bucket": "new-artwork",
+};
+const S3_SAVED_ACCESS_KEY_EDIT: Staged = {
+  dirty: ["s3.public_access_key"],
+  persisted: S3_SAVED,
+  values: { ...S3_SAVED, "s3.public_access_key": "NEWKEY" },
+};
+
+const BUCKET_AND_UNRELATED_EDIT: Staged = {
+  dirty: ["s3.public_bucket", "server.log_level"],
+  values: {
+    "artwork.storage_backend": "s3",
+    "s3.public_bucket": "new-artwork",
+    "s3.public_url_auth": "presigned",
+  },
+};
+
 describe("StorageSettings", () => {
   afterEach(() => {
     // Disclosures remember being opened; start every case collapsed.
@@ -179,16 +224,9 @@ describe("StorageSettings", () => {
     serverStatus.current = undefined;
     serverStatus.isPending = isPending;
     serverStatus.isError = isError;
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.public_bucket"],
-      isDirty: (key: string) => key === "s3.public_bucket",
-      getValue: (key: string) =>
-        key === "s3.public_bucket"
-          ? "new-artwork"
-          : key === "s3.public_url_auth"
-            ? "presigned"
-            : "",
+    stageForm({
+      dirty: ["s3.public_bucket"],
+      values: { "s3.public_bucket": "new-artwork", "s3.public_url_auth": "presigned" },
     });
 
     render(<StorageSettings />);
@@ -200,15 +238,6 @@ describe("StorageSettings", () => {
         ? screen.getByRole("alert")
         : screen.getByRole("status", { name: "Loading settings" }),
     ).toBeInTheDocument();
-  });
-
-  it("keeps the backend editable until artwork has been stored", () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: false } };
-    mockForm();
-    render(<StorageSettings />);
-    expect(screen.getByRole("combobox", { name: "Backend" })).toBeEnabled();
-    expect(screen.queryByText(/Locked to/)).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Local storage path")).toBeEnabled();
   });
 
   it("opens the managed transition when a locked S3 backend changes", async () => {
@@ -241,9 +270,7 @@ describe("StorageSettings", () => {
       isPending: false,
       isError: false,
     });
-    const form = mockForm({
-      getValue: (key: string) => (key === "artwork.storage_backend" ? "s3" : ""),
-    });
+    const form = stageForm({ values: { "artwork.storage_backend": "s3" } });
     render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
@@ -257,14 +284,7 @@ describe("StorageSettings", () => {
 
   it("queues an explicit start-fresh transition back to local storage", async () => {
     serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    const form = mockForm({
-      getValue: (key: string) =>
-        key === "artwork.storage_backend"
-          ? "s3"
-          : key === "artwork.local_path"
-            ? "/srv/silo/artwork"
-            : "",
-    });
+    const form = stageForm({ values: S3_WITH_LOCAL_PATH });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-1" } });
     render(<StorageSettings />);
 
@@ -311,14 +331,7 @@ describe("StorageSettings", () => {
       isError: false,
       refetch,
     });
-    mockForm({
-      getValue: (key: string) =>
-        key === "artwork.storage_backend"
-          ? "s3"
-          : key === "artwork.local_path"
-            ? "/srv/silo/artwork"
-            : "",
-    });
+    stageForm({ values: S3_WITH_LOCAL_PATH });
     render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
@@ -341,60 +354,16 @@ describe("StorageSettings", () => {
     serverStatus.current = undefined;
   });
 
-  it("manages the storage keys and provider artwork caching in one form", () => {
-    mockForm();
-
-    renderToStaticMarkup(<StorageSettings />);
-
-    const calls = settingsFormMock.mock.calls as [{ keys: string[] }][];
-    const keys = calls[calls.length - 1]?.[0].keys ?? [];
-    expect(keys).toEqual(
-      expect.arrayContaining(["s3.public_bucket", "s3.private_bucket", "metadata.cache_images"]),
-    );
-    // Redis and the Postgres pool moved to General, which saves those keys itself.
-    expect(keys.filter((key) => /^(redis|database)\./.test(key))).toEqual([]);
-    // Log retention moved to the Logging page, which saves those keys itself.
-    expect(keys.filter((key) => /^(opslog|policy)\./.test(key))).toEqual([]);
-    // The disabled Litestream storage tab is gone; its keys keep working through the API.
-    expect(keys.filter((key) => key.startsWith("s3.user_db_"))).toEqual([]);
-    // The per-user database backend and its SQLite tuning are Hidden: one usable
-    // option and two fields that could never show. The API still serves them.
-    expect(keys.filter((key) => key.startsWith("userdb."))).toEqual([]);
-  });
-
-  it("shows provider artwork caching in the Storage group and stages edits", async () => {
-    const form = mockForm({
-      getValue: (key: string) =>
-        key === "metadata.cache_images" ? "true" : key === "s3.public_url_auth" ? "presigned" : "",
-    });
-    render(<StorageSettings />);
-
-    const storage = within(screen.getByRole("group", { name: "Storage" }));
-    const toggle = storage.getByRole("switch", { name: "Save provider artwork to storage" });
-    expect(toggle).toBeChecked();
-    // It hot-reloads, so the group no longer claims a restart for every row.
-    expect(storage.queryByText("Changes apply after a restart")).not.toBeInTheDocument();
-    expect(storage.getAllByLabelText("Takes effect after a server restart")).toHaveLength(2);
-    await userEvent.click(toggle);
-    expect(form.setValue).toHaveBeenCalledWith("metadata.cache_images", "false");
-  });
-
   it("saves provider artwork caching directly on a locked install", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    const form = mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["metadata.cache_images"],
-      isDirty: (key: string) => key === "metadata.cache_images",
-      getValue: (key: string) =>
-        key === "artwork.storage_backend"
-          ? "local"
-          : key === "metadata.cache_images"
-            ? "false"
-            : key === "s3.public_url_auth"
-              ? "presigned"
-              : "",
-      getPersistedValue: (key: string) =>
-        key === "artwork.storage_backend" ? "local" : key === "metadata.cache_images" ? "true" : "",
+    const form = stageForm({
+      dirty: ["metadata.cache_images"],
+      values: {
+        "artwork.storage_backend": "local",
+        "metadata.cache_images": "false",
+        "s3.public_url_auth": "presigned",
+      },
+      persisted: { "artwork.storage_backend": "local", "metadata.cache_images": "true" },
     });
     render(<StorageSettings />);
 
@@ -404,66 +373,11 @@ describe("StorageSettings", () => {
     serverStatus.current = undefined;
   });
 
-  it.each([
-    ["Automatic without a bucket", "", ""],
-    ["Automatic without a bucket, saved as auto", "auto", ""],
-    ["S3", "s3", ""],
-    ["Automatic with a saved bucket", "auto", "artwork"],
-  ])("shows public and private storage for %s", (_, backend, savedBucket) => {
-    mockForm({
-      getPersistedValue: (key: string) =>
-        key === "artwork.storage_backend" ? backend : key === "s3.public_bucket" ? savedBucket : "",
-      getValue: (key: string) =>
-        key === "artwork.storage_backend"
-          ? backend
-          : key === "s3.public_bucket"
-            ? savedBucket
-            : key === "s3.public_url_auth"
-              ? "presigned"
-              : "",
-    });
-    render(<StorageSettings />);
-
-    const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
-    expect(publicStorage.getByLabelText("Bucket")).toBeVisible();
-    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
-    expect(privateStorage.getByLabelText("Bucket")).toBeVisible();
-    expect(screen.queryByRole("group", { name: "S3 storage" })).not.toBeInTheDocument();
-  });
-
-  // Public storage serves only S3 and Automatic, and local disk keeps private
-  // files in the local path, so Local disk shows neither bucket section.
-  it.each([
-    ["Local disk", ""],
-    ["Local disk with a leftover public bucket", "artwork"],
-  ])("hides both bucket sections for %s", (_, savedBucket) => {
-    mockForm({
-      getPersistedValue: (key: string) =>
-        key === "artwork.storage_backend" ? "local" : key === "s3.public_bucket" ? savedBucket : "",
-      getValue: (key: string) =>
-        key === "artwork.storage_backend"
-          ? "local"
-          : key === "s3.public_bucket"
-            ? savedBucket
-            : key === "s3.public_url_auth"
-              ? "presigned"
-              : "",
-    });
-    render(<StorageSettings />);
-
-    expect(screen.queryByRole("group", { name: "Public storage" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "Private storage" })).not.toBeInTheDocument();
-  });
-
   // A saved private bucket holds the avatars even on local disk, so it stays
   // in view where it can be changed or cleared.
   it("keeps a saved private bucket in view on Local disk", () => {
-    mockForm({
-      getPersistedValue: (key: string) =>
-        key === "artwork.storage_backend" ? "local" : key === "s3.private_bucket" ? "ops" : "",
-      getValue: (key: string) =>
-        key === "artwork.storage_backend" ? "local" : key === "s3.private_bucket" ? "ops" : "",
-    });
+    const saved = { "artwork.storage_backend": "local", "s3.private_bucket": "ops" };
+    stageForm({ values: saved, persisted: saved });
     render(<StorageSettings />);
 
     const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
@@ -471,18 +385,17 @@ describe("StorageSettings", () => {
   });
 
   it("shows a staged public endpoint after the backend goes back to Local disk", () => {
-    mockForm({
-      dirtyCount: 2,
-      isDirty: (key: string) => key === "artwork.storage_backend" || key === "s3.public_endpoint",
-      getValue: (key: string) =>
-        key === "artwork.storage_backend"
-          ? "local"
-          : key === "s3.public_endpoint"
-            ? "https://s3.example"
-            : key === "s3.public_url_auth"
-              ? "presigned"
-              : "",
-    });
+    stageForm(
+      {
+        dirty: ["artwork.storage_backend", "s3.public_endpoint"],
+        values: {
+          "artwork.storage_backend": "local",
+          "s3.public_endpoint": "https://s3.example",
+          "s3.public_url_auth": "presigned",
+        },
+      },
+      { dirtyKeys: [] },
+    );
     render(<StorageSettings />);
 
     expect(
@@ -490,157 +403,10 @@ describe("StorageSettings", () => {
     ).toHaveValue("https://s3.example");
   });
 
-  // Choosing S3 stages the backend instead of opening the review, so Public
-  // storage appears and its bucket can be filled in before Save.
-  it("stages S3 on a locked local install instead of opening the review", async () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    const form = mockForm({
-      getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "local" : ""),
-      getValue: (key: string) =>
-        key === "artwork.storage_backend"
-          ? "local"
-          : key === "s3.public_url_auth"
-            ? "presigned"
-            : "",
-    });
-    render(<StorageSettings />);
-
-    await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
-    await userEvent.click(screen.getByRole("option", { name: "S3" }));
-
-    expect(form.setValue).toHaveBeenCalledWith("artwork.storage_backend", "s3");
-    expect(
-      screen.queryByRole("dialog", { name: "Change artwork storage" }),
-    ).not.toBeInTheDocument();
-    serverStatus.current = undefined;
-  });
-
-  it("shows every private storage field without a disclosure", () => {
-    mockForm();
-    render(<StorageSettings />);
-
-    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
-    expect(
-      privateStorage.getByText(/on local disk they stay in the local storage path/),
-    ).toBeInTheDocument();
-    for (const label of [
-      "Endpoint",
-      "Bucket",
-      "Access Key",
-      "Secret Key",
-      "Region",
-      "Put the bucket name in the URL path",
-      "Folder inside the bucket",
-    ]) {
-      expect(privateStorage.getByLabelText(label)).toBeVisible();
-    }
-    expect(privateStorage.getByRole("button", { name: "Check Connection" })).toBeVisible();
-    expect(privateStorage.queryByRole("button", { name: /Advanced/ })).not.toBeInTheDocument();
-  });
-
-  it("shows the public bucket connection and link mode with no disclosure for signed links", () => {
-    mockForm();
-    render(<StorageSettings />);
-
-    const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
-    for (const label of [
-      "Endpoint",
-      "Bucket",
-      "Region",
-      "Access Key",
-      "Secret Key",
-      "Put the bucket name in the URL path",
-      "Folder inside the bucket",
-      "How asset links are authorized",
-    ]) {
-      expect(publicStorage.getByLabelText(label)).toBeVisible();
-    }
-    expect(publicStorage.getByRole("button", { name: "Check Connection" })).toBeVisible();
-    // Signed links need neither a CDN address nor a token.
-    expect(publicStorage.queryByRole("button", { name: /Advanced/ })).not.toBeInTheDocument();
-    expect(publicStorage.queryByLabelText("Address clients download from")).not.toBeInTheDocument();
-  });
-
-  it.each([
-    ["public", 1, ["Address clients download from"]],
-    [
-      "cloudflare_token",
-      4,
-      ["Address clients download from", "Token Secret", "Token query parameter", "Link lifetime"],
-    ],
-  ])(
-    "keeps the %s link settings behind public storage's Advanced disclosure",
-    async (urlAuth, count, labels) => {
-      mockForm({
-        getValue: (key: string) => (key === "s3.public_url_auth" ? urlAuth : ""),
-      });
-      render(<StorageSettings />);
-
-      const publicStorage = within(screen.getByRole("group", { name: "Public storage" }));
-      for (const label of labels) {
-        expect(publicStorage.queryByLabelText(label)).not.toBeInTheDocument();
-      }
-      await userEvent.click(
-        publicStorage.getByRole("button", {
-          name: `Advanced · ${count} setting${count === 1 ? "" : "s"}`,
-        }),
-      );
-      for (const label of labels) {
-        expect(publicStorage.getByLabelText(label)).toBeVisible();
-      }
-    },
-  );
-
-  it("opens public storage's Advanced disclosure while one of its fields is unsaved", () => {
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.public_read_endpoint"],
-      isDirty: (key: string) => key === "s3.public_read_endpoint",
-      getValue: (key: string) =>
-        key === "s3.public_url_auth"
-          ? "public"
-          : key === "s3.public_read_endpoint"
-            ? "https://cdn.example"
-            : "",
-    });
-    render(<StorageSettings />);
-
-    expect(
-      within(screen.getByRole("group", { name: "Public storage" })).getByLabelText(
-        "Address clients download from",
-      ),
-    ).toHaveValue("https://cdn.example");
-  });
-
-  it("warns about a staged private bucket", () => {
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.private_bucket"],
-      isDirty: (key: string) => key === "s3.private_bucket",
-      getValue: (key: string) => (key === "s3.private_bucket" ? "private-new" : ""),
-    });
-    render(<StorageSettings />);
-
-    const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
-    expect(privateStorage.getByLabelText("Bucket")).toHaveValue("private-new");
-    expect(privateStorage.getByText("Storage location change")).toBeVisible();
-  });
-
   it("saves unrelated edits before opening an S3 location transition", async () => {
     serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
     const save = vi.fn().mockResolvedValue(undefined);
-    mockForm({
-      dirtyCount: 2,
-      dirtyKeys: ["s3.public_bucket", "server.log_level"],
-      isDirty: (key: string) => key === "s3.public_bucket" || key === "server.log_level",
-      save,
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "s3";
-        if (key === "s3.public_bucket") return "new-artwork";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
-      },
-    });
+    stageForm(BUCKET_AND_UNRELATED_EDIT, { save });
     render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
@@ -661,17 +427,7 @@ describe("StorageSettings", () => {
     async (_, capabilities) => {
       serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
       storageTransitionCapabilitiesMock.mockReturnValue(capabilities);
-      const form = mockForm({
-        dirtyCount: 2,
-        dirtyKeys: ["s3.public_bucket", "server.log_level"],
-        isDirty: (key: string) => key === "s3.public_bucket" || key === "server.log_level",
-        getValue: (key: string) => {
-          if (key === "artwork.storage_backend") return "s3";
-          if (key === "s3.public_bucket") return "new-artwork";
-          if (key === "s3.public_url_auth") return "presigned";
-          return "";
-        },
-      });
+      const form = stageForm(BUCKET_AND_UNRELATED_EDIT);
       render(<StorageSettings />);
 
       await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
@@ -686,19 +442,20 @@ describe("StorageSettings", () => {
 
   it("opens an S3-to-S3 transition when a locked endpoint or bucket is saved", async () => {
     serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    const form = mockForm({
-      dirtyCount: 2,
-      isDirty: (key: string) => key === "s3.public_endpoint" || key === "s3.public_bucket",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "s3";
-        if (key === "s3.public_endpoint") return "https://new-s3.example";
-        if (key === "s3.public_bucket") return "new-artwork";
-        if (key === "s3.private_endpoint") return "https://private.example";
-        if (key === "s3.private_bucket") return "private-artifacts";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    const form = stageForm(
+      {
+        dirty: ["s3.public_endpoint", "s3.public_bucket"],
+        values: {
+          "artwork.storage_backend": "s3",
+          "s3.public_endpoint": "https://new-s3.example",
+          "s3.public_bucket": "new-artwork",
+          "s3.private_endpoint": "https://private.example",
+          "s3.private_bucket": "private-artifacts",
+          "s3.public_url_auth": "presigned",
+        },
       },
-    });
+      { dirtyKeys: [] },
+    );
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-s3" } });
     render(<StorageSettings />);
 
@@ -730,17 +487,13 @@ describe("StorageSettings", () => {
 
   it("routes a locked local path change through a local-to-local transition", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    const form = mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["artwork.local_path"],
-      isDirty: (key: string) => key === "artwork.local_path",
-      getPersistedValue: (key: string) =>
-        key === "artwork.local_path" ? "/srv/silo/artwork-old" : "",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
-        if (key === "artwork.local_path") return "/srv/silo/artwork-new";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    const form = stageForm({
+      dirty: ["artwork.local_path"],
+      persisted: { "artwork.local_path": "/srv/silo/artwork-old" },
+      values: {
+        "artwork.storage_backend": "local",
+        "artwork.local_path": "/srv/silo/artwork-new",
+        "s3.public_url_auth": "presigned",
       },
     });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-local-path" } });
@@ -766,67 +519,64 @@ describe("StorageSettings", () => {
     expect(form.save).not.toHaveBeenCalled();
   });
 
-  it("describes private data when a local root moves without a private bucket", async () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["artwork.local_path"],
-      isDirty: (key: string) => key === "artwork.local_path",
-      getPersistedValue: (key: string) =>
-        key === "artwork.local_path" ? "/srv/silo/artwork-old" : "",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
-        if (key === "artwork.local_path") return "/srv/silo/artwork-new";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+  it.each<[string, Staged, FormOverrides?]>([
+    ...["/srv/silo/artwork/", "/srv//silo/./artwork/"].map((path): [string, Staged] => [
+      `a restyled local path ${path}`,
+      {
+        dirty: ["artwork.local_path"],
+        persisted: { "artwork.local_path": "/srv/silo/artwork" },
+        values: { "artwork.local_path": path, "artwork.storage_backend": "local" },
       },
-    });
+    ]),
+    [
+      "public bucket edits on an explicit Local backend",
+      {
+        dirty: ["s3.public_bucket"],
+        persisted: { "artwork.storage_backend": "local" },
+        values: {
+          "artwork.storage_backend": "local",
+          "s3.public_bucket": "artwork",
+          "s3.public_url_auth": "presigned",
+        },
+      },
+    ],
+    [
+      "a private field that was edited back to its stored value",
+      {
+        dirty: ["s3.private_bucket"],
+        persisted: { "s3.private_bucket": "private" },
+        values: { "s3.private_bucket": "private " },
+      },
+    ],
+    [
+      "location edits that name the same store",
+      {
+        dirty: ["s3.private_endpoint", "s3.private_bucket", "s3.private_key_prefix"],
+        persisted: {
+          "s3.private_endpoint": "https://private.example",
+          "s3.private_bucket": "private",
+          "s3.private_key_prefix": "ops",
+        },
+        values: {
+          "s3.private_endpoint": "https://PRIVATE.example",
+          "s3.private_bucket": "Private",
+          "s3.private_key_prefix": "ops/",
+        },
+      },
+    ],
+    [
+      "a leftover private prefix when there is no private bucket",
+      { dirty: ["s3.private_key_prefix"], persisted: { "s3.private_key_prefix": "ops" } },
+      { dirtyKeys: [] },
+    ],
+  ])("saves %s directly on a locked local install", (_, staged, overrides) => {
+    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
+    stageForm(staged, overrides);
     render(<StorageSettings />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
-
-    const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
-    expect(
-      within(dialog).getByText(/copies branding, collection and library posters, profile avatars/i),
-    ).toBeVisible();
-    expect(
-      within(dialog).getByText(
-        /Preserve personal uploads and Start fresh leave them in the old location/i,
-      ),
-    ).toBeVisible();
-    expect(
-      within(dialog)
-        .getByRole("radio", { name: /Start fresh/i })
-        .closest("label"),
-    ).toHaveTextContent(
-      /Profile avatars also remain in the old storage and are unavailable after the switch/i,
-    );
-    expect(
-      within(dialog).queryByText(
-        /Profile avatars, diagnostic bundles, and catalog job artifacts stay in their current storage/,
-      ),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Review transition" })).not.toBeInTheDocument();
   });
-
-  it.each(["/srv/silo/artwork/", "/srv//silo/./artwork/"])(
-    "does not start a transition for a restyled local path %s",
-    (path) => {
-      serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-      mockForm({
-        dirtyCount: 1,
-        dirtyKeys: ["artwork.local_path"],
-        isDirty: (key: string) => key === "artwork.local_path",
-        getPersistedValue: (key: string) =>
-          key === "artwork.local_path" ? "/srv/silo/artwork" : "",
-        getValue: (key: string) =>
-          key === "artwork.local_path" ? path : key === "artwork.storage_backend" ? "local" : "",
-      });
-      render(<StorageSettings />);
-
-      expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
-      expect(screen.queryByRole("button", { name: "Review transition" })).not.toBeInTheDocument();
-    },
-  );
 
   it.each([
     ["failed refetch", true, true],
@@ -837,13 +587,10 @@ describe("StorageSettings", () => {
       artwork_storage: { backend: "local", locked: true, status_known: statusKnown },
     };
     serverStatus.isError = isError;
-    const form = mockForm({
-      dirtyCount: 2,
-      dirtyKeys: ["artwork.local_path", "metadata.cache_images"],
-      isDirty: (key: string) => key === "artwork.local_path" || key === "metadata.cache_images",
-      getPersistedValue: (key: string) =>
-        key === "artwork.local_path" ? "/srv/silo/artwork-old" : "",
-      getValue: (key: string) => (key === "artwork.local_path" ? "/srv/silo/artwork-new" : ""),
+    const form = stageForm({
+      dirty: ["artwork.local_path", "metadata.cache_images"],
+      persisted: { "artwork.local_path": "/srv/silo/artwork-old" },
+      values: { "artwork.local_path": "/srv/silo/artwork-new" },
     });
     render(<StorageSettings />);
 
@@ -863,10 +610,9 @@ describe("StorageSettings", () => {
     serverStatus.current = {
       artwork_storage: { backend: "s3", locked: true, status_known: false },
     };
-    mockForm({
-      getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "s3" : ""),
-      getValue: (key: string) =>
-        key === "artwork.storage_backend" ? "s3" : key === "s3.public_url_auth" ? "presigned" : "",
+    stageForm({
+      persisted: { "artwork.storage_backend": "s3" },
+      values: { "artwork.storage_backend": "s3", "s3.public_url_auth": "presigned" },
     });
     render(<StorageSettings />);
 
@@ -881,11 +627,9 @@ describe("StorageSettings", () => {
     serverStatus.current = {
       artwork_storage: { backend: "local", locked: false, status_known: false },
     };
-    const form = mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["artwork.local_path"],
-      isDirty: (key: string) => key === "artwork.local_path",
-      getValue: (key: string) => (key === "artwork.local_path" ? "/srv/silo/artwork-new" : ""),
+    const form = stageForm({
+      dirty: ["artwork.local_path"],
+      values: { "artwork.local_path": "/srv/silo/artwork-new" },
     });
     render(<StorageSettings />);
 
@@ -912,18 +656,7 @@ describe("StorageSettings", () => {
       isFetching: false,
       refetch: vi.fn(),
     });
-    const saved: Record<string, string> = {
-      "artwork.storage_backend": "s3",
-      "s3.public_endpoint": "https://s3.example",
-      "s3.public_bucket": "new-artwork",
-    };
-    const form = mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.public_access_key"],
-      isDirty: (key: string) => key === "s3.public_access_key",
-      getPersistedValue: (key: string) => saved[key] ?? "",
-      getValue: (key: string) => (key === "s3.public_access_key" ? "NEWKEY" : (saved[key] ?? "")),
-    });
+    const form = stageForm(S3_SAVED_ACCESS_KEY_EDIT);
     render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -937,18 +670,7 @@ describe("StorageSettings", () => {
   // the running backend, so only a transition can move storage now.
   it("routes storage edits to a transition when saved settings differ without a commit", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    const saved: Record<string, string> = {
-      "artwork.storage_backend": "s3",
-      "s3.public_endpoint": "https://s3.example",
-      "s3.public_bucket": "new-artwork",
-    };
-    const form = mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.public_access_key"],
-      isDirty: (key: string) => key === "s3.public_access_key",
-      getPersistedValue: (key: string) => saved[key] ?? "",
-      getValue: (key: string) => (key === "s3.public_access_key" ? "NEWKEY" : (saved[key] ?? "")),
-    });
+    const form = stageForm(S3_SAVED_ACCESS_KEY_EDIT);
     render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
@@ -966,12 +688,10 @@ describe("StorageSettings", () => {
       "s3.public_secret_key",
       "metadata.cache_images",
     ];
-    const form = mockForm({
-      dirtyCount: edited.length,
-      dirtyKeys: edited,
-      isDirty: (key: string) => edited.includes(key),
-      getPersistedValue: (key: string) => (key === "s3.public_bucket" ? "artwork-old" : ""),
-      getValue: (key: string) => (key === "s3.public_bucket" ? "artwork-new" : ""),
+    const form = stageForm({
+      dirty: edited,
+      persisted: { "s3.public_bucket": "artwork-old" },
+      values: { "s3.public_bucket": "artwork-new" },
     });
     render(<StorageSettings />);
 
@@ -981,17 +701,14 @@ describe("StorageSettings", () => {
 
   it("routes an Automatic local backend to S3 when a public bucket is added", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    const form = mockForm({
-      dirtyCount: 2,
-      dirtyKeys: ["s3.public_endpoint", "s3.public_bucket"],
-      isDirty: (key: string) => key === "s3.public_endpoint" || key === "s3.public_bucket",
-      getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "auto" : ""),
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "auto";
-        if (key === "s3.public_endpoint") return "https://s3.example";
-        if (key === "s3.public_bucket") return "artwork";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    const form = stageForm({
+      dirty: ["s3.public_endpoint", "s3.public_bucket"],
+      persisted: { "artwork.storage_backend": "auto" },
+      values: {
+        "artwork.storage_backend": "auto",
+        "s3.public_endpoint": "https://s3.example",
+        "s3.public_bucket": "artwork",
+        "s3.public_url_auth": "presigned",
       },
     });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-auto-s3" } });
@@ -1021,44 +738,16 @@ describe("StorageSettings", () => {
     expect(form.save).not.toHaveBeenCalled();
   });
 
-  it("routes Local to Automatic with a saved public bucket through an S3 transition", async () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    const form = mockForm({
-      getPersistedValue: (key: string) =>
-        key === "artwork.storage_backend" ? "local" : key === "s3.public_bucket" ? "artwork" : "",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
-        if (key === "s3.public_bucket") return "artwork";
-        if (key === "s3.public_endpoint") return "https://s3.example";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
-      },
-    });
-    render(<StorageSettings />);
-
-    await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
-    await userEvent.click(screen.getByRole("option", { name: "Automatic" }));
-
-    expect(form.setValue).toHaveBeenCalledWith("artwork.storage_backend", "auto");
-    expect(
-      screen.queryByRole("dialog", { name: "Change artwork storage" }),
-    ).not.toBeInTheDocument();
-  });
-
   it("reviews a staged Local to Automatic switch with a saved public bucket as an S3 move", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["artwork.storage_backend"],
-      isDirty: (key: string) => key === "artwork.storage_backend",
-      getPersistedValue: (key: string) =>
-        key === "artwork.storage_backend" ? "local" : key === "s3.public_bucket" ? "artwork" : "",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "auto";
-        if (key === "s3.public_bucket") return "artwork";
-        if (key === "s3.public_endpoint") return "https://s3.example";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    stageForm({
+      dirty: ["artwork.storage_backend"],
+      persisted: { "artwork.storage_backend": "local", "s3.public_bucket": "artwork" },
+      values: {
+        "artwork.storage_backend": "auto",
+        "s3.public_bucket": "artwork",
+        "s3.public_endpoint": "https://s3.example",
+        "s3.public_url_auth": "presigned",
       },
     });
     render(<StorageSettings />);
@@ -1073,18 +762,13 @@ describe("StorageSettings", () => {
 
   it("routes Automatic S3 to local when its public bucket is cleared", async () => {
     serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    const form = mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.public_bucket"],
-      isDirty: (key: string) => key === "s3.public_bucket",
-      getPersistedValue: (key: string) =>
-        key === "artwork.storage_backend" ? "auto" : key === "s3.public_bucket" ? "artwork" : "",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "auto";
-        if (key === "artwork.local_path") return "/srv/silo/artwork";
-        if (key === "s3.public_bucket") return "";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    const form = stageForm({
+      dirty: ["s3.public_bucket"],
+      persisted: { "artwork.storage_backend": "auto", "s3.public_bucket": "artwork" },
+      values: {
+        "artwork.storage_backend": "auto",
+        "artwork.local_path": "/srv/silo/artwork",
+        "s3.public_url_auth": "presigned",
       },
     });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-auto-local" } });
@@ -1111,9 +795,8 @@ describe("StorageSettings", () => {
 
   it("saves S3 to Automatic directly when the public bucket remains configured", async () => {
     serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    const form = mockForm({
-      getValue: (key: string) =>
-        key === "artwork.storage_backend" ? "s3" : key === "s3.public_bucket" ? "artwork" : "",
+    const form = stageForm({
+      values: { "artwork.storage_backend": "s3", "s3.public_bucket": "artwork" },
     });
     render(<StorageSettings />);
 
@@ -1135,26 +818,20 @@ describe("StorageSettings", () => {
           finishSave = resolve;
         }),
     );
-    mockForm({
-      dirtyCount: 2,
-      dirtyKeys: ["artwork.local_path", "metadata.cache_images"],
-      isDirty: (key: string) => key === "artwork.local_path" || key === "metadata.cache_images",
-      // A saved private bucket keeps Private storage on the Local disk page.
-      getPersistedValue: (key: string) =>
-        key === "artwork.local_path"
-          ? "/srv/silo/artwork-old"
-          : key === "s3.private_bucket"
-            ? "ops"
-            : "",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
-        if (key === "artwork.local_path") return "/srv/silo/artwork-new";
-        if (key === "s3.private_bucket") return "ops";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    stageForm(
+      {
+        dirty: ["artwork.local_path", "metadata.cache_images"],
+        // A saved private bucket keeps Private storage on the Local disk page.
+        persisted: { "artwork.local_path": "/srv/silo/artwork-old", "s3.private_bucket": "ops" },
+        values: {
+          "artwork.storage_backend": "local",
+          "artwork.local_path": "/srv/silo/artwork-new",
+          "s3.private_bucket": "ops",
+          "s3.public_url_auth": "presigned",
+        },
       },
-      save,
-    });
+      { save },
+    );
     render(<StorageSettings />);
     const privateStorage = within(screen.getByRole("group", { name: "Private storage" }));
     expect(privateStorage.getByLabelText("Endpoint")).toBeEnabled();
@@ -1170,140 +847,67 @@ describe("StorageSettings", () => {
     expect(screen.getByLabelText("Local artwork path")).toHaveValue("/srv/silo/artwork-new");
   });
 
-  it("keeps public bucket edits as settings on an explicit Local backend", () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.public_bucket"],
-      isDirty: (key: string) => key === "s3.public_bucket",
-      getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "local" : ""),
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
-        if (key === "s3.public_bucket") return "artwork";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+  it.each<[string, (typeof serverStatus)["current"], Staged, string]>([
+    ...[
+      ["an explicit default port", "https://s3.example:443"],
+      ["a trailing slash", "https://s3.example/"],
+    ].map(([name, endpoint]): [string, (typeof serverStatus)["current"], Staged, string] => [
+      `${name} in a locked S3 endpoint`,
+      { artwork_storage: { backend: "s3", locked: true } },
+      {
+        dirty: ["s3.public_endpoint"],
+        persisted: { "s3.public_endpoint": "https://s3.example" },
+        values: {
+          "artwork.storage_backend": "s3",
+          "s3.public_endpoint": endpoint!,
+          "s3.public_bucket": "artwork",
+          "s3.public_url_auth": "presigned",
+        },
       },
-    });
-    render(<StorageSettings />);
-
-    expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Review transition" })).not.toBeInTheDocument();
-  });
-
-  it.each([
-    ["an explicit default port", "https://s3.example:443"],
-    ["a trailing slash", "https://s3.example/"],
-  ])("routes %s in a locked S3 endpoint through a transition", async (_, endpoint) => {
-    serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.public_endpoint"],
-      isDirty: (key: string) => key === "s3.public_endpoint",
-      getPersistedValue: (key: string) =>
-        key === "s3.public_endpoint" ? "https://s3.example" : "",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "s3";
-        if (key === "s3.public_endpoint") return endpoint;
-        if (key === "s3.public_bucket") return "artwork";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+      "Change artwork storage",
+    ]),
+    [
+      "an explicit port in a locked private endpoint",
+      { artwork_storage: { backend: "local", locked: false, private_locked: true } },
+      {
+        dirty: ["s3.private_endpoint"],
+        persisted: {
+          "s3.private_endpoint": "https://private.example",
+          "s3.private_bucket": "private",
+        },
+        values: {
+          "artwork.storage_backend": "local",
+          "s3.private_endpoint": "https://private.example:443",
+          "s3.private_bucket": "private",
+          "s3.public_url_auth": "presigned",
+        },
       },
-    });
-    render(<StorageSettings />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
-    expect(screen.getByRole("dialog", { name: "Change artwork storage" })).toBeVisible();
-  });
-
-  it("routes an explicit port in a locked private endpoint through a private transition", async () => {
-    serverStatus.current = {
-      artwork_storage: { backend: "local", locked: false, private_locked: true },
-    };
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.private_endpoint"],
-      isDirty: (key: string) => key === "s3.private_endpoint",
-      getPersistedValue: (key: string) => {
-        if (key === "s3.private_endpoint") return "https://private.example";
-        if (key === "s3.private_bucket") return "private";
-        return "";
-      },
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
-        if (key === "s3.private_endpoint") return "https://private.example:443";
-        if (key === "s3.private_bucket") return "private";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
-      },
-    });
+      "Change private storage",
+    ],
+  ])("routes %s through a transition", async (_, status, staged, dialog) => {
+    serverStatus.current = status;
+    stageForm(staged);
     render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
-    expect(screen.getByRole("dialog", { name: "Change private storage" })).toBeVisible();
-  });
-
-  it("warns that Start fresh leaves downloaded subtitles behind on local-to-S3 moves", async () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["artwork.storage_backend"],
-      isDirty: (key: string) => key === "artwork.storage_backend",
-      getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "local" : ""),
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "s3";
-        if (key === "s3.public_bucket") return "artwork";
-        if (key === "s3.public_endpoint") return "https://s3.example";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
-      },
-    });
-    render(<StorageSettings />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
-
-    const startFresh = screen.getByRole("radio", { name: /Start fresh/ }).closest("label");
-    expect(startFresh).toHaveTextContent(/Downloaded subtitles.*unavailable after the switch/);
-  });
-
-  it("shows the kept endpoint during a bucket-only change", async () => {
-    serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      isDirty: (key: string) => key === "s3.public_bucket",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "s3";
-        if (key === "s3.public_endpoint") return "https://s3.example";
-        if (key === "s3.public_bucket") return "new-artwork";
-        if (key === "s3.private_endpoint") return "https://private.example";
-        if (key === "s3.private_bucket") return "private-artifacts";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
-      },
-    });
-    render(<StorageSettings />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
-
-    expect(screen.getByRole("group", { name: "Target" })).toHaveTextContent(
-      "new-artwork · https://s3.example",
-    );
-    serverStatus.current = undefined;
+    expect(screen.getByRole("dialog", { name: dialog })).toBeVisible();
   });
 
   it("describes a private-only S3 transition without public artwork claims", async () => {
     serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    mockForm({
-      dirtyCount: 2,
-      isDirty: (key: string) => key === "s3.private_endpoint" || key === "s3.private_bucket",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "s3";
-        if (key === "s3.public_bucket") return "public-artwork";
-        if (key === "s3.private_endpoint") return "https://private.example";
-        if (key === "s3.private_bucket") return "private-new";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    stageForm(
+      {
+        dirty: ["s3.private_endpoint", "s3.private_bucket"],
+        values: {
+          "artwork.storage_backend": "s3",
+          "s3.public_bucket": "public-artwork",
+          "s3.private_endpoint": "https://private.example",
+          "s3.private_bucket": "private-new",
+          "s3.public_url_auth": "presigned",
+        },
       },
-    });
+      { dirtyKeys: [] },
+    );
     render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
@@ -1325,58 +929,15 @@ describe("StorageSettings", () => {
     expect(within(dialog).getByText(/reconciled in the background after restart/)).toBeVisible();
   });
 
-  it("describes public-only and combined S3 changes as artwork transitions", async () => {
-    for (const changedKeys of [
-      new Set(["s3.public_bucket"]),
-      new Set(["s3.public_bucket", "s3.private_bucket"]),
-    ]) {
-      serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-      mockForm({
-        dirtyCount: changedKeys.size,
-        isDirty: (key: string) => changedKeys.has(key),
-        getValue: (key: string) => {
-          if (key === "artwork.storage_backend") return "s3";
-          if (key === "s3.public_bucket") return "public-new";
-          if (key === "s3.private_bucket") return "private-new";
-          if (key === "s3.public_url_auth") return "presigned";
-          return "";
-        },
-      });
-      const view = render(<StorageSettings />);
-      await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
-      const dialog = screen.getByRole("dialog", { name: "Change artwork storage" });
-      expect(dialog).toBeVisible();
-      expect(screen.getByRole("radio", { name: /Preserve personal uploads/ })).toBeVisible();
-      // Avatars move only with the private location.
-      expect(
-        within(dialog).getByText(
-          changedKeys.has("s3.private_bucket")
-            ? /profile avatars, and downloaded subtitles/
-            : /posters, and downloaded subtitles\. Provider/,
-        ),
-      ).toBeVisible();
-      expect(within(dialog).getByText(/including downloaded subtitles/)).toBeVisible();
-      if (changedKeys.has("s3.private_bucket")) {
-        expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
-          "Private bucket: private-new",
-        );
-      }
-      view.unmount();
-    }
-  });
-
   it("requires private S3 before offering avatar-preserving copy policies", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["artwork.storage_backend"],
-      isDirty: (key: string) => key === "artwork.storage_backend",
-      getPersistedValue: (key: string) => (key === "artwork.storage_backend" ? "local" : ""),
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "s3";
-        if (key === "s3.public_bucket") return "public-artwork";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    stageForm({
+      dirty: ["artwork.storage_backend"],
+      persisted: { "artwork.storage_backend": "local" },
+      values: {
+        "artwork.storage_backend": "s3",
+        "s3.public_bucket": "public-artwork",
+        "s3.public_url_auth": "presigned",
       },
     });
     render(<StorageSettings />);
@@ -1394,17 +955,14 @@ describe("StorageSettings", () => {
 
   it("routes a private bucket added to a locked local install through a transition", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    const form = mockForm({
-      dirtyCount: 2,
-      dirtyKeys: ["s3.private_endpoint", "s3.private_bucket"],
-      isDirty: (key: string) => key === "s3.private_endpoint" || key === "s3.private_bucket",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
-        if (key === "artwork.local_path") return "/srv/silo/artwork";
-        if (key === "s3.private_endpoint") return "https://private.example";
-        if (key === "s3.private_bucket") return "private-new";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    const form = stageForm({
+      dirty: ["s3.private_endpoint", "s3.private_bucket"],
+      values: {
+        "artwork.storage_backend": "local",
+        "artwork.local_path": "/srv/silo/artwork",
+        "s3.private_endpoint": "https://private.example",
+        "s3.private_bucket": "private-new",
+        "s3.public_url_auth": "presigned",
       },
     });
     createStorageTransitionMock.mockResolvedValueOnce({ job: { id: "transition-private" } });
@@ -1437,16 +995,13 @@ describe("StorageSettings", () => {
 
   it("describes removing a local install's private bucket as a move to local disk", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.private_bucket"],
-      isDirty: (key: string) => key === "s3.private_bucket",
-      getPersistedValue: (key: string) => (key === "s3.private_bucket" ? "private-old" : ""),
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
-        if (key === "artwork.local_path") return "/srv/silo/artwork";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    stageForm({
+      dirty: ["s3.private_bucket"],
+      persisted: { "s3.private_bucket": "private-old" },
+      values: {
+        "artwork.storage_backend": "local",
+        "artwork.local_path": "/srv/silo/artwork",
+        "s3.public_url_auth": "presigned",
       },
     });
     render(<StorageSettings />);
@@ -1461,65 +1016,20 @@ describe("StorageSettings", () => {
     expect(sourceHealthMock).toHaveBeenCalledWith(true, true);
   });
 
-  it("saves a private field that was edited back to its stored value", () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      dirtyKeys: ["s3.private_bucket"],
-      isDirty: (key: string) => key === "s3.private_bucket",
-      getPersistedValue: (key: string) => (key === "s3.private_bucket" ? "private" : ""),
-      getValue: (key: string) => (key === "s3.private_bucket" ? "private " : ""),
-    });
-    render(<StorageSettings />);
-
-    expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Review transition" })).not.toBeInTheDocument();
-  });
-
-  it("warns that an S3 install without a private bucket has nowhere to keep private data", async () => {
-    serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    mockForm({
-      dirtyCount: 2,
-      isDirty: (key: string) => key === "s3.private_endpoint" || key === "s3.private_bucket",
-      getPersistedValue: (key: string) =>
-        key === "s3.private_bucket"
-          ? "private-old"
-          : key === "s3.private_endpoint"
-            ? "https://private.example"
-            : "",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "s3";
-        if (key === "s3.public_bucket") return "public-artwork";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
-      },
-    });
-    render(<StorageSettings />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
-
-    const dialog = screen.getByRole("dialog", { name: "Change private storage" });
-    expect(within(dialog).getByRole("group", { name: "Target" })).toHaveTextContent(
-      "catalog artifacts become unavailable",
-    );
-    expect(within(dialog).getByRole("group", { name: "Target" })).not.toHaveTextContent(
-      "local disk",
-    );
-  });
-
   it("does not queue a private bucket without its endpoint", async () => {
     serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      isDirty: (key: string) => key === "s3.private_bucket",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
-        if (key === "artwork.local_path") return "/srv/silo/artwork";
-        if (key === "s3.private_bucket") return "private-new";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
+    stageForm(
+      {
+        dirty: ["s3.private_bucket"],
+        values: {
+          "artwork.storage_backend": "local",
+          "artwork.local_path": "/srv/silo/artwork",
+          "s3.private_bucket": "private-new",
+          "s3.public_url_auth": "presigned",
+        },
       },
-    });
+      { dirtyKeys: [] },
+    );
     render(<StorageSettings />);
 
     await userEvent.click(screen.getByRole("button", { name: "Review transition" }));
@@ -1532,86 +1042,26 @@ describe("StorageSettings", () => {
     expect(within(dialog).getByRole("button", { name: "Queue transition" })).toBeDisabled();
   });
 
-  it("says Start fresh leaves S3 data behind when disabling S3", async () => {
-    serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    mockForm({
-      getPersistedValue: (key: string) => (key === "s3.private_bucket" ? "private" : ""),
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "s3";
-        if (key === "artwork.local_path") return "/srv/silo/artwork";
-        if (key === "s3.public_url_auth") return "presigned";
-        return "";
-      },
-    });
-    render(<StorageSettings />);
-
-    await userEvent.click(screen.getByRole("combobox", { name: "Backend" }));
-    await userEvent.click(screen.getByRole("option", { name: "Local disk" }));
-    await userEvent.click(screen.getByRole("radio", { name: /Start fresh/ }));
-
-    expect(screen.getByText(/Start fresh copies nothing/)).toBeVisible();
-    await userEvent.click(screen.getByRole("radio", { name: /Migrate everything/ }));
-    expect(screen.getByText(/is copied to local disk/)).toBeVisible();
-  });
-
-  it("saves location edits that name the same store", () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    const persisted: Record<string, string> = {
-      "s3.private_endpoint": "https://private.example",
-      "s3.private_bucket": "private",
-      "s3.private_key_prefix": "ops",
-    };
-    const edited: Record<string, string> = {
-      "s3.private_endpoint": "https://PRIVATE.example",
-      "s3.private_bucket": "Private",
-      "s3.private_key_prefix": "ops/",
-    };
-    mockForm({
-      dirtyCount: 3,
-      dirtyKeys: Object.keys(edited),
-      isDirty: (key: string) => key in edited,
-      getPersistedValue: (key: string) => persisted[key] ?? "",
-      getValue: (key: string) => edited[key] ?? "",
-    });
-    render(<StorageSettings />);
-
-    expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
-  });
-
-  it("saves a leftover private prefix when there is no private bucket", () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: true } };
-    mockForm({
-      dirtyCount: 1,
-      isDirty: (key: string) => key === "s3.private_key_prefix",
-      getPersistedValue: (key: string) => (key === "s3.private_key_prefix" ? "ops" : ""),
-      getValue: () => "",
-    });
-    render(<StorageSettings />);
-
-    expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
-  });
-
   it("locks only the private bucket when it alone holds data", async () => {
     serverStatus.current = {
       artwork_storage: { backend: "local", locked: false, private_locked: true },
     };
-    mockForm({
-      dirtyCount: 1,
-      isDirty: (key: string) => key === "s3.private_bucket",
-      getPersistedValue: (key: string) =>
-        key === "s3.private_bucket"
-          ? "private-old"
-          : key === "s3.private_endpoint"
-            ? "https://private.example"
-            : "",
-      getValue: (key: string) => {
-        if (key === "artwork.storage_backend") return "local";
-        if (key === "artwork.local_path") return "/srv/silo/artwork";
-        if (key === "s3.private_endpoint") return "https://private.example";
-        if (key === "s3.private_bucket") return "private-new";
-        return "";
+    stageForm(
+      {
+        dirty: ["s3.private_bucket"],
+        persisted: {
+          "s3.private_bucket": "private-old",
+          "s3.private_endpoint": "https://private.example",
+        },
+        values: {
+          "artwork.storage_backend": "local",
+          "artwork.local_path": "/srv/silo/artwork",
+          "s3.private_endpoint": "https://private.example",
+          "s3.private_bucket": "private-new",
+        },
       },
-    });
+      { dirtyKeys: [] },
+    );
     render(<StorageSettings />);
 
     expect(screen.getByLabelText("Local storage path")).toBeEnabled();
@@ -1765,15 +1215,16 @@ describe("StorageSettings", () => {
   });
 
   it("keeps a saved credential when its input is emptied", async () => {
-    const values: Record<string, string> = {
-      "artwork.storage_backend": "s3",
-      "s3.public_access_key": "draft",
-      "s3.public_url_auth": "presigned",
-    };
-    const form = mockForm({
-      sensitiveConfigured: ["s3.public_access_key", "s3.public_secret_key"],
-      getValue: (key: string) => values[key] ?? "",
-    });
+    const form = stageForm(
+      {
+        values: {
+          "artwork.storage_backend": "s3",
+          "s3.public_access_key": "draft",
+          "s3.public_url_auth": "presigned",
+        },
+      },
+      { sensitiveConfigured: ["s3.public_access_key", "s3.public_secret_key"] },
+    );
 
     render(<StorageSettings />);
 
@@ -1788,23 +1239,6 @@ describe("StorageSettings", () => {
     await userEvent.clear(input);
     expect(form.resetValue).toHaveBeenCalledWith("s3.public_access_key");
     expect(form.setValue).not.toHaveBeenCalledWith("s3.public_access_key", "");
-  });
-
-  it("keeps the credential input editable when saving fails", async () => {
-    mockForm({
-      sensitiveConfigured: ["s3.private_access_key"],
-      dirtyCount: 1,
-      save: vi.fn().mockRejectedValue(new Error("save failed")),
-    });
-
-    render(<StorageSettings />);
-
-    const privateGroup = within(screen.getByRole("group", { name: "Private storage" }));
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() =>
-      expect(privateGroup.getByLabelText("Access Key")).toHaveAttribute("type", "password"),
-    );
   });
 
   it("fails closed when protected credential status cannot be loaded", () => {

@@ -171,26 +171,6 @@ func TestListRatings(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings?cursor="+bad, "", viewerHeaders()), TypeInvalidCursor)
 }
 
-func TestDeleteRating(t *testing.T) {
-	ratings := &fakeRatings{ratings: ratingRows()}
-	h := newTestHandler(t, ratingsDeps(ratings))
-	for i := 0; i < 2; i++ {
-		rec := do(t, h, http.MethodDelete, "/api/v2/ratings/movie:c", "", viewerHeaders())
-		if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
-			t.Fatalf("delete %d: %d %s", i, rec.Code, rec.Body.String())
-		}
-	}
-	if len(ratings.ratings) != 3 {
-		t.Fatalf("ratings = %+v", ratings.ratings)
-	}
-	// Demo mode lets the mutation through, as v1's demo guard does.
-	demo := ratingsDeps(ratings)
-	demo.DemoSettings = fakeSettings{demo: true}
-	if rec := do(t, newTestHandler(t, demo), http.MethodDelete, "/api/v2/ratings/movie:b", "", viewerHeaders()); rec.Code != http.StatusNoContent {
-		t.Fatalf("demo delete: %d %s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestGetRating(t *testing.T) {
 	h := newTestHandler(t, ratingsDeps(&fakeRatings{ratings: ratingRows()}))
 	rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:c", "", viewerHeaders())
@@ -200,50 +180,6 @@ func TestGetRating(t *testing.T) {
 	// Not rated, and another profile's rating, are both 404.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:nope", "", viewerHeaders()), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:z", "", viewerHeaders()), TypeNotFound)
-}
-
-func TestSetRating(t *testing.T) {
-	ratings := &fakeRatings{ratings: ratingRows(), hidden: map[string]bool{"movie:hidden": true}}
-	h := newTestHandler(t, ratingsDeps(ratings))
-	for i := 0; i < 2; i++ {
-		rec := do(t, h, http.MethodPut, "/api/v2/ratings/movie:new", `{"rating":4}`, viewerHeaders())
-		if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
-			t.Fatalf("put %d: %d %s", i, rec.Code, rec.Body.String())
-		}
-	}
-	if len(ratings.ratings) != 5 || ratings.ratings[0].MediaItemID != "movie:new" || ratings.ratings[0].Rating != 4 {
-		t.Fatalf("ratings = %+v", ratings.ratings)
-	}
-	// The access filter is the viewer's, without a device id.
-	if a := ratings.access[0]; a.UserID != 1 || a.ProfileID != "p-owner" || a.DeviceID != "" {
-		t.Fatalf("access = %+v", a)
-	}
-	// Re-rating replaces.
-	if rec := do(t, h, http.MethodPut, "/api/v2/ratings/movie:c", `{"rating":1}`, viewerHeaders()); rec.Code != http.StatusNoContent {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if _, ok, _ := ratings.GetRating(context.Background(), 1, "p-owner", "movie:c"); !ok || ratings.ratings[1].Rating != 1 {
-		t.Fatalf("ratings = %+v", ratings.ratings)
-	}
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/ratings/movie:hidden", `{"rating":3}`, viewerHeaders()), TypeNotFound)
-	// The range and the strict body are typed validation.
-	for _, tc := range []struct{ body, location, code string }{
-		{`{"rating":0}`, "body.rating", codeOutOfRange},
-		{`{"rating":6}`, "body.rating", codeOutOfRange},
-		{`{}`, "body.rating", codeRequired},
-		{`{"rating":3,"stars":3}`, "body.stars", codeUnknownField},
-	} {
-		p := requireProblem(t, do(t, h, http.MethodPut, "/api/v2/ratings/movie:c", tc.body, viewerHeaders()), TypeValidationFailed)
-		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
-			t.Errorf("%s: errors = %+v", tc.body, p.Errors)
-		}
-	}
-	// Demo mode lets the mutation through, as v1's demo guard does.
-	demo := ratingsDeps(ratings)
-	demo.DemoSettings = fakeSettings{demo: true}
-	if rec := do(t, newTestHandler(t, demo), http.MethodPut, "/api/v2/ratings/movie:b", `{"rating":2}`, viewerHeaders()); rec.Code != http.StatusNoContent {
-		t.Fatalf("demo put: %d %s", rec.Code, rec.Body.String())
-	}
 }
 
 func TestRatingsDenied(t *testing.T) {

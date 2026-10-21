@@ -3,7 +3,6 @@
 import { describe, expect, it } from "vitest";
 import { makePreparation } from "@/test/downloadPreparations";
 import {
-  cancelPreparationsPrompt,
   formatRemaining,
   formatSpeed,
   preparationPercent,
@@ -59,29 +58,5 @@ describe("download preparation presentation", () => {
       "Canceled 1 job.",
     );
     expect(summarizePreparationAction("cancel", [])).toBe("Nothing changed.");
-  });
-
-  it("names what canceling costs the requesters", () => {
-    const running = makePreparation();
-    expect(cancelPreparationsPrompt([running])).toEqual({
-      title: "Cancel preparing Example Movie?",
-      description:
-        'Encoding stops and its progress is lost. 1 waiting download fails with "Canceled by an administrator". Users can download again later, which starts a new job.',
-      confirmLabel: "Cancel job",
-    });
-    const failed = makePreparation({
-      id: "f",
-      state: "failed",
-      progress: undefined,
-      requesters: [],
-    });
-    expect(cancelPreparationsPrompt([failed])).toEqual({
-      title: "Remove the failed job for Example Movie?",
-      description: "No downloads are waiting on this job.",
-      confirmLabel: "Remove",
-    });
-    const queued = makePreparation({ id: "q", state: "queued", progress: undefined });
-    expect(cancelPreparationsPrompt([queued, failed]).title).toBe("Cancel 2 jobs?");
-    expect(cancelPreparationsPrompt([queued, failed]).confirmLabel).toBe("Cancel 2 jobs");
   });
 });

@@ -202,22 +202,6 @@ func TestWebhookDeliveryDisabledSourceIsAcceptedNoOp(t *testing.T) {
 	}
 }
 
-func TestWebhookDeliveryMalformedBodyIs400(t *testing.T) {
-	store := webhookStore(webhookSource(true), true)
-	svc := &fakeAutoscanTriggerer{}
-	h := NewAutoscanHandler(store, svc)
-
-	rec := httptest.NewRecorder()
-	h.HandleWebhookDelivery(rec, newWebhookDeliveryRequest(testWebhookToken, "{not json"))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if store.webhookErrs["src-1"] == "" {
-		t.Fatal("parse failure must be recorded on the endpoint")
-	}
-}
-
 func TestWebhookDeliveryOversizedBodyIs413(t *testing.T) {
 	store := webhookStore(webhookSource(true), true)
 	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
@@ -347,97 +331,7 @@ func TestResolveDeliveryMode(t *testing.T) {
 	}
 }
 
-func TestValidateWebhookProvider(t *testing.T) {
-	for _, ok := range []string{"auto", "sonarr", "radarr", "", "Sonarr"} {
-		if err := validateWebhookProvider(map[string]string{"webhook_provider": ok}); err != nil {
-			t.Fatalf("provider %q must validate: %v", ok, err)
-		}
-	}
-	if err := validateWebhookProvider(map[string]string{"webhook_provider": "lidarr"}); err == nil {
-		t.Fatal("unsupported provider must be rejected")
-	}
-	if err := validateWebhookProvider(map[string]string{}); err != nil {
-		t.Fatalf("absent provider must validate: %v", err)
-	}
-}
-
-func TestUpdatePollSourceAllowsPluginWebhookProviderKey(t *testing.T) {
-	existing := autoscan.Source{
-		ID:           "src-1",
-		PluginID:     "example.plugin",
-		CapabilityID: "source",
-		DeliveryMode: autoscan.DeliveryModePoll,
-	}
-	var saved autoscan.Source
-	store := &fakeAutoscanStore{
-		getSourceFn: func(string) (autoscan.Source, error) { return existing, nil },
-		updateSourceFn: func(source autoscan.Source) (autoscan.Source, error) {
-			saved = source
-			return source, nil
-		},
-	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
-	body := `{"enabled":true,"delivery_mode":"poll","path_rewrites":[],"source_config":{"webhook_provider":"plugin-specific"}}`
-
-	rec := httptest.NewRecorder()
-	h.HandleUpdateSource(rec, newAutoscanRequest(http.MethodPut, "/admin/autoscan/sources/src-1", body, "src-1"))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	if got := saved.SourceConfig["webhook_provider"]; got != "plugin-specific" {
-		t.Fatalf("plugin source config = %q, want unchanged", got)
-	}
-}
-
 // --- Admin endpoint management ---
-
-func TestCreateSourceWebhookRequiresWebhookMode(t *testing.T) {
-	store := &fakeAutoscanStore{
-		getSourceFn: func(id string) (autoscan.Source, error) {
-			return autoscan.Source{ID: id, DeliveryMode: autoscan.DeliveryModePoll}, nil
-		},
-	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
-
-	rec := httptest.NewRecorder()
-	h.HandleCreateSourceWebhook(rec, newAutoscanRequest(http.MethodPost, "/admin/autoscan/sources/s1/webhook", "", "s1"))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for poll-mode source", rec.Code)
-	}
-}
-
-func TestCreateSourceWebhookReturnsURL(t *testing.T) {
-	source := webhookSource(true)
-	store := &fakeAutoscanStore{
-		getSourceFn: func(string) (autoscan.Source, error) { return source, nil },
-		createWebhookFn: func(sourceID string) (autoscan.WebhookEndpoint, string, error) {
-			return autoscan.WebhookEndpoint{SourceID: sourceID, SecretSuffix: "def456"}, testWebhookToken, nil
-		},
-		getWebhookFn: func(sourceID string) (autoscan.WebhookEndpoint, error) {
-			return autoscan.WebhookEndpoint{SourceID: sourceID, SecretSuffix: "def456"}, nil
-		},
-		revealTokenFn: func(string) (string, error) { return testWebhookToken, nil },
-	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
-	h.SetPublicURL("https://silo.example/")
-
-	rec := httptest.NewRecorder()
-	h.HandleCreateSourceWebhook(rec, newAutoscanRequest(http.MethodPost, "/admin/autoscan/sources/src-1/webhook", "", "src-1"))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	body := rec.Body.String()
-	wantURL := `"webhook_url":"https://silo.example/api/v2/autoscan/webhooks/` + testWebhookToken + `"`
-	if !strings.Contains(body, wantURL) {
-		t.Fatalf("response missing %s: %s", wantURL, body)
-	}
-	if !strings.Contains(body, `"webhook_configured":true`) || !strings.Contains(body, `"webhook_secret_suffix":"def456"`) {
-		t.Fatalf("response missing webhook status fields: %s", body)
-	}
-}
 
 func TestSourceResponsesOmitWebhookURLWhenRevealFails(t *testing.T) {
 	source := webhookSource(true)

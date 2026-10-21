@@ -190,6 +190,22 @@ func (c *Cacher) CacheEbookCover(ctx context.Context, data []byte, contentID str
 	return res.OriginalPath, res.Thumbhash, nil
 }
 
+// CacheExtraStill stores a local extra's sidecar card image under
+// "local/extras/{extraID}/still/..." with the 16:9 still variants episode
+// stills use.
+func (c *Cacher) CacheExtraStill(ctx context.Context, data []byte, extraID string) (storedPath string, thumbhash string, err error) {
+	res, err := c.CacheBytes(ctx, data, CacheRequest{
+		ProviderID:  "local",
+		ContentType: "extras",
+		ContentID:   extraID,
+		ImageType:   metadata.ImageStill,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return res.OriginalPath, res.Thumbhash, nil
+}
+
 // validateCacheRequest checks the required identity fields and the
 // episode/season invariant shared by Cache and CacheBytes. Keeping it in one
 // place prevents the season/episode guard from drifting between the two paths:

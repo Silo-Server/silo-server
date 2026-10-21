@@ -178,7 +178,6 @@ export default function MovieContent({
     setSubtitlePreference.mutate({
       prefId: item.content_id,
       selection,
-      showForcedSubtitles: item.effective_show_forced_subtitles,
     });
   };
 
@@ -188,7 +187,6 @@ export default function MovieContent({
     setSubtitlePreference.mutate({
       prefId: item.content_id,
       selection: null,
-      showForcedSubtitles: item.effective_show_forced_subtitles,
     });
   };
 
@@ -422,9 +420,10 @@ export default function MovieContent({
         />
       )}
 
-      {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
-
+      {/* Local extras play in Silo, so they lead; YouTube videos follow. */}
       {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
+
+      {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
 
       {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
         <DetailSection title="Cast & Crew">

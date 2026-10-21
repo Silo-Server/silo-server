@@ -234,6 +234,9 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("  scopeIntroducedIn: readonly number[];\n")
 	out.WriteString("  resolutionOrder: readonly string[];\n")
 	out.WriteString("  defaultValue: unknown;\n")
+	out.WriteString("  /** The server administrator may replace defaultValue for the whole server,\n")
+	out.WriteString("   * so a value with source \"default\" can differ from it. */\n")
+	out.WriteString("  adminDefault?: boolean;\n")
 	out.WriteString("  label: string;\n")
 	out.WriteString("  description: string;\n")
 	out.WriteString("  category: string;\n")
@@ -279,6 +282,9 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 		fmt.Fprintf(&out, "    scopeIntroducedIn: [%s],\n", scopeRevisions(def))
 		fmt.Fprintf(&out, "    resolutionOrder: [%s],\n", quotedResolution(def))
 		fmt.Fprintf(&out, "    defaultValue: %s,\n", defaultLiteral(def))
+		if def.AdminDefault {
+			out.WriteString("    adminDefault: true,\n")
+		}
 		fmt.Fprintf(&out, "    label: %s,\n", jsString(def.Label))
 		fmt.Fprintf(&out, "    description: %s,\n", jsString(def.Description))
 		fmt.Fprintf(&out, "    category: %q,\n", def.Category)

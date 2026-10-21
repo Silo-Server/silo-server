@@ -109,7 +109,7 @@ func registerAdminTaskJobs(reg *Registry) {
 		return reg.listAdminTaskJobs(ctx, cursors, in)
 	})
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/jobs/{id}", "getAdminJob", "admin-tasks", "Read a retained job. Administrators acting through the account's primary profile may read all jobs; item refresh owners may read their own safe result."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, reg.getAdminTaskJob)
-	cancel := humaOp("POST", Prefix+"/admin/jobs/{id}/cancel", "cancelAdminJob", "admin-tasks", "Request cancellation of a cancellable administrator job. Completed effects and verified storage-copy checkpoints are retained.")
+	cancel := humaOp("POST", Prefix+"/admin/jobs/{id}/cancel", "cancelAdminJob", "admin-tasks", "Request cancellation of a job that reports cancelable: library refresh, storage transition, or image cache cleanup. Completed effects and verified storage-copy checkpoints are retained.")
 	cancel.DefaultStatus = 202
 	cancel.Errors = []int{409}
 	cancel.Responses = map[string]*huma.Response{"200": {
@@ -130,8 +130,8 @@ func (reg *Registry) cancelAdminTaskJob(ctx context.Context, in *AdminTaskJobInp
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	if job.JobType != adminjob.JobTypeStorageTransition && job.JobType != adminjob.JobTypeImageCacheCleanup {
-		return nil, NewProblem(TypeJobNotCancelable, "This job cannot be canceled from this endpoint")
+	if !adminjob.IsCancellableJobType(job.JobType) {
+		return nil, NewProblem(TypeJobNotCancelable, "This job cannot be canceled")
 	}
 	canceller, ok := reg.deps.AdminTaskJobs.(interface {
 		RequestAdminTaskJobCancellation(context.Context, string) (*models.AdminJob, error)

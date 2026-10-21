@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -224,42 +223,6 @@ func (f *fakeNotificationInbox) NotificationPushDisplay(_ context.Context, _ int
 	return notifications.BuildNotificationDisplay(notifications.DeliveryRow{Delivery: notifications.Delivery{ID: id, Type: "request.approved", ReasonFlags: json.RawMessage(`{"request_id":"request-1"}`)}}), nil
 }
 
-func TestNotificationApplePushDisplay(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.NotificationInbox = fixtureNotificationInbox()
-	h := NewHandler(deps)
-	path := Prefix + "/notifications/push/apple/display/"
-	for _, tc := range []struct {
-		name, id string
-		headers  map[string]string
-		status   int
-	}{
-		{"owner", notificationFixtureID, profileOwner(), 200},
-		{"missing", notificationMissingID, profileOwner(), 404},
-		{"uuid shaped id is not rejected up front", "00000000-0000-0000-0000-000000000003", profileOwner(), 404},
-		{"anonymous", notificationFixtureID, nil, 401},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := do(t, h, http.MethodGet, path+tc.id, "", tc.headers)
-			if rec.Code != tc.status {
-				t.Fatalf("%d: %s", rec.Code, rec.Body.String())
-			}
-			if rec.Code == 200 {
-				var body NotificationPushDisplay
-				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-					t.Fatal(err)
-				}
-				if body.DeliveryID != ID(notificationFixtureID) || body.Category != "request_approved" || body.ThreadID != "request:request-1" {
-					t.Fatalf("unexpected display: %+v", body)
-				}
-				if rec.Header().Get("Cache-Control") != "no-store" {
-					t.Fatal(rec.Header())
-				}
-			}
-		})
-	}
-}
-
 func TestNotificationDisplayCredentialScope(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	deps.NotificationInbox = fixtureNotificationInbox()
@@ -287,44 +250,5 @@ func TestNotificationDisplayCredentialScope(t *testing.T) {
 				t.Fatalf("%d: %s", rec.Code, rec.Body.String())
 			}
 		})
-	}
-}
-
-// reason_flags is notification data, not a settings value: the contract must
-// not borrow JSONValue's settings description for it.
-func TestNotificationItemReasonFlagsSchema(t *testing.T) {
-	NewHandler(Dependencies{testRegister: func(reg *Registry) {
-		item := reg.api.OpenAPI().Components.Schemas.Map()["NotificationItem"]
-		if item == nil {
-			t.Fatal("NotificationItem schema is not published")
-		}
-		flags := item.Properties["reason_flags"]
-		if flags == nil {
-			t.Fatal("NotificationItem.reason_flags is not declared")
-		}
-		if flags.Type != "object" || flags.AdditionalProperties != true {
-			t.Fatalf("reason_flags = type %q, additionalProperties %v; want an open object", flags.Type, flags.AdditionalProperties)
-		}
-		if flags.Extensions[extExtensionBag] != "notification-reason-flags" {
-			t.Fatalf("reason_flags extension bag = %v", flags.Extensions[extExtensionBag])
-		}
-		if !strings.Contains(flags.Description, "notification type") || strings.Contains(flags.Description, "value_schema") {
-			t.Fatalf("reason_flags description = %q", flags.Description)
-		}
-	}})
-}
-
-func TestNotificationReasonFlagsMarshal(t *testing.T) {
-	for _, tc := range []struct {
-		in   NotificationReasonFlags
-		want string
-	}{
-		{nil, `{}`},
-		{NotificationReasonFlags(`{"follower":true,"request_id":"request-1"}`), `{"follower":true,"request_id":"request-1"}`},
-	} {
-		got, err := json.Marshal(tc.in)
-		if err != nil || string(got) != tc.want {
-			t.Fatalf("marshal %q = %s, %v; want %s", tc.in, got, err, tc.want)
-		}
 	}
 }

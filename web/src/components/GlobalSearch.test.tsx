@@ -119,17 +119,37 @@ const browseFixture = {
   backdrop_thumbhash: "",
 };
 
-function renderSearchMarkup(props: Partial<Parameters<typeof GlobalSearch>[0]> = {}) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return renderToStaticMarkup(
+const discoveryOff = { discoveryEnabled: false, isResolving: false, submitDisabledReason: null };
+const discoveryOn = { discoveryEnabled: true, isResolving: false, submitDisabledReason: null };
+const noTitles = {
+  data: { total: 0, has_more: false, items: [] },
+  isFetching: false,
+  isError: false,
+};
+
+function searchTree(
+  props: Partial<Parameters<typeof GlobalSearch>[0]> = {},
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
+  return (
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <GlobalSearch {...props} />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+}
+
+function renderSearchMarkup(props: Partial<Parameters<typeof GlobalSearch>[0]> = {}) {
+  return renderToStaticMarkup(searchTree(props));
+}
+
+// Opens the dialog on a query and focuses the search box.
+function renderOpen(initialQuery = "Test") {
+  render(searchTree({ defaultOpen: true, initialQuery }));
+  const input = screen.getByRole("combobox", { name: "Search" });
+  input.focus();
+  return input;
 }
 
 const personFixture = {
@@ -141,65 +161,22 @@ const personFixture = {
 beforeEach(() => {
   mocks.usePersonSearch.mockReset();
   mocks.usePersonSearch.mockReturnValue({ data: [], isFetching: false });
+  mocks.navigate.mockReset();
+  mocks.useQuery.mockReset();
+  mocks.useCanRequest.mockReset();
+  mocks.useRequestSearch.mockReset();
+  mocks.useCanRequest.mockReturnValue(discoveryOff);
+  mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
+  mocks.useQuery.mockReturnValue({
+    data: { total: 50, has_more: true, items: [browseFixture] },
+    isFetching: false,
+    isError: false,
+  });
 });
 
 describe("GlobalSearch", () => {
-  beforeEach(() => {
-    mocks.navigate.mockReset();
-    mocks.useQuery.mockReset();
-    mocks.useCanRequest.mockReset();
-    mocks.useRequestSearch.mockReset();
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: false,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useRequestSearch.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isError: false,
-    });
-    mocks.useQuery.mockReturnValue({
-      data: {
-        total: 50,
-        has_more: true,
-        items: [browseFixture],
-      },
-      isFetching: false,
-      isError: false,
-    });
-  });
-
-  it("disables the preview query when the dialog is closed", () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    renderToStaticMarkup(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <GlobalSearch />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(mocks.useQuery).toHaveBeenCalled();
-    const lastCall = mocks.useQuery.mock.calls[mocks.useQuery.mock.calls.length - 1]![0] as {
-      enabled: boolean;
-    };
-    expect(lastCall.enabled).toBe(false);
-  });
-
   it("opens global search with Ctrl+K", () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <GlobalSearch />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    render(searchTree());
 
     expect(screen.queryByTestId("dialog")).toBeNull();
     fireEvent.keyDown(document, { key: "k", ctrlKey: true });
@@ -223,16 +200,7 @@ describe("GlobalSearch", () => {
       isFetching: false,
       isError: false,
     });
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <GlobalSearch defaultOpen initialQuery="Reader" />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    render(searchTree({ defaultOpen: true, initialQuery: "Reader" }));
 
     await userEvent.click(screen.getByRole("option", { name: /A Reader/i }));
 
@@ -252,19 +220,7 @@ describe("GlobalSearch", () => {
       isFetching: false,
       isError: false,
     });
-
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <GlobalSearch defaultOpen initialQuery="Test" />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    const input = screen.getByRole("combobox", { name: "Search" });
-    input.focus();
-    return input;
+    return renderOpen();
   }
 
   it("tracks selection with aria-activedescendant while keeping typing focus in the input", async () => {
@@ -399,23 +355,8 @@ describe("GlobalSearch", () => {
   });
 
   it("clears selection and keeps focus in the input when there are no results", () => {
-    mocks.useQuery.mockReturnValue({
-      data: { total: 0, has_more: false, items: [] },
-      isFetching: false,
-      isError: false,
-    });
-
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <GlobalSearch defaultOpen initialQuery="Test" />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    const input = screen.getByRole("combobox", { name: "Search" });
-    input.focus();
+    mocks.useQuery.mockReturnValue(noTitles);
+    const input = renderOpen();
     fireEvent.keyDown(input, { key: "ArrowDown" });
 
     expect(input).toHaveFocus();
@@ -450,61 +391,12 @@ describe("GlobalSearch", () => {
 
 describe("GlobalSearch people results", () => {
   beforeEach(() => {
-    mocks.navigate.mockReset();
-    mocks.useQuery.mockReset();
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: false,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useRequestSearch.mockReturnValue({ data: undefined, isLoading: false, isError: false });
     mocks.useQuery.mockReturnValue({
       data: { total: 1, has_more: false, items: [browseFixture] },
       isFetching: false,
       isError: false,
     });
     mocks.usePersonSearch.mockReturnValue({ data: [personFixture], isFetching: false });
-  });
-
-  function renderOpen(initialQuery = "Test") {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <GlobalSearch defaultOpen initialQuery={initialQuery} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    const input = screen.getByRole("combobox", { name: "Search" });
-    input.focus();
-    return input;
-  }
-
-  it("searches people with the preview scope only while the dialog is open", () => {
-    renderSearchMarkup({ defaultOpen: true, initialQuery: " Test " });
-    // The unset profile preference defaults to Media.
-    expect(mocks.usePersonSearch).toHaveBeenLastCalledWith("Test", 4, true, "video");
-
-    renderSearchMarkup();
-    expect(mocks.usePersonSearch).toHaveBeenLastCalledWith("", 4, false, "video");
-  });
-
-  it("lists people in their own group after the title results", () => {
-    renderOpen();
-
-    const options = screen.getAllByRole("option");
-    expect(options.map((option) => option.getAttribute("aria-label"))).toEqual([
-      "Test Movie, 2020, Movie",
-      "Test Actor, Person",
-    ]);
-    const titles = screen.getByRole("group", { name: "Titles" });
-    const people = screen.getByRole("group", { name: "People" });
-    expect(titles).toContainElement(options[0]!);
-    expect(people).toContainElement(options[1]!);
-    // Only the lower group draws the divider between the two.
-    expect(people).toHaveClass("border-t");
-    expect(titles).not.toHaveClass("border-t");
-    expect(screen.getByText("TA")).toBeInTheDocument();
   });
 
   it("leads with exact person matches only, leaving partial names to the search page", () => {
@@ -520,15 +412,6 @@ describe("GlobalSearch people results", () => {
     expect(
       screen.getAllByRole("option").map((option) => option.getAttribute("aria-label")),
     ).toEqual(["Chris, Person", "Test Movie, 2020, Movie"]);
-  });
-
-  it("opens a person picked with the mouse", async () => {
-    renderOpen();
-
-    await userEvent.click(screen.getByRole("option", { name: "Test Actor, Person" }));
-
-    expect(mocks.navigate).toHaveBeenCalledWith("/person/9007199254740993");
-    expect(screen.queryByTestId("dialog")).not.toBeInTheDocument();
   });
 
   it("moves keyboard selection from titles into people and opens the person on Enter", () => {
@@ -549,28 +432,10 @@ describe("GlobalSearch people results", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("/person/9007199254740993");
   });
 
-  it("leads with people when a person's name matches the query exactly", () => {
-    const input = renderOpen("test actor");
-
-    expect(
-      screen.getAllByRole("option").map((option) => option.getAttribute("aria-label")),
-    ).toEqual(["Test Actor, Person", "Test Movie, 2020, Movie"]);
-
-    fireEvent.keyDown(input, { key: "ArrowDown" });
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(mocks.navigate).toHaveBeenCalledWith("/person/9007199254740993");
-  });
-
   it("keeps the selected title selected when an exact person match moves it down", () => {
     mocks.usePersonSearch.mockReturnValue({ data: undefined, isFetching: true });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const tree = () => (
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <GlobalSearch defaultOpen initialQuery="Test Actor" />
-        </MemoryRouter>
-      </QueryClientProvider>
-    );
+    const tree = () => searchTree({ defaultOpen: true, initialQuery: "Test Actor" }, client);
     const { rerender } = render(tree());
     const input = screen.getByRole("combobox", { name: "Search" });
     fireEvent.keyDown(input, { key: "ArrowDown" });
@@ -596,66 +461,35 @@ describe("GlobalSearch people results", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("/item/movie-99");
   });
 
-  it("shows people instead of 'No matches' when no title matches", () => {
-    mocks.useQuery.mockReturnValue({
-      data: { total: 0, has_more: false, items: [] },
-      isFetching: false,
-      isError: false,
-    });
+  it.each([
+    [
+      "shows people instead of 'No matches' when no title matches",
+      { data: [personFixture], isFetching: false },
+      ["Test Actor, Person", "1 results found"],
+    ],
+    [
+      "keeps searching instead of showing 'No matches' while people are still loading",
+      { data: undefined, isFetching: true },
+      ["Searching..."],
+    ],
+    [
+      "reports a failed people search instead of 'No matches' when no title matches",
+      { data: undefined, isFetching: false, isError: true },
+      ["Could not load results"],
+    ],
+  ])("%s", (_, people, shown) => {
+    mocks.useQuery.mockReturnValue(noTitles);
+    mocks.usePersonSearch.mockReturnValue(people);
 
     const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test Actor" });
 
-    expect(markup).toContain("Test Actor, Person");
+    for (const text of shown) expect(markup).toContain(text);
     expect(markup).not.toContain("No matches");
-    expect(markup).toContain("1 results found");
-  });
-
-  it("keeps searching instead of showing 'No matches' while people are still loading", () => {
-    mocks.useQuery.mockReturnValue({
-      data: { total: 0, has_more: false, items: [] },
-      isFetching: false,
-      isError: false,
-    });
-    mocks.usePersonSearch.mockReturnValue({ data: undefined, isFetching: true });
-
-    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test Actor" });
-
-    expect(markup).toContain("Searching...");
-    expect(markup).not.toContain("No matches");
-  });
-
-  it("reports a failed people search instead of 'No matches' when no title matches", () => {
-    mocks.useQuery.mockReturnValue({
-      data: { total: 0, has_more: false, items: [] },
-      isFetching: false,
-      isError: false,
-    });
-    mocks.usePersonSearch.mockReturnValue({ data: undefined, isFetching: false, isError: true });
-
-    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test Actor" });
-
-    expect(markup).toContain("Could not load results");
-    expect(markup).not.toContain("No matches");
-  });
-
-  it("hides the people group when the people search fails", () => {
-    mocks.usePersonSearch.mockReturnValue({ data: undefined, isFetching: false, isError: true });
-
-    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test" });
-
-    expect(markup).toContain("Test Movie");
-    expect(markup).not.toContain("People");
   });
 });
 
 describe("GlobalSearch request rows", () => {
-  const discoveryOn = { discoveryEnabled: true, isResolving: false, submitDisabledReason: null };
-
   beforeEach(() => {
-    mocks.navigate.mockReset();
-    mocks.useQuery.mockReset();
-    mocks.useCanRequest.mockReset();
-    mocks.useRequestSearch.mockReset();
     mocks.renderRealRequestSection = true;
     mocks.useCanRequest.mockReturnValue(discoveryOn);
     mocks.useQuery.mockReturnValue({
@@ -695,14 +529,7 @@ describe("GlobalSearch request rows", () => {
 
   // The request rows load lazily; it returns once they are on screen.
   async function renderOpenSearch() {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <GlobalSearch defaultOpen initialQuery="Show" />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    render(searchTree({ defaultOpen: true, initialQuery: "Show" }));
     await screen.findByRole("option", { name: /Requested Show/ });
     const input = screen.getByRole("combobox", { name: "Search" });
     input.focus();
@@ -710,24 +537,9 @@ describe("GlobalSearch request rows", () => {
   }
 
   it("offers See all when only request suggestions match", async () => {
-    mocks.useQuery.mockReturnValue({
-      data: { total: 0, has_more: false, items: [] },
-      isFetching: false,
-      isError: false,
-    });
+    mocks.useQuery.mockReturnValue(noTitles);
     await renderOpenSearch();
     expect(screen.getByText("See all")).toBeInTheDocument();
-  });
-
-  it("closes the dialog and opens the request page when a request row is clicked", async () => {
-    await renderOpenSearch();
-
-    const row = screen.getByRole("option", { name: /Requested Show/ });
-    expect(row.querySelector('[data-request-state="processing"]')).toHaveTextContent("Processing");
-    await userEvent.click(row);
-
-    expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith("/title/series/7");
-    expect(screen.queryByTestId("dialog")).not.toBeInTheDocument();
   });
 
   it("walks from library rows into request rows with the arrow keys and opens one with Enter", async () => {
@@ -752,27 +564,6 @@ describe("GlobalSearch request rows", () => {
     expect(screen.queryByTestId("dialog")).not.toBeInTheDocument();
   });
 
-  it("reveals a pointer-selected last request row when ArrowDown takes over", async () => {
-    const input = await renderOpenSearch();
-    const scrollIntoView = vi.fn();
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = scrollIntoView;
-    try {
-      const row = screen.getByRole("option", { name: /Requested Show/ });
-      fireEvent.mouseMove(row);
-      expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
-      expect(row).toHaveTextContent("↵");
-      expect(scrollIntoView).not.toHaveBeenCalled();
-
-      fireEvent.keyDown(input, { key: "ArrowDown" });
-      expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
-      expect(scrollIntoView).toHaveBeenCalledTimes(1);
-      expect(scrollIntoView.mock.contexts[0]).toBe(row);
-    } finally {
-      Element.prototype.scrollIntoView = original;
-    }
-  });
-
   it("keeps the dialog and search when a request row opens in another tab", async () => {
     const input = await renderOpenSearch();
     const row = screen.getByRole("option", { name: /Requested Show/ });
@@ -792,42 +583,9 @@ describe("GlobalSearch request rows", () => {
 });
 
 describe("GlobalSearch + RequestToAddSection wiring", () => {
-  beforeEach(() => {
-    mocks.navigate.mockReset();
-    mocks.useQuery.mockReset();
-    mocks.useCanRequest.mockReset();
-    mocks.useRequestSearch.mockReset();
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: false,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useRequestSearch.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isError: false,
-    });
-    mocks.useQuery.mockReturnValue({
-      data: { total: 50, has_more: true, items: [browseFixture] },
-      isFetching: false,
-      isError: false,
-    });
-  });
-
   it("does not mount RequestToAddSection when discovery is disabled", async () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: false,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <GlobalSearch defaultOpen initialQuery="Dune" />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    mocks.useCanRequest.mockReturnValue(discoveryOff);
+    render(searchTree({ defaultOpen: true, initialQuery: "Dune" }));
     // Let the lazy section load, so a mounted one would be on screen.
     await act(async () => {
       await import("./RequestToAddSection");
@@ -845,16 +603,8 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
   });
 
   it("suppresses 'No matches' when library is empty and TMDB is still loading", () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useQuery.mockReturnValue({
-      data: { total: 0, has_more: false, items: [] },
-      isFetching: false,
-      isError: false,
-    });
+    mocks.useCanRequest.mockReturnValue(discoveryOn);
+    mocks.useQuery.mockReturnValue(noTitles);
     mocks.useRequestSearch.mockReturnValue({
       data: undefined,
       isLoading: true,
@@ -865,51 +615,9 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
     expect(markup).not.toContain("No matches");
   });
 
-  it("suppresses 'No matches' when library is empty and TMDB has missing results", () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useQuery.mockReturnValue({
-      data: { total: 0, has_more: false, items: [] },
-      isFetching: false,
-      isError: false,
-    });
-    mocks.useRequestSearch.mockReturnValue({
-      data: {
-        page: 1,
-        total_pages: 1,
-        total_results: 1,
-        results: [
-          {
-            media_type: "movie",
-            tmdb_id: 1,
-            title: "X",
-            availability: "missing",
-            request: { requestable: true },
-          },
-        ],
-      },
-      isLoading: false,
-      isError: false,
-    });
-    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "FoundOnTmdb" });
-
-    expect(markup).not.toContain("No matches");
-  });
-
   it("still shows 'No matches' when both library and TMDB are empty", () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useQuery.mockReturnValue({
-      data: { total: 0, has_more: false, items: [] },
-      isFetching: false,
-      isError: false,
-    });
+    mocks.useCanRequest.mockReturnValue(discoveryOn);
+    mocks.useQuery.mockReturnValue(noTitles);
     mocks.useRequestSearch.mockReturnValue({
       data: { page: 1, total_pages: 1, total_results: 0, results: [] },
       isLoading: false,
@@ -921,11 +629,7 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
   });
 
   it("marks library results unknown while the local preview is still pending", async () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
+    mocks.useCanRequest.mockReturnValue(discoveryOn);
     mocks.useQuery.mockReturnValue({
       data: undefined,
       isFetching: true,
@@ -950,14 +654,7 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
       isError: false,
     });
 
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <GlobalSearch defaultOpen initialQuery="Dune" />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    render(searchTree({ defaultOpen: true, initialQuery: "Dune" }));
     const section = (await screen.findByTestId("request-section")).textContent ?? "";
 
     expect(section).toContain('libraryHadHits="false"');

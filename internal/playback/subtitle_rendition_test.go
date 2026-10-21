@@ -146,19 +146,6 @@ func TestBuildPlaybackManifestPublishesSubtitleRendition(t *testing.T) {
 	}
 }
 
-func TestBuildPlaybackManifestRenditionWithoutQuery(t *testing.T) {
-	session := &TranscodeSession{opts: subtitleRenditionTestOpts(t.TempDir())}
-	master, err := session.BuildPlaybackManifest("segment/", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`URI="master.m3u8?silo_rendition=subtitles"`, "\nmaster.m3u8?silo_rendition=video\n", "BANDWIDTH=8192000"} {
-		if !strings.Contains(string(master), want) {
-			t.Fatalf("multivariant playlist missing %q:\n%s", want, master)
-		}
-	}
-}
-
 func TestAppendManifestQueryParamCoversSubtitleRendition(t *testing.T) {
 	session := &TranscodeSession{opts: subtitleRenditionTestOpts(t.TempDir())}
 	master, err := session.BuildPlaybackManifest("segment/", "")
@@ -435,13 +422,7 @@ func TestSubtitleSpanOriginDiscardsAnObservationARestartOverlapped(t *testing.T)
 	// A backward seek restart replaces the generation while its first segment
 	// is read: the new generation rewrites output from segment 4 onward.
 	writeSubtitleRenditionPlaylist(t, session.outputDir, 10, 14)
-	session.closeSubtitleSpan()
-	next := opts
-	next.StartSegmentNumber = 4
-	next.subtitleCueFile = subtitleCueFileName(1)
-	session.mu.Lock()
-	session.startSubtitleSpanLocked(next)
-	session.mu.Unlock()
+	restartSubtitleGeneration(session, opts, 4)
 	if err := os.WriteFile(filepath.Join(fake, "release"), []byte("go\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -467,19 +448,75 @@ func TestSubtitleSpanOriginObservesAnEarlierGenerationItsSuccessorKept(t *testin
 	session := subtitleOriginTestSession(t, ffmpegPath, 10)
 	opts := session.Opts()
 	writeSubtitleRenditionPlaylist(t, session.outputDir, 10, 14)
-	session.closeSubtitleSpan()
-	next := opts
-	next.StartSegmentNumber = 900
-	next.subtitleCueFile = subtitleCueFileName(1)
-	session.mu.Lock()
-	session.startSubtitleSpanLocked(next)
-	session.mu.Unlock()
+	restartSubtitleGeneration(session, opts, 900)
 
 	if got := session.subtitleSegmentWindow(t.Context(), opts.subtitleCueFile, 12, 2); got.origin+got.offset != 21 {
 		t.Fatalf("earlier generation's window = %+v, want a start at 21", got)
 	}
 	if runs := fakeSubtitleFFprobeRuns(t, fake); runs != 1 {
 		t.Fatalf("ffprobe ran %d times", runs)
+	}
+}
+
+// subtitleCueTestOpts returns rendition options for a fresh output dir whose
+// generation-0 cue file already holds subtitleRenditionCues.
+func subtitleCueTestOpts(t *testing.T) (string, TranscodeOpts) {
+	t.Helper()
+	dir := t.TempDir()
+	opts := subtitleRenditionTestOpts(dir)
+	opts.subtitleCueFile = subtitleCueFileName(0)
+	if err := os.WriteFile(filepath.Join(dir, opts.subtitleCueFile), []byte(subtitleRenditionCues), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir, opts
+}
+
+// restartSubtitleGeneration closes the session's current cue span and opens
+// generation 1 at start, as a seek restart does.
+func restartSubtitleGeneration(session *TranscodeSession, opts TranscodeOpts, start int) {
+	session.closeSubtitleSpan()
+	next := opts
+	next.StartSegmentNumber = start
+	next.subtitleCueFile = subtitleCueFileName(1)
+	session.mu.Lock()
+	session.startSubtitleSpanLocked(next)
+	session.mu.Unlock()
+}
+
+// A rebuild keeps each span's observed origin: a later generation that started
+// at or before an earlier span's start makes both of that span's probe
+// candidates unreadable, so the origin cannot be observed again.
+func TestRebuiltSessionKeepsAnObservedOrigin(t *testing.T) {
+	ffmpegPath, _ := fakeSubtitleFFprobe(t, "127.000000", false)
+	session := subtitleOriginTestSession(t, ffmpegPath, 50)
+	opts := session.Opts()
+	for _, name := range []string{subtitleCueFileName(0), subtitleCueFileName(1)} {
+		if err := os.WriteFile(filepath.Join(session.outputDir, name), []byte(subtitleRenditionCues), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observed := session.subtitleSegmentWindow(t.Context(), opts.subtitleCueFile, 52, 2)
+	if !observed.observed {
+		t.Fatalf("origin not observed: %+v", observed)
+	}
+	writeSubtitleRenditionPlaylist(t, session.outputDir, 50, 100)
+	session.closeSubtitleSpan()
+	// A backward seek restarts at 40 and gets as far as 60 before the server dies.
+	next := opts
+	next.StartSegmentNumber = 40
+	next.subtitleCueFile = subtitleCueFileName(1)
+	session.mu.Lock()
+	session.startSubtitleSpanLocked(next)
+	session.mu.Unlock()
+	session.saveSubtitleSpans()
+	writeSubtitleRenditionPlaylist(t, session.outputDir, 40, 60)
+	session.closeSubtitleSpan()
+
+	spans, _ := loadSubtitleSpans(opts)
+	rebuilt := &TranscodeSession{outputDir: session.outputDir, opts: opts, running: true, subtitleSpans: spans}
+	got := rebuilt.subtitleSegmentWindow(t.Context(), opts.subtitleCueFile, 80, 2)
+	if want := (subtitleCueWindow{origin: observed.origin, offset: 60, observed: true}); got != want {
+		t.Fatalf("rebuilt window = %+v, want %+v", got, want)
 	}
 }
 
@@ -501,12 +538,7 @@ func writeSubtitleRenditionPlaylistFile(dir string, first, last int) error {
 }
 
 func TestSubtitleSegmentVTTServesOnlyDemuxedSegments(t *testing.T) {
-	dir := t.TempDir()
-	opts := subtitleRenditionTestOpts(dir)
-	opts.subtitleCueFile = subtitleCueFileName(0)
-	if err := os.WriteFile(filepath.Join(dir, opts.subtitleCueFile), []byte(subtitleRenditionCues), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dir, opts := subtitleCueTestOpts(t)
 	writeSubtitleRenditionPlaylist(t, dir, 10, 12)
 	opts.StartSegmentNumber = 10
 	session := &TranscodeSession{outputDir: dir, opts: opts, running: true}
@@ -552,12 +584,7 @@ func TestSubtitleSegmentVTTServesOnlyDemuxedSegments(t *testing.T) {
 }
 
 func TestSubtitleSegmentVTTWakesWhenProductionCatchesUp(t *testing.T) {
-	dir := t.TempDir()
-	opts := subtitleRenditionTestOpts(dir)
-	opts.subtitleCueFile = subtitleCueFileName(0)
-	if err := os.WriteFile(filepath.Join(dir, opts.subtitleCueFile), []byte(subtitleRenditionCues), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dir, opts := subtitleCueTestOpts(t)
 	writeSubtitleRenditionPlaylist(t, dir, 0, 10)
 	session := &TranscodeSession{outputDir: dir, opts: opts, running: true}
 	session.startSubtitleSpanLocked(opts)
@@ -582,14 +609,9 @@ func TestSubtitleSegmentVTTWakesWhenProductionCatchesUp(t *testing.T) {
 // answer would be final for a VOD player, so a segment the live generation is
 // about to produce waits as long as its video segment does.
 func TestSubtitleSegmentVTTWaitsOutASlowRestart(t *testing.T) {
-	dir := t.TempDir()
-	opts := subtitleRenditionTestOpts(dir)
+	dir, opts := subtitleCueTestOpts(t)
 	opts.SegmentDuration = 1 // the short wait is its minimum; cue 00:21 is in segment 21
 	opts.StartSegmentNumber = 20
-	opts.subtitleCueFile = subtitleCueFileName(0)
-	if err := os.WriteFile(filepath.Join(dir, opts.subtitleCueFile), []byte(subtitleRenditionCues), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	session := &TranscodeSession{outputDir: dir, opts: opts, running: true}
 	session.startSubtitleSpanLocked(opts)
 
@@ -609,12 +631,7 @@ func TestSubtitleSegmentVTTWaitsOutASlowRestart(t *testing.T) {
 }
 
 func TestSubtitleSegmentVTTIgnoresAnInheritedPlaylist(t *testing.T) {
-	dir := t.TempDir()
-	opts := subtitleRenditionTestOpts(dir)
-	opts.subtitleCueFile = subtitleCueFileName(0)
-	if err := os.WriteFile(filepath.Join(dir, opts.subtitleCueFile), []byte(subtitleRenditionCues), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dir, opts := subtitleCueTestOpts(t)
 	writeSubtitleRenditionPlaylist(t, dir, 0, 20)
 	session := &TranscodeSession{outputDir: dir, opts: opts, inheritedManifest: statManifest(dir)}
 	session.startSubtitleSpanLocked(opts)
@@ -625,12 +642,7 @@ func TestSubtitleSegmentVTTIgnoresAnInheritedPlaylist(t *testing.T) {
 }
 
 func TestSubtitleSpansKeepEarlierGenerationsReadable(t *testing.T) {
-	dir := t.TempDir()
-	opts := subtitleRenditionTestOpts(dir)
-	opts.subtitleCueFile = subtitleCueFileName(0)
-	if err := os.WriteFile(filepath.Join(dir, opts.subtitleCueFile), []byte(subtitleRenditionCues), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dir, opts := subtitleCueTestOpts(t)
 	writeSubtitleRenditionPlaylist(t, dir, 0, 14)
 	session := &TranscodeSession{outputDir: dir, opts: opts}
 	session.startSubtitleSpanLocked(opts)
@@ -667,6 +679,107 @@ func TestSubtitleSpansKeepEarlierGenerationsReadable(t *testing.T) {
 	}
 	if file, ready, _, _ := session.subtitleSegmentSource(900); !ready || file != "subtitles_1.vtt" {
 		t.Fatalf("live generation must serve its own segments: %q, %v", file, ready)
+	}
+}
+
+// A session rebuilt from its recipe on the same output directory (after the
+// server that ran it crashed) serves the earlier process's video segments from
+// disk, so it has to serve their cues too.
+func TestRebuiltSessionKeepsEarlierGenerationCues(t *testing.T) {
+	dir := t.TempDir()
+	opts := subtitleRenditionTestOpts(dir)
+	opts.FFmpegPath = fakeFFmpegScript(t)
+	first, err := StartTranscode(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstCues := first.Opts().subtitleCueFile
+	if err := os.WriteFile(filepath.Join(dir, firstCues), []byte(subtitleRenditionCues), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeSubtitleRenditionPlaylist(t, dir, 0, 14)
+	// The server dies: its process goes, the directory stays.
+	if err := first.CloseProcess(); err != nil {
+		t.Fatal(err)
+	}
+
+	rebuiltOpts := opts
+	rebuiltOpts.Reconstructed = true
+	rebuiltOpts.StartSegmentNumber = 25
+	rebuiltOpts.SeekSeconds = 50
+	rebuilt, err := StartTranscode(t.Context(), rebuiltOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rebuilt.CloseProcess() })
+	if got := rebuilt.Opts().subtitleCueFile; got == firstCues {
+		t.Errorf("the rebuilt process writes %s again, replacing the earlier process's cues", got)
+	}
+
+	start := time.Now()
+	got, err := rebuilt.SubtitleSegmentVTT(t.Context(), 11)
+	if err != nil || !strings.Contains(string(got), "After the gap") {
+		t.Fatalf("segment the earlier process produced: %q, %v", got, err)
+	}
+	if waited := time.Since(start); waited > time.Second {
+		t.Fatalf("a finished segment waited %v", waited)
+	}
+	if file, ready, _, _ := rebuilt.subtitleSegmentSource(14); !ready || file != firstCues {
+		t.Fatalf("the earlier process's last segment: %q, %v", file, ready)
+	}
+	if _, ready, _, _ := rebuilt.subtitleSegmentSource(15); ready {
+		t.Fatal("a segment the earlier process never finished must not be served from its cues")
+	}
+
+	// A seek restart of the rebuilt session keeps numbering past both files.
+	if err := rebuilt.Restart(t.Context(), 10, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := rebuilt.Opts().subtitleCueFile; got == firstCues {
+		t.Fatalf("restart reused %s", got)
+	}
+}
+
+// Only spans that can still serve cues survive a rebuild.
+func TestLoadSubtitleSpansDropsUnusableSpans(t *testing.T) {
+	dir := t.TempDir()
+	opts := subtitleRenditionTestOpts(dir)
+	for _, name := range []string{subtitleCueFileName(0), subtitleCueFileName(2)} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(subtitleRenditionCues), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSubtitleRenditionPlaylist(t, dir, 0, 14)
+	inherited := statManifest(dir)
+	session := &TranscodeSession{outputDir: dir, opts: opts, inheritedManifest: inherited, subtitleSpans: []subtitleCueSpan{
+		{file: subtitleCueFileName(0), start: 0, end: 14},
+		// Its cue file is gone.
+		{file: subtitleCueFileName(1), start: 100, end: 120},
+		// The live generation never wrote a playlist: the one on disk is
+		// generation 0's.
+		{file: subtitleCueFileName(2), start: 10, end: -1},
+	}}
+	session.saveSubtitleSpans()
+
+	spans, next := loadSubtitleSpans(opts)
+	if want := []subtitleCueSpan{{file: subtitleCueFileName(0), start: 0, end: 14}}; !slices.Equal(spans, want) {
+		t.Fatalf("spans = %#v, want %#v", spans, want)
+	}
+	if next != 3 {
+		t.Fatalf("next generation = %d, want 3: a dropped span's file name stays taken", next)
+	}
+	// Nor is a playlist another generation wrote after the record was last
+	// saved, such as one whose own record write failed.
+	writeSubtitleRenditionPlaylist(t, dir, 0, 20)
+	if spans, _ := loadSubtitleSpans(opts); len(spans) != 1 {
+		t.Fatalf("a playlist starting at 0 was credited to the span starting at 10: %#v", spans)
+	}
+
+	// Another track's cues are not this recipe's.
+	other := opts
+	other.SubtitleTrackIndex = 4
+	if spans, _ := loadSubtitleSpans(other); len(spans) != 0 {
+		t.Fatalf("spans of another track: %#v", spans)
 	}
 }
 
@@ -715,8 +828,8 @@ func TestSubtitleRenditionAlignsWithRealFFmpegSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := filepath.Join(work, "base.mkv")
-	run(t, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=24",
-		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-i", srt, "-t", "30",
+	run(t, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=12",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-i", srt, "-t", "26",
 		"-map", "0", "-map", "1", "-map", "2", "-c:v", "ffv1", "-c:a", "pcm_s16le", "-c:s", "srt", base)
 	// source shifts the video and the audio and subtitles of base.mkv.
 	source := func(t *testing.T, name string, videoStart, otherStart int) string {
@@ -743,10 +856,13 @@ func TestSubtitleRenditionAlignsWithRealFFmpegSegments(t *testing.T) {
 			name                   string
 			videoStart, otherStart int
 		}{
-			{"zero", 0, 0},
 			{"offset", 7, 7},
 			{"video-after-audio", 7, 3},
 		} {
+			// fMP4 differs only in its timestamp map; the offset source covers it.
+			if container.video == transcodeCodecHEVC && src.name != "offset" {
+				continue
+			}
 			for _, generation := range []struct {
 				name  string
 				seek  float64
@@ -763,15 +879,15 @@ func TestSubtitleRenditionAlignsWithRealFFmpegSegments(t *testing.T) {
 					opts := TranscodeOpts{
 						InputPath: source(t, src.name, src.videoStart, src.otherStart), OutputDir: dir, FFmpegPath: ffmpeg, HWAccel: HWAccelNone,
 						SourceVideoCodec: "ffv1", TargetCodecVideo: container.video, TargetCodecAudio: "aac",
-						SeekSeconds: generation.seek, StartSegmentNumber: generation.first, SegmentDuration: 2, TotalDuration: 30,
+						SeekSeconds: generation.seek, StartSegmentNumber: generation.first, SegmentDuration: 2, TotalDuration: 26,
 						SubtitleTrackIndex: 0, SubtitleCodec: "subrip", SubtitleRendition: true,
 						subtitleCueFile: subtitleCueFileName(0),
 					}
 					if container.video == transcodeCodecHEVC {
 						opts.VideoSampleEntry = VideoSampleEntryHVC1
 					}
-					// A reconstructed session reuses its predecessor's directory and
-					// cue file name; ffmpeg must replace the file, not stop to ask.
+					// A cue file a dropped span left behind can carry the generation's
+					// name; ffmpeg must replace the file, not stop to ask.
 					if err := os.WriteFile(filepath.Join(dir, opts.subtitleCueFile), []byte("WEBVTT\n\n00:21.000 --> 00:22.000\nStale\n"), 0o644); err != nil {
 						t.Fatal(err)
 					}

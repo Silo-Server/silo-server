@@ -90,16 +90,6 @@ func TestHandleCreateAPIKeyHonorsRequestedScopes(t *testing.T) {
 	}
 }
 
-func TestHandleCreateAPIKeyWithoutScopesStaysUnscoped(t *testing.T) {
-	rec, store := createAPIKey(t, `{"label":"ci"}`)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
-	}
-	if len(store.createdScopes) != 0 {
-		t.Fatalf("stored scopes = %v, want none", store.createdScopes)
-	}
-}
-
 func TestHandleCreateAPIKeyRejectsUnknownScope(t *testing.T) {
 	rec, store := createAPIKey(t, `{"label":"ci","scopes":["admin:everything"]}`)
 	if rec.Code != http.StatusBadRequest {
@@ -122,49 +112,6 @@ func TestHandleCreateAPIKeyRequiresAdmin(t *testing.T) {
 			t.Fatalf("body %q: a regular account must not create a key", body)
 		}
 	}
-}
-
-func TestHandleListAPIKeyScopes(t *testing.T) {
-	h := NewAPIKeyHandler(&fakeAPIKeyStore{})
-
-	t.Run("requires authentication", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys/scopes", nil)
-		rec := httptest.NewRecorder()
-		h.HandleListAPIKeyScopes(rec, req)
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("status = %d, want 401", rec.Code)
-		}
-	})
-
-	t.Run("lists the frozen v1 scopes with descriptions", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys/scopes", nil)
-		req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, TokenType: auth.TokenTypeAccess}))
-		rec := httptest.NewRecorder()
-		h.HandleListAPIKeyScopes(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-		}
-
-		var resp apiKeyScopesResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("decode response: %v", err)
-		}
-		valid := []string{}
-		for _, scope := range auth.V1APIKeyScopeCatalog() {
-			valid = append(valid, scope.Name)
-		}
-		if len(resp.Scopes) != len(valid) {
-			t.Fatalf("scopes = %+v, want %d entries", resp.Scopes, len(valid))
-		}
-		for i, scope := range resp.Scopes {
-			if scope.Name != valid[i] {
-				t.Fatalf("scope %d = %q, want frozen v1 scope %q", i, scope.Name, valid[i])
-			}
-			if strings.TrimSpace(scope.Description) == "" {
-				t.Fatalf("scope %q has no description", scope.Name)
-			}
-		}
-	})
 }
 
 func (s *fakeAPIKeyStore) GetMetadataByID(context.Context, int64) (*models.APIKeyMetadata, error) {

@@ -673,8 +673,10 @@ Status rules, applied by `Artifact.State`:
 The retry delay starts at 12 hours and doubles for each consecutive failure on
 the same server and unchanged file, up to 7 days. A failure recorded inside
 the current delay (a forced run) does not extend it. A failure never replaces
-a `complete` or `unusable` row for the same file identity. A later success
-clears the failure.
+a `complete` or `unusable` row for the same file identity, except an
+`unusable` row whose `detail` the failure lists as replaceable: a verdict an
+earlier build stored that the kind no longer trusts and no current writer
+stores. A later success clears the failure.
 
 `unusable` and `failed` rows carry an empty payload and, for intro
 fingerprints, no Chromaprint format. Binaries that predate artifact statuses

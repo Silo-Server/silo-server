@@ -40,133 +40,83 @@ func TestInferGroupAssignments_FlatLooseMovieEditionsCollapse(t *testing.T) {
 	}
 }
 
-func TestInferGroupAssignments_AnchormanEditionNoiseStaysResolved(t *testing.T) {
+// TestInferGroupAssignments_SingleGroupIdentity checks the identity inferred
+// for paths that form one group. Zero-valued expectations are not checked.
+func TestInferGroupAssignments_SingleGroupIdentity(t *testing.T) {
 	t.Parallel()
 
-	filePaths := []string{
-		"/srv/media/movies/alt-cuts/1080p/Anchorman 2 The Legend Continues (2013)/Anchorman.2.The.Legend.Continues.Super-Sized.R-Rated.Version.2013.Bluray.Remux.1080p.AVC.DTS-HD.MA.5.1-HiFi.mkv",
-	}
+	for _, tc := range []struct {
+		name        string
+		libraryType string
+		folderID    int
+		paths       []string
+		wantGroups  int
+		wantState   string
+		wantTitle   string
+		wantYear    int
+		wantType    string
+		wantKey     string
+		wantNoTvdb  bool
+	}{
+		{name: "anchorman edition noise stays resolved", libraryType: "movies", folderID: 1,
+			paths:      []string{"/srv/media/movies/alt-cuts/1080p/Anchorman 2 The Legend Continues (2013)/Anchorman.2.The.Legend.Continues.Super-Sized.R-Rated.Version.2013.Bluray.Remux.1080p.AVC.DTS-HD.MA.5.1-HiFi.mkv"},
+			wantGroups: 1, wantState: "resolved", wantTitle: "Anchorman 2 The Legend Continues"},
+		{name: "AVP alias stays resolved", libraryType: "movies", folderID: 1,
+			paths:     []string{"/srv/media/movies/alt-cuts/1080p/AVP Alien vs. Predator (2004)/Alien.vs.Predator.2004.Unrated.Bluray.Remux.1080p.AVC.DTS-HD.MA.5.1-HiFi.mkv"},
+			wantState: "resolved", wantYear: 2004},
+		{name: "unrelated movie title becomes ambiguous", libraryType: "movies", folderID: 1,
+			paths:     []string{"/srv/media/movies/alt-cuts/1080p/Green Lantern (2011)/Green.Lantern.Emerald.Knights.2011.1080p.BluRay.x264.mkv"},
+			wantState: "ambiguous"},
+		{name: "series season dirs collapse", libraryType: "series", folderID: 1,
+			paths: []string{
+				"/tv/Breaking Bad (2008)/Season 01/Breaking.Bad.S01E01.mkv",
+				"/tv/Breaking Bad (2008)/Season 02/Breaking.Bad.S02E01.mkv",
+			},
+			wantGroups: 1, wantType: "series", wantTitle: "Breaking Bad", wantYear: 2008},
+		{name: "series episode title number does not become a TVDB ID", libraryType: "mixed", folderID: 7,
+			paths:      []string{"/sports/television/WWE SmackDown (1999)/Season 01/WWE SmackDown (1999) - S01E01 - SmackDown 01.mkv"},
+			wantGroups: 1, wantType: "series", wantNoTvdb: true},
+		{name: "movie episode-token folder stays resolved", libraryType: "movies", folderID: 1,
+			paths:      []string{"/movies/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}/s01e03 (2020).mkv"},
+			wantGroups: 1, wantState: "resolved", wantTitle: "s01e03", wantType: "movie"},
+		// No structured tags: grouping stays title+year based, so untagged
+		// libraries keep today's group keys (no churn).
+		{name: "untagged files keep title keys", libraryType: "movies", folderID: 1,
+			paths: []string{
+				"/media/movies/Heat (1995)/Heat (1995) 1080p.mkv",
+				"/media/movies/Heat (1995)/Heat (1995) 2160p.mkv",
+			},
+			wantGroups: 1, wantKey: "v1|movie|heat|1995"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	rootInference := inferRootAssignments(filePaths, "movies", 1, nil)
-	groupInference := inferGroupAssignments(filePaths, "movies", 1, rootInference.Assignments, nil)
+			rootInference := inferRootAssignments(tc.paths, tc.libraryType, tc.folderID, nil)
+			result := inferGroupAssignments(tc.paths, tc.libraryType, tc.folderID, rootInference.Assignments, nil)
 
-	if got, want := len(groupInference.ScannedGroups), 1; got != want {
-		t.Fatalf("len(ScannedGroups) = %d, want %d", got, want)
-	}
-	group := groupInference.ScannedGroups[0]
-	if got, want := group.State, "resolved"; got != want {
-		t.Fatalf("State = %q, want %q", got, want)
-	}
-	if got, want := group.BaseTitle, "Anchorman 2 The Legend Continues"; got != want {
-		t.Fatalf("BaseTitle = %q, want %q", got, want)
-	}
-}
-
-func TestInferGroupAssignments_AVPAliasStaysResolved(t *testing.T) {
-	t.Parallel()
-
-	filePaths := []string{
-		"/srv/media/movies/alt-cuts/1080p/AVP Alien vs. Predator (2004)/Alien.vs.Predator.2004.Unrated.Bluray.Remux.1080p.AVC.DTS-HD.MA.5.1-HiFi.mkv",
-	}
-
-	rootInference := inferRootAssignments(filePaths, "movies", 1, nil)
-	groupInference := inferGroupAssignments(filePaths, "movies", 1, rootInference.Assignments, nil)
-
-	group := groupInference.ScannedGroups[0]
-	if got, want := group.State, "resolved"; got != want {
-		t.Fatalf("State = %q, want %q", got, want)
-	}
-	if got, want := group.BaseYear, 2004; got != want {
-		t.Fatalf("BaseYear = %d, want %d", got, want)
-	}
-}
-
-func TestInferGroupAssignments_UnrelatedMovieTitleBecomesAmbiguous(t *testing.T) {
-	t.Parallel()
-
-	filePaths := []string{
-		"/srv/media/movies/alt-cuts/1080p/Green Lantern (2011)/Green.Lantern.Emerald.Knights.2011.1080p.BluRay.x264.mkv",
-	}
-
-	rootInference := inferRootAssignments(filePaths, "movies", 1, nil)
-	groupInference := inferGroupAssignments(filePaths, "movies", 1, rootInference.Assignments, nil)
-
-	group := groupInference.ScannedGroups[0]
-	if got, want := group.State, "ambiguous"; got != want {
-		t.Fatalf("State = %q, want %q", got, want)
-	}
-}
-
-func TestInferGroupAssignments_SeriesSeasonDirsCollapse(t *testing.T) {
-	t.Parallel()
-
-	filePaths := []string{
-		"/tv/Breaking Bad (2008)/Season 01/Breaking.Bad.S01E01.mkv",
-		"/tv/Breaking Bad (2008)/Season 02/Breaking.Bad.S02E01.mkv",
-	}
-
-	rootInference := inferRootAssignments(filePaths, "series", 1, nil)
-	groupInference := inferGroupAssignments(filePaths, "series", 1, rootInference.Assignments, nil)
-
-	if got, want := len(groupInference.ScannedGroups), 1; got != want {
-		t.Fatalf("len(ScannedGroups) = %d, want %d", got, want)
-	}
-	group := groupInference.ScannedGroups[0]
-	if got, want := group.InferredType, "series"; got != want {
-		t.Fatalf("InferredType = %q, want %q", got, want)
-	}
-	if got, want := group.BaseTitle, "Breaking Bad"; got != want {
-		t.Fatalf("BaseTitle = %q, want %q", got, want)
-	}
-	if got, want := group.BaseYear, 2008; got != want {
-		t.Fatalf("BaseYear = %d, want %d", got, want)
-	}
-}
-
-func TestInferGroupAssignments_SeriesEpisodeTitleNumberDoesNotBecomeTVDBID(t *testing.T) {
-	t.Parallel()
-
-	filePaths := []string{
-		"/sports/television/WWE SmackDown (1999)/Season 01/WWE SmackDown (1999) - S01E01 - SmackDown 01.mkv",
-	}
-
-	rootInference := inferRootAssignments(filePaths, "mixed", 7, nil)
-	groupInference := inferGroupAssignments(filePaths, "mixed", 7, rootInference.Assignments, nil)
-
-	if got, want := len(groupInference.ScannedGroups), 1; got != want {
-		t.Fatalf("len(ScannedGroups) = %d, want %d", got, want)
-	}
-	group := groupInference.ScannedGroups[0]
-	if got, want := group.InferredType, "series"; got != want {
-		t.Fatalf("InferredType = %q, want %q", got, want)
-	}
-	if group.TvdbID != "" {
-		t.Fatalf("TvdbID = %q, want empty", group.TvdbID)
-	}
-}
-
-func TestInferGroupAssignments_MovieEpisodeTokenFolderStaysResolved(t *testing.T) {
-	t.Parallel()
-
-	filePaths := []string{
-		"/movies/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}/s01e03 (2020).mkv",
-	}
-
-	rootInference := inferRootAssignments(filePaths, "movies", 1, nil)
-	groupInference := inferGroupAssignments(filePaths, "movies", 1, rootInference.Assignments, nil)
-
-	if got, want := len(groupInference.ScannedGroups), 1; got != want {
-		t.Fatalf("len(ScannedGroups) = %d, want %d", got, want)
-	}
-	group := groupInference.ScannedGroups[0]
-	if got, want := group.State, "resolved"; got != want {
-		t.Fatalf("State = %q, want %q", got, want)
-	}
-	if got, want := group.BaseTitle, "s01e03"; got != want {
-		t.Fatalf("BaseTitle = %q, want %q", got, want)
-	}
-	if got, want := group.InferredType, "movie"; got != want {
-		t.Fatalf("InferredType = %q, want %q", got, want)
+			if tc.wantGroups != 0 && len(result.ScannedGroups) != tc.wantGroups {
+				t.Fatalf("len(ScannedGroups) = %d, want %d", len(result.ScannedGroups), tc.wantGroups)
+			}
+			group := result.ScannedGroups[0]
+			if tc.wantState != "" && group.State != tc.wantState {
+				t.Fatalf("State = %q, want %q", group.State, tc.wantState)
+			}
+			if tc.wantType != "" && group.InferredType != tc.wantType {
+				t.Fatalf("InferredType = %q, want %q", group.InferredType, tc.wantType)
+			}
+			if tc.wantTitle != "" && group.BaseTitle != tc.wantTitle {
+				t.Fatalf("BaseTitle = %q, want %q", group.BaseTitle, tc.wantTitle)
+			}
+			if tc.wantYear != 0 && group.BaseYear != tc.wantYear {
+				t.Fatalf("BaseYear = %d, want %d", group.BaseYear, tc.wantYear)
+			}
+			if tc.wantKey != "" && group.ContentGroupKey != tc.wantKey {
+				t.Fatalf("ContentGroupKey = %q, want %q", group.ContentGroupKey, tc.wantKey)
+			}
+			if tc.wantNoTvdb && group.TvdbID != "" {
+				t.Fatalf("TvdbID = %q, want empty", group.TvdbID)
+			}
+		})
 	}
 }
 
@@ -387,26 +337,5 @@ func TestInferGroupAssignments_SameTagAcrossFoldersStillGroups(t *testing.T) {
 	}
 	if got, want := len(result.GroupLocations), 2; got != want {
 		t.Fatalf("len(GroupLocations) = %d, want %d (two roots, one group)", got, want)
-	}
-}
-
-func TestInferGroupAssignments_UntaggedFilesKeepTitleKeys(t *testing.T) {
-	t.Parallel()
-
-	// No structured tags: grouping stays title+year based, so untagged
-	// libraries keep today's group keys (no churn).
-	filePaths := []string{
-		"/media/movies/Heat (1995)/Heat (1995) 1080p.mkv",
-		"/media/movies/Heat (1995)/Heat (1995) 2160p.mkv",
-	}
-
-	rootInference := inferRootAssignments(filePaths, "movies", 1, nil)
-	result := inferGroupAssignments(filePaths, "movies", 1, rootInference.Assignments, nil)
-
-	if got, want := len(result.ScannedGroups), 1; got != want {
-		t.Fatalf("len(ScannedGroups) = %d, want %d", got, want)
-	}
-	if got, want := result.ScannedGroups[0].ContentGroupKey, "v1|movie|heat|1995"; got != want {
-		t.Fatalf("ContentGroupKey = %q, want %q", got, want)
 	}
 }

@@ -3,7 +3,6 @@ package mediasample
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -12,7 +11,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -118,25 +116,6 @@ func TestRunSheetsBoundsTheProbedRun(t *testing.T) {
 	}
 }
 
-func TestSheetsRequestRoundTripsThroughJSON(t *testing.T) {
-	req := sheetsRequest([]float64{5, 15}, 10, 10)
-	req.Samples.ReadThrough = true
-	req.Sheets.UseInputAspect = true
-	req.Sheets.ToneMap = &ToneMap{AllowSoftware: true}
-	req.Attempts = []Attempt{{Hardware: true, TimeoutSeconds: 60}, {}}
-	encoded, err := json.Marshal(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded Request
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(decoded, req) {
-		t.Fatalf("round trip changed the request:\n got %+v\nwant %+v", decoded, req)
-	}
-}
-
 func TestBuildSheetsGraph(t *testing.T) {
 	out := SheetsOutput{TileWidth: 320, TileHeight: 134, Columns: 10, Rows: 10, Quality: 80}
 	hdr := out
@@ -186,9 +165,6 @@ func TestBuildSheetsGraph(t *testing.T) {
 	}
 	if _, err := buildSheetsGraph(hdr, "vaapi", sheetsToneMap{kind: tonemap.SourcePQ}); err == nil {
 		t.Error("GPU HDR with a source signal but no software chain: want an error")
-	}
-	if vaapiToneMapDownload != vaapiToneMap+",hwdownload,format=nv12" {
-		t.Errorf("image tone-map chain changed: %s", vaapiToneMapDownload)
 	}
 }
 

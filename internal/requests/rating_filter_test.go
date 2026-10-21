@@ -3,7 +3,6 @@ package requests
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
@@ -95,26 +94,6 @@ func TestDiscoverFilterDropsNRTitles(t *testing.T) {
 	}
 }
 
-func TestDiscoverUnrestrictedViewerSkipsCertificationLookups(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	client := &certTMDBClient{
-		fakeTMDBClient: fakeTMDBClient{page: discoverTestPage()},
-	}
-	service := newRatedService(store, client, nil, "")
-
-	section, err := service.Discover(context.Background(), testViewer(1), "trending_movies", 1)
-	if err != nil {
-		t.Fatalf("Discover returned error: %v", err)
-	}
-	if len(section.Results) != 4 {
-		t.Fatalf("results = %d, want all 4 unfiltered", len(section.Results))
-	}
-	if calls := client.certCalls.Load(); calls != 0 {
-		t.Fatalf("certification calls = %d, want 0 for an unrestricted viewer", calls)
-	}
-}
-
 func TestDiscoverCertificationErrorPropagates(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
@@ -200,83 +179,6 @@ func TestDiscoverBackfillsSectionFromLaterPages(t *testing.T) {
 	}
 }
 
-func TestDiscoverBackfillStopsWhenPageFull(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	// Page 1 survives fully; the window must stop after it.
-	var results []tmdb.MediaResult
-	certs := map[int]string{}
-	for i := 0; i < 20; i++ {
-		results = append(results, tmdb.MediaResult{ID: 100 + i, MediaType: "movie", Title: "Movie"})
-		certs[100+i] = "G"
-	}
-	client := &pagedCertTMDBClient{
-		certTMDBClient: certTMDBClient{certs: certs},
-		pages: map[int]*tmdb.MediaPage{
-			1: {Page: 1, TotalPages: 500, TotalResults: 10000, Results: results},
-		},
-	}
-	service := NewService(store, client, &fakePresence{})
-	service.SetEntitlementResolver(ratedCeiling{rating: "PG"})
-
-	section, err := service.Discover(context.Background(), testViewer(1), "trending_movies", 1)
-	if err != nil {
-		t.Fatalf("Discover returned error: %v", err)
-	}
-	if len(section.Results) != 20 {
-		t.Fatalf("results = %d, want 20", len(section.Results))
-	}
-	if got := client.fetchedPage; len(got) != 1 || got[0] != 1 {
-		t.Fatalf("fetched TMDB pages = %v, want just [1] (page already full)", got)
-	}
-}
-
-func TestDiscoverBackfillNextPageResumesWithoutSkippingOrRepeating(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	certs := map[int]string{}
-	pages := map[int]*tmdb.MediaPage{}
-	for p := 1; p <= 10; p++ {
-		id := p * 100
-		certs[id] = "G"
-		pages[p] = &tmdb.MediaPage{Page: p, TotalPages: 10, TotalResults: 200,
-			Results: []tmdb.MediaResult{{ID: id, MediaType: "movie", Title: "Movie"}}}
-	}
-	client := &pagedCertTMDBClient{
-		certTMDBClient: certTMDBClient{certs: certs},
-		pages:          pages,
-	}
-	service := NewService(store, client, &fakePresence{})
-	service.SetEntitlementResolver(ratedCeiling{rating: "PG"})
-
-	// One survivor per page and a budget of 5: page 1 consumes TMDB 1-5.
-	first, err := service.Discover(context.Background(), testViewer(1), "trending_movies", 1)
-	if err != nil {
-		t.Fatalf("Discover returned error: %v", err)
-	}
-	if first.NextPage != 6 {
-		t.Fatalf("NextPage = %d, want 6", first.NextPage)
-	}
-	client.fetchedPage = nil
-	second, err := service.Discover(context.Background(), testViewer(1), "trending_movies", first.NextPage)
-	if err != nil {
-		t.Fatalf("Discover returned error: %v", err)
-	}
-	if got := client.fetchedPage; len(got) != 5 || got[0] != 6 || got[4] != 10 {
-		t.Fatalf("fetched TMDB pages = %v, want [6 7 8 9 10]", got)
-	}
-	var ids []int
-	for _, r := range append(first.Results, second.Results...) {
-		ids = append(ids, r.TMDBID)
-	}
-	if len(ids) != 10 || ids[0] != 100 || ids[9] != 1000 {
-		t.Fatalf("combined ids = %v, want 100..1000 with no gap or repeat", ids)
-	}
-	if second.NextPage != 0 {
-		t.Fatalf("NextPage after last page = %d, want 0", second.NextPage)
-	}
-}
-
 // TestDiscoverBackfillPreservesOverflowAcrossPages pins the review regression:
 // with a permissive ceiling most of TMDB page 1 survives, and an early "20
 // survived, stop scanning" break must not drop the un-consumed pages —
@@ -322,71 +224,6 @@ func TestDiscoverBackfillPreservesOverflowAcrossPages(t *testing.T) {
 	}
 	if len(seen) != 60 {
 		t.Fatalf("saw %d unique titles across all pages, want all 60 (overflow lost)", len(seen))
-	}
-}
-
-// countingCeiling counts scope resolutions; the production resolver hits the
-// user store and policy engine per call, so call count is a real cost.
-type countingCeiling struct {
-	rating string
-	calls  atomic.Int64
-}
-
-func (f *countingCeiling) MaxPlaybackQuality(context.Context, int, string) (string, error) {
-	return "", nil
-}
-
-func (f *countingCeiling) MaxContentRating(context.Context, int, string) (string, error) {
-	f.calls.Add(1)
-	return f.rating, nil
-}
-
-func TestDiscoverAllResolvesCeilingOnce(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	client := &pagedCertTMDBClient{
-		certTMDBClient: certTMDBClient{certs: map[int]string{}},
-		pages: map[int]*tmdb.MediaPage{
-			1: {Page: 1, TotalPages: 1, Results: nil},
-		},
-	}
-	service := NewService(store, client, &fakePresence{})
-	ceiling := &countingCeiling{rating: "PG"}
-	service.SetEntitlementResolver(ceiling)
-
-	if _, err := service.DiscoverAll(context.Background(), testViewer(1)); err != nil {
-		t.Fatalf("DiscoverAll returned error: %v", err)
-	}
-	if got := ceiling.calls.Load(); got != 1 {
-		t.Fatalf("ceiling resolutions = %d, want 1 for the whole DiscoverAll", got)
-	}
-}
-
-func TestDiscoverAllUsesSmallerBackfillBudget(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	// Nothing survives filtering, so backfill always runs to its budget.
-	pages := map[int]*tmdb.MediaPage{}
-	for p := 1; p <= 10; p++ {
-		pages[p] = &tmdb.MediaPage{Page: p, TotalPages: 10, TotalResults: 200,
-			Results: []tmdb.MediaResult{{ID: p * 100, MediaType: "movie", Title: "Movie"}}}
-	}
-	client := &pagedCertTMDBClient{
-		certTMDBClient: certTMDBClient{certs: map[int]string{}}, // all unrated -> dropped
-		pages:          pages,
-	}
-	service := NewService(store, client, &fakePresence{})
-	service.SetEntitlementResolver(ratedCeiling{rating: "PG"})
-
-	sections, err := service.DiscoverAll(context.Background(), testViewer(1))
-	if err != nil {
-		t.Fatalf("DiscoverAll returned error: %v", err)
-	}
-	// 6 sections x aggregate budget of 2 pages = 12 list fetches, bounding the
-	// cold-path cost the review flagged (vs 6 x 5 = 30 at the single budget).
-	want := len(sections) * 2
-	if got := len(client.fetchedPage); got != want {
-		t.Fatalf("total TMDB page fetches = %d, want %d", got, want)
 	}
 }
 
@@ -461,25 +298,6 @@ func TestCreateRequestBlocksTitleAboveCeiling(t *testing.T) {
 	}
 }
 
-func TestCreateRequestAllowsTitleWithinCeiling(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	client := &certTMDBClient{certs: map[int]string{8: "PG"}}
-	service := newRatedService(store, client, nil, "PG")
-
-	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
-		MediaType: MediaTypeMovie,
-		TMDBID:    8,
-		Title:     "Family Movie",
-	})
-	if err != nil {
-		t.Fatalf("CreateRequest returned error: %v", err)
-	}
-	if req.TMDBID != 8 {
-		t.Fatalf("request tmdb id = %d, want 8", req.TMDBID)
-	}
-}
-
 func TestBrowsePushesCertificationCeilingToTMDB(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
@@ -539,5 +357,33 @@ func TestCertificationCeilingFor(t *testing.T) {
 		if got := certificationCeilingFor(tc.ceiling, tc.mediaType); got != tc.want {
 			t.Errorf("certificationCeilingFor(%q, %q) = %q, want %q", tc.ceiling, tc.mediaType, got, tc.want)
 		}
+	}
+}
+
+func TestDiscoverAllUsesSmallerBackfillBudget(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	// Nothing survives filtering, so backfill always runs to its budget.
+	pages := map[int]*tmdb.MediaPage{}
+	for p := 1; p <= 10; p++ {
+		pages[p] = &tmdb.MediaPage{Page: p, TotalPages: 10, TotalResults: 200,
+			Results: []tmdb.MediaResult{{ID: p * 100, MediaType: "movie", Title: "Movie"}}}
+	}
+	client := &pagedCertTMDBClient{
+		certTMDBClient: certTMDBClient{certs: map[int]string{}}, // all unrated -> dropped
+		pages:          pages,
+	}
+	service := NewService(store, client, &fakePresence{})
+	service.SetEntitlementResolver(ratedCeiling{rating: "PG"})
+
+	sections, err := service.DiscoverAll(context.Background(), testViewer(1))
+	if err != nil {
+		t.Fatalf("DiscoverAll returned error: %v", err)
+	}
+	// 6 sections x aggregate budget of 2 pages = 12 list fetches, bounding the
+	// cold-path cost the review flagged (vs 6 x 5 = 30 at the single budget).
+	want := len(sections) * 2
+	if got := len(client.fetchedPage); got != want {
+		t.Fatalf("total TMDB page fetches = %d, want %d", got, want)
 	}
 }

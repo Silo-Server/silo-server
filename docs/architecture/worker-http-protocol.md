@@ -386,9 +386,10 @@ Proxy token remux routes keep the legacy and audio-v2 suffixes distinct. The
 legacy route refuses boosted recipes; the versioned route requires the exact
 stereo AAC shape. Both enforce signed recipe/egress authority. Local execution
 streams video or audio MP4; query seek parse failures retain the legacy zero
-fallback and there is no byte-range resume promise. Local proxy HEAD still
-starts and drains remux work. A transcode-node remux HEAD instead validates
-authority without starting an encoder or checking actual file existence. Node
+fallback and there is no byte-range resume promise. Local proxy HEAD checks
+that the file exists and answers with the stream headers without starting
+remux work. A transcode-node remux HEAD validates authority without starting
+an encoder or checking actual file existence. Node
 progressive execution requires its independently verified recipe, exact
 transport/node route and approved input. Stopped authority returns 410 and
 concurrent requests return 409. Cancellation and reload fences remain

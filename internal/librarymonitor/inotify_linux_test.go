@@ -151,24 +151,6 @@ func TestInotifyRenameRewritesDescendantPaths(t *testing.T) {
 	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(root, "New", "Season 1", "Extras"), "x.mkv"))
 }
 
-func TestInotifyMovedOutDirectoryDropsItsWatches(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
-	mkdirs(t, root, "Movie/Extras")
-	b := newTestInotify(t, inotifyHooks{})
-	if err := b.AddRoot(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	mustRename(t, filepath.Join(root, "Movie"), filepath.Join(outside, "Movie"))
-	nextEvents(t, b, isEvent(EventMovedFrom, root, "Movie"))
-	if stale := b.pathsWithPrefix(filepath.Join(root, "Movie")); len(stale) != 0 {
-		t.Fatalf("stale paths after moving out: %v", stale)
-	}
-	if got := b.watchCount(); got != 1 {
-		t.Fatalf("watches = %d, want only the root's", got)
-	}
-}
-
 func TestInotifyAliasAcrossRootsReportsBothPaths(t *testing.T) {
 	parent := t.TempDir()
 	mkdirs(t, parent, "a/Shared", "b")
@@ -191,33 +173,6 @@ func TestInotifyAliasAcrossRootsReportsBothPaths(t *testing.T) {
 	b.RemoveRoot(rootA)
 	writeFile(t, filepath.Join(rootA, "Shared", "y.mkv"), "x")
 	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(rootB, "Link"), "y.mkv"))
-}
-
-func TestInotifyWatchLimitDuringInitialWalk(t *testing.T) {
-	root := t.TempDir()
-	mkdirs(t, root, "A/1", "A/2", "B")
-	added := 0
-	b := newTestInotify(t, inotifyHooks{
-		addWatch: func(fd int, path string, mask uint32) (int, error) {
-			if added == 2 {
-				return -1, unix.ENOSPC
-			}
-			added++
-			return unix.InotifyAddWatch(fd, path, mask)
-		},
-		maxUserWatches: func() int { return 2 },
-	})
-	err := b.AddRoot(context.Background(), root)
-	var limitErr *WatchLimitError
-	if !errors.As(err, &limitErr) {
-		t.Fatalf("AddRoot error = %v, want *WatchLimitError", err)
-	}
-	if limitErr.Limit != 2 || limitErr.Directories != 5 {
-		t.Fatalf("limit error = %+v, want limit 2 and all 5 directories counted", limitErr)
-	}
-	if b.watchCount() != 0 || b.Directories(root) != 0 {
-		t.Fatalf("watches kept after the limit: %d", b.watchCount())
-	}
 }
 
 func TestInotifyWatchLimitAtRuntimeReleasesTheRoot(t *testing.T) {

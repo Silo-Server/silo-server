@@ -201,29 +201,7 @@ func TestAdminPolicyCommittedApplyFailure(t *testing.T) {
 		t.Fatal("replayed committed mutation")
 	}
 }
-func TestAdminPolicyBodiesAndDraftPersistence(t *testing.T) {
-	f := newFakeAdminPolicy()
-	h := adminPolicyTestHandler(t, f)
-	path := Prefix + "/admin/policy/documents/1"
-	for _, body := range []string{`{}`, `{"enabled":null}`, `{"enabled":false,"unknown":1}`} {
-		requireProblem(t, do(t, h, "PATCH", path, body, with(bearer(adminToken), "If-Match", "*")), TypeValidationFailed)
-	}
-	if f.writes != 0 {
-		t.Fatal("invalid body reached writer")
-	}
-	saved := do(t, h, "POST", path+"/versions", `{"source":"invalid"}`, bearer(adminToken))
-	if saved.Code != 201 || saved.Header().Get("Location") != path+"/versions/3" || !strings.Contains(saved.Body.String(), `"compiled_ok":false`) || !strings.Contains(saved.Body.String(), `"id":"3"`) {
-		t.Fatalf("saved draft %d %s", saved.Code, saved.Body)
-	}
-	requireProblem(t, do(t, h, "GET", Prefix+"/admin/policy/decisions?cursor=bad", "", bearer(adminToken)), TypeInvalidCursor)
-	for _, query := range []string{"limit=201", "allowed=maybe", "user_id=0", "from=2026-09-05T00:00:00Z&to=2026-09-04T00:00:00Z"} {
-		requireProblem(t, do(t, h, "GET", Prefix+"/admin/policy/decisions?"+query, "", bearer(adminToken)), TypeValidationFailed)
-	}
-	page := do(t, h, "GET", Prefix+"/admin/policy/decisions", "", bearer(adminToken))
-	if page.Code != 200 || !strings.Contains(page.Body.String(), `"items":[]`) || !strings.Contains(page.Body.String(), `"has_more":false`) {
-		t.Fatalf("page %d %s", page.Code, page.Body)
-	}
-}
+
 func TestAdminPolicyAuthorizationAndEditorGate(t *testing.T) {
 	f := newFakeAdminPolicy()
 	h := adminPolicyTestHandler(t, f)

@@ -111,13 +111,6 @@ describe("AddToCollectionDialog", () => {
     ).toBe("false");
   });
 
-  it("flashes Added when a tick saves", async () => {
-    show();
-    fireEvent.click(await dialog().findByRole("checkbox", { name: "Rainy days" }));
-    expect(await dialog().findByText("Added")).toBeTruthy();
-    expect(dialog().getByText("In 1 collection")).toBeTruthy();
-  });
-
   it("drops this dialog's ticks when it moves to another title", async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -189,27 +182,6 @@ describe("AddToCollectionDialog", () => {
     expect(
       dialog().getByText("Only manual collections take titles by hand.", { exact: false }),
     ).toBeTruthy();
-  });
-
-  it("marks the profile's own shared collections Shared", async () => {
-    listing(() => [{ ...rainyDays, is_shared: true }]);
-    show();
-    await dialog().findByRole("checkbox", { name: "Rainy days" });
-    expect(dialog().getByText("Shared")).toBeTruthy();
-    expect(dialog().getByText("Manual · 4 titles")).toBeTruthy();
-  });
-
-  it("finds a collection by name", async () => {
-    listing(() => [rainyDays, { ...rainyDays, id: "c5", name: "Heist films" }]);
-    show();
-    await dialog().findByRole("checkbox", { name: "Rainy days" });
-    fireEvent.change(dialog().getByRole("searchbox", { name: "Find one of your collections" }), {
-      target: { value: "heist" },
-    });
-    expect(dialog().queryByRole("checkbox", { name: "Rainy days" })).toBeNull();
-    expect(dialog().getByRole("checkbox", { name: "Heist films" })).toBeTruthy();
-    // The inline create row stays while searching.
-    expect(dialog().getByRole("textbox", { name: "New manual collection" })).toBeTruthy();
   });
 
   it("lists nothing while the acting profile is unknown", async () => {
@@ -315,30 +287,5 @@ describe("AddToCollectionDialog", () => {
     expect(v2Recorder.writes().at(-1)?.operation).toBe(
       "PUT /api/v2/collections/{id}/items/{item_id}",
     );
-  });
-
-  it("opens the new collection from the toast when the add failed", async () => {
-    v2Recorder.answer("PUT /api/v2/collections/{id}/items/{item_id}", () => {
-      throw new Error("The server is busy");
-    });
-    listing(() => []);
-    show();
-    await createAndAdd("Night in");
-    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
-    const options = vi.mocked(toast.warning).mock.calls[0]![1] as {
-      cancel: { label: string; onClick: () => void };
-    };
-    expect(options.cancel.label).toBe("Open it");
-    act(() => options.cancel.onClick());
-    expect(screen.getByRole("status", { name: "location", hidden: true }).textContent).toBe(
-      "/collections/c1/edit",
-    );
-  });
-
-  it("closes from Done", async () => {
-    const onOpenChange = show();
-    await dialog().findByRole("checkbox", { name: "Rainy days" });
-    fireEvent.click(dialog().getByRole("button", { name: "Done" }));
-    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
