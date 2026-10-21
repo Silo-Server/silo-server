@@ -8989,7 +8989,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The home page's sections with their cards, as the acting profile sees them. */
+    /** The home page's sections that have cards for the acting profile, with those cards. */
     get: operations["listHomeSections"];
     put?: never;
     post?: never;
@@ -9591,7 +9591,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The library's sections with their cards, as the acting profile sees them. */
+    /** The library's sections that have cards for the acting profile, with those cards. */
     get: operations["listLibrarySections"];
     put?: never;
     post?: never;
