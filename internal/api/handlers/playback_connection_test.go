@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -24,7 +26,8 @@ import (
 // start request, which applyLearnedLimit has already rewritten to the limit or
 // marked observed_rebuffer over a lower probe. Only the client's own request
 // may record or clear the limit, so a replay neither renews it nor stores the
-// probe estimate as a new limit.
+// probe estimate as a new limit. The last case sends a seek_failure_recovery
+// through the native v2 replan dispatch, which must pass the replay as one.
 func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	pool := catalogTransferPool(t)
 	ctx := t.Context()
@@ -99,6 +102,64 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	}
 	if _, _, ok := stored(); ok {
 		t.Fatal("the client's clear kept the limit")
+	}
+
+	requireSeekRecoveryKeepsLimitV3(t, pool, user, stored)
+}
+
+// requireSeekRecoveryKeepsLimitV3 sends a seek_failure_recovery through the
+// native v2 replan dispatch and fails unless it leaves the learned limit as it
+// was. A stall on the same device and connection records the limit first, and
+// the stored start request the recovery replays then carries it as an
+// observed_rebuffer estimate.
+func requireSeekRecoveryKeepsLimitV3(t *testing.T, pool *pgxpool.Pool, user int, stored func() (int, time.Time, bool)) {
+	t.Helper()
+	ctx := t.Context()
+	handler, _, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
+	handler.InstallationID = serviceInstallation
+	handler.Connections = &connectionstore.Store{Pool: pool}
+	stubCopySeekAnchorV3(handler)
+	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
+	startRequest.Capabilities.VideoDecode = append(startRequest.Capabilities.VideoDecode, v3HandlerStartRequest().Capabilities.VideoDecode[0])
+	caller := PlaybackCaller{UserID: user, ProfileID: "profile-1", InstallationID: serviceInstallation, ConnectionDeviceID: "tv-1"}
+	serviceCtx := apimw.SetProfileID(apimw.SetClaims(ctx, &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "profile-1")
+	serviceCtx = clientip.SetContext(serviceCtx, "192.168.1.10")
+	started, err := handler.StartPlaybackV2(serviceCtx, caller, startRequest)
+	if err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start: err=%v response=%#v", err, started)
+	}
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+	replan := func(i int, operation playback.ReplanOperationV3, plan *playback.PlanV3, estimate *int, source string, failure playback.FailureV3) *playback.PlanV3 {
+		t.Helper()
+		request := playback.ReplanRequestV3{
+			ProtocolVersion: playback.ProtocolV3, Operation: operation, Failure: failure,
+			PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: fmt.Sprintf("replay-replan-%04d", i),
+			FailedPlanID: plan.PlanID, PlanAttemptID: fmt.Sprintf("replay-attempt-%04d", i),
+			PlanAttemptKey: plan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
+			QualityPreference: playback.QualityAutoV3, SelectedTracks: plan.SelectedTracks,
+			BandwidthEstimateKbps: estimate, BandwidthEstimateSource: source,
+			ClientFeatures: startRequest.ClientFeatures, Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+		}
+		response, err := handler.ReplanPlaybackV2(serviceCtx, caller, started.SessionID, PlaybackReplanCommand{Request: request, Digest: fmt.Sprintf("replay-digest-%d", i)})
+		if err != nil || response.PlaybackPlan == nil {
+			t.Fatalf("%s: err=%v response=%#v", operation, err, response)
+		}
+		return response.PlaybackPlan
+	}
+	stalled := replan(0, playback.ReplanOperationQualityChangeV3, started.PlaybackPlan, new(44100), playback.BandwidthEstimateObservedRebufferV3, playback.FailureV3{})
+	if stalled.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("the stall played file %d, want the lower version %d", stalled.EffectiveMediaFileID, alternate.ID)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 day' WHERE user_id = $1`, user); err != nil {
+		t.Fatal(err)
+	}
+	_, before, _ := stored()
+	recovered := replan(1, playback.ReplanOperationSeekFailureRecoveryV3, stalled, nil, "", playback.FailureV3{Classification: "decoder_failure", Message: "the seek's route failed"})
+	if recovered.EffectiveMediaFileID != alternate.ID || recovered.PlanAttemptKey == stalled.PlanAttemptKey {
+		t.Fatalf("seek recovery played file %d on route %s, want another route for %d", recovered.EffectiveMediaFileID, recovered.PlanAttemptKey, alternate.ID)
+	}
+	if kbps, observed, ok := stored(); !ok || kbps != 44100 || !observed.Equal(before) {
+		t.Fatalf("seek recovery changed the limit: kbps=%d observed=%v want 44100 at %v", kbps, observed, before)
 	}
 }
 
