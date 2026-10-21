@@ -5967,6 +5967,22 @@ describe("VideoPlayer buffering pill", () => {
     expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
   });
 
+  it("keeps a newer pick pending when the pick it replaced is refused", () => {
+    const onQualitySelect = vi.fn();
+    const { video } = askPlayer({ onQualitySelect });
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(7_000));
+    const refuseFirst = pickQuality(onQualitySelect, "1080p-high");
+    const refuseSecond = pickQuality(onQualitySelect, "original");
+    // The first pick, replaced, settles as refused: the second still holds.
+    refuseFirst(undefined);
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(screen.queryByRole("button", { name: "Lower quality" })).toBeNull();
+    // Once the second is refused too, the long stall in progress asks at once.
+    refuseSecond(undefined);
+    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+  });
+
   it("keeps the step-down estimate when the session refuses a quality pick", () => {
     const onQualitySelect = vi.fn();
     const onKeptEstimate = vi.fn();

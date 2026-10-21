@@ -4522,6 +4522,27 @@ export function VideoPlayer({
   });
   const bufferingPill = bufferingQuality.pill;
   const { answer: answerBufferingPill } = bufferingQuality;
+  // The viewer's latest quality pick while it is pending. A pick that a newer
+  // one replaced settles too, but must not end the newer one's suspension.
+  const pendingPickRef = useRef<number | null>(null);
+  const pickGenerationRef = useRef(0);
+  const sendBufferingPick = useCallback(
+    (send: (onAdopt: (planRevision?: number) => void) => void) => {
+      const generation = ++pickGenerationRef.current;
+      pendingPickRef.current = generation;
+      answerBufferingPill("pick_sent");
+      send((revision) => {
+        const latest = pendingPickRef.current === generation;
+        if (latest) pendingPickRef.current = null;
+        if (revision !== undefined) {
+          answerBufferingPill("quality_changed");
+          // A newer pick still waiting stays pending.
+          if (pendingPickRef.current !== null) answerBufferingPill("pick_sent");
+        } else if (latest) answerBufferingPill("pick_refused");
+      });
+    },
+    [answerBufferingPill],
+  );
   // A new cap on the session's replans is a quality change (see the prop).
   const capForBuffering = bandwidthCapKbps ?? null;
   const capForBufferingRef = useRef(capForBuffering);
@@ -5364,10 +5385,7 @@ export function VideoPlayer({
             // quality change: it counts once its plan is adopted, which the
             // session tells before it renders.
             if (id === activeQualityId) return;
-            answerBufferingPill("pick_sent");
-            handleQualitySelect(id, (revision) => {
-              answerBufferingPill(revision === undefined ? "pick_refused" : "quality_changed");
-            });
+            sendBufferingPick((onAdopt) => handleQualitySelect(id, onAdopt));
           }}
           versionLocked={!!watchTogetherRoomId}
           versions={
@@ -5387,12 +5405,7 @@ export function VideoPlayer({
               ? (fileId) => {
                   // A version the viewer chooses is a quality change, counted
                   // like a quality pick: pending until its plan is adopted.
-                  answerBufferingPill("pick_sent");
-                  onSwitchVersion(fileId, currentTime, (revision) => {
-                    answerBufferingPill(
-                      revision === undefined ? "pick_refused" : "quality_changed",
-                    );
-                  });
+                  sendBufferingPick((onAdopt) => onSwitchVersion(fileId, currentTime, onAdopt));
                 }
               : undefined
           }
