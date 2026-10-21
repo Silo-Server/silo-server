@@ -212,7 +212,7 @@ func TestAnalyzeMovieWithRealFFmpeg(t *testing.T) {
 		"-f", "lavfi", "-i", scene, "-f", "lavfi", "-i", roll,
 		"-f", "lavfi", "-i", "aevalsrc=if(between(t\\,1098.5\\,1099.8)\\,0\\,0.3*sin(2*PI*330*t)):d=1260:s=8000",
 		"-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-map", "2:a",
-		"-g", "2", "-shortest", candidate.FilePath)
+		"-c:v", "libx264", "-preset", "ultrafast", "-g", "2", "-shortest", candidate.FilePath)
 	if output, err := generate.CombinedOutput(); err != nil {
 		t.Skipf("cannot generate the clip: %v: %s", err, output)
 	}

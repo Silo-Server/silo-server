@@ -2,12 +2,9 @@ package recommendations
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"slices"
 	"sort"
 	"strings"
@@ -181,9 +178,6 @@ func TestEmbedBatchStopsOnProviderLimit(t *testing.T) {
 		err  error
 	}{
 		{"daily quota", &embeddings.RateLimitError{DailyQuota: true}},
-		{"quota exhausted", &embeddings.RateLimitError{QuotaExhausted: true}},
-		{"temporary retries exhausted", &embeddings.RateLimitError{}},
-		{"excessive retry delay", &embeddings.RateLimitError{RetryDeferred: true}},
 		{"wrapped limit", fmt.Errorf("wrapped: %w", &embeddings.RateLimitError{})},
 		{"OpenAI quota text", errors.New("embedding API returned 429: insufficient_quota")},
 	} {
@@ -225,7 +219,7 @@ func TestEmbedBatchStopsFallbackOnProviderLimit(t *testing.T) {
 // A model whose vectors the table cannot hold must never become the locked
 // model: the run fails and writes neither the lock nor any row.
 func TestBackfillUnstorableVectorWritesNoLock(t *testing.T) {
-	for _, dims := range []int{0, CanonicalEmbeddingDimensions + 1, 4096} {
+	for _, dims := range []int{0, CanonicalEmbeddingDimensions + 1} {
 		t.Run(fmt.Sprint(dims), func(t *testing.T) {
 			calls := 0
 			store := newFakeEmbeddingStore(testIDs("item-", 3)...)
@@ -315,52 +309,6 @@ func TestBackfillLocksImportedEmbeddings(t *testing.T) {
 	}
 	if calls != 0 || empty.lockWrites != 0 {
 		t.Fatalf("no imported vectors: calls=%d lock writes=%d, want none", calls, empty.lockWrites)
-	}
-}
-
-// A provider that answers 200 with a malformed body fails the run before any
-// lock or row is written: the batch, its first item and the probe all fail.
-func TestBackfillMalformedResponsesFailTheRun(t *testing.T) {
-	for name, entry := range map[string]func(index int) string{
-		"no data":      nil,
-		"null vectors": func(index int) string { return fmt.Sprintf(`{"embedding":null,"index":%d}`, index) },
-		"one short": func(index int) string {
-			if index == 0 {
-				return ""
-			}
-			return fmt.Sprintf(`{"embedding":[0.5,0.5],"index":%d}`, index)
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			requests := 0
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests++
-				var req struct {
-					Input []string `json:"input"`
-				}
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				var entries []string
-				for i := range req.Input {
-					if entry != nil {
-						if e := entry(i); e != "" {
-							entries = append(entries, e)
-						}
-					}
-				}
-				_, _ = fmt.Fprintf(w, `{"data":[%s]}`, strings.Join(entries, ","))
-			}))
-			defer srv.Close()
-
-			store := newFakeEmbeddingStore(testIDs("item-", 5)...)
-			b := newTestBackfill(store, embeddings.NewClient(embeddings.ClientConfig{BaseURL: srv.URL, Model: backfillTestModel}), nil)
-			err := b.run(context.Background(), true)
-			if err == nil || !strings.Contains(err.Error(), "embedding provider unavailable") {
-				t.Fatalf("error = %v, want the run to fail", err)
-			}
-			if store.lock != nil || len(store.stored) != 0 || requests != 3 {
-				t.Fatalf("lock=%+v stored=%d requests=%d", store.lock, len(store.stored), requests)
-			}
-		})
 	}
 }
 

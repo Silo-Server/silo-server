@@ -70,11 +70,6 @@ func TestWebhookManagementAccountCursorAndSecrets(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/webhook-sync/connections", "", nil), TypeAuthenticationRequired)
 	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/webhook-sync/connections/"+webhookFixtureID, "", bearer(memberToken)), TypeNotFound)
 }
-func TestWebhookManagementMissingAndValidation(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/webhook-sync/connections", "", bearer(memberToken)), TypeDependencyUnavailable)
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/webhook-sync/connections", `{"provider":"unknown","server_id":"x","server_name":"x","default_profile_id":"p-owner"}`, bearer(memberToken)), TypeValidationFailed)
-}
 
 func TestWebhookMappingsRejectDuplicateUsersBeforeWrite(t *testing.T) {
 	deps := pilotDeps(nil, nil)

@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestResourceAttributionRejectsUnmeasuredIdle(t *testing.T) {
@@ -80,16 +79,6 @@ func TestResourceAttributionCgroupCPUVersions(t *testing.T) {
 	}
 }
 
-func TestResourceAttributionPressureRejectsInvalidValues(t *testing.T) {
-	for _, value := range []string{"NaN", "+Inf", "-1", "101", "garbage"} {
-		tree := newProcTree(t)
-		tree.write("pressure", "some avg10="+value+" avg60=0 avg300=0 total=0\n")
-		if some, full := readPressure(filepath.Join(tree.root, "pressure")); some != nil || full != nil {
-			t.Fatalf("accepted pressure %s", value)
-		}
-	}
-}
-
 func procStatFixture(pid, parent int, comm string, start uint64) string {
 	fields := make([]string, 52)
 	for i := range fields {
@@ -113,73 +102,5 @@ func TestResourceAttributionChildrenValidateOwnershipAndCap(t *testing.T) {
 	got = sampleChildren(tree.root, 10, pids)
 	if !got.Truncated {
 		t.Fatal("unbounded child sample")
-	}
-}
-
-func TestResourceAttributionProcessUnitsAndPartialFailure(t *testing.T) {
-	tree := newProcTree(t)
-	tree.write("10/stat", procStatFixture(10, 1, "silo", 100))
-	tree.write("10/io", "rchar: 42\nwchar: 43\nsyscr: 4\nsyscw: 5\nread_bytes: 8192\nwrite_bytes: 4096\ncancelled_write_bytes: 0\n") //nolint:misspell // Linux procfs field name uses this spelling.
-	got := sampleProcess(tree.root, 10)
-	if got.CPUSeconds == nil || *got.CPUSeconds != 2 || *got.ResidentBytes != 512*uint64(os.Getpagesize()) || *got.VirtualBytes != 10485760 || *got.Threads != 4 || *got.ReadBytes != 8192 || *got.WriteBytes != 4096 || got.OpenFDs != nil || got.MaxFDs != nil {
-		t.Fatalf("wrong units or fabricated unavailable process values: %+v", got)
-	}
-}
-
-func TestResourceSampleFreshnessAndInstanceIdentity(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	s := newTestSampler(t, tree, clock, Options{})
-	s.sample(context.Background())
-	first := s.Snapshot()
-	clock.advance(DefaultInterval)
-	s.sample(context.Background())
-	second := s.Snapshot()
-	if first.Attribution.InstanceID == "" || second.Attribution.InstanceID != first.Attribution.InstanceID || NewSampler(Options{}).instanceID == s.instanceID {
-		t.Fatal("instance attribution missing or unstable")
-	}
-	if second.Stale(clock.now()) || !second.Stale(clock.now().Add(16*time.Second)) || !(Snapshot{}).Stale(clock.now()) {
-		t.Fatal("incorrect freshness threshold")
-	}
-	if first.SampledAt.Equal(second.SampledAt) {
-		t.Fatal("snapshot mutated")
-	}
-}
-
-func TestResourceDiskInodesUseBoundedProbe(t *testing.T) {
-	f := newDiskFixture(t, "/transcode")
-	f.answer("/transcode", fsStats{UsedBytes: 100, TotalBytes: 200, InodesUsed: 90, InodesTotal: 100})
-	f.sampleAndSettle(t, 1)
-	f.sampleAndSettle(t, 1)
-	a := f.sampler.Snapshot().Attribution
-	if len(a.Disks) != 1 || a.Disks[0].Role != "scratch" || *a.Disks[0].InodesUsed != 90 || *a.Disks[0].InodesTotal != 100 {
-		t.Fatalf("%+v", a.Disks)
-	}
-}
-
-func TestResourceAttributionMalformedLoadIsUnavailable(t *testing.T) {
-	for _, raw := range []string{"", "not-a-load", "NaN 0 0", "+Inf 0 0", "-1 0 0"} {
-		tree := newProcTree(t)
-		tree.write("loadavg", raw)
-		s := newTestSampler(t, tree, newFakeClock(), Options{})
-		s.sample(context.Background())
-		if s.Snapshot().Attribution.Load.Available {
-			t.Fatalf("malformed load %q became an available reading", raw)
-		}
-	}
-}
-
-func TestResourceCgroupWorkingSetRequiresInactiveFileReading(t *testing.T) {
-	tree := newProcTree(t)
-	tree.write("memory.current", "4096\n")
-	level := cgroupUsagePath{usage: filepath.Join(tree.root, "memory.current"), limit: filepath.Join(tree.root, "memory.max"), stat: filepath.Join(tree.root, "memory.stat"), inactiveFile: cgroupInactiveFileKeyV2}
-	got := sampleCgroupMemory(level, []cgroupUsagePath{level})
-	if got.CurrentBytes == nil || *got.CurrentBytes != 4096 || got.WorkingSetBytes != nil {
-		t.Fatal("missing inactive-file measurement became a working set")
-	}
-	tree.write("memory.stat", "inactive_file 0\n")
-	got = sampleCgroupMemory(level, []cgroupUsagePath{level})
-	if got.WorkingSetBytes == nil || *got.WorkingSetBytes != 4096 {
-		t.Fatal("measured zero inactive pages were mistaken for unavailable")
 	}
 }

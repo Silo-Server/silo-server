@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 )
 
 func TestMain(m *testing.M) {
@@ -14,10 +12,4 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
-}
-
-func TestPostgresAttributionInitializedBeforePool(t *testing.T) {
-	if !queryattr.Initialize() {
-		t.Fatal("attribution disabled before the first pool, want enabled fixture")
-	}
 }

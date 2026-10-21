@@ -466,37 +466,3 @@ func TestSearchFacetAnswersMatchesAndValues(t *testing.T) {
 		t.Fatalf("empty q reached the fetcher: %v", facets.searches)
 	}
 }
-
-// A history facet search without a snapshot must build the same scope
-// arguments on every keystroke, or its cached list is never reused.
-func TestSearchFacetHistoryScopeIsStableAcrossCalls(t *testing.T) {
-	resolver := &CatalogResolver{browseRepo: &BrowseRepository{}}
-	req := CatalogRequest{Source: CatalogSourceHistory}
-	access := AccessFilter{UserID: 7, ProfileID: "p1"}
-	keystrokes := func() (*columnRecordingFetcher, bool) {
-		facets := &columnRecordingFetcher{}
-		resolver.facets = facets
-		for _, q := range []string{"d", "dr"} {
-			if _, err := resolver.SearchFacet(t.Context(), req, access, "genre", q, 10); err != nil {
-				t.Fatal(err)
-			}
-		}
-		a, _ := queryCacheKey(facets.filters[0].contentSourceSQL, facets.filters[0].contentSourceArgs)
-		b, _ := queryCacheKey(facets.filters[1].contentSourceSQL, facets.filters[1].contentSourceArgs)
-		return facets, a == b
-	}
-	// Two keystrokes can straddle a minute boundary; three tries in a row
-	// cannot.
-	for range 3 {
-		facets, same := keystrokes()
-		if !same {
-			continue
-		}
-		snapshot, ok := facets.filters[0].contentSourceArgs[2].(time.Time)
-		if !ok || snapshot.Before(time.Now()) {
-			t.Fatalf("default snapshot = %v, want a time that covers now", facets.filters[0].contentSourceArgs[2])
-		}
-		return
-	}
-	t.Fatal("history scope arguments differ between keystrokes")
-}

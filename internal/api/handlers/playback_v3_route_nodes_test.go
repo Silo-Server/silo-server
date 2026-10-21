@@ -253,12 +253,7 @@ func newRemoteReplanFixtureV3(t *testing.T) remoteReplanFixtureV3 {
 
 	startRequest := v3HandlerStartRequest()
 	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
-	startRR := httptest.NewRecorder()
-	handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
-	var started playback.DecisionResponseV3
-	if startRR.Code != http.StatusCreated || json.Unmarshal(startRR.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
-		t.Fatalf("start status=%d body=%s", startRR.Code, startRR.Body.String())
-	}
+	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, startRequest))
 	session, err := handler.sessionMgr.GetSession(started.SessionID)
 	if err != nil || session.TranscodeNodeURL == "" {
 		t.Fatalf("start did not place the transcode on a node: %#v", session)

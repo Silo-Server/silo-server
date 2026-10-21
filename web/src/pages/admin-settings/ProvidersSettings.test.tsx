@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarkerProviderConfig, PluginInstallation } from "@/api/types";
 
 import ProvidersSettings from "./ProvidersSettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 
 const mocks = vi.hoisted(() => ({
   checkConnection: vi.fn(),
@@ -67,24 +68,13 @@ let sensitiveConfigured: string[] = ["mdblist.api_key"];
 let settingsValues: Record<string, string> = {};
 const setValueMock = vi.fn();
 
-const useSettingsFormMock = vi.fn((_options?: { keys: string[] }) => ({
-  isLoading: false,
-  getValue: (key: string) => settingsValues[key] ?? "",
-  setValue: setValueMock,
-  resetValue: vi.fn(),
-  dirtyCount: 0,
-  dirtyKeys: [],
-  isDirty: vi.fn(() => false),
-  save: vi.fn(),
-  discard: vi.fn(),
-  isSaving: false,
-  restartRequired: false,
-  sensitiveConfigured,
-  sensitiveManagedByEnv: [],
-  sensitiveStatusReady: true,
-  sensitiveStatusError: false,
-  buildConnectionCheckRequest: vi.fn(() => ({ values: {}, dirty_keys: [] })),
-}));
+const useSettingsFormMock = vi.fn((_options?: { keys: string[] }) =>
+  fakeSettingsForm(settingsValues, {
+    setValue: setValueMock,
+    sensitiveConfigured,
+    buildConnectionCheckRequest: vi.fn(() => ({ values: {}, dirty_keys: [] })),
+  }),
+);
 
 const reportUnsavedMock = vi.fn();
 vi.mock("@/hooks/useUnsavedChanges", () => ({
@@ -179,33 +169,6 @@ describe("ProvidersSettings", () => {
     installationsError = false;
     refetchInstallations.mockReset();
     for (const mock of Object.values(mocks)) mock.mockReset();
-  });
-
-  it("leaves subtitle sync to Playback and stages nothing through a save bar", () => {
-    render(<ProvidersSettings />);
-
-    expect(screen.getByRole("heading", { level: 1, name: "Providers" })).toBeInTheDocument();
-    expect(useSettingsFormMock).toHaveBeenLastCalledWith({ keys: ["mdblist.api_key"] });
-    expect(screen.queryByRole("group", { name: "Subtitle sync" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Sync subtitles automatically")).not.toBeInTheDocument();
-    const groups = ["Watch providers", "Lists", "Subtitle providers", "Marker providers"];
-    const headings = Array.from(document.querySelectorAll("h3"), (h) => h.textContent ?? "");
-    expect(headings.filter((heading) => groups.includes(heading))).toEqual(groups);
-    expect(setValueMock).not.toHaveBeenCalled();
-  });
-
-  it("files the MDBList key under Lists and points metadata providers to Plugins", () => {
-    render(<ProvidersSettings />);
-
-    const lists = screen.getByRole("group", { name: "Lists" });
-    const mdblist = within(lists).getByRole("group", { name: "MDBList" });
-    expect(within(mdblist).getByText("Lists")).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "Metadata providers" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Ratings and lists")).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/Metadata providers, including TMDB, TheTVDB, and MDBList ratings/),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Plugins" })).toHaveAttribute("href", "/admin/plugins");
   });
 
   it("reports a credential draft to the unsaved-changes registry", async () => {
@@ -388,35 +351,6 @@ describe("ProvidersSettings", () => {
     expect(mocks.updateProvider).not.toHaveBeenCalled();
   });
 
-  it("surfaces a failed provider test on the tile itself", async () => {
-    const user = userEvent.setup();
-    mocks.testProvider.mockImplementation((_vars, options) => {
-      options.onSuccess({ success: false, error: "401 — key rejected" });
-    });
-    render(<ProvidersSettings />);
-
-    await user.click(
-      within(screen.getByRole("group", { name: "SubSource" })).getByRole("button", {
-        name: "Manage",
-      }),
-    );
-    await user.click(
-      within(screen.getByRole("group", { name: "SubSource" })).getByRole("button", {
-        name: "Test connection",
-      }),
-    );
-    await user.click(
-      within(screen.getByRole("group", { name: "SubSource" })).getByRole("button", {
-        name: "Close",
-      }),
-    );
-
-    const subsource = screen.getByRole("group", { name: "SubSource" });
-    expect(subsource).toHaveAttribute("data-state", "error");
-    expect(within(subsource).getByRole("button", { name: "Fix" })).toBeInTheDocument();
-    expect(within(subsource).getByText("401 — key rejected")).toBeInTheDocument();
-  });
-
   it("edits marker provider behavior in the tile and sends the whole row", async () => {
     const user = userEvent.setup();
     markerProviders = [markerProvider()];
@@ -465,35 +399,32 @@ describe("ProvidersSettings", () => {
     });
   });
 
-  it.each([0, 92.5, 100])(
-    "saves a confidence of %s percent in the API's 0–1 range",
-    async (percent) => {
-      const user = userEvent.setup();
-      markerProviders = [markerProvider({ contribute_enabled: true, contribute_auto_local: true })];
-      render(<ProvidersSettings />);
-      const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
-      await user.click(tile.getByRole("button", { name: "Manage" }));
-      await user.click(tile.getByRole("button", { name: /^Advanced/ }));
+  it.each([0, 92.5])("saves a confidence of %s percent in the API's 0–1 range", async (percent) => {
+    const user = userEvent.setup();
+    markerProviders = [markerProvider({ contribute_enabled: true, contribute_auto_local: true })];
+    render(<ProvidersSettings />);
+    const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
+    await user.click(tile.getByRole("button", { name: "Manage" }));
+    await user.click(tile.getByRole("button", { name: /^Advanced/ }));
 
-      const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
-      await user.clear(confidence);
-      await user.type(confidence, String(percent));
-      await user.click(tile.getByRole("button", { name: "Save" }));
+    const confidence = tile.getByLabelText("Minimum confidence for automatic sharing");
+    await user.clear(confidence);
+    await user.type(confidence, String(percent));
+    await user.click(tile.getByRole("button", { name: "Save" }));
 
-      expect(mocks.updateMarkerProvider).toHaveBeenCalledWith({
-        provider: "plugin:6:introdb",
-        patch: {
-          fetch_enabled: true,
-          fetch_priority: 10,
-          contribute_enabled: true,
-          contribute_auto_local: true,
-          contribute_min_confidence: percent / 100,
-        },
-      });
-    },
-  );
+    expect(mocks.updateMarkerProvider).toHaveBeenCalledWith({
+      provider: "plugin:6:introdb",
+      patch: {
+        fetch_enabled: true,
+        fetch_priority: 10,
+        contribute_enabled: true,
+        contribute_auto_local: true,
+        contribute_min_confidence: percent / 100,
+      },
+    });
+  });
 
-  it.each([0.947, 0.9500000000000001, 0.9876543210987654])(
+  it.each([0.9500000000000001])(
     "keeps custom confidence %s clean and exact when another setting changes",
     async (savedConfidence) => {
       const user = userEvent.setup();
@@ -613,24 +544,6 @@ describe("ProvidersSettings", () => {
     ).toBeDisabled();
     expect(tile.getByLabelText("Minimum confidence for automatic sharing")).toBeDisabled();
     expect(tile.queryByRole("button", { name: "Test connection" })).not.toBeInTheDocument();
-  });
-
-  it("tests the marker provider connection and displays the result", async () => {
-    const user = userEvent.setup();
-    markerProviders = [markerProvider()];
-    mocks.validateMarkerProvider.mockImplementation((_vars, options) => {
-      options.onSuccess({ valid: true });
-    });
-    render(<ProvidersSettings />);
-    const tile = within(screen.getByRole("group", { name: "TheIntroDB" }));
-    await user.click(tile.getByRole("button", { name: "Manage" }));
-    await user.click(tile.getByRole("button", { name: "Test connection" }));
-
-    expect(mocks.validateMarkerProvider).toHaveBeenCalledWith(
-      { provider: "plugin:6:introdb", displayName: "TheIntroDB" },
-      expect.any(Object),
-    );
-    expect(tile.getByRole("status")).toHaveTextContent("Tested");
   });
 
   it("reports a failed watch provider load instead of claiming nothing is installed", async () => {

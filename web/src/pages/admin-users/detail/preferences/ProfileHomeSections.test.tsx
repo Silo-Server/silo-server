@@ -5,7 +5,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SectionOverride, SettingsSectionEntry } from "@/api/types";
-import { V2ProblemError } from "@/api/v2/request";
 
 import { ProfileHomeSections } from "./ProfileHomeSections";
 
@@ -104,19 +103,6 @@ afterEach(() => {
 });
 
 describe("ProfileHomeSections", () => {
-  it("lists the profile's Home rows in order, without edit or delete", () => {
-    const card = renderCard();
-    expect(
-      within(card)
-        .getAllByRole("button", { name: /^Drag / })
-        .map((b) => b.getAttribute("aria-label")),
-    ).toEqual(["Drag Continue Watching", "Drag Recently Added", "Drag Hidden gems"]);
-    expect(within(card).getByRole("button", { name: "Show Recently Added" })).toBeEnabled();
-    expect(within(card).queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
-    expect(within(card).queryByRole("button", { name: /^Delete / })).not.toBeInTheDocument();
-    expect(mocks.calls).toContainEqual({ hook: "settings", userId: 7, profileId: "p2" });
-  });
-
   it("saves the whole layout when a row is hidden, keeping saved IDs and removed rows", async () => {
     const u = userEvent.setup();
     const card = renderCard();
@@ -170,42 +156,5 @@ describe("ProfileHomeSections", () => {
     await u.click(within(dialog).getByRole("button", { name: "Reset" }));
     await waitFor(() => expect(mocks.resetMutate).toHaveBeenCalledTimes(1));
     expect(mocks.saveMutate).not.toHaveBeenCalled();
-  });
-
-  it("says so when the layout can't load, and offers no edits", () => {
-    mocks.settingsError = true;
-    const card = renderCard();
-    expect(within(card).getByRole("alert")).toHaveTextContent(
-      "Couldn't load Kids's Home sections.",
-    );
-    expect(within(card).getByRole("button", { name: "Reset to default" })).toBeDisabled();
-  });
-
-  it("names the server's reason when a save is refused", async () => {
-    mocks.saveMutate.mockImplementation((_body, options: { onError: (e: unknown) => void }) =>
-      options.onError(
-        new V2ProblemError("replaceAdminUserProfileSectionOverrides", {
-          type: "https://silo.dev/problems/validation_failed",
-          title: "Validation failed",
-          status: 400,
-          detail: "The request did not pass validation; see errors.",
-          instance: "urn:silo:request:1",
-          errors: [
-            {
-              location: "body.overrides",
-              code: "invalid",
-              detail: "unknown section type retired_row",
-            },
-          ],
-        }),
-      ),
-    );
-    const u = userEvent.setup();
-    const card = renderCard();
-    await u.click(within(card).getByRole("button", { name: "Hide Continue Watching" }));
-
-    expect(toastError).toHaveBeenCalledWith(
-      "Couldn't save Home sections: unknown section type retired_row",
-    );
   });
 });

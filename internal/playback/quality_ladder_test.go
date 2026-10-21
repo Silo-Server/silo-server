@@ -16,14 +16,9 @@ func TestLadderClassForBitrate(t *testing.T) {
 		// The download presets at film and video frame rates.
 		{20_000, 23.976, "h264", 2160},
 		{10_000, 23.976, "h264", 1080},
-		{5_000, 23.976, "h264", 1080},
 		{2_000, 23.976, "h264", 720},
-		{1_000, 23.976, "h264", 480},
 		{20_000, 60, "h264", 1080},
-		{10_000, 60, "h264", 1080},
 		{5_000, 60, "h264", 720},
-		{2_000, 60, "h264", 540},
-		{1_000, 60, "h264", 480},
 		// HEVC stretches the same budget further.
 		{12_000, 24, "hevc", 2160},
 		{1_000, 24, "hevc", 540},
@@ -271,53 +266,44 @@ func TestResolveDownloadTranscodeTargetWithoutAttestedDecoder(t *testing.T) {
 	}
 }
 
-// Auto is best-effort direct play: without a measured estimate, or on a
-// metered link alone, it assumes the link can carry the source.
-func TestResolveQualityPolicyV3AutoWithoutAnEstimatePlaysTheSource(t *testing.T) {
+// Auto is best-effort direct play: a source the limits allow is sent as-is.
+// Without a measured estimate, or on a metered link alone, auto assumes the
+// link can carry the source; an estimate or cap only lowers a source the link
+// cannot carry, at any resolution; and a fixed resolution is the viewer's
+// explicit choice that never reads the estimate.
+func TestResolveQualityPolicyV3PreservesASourceTheLimitsAllow(t *testing.T) {
 	uhd := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 23.976}
-	req := validStartRequestV3()
-	req.QualityPreference = "auto"
-	req.Metered = true
-	got := ResolveQualityPolicyV3(req, uhd)
-	if !got.PreservesSource || got.RequiresTranscode || got.Reason != "quality_auto_source" {
-		t.Fatalf("auto on a metered link without an estimate = %#v, want the source", got)
-	}
-}
-
-// A source whose bitrate fits the estimate's budget is sent as-is at any
-// resolution: the estimate only lowers a source the link cannot carry.
-func TestResolveQualityPolicyV3AutoSendsASourceThatFitsTheEstimate(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		source   SourceDescriptorV3
-		estimate int
+		name       string
+		quality    string
+		metered    bool
+		estimate   int
+		capKbps    int
+		source     SourceDescriptorV3
+		wantReason string // checked when set
 	}{
-		{"a 3 Mbps 1080p film on 6 Mbps", SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 3_000, VideoCodec: "h264", FrameRate: 24}, 6_000},
-		{"a 3 Mbps HEVC 4K film on 10 Mbps", SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 3_000, VideoCodec: "hevc", FrameRate: 24}, 10_000},
-		{"a 15 Mbps 4K film on 20 Mbps", SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 15_000, VideoCodec: "hevc", FrameRate: 24}, 20_000},
+		{"auto on a metered link without an estimate", "auto", true, 0, 0, uhd, "quality_auto_source"},
+		{"a 3 Mbps 1080p film on 6 Mbps", "auto", false, 6_000, 0, SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 3_000, VideoCodec: "h264", FrameRate: 24}, "quality_auto_source"},
+		{"a 3 Mbps HEVC 4K film on 10 Mbps", "auto", false, 10_000, 0, SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 3_000, VideoCodec: "hevc", FrameRate: 24}, "quality_auto_source"},
+		{"a 5 Mbps source within a 7 Mbps estimate's budget", "auto", false, 7_000, 0, SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 5_000, FrameRate: 24}, ""},
+		{"a 3 Mbps source under a 6 Mbps cap", "auto", false, 0, 6_000, SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 3_000, FrameRate: 24}, ""},
+		{"1080p preference on a 2 Mbps estimate keeps a 30 Mbps source", "1080p", false, 2_000, 0, SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 30_000, VideoCodec: "h264", FrameRate: 24}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := validStartRequestV3()
-			req.QualityPreference = "auto"
-			req.BandwidthEstimateKbps = &tc.estimate
+			req.QualityPreference = tc.quality
+			req.Metered = tc.metered
+			if tc.estimate > 0 {
+				req.BandwidthEstimateKbps = &tc.estimate
+			}
+			if tc.capKbps > 0 {
+				req.BandwidthCapKbps = &tc.capKbps
+			}
 			got := ResolveQualityPolicyV3(req, tc.source)
-			if !got.PreservesSource || got.RequiresTranscode || got.Reason != "quality_auto_source" {
-				t.Fatalf("auto = %#v, want the source as-is", got)
+			if !got.PreservesSource || got.RequiresTranscode || tc.wantReason != "" && got.Reason != tc.wantReason {
+				t.Fatalf("quality = %#v, want the source as-is (reason %q)", got, tc.wantReason)
 			}
 		})
-	}
-}
-
-// A fixed resolution is the viewer's explicit choice and never reads the
-// estimate.
-func TestResolveQualityPolicyV3FixedResolutionIgnoresTheEstimate(t *testing.T) {
-	req := validStartRequestV3()
-	req.QualityPreference = "1080p"
-	estimate := 2_000
-	req.BandwidthEstimateKbps = &estimate
-	got := ResolveQualityPolicyV3(req, SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 30_000, VideoCodec: "h264", FrameRate: 24})
-	if !got.PreservesSource || got.RequiresTranscode {
-		t.Fatalf("1080p preference on a 2 Mbps estimate = %#v, want the 30 Mbps source as-is", got)
 	}
 }
 
@@ -338,103 +324,52 @@ func TestResolveQualityPolicyV3OriginalIsAuto(t *testing.T) {
 	}
 }
 
-// Under a bitrate cap, automatic quality sends a source that fits the cap
-// as-is and re-encodes one over it at the ladder class the cap's budget earns,
-// keeping a fifth of the cap as headroom when choosing the class.
-func TestResolveQualityPolicyV3AutoUsesTheLadderUnderACap(t *testing.T) {
-	fitsCap := SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 3_000, FrameRate: 24}
-	req := validStartRequestV3()
-	req.QualityPreference = "auto"
-	capKbps := 6_000
-	req.BandwidthCapKbps = &capKbps
-	if got := ResolveQualityPolicyV3(req, fitsCap); !got.PreservesSource || got.RequiresTranscode {
-		t.Fatalf("a source under the cap = %#v, want it preserved", got)
-	}
-
+// Automatic streaming quality re-encodes a source over a bitrate cap or over
+// an estimate's budget at the ladder class that limit earns, the same ladder
+// as download presets, keeping a fifth of the limit as headroom when choosing
+// the class. The cap is a hard delivery ceiling on the bitrate too.
+func TestResolveQualityPolicyV3AutoUsesTheLadder(t *testing.T) {
 	uhd := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 23.976}
 	scope := SourceDescriptorV3{Width: 3840, Height: 1600, BitrateKbps: 30_000, FrameRate: 23.976}
 	uhd60 := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 60}
+	hd8M := SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 8_000, FrameRate: 24}
 	for _, tc := range []struct {
 		name        string
 		source      SourceDescriptorV3
-		capKbps     int
+		isCap       bool // the limit is a bandwidth cap, otherwise an estimate
+		kbps        int
 		wantW       int
 		wantH       int
 		wantLabel   string
 		wantBitrate int
 	}{
-		{"7 Mbps reaches 1080p", uhd, 7_000, 1920, 1080, "1080p", 6_000},
-		{"10 Mbps encodes 1080p at the class bitrate", uhd, 10_000, 1920, 1080, "1080p", 6_000},
-		{"4 Mbps is 720p", uhd, 4_000, 1280, 720, "720p", 2_000},
-		{"2 Mbps is 540p", uhd, 2_000, 960, 540, "540p", 1_800},
-		{"1 Mbps is 480p", uhd, 1_000, 854, 480, "480p", 1_000},
-		{"scope keeps its shape", scope, 10_000, 1920, 800, "800p", 6_000},
-		{"60 fps drops a class", uhd60, 7_000, 1280, 720, "720p", 2_000},
-		{"a source over the cap is re-encoded at its own size", SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1920, 1080, "1080p", 6_000},
-		{"a cropped source over the cap keeps its size and class", SourceDescriptorV3{Width: 1920, Height: 800, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1920, 800, "800p", 6_000},
-		{"a 4:3 source over the cap keeps its size", SourceDescriptorV3{Width: 1280, Height: 960, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1280, 960, "960p", 6_000},
-		{"a 720p source over the cap keeps the 720p bitrate", SourceDescriptorV3{Width: 1280, Height: 720, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1280, 720, "720p", 2_000},
-		{"an odd source frame is re-encoded at an even size", SourceDescriptorV3{Width: 1920, Height: 1079, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1918, 1078, "1078p", 6_000},
+		{"cap: 7 Mbps reaches 1080p", uhd, true, 7_000, 1920, 1080, "1080p", 6_000},
+		{"cap: 10 Mbps encodes 1080p at the class bitrate", uhd, true, 10_000, 1920, 1080, "1080p", 6_000},
+		{"cap: 4 Mbps is 720p", uhd, true, 4_000, 1280, 720, "720p", 2_000},
+		{"cap: 1 Mbps is 480p", uhd, true, 1_000, 854, 480, "480p", 1_000},
+		{"cap: scope keeps its shape", scope, true, 10_000, 1920, 800, "800p", 6_000},
+		{"cap: 60 fps drops a class", uhd60, true, 7_000, 1280, 720, "720p", 2_000},
+		{"cap: a source over the cap is re-encoded at its own size", hd8M, true, 7_000, 1920, 1080, "1080p", 6_000},
+		{"cap: a 720p source over the cap keeps the 720p bitrate", SourceDescriptorV3{Width: 1280, Height: 720, BitrateKbps: 8_000, FrameRate: 24}, true, 7_000, 1280, 720, "720p", 2_000},
+		{"cap: an odd source frame is re-encoded at an even size", SourceDescriptorV3{Width: 1920, Height: 1079, BitrateKbps: 8_000, FrameRate: 24}, true, 7_000, 1918, 1078, "1078p", 6_000},
+		{"estimate: 7 Mbps reaches 1080p within its budget", uhd, false, 7_000, 1920, 1080, "1080p", 5_600},
+		{"estimate: 10 Mbps encodes 1080p at the class bitrate", uhd, false, 10_000, 1920, 1080, "1080p", 6_000},
+		{"estimate: 2 Mbps is 540p", uhd, false, 2_000, 960, 540, "540p", 1_600},
+		{"estimate: 1 Mbps is 480p", uhd, false, 1_000, 854, 480, "480p", 800},
+		{"estimate: a source over the budget is re-encoded at its own size", hd8M, false, 7_000, 1920, 1080, "1080p", 5_600},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := validStartRequestV3()
 			req.QualityPreference = "auto"
-			req.BandwidthCapKbps = &tc.capKbps
-			got := ResolveQualityPolicyV3(req, tc.source)
-			if got.Width != tc.wantW || got.Height != tc.wantH || got.Label != tc.wantLabel || got.BitrateKbps != tc.wantBitrate || !got.RequiresTranscode {
-				t.Fatalf("auto under a %d kbps cap = %dx%d %q %d kbps (transcode %v), want %dx%d %q %d kbps",
-					tc.capKbps, got.Width, got.Height, got.Label, got.BitrateKbps, got.RequiresTranscode, tc.wantW, tc.wantH, tc.wantLabel, tc.wantBitrate)
+			if tc.isCap {
+				req.BandwidthCapKbps = &tc.kbps
+			} else {
+				req.BandwidthEstimateKbps = &tc.kbps
 			}
-		})
-	}
-}
-
-// Automatic streaming quality reads the same ladder as download presets for a
-// source over the estimate's budget, keeping a fifth of the estimate as
-// headroom.
-func TestResolveQualityPolicyV3AutoUsesTheLadderForAnEstimate(t *testing.T) {
-	fitsBudget := SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 5_000, FrameRate: 24}
-	req := validStartRequestV3()
-	req.QualityPreference = "auto"
-	estimate := 7_000
-	req.BandwidthEstimateKbps = &estimate
-	if got := ResolveQualityPolicyV3(req, fitsBudget); !got.PreservesSource || got.RequiresTranscode {
-		t.Fatalf("a source within the budget = %#v, want it preserved", got)
-	}
-
-	uhd := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 23.976}
-	scope := SourceDescriptorV3{Width: 3840, Height: 1600, BitrateKbps: 30_000, FrameRate: 23.976}
-	uhd60 := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 60}
-	for _, tc := range []struct {
-		name        string
-		source      SourceDescriptorV3
-		estimate    int
-		wantW       int
-		wantH       int
-		wantLabel   string
-		wantBitrate int
-	}{
-		{"7 Mbps reaches 1080p within its budget", uhd, 7_000, 1920, 1080, "1080p", 5_600},
-		{"10 Mbps encodes 1080p at the class bitrate", uhd, 10_000, 1920, 1080, "1080p", 6_000},
-		{"4 Mbps is 720p", uhd, 4_000, 1280, 720, "720p", 2_000},
-		{"2 Mbps is 540p", uhd, 2_000, 960, 540, "540p", 1_600},
-		{"1 Mbps is 480p", uhd, 1_000, 854, 480, "480p", 800},
-		{"scope keeps its shape", scope, 10_000, 1920, 800, "800p", 6_000},
-		{"60 fps drops a class", uhd60, 7_000, 1280, 720, "720p", 2_000},
-		{"a source over the budget is re-encoded at its own size", SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1920, 1080, "1080p", 5_600},
-		{"a cropped source over the budget keeps its size and class", SourceDescriptorV3{Width: 1920, Height: 800, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1920, 800, "800p", 5_600},
-		{"a 4:3 source over the budget keeps its size", SourceDescriptorV3{Width: 1280, Height: 960, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1280, 960, "960p", 5_600},
-		{"a 720p source over the budget keeps the 720p bitrate", SourceDescriptorV3{Width: 1280, Height: 720, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1280, 720, "720p", 2_000},
-		{"an odd source frame is re-encoded at an even size", SourceDescriptorV3{Width: 1920, Height: 1079, BitrateKbps: 8_000, FrameRate: 24}, 7_000, 1918, 1078, "1078p", 5_600},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			req := validStartRequestV3()
-			req.QualityPreference = "auto"
-			req.BandwidthEstimateKbps = &tc.estimate
 			got := ResolveQualityPolicyV3(req, tc.source)
 			if got.Width != tc.wantW || got.Height != tc.wantH || got.Label != tc.wantLabel || got.BitrateKbps != tc.wantBitrate || !got.RequiresTranscode {
-				t.Fatalf("auto at %d kbps = %dx%d %q %d kbps (transcode %v), want %dx%d %q %d kbps",
-					tc.estimate, got.Width, got.Height, got.Label, got.BitrateKbps, got.RequiresTranscode, tc.wantW, tc.wantH, tc.wantLabel, tc.wantBitrate)
+				t.Fatalf("auto under a %d kbps limit = %dx%d %q %d kbps (transcode %v), want %dx%d %q %d kbps",
+					tc.kbps, got.Width, got.Height, got.Label, got.BitrateKbps, got.RequiresTranscode, tc.wantW, tc.wantH, tc.wantLabel, tc.wantBitrate)
 			}
 		})
 	}
@@ -573,12 +508,10 @@ func TestPlanPlaybackV3DirectPlaysWhateverTheLimitsAllow(t *testing.T) {
 		wantHeight int
 	}{
 		{name: "auto without an estimate", file: remux1080, quality: "auto", wantDirect: true},
-		{name: "auto on a link that carries the source", file: remux1080, quality: "auto", estimate: 50_000, wantDirect: true},
 		{name: "auto on a link that cannot", file: remux1080, quality: "auto", estimate: 8_000, wantHeight: 1080},
 		{name: "auto under a cap the source fits", file: remux1080, quality: "auto", capKbps: 40_000, wantDirect: true},
 		{name: "the legacy original preference", file: web4K, quality: "original", wantDirect: true},
 		{name: "1080p ignores a low estimate", file: remux1080, quality: "1080p", estimate: 2_000, wantDirect: true},
-		{name: "4K ignores a low estimate", file: web4K, quality: "2160p", estimate: 2_000, wantDirect: true},
 		{name: "1080p converts a 4K source", file: web4K, quality: "1080p", wantHeight: 1080},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

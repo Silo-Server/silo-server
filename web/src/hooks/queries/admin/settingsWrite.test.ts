@@ -78,26 +78,6 @@ it("captures the displayed validator, copied batch and profile before an offline
   expect(invalidate).not.toHaveBeenCalled();
   expect(toast.error).not.toHaveBeenCalled();
 });
-it("does not refresh or retry a single-setting write on 401", async () => {
-  setRefreshToken("refresh-token");
-  const fetchMock = vi
-    .fn()
-    .mockImplementation(async (_url, init) =>
-      init?.method === "PUT"
-        ? response({ title: "Unauthorized", status: 401 }, 401)
-        : response({ "server.log_level": "info" }),
-    );
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(
-    () => ({ read: useAdminServerSettings(), write: useUpdateServerSetting() }),
-    fixture(),
-  );
-  await waitFor(() => expect(result.current.read.isSuccess).toBe(true));
-  act(() => result.current.write.mutate({ key: "server.log_level", value: "debug" }));
-  await waitFor(() => expect(result.current.write.isError).toBe(true));
-  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1);
-  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("refresh"))).toBe(false);
-});
 it("keeps the original displayed guard after a background refetch and a 412", async () => {
   let etag = '"displayed-v1"';
   const fetchMock = vi

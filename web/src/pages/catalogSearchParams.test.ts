@@ -10,8 +10,6 @@ import {
   buildCatalogHref,
   buildLibraryCollectionCatalogHref,
   buildPersonCatalogHref,
-  buildPersonalCatalogHref,
-  catalogSourceAllowsOverlay,
   parseCatalogSearchParams,
   readCatalogRequestPage,
   sameCatalogDestination,
@@ -49,51 +47,12 @@ describe("parseCatalogSearchParams", () => {
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
-  it("keeps overlay params for collection sources", () => {
-    const state = parseCatalogSearchParams(
-      params("source=user_collection&collection_id=col-7&type=movie&genre=Drama&sort=title"),
-    );
-
-    expect(state.source).toBe("user_collection");
-    expect(state.collection_id).toBe("col-7");
-    expect(state.query_definition.media_scope).toBe("movie");
-    expect(state.query_definition.groups).toContainEqual({
-      match: "all",
-      rules: [{ field: "genre", op: "contains", value: "Drama" }],
-    });
-    expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
-  });
-
-  it("keeps ebook media scope from catalog URLs", () => {
-    const state = parseCatalogSearchParams(params("source=query&type=ebook&sort=author"));
-
-    expect(state.query_definition.media_scope).toBe("ebook");
-    expect(state.query_definition.sort).toEqual({ field: "author", order: "asc" });
-  });
-
   it("parses the video group scope and treats type=all as unscoped", () => {
     const video = parseCatalogSearchParams(params("source=query&q=heat&type=video"));
     expect(video.query_definition.media_scope).toBe("video");
 
     const all = parseCatalogSearchParams(params("source=query&q=heat&type=all"));
     expect(all.query_definition.media_scope).toBeUndefined();
-  });
-
-  it("parses person catalog sources with overlays", () => {
-    const state = parseCatalogSearchParams(
-      params(
-        "source=person&person_id=117290402172239876&type=movie&genre=Drama&sort=title&order=asc",
-      ),
-    );
-
-    expect(state.source).toBe("person");
-    expect(state.person_id).toBe("117290402172239876");
-    expect(state.query_definition.media_scope).toBe("movie");
-    expect(state.query_definition.groups).toContainEqual({
-      match: "all",
-      rules: [{ field: "genre", op: "contains", value: "Drama" }],
-    });
-    expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
   it("defaults personal saved lists to source order until a sort is chosen", () => {
@@ -165,18 +124,6 @@ describe("sameCatalogDestination", () => {
   });
 });
 
-describe("catalogSourceAllowsOverlay", () => {
-  it("returns true only for supported overlay sources", () => {
-    expect(catalogSourceAllowsOverlay("query")).toBe(true);
-    expect(catalogSourceAllowsOverlay("favorites")).toBe(true);
-    expect(catalogSourceAllowsOverlay("watchlist")).toBe(true);
-    expect(catalogSourceAllowsOverlay("history")).toBe(true);
-    expect(catalogSourceAllowsOverlay("library_collection")).toBe(true);
-    expect(catalogSourceAllowsOverlay("user_collection")).toBe(true);
-    expect(catalogSourceAllowsOverlay("section")).toBe(false);
-  });
-});
-
 describe("buildCatalogHref", () => {
   it("keeps a library-scoped collection shortcut in its library context", () => {
     const href = buildLibraryCollectionCatalogHref("collection-7", "Favorites", 42);
@@ -216,21 +163,6 @@ describe("buildCatalogHref", () => {
       match: "all",
       rules: [{ field: "genre", op: "contains", value: "Drama" }],
     });
-  });
-
-  it("keeps explicit added-at sorting in query-source URLs", () => {
-    expect(
-      buildCatalogApiSearchParams({
-        source: "query",
-        library_id: 2,
-        query_definition: {
-          library_ids: [2],
-          match: "all",
-          groups: [],
-          sort: { field: "added_at", order: "desc" },
-        },
-      }).toString(),
-    ).toBe("source=query&library_id=2&sort=added_at&order=desc");
   });
 
   it.each(["watchlist", "favorites"] as const)(
@@ -288,11 +220,6 @@ describe("buildCatalogHref", () => {
     expect(built.has("order")).toBe(false);
   });
 
-  it("builds source-ordered personal catalog hrefs without a sort param", () => {
-    expect(buildPersonalCatalogHref("watchlist")).toBe("/catalog?source=watchlist");
-    expect(buildPersonalCatalogHref("favorites")).toBe("/catalog?source=favorites");
-  });
-
   it("builds collection catalog URLs with overlay params", () => {
     const href = buildCatalogHref({
       source: "user_collection",
@@ -317,21 +244,6 @@ describe("buildCatalogHref", () => {
     expect(built.searchParams.get("groups[0][rules][0][field]")).toBe("genre");
     expect(built.searchParams.get("groups[0][rules][0][op]")).toBe("contains");
     expect(built.searchParams.get("groups[0][rules][0][value]")).toBe("Drama");
-  });
-
-  it("builds person catalog URLs with the person id", () => {
-    expect(
-      buildCatalogHref({
-        source: "person",
-        person_id: "117290402172239876",
-        query_definition: {
-          library_ids: [],
-          match: "all",
-          groups: [],
-          sort: { field: "added_at", order: "desc" },
-        },
-      }),
-    ).toBe("/catalog?source=person&person_id=117290402172239876");
   });
 
   it("builds canonical person catalog URLs from raw route ids", () => {

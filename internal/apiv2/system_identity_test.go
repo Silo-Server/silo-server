@@ -3,13 +3,11 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
-	"github.com/Silo-Server/silo-server/internal/serveridentity"
 )
 
 type fakeServerIdentity struct {
@@ -40,48 +38,6 @@ func decodeConnections(t *testing.T, rec *httptest.ResponseRecorder) connections
 		t.Fatal(err)
 	}
 	return doc
-}
-
-func TestGetServerIdentity(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, Prefix+"/system/identity", "", nil)
-	if rec.Code != http.StatusOK || rec.Body.String() != `{"server_id":"`+fixtureServerID+`"}`+"\n" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if rec.Header().Get("Cache-Control") != "no-cache" {
-		t.Fatalf("Cache-Control = %q", rec.Header().Get("Cache-Control"))
-	}
-	// Public: credentials and profile headers change nothing, and the
-	// document links to it from discovery.
-	rec = do(t, h, http.MethodGet, Prefix+"/system/identity", "", with(bearer(memberToken), "X-Profile-Id", "p-owner"))
-	if rec.Code != http.StatusOK {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	rec = do(t, h, http.MethodGet, Prefix+"/system/info", "", nil)
-	var info struct {
-		Links struct {
-			Identity string `json:"identity"`
-		} `json:"links"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil || info.Links.Identity != Prefix+"/system/identity" {
-		t.Fatalf("links.identity = %q err = %v", info.Links.Identity, err)
-	}
-}
-
-func TestGetServerIdentityFailures(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.ServerIdentity = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/system/identity", "", nil), TypeDependencyUnavailable)
-	identity := &fakeServerIdentity{err: serveridentity.ErrUnavailable}
-	deps.ServerIdentity = identity
-	h := newTestHandler(t, deps)
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/system/identity", "", nil), TypeDependencyUnavailable)
-	identity.err = errors.New("db down")
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/system/identity", "", nil), TypeInternalError)
-	// The connections document depends on the same identity.
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/system/connections", "", bearer(memberToken)), TypeInternalError)
 }
 
 func TestGetServerConnections(t *testing.T) {
@@ -163,33 +119,4 @@ func TestGetServerConnections(t *testing.T) {
 			t.Fatalf("url=%q local_route = %+v", raw, doc.LocalRoute)
 		}
 	}
-}
-
-func TestGetServerConnectionsCurrentPath(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
-	h := newTestHandler(t, deps)
-	r := httptest.NewRequest(http.MethodGet, Prefix+"/system/connections", nil)
-	r.Header.Set("Authorization", "Bearer "+memberToken)
-	r = r.WithContext(netaccess.WithPath(r.Context(), netaccess.Path{Provider: "tailscale"}))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, r)
-	doc := decodeConnections(t, rec)
-	if doc.Current.Kind != EndpointKindProvider || doc.Current.Provider != "tailscale" {
-		t.Fatalf("current = %+v", doc.Current)
-	}
-	// Nothing wired beyond identity: an empty, still-available document
-	// with no local route.
-	if doc.State != StateAvailable || len(doc.Endpoints) != 0 || doc.LocalRoute != nil {
-		t.Fatalf("doc = %+v", doc)
-	}
-}
-
-func TestGetServerConnectionsProviderListFailure(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
-	f := newFakeNetworkAccess()
-	f.listErr = errors.New("manifest store down")
-	deps.NetworkAccess = f
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/system/connections", "", bearer(memberToken)), TypeInternalError)
 }

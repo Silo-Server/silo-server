@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,22 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
 
+// connectionTestPool opens the migrated database the DB contract tests run
+// against, or skips when there is none.
+func connectionTestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
 // TestSeekReplayKeepsLearnedLimitDB: only a request carrying observed_rebuffer
 // records a limit. A client replan that repeats its kept step-down estimate has
 // no source and records nothing. A seek-scoped replan replays the stored
@@ -29,7 +46,7 @@ import (
 // probe estimate as a new limit. The last case sends a seek_failure_recovery
 // through the native v2 replan dispatch, which must pass the replay as one.
 func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
-	pool := catalogTransferPool(t)
+	pool := connectionTestPool(t)
 	ctx := t.Context()
 	var user int
 	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-replay-%d", time.Now().UnixNano())).Scan(&user); err != nil {
@@ -167,7 +184,7 @@ func requireSeekRecoveryKeepsLimitV3(t *testing.T, pool *pgxpool.Pool, user int,
 // Auto's budget under the administrator's bitrate cap for the caller's
 // network, the cap a start would plan under.
 func TestConnectionBudgetAppliesAdminCapDB(t *testing.T) {
-	pool := catalogTransferPool(t)
+	pool := connectionTestPool(t)
 	ctx := t.Context()
 	var user int
 	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("connection-budget-cap-%d", time.Now().UnixNano())).Scan(&user); err != nil {
@@ -367,7 +384,7 @@ func TestBufferedReplansGoLowerToAVersion(t *testing.T) {
 // later output change that sends no estimate still plans under it from the
 // store, stays on the lower version and reports bandwidth_limit.
 func TestLearnedLimitCarriesThroughReplansDB(t *testing.T) {
-	pool := catalogTransferPool(t)
+	pool := connectionTestPool(t)
 	var user int
 	if err := pool.QueryRow(t.Context(), `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-replans-%d", time.Now().UnixNano())).Scan(&user); err != nil {
 		t.Fatal(err)
@@ -425,7 +442,7 @@ func TestLearnedLimitCarriesThroughReplansDB(t *testing.T) {
 // nothing. A client that plays the source moves to that version only under
 // the limit.
 func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
-	pool := catalogTransferPool(t)
+	pool := connectionTestPool(t)
 	var user int
 	if err := pool.QueryRow(t.Context(), `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-starts-%d", time.Now().UnixNano())).Scan(&user); err != nil {
 		t.Fatal(err)
@@ -494,7 +511,7 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 // later track change keeps that version, and so the label, even though the
 // same track change without the limit would stay on it too.
 func TestLearnedLimitMarksOnlyAReplanItLoweredDB(t *testing.T) {
-	pool := catalogTransferPool(t)
+	pool := connectionTestPool(t)
 	var user int
 	if err := pool.QueryRow(t.Context(), `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("learned-limit-replan-marks-%d", time.Now().UnixNano())).Scan(&user); err != nil {
 		t.Fatal(err)
@@ -568,7 +585,7 @@ func TestLearnedLimitMarksOnlyAReplanItLoweredDB(t *testing.T) {
 // lower bound, and only readings within their lifetime count toward the
 // budget, though both are still returned.
 func TestConnectionReadingsDB(t *testing.T) {
-	pool := catalogTransferPool(t)
+	pool := connectionTestPool(t)
 	ctx := t.Context()
 	var user int
 	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("connection-readings-%d", time.Now().UnixNano())).Scan(&user); err != nil {

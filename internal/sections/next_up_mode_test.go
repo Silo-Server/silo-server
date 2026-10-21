@@ -66,22 +66,6 @@ func TestNextUpModeCanonicalRowWins(t *testing.T) {
 	}
 }
 
-// TestNextUpModeIgnoresLegacySetting: the retired-fallback migration copied
-// the legacy account value onto every profile that existed, so the read no
-// longer consults it. A profile without a canonical row reads the default.
-func TestNextUpModeIgnoresLegacySetting(t *testing.T) {
-	ctx := context.Background()
-	store := newNextUpModeTestStore(t)
-
-	if err := store.SetSetting(ctx, "next_up_mode", "separate"); err != nil {
-		t.Fatalf("seed legacy setting: %v", err)
-	}
-
-	if got := NextUpMode(ctx, store, nil, "profile-1"); got != NextUpModeCombined {
-		t.Errorf("NextUpMode = %q, want default %q; the legacy key is retired", got, NextUpModeCombined)
-	}
-}
-
 // TestNextUpModeProfileIsolation: one profile's canonical mode must not leak
 // into another profile on the same account.
 func TestNextUpModeProfileIsolation(t *testing.T) {

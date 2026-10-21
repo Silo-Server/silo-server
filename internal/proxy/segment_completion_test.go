@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
@@ -104,11 +102,7 @@ func TestTranscodeProxyDoesNotAcknowledgeFailedDownstreamWrite(t *testing.T) {
 }
 
 func newCompletionTestProxy(client *http.Client) *Server {
-	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "proxy-test-secret"
-	watcher.SetConfigForTest(cfg)
-	server := NewServer(watcher, nil)
+	server := NewServer(testWatcher("proxy-test-secret"), nil)
 	server.httpClient = client
 	return server
 }

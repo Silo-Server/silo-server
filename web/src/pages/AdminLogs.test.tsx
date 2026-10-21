@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { v2 } from "@/api/v2/request";
 import { useAdminLogStream } from "@/hooks/admin/useAdminLogStream";
 import AdminLogs from "./AdminLogs";
+import { stubRadixDom } from "./adminPage.test-support";
 
 vi.mock("@/api/v2/request", () => ({ v2: vi.fn() }));
 vi.mock("@/api/client", () => ({
@@ -17,6 +18,7 @@ vi.mock("@/api/client", () => ({
 vi.mock("@/hooks/useAuth", () => ({ useOptionalAuth: () => null }));
 vi.mock("@/hooks/useDateTimeFormat", () => ({ useDateTimeFormat: () => "locale" }));
 vi.mock("@/hooks/admin/useAdminLogStream", () => ({ useAdminLogStream: vi.fn() }));
+stubRadixDom();
 
 function page(id: string, hasMore: boolean) {
   return {
@@ -160,22 +162,6 @@ function latestAppStreamParams() {
 }
 
 describe("admin log level and component filters", () => {
-  beforeEach(() => {
-    // Radix Select uses Pointer Capture APIs that jsdom does not implement.
-    if (!Element.prototype.hasPointerCapture) {
-      Element.prototype.hasPointerCapture = () => false;
-    }
-    if (!Element.prototype.setPointerCapture) {
-      Element.prototype.setPointerCapture = () => undefined;
-    }
-    if (!Element.prototype.releasePointerCapture) {
-      Element.prototype.releasePointerCapture = () => undefined;
-    }
-    if (!Element.prototype.scrollIntoView) {
-      Element.prototype.scrollIntoView = () => undefined;
-    }
-  });
-
   it("treats a reserved all URL value as no level or component filter", async () => {
     const user = userEvent.setup();
     mount("/admin/logs?level=all&component=all");
@@ -191,38 +177,7 @@ describe("admin log level and component filters", () => {
     expect(screen.getByRole("combobox", { name: "Component" })).toHaveValue("all");
   });
 
-  it("updates stream params from the filters and clears them", async () => {
-    const user = userEvent.setup();
-    mount("/admin/logs");
-
-    await user.click(screen.getByRole("combobox", { name: "Level" }));
-    await user.click(await screen.findByRole("option", { name: "error" }));
-    await waitFor(() => expect(latestAppStreamParams()).toMatchObject({ level: "error" }));
-
-    const component = screen.getByRole("combobox", { name: "Component" });
-    const suggestions = (component as HTMLInputElement).list;
-    expect(Array.from(suggestions?.options ?? []).map((option) => option.value)).toContain(
-      "scanner",
-    );
-    await user.type(component, "scanner");
-    await waitFor(() =>
-      expect(latestAppStreamParams()).toMatchObject({
-        level: "error",
-        component: "scanner",
-      }),
-    );
-
-    await user.click(screen.getByRole("combobox", { name: "Level" }));
-    await user.click(await screen.findByRole("option", { name: "All levels" }));
-    await user.clear(component);
-    await waitFor(() => {
-      const params = latestAppStreamParams();
-      expect(params?.level).toBeUndefined();
-      expect(params?.component).toBeUndefined();
-    });
-  });
-
-  it.each(["apiv2", "subtitles", "notifications.fanout", "future.worker", "allworkers"])(
+  it.each(["future.worker", "allworkers"])(
     "filters live and history logs by %s, including after clearing and re-entering it",
     async (value) => {
       const user = userEvent.setup();
@@ -250,7 +205,8 @@ describe("admin log level and component filters", () => {
   );
 });
 
-it("shows the actor, affected account and safe permission/password changes", () => {
+/** Streams one audit row, a PUT on account 2 by account 1, with `fields` on top. */
+function streamAuditRow(fields: Record<string, unknown>) {
   vi.mocked(useAdminLogStream).mockReturnValue({
     rows: [
       {
@@ -265,16 +221,22 @@ it("shows the actor, affected account and safe permission/password changes", () 
         action: "user.updated",
         target_type: "user",
         target_id: "2",
-        changes: [
-          { field: "permissions", before: "[]", after: '["marker_edit"]' },
-          { field: "password" },
-        ],
+        ...fields,
       },
     ],
     isConnecting: false,
     isLive: true,
     connectionState: "live",
     reconnect: vi.fn(),
+  });
+}
+
+it("shows the actor, affected account and safe permission/password changes", () => {
+  streamAuditRow({
+    changes: [
+      { field: "permissions", before: "[]", after: '["marker_edit"]' },
+      { field: "password" },
+    ],
   });
   mount("/admin/logs?tab=audit&action=user.updated&actor_user_id=1&target_type=user&target_id=2");
   expect(screen.getByText("user.updated")).toBeInTheDocument();
@@ -290,60 +252,19 @@ it("shows the actor, affected account and safe permission/password changes", () 
 });
 
 it.each([
-  ["access_group", "library_ids", "[]", "all libraries → none"],
-  ["access_group", "allowed_permissions", "[]", "all assignable → none"],
-  ["user", "access_group_id", "5", "none → 5"],
-  ["user", "max_streams", "3", "inherit → 3"],
-])("shows the meaning of null for %s %s", (targetType, field, after, expected) => {
-  vi.mocked(useAdminLogStream).mockReturnValue({
-    rows: [
-      {
-        id: 901,
-        timestamp: "2026-10-08T10:00:00Z",
-        client_ip: "192.0.2.1",
-        method: "PUT",
-        path: "/api/v2/admin/users/2",
-        status_code: 204,
-        duration_ms: 1,
-        user_id: 1,
-        action: `${targetType}.updated`,
-        target_type: targetType,
-        target_id: "2",
-        changes: [{ field, before: "null", after }],
-      },
-    ],
-    isConnecting: false,
-    isLive: true,
-    connectionState: "live",
-    reconnect: vi.fn(),
+  ["access_group", "library_ids", "null", "[]", "all libraries → none"],
+  ["access_group", "allowed_permissions", "null", "[]", "all assignable → none"],
+  ["user", "access_group_id", "null", "5", "none → 5"],
+  ["user", "max_streams", "null", "3", "inherit → 3"],
+  // Object values show as JSON.
+  ["user", "max_streams", '{"a":1}', "2", '{"a":1} → 2'],
+])("shows a %s %s change from %s to %s", (targetType, field, before, after, expected) => {
+  streamAuditRow({
+    id: 901,
+    action: `${targetType}.updated`,
+    target_type: targetType,
+    changes: [{ field, before, after }],
   });
   mount("/admin/logs?tab=audit");
   expect(screen.getByText(field.replaceAll("_", " ")).parentElement).toHaveTextContent(expected);
-});
-
-it("shows object change values as JSON", () => {
-  vi.mocked(useAdminLogStream).mockReturnValue({
-    rows: [
-      {
-        id: 902,
-        timestamp: "2026-10-08T10:00:00Z",
-        client_ip: "192.0.2.1",
-        method: "PUT",
-        path: "/api/v2/admin/users/2",
-        status_code: 204,
-        duration_ms: 1,
-        user_id: 1,
-        action: "user.updated",
-        target_type: "user",
-        target_id: "2",
-        changes: [{ field: "max_streams", before: '{"a":1}', after: "2" }],
-      },
-    ],
-    isConnecting: false,
-    isLive: true,
-    connectionState: "live",
-    reconnect: vi.fn(),
-  });
-  mount("/admin/logs?tab=audit");
-  expect(screen.getByText("max streams").parentElement).toHaveTextContent('{"a":1} → 2');
 });

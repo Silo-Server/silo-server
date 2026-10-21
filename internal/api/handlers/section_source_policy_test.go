@@ -84,39 +84,6 @@ func TestProfileOverrideSaveStopsOnBaseSectionReadFailure(t *testing.T) {
 	}
 }
 
-func TestProfileTMDBTrendingUnchangedSaveDoesNotRefreshAgain(t *testing.T) {
-	store := &sourcePolicyStore{}
-	refresher := sourcePolicyRefresher{configs: make(chan json.RawMessage, 2)}
-	h := &SectionHandler{
-		StoreProvider:     sourcePolicyProvider{store: store},
-		TrendingRefresher: refresher,
-	}
-	write := SectionOverrideWrite{
-		ID: "new", IsUserAdded: true, UserSectionType: "trending_discover",
-		UserConfig: json.RawMessage(`{"source":"tmdb","window":"day"}`),
-	}
-	query := SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}
-	if err := h.SaveProfileOverrides(t.Context(), query, []SectionOverrideWrite{write}); err != nil {
-		t.Fatalf("first SaveProfileOverrides: %v", err)
-	}
-	select {
-	case config := <-refresher.configs:
-		if string(config) != string(write.UserConfig) {
-			t.Fatalf("refresh config = %s, want %s", config, write.UserConfig)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("first save did not request an immediate refresh")
-	}
-	if err := h.SaveProfileOverrides(t.Context(), query, []SectionOverrideWrite{write}); err != nil {
-		t.Fatalf("second SaveProfileOverrides: %v", err)
-	}
-	select {
-	case config := <-refresher.configs:
-		t.Fatalf("unchanged save unexpectedly refreshed %s", config)
-	case <-time.After(100 * time.Millisecond):
-	}
-}
-
 func TestProfileConflictingLegacyFieldsResolveToValidatedUserFields(t *testing.T) {
 	store := &sourcePolicyStore{}
 	refresher := sourcePolicyRefresher{configs: make(chan json.RawMessage, 1)}

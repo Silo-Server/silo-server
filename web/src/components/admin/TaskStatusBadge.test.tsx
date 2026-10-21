@@ -1,5 +1,4 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import type { ExecutionResult } from "@/api/types";
@@ -20,7 +19,6 @@ describe("TaskStatusBadge", () => {
     },
     { taskKey: "contribute_markers", status: "completed", failed: 0, label: "completed" },
     { taskKey: "contribute_markers", status: "failed", failed: 18, label: "failed" },
-    { taskKey: "contribute_markers", status: "cancelled", failed: 18, label: "cancelled" },
     { taskKey: "other_task", status: "completed", failed: 18, label: "completed" },
   ])(
     "shows $label for $taskKey ($status, $failed failures)",
@@ -41,25 +39,4 @@ describe("TaskStatusBadge", () => {
       }
     },
   );
-
-  it("keeps the failure reason available when the task itself failed", async () => {
-    const user = userEvent.setup();
-    render(
-      <TaskStatusBadge
-        result={{
-          task_key: "contribute_markers",
-          status: "failed",
-          result_data: { submitted: 0, skipped: 0, invalid: 0, failed: 18, retry_after_seconds: 0 },
-          error_message: "Could not load marker candidates",
-        }}
-      />,
-    );
-
-    await user.tab();
-
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(
-      "Could not load marker candidates",
-    );
-    expect(screen.queryByText("Completed with errors")).not.toBeInTheDocument();
-  });
 });

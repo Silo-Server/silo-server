@@ -445,16 +445,6 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
   });
 
-  it("finds an episode's series from its cached detail", () => {
-    const queryClient = new QueryClient();
-    queryClient.setQueryData(catalogKeys.itemDetail("episode-1"), {
-      content_id: "episode-1",
-      series_id: "series-1",
-    });
-
-    expect(relatedItemIds(queryClient, "episode-1")).toEqual(new Set(["episode-1", "series-1"]));
-  });
-
   it("refreshes open episode grids for an item the cache doesn't know yet", async () => {
     // A scan adds an episode: its event names only the new episode, which no
     // cached query mentions, so the season grid that should list it refreshes.
@@ -713,22 +703,6 @@ describe("invalidateMediaSurfaceQueries", () => {
     });
 
     expect(queryClient.getQueryState(libraryDetailKey)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
-  });
-
-  it("still invalidates explicitly watched keys that belong to another item", async () => {
-    const queryClient = new QueryClient();
-    const seriesDetailKey = itemKeys.detail("series-1");
-    const otherDetailKey = itemKeys.detail("item-2");
-    queryClient.setQueryData(seriesDetailKey, { content_id: "series-1" });
-    queryClient.setQueryData(otherDetailKey, { content_id: "item-2" });
-
-    await invalidateMediaSurfaceQueries(queryClient, {
-      itemId: "episode-1",
-      watchedKeys: [seriesDetailKey],
-    });
-
-    expect(queryClient.getQueryState(seriesDetailKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
   });
 });

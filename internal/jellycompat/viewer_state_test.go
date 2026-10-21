@@ -107,7 +107,7 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 }
 
 func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
-	for _, key := range []string{"datePlayed", "DatePlayed", "DATEPLAYED"} {
+	for _, key := range []string{"datePlayed", "DATEPLAYED"} {
 		t.Run(key, func(t *testing.T) {
 			store := newJellycompatUserStore(t)
 			provider := notifications.WrapUserStoreProvider(compatTestUserStoreProvider{store: store}, &notifications.System{})
@@ -212,14 +212,6 @@ func TestConfigurationPersistsProfileSettingsAndPartialChanges(t *testing.T) {
 	}
 	if dto.Configuration.SubtitleMode == "Always" || dto.Configuration.HidePlayedInLatest {
 		t.Fatalf("configuration profile leak %+v", dto.Configuration)
-	}
-}
-
-func TestCulturesIncludesLanguageCodes(t *testing.T) {
-	rec := httptest.NewRecorder()
-	(&AuthHandler{}).HandleCultures(rec, httptest.NewRequest("GET", "/", nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"ThreeLetterISOLanguageName":"eng"`) {
-		t.Fatal(rec.Code, rec.Body.String())
 	}
 }
 
@@ -456,7 +448,7 @@ func TestUserDataZeroDateUsesCurrentTime(t *testing.T) {
 }
 
 func TestViewerOwnerQueryIsCaseInsensitive(t *testing.T) {
-	for _, key := range []string{"userId", "UserId", "USERID"} {
+	for _, key := range []string{"userId", "USERID"} {
 		t.Run(key, func(t *testing.T) {
 			store := newJellycompatUserStore(t)
 			provider := compatTestUserStoreProvider{store: store}

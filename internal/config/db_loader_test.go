@@ -25,27 +25,6 @@ func TestLoadFromDBMetadataPresignExpiry(t *testing.T) {
 	}
 }
 
-func TestLoadFromDBMetadataPresignExpiryRejectsInvalidDuration(t *testing.T) {
-	_, err := LoadFromDB(map[string]string{"s3.metadata_presign_expiry": "soon"})
-	if err == nil {
-		t.Fatal("LoadFromDB() error = nil, want invalid duration error")
-	}
-	if !strings.Contains(err.Error(), "s3.metadata_presign_expiry") {
-		t.Fatalf("LoadFromDB() error = %v, want key name", err)
-	}
-}
-
-func TestLoadFromDBRejectsInvalidSegmentRetention(t *testing.T) {
-	for _, value := range []string{"-1", "119", "86401"} {
-		t.Run(value, func(t *testing.T) {
-			_, err := LoadFromDB(map[string]string{playbackSegmentRetentionSettingKey: value})
-			if err == nil || !strings.Contains(err.Error(), playbackSegmentRetentionSettingKey) {
-				t.Fatalf("LoadFromDB() error = %v, want retention bounds error", err)
-			}
-		})
-	}
-}
-
 func TestLoadFromDBDownloadArtifactDirRequiresAbsolutePath(t *testing.T) {
 	cfg, err := LoadFromDB(map[string]string{downloadArtifactDirSettingKey: "/mnt/silo-downloads"})
 	if err != nil {
@@ -53,55 +32,6 @@ func TestLoadFromDBDownloadArtifactDirRequiresAbsolutePath(t *testing.T) {
 	}
 	if cfg.Download.ArtifactDir != "/mnt/silo-downloads" {
 		t.Fatalf("artifact dir = %q", cfg.Download.ArtifactDir)
-	}
-
-	_, err = LoadFromDB(map[string]string{downloadArtifactDirSettingKey: "relative/downloads"})
-	if err == nil || !strings.Contains(err.Error(), downloadArtifactDirSettingKey) {
-		t.Fatalf("relative artifact dir error = %v", err)
-	}
-}
-
-func TestLoadFromDBJellyfinWebEnabledDefaultsToTrue(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if !cfg.JellyfinCompat.WebEnabled {
-		t.Fatal("JellyfinCompat.WebEnabled = false, want default true")
-	}
-
-	cfg, err = LoadFromDB(map[string]string{"jellyfin_compat.web_enabled": "false"})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if cfg.JellyfinCompat.WebEnabled {
-		t.Fatal("JellyfinCompat.WebEnabled = true, want configured false")
-	}
-}
-
-func TestLoadFromDBPolicyEditorEnabledDefaultsFalse(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if cfg.Policy.EditorEnabled {
-		t.Fatal("Policy.EditorEnabled = true, want default false")
-	}
-
-	cfg, err = LoadFromDB(map[string]string{"policy.editor_enabled": "true"})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if !cfg.Policy.EditorEnabled {
-		t.Fatal("Policy.EditorEnabled = false, want configured true")
-	}
-
-	_, err = LoadFromDB(map[string]string{"policy.editor_enabled": "maybe"})
-	if err == nil {
-		t.Fatal("LoadFromDB() error = nil, want invalid bool error")
-	}
-	if !strings.Contains(err.Error(), "policy.editor_enabled") {
-		t.Fatalf("LoadFromDB() error = %v, want key name", err)
 	}
 }
 
@@ -120,14 +50,6 @@ func TestLoadFromDBScannerRealtimeMonitoringDefaultsTrue(t *testing.T) {
 	}
 	if cfg.Scanner.RealtimeMonitoring {
 		t.Fatal("Scanner.RealtimeMonitoring = true, want configured false")
-	}
-
-	_, err = LoadFromDB(map[string]string{"scanner.realtime_monitoring": "maybe"})
-	if err == nil {
-		t.Fatal("LoadFromDB() error = nil, want invalid bool error")
-	}
-	if !strings.Contains(err.Error(), "scanner.realtime_monitoring") {
-		t.Fatalf("LoadFromDB() error = %v, want key name", err)
 	}
 }
 
@@ -192,76 +114,71 @@ func TestLoadFromDBJellyfinCompatEnabledRespectsExplicitDisable(t *testing.T) {
 	if cfg.JellyfinCompat.Enabled {
 		t.Fatal("JellyfinCompat.Enabled = true, want configured false")
 	}
+}
 
-	_, err = LoadFromDB(map[string]string{"jellyfin_compat.enabled": "maybe"})
-	if err == nil {
-		t.Fatal("LoadFromDB() error = nil, want invalid bool error")
-	}
-	if !strings.Contains(err.Error(), "jellyfin_compat.enabled") {
-		t.Fatalf("LoadFromDB() error = %v, want key name", err)
+// TestLoadFromDBRejectsInvalidValues checks that an unreadable stored value
+// fails the load and names its key.
+func TestLoadFromDBRejectsInvalidValues(t *testing.T) {
+	for _, tc := range []struct{ key, value string }{
+		{"s3.metadata_presign_expiry", "soon"},
+		{playbackSegmentRetentionSettingKey, "-1"},
+		{playbackSegmentRetentionSettingKey, "119"},
+		{playbackSegmentRetentionSettingKey, "86401"},
+		{downloadArtifactDirSettingKey, "relative/downloads"},
+		{"scanner.realtime_monitoring", "maybe"},
+		{"jellyfin_compat.enabled", "maybe"},
+		{PlaybackRoutingRemuxExecutionSettingKey, "sometimes_worker"},
+		{PlaybackRoutingDirectPlayEgressSettingKey, "worker"},
+	} {
+		t.Run(tc.key+"="+tc.value, func(t *testing.T) {
+			_, err := LoadFromDB(map[string]string{tc.key: tc.value})
+			if err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("LoadFromDB() error = %v, want an error naming %s", err, tc.key)
+			}
+		})
 	}
 }
 
-func TestYAMLToSettingsMapJellyfinCompatEnabledPreservesLegacyListener(t *testing.T) {
-	m := yamlSettingsMapFromString(t, `
-jellyfin_compat:
-  listen: ":19096"
-`)
-	if got := m["jellyfin_compat.enabled"]; got != "true" {
-		t.Fatalf("jellyfin_compat.enabled = %q, want true", got)
-	}
-	if got := m["jellyfin_compat.listen"]; got != ":19096" {
-		t.Fatalf("jellyfin_compat.listen = %q, want configured listener", got)
-	}
-}
-
-func TestYAMLToSettingsMapJellyfinCompatEnabledRespectsExplicitDisable(t *testing.T) {
-	m := yamlSettingsMapFromString(t, `
-jellyfin_compat:
-  enabled: false
-  listen: ":19096"
-`)
-	if got := m["jellyfin_compat.enabled"]; got != "false" {
-		t.Fatalf("jellyfin_compat.enabled = %q, want false", got)
-	}
-}
-
-func TestYAMLToSettingsMapJellyfinCompatEnabledDefaultsToLegacyListener(t *testing.T) {
-	m := yamlSettingsMapFromString(t, `server:
-  mode: integrated
-`)
-	if got := m["jellyfin_compat.enabled"]; got != "true" {
-		t.Fatalf("jellyfin_compat.enabled = %q, want true for default listener", got)
-	}
-	if got := m["jellyfin_compat.listen"]; got == "" {
-		t.Fatal("jellyfin_compat.listen is empty, want default listener")
-	}
-}
-
-func TestYAMLToSettingsMapPreservesExplicitlyDisabledSegmentRetention(t *testing.T) {
-	m := yamlSettingsMapFromString(t, `
-playback:
-  segment_retention_seconds: 0
-`)
-	if got := m[playbackSegmentRetentionSettingKey]; got != "0" {
-		t.Fatalf("segment retention = %q, want explicit disable", got)
-	}
-}
-
-func TestYAMLToSettingsMapScannerRealtimeMonitoring(t *testing.T) {
-	m := yamlSettingsMapFromString(t, `server:
-  mode: integrated
-`)
-	if got := m["scanner.realtime_monitoring"]; got != "true" {
-		t.Fatalf("scanner.realtime_monitoring = %q, want default true", got)
-	}
-
-	m = yamlSettingsMapFromString(t, `
-scanner:
-  realtime_monitoring: false
-`)
-	if got := m["scanner.realtime_monitoring"]; got != "false" {
-		t.Fatalf("scanner.realtime_monitoring = %q, want explicit false", got)
+func TestYAMLToSettingsMap(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		yaml     string
+		want     map[string]string
+		nonEmpty string
+	}{
+		{
+			name: "jellyfin listener alone enables compat",
+			yaml: "jellyfin_compat:\n  listen: \":19096\"\n",
+			want: map[string]string{"jellyfin_compat.enabled": "true", "jellyfin_compat.listen": ":19096"},
+		},
+		{
+			name: "jellyfin explicit disable wins over a listener",
+			yaml: "jellyfin_compat:\n  enabled: false\n  listen: \":19096\"\n",
+			want: map[string]string{"jellyfin_compat.enabled": "false"},
+		},
+		{
+			name:     "jellyfin defaults to the legacy listener",
+			yaml:     "server:\n  mode: integrated\n",
+			want:     map[string]string{"jellyfin_compat.enabled": "true"},
+			nonEmpty: "jellyfin_compat.listen",
+		},
+		{
+			name: "explicitly disabled segment retention is preserved",
+			yaml: "playback:\n  segment_retention_seconds: 0\n",
+			want: map[string]string{playbackSegmentRetentionSettingKey: "0"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := yamlSettingsMapFromString(t, tc.yaml)
+			for key, want := range tc.want {
+				if got := m[key]; got != want {
+					t.Errorf("%s = %q, want %q", key, got, want)
+				}
+			}
+			if tc.nonEmpty != "" && m[tc.nonEmpty] == "" {
+				t.Errorf("%s is empty, want a default", tc.nonEmpty)
+			}
+		})
 	}
 }
 

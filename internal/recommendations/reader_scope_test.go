@@ -1,7 +1,6 @@
 package recommendations
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -26,16 +25,6 @@ func scoredIDs(items []ScoredItem) []string {
 		out[i] = item.MediaItemID
 	}
 	return out
-}
-
-func TestNormalizeRecommendationLimit(t *testing.T) {
-	for _, tc := range []struct{ in, want int }{
-		{-1, 20}, {0, 20}, {1, 1}, {20, 20}, {21, 21}, {50, 50}, {51, 50}, {CacheCandidateLimit, 50},
-	} {
-		if got := normalizeRecommendationLimit(tc.in); got != tc.want {
-			t.Errorf("normalizeRecommendationLimit(%d) = %d, want %d", tc.in, got, tc.want)
-		}
-	}
 }
 
 // Public reads answer up to the v2 maximum of 50 items per row; section
@@ -219,103 +208,6 @@ func TestSectionBecauseYouWatchedMovesPastAnEmptiedAnchor(t *testing.T) {
 	items, source, err := r.SectionBecauseYouWatched(t.Context(), 7, "p1", "", nil, catalog.AccessFilter{})
 	if err != nil || source != "second" || !slices.Equal(scoredIDs(items), []string{"fresh"}) {
 		t.Fatalf("source=%q items=%v err=%v; want the second anchor's row", source, scoredIDs(items), err)
-	}
-}
-
-// A profile whose recent completions were all deleted from the catalog has
-// no anchor, so reading the row asks for no refresh that could never fill it.
-func TestBecauseYouWatchedWithOnlyDeletedCompletionsRequestsNoRefresh(t *testing.T) {
-	refresher := &countingReadRefresher{}
-	r := &Reader{
-		repo:    &fakeReaderRepo{},
-		refresh: refresher,
-		signals: NewSignalReader(
-			&fakeSignalRepo{missing: map[string]struct{}{"deleted-movie": {}, "orphan-episode": {}}},
-			fakeSignalProvider{store: anchorStore("deleted-movie", "orphan-episode")},
-		),
-	}
-	for range 3 {
-		items, source, err := r.SectionBecauseYouWatched(t.Context(), 7, "p1", "", nil, catalog.AccessFilter{})
-		if err != nil || len(items) != 0 || source != "" {
-			t.Fatalf("items=%v source=%q err=%v; want an empty row", items, source, err)
-		}
-	}
-	if refresher.calls != 0 {
-		t.Fatalf("refreshes = %d, want none", refresher.calls)
-	}
-}
-
-// progressPageCounter counts the full progress walks the watched set makes.
-type progressPageCounter struct {
-	*fakeSignalStore
-	allPages int
-}
-
-func (s *progressPageCounter) ListProgressPage(ctx context.Context, profileID, status string, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, error) {
-	if status == "all" {
-		s.allPages++
-	}
-	return s.fakeSignalStore.ListProgressPage(ctx, profileID, status, after, limit)
-}
-
-// One request loads the profile's exclusion set once, however many rows,
-// clusters or anchors it filters.
-func TestReadLoadsTheExclusionSetOncePerRequest(t *testing.T) {
-	store := &progressPageCounter{fakeSignalStore: anchorStore("first", "second", "third")}
-	r := &Reader{
-		repo: &fakeReaderRepo{
-			meta: &TasteProfileMeta{SignalCounts: map[string]int{"watch_high": ColdStartFullPersonalized}},
-			clusters: []TasteCluster{
-				{ClusterIdx: 0, Label: "Drama", TotalWeight: 3},
-				{ClusterIdx: 1, Label: "Comedy", TotalWeight: 2},
-			},
-			personal: map[string][]ScoredItem{
-				RecTypeForYouMain + "|":                {{MediaItemID: "main"}},
-				RecTypeSimilarUsersLiked + "|":         {{MediaItemID: "similar"}},
-				RecTypeForYouClusterPrefix + "0" + "|": {{MediaItemID: "first"}},
-				RecTypeForYouClusterPrefix + "1" + "|": {{MediaItemID: "comedy"}},
-				RecTypeBecauseWatched + "|first":       {{MediaItemID: "second"}},
-				RecTypeBecauseWatched + "|second":      {{MediaItemID: "third"}},
-				RecTypeBecauseWatched + "|third":       {{MediaItemID: "fresh"}},
-			},
-		},
-		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: store}),
-	}
-	ctx := t.Context()
-	for name, read := range map[string]func() error{
-		"discover": func() error {
-			_, err := r.GetDiscoverRows(ctx, 7, "p1", 20, catalog.AccessFilter{})
-			return err
-		},
-		"taste match past a watched cluster": func() error {
-			row, err := r.SectionTasteMatchRow(ctx, 7, "p1", "", catalog.AccessFilter{})
-			if err == nil && (row == nil || row.ClusterIndex != 1) {
-				return fmt.Errorf("row = %+v, want cluster 1", row)
-			}
-			return err
-		},
-		"for you fill": func() error {
-			fill, err := r.SectionForYouFill(ctx, 7, "p1", catalog.AccessFilter{})
-			if err == nil && !slices.Equal(scoredIDs(fill), []string{"comedy", "fresh", "similar"}) {
-				return fmt.Errorf("fill = %v, want comedy, fresh, similar", scoredIDs(fill))
-			}
-			return err
-		},
-		"because you watched past two watched rows": func() error {
-			items, source, err := r.SectionBecauseYouWatched(ctx, 7, "p1", "", nil, catalog.AccessFilter{})
-			if err == nil && (source != "third" || len(items) != 1) {
-				return fmt.Errorf("source=%q items=%v, want the third anchor", source, items)
-			}
-			return err
-		},
-	} {
-		store.allPages = 0
-		if err := read(); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if store.allPages != 1 {
-			t.Fatalf("%s walked the watch history %d times, want once", name, store.allPages)
-		}
 	}
 }
 

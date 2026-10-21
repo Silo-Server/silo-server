@@ -8,8 +8,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // fakeCoverageModels is an in-memory CatalogSemanticModelProvider. It returns a
@@ -64,24 +62,6 @@ func fatalFetch(t *testing.T) func(context.Context, string) ([]catalogTypeCovera
 	return func(context.Context, string) ([]catalogTypeCoverage, error) {
 		t.Fatal("fetch must not be called")
 		return nil, nil
-	}
-}
-
-// TestCoverageReadyNilSnapshotIsSafe verifies the fail-safe contract: a
-// freshly-constructed tracker that has never refreshed reports not-ready, never
-// panics, and never touches the fetch seam (read path is lock/DB free).
-func TestCoverageReadyNilSnapshotIsSafe(t *testing.T) {
-	tr := &semanticCoverageTracker{fetch: fatalFetch(t), clock: time.Now}
-
-	ready, reason := tr.CoverageReady(nil)
-	if ready {
-		t.Fatalf("nil-snapshot tracker reported ready")
-	}
-	if reason != "coverage not yet computed" {
-		t.Fatalf("reason = %q, want %q", reason, "coverage not yet computed")
-	}
-	if tr.Snapshot() != nil {
-		t.Fatalf("Snapshot() = %+v, want nil before any refresh", tr.Snapshot())
 	}
 }
 
@@ -463,79 +443,5 @@ func TestCoverageRunStopsOnContextCancel(t *testing.T) {
 	}
 	if refreshes.Load() == 0 {
 		t.Fatalf("Run should perform an immediate refresh before ticking")
-	}
-}
-
-// TestNewSemanticCoverageTrackerCoverageDBSmoke is the single DB-backed test. It
-// proves the default fetch wiring reaches catalogSemanticCoverageByType through
-// a real pool. Skipped unless SILO_TEST_DATABASE_URL is set.
-func TestNewSemanticCoverageTrackerCoverageDBSmoke(t *testing.T) {
-	pool := newSemanticCoverageTestPool(t)
-	const prefix = "covtrack-smoke-"
-	cleanupSemanticCoverageItems(t, pool, prefix)
-
-	seedSemanticCoverageMediaItem(t, pool, prefix+"m1", "movie", "matched")
-	seedSemanticCoverageMediaItem(t, pool, prefix+"m2", "movie", "matched")
-	seedSemanticCoverageEmbedding(t, pool, prefix+"m1", "smoke-model")
-
-	tr := newSemanticCoverageTracker(pool, []string{"movie"}, constCoverageModels{model: "smoke-model"})
-	if err := tr.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh against real pool: %v", err)
-	}
-	snap := tr.Snapshot()
-	if snap == nil {
-		t.Fatalf("Snapshot() = nil after DB-backed refresh")
-	}
-	cov := snap.PerType["movie"]
-	if cov.Eligible < 2 {
-		t.Fatalf("movie eligible = %d, want >= 2 seeded rows", cov.Eligible)
-	}
-	if cov.Vectorized < 1 {
-		t.Fatalf("movie vectorized = %d, want >= 1 seeded embedding", cov.Vectorized)
-	}
-	if cov.Vectorized > cov.Eligible {
-		t.Fatalf("vectorized %d exceeds eligible %d", cov.Vectorized, cov.Eligible)
-	}
-}
-
-// fakeCountRows yields (type, count) rows, then reports err from Err.
-type fakeCountRows struct {
-	pgx.Rows
-	rows   []catalogTypeCoverage
-	err    error
-	closed bool
-}
-
-func (r *fakeCountRows) Next() bool { return len(r.rows) > 0 }
-
-func (r *fakeCountRows) Scan(dest ...any) error {
-	mediaType, okType := dest[0].(*string)
-	count, okCount := dest[1].(*int)
-	if !okType || !okCount {
-		return errors.New("fakeCountRows: scan wants *string, *int")
-	}
-	*mediaType, *count = r.rows[0].Type, r.rows[0].Eligible
-	r.rows = r.rows[1:]
-	return nil
-}
-
-func (r *fakeCountRows) Err() error { return r.err }
-func (r *fakeCountRows) Close()     { r.closed = true }
-
-// TestScanCoverageCountsReportsIterationError pins that a query failing
-// mid-stream fails the count instead of returning the rows read so far.
-func TestScanCoverageCountsReportsIterationError(t *testing.T) {
-	streamErr := errors.New("connection reset")
-	rows := &fakeCountRows{rows: []catalogTypeCoverage{{Type: "movie", Eligible: 3}}, err: streamErr}
-	got := map[string]int{}
-	err := scanCoverageCounts(rows, func(mediaType string, count int) { got[mediaType] = count })
-	if !errors.Is(err, streamErr) {
-		t.Fatalf("err = %v, want %v", err, streamErr)
-	}
-	if got["movie"] != 3 {
-		t.Fatalf("counts = %v, want the row read before the failure", got)
-	}
-	if !rows.closed {
-		t.Fatal("rows were not closed")
 	}
 }

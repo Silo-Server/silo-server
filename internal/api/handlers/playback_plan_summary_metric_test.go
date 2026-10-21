@@ -127,7 +127,7 @@ func (stalledDeliveryStore) PlanDelivery(ctx context.Context, _, _ string) (stri
 // A slow delivery lookup only loses the metric's label: the summary and the
 // playback sample it carries are still kept for the connection.
 func TestSlowPlanDeliveryLookupKeepsTheSummaryDB(t *testing.T) {
-	pool := catalogTransferPool(t)
+	pool := connectionTestPool(t)
 	ctx := t.Context()
 	var user int
 	if err := pool.QueryRow(ctx, `INSERT INTO users(username, role) VALUES ($1, 'user') RETURNING id`, fmt.Sprintf("slow-delivery-%d", time.Now().UnixNano())).Scan(&user); err != nil {

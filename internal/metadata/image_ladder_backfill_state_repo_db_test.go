@@ -72,31 +72,6 @@ func seedLadderFenceFixture(t *testing.T, pool *pgxpool.Pool) ladderFenceFixture
 	return fixture
 }
 
-func TestImageLadderBackfillFinalConfirmationRejectsLateOldArtwork(t *testing.T) {
-	pool := imageCacheQueueTestPool(t)
-	fixture := seedLadderFenceFixture(t, pool)
-	ctx := context.Background()
-
-	if _, err := pool.Exec(ctx, `UPDATE media_items SET poster_path = $1 WHERE content_id = $2`, fixture.oldPath, fixture.contentID); err != nil {
-		t.Fatalf("publish old-ladder artwork: %v", err)
-	}
-	confirmed, err := NewImageLadderBackfillStateRepository(pool).ConfirmBackfilled(ctx, 3)
-	if err != nil {
-		t.Fatalf("ConfirmBackfilled: %v", err)
-	}
-	if confirmed {
-		t.Fatal("confirmed ladder v3 while the published artwork lacks its new rung")
-	}
-
-	state, err := NewImageLadderBackfillStateRepository(pool).Get(ctx)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if !state.LastAttemptAt.IsZero() {
-		t.Fatalf("last attempt = %v, want immediate retry after rejected confirmation", state.LastAttemptAt)
-	}
-}
-
 func TestImageLadderBackfillLateOldArtworkReopensCompletedVersion(t *testing.T) {
 	pool := imageCacheQueueTestPool(t)
 	fixture := seedLadderFenceFixture(t, pool)

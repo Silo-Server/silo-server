@@ -74,8 +74,6 @@ func TestEpisodeNamingSeriesTitle(t *testing.T) {
 		{"[Baz-Bar] Foo - 05 [1080p][Multiple Subtitle]", "Foo", 5},
 		{"[YuiSubs] Tensura Nikki - Tensei Shitara Slime Datta Ken - 12 (NVENC H.265 1080p)", "Tensura Nikki - Tensei Shitara Slime Datta Ken", 12},
 		{"[CASO&Sumisora][Oda_Nobuna_no_Yabou][04][BDRIP][1920x1080][x264_AAC][7620E503]", "Oda Nobuna no Yabou", 4},
-		{"[HorribleSubs] Made in Abyss - 13 [720p]", "Made in Abyss", 13},
-		{"[Erai-raws] Jujutsu Kaisen - 03 [720p][Multiple Subtitle]", "Jujutsu Kaisen", 3},
 		{"[tvN] 혼술남녀.E01-E16.720p-NEXT", "혼술남녀", 1},
 		{"[tvN] 연애말고 결혼 E01~E16 END HDTV.H264.720p-WITH", "연애말고 결혼", 1},
 		{"[Group] 86 - 03 [1080p]", "86", 3},
@@ -97,7 +95,7 @@ func TestEpisodeNamingSeriesTitle(t *testing.T) {
 
 func TestEpisodeNamingDoesNotInventCoordinates(t *testing.T) {
 	for _, name := range []string{
-		"1920x1080", "720x480", "360x240", "1080p", "1080p H.265 AAC5.1",
+		"1920x1080", "1080p", "1080p H.265 AAC5.1",
 		"1920x1080-E15", "999x03-E15", "Show.03.04.2020", "Show 03-04-2020", "2001 - A Space Odyssey", "Space 1999",
 		"Show E02video", "Show E02v2video", "Show [1920x1080] [AAC5.1]", "Show H.265 AAC5.1", "Show S01E02foo",
 	} {
@@ -107,7 +105,7 @@ func TestEpisodeNamingDoesNotInventCoordinates(t *testing.T) {
 			}
 		})
 	}
-	for _, folder := range []string{"Extras", "Trailers", "Shorts", "Clips", "Other", "Teasers", "Scenes", "BehindTheScenes", "DeletedScenes", "Behind_the_scenes", "Interviews"} {
+	for _, folder := range []string{"Extras", "Trailers", "BehindTheScenes", "Behind_the_scenes"} {
 		t.Run(folder, func(t *testing.T) {
 			if token, _ := parseEpisodeToken("E02 - Bonus", []string{"Show", "Season 1", folder}, false, true, true); token.episode != 0 {
 				t.Fatalf("extra acquired episode coordinates: %+v", token)

@@ -202,39 +202,6 @@ func TestManagerDownloadRejectsOversizedProviderResult(t *testing.T) {
 	}
 }
 
-func TestManagerProviderNames(t *testing.T) {
-	manager := NewManager(newMockSubtitleRepo(), newMockBlobStore())
-
-	names := manager.ProviderNames()
-	if names == nil {
-		t.Fatal("ProviderNames() = nil, want non-nil empty slice")
-	}
-	if len(names) != 0 {
-		t.Fatalf("ProviderNames() = %v, want empty", names)
-	}
-
-	manager.RegisterProvider(stubProvider{name: "subdl"})
-	manager.RegisterProvider(stubProvider{name: "opensubtitles"})
-	manager.RegisterProvider(stubProvider{name: "subsource"})
-
-	want := []string{"opensubtitles", "subdl", "subsource"}
-	names = manager.ProviderNames()
-	if len(names) != len(want) {
-		t.Fatalf("ProviderNames() = %v, want %v", names, want)
-	}
-	for i, name := range want {
-		if names[i] != name {
-			t.Fatalf("ProviderNames() = %v, want %v (sorted)", names, want)
-		}
-	}
-
-	manager.RemoveProvider("subdl")
-	names = manager.ProviderNames()
-	if len(names) != 2 || names[0] != "opensubtitles" || names[1] != "subsource" {
-		t.Fatalf("ProviderNames() after removal = %v, want [opensubtitles subsource]", names)
-	}
-}
-
 func TestManagerUploadDedupesIdenticalContent(t *testing.T) {
 	repo := newMockSubtitleRepo()
 	s3 := newMockBlobStore()

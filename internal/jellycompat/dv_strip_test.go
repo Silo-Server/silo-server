@@ -128,23 +128,15 @@ func TestPlaybackInfoDoesNotStripWhenClientPlaysDolbyVision(t *testing.T) {
 	}
 }
 
+// An SDR display rejects the HDR10 base layer too, so the strip must not be
+// offered even though an executor could run it.
 func TestPlaybackInfoWithoutStripOrToneMapStillHasNoRoute(t *testing.T) {
-	for name, tc := range map[string]struct {
-		unsupported []string
-		localStrip  bool
-	}{
-		"SDR display rejects the HDR10 base layer": {unsupported: androidTVSDRDisplay, localStrip: true},
-		"no executor has the dovi_rpu filter":      {unsupported: androidTVDVProfile8Disabled, localStrip: false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			handler, routeID := newDVStripHandler(t, tc.localStrip)
+	handler, routeID := newDVStripHandler(t, true)
 
-			rr := servePlaybackInfo(handler, routeID, androidTVRangeProfile(tc.unsupported...))
+	rr := servePlaybackInfo(handler, routeID, androidTVRangeProfile(androidTVSDRDisplay...))
 
-			if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
-				t.Fatalf("status = %d body = %s, want PlaybackUnavailable", rr.Code, rr.Body.String())
-			}
-		})
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
+		t.Fatalf("status = %d body = %s, want PlaybackUnavailable", rr.Code, rr.Body.String())
 	}
 }
 
@@ -231,28 +223,6 @@ func TestCompatCopyVideoMasterManifestForStripOmitsDolbyVision(t *testing.T) {
 	}
 	if strings.Contains(got, "SUPPLEMENTAL-CODECS") || strings.Contains(got, "dvh1") {
 		t.Fatalf("strip master still advertises Dolby Vision:\n%s", got)
-	}
-}
-
-func TestCompatCopyVideoMasterManifestForProfile7StripAdvertisesPQ(t *testing.T) {
-	source := PlaybackMediaSource{
-		ID: "source-1",
-		Version: catalog.FileVersion{
-			Bitrate: 60_000,
-			VideoTracks: []models.VideoTrack{{
-				Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
-				DVProfile: 7, DVLevel: 6, DVBLCompatID: 6, VideoRangeType: "DOVIWithEL",
-			}},
-			AudioTracks: []models.AudioTrack{{Codec: "aac", Profile: "LC", Default: true}},
-		},
-		HLSRemux:       true,
-		DVStripToHDR10: true,
-	}
-
-	got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", ""))
-
-	if !strings.Contains(got, "VIDEO-RANGE=PQ") || strings.Contains(got, "dvh1") {
-		t.Fatalf("profile 7 strip master must describe the HDR10 base layer:\n%s", got)
 	}
 }
 

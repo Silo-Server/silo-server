@@ -83,6 +83,52 @@ func (r *fakeProviderIDRepo) FindContentIDByProviderIDs(_ context.Context, provi
 	return "", nil
 }
 
+// seedProviderIdentity stores item, filling nil list fields with empty ones.
+// durable and stale are provider/ID pairs. A non-nil durable adds those rows to
+// the harness's fake provider-ID repository and a non-nil stale records those
+// stale IDs in its fake stale-ID repository, installing either fake on first
+// use. A nil list leaves that repository untouched.
+func seedProviderIdentity(t *testing.T, h *testHarness, item *models.MediaItem, durable, stale []string) (*fakeProviderIDRepo, *fakeStaleIDRepo) {
+	t.Helper()
+	for _, list := range []*[]string{&item.Studios, &item.Networks, &item.Countries, &item.Genres} {
+		if *list == nil {
+			*list = []string{}
+		}
+	}
+	if err := h.itemRepo.Upsert(context.Background(), item); err != nil {
+		t.Fatalf("upsert item %s: %v", item.ContentID, err)
+	}
+	providerRepo, _ := h.service.providerIDRepo.(*fakeProviderIDRepo)
+	if durable != nil {
+		if providerRepo == nil {
+			providerRepo = newFakeProviderIDRepo()
+			h.service.providerIDRepo = providerRepo
+		}
+		var rows []*models.MediaItemProviderID
+		for i := 0; i+1 < len(durable); i += 2 {
+			rows = append(rows, &models.MediaItemProviderID{ContentID: item.ContentID, ItemType: item.Type, Provider: durable[i], ProviderID: durable[i+1]})
+		}
+		if len(rows) > 0 {
+			providerRepo.set(item.ContentID, rows...)
+		}
+	}
+	staleRepo, _ := h.service.staleIDRepo.(*fakeStaleIDRepo)
+	if stale != nil {
+		if staleRepo == nil {
+			staleRepo = newFakeStaleIDRepo()
+			h.service.staleIDRepo = staleRepo
+		}
+		var rows []*models.StaleMediaID
+		for i := 0; i+1 < len(stale); i += 2 {
+			rows = append(rows, &models.StaleMediaID{ContentID: item.ContentID, Provider: stale[i], ProviderID: stale[i+1]})
+		}
+		if len(rows) > 0 {
+			staleRepo.set(item.ContentID, rows...)
+		}
+	}
+	return providerRepo, staleRepo
+}
+
 func (r *fakeProviderIDRepo) set(contentID string, ids ...*models.MediaItemProviderID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -276,33 +322,10 @@ func (p *capturingMetadataProvider) lastRequest() MetadataRequest {
 func TestProcess_ScheduledRefreshReplacesRecordedStaleCurrentID(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: staleRecoveryContentID,
-		Type:      anchoredItemTypeMovie,
-		Title:     staleRecoveryTitle,
-		Year:      2020,
-		Status:    string(MatchOutcomeMatched),
-		TmdbID:    "111",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set(staleRecoveryContentID, &models.MediaItemProviderID{
-		ContentID: staleRecoveryContentID, ItemType: anchoredItemTypeMovie,
-		Provider: contentid.ProviderTMDB, ProviderID: "111",
-	})
-	h.service.providerIDRepo = providerRepo
-	staleRepo := newFakeStaleIDRepo()
-	staleRepo.set(staleRecoveryContentID, &models.StaleMediaID{
-		ContentID: staleRecoveryContentID, Provider: contentid.ProviderTMDB, ProviderID: "111",
-	})
-	h.service.staleIDRepo = staleRepo
+	providerRepo, _ := seedProviderIdentity(t, h, &models.MediaItem{
+		ContentID: staleRecoveryContentID, Type: anchoredItemTypeMovie, Title: staleRecoveryTitle, Year: 2020,
+		Status: string(MatchOutcomeMatched), TmdbID: "111",
+	}, []string{contentid.ProviderTMDB, "111"}, []string{contentid.ProviderTMDB, "111"})
 
 	tmdb := &searchMetadataProvider{
 		slug: contentid.ProviderTMDB,
@@ -391,24 +414,10 @@ func TestProcess_ScheduledRefreshDoesNotReanchorRecordedStaleContentID(t *testin
 	)
 	h := newTestHarness()
 	ctx := context.Background()
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+	seedProviderIdentity(t, h, &models.MediaItem{
 		ContentID: contentID, Type: anchoredItemTypeMovie, Title: "Stable Identity",
 		Status: string(MatchOutcomeMatched), TmdbID: "777", ImdbID: imdbID,
-		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set(contentID,
-		&models.MediaItemProviderID{ContentID: contentID, ItemType: anchoredItemTypeMovie, Provider: contentid.ProviderTMDB, ProviderID: "777"},
-		&models.MediaItemProviderID{ContentID: contentID, ItemType: anchoredItemTypeMovie, Provider: contentid.ProviderIMDB, ProviderID: imdbID},
-	)
-	h.service.providerIDRepo = providerRepo
-	staleRepo := newFakeStaleIDRepo()
-	staleRepo.set(contentID, &models.StaleMediaID{
-		ContentID: contentID, Provider: contentid.ProviderTMDB, ProviderID: "777",
-	})
-	h.service.staleIDRepo = staleRepo
+	}, []string{contentid.ProviderTMDB, "777", contentid.ProviderIMDB, imdbID}, []string{contentid.ProviderTMDB, "777"})
 	provider := &capturingMetadataProvider{response: &MetadataResult{
 		HasMetadata: true, Title: "Stable Identity",
 		ProviderIDs: map[string]string{contentid.ProviderIMDB: imdbID},
@@ -433,25 +442,10 @@ func TestProcess_ScheduledRefreshDoesNotRestoreProviderIDThat404sDuringSameRun(t
 	)
 	h := newTestHarness()
 	ctx := context.Background()
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: itemID,
-		Type:      anchoredItemTypeSeries,
-		Title:     "Still Available",
-		Status:    string(MatchOutcomeMatched),
-		TmdbID:    badTMDB,
-		TvdbID:    goodTVDB,
-		Studios:   []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set(itemID,
-		&models.MediaItemProviderID{ContentID: itemID, ItemType: anchoredItemTypeSeries, Provider: contentid.ProviderTMDB, ProviderID: badTMDB},
-		&models.MediaItemProviderID{ContentID: itemID, ItemType: anchoredItemTypeSeries, Provider: contentid.ProviderTVDB, ProviderID: goodTVDB},
-	)
-	h.service.providerIDRepo = providerRepo
-	h.service.staleIDRepo = newFakeStaleIDRepo()
+	providerRepo, _ := seedProviderIdentity(t, h, &models.MediaItem{
+		ContentID: itemID, Type: anchoredItemTypeSeries, Title: "Still Available",
+		Status: string(MatchOutcomeMatched), TmdbID: badTMDB, TvdbID: goodTVDB,
+	}, []string{contentid.ProviderTMDB, badTMDB, contentid.ProviderTVDB, goodTVDB}, []string{})
 
 	tvdb := &searchMetadataProvider{
 		slug: contentid.ProviderTVDB,
@@ -494,24 +488,10 @@ func TestProcess_ScheduledRefreshSuppressesRecordedAndReplacement404Values(t *te
 	)
 	h := newTestHarness()
 	ctx := context.Background()
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+	providerRepo, staleRepo := seedProviderIdentity(t, h, &models.MediaItem{
 		ContentID: itemID, Type: anchoredItemTypeSeries, Title: title, Year: 2020,
 		Status: string(MatchOutcomeMatched), TmdbID: oldTMDBID,
-		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set(itemID, &models.MediaItemProviderID{
-		ContentID: itemID, ItemType: anchoredItemTypeSeries,
-		Provider: contentid.ProviderTMDB, ProviderID: oldTMDBID,
-	})
-	h.service.providerIDRepo = providerRepo
-	staleRepo := newFakeStaleIDRepo()
-	staleRepo.set(itemID, &models.StaleMediaID{
-		ContentID: itemID, Provider: contentid.ProviderTMDB, ProviderID: oldTMDBID,
-	})
-	h.service.staleIDRepo = staleRepo
+	}, []string{contentid.ProviderTMDB, oldTMDBID}, []string{contentid.ProviderTMDB, oldTMDBID})
 
 	tmdb := &searchThen404MetadataProvider{
 		slug: contentid.ProviderTMDB,
@@ -566,24 +546,10 @@ func TestProcess_ScheduledRefreshPreservesProviderIDWhenOnlyImages404(t *testing
 	)
 	h := newTestHarness()
 	ctx := context.Background()
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: itemID,
-		Type:      anchoredItemTypeMovie,
-		Title:     title,
-		Status:    string(MatchOutcomeMatched),
-		TmdbID:    tmdbID,
-		Studios:   []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set(itemID, &models.MediaItemProviderID{
-		ContentID: itemID, ItemType: anchoredItemTypeMovie,
-		Provider: contentid.ProviderTMDB, ProviderID: tmdbID,
-	})
-	h.service.providerIDRepo = providerRepo
-	h.service.staleIDRepo = newFakeStaleIDRepo()
+	providerRepo, _ := seedProviderIdentity(t, h, &models.MediaItem{
+		ContentID: itemID, Type: anchoredItemTypeMovie, Title: title,
+		Status: string(MatchOutcomeMatched), TmdbID: tmdbID,
+	}, []string{contentid.ProviderTMDB, tmdbID}, []string{})
 
 	provider := &image404MetadataProvider{searchMetadataProvider: &searchMetadataProvider{
 		slug: contentid.ProviderTMDB,
@@ -628,15 +594,10 @@ func TestProcess_IdentifyBootstrapsEpisodeProviderFromDetailCrossReference(t *te
 	)
 	h := newTestHarness()
 	ctx := context.Background()
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+	seedProviderIdentity(t, h, &models.MediaItem{
 		ContentID: itemID, Type: anchoredItemTypeSeries, Title: "Bootstrap Show",
 		Status: string(MatchOutcomeMatched), TmdbID: tmdbID,
-		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-	h.service.providerIDRepo = newFakeProviderIDRepo()
-	h.service.staleIDRepo = newFakeStaleIDRepo()
+	}, []string{}, []string{})
 	metadataProvider := &capturingMetadataProvider{response: &MetadataResult{
 		HasMetadata: true, Title: "Bootstrap Show",
 		ProviderIDs: map[string]string{
@@ -663,89 +624,13 @@ func TestProcess_IdentifyBootstrapsEpisodeProviderFromDetailCrossReference(t *te
 	}
 }
 
-func TestFindExistingByProviderIDsUsesDurableRepository(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "existing-1",
-		Type:      "movie",
-		Title:     "Existing Item",
-		Year:      2020,
-		Status:    "matched",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set("existing-1", &models.MediaItemProviderID{
-		ContentID:  "existing-1",
-		ItemType:   "movie",
-		Provider:   "custom",
-		ProviderID: "custom-123",
-	})
-	h.service.providerIDRepo = providerRepo
-
-	item, err := h.service.findExistingByProviderIDs(ctx, map[string]string{"custom": "custom-123"}, "movie", "")
-	if err != nil {
-		t.Fatalf("findExistingByProviderIDs: %v", err)
-	}
-	if item == nil || item.ContentID != "existing-1" {
-		t.Fatalf("found item = %#v, want existing-1", item)
-	}
-}
-
 func TestFindExistingByProviderIDsRespectsDurableProviderItemType(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
-
-	for _, item := range []*models.MediaItem{
-		{
-			ContentID: "movie-1",
-			Type:      "movie",
-			Title:     "Shared ID Movie",
-			Year:      1992,
-			Status:    "matched",
-			Studios:   []string{},
-			Networks:  []string{},
-			Countries: []string{},
-			Genres:    []string{},
-		},
-		{
-			ContentID: "series-1",
-			Type:      "series",
-			Title:     "Shared ID Series",
-			Year:      2008,
-			Status:    "matched",
-			Studios:   []string{},
-			Networks:  []string{},
-			Countries: []string{},
-			Genres:    []string{},
-		},
-	} {
-		if err := h.itemRepo.Upsert(ctx, item); err != nil {
-			t.Fatalf("upsert item %s: %v", item.ContentID, err)
-		}
-	}
-
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set("movie-1", &models.MediaItemProviderID{
-		ContentID:  "movie-1",
-		ItemType:   "movie",
-		Provider:   "tmdb",
-		ProviderID: "37264",
-	})
-	providerRepo.set("series-1", &models.MediaItemProviderID{
-		ContentID:  "series-1",
-		ItemType:   "series",
-		Provider:   "tmdb",
-		ProviderID: "37264",
-	})
-	h.service.providerIDRepo = providerRepo
+	seedProviderIdentity(t, h, &models.MediaItem{ContentID: "movie-1", Type: "movie", Title: "Shared ID Movie", Year: 1992, Status: "matched"},
+		[]string{"tmdb", "37264"}, nil)
+	seedProviderIdentity(t, h, &models.MediaItem{ContentID: "series-1", Type: "series", Title: "Shared ID Series", Year: 2008, Status: "matched"},
+		[]string{"tmdb", "37264"}, nil)
 
 	movie, err := h.service.findExistingByProviderIDs(ctx, map[string]string{"tmdb": "37264"}, "movie", "")
 	if err != nil {
@@ -767,28 +652,8 @@ func TestFindExistingByProviderIDsRespectsDurableProviderItemType(t *testing.T) 
 func TestProcess_LoadsAndPersistsDurableProviderIDs(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "existing-1",
-		Type:      "movie",
-		Title:     "Old Title",
-		Status:    "matched",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set("existing-1", &models.MediaItemProviderID{
-		ContentID:  "existing-1",
-		ItemType:   "movie",
-		Provider:   "custom",
-		ProviderID: "custom-123",
-	})
-	h.service.providerIDRepo = providerRepo
+	providerRepo, _ := seedProviderIdentity(t, h, &models.MediaItem{ContentID: "existing-1", Type: "movie", Title: "Old Title", Status: "matched"},
+		[]string{"custom", "custom-123"}, nil)
 
 	provider := &capturingMetadataProvider{
 		response: &MetadataResult{
@@ -848,28 +713,8 @@ func TestProcess_LoadsAndPersistsDurableProviderIDs(t *testing.T) {
 func TestProcess_InitialMatchSuppressesRecordedStaleProviderIDs(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "existing-1",
-		Type:      "movie",
-		Title:     "Old Title",
-		Year:      2001,
-		Status:    "pending",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	staleRepo := newFakeStaleIDRepo()
-	staleRepo.set("existing-1", &models.StaleMediaID{
-		ContentID:  "existing-1",
-		Provider:   "tmdb",
-		ProviderID: "dead-tmdb-id",
-	})
-	h.service.staleIDRepo = staleRepo
+	seedProviderIdentity(t, h, &models.MediaItem{ContentID: "existing-1", Type: "movie", Title: "Old Title", Year: 2001, Status: "pending"},
+		nil, []string{"tmdb", "dead-tmdb-id"})
 
 	provider := &capturingMetadataProvider{
 		response: &MetadataResult{
@@ -906,29 +751,8 @@ func TestProcess_InitialMatchSuppressesRecordedStaleProviderIDs(t *testing.T) {
 func TestMergeAndPersist_DoesNotReusePendingProviderMatch(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "pending-existing",
-		Type:      "series",
-		Title:     "Example Show",
-		Year:      2024,
-		Status:    "pending",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set("pending-existing", &models.MediaItemProviderID{
-		ContentID:  "pending-existing",
-		ItemType:   "series",
-		Provider:   "custom",
-		ProviderID: "series-123",
-	})
-	h.service.providerIDRepo = providerRepo
+	seedProviderIdentity(t, h, &models.MediaItem{ContentID: "pending-existing", Type: "series", Title: "Example Show", Year: 2024, Status: "pending"},
+		[]string{"custom", "series-123"}, nil)
 
 	result, err := h.service.mergeAndPersist(ctx, ProcessRequest{
 		Mode: ModeInitialMatch,
@@ -952,42 +776,10 @@ func TestMergeAndPersist_DoesNotReusePendingProviderMatch(t *testing.T) {
 func TestMergeAndPersist_DoesNotRebindSkeletonToPendingProviderMatch(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "pending-source",
-		Type:      "series",
-		Title:     "Example Show Alt Root",
-		Year:      2024,
-		Status:    "pending",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert source item: %v", err)
-	}
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "pending-target",
-		Type:      "series",
-		Title:     "Example Show",
-		Year:      2024,
-		Status:    "pending",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert target item: %v", err)
-	}
-
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set("pending-target", &models.MediaItemProviderID{
-		ContentID:  "pending-target",
-		ItemType:   "series",
-		Provider:   "custom",
-		ProviderID: "series-123",
-	})
-	h.service.providerIDRepo = providerRepo
+	seedProviderIdentity(t, h, &models.MediaItem{ContentID: "pending-source", Type: "series", Title: "Example Show Alt Root", Year: 2024, Status: "pending"},
+		nil, nil)
+	seedProviderIdentity(t, h, &models.MediaItem{ContentID: "pending-target", Type: "series", Title: "Example Show", Year: 2024, Status: "pending"},
+		[]string{"custom", "series-123"}, nil)
 
 	result, err := h.service.mergeAndPersist(ctx, ProcessRequest{
 		ContentID: "pending-source",
@@ -1003,11 +795,5 @@ func TestMergeAndPersist_DoesNotRebindSkeletonToPendingProviderMatch(t *testing.
 	}
 	if result == nil || result.ContentID != "pending-source" {
 		t.Fatalf("result = %#v, want content_id pending-source", result)
-	}
-}
-
-func TestIsProvisionalOwnershipStatus_IncludesAmbiguous(t *testing.T) {
-	if !isProvisionalOwnershipStatus("ambiguous") {
-		t.Fatal("expected ambiguous items to be treated as provisional ownership")
 	}
 }

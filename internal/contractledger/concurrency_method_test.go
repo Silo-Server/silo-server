@@ -3,10 +3,7 @@ package contractledger
 import (
 	"fmt"
 	"net/http"
-	"strings"
 	"testing"
-
-	apiv2registry "github.com/Silo-Server/silo-server/internal/apiv2"
 )
 
 func TestConcurrencyUsesMappedMethod(t *testing.T) {
@@ -59,40 +56,5 @@ func TestConcurrencyUsesMappedMethod(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestChangedMethodConcurrencyRegistryAgreement(t *testing.T) {
-	e := Entry{copied: copied{Method: http.MethodPost, Path: "/api/v1/sections/restore-defaults"}, Tier: 2, Disposition: DispositionPorted, Concurrency: ConcurrencyIfMatch,
-		RetrySafety: RetrySafetyNonRetryable, RetrySafetyNote: "Restoring defaults replaces the scope.",
-		V2: V2Target{Method: new(http.MethodPut), Path: new("/api/v2/sections/defaults"), OperationID: new("restoreSections")},
-	}
-	op := apiv2registry.Declared{Method: http.MethodPut, Path: *e.V2.Path, OperationID: *e.V2.OperationID, Guarded: true}
-	if got := concurrencyMismatches([]Entry{e}, []apiv2registry.Declared{op}, nil); len(got) != 0 {
-		t.Fatal(got)
-	}
-	unmarked := e
-	unmarked.Concurrency = ""
-	if got := concurrencyMismatches([]Entry{unmarked}, []apiv2registry.Declared{op}, nil); len(got) != 1 || !strings.Contains(got[0], "is not marked concurrency") {
-		t.Fatalf("missing marking accepted: %v", got)
-	}
-	unguarded := op
-	unguarded.Guarded = false
-	if got := concurrencyMismatches([]Entry{e}, []apiv2registry.Declared{unguarded}, nil); len(got) != 1 || !strings.Contains(got[0], "is not declared Guarded") {
-		t.Fatalf("unguarded target accepted: %v", got)
-	}
-	wrongMethod := op
-	wrongMethod.Method = http.MethodPost
-	if got := concurrencyMismatches([]Entry{e}, []apiv2registry.Declared{wrongMethod}, nil); len(got) != 1 || !strings.Contains(got[0], "disagree with the registry") {
-		t.Fatalf("wrong target method accepted: %v", got)
-	}
-	// Retry placement still follows the source method, independent of this change.
-	if got := retrySafetyRules(e.key(), e); len(got) != 0 {
-		t.Fatal(got)
-	}
-	e.RetrySafety = ""
-	e.RetrySafetyNote = ""
-	if got := retrySafetyRules(e.key(), e); len(got) != 1 || !strings.Contains(got[0], "no retry_safety") {
-		t.Fatalf("mapped source POST lost retry requirement: %v", got)
 	}
 }

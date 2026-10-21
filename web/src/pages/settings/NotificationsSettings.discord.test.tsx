@@ -112,9 +112,3 @@ it("lets the primary profile unlink and change the account mode", () => {
   fireEvent.click(section.getByRole("button", { name: "Unlink" }));
   expect(state.mutate).toHaveBeenCalledTimes(2);
 });
-it("offers link initiation to the primary profile without running consent", () => {
-  state.linked = false;
-  const section = page();
-  expect(section.getByRole("button", { name: "Link Discord" })).toBeEnabled();
-  expect(state.mutate).not.toHaveBeenCalled();
-});

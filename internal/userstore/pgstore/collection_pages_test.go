@@ -4,30 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestPostgresCollectionContinuation(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
+	pool := testPool(t)
 	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	var userID int
-	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, fmt.Sprintf("collection-page-%d", time.Now().UnixNano())).Scan(&userID); err != nil {
-		t.Fatal(err)
-	}
+	userID := seedTestUser(t, pool, "collection-page")
 	defer func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, userID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM user_collection_revisions WHERE user_id=$1`, userID)

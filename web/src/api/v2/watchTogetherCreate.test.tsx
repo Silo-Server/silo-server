@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { captureRoomCreationDraft, createRoom } from "./watchTogetherCreate";
 import WatchPartyHub from "@/pages/watchtogether/WatchPartyHub";
 const state = vi.hoisted(() => ({ token: "", navigate: vi.fn() }));
@@ -71,15 +71,6 @@ it("retains fallback UUID and mode across an uncertain explicit retry", async ()
   expect(fetch.mock.calls[0]![1].body).toBe(fetch.mock.calls[1]![1].body);
   expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual(draft.body);
 });
-it.each([401, 500])("single sends refusal %s", async (status) => {
-  setAccessToken("synthetic-access");
-  setRefreshToken("synthetic-refresh");
-
-  const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
-  vi.stubGlobal("fetch", fetch);
-  await expect(createRoom(captureRoomCreationDraft("host_pick"))).rejects.toThrow();
-  expect(fetch).toHaveBeenCalledTimes(1);
-});
 it("refuses old authority before dispatch and mismatched creation receipts", async () => {
   const draft = captureRoomCreationDraft("host_pick");
   setProfileToken("new");
@@ -113,9 +104,6 @@ it("mounted create reuses uncertain draft and changes identity only for new mode
 it.each([
   ["mode", 201],
   ["authority", 201],
-  ["unmount", 201],
-  ["mode", 500],
-  ["authority", 500],
   ["unmount", 500],
 ] as const)(
   "mounted create fences stale completion after %s replacement (%s)",

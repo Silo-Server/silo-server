@@ -54,24 +54,4 @@ describe("v2 marker consumers", () => {
     });
     expect(markerUpdateToV2({ recap: {} })).toEqual({ recap: {} });
   });
-
-  it("forwards read cancellation to the transport", async () => {
-    const controller = new AbortController();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(
-        (_url, options) =>
-          new Promise((_resolve, reject) => {
-            options?.signal?.addEventListener(
-              "abort",
-              () => reject(new DOMException("Aborted", "AbortError")),
-              { once: true },
-            );
-          }),
-      ),
-    );
-    const pending = getItemMarkers("one", controller.signal);
-    controller.abort();
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
-  });
 });

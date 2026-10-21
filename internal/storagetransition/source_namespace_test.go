@@ -2,7 +2,6 @@ package storagetransition
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"reflect"
@@ -90,15 +89,11 @@ func TestExecuteSeparatesSourceEndpointAliases(t *testing.T) {
 				publicTarget := &memoryStore{identity: "s3|endpoint|new-public|", objects: make(map[string][]byte)}
 				privateTarget := &memoryStore{identity: "s3|endpoint|new-private|", objects: make(map[string][]byte)}
 				stage := stagedTarget{ID: "source-alias", Policy: policy, SourceIdentity: public.Identity(), Phase: transitionPhaseStaged, Values: map[string]string{settingArtworkBackend: blobstore.BackendS3, settingPrivateBucket: "new-private"}}
-				raw, err := json.Marshal(stage)
-				if err != nil {
-					t.Fatal(err)
-				}
-				settings := &memorySettings{values: map[string]string{StagedTargetSettingKey: string(raw)}}
+				settings := stagedSettings(t, stage)
 				service := New(nil, settings, nil, public, private)
 				service.openPublic = func(map[string]string) (blobstore.Store, error) { return publicTarget, nil }
 				service.openPrivate = func(map[string]string) blobstore.Store { return privateTarget }
-				_, err = service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: stage.ID, Policy: policy}, func(adminjob.StorageTransitionProgress) {})
+				_, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: stage.ID, Policy: policy}, func(adminjob.StorageTransitionProgress) {})
 				if (layout == "probe_error" || layout == "cleanup_error") && policy != PolicyFresh {
 					if err == nil || !strings.Contains(err.Error(), "source") {
 						t.Fatalf("expected source namespace probe error, got %v", err)

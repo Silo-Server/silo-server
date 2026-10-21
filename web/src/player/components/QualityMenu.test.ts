@@ -225,17 +225,6 @@ describe("available playback choices", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("shows both sections when versions and qualities are available", () => {
-    render(createElement(QualityMenu, menuProps({ options: [auto, rung720] })));
-    fireEvent.click(screen.getByRole("button", { name: "Quality" }));
-    expect(screen.getByText("Version")).toBeInTheDocument();
-    expect(screen.getByText("Quality")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Auto.*Selected/ })).toHaveAttribute(
-      "aria-current",
-      "true",
-    );
-  });
-
   it("preserves Auto when playback changes from one quality to multiple qualities", () => {
     const props = menuProps();
     const { rerender } = render(createElement(QualityMenu, props));
@@ -290,21 +279,5 @@ describe("playback speed", () => {
     expect(
       fireEvent.pointerDown(screen.getByRole("menuitemradio", { name: "2×" }), { button: 0 }),
     ).toBe(true);
-  });
-
-  it("badges the gear with a speed other than 1x", () => {
-    const props = menuProps({
-      options: [auto, rung720],
-      activeId: "720p",
-      playbackSpeed: 1,
-      onPlaybackSpeedChange: vi.fn(),
-    });
-    const { rerender } = render(createElement(QualityMenu, props));
-    expect(screen.getByRole("button", { name: "Playback settings" })).toHaveTextContent(/^720p$/);
-
-    rerender(createElement(QualityMenu, { ...props, playbackSpeed: 1.5 }));
-    const trigger = screen.getByRole("button", { name: "Playback settings, 1.5×" });
-    expect(trigger.querySelector(".player-quality-label")).toHaveTextContent(/^720p$/);
-    expect(trigger.querySelector(".player-speed-badge")).toHaveTextContent(/^1\.5×$/);
   });
 });

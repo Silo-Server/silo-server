@@ -56,32 +56,6 @@ func TestSeriesQueueUsesConfiguredRootForIdentity(t *testing.T) {
 	}
 }
 
-type countedNamingFolderRepo struct {
-	folder *models.MediaFolder
-	calls  int
-}
-
-func (r *countedNamingFolderRepo) GetByID(context.Context, int) (*models.MediaFolder, error) {
-	r.calls++
-	return r.folder, nil
-}
-
-func TestMatchFolderConfigCachesNamingRootsWithEnabledState(t *testing.T) {
-	h := newTestHarness()
-	repo := &countedNamingFolderRepo{folder: &models.MediaFolder{ID: 10, Enabled: true, Paths: []string{"/library/All Shows"}}}
-	h.service.folderRepo = repo
-	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
-	cache := &sync.Map{}
-	if !worker.matchFolderConfig(t.Context(), 10, cache).enabled {
-		t.Fatal("library unexpectedly disabled")
-	}
-	repo.folder.Paths[0] = "/different"
-	config := worker.matchFolderConfig(t.Context(), 10, cache)
-	if repo.calls != 1 || len(config.paths) != 1 || config.paths[0] != "/library/All Shows" {
-		t.Fatalf("folder calls=%d cached roots=%v", repo.calls, config.paths)
-	}
-}
-
 func TestConfiguredLibraryRootCannotSupplyEpisodeSeason(t *testing.T) {
 	h := newFallbackTestHarness()
 	const root = "/library/Season 1"

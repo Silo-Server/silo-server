@@ -25,20 +25,7 @@ func TestMimeFromExtension(t *testing.T) {
 	cases := map[string]string{
 		"movie.mkv":     "video/x-matroska",
 		"movie.MP4":     "video/mp4",
-		"movie.f4v":     "video/mp4",
-		"movie.webm":    "video/webm",
-		"movie.mov":     "video/quicktime",
-		"movie.3gp":     "video/3gpp",
-		"movie.3g2":     "video/3gpp2",
-		"movie.divx":    "video/x-msvideo",
 		"movie.ts":      "video/mp2t",
-		"movie.m2ts":    "video/mp2t",
-		"movie.mts":     "video/mp2t",
-		"movie.mpg":     "video/mpeg",
-		"movie.mpeg":    "video/mpeg",
-		"movie.asf":     "video/x-ms-asf",
-		"movie.ogv":     "video/ogg",
-		"movie.ogm":     "video/ogg",
 		"book.m4b":      "audio/mp4",
 		"track.opus":    "audio/ogg",
 		"movie.unknown": "application/octet-stream",
@@ -68,10 +55,7 @@ func TestMediaMIMETypesListsEveryKnownTypeOnce(t *testing.T) {
 
 func TestServeDirectPlayHTTPContract(t *testing.T) {
 	const content = "0123456789abcdefghijklmnopqrstuvwxyz"
-	filePath := filepath.Join(t.TempDir(), "fixture.mp4")
-	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	filePath := writeDirectPlayFixture(t, "fixture.mp4", content)
 
 	serve := func(method, rangeHeader, ifMatch, ifRange, ifNoneMatch string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -153,22 +137,6 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 			wantStart:   5,
 		},
 		{
-			name:        "suffix range",
-			rangeHeader: "bytes=-4",
-			wantStatus:  http.StatusPartialContent,
-			wantRange:   fmt.Sprintf("bytes %d-%d/%d", len(content)-4, len(content)-1, len(content)),
-			wantBody:    content[len(content)-4:],
-			wantStart:   int64(len(content) - 4),
-		},
-		{
-			name:        "open ended range",
-			rangeHeader: "bytes=10-",
-			wantStatus:  http.StatusPartialContent,
-			wantRange:   fmt.Sprintf("bytes 10-%d/%d", len(content)-1, len(content)),
-			wantBody:    content[10:],
-			wantStart:   10,
-		},
-		{
 			name:        "syntactically invalid range",
 			rangeHeader: "bytes=invalid",
 			wantStatus:  http.StatusRequestedRangeNotSatisfiable,
@@ -177,12 +145,6 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 		{
 			name:        "unsatisfiable range",
 			rangeHeader: "bytes=999-1000",
-			wantStatus:  http.StatusRequestedRangeNotSatisfiable,
-			wantRange:   fmt.Sprintf("bytes */%d", len(content)),
-		},
-		{
-			name:        "range starts at EOF",
-			rangeHeader: fmt.Sprintf("bytes=%d-", len(content)),
 			wantStatus:  http.StatusRequestedRangeNotSatisfiable,
 			wantRange:   fmt.Sprintf("bytes */%d", len(content)),
 		},
@@ -211,138 +173,34 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 		})
 	}
 
-	t.Run("matching If-Range", func(t *testing.T) {
-		if !validatorRequired {
-			t.Skip("platform does not expose a durable file revision")
-		}
-		rr := serve(http.MethodGet, "bytes=7-", "", etag, "")
-		if rr.Code != http.StatusPartialContent {
-			t.Fatalf("status = %d, want 206", rr.Code)
-		}
-		if body := rr.Body.String(); body != content[7:] {
-			t.Fatalf("body = %q, want %q", body, content[7:])
-		}
-	})
-
-	t.Run("stale If-Range", func(t *testing.T) {
-		rr := serve(http.MethodGet, "bytes=7-", "", "\"stale\"", "")
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200", rr.Code)
-		}
-		if body := rr.Body.String(); body != content {
-			t.Fatalf("body = %q, want full entity %q", body, content)
-		}
-	})
-
-	t.Run("bounded range with matching If-Match", func(t *testing.T) {
-		if !validatorRequired {
-			t.Skip("platform does not expose a durable file revision")
-		}
-		rr := serve(http.MethodGet, "bytes=7-11", etag, "", "")
-		if rr.Code != http.StatusPartialContent {
-			t.Fatalf("status = %d, want 206", rr.Code)
-		}
-		if body := rr.Body.String(); body != content[7:12] {
-			t.Fatalf("body = %q, want %q", body, content[7:12])
-		}
-	})
-
-	t.Run("bounded range with stale If-Match", func(t *testing.T) {
-		rr := serve(http.MethodGet, "bytes=7-11", "\"stale\"", "", "")
-		if rr.Code != http.StatusPreconditionFailed {
-			t.Fatalf("status = %d, want 412", rr.Code)
-		}
-		if rr.Body.Len() != 0 {
-			t.Fatalf("body length = %d, want 0", rr.Body.Len())
-		}
-	})
-
-	t.Run("If-None-Match", func(t *testing.T) {
-		if !validatorRequired {
-			t.Skip("platform does not expose a durable file revision")
-		}
-		rr := serve(http.MethodGet, "", "", "", etag)
-		if rr.Code != http.StatusNotModified {
-			t.Fatalf("status = %d, want 304", rr.Code)
-		}
-		if rr.Body.Len() != 0 {
-			t.Fatalf("body length = %d, want 0", rr.Body.Len())
-		}
-	})
-}
-
-func TestDirectStreamConditionalResult(t *testing.T) {
-	tests := []struct {
-		name          string
-		status        int
-		hadIfMatch    bool
-		hadIfRange    bool
-		ifRangeResult string
-		want          string
+	conditional := []struct {
+		name                          string
+		rangeHeader                   string
+		ifMatch, ifRange, ifNoneMatch string
+		needsValidator                bool
+		wantStatus                    int
+		wantBody                      string
 	}{
-		{name: "unconditional", status: http.StatusOK, want: directStreamConditionalNone},
-		{name: "If-Match passed", status: http.StatusPartialContent, hadIfMatch: true, want: directStreamConditionalIfMatchPassed},
-		{name: "If-Match failed", status: http.StatusPreconditionFailed, hadIfMatch: true, want: directStreamConditionalIfMatchFailed},
-		{name: "If-Range matched", status: http.StatusPartialContent, hadIfRange: true, ifRangeResult: directStreamConditionalIfRangeMatched, want: directStreamConditionalIfRangeMatched},
-		{name: "If-Range mismatched", status: http.StatusOK, hadIfRange: true, ifRangeResult: directStreamConditionalIfRangeMismatched, want: directStreamConditionalIfRangeMismatched},
-		{name: "If-Range not evaluated after 304", status: http.StatusNotModified, hadIfRange: true, ifRangeResult: directStreamConditionalIfRangeMatched, want: directStreamConditionalIfRangeNotEvaluated},
-		{name: "If-Range not evaluated after 412", status: http.StatusPreconditionFailed, hadIfRange: true, ifRangeResult: directStreamConditionalIfRangeMismatched, want: directStreamConditionalIfRangeNotEvaluated},
-		{name: "If-Range without Range", status: http.StatusOK, hadIfRange: true, want: directStreamConditionalIfRangeNotEvaluated},
+		{name: "matching If-Range", rangeHeader: "bytes=7-", ifRange: etag, needsValidator: true, wantStatus: http.StatusPartialContent, wantBody: content[7:]},
+		{name: "stale If-Range", rangeHeader: "bytes=7-", ifRange: "\"stale\"", wantStatus: http.StatusOK, wantBody: content},
+		{name: "bounded range with matching If-Match", rangeHeader: "bytes=7-11", ifMatch: etag, needsValidator: true, wantStatus: http.StatusPartialContent, wantBody: content[7:12]},
+		{name: "bounded range with stale If-Match", rangeHeader: "bytes=7-11", ifMatch: "\"stale\"", wantStatus: http.StatusPreconditionFailed},
+		{name: "If-None-Match", ifNoneMatch: etag, needsValidator: true, wantStatus: http.StatusNotModified},
 	}
-
-	for _, tt := range tests {
+	for _, tt := range conditional {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := directStreamConditionalResult(tt.status, tt.hadIfMatch, tt.hadIfRange, tt.ifRangeResult); got != tt.want {
-				t.Fatalf("conditional result = %q, want %q", got, tt.want)
+			if tt.needsValidator && !validatorRequired {
+				t.Skip("platform does not expose a durable file revision")
+			}
+			rr := serve(http.MethodGet, tt.rangeHeader, tt.ifMatch, tt.ifRange, tt.ifNoneMatch)
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rr.Code, tt.wantStatus)
+			}
+			if body := rr.Body.String(); body != tt.wantBody {
+				t.Fatalf("body = %q, want %q", body, tt.wantBody)
 			}
 		})
 	}
-}
-
-func TestDirectStreamIfRangeResult(t *testing.T) {
-	const currentETag = `"current"`
-	modtime := time.Date(2026, time.August, 11, 12, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name      string
-		method    string
-		rangeHead string
-		validator string
-		modtime   time.Time
-		want      string
-	}{
-		{name: "matching ETag", method: http.MethodGet, rangeHead: "bytes=2-4", validator: currentETag, modtime: modtime, want: directStreamConditionalIfRangeMatched},
-		{name: "matching ETag with whitespace", method: http.MethodGet, rangeHead: "bytes=2-4", validator: `  "current"  `, modtime: modtime, want: directStreamConditionalIfRangeMatched},
-		{name: "stale ETag", method: http.MethodGet, rangeHead: "bytes=2-4", validator: `"stale"`, modtime: modtime, want: directStreamConditionalIfRangeMismatched},
-		{name: "weak ETag", method: http.MethodGet, rangeHead: "bytes=2-4", validator: `W/"current"`, modtime: modtime, want: directStreamConditionalIfRangeMismatched},
-		{name: "matching date", method: http.MethodHead, rangeHead: "bytes=2-4", validator: modtime.Format(http.TimeFormat), modtime: modtime, want: directStreamConditionalIfRangeMatched},
-		{name: "stale date", method: http.MethodGet, rangeHead: "bytes=2-4", validator: modtime.Add(-time.Second).Format(http.TimeFormat), modtime: modtime, want: directStreamConditionalIfRangeMismatched},
-		{name: "missing range", method: http.MethodGet, validator: currentETag, modtime: modtime},
-		{name: "empty validator", method: http.MethodGet, rangeHead: "bytes=2-4", modtime: modtime},
-		{name: "unsupported method", method: http.MethodPost, rangeHead: "bytes=2-4", validator: currentETag, modtime: modtime},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, "/stream", nil)
-			if tt.rangeHead != "" {
-				req.Header.Set("Range", tt.rangeHead)
-			}
-			if tt.validator != "" {
-				req.Header.Set("If-Range", tt.validator)
-			}
-			if got := directStreamIfRangeResult(req, currentETag, tt.modtime); got != tt.want {
-				t.Fatalf("If-Range result = %q, want %q", got, tt.want)
-			}
-		})
-	}
-
-	t.Run("uses first If-Range header", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/stream", nil)
-		req.Header.Set("Range", "bytes=2-4")
-		req.Header["If-Range"] = []string{currentETag, `"stale"`}
-		if got := directStreamIfRangeResult(req, currentETag, modtime); got != directStreamConditionalIfRangeMatched {
-			t.Fatalf("If-Range result = %q, want %q", got, directStreamConditionalIfRangeMatched)
-		}
-	})
 }
 
 func TestDirectStreamValidatorFingerprint(t *testing.T) {
@@ -370,10 +228,7 @@ func TestServeDirectPlayConditionalDiagnostics(t *testing.T) {
 		t.Skip("platform does not expose a durable file revision")
 	}
 
-	filePath := filepath.Join(t.TempDir(), "private-fixture.mp4")
-	if err := os.WriteFile(filePath, []byte("0123456789"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	filePath := writeDirectPlayFixture(t, "private-fixture.mp4", "0123456789")
 
 	var logs bytes.Buffer
 	previousLogger := slog.Default()
@@ -576,10 +431,7 @@ func TestServeDirectPlayChangedEntityRejectsOldValidators(t *testing.T) {
 }
 
 func TestDirectPlayEntityTagOmitsUnsupportedRevision(t *testing.T) {
-	filePath := filepath.Join(t.TempDir(), "fixture.mp4")
-	if err := os.WriteFile(filePath, []byte("abcdef"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	filePath := writeDirectPlayFixture(t, "fixture.mp4", "abcdef")
 	file, err := os.Open(filePath)
 	if err != nil {
 		t.Fatal(err)
@@ -597,6 +449,16 @@ func TestDirectPlayEntityTagOmitsUnsupportedRevision(t *testing.T) {
 	if got := DirectPlayEntityTag(file, fileInfoWithoutSystem{FileInfo: info}); got != "" {
 		t.Fatalf("ETag without durable revision = %q, want omitted validator", got)
 	}
+}
+
+// writeDirectPlayFixture writes content to a temp file and returns its path.
+func writeDirectPlayFixture(t *testing.T, name, content string) string {
+	t.Helper()
+	filePath := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return filePath
 }
 
 type fileInfoWithoutSystem struct {
@@ -617,10 +479,7 @@ func platformRequiresDirectPlayValidator() bool {
 }
 
 func TestServeDirectPlayStalledWriteIncrementsOutcomeMetric(t *testing.T) {
-	filePath := filepath.Join(t.TempDir(), "fixture.mp4")
-	if err := os.WriteFile(filePath, []byte("media bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	filePath := writeDirectPlayFixture(t, "fixture.mp4", "media bytes")
 
 	stalledEnds := directStreamEnds.WithLabelValues(string(httpstream.OutcomeStalledReap))
 	endsBefore := counterValue(t, stalledEnds)

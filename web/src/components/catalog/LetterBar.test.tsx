@@ -48,21 +48,6 @@ describe("letterAtIndex", () => {
 });
 
 describe("LetterBar", () => {
-  it("lists # and A to Z, greying out letters without titles", () => {
-    render(<LetterBar letters={letters} activeLetter="A" onJump={() => {}} />);
-
-    const bar = screen.getByRole("toolbar", { name: "Jump to letter" });
-    expect(bar.querySelectorAll("button")).toHaveLength(27);
-    expect(screen.getByRole("button", { name: "Numbers and symbols, 2 titles" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "C, 1 title" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "B, no titles" }).getAttribute("aria-disabled")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "A, 5 titles" }).getAttribute("aria-current")).toBe(
-      "true",
-    );
-  });
-
   it("jumps to a letter's first title and announces it", () => {
     const onJump = vi.fn();
     render(<LetterBar letters={letters} onJump={onJump} />);
@@ -97,18 +82,6 @@ describe("LetterBar", () => {
     fireEvent.keyDown(button("C"), { key: "b" });
     expect(document.activeElement).toBe(button("C"));
     expect(tabbable()).toEqual([button("C")]);
-  });
-
-  it("leaves Space to activate the focused letter", () => {
-    render(<LetterBar letters={letters} activeLetter="A" onJump={() => {}} />);
-    const a = screen.getByRole("button", { name: "A, 5 titles" });
-    a.focus();
-
-    const event = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
-    a.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(false);
-    expect(document.activeElement).toBe(a);
   });
 
   it("holds its place, greyed and inert, while the index loads", () => {

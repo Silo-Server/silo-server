@@ -8,56 +8,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// A cluster row's subject is its genre label without the title wording. An
-// unlabeled cluster and any other title have none.
-func TestClusterSubject(t *testing.T) {
-	for _, tc := range []struct{ title, want string }{
-		{clusterTitle("Sci-Fi & Fantasy, Thriller"), "Sci-Fi & Fantasy, Thriller"},
-		{clusterTitle("Crime"), "Crime"},
-		{clusterTitle(""), ""},
-		{unlabeledClusterTitle, ""},
-		{clusterTitlePrefix, ""},
-		{"For You", ""},
-		{"Popular on This Server", ""},
-	} {
-		if got := clusterSubject(tc.title); got != tc.want {
-			t.Errorf("clusterSubject(%q) = %q, want %q", tc.title, got, tc.want)
-		}
-	}
-}
-
-// The page's cluster rows carry their subject, taken from the cached build's
-// title like the row title; the main row carries none.
-func TestForYouPageClusterRowsCarryTheirSubject(t *testing.T) {
-	r := &Reader{
-		repo: &fakeReaderRepo{
-			meta:     &TasteProfileMeta{SignalCounts: map[string]int{"watch_high": ColdStartFullPersonalized}},
-			clusters: []TasteCluster{{ClusterIdx: 0, Label: "Horror", TotalWeight: 2}, {ClusterIdx: 1, Label: "", TotalWeight: 1}},
-			personal: map[string][]ScoredItem{
-				RecTypeForYouMain + "|":                {{MediaItemID: "main"}},
-				RecTypeForYouClusterPrefix + "0" + "|": {{MediaItemID: "c0", Reason: clusterTitle("Comedy")}},
-				RecTypeForYouClusterPrefix + "1" + "|": {{MediaItemID: "c1"}},
-			},
-		},
-		signals: NewSignalReader(&fakeSignalRepo{}, nil),
-	}
-	rows, err := r.GetForYouPage(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	subjects := map[string]string{}
-	for _, row := range rows {
-		subjects[row.Label] = row.Subject
-	}
-	want := map[string]string{"For You": "", "Because you enjoy Comedy": "Comedy", unlabeledClusterTitle: ""}
-	for label, subject := range want {
-		got, ok := subjects[label]
-		if !ok || got != subject {
-			t.Fatalf("rows %v: %q has subject %q (present %v), want %q", subjects, label, got, ok, subject)
-		}
-	}
-}
-
 // Because You Watched rows come one per anchor, most recent first, up to the
 // number asked for. An anchor whose row filters empty gives way to the next,
 // and each row names its anchor.

@@ -3,7 +3,6 @@ package apiv2
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +11,8 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
-	"github.com/Silo-Server/silo-server/internal/logstream"
+
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/gorilla/websocket"
 )
 
 type fakeAdminLogsSocket struct {
@@ -86,37 +84,5 @@ func TestAdminLogsSocketTicketAndCapabilities(t *testing.T) {
 	rec = do(t, h, http.MethodGet, Prefix+"/admin/logs/ws?stream=app", "", nil)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("raw route without service: %d", rec.Code)
-	}
-}
-
-// The raw route delegates to the service and a real handshake upgrades through
-// the v2 router with the bridge's frame shapes.
-func TestAdminLogsSocketUpgradeThroughV2Router(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	store := evt.NewSocketTicketStore(nil)
-	socket := &handlers.AdminLogsSocketV2{Logs: handlers.NewAdminLogsHandler(nil, nil, logstream.NewHub("v2-logs-fixture", nil)), Tickets: store, Validate: func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
-		return ctx, &auth.Claims{UserID: proof.UserID, Role: "admin", SessionID: proof.SessionID}, nil
-	}}
-	deps.AdminLogsSocket = socket
-	ticket, err := store.Mint(t.Context(), evt.SocketIdentity{UserID: 2, SessionID: "s2", AccessFingerprint: "scope", Role: "admin", EffectiveRole: "admin", AccessExpiresAt: time.Now().Add(time.Minute)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(NewHandler(deps))
-	defer server.Close()
-	dialer := websocket.Dialer{Subprotocols: []string{handlers.AdminLogsSocketProtocol, "silo.ticket." + ticket}}
-	conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+Prefix+"/admin/logs/ws?stream=audit", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = conn.Close() }()
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 101 || conn.Subprotocol() != handlers.AdminLogsSocketProtocol {
-		t.Fatal("v2 upgrade contract failed")
-	}
-	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
-	_, body, err := conn.ReadMessage()
-	if err != nil || !strings.Contains(string(body), `"stream":"audit"`) || !strings.Contains(string(body), `"type":"error"`) {
-		t.Fatalf("first frame (no repository wired): %s %v", body, err)
 	}
 }

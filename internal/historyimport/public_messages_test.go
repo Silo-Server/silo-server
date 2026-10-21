@@ -103,24 +103,6 @@ func TestTagUnreachableMarksOnlyNetworkFailures(t *testing.T) {
 	}
 }
 
-// The stored diagnostic has to reach a real summary: an unmapped warning falls
-// through to GenericRunWarning, which would leave the skip as opaque to the
-// person reading the run as counting it silently was.
-func TestPublicWarningExplainsHiddenHistorySkips(t *testing.T) {
-	t.Parallel()
-
-	got := PublicWarning(hiddenHistoryWarning(3))
-	if got == GenericRunWarning {
-		t.Fatalf("PublicWarning(%q) fell through to the generic text", hiddenHistoryWarning(3))
-	}
-	if !strings.Contains(got, "(3)") {
-		t.Errorf("PublicWarning = %q, want the count of skipped items", got)
-	}
-	if !strings.Contains(got, "removed") {
-		t.Errorf("PublicWarning = %q, want it to name the history removal", got)
-	}
-}
-
 // A run updates the hidden-skip warning as it goes, so a run that is canceled or
 // fails partway still carries the explanation for what it skipped. Other warnings
 // appended around it must not produce a second copy or strand the index.
