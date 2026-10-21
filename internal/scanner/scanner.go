@@ -3018,9 +3018,9 @@ func probeFindsNoVideo(folder *models.MediaFolder, probe *ProbeData) bool {
 }
 
 // retiredForNoVideo reports whether existing is a row a scan retired because
-// its probe found no video (probeFindsNoVideo). A later probe that fails or
-// cannot run says nothing new about the file, so the row stays retired rather
-// than coming back with no stream facts.
+// its probe found no video (probeFindsNoVideo). Only a later probe that
+// succeeds can bring it back: one that fails, cannot run, or rejects the file
+// leaves it retired rather than restoring it with no stream facts.
 func retiredForNoVideo(folder *models.MediaFolder, existing *scanStateFile) bool {
 	return existing != nil && existing.MissingSince != nil && existing.ProbeUpdatedAt != nil && catalogsOnlyVideo(folder) &&
 		!existing.HasVideoTracks && strings.TrimSpace(existing.CodecVideo) == "" && containerListsStreams(existing.Container)
@@ -3161,7 +3161,7 @@ func (s *Scanner) processFile(
 			logNoVideoSkip(ctx, filePath, probe)
 			return actionSkipped, nil, nil
 		}
-		if probe == nil && !probeRejected && retiredForNoVideo(folder, existing) {
+		if probe == nil && retiredForNoVideo(folder, existing) {
 			return actionSkipped, nil, nil
 		}
 		rejectionStands := probeRejectionStands(existing, fileSize, fileModifiedAt)
