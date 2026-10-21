@@ -718,6 +718,62 @@ and written in the same `Update` that flips `TranscodeStarted`. The node hop
 (multi-node jellycompat) still uses a path token exactly like native, and the
 node checks the deny marker on that path too.
 
+#### Transcode node lost mid-stream
+
+A Jellyfin client fetches a VOD playlist once, never replans, and the protocol
+has no server-to-client command that makes it fetch new URLs. When the transcode
+node of a remote jellycompat transcode dies and stays down, the transcode moves
+to another executor under the same transport id and every client URL keeps
+working (`internal/jellycompat/transcode_failover.go`):
+
+- **Trigger.** A relay could not reach the node (`nodepool.IsConnectFailure`:
+  refused, unroutable, dial timeout, failed name lookup; through a proxy also a
+  hung node, `nodepool.ErrNodeNotAnswering` from `transcodeproxy.DoNode`). A
+  node that answers, even with an error, is alive; its answer is relayed and
+  nothing moves.
+- **Move.** Central resolves a new executor with the session's frozen recipe
+  requirements (the tone-map mode it runs, audio and HEVC capabilities; this
+  process only when it can run that tone-map mode), the dead node and any node
+  the same request already failed on excluded, and without changing the egress
+  the client sees: an API-egress
+  transcode may move to another node or to this process, a proxy-egress one only
+  to another transcode node behind the same proxy. Under the session lifecycle
+  lock, and only while the transport still runs on the dead node, it rewrites the
+  `noderecipe` record to name the new node (or deletes it for a local move), then
+  the compat row's recipe and route and the upstream session. Moves are
+  single-flighted per session.
+- **Rebuild.** Nothing is started eagerly. The new node rebuilds the transcode
+  from the rewritten record on the next request, seeked to the requested
+  segment, exactly as after its own restart; a local move goes through the
+  ordinary compat reconstruction from `PlaybackSession.Recipe`.
+- **API egress.** The API relay that hit the dead node runs the move and serves
+  the same request from the new executor.
+- **Proxy egress.** The proxy holds no session state and cannot plan, so when it
+  cannot reach the node for a transport whose token carries no recipe, it
+  publishes `transcode_move_requested` (`noderecipe.MoveRequest`) on
+  `silo:transcode-move`, polls the record until it names another node (bounded
+  at 8 seconds per request), and relays there. The API process that owns the session
+  (`FindByUpstreamSessionID` is process-local) runs the move; other processes
+  ignore the request. For every such transport the proxy reads the record on
+  the first request it sees and relays to the node the record names, then
+  re-reads it every 5 seconds, so later moves are followed too, and a proxy that
+  starts after a move never relays to the old node once it answers again. Native
+  tokens carry their recipe; the proxy does not follow them, because native
+  clients replan.
+- **Old node.** Central asks the dead node to stop the transport in the
+  background, in case it is only unreachable from the relay (for example, a
+  split between the proxy and the node). The node leaves the record, which now
+  names the new node (`noderecipe.Store.DeleteUnlessMoved`). A node that cannot
+  tell (an older binary, or a card without node row ids) deletes it anyway; for
+  that case central writes the session's current recipe again after the stop,
+  and the proxy keeps polling through a missing record until its deadline.
+
+Limits: the moved route lives in the owning API process, like any compat
+session; a proxy-egress transcode whose proxy has no other usable transcode node
+fails until the client starts again; the API relay does not use the hung-node
+watch yet, so a hung node moves an API-egress transcode only once its
+connections fail.
+
 ### 12.8 Hot-path cost per request
 
 A deny GET is at most one Redis round trip per session per ~2s window on each
