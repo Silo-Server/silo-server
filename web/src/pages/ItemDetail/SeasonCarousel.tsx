@@ -66,12 +66,17 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
                   )}
 
                   {overlayPrefs && (
-                    <CardOverlays data={overlayDataFromSeason(season)} prefs={overlayPrefs} />
+                    <CardOverlays
+                      data={overlayDataFromSeason(season)}
+                      prefs={overlayPrefs}
+                      hasProgressBar={isCompleted || hasProgress}
+                      hasTopRightHostBadge={isCompleted}
+                    />
                   )}
 
                   {/* Completed checkmark */}
                   {isCompleted && (
-                    <div className="absolute top-2.5 right-2.5 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
+                    <div className="absolute top-2.5 right-2.5 z-20 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
                       <Check className="size-3.5" strokeWidth={3} />
                     </div>
                   )}

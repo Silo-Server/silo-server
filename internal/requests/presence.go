@@ -40,7 +40,7 @@ type CatalogPresence struct {
 }
 
 type seasonLookup interface {
-	SeriesSeasonAvailability(ctx context.Context, seriesContentIDs []string) (map[string]map[int]catalog.SeasonAvailability, error)
+	SeriesSeasonAvailability(ctx context.Context, seriesContentIDs []string, filter catalog.AccessFilter) (map[string]map[int]catalog.SeasonAvailability, error)
 }
 
 func NewCatalogPresence(items *catalog.ItemRepository, providerIDs ...*catalog.ProviderIDRepository) *CatalogPresence {
@@ -64,7 +64,9 @@ func (p *CatalogPresence) SeasonAvailability(ctx context.Context, seriesContentI
 	if p == nil || p.seasons == nil {
 		return nil, nil
 	}
-	bySeries, err := p.seasons.SeriesSeasonAvailability(ctx, seriesContentIDs)
+	// Media-request presence is server-wide: count every enabled library, not
+	// a single viewer's allowlist.
+	bySeries, err := p.seasons.SeriesSeasonAvailability(ctx, seriesContentIDs, catalog.AccessFilter{})
 	if err != nil {
 		return nil, err
 	}

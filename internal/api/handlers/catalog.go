@@ -219,7 +219,7 @@ func (h *CatalogHandler) catalogItemResponses(ctx context.Context, v ItemViewer,
 		items = append(items, resp)
 	}
 	if h.itemsH != nil {
-		h.itemsH.attachItemListAvailability(ctx, items)
+		h.itemsH.attachItemListAvailability(ctx, accessFilter, items)
 	}
 	return items
 }

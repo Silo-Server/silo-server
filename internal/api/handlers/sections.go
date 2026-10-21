@@ -1519,7 +1519,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	for _, section := range resp.Sections {
 		flat = append(flat, section.Items...)
 	}
-	fillSectionAvailability(ctx, h.fetcher, flat)
+	fillSectionAvailability(ctx, h.fetcher, viewerAccess, flat)
 	n := 0
 	for si := range resp.Sections {
 		for ii := range resp.Sections[si].Items {

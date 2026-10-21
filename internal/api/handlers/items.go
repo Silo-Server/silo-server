@@ -841,7 +841,8 @@ func (h *ItemsHandler) writeCatalogBrowseResponse(w http.ResponseWriter, r *http
 		}
 		items = append(items, resp)
 	}
-	h.attachItemListAvailability(r.Context(), items)
+	// Availability is json:"-" on itemListResponse: this legacy v1 writer
+	// never emits it, so skip the season aggregation that only /api/v2 reads.
 
 	writeJSON(w, http.StatusOK, browseResponse{
 		Total:      result.Total,

@@ -32,11 +32,11 @@ func (c availabilityCard) seriesAndKind() (seriesID string, seasonNumber int, ki
 }
 
 type availabilityStore interface {
-	SeriesSeasonAvailability(ctx context.Context, seriesContentIDs []string) (map[string]map[int]catalog.SeasonAvailability, error)
+	SeriesSeasonAvailability(ctx context.Context, seriesContentIDs []string, filter catalog.AccessFilter) (map[string]map[int]catalog.SeasonAvailability, error)
 	EpisodeMetadataIncomplete(ctx context.Context, seriesContentIDs []string) (map[string]bool, error)
 }
 
-func availabilityForCards(ctx context.Context, store availabilityStore, cards []availabilityCard) map[string]*catalog.Availability {
+func availabilityForCards(ctx context.Context, store availabilityStore, access catalog.AccessFilter, cards []availabilityCard) map[string]*catalog.Availability {
 	if store == nil {
 		return nil
 	}
@@ -56,7 +56,7 @@ func availabilityForCards(ctx context.Context, store availabilityStore, cards []
 	if len(seriesIDs) == 0 {
 		return nil
 	}
-	bySeries, err := store.SeriesSeasonAvailability(ctx, seriesIDs)
+	bySeries, err := store.SeriesSeasonAvailability(ctx, seriesIDs, access)
 	if err != nil {
 		slog.WarnContext(ctx, "card availability: season counts", "component", "api", "error", err)
 		return nil
@@ -88,29 +88,29 @@ func availabilityForCards(ctx context.Context, store availabilityStore, cards []
 	return out
 }
 
-func (h *ItemsHandler) attachItemListAvailability(ctx context.Context, items []itemListResponse) {
+func (h *ItemsHandler) attachItemListAvailability(ctx context.Context, access catalog.AccessFilter, items []itemListResponse) {
 	cards := make([]availabilityCard, len(items))
 	for i, item := range items {
 		cards[i] = availabilityCard{contentID: item.ContentID, itemType: item.Type, seriesID: item.SeriesID, seasonNumber: item.SeasonNumber}
 	}
-	byID := availabilityForCards(ctx, h.itemRepo, cards)
+	byID := availabilityForCards(ctx, h.itemRepo, access, cards)
 	for i := range items {
 		items[i].Availability = byID[items[i].ContentID]
 	}
 }
 
-func fillSectionAvailability(ctx context.Context, store availabilityStore, items []sectionItemResponse) {
+func fillSectionAvailability(ctx context.Context, store availabilityStore, access catalog.AccessFilter, items []sectionItemResponse) {
 	cards := make([]availabilityCard, len(items))
 	for i, item := range items {
 		cards[i] = availabilityCard{contentID: item.ContentID, itemType: item.Type, seriesID: item.SeriesID, seasonNumber: item.SeasonNumber}
 	}
-	byID := availabilityForCards(ctx, store, cards)
+	byID := availabilityForCards(ctx, store, access, cards)
 	for i := range items {
 		items[i].Availability = byID[items[i].ContentID]
 	}
 }
 
-func (h *ItemsHandler) attachSeasonListAvailability(ctx context.Context, seriesID string, seasons []seasonResponse) {
+func (h *ItemsHandler) attachSeasonListAvailability(ctx context.Context, access catalog.AccessFilter, seriesID string, seasons []seasonResponse) {
 	cards := make([]availabilityCard, 0, len(seasons))
 	for i := range seasons {
 		if seasons[i].IsSpecials || seasons[i].SeasonNumber <= 0 {
@@ -124,7 +124,7 @@ func (h *ItemsHandler) attachSeasonListAvailability(ctx context.Context, seriesI
 			seasonNumber: &number,
 		})
 	}
-	byID := availabilityForCards(ctx, h.itemRepo, cards)
+	byID := availabilityForCards(ctx, h.itemRepo, access, cards)
 	for i := range seasons {
 		seasons[i].Availability = byID[seasons[i].ContentID]
 	}

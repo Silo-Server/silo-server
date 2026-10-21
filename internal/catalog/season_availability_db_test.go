@@ -64,7 +64,8 @@ func TestSeriesSeasonAvailabilityDatabase(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id IN ($1, $2)`, enabled, disabled)
 	})
 
-	bySeries, err := NewItemRepository(pool).SeriesSeasonAvailability(ctx, []string{series, "series-season-test-absent-" + suffix})
+	repo := NewItemRepository(pool)
+	bySeries, err := repo.SeriesSeasonAvailability(ctx, []string{series, "series-season-test-absent-" + suffix}, AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,5 +87,66 @@ func TestSeriesSeasonAvailabilityDatabase(t *testing.T) {
 		if got[season] != w {
 			t.Errorf("season %d = %+v, want %+v", season, got[season], w)
 		}
+	}
+
+	// A viewer allowed only the disabled library must not count the enabled
+	// holdings that made season 1 complete for an unrestricted query.
+	scoped, err := repo.SeriesSeasonAvailability(ctx, []string{series}, AccessFilter{AllowedLibraryIDs: []int{disabled}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scoped[series][1].Have != 0 {
+		t.Fatalf("allowlist excluding enabled library: season 1 have = %d, want 0", scoped[series][1].Have)
+	}
+	if scoped[series][2].Have != 0 {
+		// Season 2's only file is in the disabled (and allowed) folder, but
+		// that folder is not enabled, so presence stays empty.
+		t.Fatalf("disabled folder in allowlist: season 2 have = %d, want 0", scoped[series][2].Have)
+	}
+}
+
+func TestEpisodeMetadataIncompleteSeasonsWithoutEpisodes(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	complete := "series-ep-list-complete-" + suffix
+	gapped := "series-ep-list-gap-" + suffix
+	seed := func(stmt string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, stmt, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed(`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'series', 'complete'), ($2, 'series', 'gapped')`, complete, gapped)
+	seed(`INSERT INTO seasons (content_id, series_id, season_number) VALUES
+		($1 || '-s1', $1, 1),
+		($2 || '-s1', $2, 1),
+		($2 || '-s2', $2, 2)`, complete, gapped)
+	seed(`INSERT INTO episodes (content_id, series_id, season_number, episode_number, air_date) VALUES
+		($1 || '-s1e1', $1, 1, 1, DATE '2020-01-01'),
+		($2 || '-s1e1', $2, 1, 1, DATE '2020-01-01')`, complete, gapped)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE series_id IN ($1, $2)`, complete, gapped)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM seasons WHERE series_id IN ($1, $2)`, complete, gapped)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN ($1, $2)`, complete, gapped)
+	})
+
+	got, err := NewItemRepository(pool).EpisodeMetadataIncomplete(ctx, []string{complete, gapped})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[complete] {
+		t.Fatalf("series with every season listed = incomplete, want ready")
+	}
+	if !got[gapped] {
+		t.Fatalf("series with season 2 and no episodes = ready, want incomplete")
 	}
 }

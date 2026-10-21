@@ -544,7 +544,7 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 				resp = append(resp, sr)
 			}
 			h.items.enrichSeasonPlayTargets(ctx, v, id, resp)
-			h.items.attachSeasonListAvailability(ctx, id, resp)
+			h.items.attachSeasonListAvailability(ctx, filter, id, resp)
 			return resp, nil
 		}
 	}
@@ -569,7 +569,7 @@ func (h *CatalogResourceHandler) seriesSeasons(ctx context.Context, v ItemViewer
 		})
 	}
 	h.items.enrichSeasonPlayTargets(ctx, v, id, resp)
-	h.items.attachSeasonListAvailability(ctx, id, resp)
+	h.items.attachSeasonListAvailability(ctx, filter, id, resp)
 	return resp, nil
 }
 
@@ -606,7 +606,7 @@ func (h *CatalogResourceHandler) SeriesSeason(ctx context.Context, v ItemViewer,
 			h.items.maybeRequestStaleSeasonMetadataRefresh(ctx, season.ContentID, episodes)
 			resp := h.items.toSeasonResponseFromEpisodes(ctx, v, id, season, episodes, userData, v.Access.ImageSize)
 			h.items.resolveSeasonPlayTarget(ctx, v, id, &resp)
-			return resp, nil
+			return h.withSeasonAvailability(ctx, v.Access, id, resp), nil
 		case !errors.Is(err, catalog.ErrSeasonNotFound):
 			return SeasonView{}, apiError(http.StatusInternalServerError, "internal_error", failed)
 		}
@@ -631,7 +631,15 @@ func (h *CatalogResourceHandler) SeriesSeason(ctx context.Context, v ItemViewer,
 		UserData:     h.items.getAggregateUserData(ctx, v, episodes),
 	}
 	h.items.resolveSeasonPlayTarget(ctx, v, id, &resp)
-	return resp, nil
+	return h.withSeasonAvailability(ctx, v.Access, id, resp), nil
+}
+
+// withSeasonAvailability fills Availability the same way the season list does,
+// so opening one season keeps the badge the collection already showed.
+func (h *CatalogResourceHandler) withSeasonAvailability(ctx context.Context, access catalog.AccessFilter, seriesID string, season seasonResponse) seasonResponse {
+	seasons := []seasonResponse{season}
+	h.items.attachSeasonListAvailability(ctx, access, seriesID, seasons)
+	return seasons[0]
 }
 
 // SeasonEpisodes answers the episodes of a series' season by number.

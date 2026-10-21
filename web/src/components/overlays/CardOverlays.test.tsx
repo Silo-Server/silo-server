@@ -403,6 +403,20 @@ describe("CardOverlays", () => {
     expect(bottomMarginClasses(lifted)).toEqual(["mb-2"]);
   });
 
+  it("clears the top-right corner when the host draws its own badge there", () => {
+    const prefs = prefsWithOnly("content_rating");
+    prefs.items.content_rating = { ...prefs.items.content_rating, position: "top-right" };
+    const flush = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />,
+    ).container.querySelector<HTMLElement>('[data-overlay-edge="top"]');
+    expect(flush?.classList.contains("pr-8")).toBe(false);
+
+    const cleared = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} hasTopRightHostBadge />,
+    ).container.querySelector<HTMLElement>('[data-overlay-edge="top"]');
+    expect(cleared?.classList.contains("pr-8")).toBe(true);
+  });
+
   it("keeps the badge layer beneath card actions and non-interactive", () => {
     // MediaItemMenu renders its quick actions at z-20 in the card wrapper's
     // stacking context (see MediaItemMenu.test.tsx), so this z-10 layer paints
