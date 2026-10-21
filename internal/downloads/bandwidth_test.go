@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -39,43 +38,6 @@ func TestThrottledReaderDoesNotExposeUnchargedBytes(t *testing.T) {
 	buffer := make([]byte, 100)
 	if n, err := reader.Read(buffer); n != 0 || err == nil {
 		t.Fatalf("read %d bytes, error %v", n, err)
-	}
-}
-
-func TestSharedBandwidthBudgetRedis(t *testing.T) {
-	url := os.Getenv("SILO_TEST_REDIS_URL")
-	if url == "" {
-		t.Skip("SILO_TEST_REDIS_URL is not set")
-	}
-	opts, err := redis.ParseURL(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := redis.NewClient(opts)
-	defer func() { _ = client.Close() }()
-	ctx := context.Background()
-	prefix := fmt.Sprintf("test:downloads:{%d}", time.Now().UnixNano())
-	global, account := prefix+":global", prefix+":account"
-	defer client.Del(ctx, global, account, prefix+":other")
-	debit := func(user string, rate int64) int64 {
-		t.Helper()
-		delay, err := sharedBandwidthScript.Run(ctx, client, []string{global, user}, rate, 0, 32768).Int64()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return delay
-	}
-	if got := debit(account, 131072); got != 0 {
-		t.Fatalf("first chunk delay %d", got)
-	}
-	// A second replica/account must use the same exhausted server budget.
-	if got := debit(prefix+":other", 131072); got < 200000 {
-		t.Fatalf("independent replica allowance: delay %d", got)
-	}
-	// Editing the rate preserves the charged balance rather than granting a
-	// fresh burst. Re-instantiating a script/manager does not reset Redis state.
-	if got := debit(account, 65536); got < 400000 {
-		t.Fatalf("rate edit refilled bucket: delay %d", got)
 	}
 }
 

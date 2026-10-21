@@ -195,6 +195,10 @@ type throttledReader struct {
 	manager   *BandwidthManager
 	userID    int
 	bytesRead int64
+	// credit is budget already paid for but not yet read. Callers such as
+	// io.Copy read at most 32 KiB at a time; paying a whole chunk ahead keeps a
+	// fast cap from being bounded by one budget round trip per read.
+	credit int
 }
 
 func (t *throttledReader) Read(p []byte) (int, error) {
@@ -209,11 +213,16 @@ func (t *throttledReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	n, err := t.r.Read(p)
-	if n > 0 {
-		if chargeErr := t.manager.wait(t.ctx, t.userID, n); chargeErr != nil {
+	if n > t.credit {
+		charge := max(chunk, n)
+		if chargeErr := t.manager.wait(t.ctx, t.userID, charge); chargeErr != nil {
 			// io.Copy writes n even with an error: never expose uncharged bytes.
 			return 0, chargeErr
 		}
+		t.credit += charge
+	}
+	if n > 0 {
+		t.credit -= n
 		t.bytesRead += int64(n)
 	}
 	return n, err
@@ -243,47 +252,65 @@ func (bm *BandwidthManager) wait(ctx context.Context, userID, bytes int) error {
 	}
 	var failingSince time.Time
 	for bytes > 0 {
-		chunkCtx, cancel := context.WithTimeout(ctx, time.Second)
-		server, user, err := bm.currentRates(chunkCtx)
-		var delay time.Duration
-		// A rate lowered mid-read can leave the chunk above the new burst,
-		// which a bucket could never pay at once; charge it in pieces.
-		charge := min(bytes, bandwidthChunk(server, user))
-		if err == nil && (server > 0 || user > 0) {
-			var micros int64
-			micros, err = sharedBandwidthScript.Run(chunkCtx, bm.shared,
-				[]string{"silo:downloads:{bandwidth}:global", fmt.Sprintf("silo:downloads:{bandwidth}:user:%d", userID)},
-				server, user, charge).Int64()
-			delay = time.Duration(micros) * time.Microsecond
-		}
-		cancel()
+		charge, delay, err := bm.chargeShared(ctx, userID, bytes)
 		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
+			if delay, err = budgetRetry(ctx, &failingSince, err); err != nil {
+				return err
 			}
-			if failingSince.IsZero() {
-				failingSince = time.Now()
-			}
-			if time.Since(failingSince) >= sharedBudgetGrace {
-				return fmt.Errorf("download bandwidth budget unavailable: %w", err)
-			}
-			delay = sharedBudgetRetry
 		} else {
 			failingSince = time.Time{}
-			if delay <= 0 {
-				bytes -= charge
-				continue
+		}
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
 			}
 		}
-		timer := time.NewTimer(min(delay, 250*time.Millisecond))
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
+		bytes -= charge
 	}
 	return nil
+}
+
+// chargeShared reserves up to one chunk of bytes in the shared buckets and
+// returns how many it reserved and how long to wait before sending them.
+func (bm *BandwidthManager) chargeShared(ctx context.Context, userID, bytes int) (int, time.Duration, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	server, user, err := bm.currentRates(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	// A rate lowered mid-read can leave the bytes above the new burst; charge
+	// them in pieces so one reservation stays about a chunk long.
+	charge := min(bytes, bandwidthChunk(server, user))
+	if server <= 0 && user <= 0 {
+		return charge, 0, nil
+	}
+	micros, err := sharedBandwidthScript.Run(ctx, bm.shared,
+		[]string{"silo:downloads:{bandwidth}:global", fmt.Sprintf("silo:downloads:{bandwidth}:user:%d", userID)},
+		server, user, charge).Int64()
+	if err != nil {
+		return 0, 0, err
+	}
+	return charge, time.Duration(micros) * time.Microsecond, nil
+}
+
+// budgetRetry returns how long to wait before retrying a failed budget call,
+// or the error that ends the transfer once failures outlast sharedBudgetGrace.
+func budgetRetry(ctx context.Context, failingSince *time.Time, err error) (time.Duration, error) {
+	if ctx.Err() != nil {
+		return 0, ctx.Err()
+	}
+	if failingSince.IsZero() {
+		*failingSince = time.Now()
+	}
+	if time.Since(*failingSince) >= sharedBudgetGrace {
+		return 0, fmt.Errorf("download bandwidth budget unavailable: %w", err)
+	}
+	return sharedBudgetRetry, nil
 }
 
 // currentRates returns the shared-mode rates, reading the settings at most once
@@ -312,17 +339,22 @@ func (bm *BandwidthManager) currentRates(ctx context.Context) (int64, int64, err
 	}
 	bm.mu.RUnlock()
 
-	freshServer, freshUser, err := bm.rates(ctx)
+	readCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	freshServer, freshUser, err := bm.rates(readCtx)
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 	if err != nil {
 		if !bm.ratesKnown {
 			return 0, 0, err
 		}
-		// Retry the read in about a second rather than on every chunk.
-		bm.ratesAt = time.Now().Add(time.Second - bandwidthRatesTTL)
-		slog.WarnContext(ctx, "download bandwidth settings unavailable; keeping last known limits",
-			"component", "downloads", "error", err)
+		// A transfer that ended mid-read says nothing about the settings.
+		if ctx.Err() == nil {
+			// Retry the read in about a second rather than on every chunk.
+			bm.ratesAt = time.Now().Add(time.Second - bandwidthRatesTTL)
+			slog.WarnContext(ctx, "download bandwidth settings unavailable; keeping last known limits",
+				"component", "downloads", "error", err)
+		}
 		return bm.serverBPS, bm.userBPS, nil
 	}
 	bm.serverBPS, bm.userBPS = freshServer, freshUser
@@ -332,33 +364,29 @@ func (bm *BandwidthManager) currentRates(ctx context.Context) (int64, int64, err
 
 // Both buckets are debited atomically. Redis time prevents node clock skew;
 // stored balances/rates survive restarts and rate edits do not refill budgets.
+// A charge always reserves its bytes, letting the balance go negative, and
+// returns the wait until they are paid for, so waiters are served in order.
+// A bucket whose rate is 0 is left alone: a replica with stale settings must
+// not reset a balance the others are still charging.
 var sharedBandwidthScript = redis.NewScript(`
 local clock = redis.call('TIME')
 local now = tonumber(clock[1]) + tonumber(clock[2]) / 1000000
 local n = tonumber(ARGV[3])
-local buckets = {}
 local delay = 0
 for i = 1,2 do
  local rate = tonumber(ARGV[i])
- local burst = math.max(rate / 4, 32768)
- local state = redis.call('HMGET', KEYS[i], 'tokens', 'time', 'rate')
- local tokens = burst
- if state[1] then
-  tokens = math.min(burst, tonumber(state[1]) + math.max(0, now - tonumber(state[2])) * tonumber(state[3]))
- end
  if rate > 0 then
-  delay = math.max(delay, math.max(0, n - tokens) / rate)
- end
- buckets[i] = {tokens, rate}
-end
-for i = 1,2 do
- local tokens, rate = buckets[i][1], buckets[i][2]
- if rate > 0 then
-  if delay == 0 then tokens = tokens - n end
+  local burst = math.max(rate / 4, 32768)
+  local state = redis.call('HMGET', KEYS[i], 'tokens', 'time', 'rate')
+  local tokens = burst
+  if state[1] then
+   tokens = math.min(burst, tonumber(state[1]) + math.max(0, now - tonumber(state[2])) * tonumber(state[3]))
+  end
+  tokens = tokens - n
+  local wait = math.max(0, -tokens) / rate
+  delay = math.max(delay, wait)
   redis.call('HSET', KEYS[i], 'tokens', tokens, 'time', now, 'rate', rate)
-  redis.call('EXPIRE', KEYS[i], 60)
- else
-  redis.call('DEL', KEYS[i])
+  redis.call('EXPIRE', KEYS[i], 60 + math.ceil(wait))
  end
 end
 return math.ceil(delay * 1000000)
