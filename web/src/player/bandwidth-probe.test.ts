@@ -29,7 +29,6 @@ import {
   TEST_DELAY_MS,
   fakeLocks,
   pageVideo,
-  settle,
   keptReading,
   fetchWithSession,
   installProbeTestHooks,
@@ -222,13 +221,11 @@ describe("media holds", () => {
     scheduleBandwidthProbe();
     const media = pageVideo();
     media.play();
-    await settle();
     expect(locks.held.map((lock) => lock.name)).toEqual(["silo-media-active"]);
 
     media.video.remove();
     mediaElementReleased(media.video);
-    await settle();
-    expect(locks.held).toEqual([]);
+    await vi.waitFor(() => expect(locks.held).toEqual([]));
   });
 
   // Both exit paths release a start that never loaded media: its player going
@@ -244,12 +241,11 @@ describe("media holds", () => {
     const locks = fakeLocks();
     hangingProbe();
     const endStart = cancelBandwidthProbe();
-    await settle();
+    expect(locks.held.map((lock) => lock.name)).toEqual(["silo-media-active"]);
     expect(await testConnectionSpeed()).toBe("playing");
 
     releaseStart(endStart);
-    await settle();
-    expect(locks.held).toEqual([]);
+    await vi.waitFor(() => expect(locks.held).toEqual([]));
     const result = testConnectionSpeed();
     await vi.waitFor(() => expect(fetchWithSession).toHaveBeenCalledTimes(1));
     stopBandwidthProbes();
@@ -264,7 +260,6 @@ describe("media holds", () => {
     const endFirst = cancelBandwidthProbe();
     cancelBandwidthProbe();
     endFirst();
-    await settle();
     expect(await testConnectionSpeed()).toBe("playing");
   });
 
@@ -273,10 +268,9 @@ describe("media holds", () => {
     const locks = fakeLocks();
     hangingProbe();
     cancelBandwidthProbe();
-    await settle();
+    expect(locks.held.map((lock) => lock.name)).toEqual(["silo-media-active"]);
     playbackStartEnded();
-    await settle();
-    expect(locks.held).toEqual([]);
+    await vi.waitFor(() => expect(locks.held).toEqual([]));
   });
 
   it("holds only automatic tests in the quiet period after a start that played", async () => {
@@ -291,7 +285,6 @@ describe("media holds", () => {
       const media = pageVideo();
       media.play();
       media.pause();
-      await settle();
 
       // An automatic test still waits out the quiet period.
       await vi.advanceTimersByTimeAsync(TEST_DELAY_MS);

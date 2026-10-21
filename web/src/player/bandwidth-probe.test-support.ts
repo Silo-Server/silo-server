@@ -229,11 +229,6 @@ export function pageVideo() {
   };
 }
 
-/** Lets pending lock grants and releases settle. */
-export async function settle() {
-  for (let i = 0; i < 10; i++) await Promise.resolve();
-}
-
 /** A reading this device measured itself, as a server without connection_speed_v1 leaves it. */
 export function keptReading(
   kbps: number,
