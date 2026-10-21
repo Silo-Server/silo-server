@@ -52,7 +52,6 @@ export function bufferedAheadMs(video: HTMLVideoElement): number {
 
 interface Options {
   videoRef: RefObject<HTMLVideoElement | null>;
-  enabled: boolean;
   /**
    * Inside a Watch Party room, which has its own lower-quality offer: stalls
    * are still tracked and summarized, but the controller does not act.
@@ -153,7 +152,6 @@ export function useAutoQualityDownshift(options: Options) {
     setPill((current) => (samePill(current, next) ? current : next));
   }, []);
   useEffect(() => {
-    if (!options.enabled) return;
     const c = new BufferingQualityController(
       latest.current.mode,
       (output) => {
@@ -193,13 +191,13 @@ export function useAutoQualityDownshift(options: Options) {
       // discard this one, so the session stops repeating it.
       latest.current.onKeptEstimate?.(undefined);
     };
-  }, [options.sessionId, options.enabled]);
+  }, [options.sessionId]);
   useEffect(() => {
     const c = controller.current;
     if (!c || options.attemptId === attempt.current) return;
     attempt.current = options.attemptId;
     c.event({ type: "new_attempt" }, now());
-  }, [options.attemptId, options.enabled, options.sessionId]);
+  }, [options.attemptId, options.sessionId]);
   useEffect(() => {
     const c = controller.current;
     if (!c) return;
@@ -243,7 +241,6 @@ export function useAutoQualityDownshift(options: Options) {
     options.mode,
     options.obscured,
     options.suspended,
-    options.enabled,
     options.sessionId,
     options.videoRef,
   ]);
@@ -362,7 +359,7 @@ export function useAutoQualityDownshift(options: Options) {
       for (const [name, handler] of Object.entries(events))
         video.removeEventListener(name, handler);
     };
-  }, [options.videoRef, options.enabled, options.sessionId, refresh]);
+  }, [options.videoRef, options.sessionId, refresh]);
   const answer = useCallback(
     (type: BufferingAnswer | "quality_changed") => {
       controller.current?.event({ type }, now());
@@ -371,8 +368,6 @@ export function useAutoQualityDownshift(options: Options) {
     [refresh],
   );
   const visiblePill =
-    options.enabled && !options.obscured && pill?.planRevision === options.planRevision
-      ? pill
-      : null;
+    !options.obscured && pill?.planRevision === options.planRevision ? pill : null;
   return useMemo(() => ({ pill: visiblePill, answer }), [visiblePill, answer]);
 }

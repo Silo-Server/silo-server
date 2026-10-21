@@ -4447,7 +4447,6 @@ export function VideoPlayer({
   const bufferingQuality = useAutoQualityDownshift({
     videoRef,
     planRevision,
-    enabled: true,
     suspended: watchTogetherRoomActive || !!watchTogetherRoomId,
     sessionId: bufferingTitleId ?? sessionId,
     attemptId: playbackAttemptId,

@@ -22,7 +22,6 @@ function setup({
   Object.defineProperty(video, "paused", { value: paused, configurable: true });
   const options = {
     videoRef: { current: video },
-    enabled: true,
     sessionId: "title",
     plan,
     planRevision: 1,
@@ -171,12 +170,12 @@ it("reports the kept estimate from a lowering until a new attempt", () => {
   expect(h.options.onReplan).toHaveBeenCalledTimes(1);
 });
 
-it("drops the kept estimate when the controller stops, as in a Watch Together room", () => {
+it("drops the kept estimate when the title changes", () => {
   const h = setup();
   h.send("waiting");
   h.advance(6000);
   expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(44100);
-  h.rerender({ ...h.options, enabled: false });
+  h.rerender({ ...h.options, sessionId: "next-title" });
   expect(h.options.onKeptEstimate).toHaveBeenLastCalledWith(undefined);
 });
 
@@ -225,7 +224,6 @@ it("keeps timing a slow start through the waiting that follows its reload", () =
   renderHook((props) => useAutoQualityDownshift(props), {
     initialProps: {
       videoRef: { current: video },
-      enabled: true,
       sessionId: "title",
       plan,
       planRevision: 1,
@@ -257,7 +255,6 @@ it("does not count a slow start's wait while the renderer, not the network, is b
   renderHook((props) => useAutoQualityDownshift(props), {
     initialProps: {
       videoRef: { current: video },
-      enabled: true,
       sessionId: "title",
       plan,
       planRevision: 1,
@@ -282,7 +279,6 @@ it("keeps timing a slow start through a seek before its first frame", () => {
   renderHook((props) => useAutoQualityDownshift(props), {
     initialProps: {
       videoRef: { current: video },
-      enabled: true,
       sessionId: "title",
       plan,
       planRevision: 1,
@@ -310,7 +306,6 @@ it("counts the wait after a seek made before a paused plan first played", () => 
   renderHook((props) => useAutoQualityDownshift(props), {
     initialProps: {
       videoRef: { current: video },
-      enabled: true,
       sessionId: "title",
       plan,
       planRevision: 1,
