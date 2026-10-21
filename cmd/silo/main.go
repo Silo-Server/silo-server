@@ -3236,7 +3236,7 @@ func main() {
 		if metadataService != nil {
 			boxSetSyncer.WithImages(metadataService.AutoImageCacher)
 		}
-		taskMgr.Register(tasks.NewSyncMovieBoxSetsTask(boxSetSyncer))
+		taskMgr.Register(tasks.NewSyncMovieBoxSetsTask(deps.DB, boxSetSyncer))
 		go boxsets.Watch(appCtx, deps.EventsHub, func() {
 			if _, err := taskMgr.StartTask(tasks.SyncMovieBoxSetsTaskKey); err != nil {
 				slog.Debug("box set sync not started", "component", "app", "error", err)
