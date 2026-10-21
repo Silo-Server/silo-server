@@ -1372,7 +1372,9 @@ every value is truncated to 256 characters.
 `effective_media_file_id`, `audio_output_mode`, `audio_mime`, `audio_channels`,
 `audio_decoder_name`, `correction_id`, `correction_stage`, `network_transport`,
 `network_metered`, `network_validated`, `bandwidth_estimate_kbps`,
-`link_downstream_kbps`, `target_source_position_seconds`, `reason`.
+`link_downstream_kbps`, `target_source_position_seconds`, `reason`,
+`played_ms`, `stall_count`, `stall_total_ms`, `stall_longest_ms`,
+`delivered_kbps`, `buffering_mode`, `buffering_action`, `throughput_kbps`.
 
 On a `first_frame` event, `first_frame_ms` is the whole milliseconds from the
 viewer's request to play (the tap, or the in-player action that started the
@@ -2027,13 +2029,17 @@ Auto plans with the lower of the request estimate and the unexpired limit, or
 the limit alone when the request has none. Fixed qualities ignore the limit.
 `ignore` plans without the limit, records nothing and leaves the limit
 stored; `clear` deletes it before planning. The 80% margin and the
-administrator and client caps still apply. On a start, a `quality_change`
-replan or an `output_change` replan that allows alternate versions, when an
-observed estimate or the limit puts the source over budget, Auto first tries
-versions of the same edition that fit and play without video encoding, then a
-transcode; an unchanged source carries `quality_reduction_unavailable`. Track
-changes, recoveries and seeks do not search for a lower version. A plan that
-the stored limit actually lowered adds
+administrator and client caps still apply. When an observed estimate or learned
+limit puts the source over budget and alternate versions are allowed, Auto first
+tries versions of the same edition that fit and play without video encoding,
+then a transcode; an unchanged source carries `quality_reduction_unavailable`.
+This buffering search runs on a start, a `quality_change` or `output_change`
+replan, and a `failure_recovery` that changes intent: `quality_changed` changes
+the normalized quality or carries `learned_limit: "clear"`;
+`output_route_changed` changes `output_context_id`; or `audio_track_changed`
+or `subtitle_track_changed` changes the corresponding selected track. Explicit
+`track_change` replans, seeks and recoveries without an intent change do not run
+this search. A plan that the stored limit actually lowered adds
 `bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`.
 
 `playback_plan_summary_v1` advertises the `plan_summary` route event. It adds
