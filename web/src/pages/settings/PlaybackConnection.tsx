@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { v2 } from "@/api/v2/request";
+import { v2, type V2Result } from "@/api/v2/request";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
@@ -102,24 +102,14 @@ export function LearnedLimitRow() {
   );
 }
 
-interface SpeedProbe {
-  kbps: number;
-  lower_bound: boolean;
-  measured_at: string;
-  transport: string;
-}
-
-interface SpeedSample {
-  kbps: number;
-  measured_at: string;
-}
+type ConnectionState = V2Result<"GET /api/v2/playback/connection">;
 
 /**
  * The highest reading the server keeps for this connection: the latest test,
  * or the best playback throughput, which is only a lower bound.
  */
 function speedDescription(
-  connection: { probe?: SpeedProbe | null; playback_sample?: SpeedSample | null } | undefined,
+  connection: ConnectionState | undefined,
   now: number,
 ): string | undefined {
   const probe = connection?.probe;

@@ -48,6 +48,7 @@ const BASE_PLAYBACK_KEYS: SettingKey[] = [
 ];
 
 const INTRO_SKIP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE]);
+const BUFFERING_MODE_SETTING = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE];
 
 // Radix Select cannot represent "" as an item value, so the unset entry needs
 // a sentinel that never collides with a stored bitrate.
@@ -476,8 +477,8 @@ export default function PlaybackSettings() {
         <QualitySetting />
         {supportsBuffering && (
           <SettingRow
-            label="Lower quality when buffering"
-            description="What Silo does on Auto when playback keeps buffering. Silo always asks before lowering a quality you picked."
+            label={BUFFERING_MODE_SETTING.label}
+            description={BUFFERING_MODE_SETTING.description}
             control={(id) => (
               <Select
                 value={read<string>(SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE)}
@@ -490,9 +491,7 @@ export default function PlaybackSettings() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {optionsFor(
-                    SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE],
-                  ).map((option) => (
+                  {optionsFor(BUFFERING_MODE_SETTING).map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
