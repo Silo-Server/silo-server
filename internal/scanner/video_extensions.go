@@ -16,7 +16,8 @@ import (
 // type for every one of them.
 var videoContainers = []videoContainer{
 	{".mkv .webm", []string{containerMKV}, true},                         // Matroska; WebM is its VP8/VP9/AV1 subset
-	{".mp4 .m4v .mov .3gp .3g2 .f4v", []string{containerMP4}, true},      // MP4/QuickTime family
+	{".mp4 .mov .3gp .3g2 .f4v", []string{containerMP4}, true},           // MP4/QuickTime family
+	{".m4v", []string{containerMP4, containerM4V}, true},                 // MP4, or a bare MPEG-4 video stream
 	{".avi .divx", []string{containerAVI}, true},                         // AVI; .divx is AVI with a DivX stream
 	{".ts .m2ts .mts", []string{containerMPEGTS, containerBDAV}, false},  // MPEG-TS; .m2ts/.mts use 192-byte BDAV packets
 	{".mpg .mpeg", []string{containerMPEGPS, containerMPEGVideo}, false}, // MPEG program stream, or a bare MPEG video stream
@@ -48,6 +49,19 @@ var videoExtensions = func() map[string]bool {
 	}
 	return set
 }()
+
+// extensionAllowsContainer reports whether filePath's extension allows a
+// probe's container: false only for a video extension whose group does not
+// list that container.
+func extensionAllowsContainer(filePath, container string) bool {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	for _, group := range videoContainers {
+		if slices.Contains(strings.Fields(group.extensions), ext) {
+			return slices.Contains(group.containers, container)
+		}
+	}
+	return true
+}
 
 // containerListsStreams reports whether container's header declares every
 // stream the file holds.
