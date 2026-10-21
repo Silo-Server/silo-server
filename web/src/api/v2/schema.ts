@@ -27169,7 +27169,7 @@ export interface components {
       stop_id?: string;
     };
     PlaybackPlan: {
-      /** @description The available_qualities label this plan delivers, so a client can mark that menu entry: the label quality_preference named while the menu lists it and the encode keeps its resolution, otherwise the rung whose resolution class and bitrate the encode matches. Absent when the plan delivers no listed entry, such as the source played unchanged or an encode a bandwidth cap set between two rungs. Present on servers that advertise plan_active_quality_v1. */
+      /** @description The available_qualities label this plan delivers, so a client can mark that menu entry: the label quality_preference named while the menu lists it and the encode keeps its resolution, otherwise the rung whose resolution class and bitrate the encode matches. Absent when the plan delivers no listed entry, such as the source played unchanged or a plain-resolution or auto request whose capped encode falls between two rungs. Present on servers that advertise plan_active_quality_v1. */
       active_quality?: string;
       applied_quirks: components["schemas"]["AppliedQuirkV3"][];
       /** @description Fixed quality rungs a quality_change replan may request, in menu order. The source is not listed: quality_preference auto returns to it. Empty when no rung applies. */

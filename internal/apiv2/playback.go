@@ -90,7 +90,7 @@ type PlaybackPlan struct {
 	EffectiveMediaFileID   ID                              `json:"effective_media_file_id"`
 	Source                 PlaybackSource                  `json:"source"`
 	SubtitleFidelityPolicy string                          `json:"subtitle_fidelity_policy"`
-	ActiveQuality          string                          `json:"active_quality,omitempty" doc:"The available_qualities label this plan delivers, so a client can mark that menu entry: the label quality_preference named while the menu lists it and the encode keeps its resolution, otherwise the rung whose resolution class and bitrate the encode matches. Absent when the plan delivers no listed entry, such as the source played unchanged or an encode a bandwidth cap set between two rungs. Present on servers that advertise plan_active_quality_v1."`
+	ActiveQuality          string                          `json:"active_quality,omitempty" doc:"The available_qualities label this plan delivers, so a client can mark that menu entry: the label quality_preference named while the menu lists it and the encode keeps its resolution, otherwise the rung whose resolution class and bitrate the encode matches. Absent when the plan delivers no listed entry, such as the source played unchanged or a plain-resolution or auto request whose capped encode falls between two rungs. Present on servers that advertise plan_active_quality_v1."`
 }
 type PlaybackSource struct {
 	MediaFileID        ID                          `json:"media_file_id"`

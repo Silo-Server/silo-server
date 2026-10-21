@@ -1607,7 +1607,8 @@ rung of its own resolution class and bitrate, so a plain `1080p`, or a
 `1080p-medium` that the client's decoder held, encoded at 720p and 2000 kbps
 names `720p-medium`, and a lower version played unchanged names its
 plain resolution entry. The field is absent when the plan delivers no entry: the
-source plays unchanged, or a cap set the encode between two rungs. The client
+source plays unchanged, or a cap set the encode of a plain resolution or `auto`
+between two rungs. The client
 marks Auto while the session's preference is `auto`, whatever `active_quality`
 says. Servers that publish the field advertise `plan_active_quality_v1`; without
 that feature an absent field says nothing. The frozen `/api/v1` response never
