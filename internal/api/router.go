@@ -5392,7 +5392,7 @@ func newDiscordNotificationsHandler(deps Dependencies, tokens *access.ProfileTok
 }
 
 // boxSetSyncStarter starts the box set sync task when a library turns box
-// sets on. A run already in progress picks the library up in its next batch.
+// sets on. A run already in progress looks the library up before it ends.
 type boxSetSyncStarter struct {
 	tasks *taskmanager.TaskManager
 }

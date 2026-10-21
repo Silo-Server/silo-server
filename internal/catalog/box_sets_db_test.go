@@ -231,6 +231,18 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 		t.Fatalf("title search in another library = %v, %v; want no franchise", elsewhere, err)
 	}
 
+	// A collection no movie belongs to any more is deleted; one with movies
+	// is kept.
+	if _, err := f.pool.Exec(ctx, `DELETE FROM media_item_tmdb_collections WHERE content_id = $1`, f.id("lonely")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repo.DeleteUnusedCollections(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if kept, err := f.repo.Collections(ctx, []int64{f.franchise, f.single}); err != nil || len(kept) != 1 || kept[f.franchise].ID != f.franchise {
+		t.Fatalf("collections after deleting unused = %v, %v; want only the franchise", kept, err)
+	}
+
 	if _, err := f.pool.Exec(ctx, `DELETE FROM media_item_tmdb_collections WHERE content_id = $1`, f.id("solo")); err != nil {
 		t.Fatal(err)
 	}
@@ -253,8 +265,8 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 		}
 	}
 	slices.Sort(mine)
-	if want := []string{f.id("solo"), f.id("stale")}; !slices.Equal(mine, want) {
-		t.Fatalf("due = %v, want the never looked up and the rematched movie %v", mine, want)
+	if want := []string{f.id("lonely"), f.id("solo"), f.id("stale")}; !slices.Equal(mine, want) {
+		t.Fatalf("due = %v, want the never looked up and the rematched movies %v", mine, want)
 	}
 	// A movie this run already tried is skipped.
 	due, err = f.repo.MoviesNeedingCollectionLookup(ctx, time.Now().Add(-time.Hour), 1000, []string{f.id("solo")})

@@ -48,6 +48,7 @@ type Store interface {
 	CollectionsNeedingFetch(ctx context.Context, staleBefore time.Time, limit int, skip []int64) ([]int64, error)
 	UpsertCollection(ctx context.Context, c catalog.TMDBMovieCollection) error
 	TouchCollection(ctx context.Context, id int64) error
+	DeleteUnusedCollections(ctx context.Context) (int64, error)
 	CollectionArtworkNeedingCache(ctx context.Context, limit int, skip []int64) ([]catalog.CollectionArtworkDue, error)
 	SetCollectionArtwork(ctx context.Context, id int64, slot catalog.CollectionArtworkSlot, sourcePath, path, thumbhash string) error
 }
@@ -82,37 +83,72 @@ func (s *Syncer) WithImages(images func() metadata.ImageCacher) *Syncer {
 	return s
 }
 
-// Run looks up every movie of a box set library that is due, then fetches
-// every collection that is due. report receives progress messages. An item
-// that fails stays due for the next run but is not tried again in this one,
-// so it neither counts as a failure in every batch nor holds back the items
-// behind it.
+// Run deletes the collections no movie belongs to any more, looks up every
+// movie of a box set library that is due, then fetches every collection that
+// is due and caches their artwork. It repeats while a lookup finds movies
+// that became due during the run, such as those of a library that turned box
+// sets on, because a start requested meanwhile is dropped. report receives
+// progress messages. An item that fails stays due for the next run
+// but is not tried again in this one, so it neither counts as a failure in
+// every batch nor holds back the items behind it.
 func (s *Syncer) Run(ctx context.Context, report func(percent float64, message string)) (Result, error) {
 	var res Result
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return res, nil
 	}
-	movieCutoff := s.now().Add(-movieRecheckAfter)
+	s.deleteUnusedCollections(ctx)
 	var failedMovies []string
-	for {
-		due, err := s.store.MoviesNeedingCollectionLookup(ctx, movieCutoff, batchSize, failedMovies)
-		if err != nil {
+	var triedCollections []int64
+	for pass := 0; ; pass++ {
+		checked := res.MoviesChecked
+		if err := s.lookUpMovies(ctx, &res, &failedMovies, report); err != nil {
 			return res, err
 		}
-		if len(due) == 0 {
-			break
+		if pass > 0 && res.MoviesChecked == checked {
+			return res, nil
+		}
+		if err := s.fetchCollections(ctx, &res, &triedCollections, report); err != nil {
+			return res, err
+		}
+		if err := s.cacheArtwork(ctx, &res); err != nil {
+			return res, err
+		}
+	}
+}
+
+// deleteUnusedCollections drops the collections no movie belongs to any
+// more. A failure is logged; the next run tries again.
+func (s *Syncer) deleteUnusedCollections(ctx context.Context) {
+	deleted, err := s.store.DeleteUnusedCollections(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "box sets: deleting unused collections failed", "component", "boxsets", "error", err)
+		return
+	}
+	if deleted > 0 {
+		slog.InfoContext(ctx, "box sets: deleted unused collections", "component", "boxsets", "count", deleted)
+	}
+}
+
+// lookUpMovies records the collection of every due movie. failed collects
+// the movies whose lookup failed in this run.
+func (s *Syncer) lookUpMovies(ctx context.Context, res *Result, failed *[]string, report func(float64, string)) error {
+	cutoff := s.now().Add(-movieRecheckAfter)
+	for {
+		due, err := s.store.MoviesNeedingCollectionLookup(ctx, cutoff, batchSize, *failed)
+		if err != nil || len(due) == 0 {
+			return err
 		}
 		for _, movie := range due {
 			if err := ctx.Err(); err != nil {
-				return res, err
+				return err
 			}
 			ref, err := s.tmdb.GetMovieCollection(ctx, int(movie.TMDBID))
 			if err != nil && !errors.Is(err, tmdb.ErrNotFound) {
 				res.Failures++
-				failedMovies = append(failedMovies, movie.ContentID)
+				*failed = append(*failed, movie.ContentID)
 				slog.WarnContext(ctx, "box sets: movie collection lookup failed", "component", "boxsets", "content_id", movie.ContentID, "tmdb_id", movie.TMDBID, "error", err)
 				if res.Failures >= maxFailures {
-					return res, fmt.Errorf("box sets: stopping after %d failed TMDB lookups: %w", res.Failures, err)
+					return fmt.Errorf("box sets: stopping after %d failed TMDB lookups: %w", res.Failures, err)
 				}
 				continue
 			}
@@ -121,28 +157,27 @@ func (s *Syncer) Run(ctx context.Context, report func(percent float64, message s
 				collectionID = new(int64(ref.ID))
 			}
 			if err := s.store.RecordMovieCollection(ctx, movie.ContentID, movie.TMDBID, collectionID); err != nil {
-				return res, err
+				return err
 			}
 			res.MoviesChecked++
 		}
 		report(25, fmt.Sprintf("Looked up the collections of %d movies", res.MoviesChecked))
 	}
+}
 
-	collectionCutoff := s.now().Add(-collectionRefetchAfter)
-	// tried holds the collections this run could not store: failed fetches,
-	// and ones TMDB no longer serves that were never stored.
-	var tried []int64
+// fetchCollections stores every due collection. tried collects the
+// collections this run could not store: failed fetches, and ones TMDB no
+// longer serves that were never stored.
+func (s *Syncer) fetchCollections(ctx context.Context, res *Result, tried *[]int64, report func(float64, string)) error {
+	cutoff := s.now().Add(-collectionRefetchAfter)
 	for {
-		due, err := s.store.CollectionsNeedingFetch(ctx, collectionCutoff, batchSize, tried)
-		if err != nil {
-			return res, err
-		}
-		if len(due) == 0 {
-			break
+		due, err := s.store.CollectionsNeedingFetch(ctx, cutoff, batchSize, *tried)
+		if err != nil || len(due) == 0 {
+			return err
 		}
 		for _, id := range due {
 			if err := ctx.Err(); err != nil {
-				return res, err
+				return err
 			}
 			c, err := s.tmdb.GetCollection(ctx, int(id))
 			if errors.Is(err, tmdb.ErrNotFound) {
@@ -150,29 +185,27 @@ func (s *Syncer) Run(ctx context.Context, report func(percent float64, message s
 				// no longer serves on every run. One never stored stays due
 				// for the next run.
 				if err := s.store.TouchCollection(ctx, id); err != nil {
-					return res, err
+					return err
 				}
-				tried = append(tried, id)
+				*tried = append(*tried, id)
 				continue
 			}
 			if err != nil {
 				res.Failures++
-				tried = append(tried, id)
+				*tried = append(*tried, id)
 				slog.WarnContext(ctx, "box sets: collection fetch failed", "component", "boxsets", "tmdb_collection_id", id, "error", err)
 				if res.Failures >= maxFailures {
-					return res, fmt.Errorf("box sets: stopping after %d failed TMDB lookups: %w", res.Failures, err)
+					return fmt.Errorf("box sets: stopping after %d failed TMDB lookups: %w", res.Failures, err)
 				}
 				continue
 			}
 			if err := s.store.UpsertCollection(ctx, storedCollection(id, c)); err != nil {
-				return res, err
+				return err
 			}
 			res.CollectionsFetched++
 		}
 		report(75, fmt.Sprintf("Fetched %d collections", res.CollectionsFetched))
 	}
-	err := s.cacheArtwork(ctx, &res)
-	return res, err
 }
 
 // cacheArtwork stores a copy of each collection image still served from

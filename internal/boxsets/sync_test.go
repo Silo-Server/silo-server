@@ -84,6 +84,8 @@ func (s *fakeStore) SetCollectionArtwork(_ context.Context, id int64, slot catal
 	return nil
 }
 
+func (s *fakeStore) DeleteUnusedCollections(context.Context) (int64, error) { return 0, nil }
+
 // TouchCollection marks only a stored collection fetched, as the
 // repository's UPDATE does.
 func (s *fakeStore) TouchCollection(_ context.Context, id int64) error {
@@ -100,6 +102,8 @@ type fakeTMDB struct {
 	// failing movies answer with an error; lookups counts every request.
 	failing map[int]bool
 	lookups map[int]int
+	// onCollection runs on each collection fetch.
+	onCollection func()
 }
 
 func (f *fakeTMDB) GetMovieCollection(_ context.Context, id int) (*tmdb.CollectionRef, error) {
@@ -117,6 +121,9 @@ func (f *fakeTMDB) GetMovieCollection(_ context.Context, id int) (*tmdb.Collecti
 }
 
 func (f *fakeTMDB) GetCollection(_ context.Context, id int) (*tmdb.Collection, error) {
+	if f.onCollection != nil {
+		f.onCollection()
+	}
 	c, ok := f.collections[id]
 	if !ok {
 		return nil, tmdb.ErrNotFound
@@ -168,6 +175,28 @@ func TestRunStoresMembershipAndCollectionsInReleaseOrder(t *testing.T) {
 	}
 	if stored.PosterSourcePath != "https://image.tmdb.org/t/p/original/p.jpg" || stored.BackdropSourcePath != "" {
 		t.Fatalf("artwork sources = %q, %q", stored.PosterSourcePath, stored.BackdropSourcePath)
+	}
+}
+
+// A start requested while a run fetches collections is dropped, so a movie
+// that becomes due then, such as one of a library that just turned box sets
+// on, is looked up before the run ends.
+func TestRunLooksUpMoviesThatBecomeDueDuringTheRun(t *testing.T) {
+	store := newFakeStore(catalog.MovieCollectionLookup{ContentID: "hp1", TMDBID: 671})
+	client := &fakeTMDB{
+		movies:      map[int]*tmdb.CollectionRef{671: {ID: 1241}, 672: {ID: 1241}},
+		collections: map[int]*tmdb.Collection{1241: {ID: 1241, Name: "Harry Potter Collection"}},
+	}
+	client.onCollection = func() {
+		store.due = append(store.due, catalog.MovieCollectionLookup{ContentID: "hp2", TMDBID: 672})
+		client.onCollection = nil
+	}
+	res, err := NewSyncer(store, client).Run(t.Context(), noReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.recorded["hp2"]; got == nil || *got != 1241 || res.MoviesChecked != 2 {
+		t.Fatalf("hp2 collection = %v, result = %+v; want hp2 looked up in the same run", got, res)
 	}
 }
 

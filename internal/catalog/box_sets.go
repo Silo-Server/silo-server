@@ -371,6 +371,20 @@ func (r *BoxSetRepository) TouchCollection(ctx context.Context, id int64) error 
 	return nil
 }
 
+// DeleteUnusedCollections deletes the stored collections no movie belongs
+// to any more, such as one whose last movie left the catalog, so their rows
+// and cached artwork do not outlive them. The delete trigger queues the
+// artwork for collection. A collection a movie joins again is fetched anew.
+func (r *BoxSetRepository) DeleteUnusedCollections(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM tmdb_movie_collections c
+		WHERE NOT EXISTS (SELECT 1 FROM media_item_tmdb_collections m WHERE m.tmdb_collection_id = c.tmdb_collection_id)`)
+	if err != nil {
+		return 0, fmt.Errorf("deleting unused tmdb collections: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // BoxSetLibrary is a library's box set settings.
 type BoxSetLibrary struct {
 	ID        int
