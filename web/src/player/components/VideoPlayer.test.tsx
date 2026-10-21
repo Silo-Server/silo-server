@@ -6053,6 +6053,15 @@ describe("VideoPlayer hls.js request timeouts", () => {
     expect(prompt()).not.toBeNull();
   });
 
+  it("ends the outage when hls.js appends media without a progress event", async () => {
+    const { setEnd } = await waitingAfterError({ details: "fragLoadError" });
+    act(() => vi.advanceTimersByTime(2_000));
+    setEnd(0.4);
+    act(() => hlsJS.latest?.emit("bufferAppended", { parent: "main" }));
+    act(() => vi.advanceTimersByTime(6_200));
+    expect(prompt()).not.toBeNull();
+  });
+
   it("does not end an outage on a timer while no data arrives", async () => {
     const { video, setEnd } = await waitingAfterError({ details: "fragLoadError" });
     act(() => vi.advanceTimersByTime(30_000));

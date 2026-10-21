@@ -2735,8 +2735,17 @@ export function VideoPlayer({
               };
             });
 
-            hls.on(Hls.Events.BUFFER_APPENDED, () => {
+            hls.on(Hls.Events.BUFFER_APPENDED, (_event, data) => {
               if (destroyed) return;
+              // Media data arriving ends an outage. Not every browser fires
+              // the element's `progress` for MediaSource appends.
+              if (
+                data?.parent !== "subtitle" &&
+                mediaOutageRef.current &&
+                bufferedEndSeconds(video) > outageBufferedEndRef.current
+              ) {
+                mediaOutageRef.current = false;
+              }
               attemptAutoplayWhenReady();
             });
 
