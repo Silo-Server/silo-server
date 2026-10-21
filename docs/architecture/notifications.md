@@ -50,7 +50,9 @@ cap.
 
 Fanout claims events as soon as they are recorded and runs each series'
 events in ascending episode-key order, so the notified cursor never skips a
-lower episode of the same batch. Every new episode gets its own delivery, and
+lower episode of the same batch. The claim breaks ties in `created_at` by
+episode key, so one ingest larger than a claim batch splits in episode order
+too. Every new episode gets its own delivery, and
 the inbox, email and webhooks see each one. Push is rate-limited per series:
 a delivery reaches the profile's mobile push devices and web push
 subscriptions only when the profile had no other `episode.available`

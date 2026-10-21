@@ -379,6 +379,50 @@ func TestFanoutPushesOnlyTheFirstEpisodeOfASeriesBurst(t *testing.T) {
 	}
 }
 
+// TestFanoutClaimSplitsAnIngestInEpisodeOrder records a season larger than
+// one claim batch in one ingest. The ingest's events share created_at, and
+// their ids sort newest episode first, so the claim must break the tie by
+// episode or the second batch's lower episodes fall behind the notified
+// cursor.
+func TestFanoutClaimSplitsAnIngestInEpisodeOrder(t *testing.T) {
+	pool := inboxPageDB(t)
+	ctx := t.Context()
+	c := seedAccessCatalog(t, pool)
+	seedFanoutEvent(t, pool, c, []string{"viewer"})
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM episodes WHERE series_id = $1 AND content_id <> $2`, c.series, c.episode)
+	})
+	last := fanoutClaimLimit + 2 // episodes 2 through last: one more than a batch
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title)
+		SELECT $1 || '-e' || n, $1, $1 || '-s1', 1, n, 'E' FROM generate_series($2::int, 3, -1) AS n`,
+		c.series, last); err != nil {
+		t.Fatalf("seed episodes: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO release_events (id, library_id, series_id, episode_id, season_number, episode_number,
+			episode_key, available_at, dedupe_key, created_at)
+		SELECT $1 || '-rev-' || lpad((1000 - n)::text, 4, '0'), $3, $1, $1 || '-e' || n, 1, n, $4 + n, now(), 'ep:' || $1 || ':' || n,
+			(SELECT created_at FROM release_events WHERE id = 'event-1')
+		FROM generate_series($2::int, 3, -1) AS n`, c.series, last, c.library, EpisodeKey(1, 0)); err != nil {
+		t.Fatalf("seed release events: %v", err)
+	}
+
+	worker := newAccessFanoutWorker(pool, scopeByProfile{"viewer": {}})
+	for batch := range 2 {
+		if _, err := worker.processBatch(ctx); err != nil {
+			t.Fatalf("processBatch %d: %v", batch, err)
+		}
+	}
+	var inbox int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notification_deliveries WHERE profile_id = 'viewer'`).Scan(&inbox); err != nil {
+		t.Fatal(err)
+	}
+	if want := last - 1; inbox != want {
+		t.Fatalf("inbox rows = %d; want %d, one per episode", inbox, want)
+	}
+}
+
 // TestNotifyFulfilledRetriesWhenRecipientScopeFails returns the scope error,
 // so the caller retries the request instead of stamping it notified.
 func TestNotifyFulfilledRetriesWhenRecipientScopeFails(t *testing.T) {

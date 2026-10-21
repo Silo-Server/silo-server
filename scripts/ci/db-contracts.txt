@@ -197,6 +197,7 @@
 ./internal/notifications TestFanoutRetriesWhenRecipientScopeFails
 ./internal/notifications TestFanoutResolvesOnlyEligibleRecipients
 ./internal/notifications TestFanoutPushesOnlyTheFirstEpisodeOfASeriesBurst
+./internal/notifications TestFanoutClaimSplitsAnIngestInEpisodeOrder
 ./internal/notifications TestWebhookRejectionStreak
 ./internal/notifications TestNotifyFulfilledRetriesWhenRecipientScopeFails
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
