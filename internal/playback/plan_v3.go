@@ -854,7 +854,10 @@ func activeQualityV3(request StartRequestV3, plan PlanV3) string {
 			continue
 		}
 		if rung, ok := ladderRungForLabelV3(quality.Label); ok {
-			if !encodes || class == 0 || class == rung.Height {
+			// A decoder bound fits the frame in a smaller class's box. The
+			// rung's own frame never fits one, but keeping the source aspect
+			// can class it higher: 1728x720 from a 2.4:1 film is 1080p.
+			if !encodes || class == 0 || class >= rung.Height {
 				return quality.Label
 			}
 		} else if delivered(quality) {
