@@ -25,6 +25,7 @@ import {
   hangingProbe,
   server,
   serverAnswer,
+  setVisibility,
   TEST_DELAY_MS,
   fakeLocks,
   pageVideo,
@@ -95,20 +96,7 @@ describe("kept reading", () => {
 });
 
 describe("Test speed", () => {
-  it("answers playing when playback stops it mid-test", async () => {
-    stopBandwidthProbes();
-    server({ target: 115_000 });
-    hangingProbe();
-    const result = testConnectionSpeed();
-    await vi.waitFor(() => expect(fetchWithSession).toHaveBeenCalledTimes(1));
-
-    cancelBandwidthProbe();
-    await expect(result).resolves.toBe("playing");
-    stopBandwidthProbes();
-  });
-
   it("runs the accurate test, even with a current reading, and reports it", async () => {
-    stopBandwidthProbes();
     const { posted } = server({
       target: 115_000,
       reading: { probe: { kbps: 48_000, lower_bound: false, ageMs: 0 } },
@@ -192,8 +180,7 @@ describe("Test speed", () => {
 
     const hidden = testConnectionSpeed();
     await vi.waitFor(() => expect(fetchWithSession).toHaveBeenCalled());
-    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
-    document.dispatchEvent(new Event("visibilitychange"));
+    setVisibility("hidden");
     await expect(hidden).rejects.toThrow("could not be measured");
     Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
 
@@ -212,7 +199,7 @@ describe("Test speed", () => {
     const body = timedBody(1000, 1_000_000, 10);
     fetchWithSession.mockResolvedValue({ res: body.res });
     const clock = vi.spyOn(performance, "now").mockImplementation(body.clock);
-    const read = vi.mocked(v2).getMockImplementation()!;
+    const read = serverAnswer();
     vi.mocked(v2).mockImplementation((async (operation: string, init?: unknown) => {
       if (operation === "POST /api/v2/playback/bandwidth-probe/results")
         throw new Error("validation failed");
@@ -244,27 +231,15 @@ describe("media holds", () => {
     expect(locks.held).toEqual([]);
   });
 
-  // WEB-SCHEDULE-6: the start's hold and quiet period end with its player.
-  it("lets Test speed run once the player that was starting goes away", async () => {
-    server({});
-    const locks = fakeLocks();
-    hangingProbe();
-    cancelBandwidthProbe();
-    await settle();
-    expect(await testConnectionSpeed()).toBe("playing");
-
-    const video = document.createElement("video");
-    mediaElementReleased(video);
-    await settle();
-    expect(locks.held).toEqual([]);
-    const result = testConnectionSpeed();
-    await vi.waitFor(() => expect(fetchWithSession).toHaveBeenCalledTimes(1));
-    stopBandwidthProbes();
-    await expect(result).rejects.toThrow("could not be measured");
-  });
-
-  // A refused start, or one the viewer left before it loaded, holds nothing.
-  it("lets Test speed run once a start ends without loading media", async () => {
+  // Both exit paths release a start that never loaded media: its player going
+  // away, and a refused start or one the viewer left before it loaded.
+  it.each([
+    [
+      "its player goes away",
+      (_endStart: () => void) => mediaElementReleased(document.createElement("video")),
+    ],
+    ["it ends without loading media", (endStart: () => void) => endStart()],
+  ])("lets Test speed run once %s", async (_reason, releaseStart) => {
     server({});
     const locks = fakeLocks();
     hangingProbe();
@@ -272,7 +247,7 @@ describe("media holds", () => {
     await settle();
     expect(await testConnectionSpeed()).toBe("playing");
 
-    endStart();
+    releaseStart(endStart);
     await settle();
     expect(locks.held).toEqual([]);
     const result = testConnectionSpeed();

@@ -29,6 +29,7 @@ import {
   readThenTest,
   setVisibility,
   awayFor,
+  fakeLocks,
   pageVideo,
   FakeBroadcastChannel,
   fetchWithSession,
@@ -272,15 +273,12 @@ describe("scheduleBandwidthProbe", () => {
 
   it("leaves the test to the tab that holds the lock", async () => {
     server({});
-    const request = vi.fn(
-      async (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
-        callback(null),
-    );
-    vi.stubGlobal("navigator", { ...navigator, locks: { request } });
+    const locks = fakeLocks();
+    locks.held.push({ name: "silo-bandwidth-probe", mode: "exclusive" });
     scheduleBandwidthProbe();
     await readThenTest();
 
-    expect(request).toHaveBeenCalledWith(
+    expect(locks.request).toHaveBeenCalledWith(
       "silo-bandwidth-probe",
       { ifAvailable: true },
       expect.any(Function),
@@ -339,19 +337,12 @@ describe("scheduleBandwidthProbe", () => {
 
   it("does not test while another tab holds the media lock", async () => {
     server({});
-    const request = vi.fn(
-      async (_name: string, _options: unknown, callback: (lock: unknown) => Promise<void>) =>
-        callback({ name: "silo-bandwidth-probe" }),
-    );
-    const query = vi.fn(async () => ({
-      held: [{ name: "silo-media-active", mode: "shared" }],
-      pending: [],
-    }));
-    vi.stubGlobal("navigator", { ...navigator, locks: { request, query } });
+    const locks = fakeLocks();
+    locks.held.push({ name: "silo-media-active", mode: "shared" });
     scheduleBandwidthProbe();
     await readThenTest();
 
-    expect(query).toHaveBeenCalled();
+    expect(locks.query).toHaveBeenCalled();
     expect(fetchWithSession).not.toHaveBeenCalled();
   });
 
