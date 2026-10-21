@@ -65,14 +65,16 @@ func TestUnsupportedVideoFileReason(t *testing.T) {
 	}
 }
 
-func TestEveryUnsupportedReasonHasAMessage(t *testing.T) {
+// Every reason has the message the scan log and the API show and the label
+// the admin list shows.
+func TestEveryUnsupportedReasonHasAMessageAndLabel(t *testing.T) {
 	reasons := []string{UnsupportedReasonDiscStream}
 	for _, reason := range unsupportedVideoExtensions {
 		reasons = append(reasons, reason)
 	}
 	for _, reason := range reasons {
-		if UnsupportedReasonMessage(reason) == "" {
-			t.Errorf("reason %q has no message", reason)
+		if UnsupportedReasonMessage(reason) == "" || unsupportedReasonLabels[reason] == "" {
+			t.Errorf("reason %q has message %q and label %q", reason, UnsupportedReasonMessage(reason), unsupportedReasonLabels[reason])
 		}
 	}
 	if got := UnsupportedReasonMessage("unknown"); got != "" {
@@ -225,14 +227,6 @@ func TestUnsupportedReasonsMatching(t *testing.T) {
 	} {
 		if got := unsupportedReasonsMatching(tc.search); strings.Join(got, ",") != strings.Join(tc.want, ",") {
 			t.Errorf("unsupportedReasonsMatching(%q) = %v, want %v", tc.search, got, tc.want)
-		}
-	}
-}
-
-func TestEveryUnsupportedReasonHasALabel(t *testing.T) {
-	for reason := range unsupportedReasonMessages {
-		if unsupportedReasonLabels[reason] == "" {
-			t.Errorf("reason %q has no label", reason)
 		}
 	}
 }
