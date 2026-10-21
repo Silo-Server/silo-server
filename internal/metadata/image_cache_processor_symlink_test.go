@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -32,14 +33,15 @@ func (r *catalogedRootResolver) LibraryRootsForContent(context.Context, string) 
 	return r.roots, nil
 }
 
-func (r *catalogedRootResolver) CatalogedFilesUnder(_ context.Context, contentID, dir string, limit int) ([]string, error) {
+func (r *catalogedRootResolver) CatalogedFilesUnder(_ context.Context, contentID, dir, after string, limit int) ([]string, error) {
 	r.asked = append(r.asked, contentID)
 	if r.err != nil {
 		return nil, r.err
 	}
+	files := slices.Sorted(slices.Values(r.files))
 	var out []string
-	for _, file := range r.files {
-		if strings.HasPrefix(file, dir+string(filepath.Separator)) && len(out) < limit {
+	for _, file := range files {
+		if strings.HasPrefix(file, dir+string(filepath.Separator)) && file > after && len(out) < limit {
 			out = append(out, file)
 		}
 	}
@@ -240,21 +242,28 @@ func TestProcessLocalImageFollowsAbsoluteLinkInsideTheTitleFolder(t *testing.T) 
 	}
 }
 
-// When every cataloged file tried fails the check and more were listed than
-// were tried, the job is retried as usual rather than parked as refused.
-func TestProcessLocalImageRetriesWhenTheCatalogedCheckIsIncomplete(t *testing.T) {
-	library, title := symlinkedTitle(t, map[string]string{"poster.jpg": "poster-bytes"})
-	files := make([]string, catalogedFileCheckLimit)
-	for i := range files {
-		files[i] = filepath.Join(title, fmt.Sprintf("gone-%02d.mkv", i))
+// A cataloged file that vouches for the folder is found even when more than
+// a page of cataloged files that can't vouch for it sort before it, and a
+// folder none of whose cataloged files vouch for it stays refused.
+func TestProcessLocalImageTriesEveryCatalogedFile(t *testing.T) {
+	library, title := symlinkedTitle(t, map[string]string{
+		"poster.jpg":   "poster-bytes",
+		"zz-video.mkv": "video",
+	})
+	files := make([]string, 0, 2*catalogedFilePageSize+1)
+	for i := range 2 * catalogedFilePageSize {
+		files = append(files, filepath.Join(title, fmt.Sprintf("gone-%02d.mkv", i)))
 	}
 	job := localArtworkJob("file://" + filepath.Join(title, "poster.jpg"))
-	jobs, cacher := runLocalJob(t, job, &catalogedRootResolver{roots: []string{library}, files: files})
-	if len(cacher.byteReqs) != 0 || !strings.Contains(jobs.failedText, "local image read failed") {
-		t.Fatalf("cached %d images, failed text %q; want a read failure", len(cacher.byteReqs), jobs.failedText)
+	jobs, cacher := runLocalJob(t, job, &catalogedRootResolver{roots: []string{library}, files: append(slices.Clone(files), filepath.Join(title, "zz-video.mkv"))})
+	if len(cacher.byteReqs) != 1 || string(cacher.byteReqs[0]) != "poster-bytes" {
+		t.Fatalf("cached %d images (failed text %q), want the poster", len(cacher.byteReqs), jobs.failedText)
 	}
-	if isStableProviderImageFailure(jobs.failedText) {
-		t.Fatalf("an incomplete check %q must retry as usual, not park", jobs.failedText)
+
+	job = localArtworkJob("file://" + filepath.Join(title, "poster.jpg"))
+	jobs, cacher = runLocalJob(t, job, &catalogedRootResolver{roots: []string{library}, files: files})
+	if len(cacher.byteReqs) != 0 || !isStableProviderImageFailure(jobs.failedText) {
+		t.Fatalf("cached %d images, failed text %q; want the stable outside-roots refusal", len(cacher.byteReqs), jobs.failedText)
 	}
 }
 

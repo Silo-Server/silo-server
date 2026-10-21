@@ -1179,14 +1179,15 @@ var errLocalImageEscapedRoots = errors.New("a symlink leads out of the library r
 // *catalog.FolderRepository does.
 type catalogedFileLister interface {
 	// CatalogedFilesUnder returns up to limit present media file paths of
-	// contentID (a title, or a series for its episodes' files) under dir, as
-	// the scanner recorded them.
-	CatalogedFilesUnder(ctx context.Context, contentID, dir string, limit int) ([]string, error)
+	// contentID (a title, or a series for its episodes' files) under dir
+	// that sort after after, in path order, as the scanner recorded them.
+	CatalogedFilesUnder(ctx context.Context, contentID, dir, after string, limit int) ([]string, error)
 }
 
-// catalogedFileCheckLimit bounds how many cataloged files are tried as
-// proof for one folder. Usually the first one is enough.
-const catalogedFileCheckLimit = 32
+// catalogedFilePageSize is how many cataloged files are listed at a time
+// while looking for one that vouches for a folder. Usually the first one is
+// enough.
+const catalogedFilePageSize = 32
 
 // readLocalImageOfTitle reads a local image of contentID under roots with
 // readConfinedLocalImage. When the image's folder leads out of the roots
@@ -1229,8 +1230,8 @@ func readCatalogedLocalImage(ctx context.Context, lister catalogedFileLister, co
 	// such as a mount that stopped answering.
 	var ioErr error
 	noteIOErr := func(err error) {
-		if ioErr == nil && err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, fs.ErrPermission) {
-			ioErr = err
+		if localFileIOError(err) {
+			ioErr = cmp.Or(ioErr, err)
 		}
 	}
 	untrusted := func() error {
@@ -1256,30 +1257,29 @@ func readCatalogedLocalImage(ctx context.Context, lister catalogedFileLister, co
 		if !localImagePathWithinRoots(resolvedImageDir, []string{resolvedDir}) {
 			continue
 		}
-		files, err := lister.CatalogedFilesUnder(ctx, contentID, dir, catalogedFileCheckLimit)
-		if err != nil {
-			return nil, fmt.Errorf("local image read failed: listing cataloged files: %w", err)
-		}
-		if len(files) == 0 {
-			continue
-		}
-		data, trusted, err := readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImageDir, files)
-		if trusted {
-			return data, err
-		}
-		noteIOErr(err)
-		if len(files) == catalogedFileCheckLimit {
-			// More files may be listed than were tried; one of them could
-			// still vouch for the folder, so this is no proof it can't.
-			noteIOErr(errCatalogedCheckIncomplete)
+		// Every cataloged file is tried, a page at a time, so the answer
+		// does not depend on which files happen to be listed first.
+		for after := ""; ; {
+			files, err := lister.CatalogedFilesUnder(ctx, contentID, dir, after, catalogedFilePageSize)
+			if err != nil {
+				return nil, fmt.Errorf("local image read failed: listing cataloged files: %w", err)
+			}
+			if len(files) == 0 {
+				break
+			}
+			data, trusted, err := readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImageDir, files)
+			if trusted {
+				return data, err
+			}
+			noteIOErr(err)
+			if len(files) < catalogedFilePageSize {
+				break
+			}
+			after = files[len(files)-1]
 		}
 	}
 	return nil, untrusted()
 }
-
-// errCatalogedCheckIncomplete reports that every cataloged file tried for a
-// folder failed the check while more were listed than were tried.
-var errCatalogedCheckIncomplete = fmt.Errorf("checked the first %d cataloged files without a match", catalogedFileCheckLimit)
 
 // localFileIOError reports whether err is the operating system failing a
 // call on storage, such as a share that stopped answering, rather than a path

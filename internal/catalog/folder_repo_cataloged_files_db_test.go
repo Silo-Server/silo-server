@@ -59,7 +59,7 @@ func TestCatalogedFilesUnderListsPresentFilesOfTheTitleDB(t *testing.T) {
 	}
 
 	repo := NewFolderRepository(pool)
-	got, err := repo.CatalogedFilesUnder(ctx, series, base, 10)
+	got, err := repo.CatalogedFilesUnder(ctx, series, base, "", 10)
 	if err != nil {
 		t.Fatalf("list cataloged files: %v", err)
 	}
@@ -67,7 +67,11 @@ func TestCatalogedFilesUnderListsPresentFilesOfTheTitleDB(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("cataloged files = %q, want %q", got, want)
 	}
-	if got, err := repo.CatalogedFilesUnder(ctx, series, base+"/", 1); err != nil || len(got) != 1 {
-		t.Fatalf("limited listing = %q, %v; want one file", got, err)
+	// Pages continue after the last path of the previous one.
+	if got, err := repo.CatalogedFilesUnder(ctx, series, base+"/", "", 1); err != nil || !slices.Equal(got, want[:1]) {
+		t.Fatalf("first page = %q, %v; want %q", got, err, want[:1])
+	}
+	if got, err := repo.CatalogedFilesUnder(ctx, series, base, want[0], 1); err != nil || !slices.Equal(got, want[1:]) {
+		t.Fatalf("second page = %q, %v; want %q", got, err, want[1:])
 	}
 }

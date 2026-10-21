@@ -1366,20 +1366,23 @@ func (r *FolderRepository) LibraryRootsForContent(ctx context.Context, contentID
 }
 
 // CatalogedFilesUnder returns up to limit present media file paths of
-// contentID under dir, as the scanner recorded them. An episode's file
-// carries its series' content ID, so a series lists its episodes' files. The
-// metadata image-cache processor uses this to accept local artwork in a title
-// folder that is a symlink out of the library (metadata.catalogedFileLister).
-func (r *FolderRepository) CatalogedFilesUnder(ctx context.Context, contentID, dir string, limit int) ([]string, error) {
+// contentID under dir that sort after after, in path order, as the scanner
+// recorded them; pass the last path of a page to read the next one. An
+// episode's file carries its series' content ID, so a series lists its
+// episodes' files. The metadata image-cache processor uses this to accept
+// local artwork in a title folder that is a symlink out of the library
+// (metadata.catalogedFileLister).
+func (r *FolderRepository) CatalogedFilesUnder(ctx context.Context, contentID, dir, after string, limit int) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT file_path
 		FROM media_files
 		WHERE content_id = $1
 		  AND missing_since IS NULL
 		  AND starts_with(file_path, $2)
-		ORDER BY id
-		LIMIT $3
-	`, contentID, strings.TrimSuffix(dir, "/")+"/", limit)
+		  AND file_path > $3
+		ORDER BY file_path
+		LIMIT $4
+	`, contentID, strings.TrimSuffix(dir, "/")+"/", after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying cataloged files of %q under %q: %w", contentID, dir, err)
 	}
