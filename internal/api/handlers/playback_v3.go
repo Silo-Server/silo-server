@@ -3258,7 +3258,7 @@ func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID stri
 	}
 	var relayEligible func(*nodepool.Node) bool
 	if delivery == noderouting.DeliveryProgressiveRemux {
-		relayEligible = h.identityProxyRelayEligibilityV3(r.Context())
+		relayEligible, _ = h.proxyTransportFeatureEligibilityV3(r.Context(), playback.TransportFeatureProgressiveRemuxRelayV1)
 	}
 	// Both proxy predicates are narrowed to proxies the client can actually
 	// reach on its access path (see resolveHLSRouteWithPolicyV3). With no
@@ -3287,14 +3287,18 @@ func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID stri
 	return decision, nil
 }
 
-func (h *PlaybackHandler) identityProxyRelayEligibilityV3(ctx context.Context) func(*nodepool.Node) bool {
+// proxyTransportFeatureEligibilityV3 narrows proxy selection to pooled proxies
+// that advertise feature, and reports whether some proxy may not. Capabilities
+// are read here, before planning, so the planner lock only sees a map lookup.
+func (h *PlaybackHandler) proxyTransportFeatureEligibilityV3(ctx context.Context, feature string) (eligible func(*nodepool.Node) bool, someLack bool) {
 	enumerator, ok := h.NodePlanner.(proxyNodeEnumeratorV3)
 	if !ok {
-		return func(*nodepool.Node) bool { return false }
+		return func(*nodepool.Node) bool { return false }, true
 	}
+	nodeURLs := enumerator.ProxyNodeURLs()
 	capable := make(map[string]struct{})
-	for nodeURL, entry := range h.pooledNodeCapabilitiesV3(ctx, enumerator.ProxyNodeURLs()) {
-		if slices.Contains(entry.transportFeatures, playback.TransportFeatureProgressiveRemuxRelayV1) {
+	for nodeURL, entry := range h.pooledNodeCapabilitiesV3(ctx, nodeURLs) {
+		if slices.Contains(entry.transportFeatures, feature) {
 			capable[nodeURL] = struct{}{}
 		}
 	}
@@ -3304,7 +3308,7 @@ func (h *PlaybackHandler) identityProxyRelayEligibilityV3(ctx context.Context) f
 		}
 		_, supported := capable[node.URL]
 		return supported
-	}
+	}, len(capable) < len(nodeURLs)
 }
 
 // applyRemoteTransportMarkV3 records whether the committed route's media bytes
