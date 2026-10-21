@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
@@ -63,8 +66,8 @@ var SensitiveSettingKeys = map[string]bool{
 	// It is machine-managed and cleared when the transition commits.
 	"storage.transition.target": true,
 
-	// Redis — url may embed credentials (redis://:pass@host); sentinel_password
-	// is read at db_loader L334 and was MISSING from the old redaction map.
+	// Redis — url may embed credentials (redis://:pass@host). sentinel_password
+	// is no longer read, but rows written by older builds stay encrypted.
 	"redis.url":               true,
 	"redis.sentinel_password": true,
 
@@ -76,9 +79,10 @@ var SensitiveSettingKeys = map[string]bool{
 	// Shared AI endpoint API keys (+ legacy subtitle_ai alias the loader still
 	// falls back to; the legacy row is never renamed because ciphertext is
 	// GCM-bound to its key).
-	"ai.api_key":          true,
-	"ai.asr_api_key":      true,
-	"subtitle_ai.api_key": true,
+	"ai.api_key":           true,
+	chatgpt.CredentialsKey: true,
+	"ai.asr_api_key":       true,
+	"subtitle_ai.api_key":  true,
 
 	// Recommendations embedding auth (+ legacy openai alias at db_loader L409).
 	"recommendations.embedding_auth_token": true,
@@ -90,8 +94,6 @@ var SensitiveSettingKeys = map[string]bool{
 
 	// Watch-sync OAuth client credentials. The client_id entries are low-value
 	// but kept as a harmless safe superset and to match existing redaction.
-	"watchsync.trakt.client_id":     true,
-	"watchsync.trakt.client_secret": true,
 	"watchsync.simkl.client_id":     true,
 	"watchsync.simkl.client_secret": true,
 
@@ -135,6 +137,7 @@ func NewEncryptedSettingsRepo(inner SettingsStore, cipher *secret.Cipher) *Encry
 }
 
 var _ SettingsStore = (*EncryptedSettingsRepo)(nil)
+var _ chatgpt.Store = (*EncryptedSettingsRepo)(nil)
 
 // Set encrypts a sensitive, non-empty value (AAD-bound to its key) before
 // delegating to the raw store; non-sensitive keys and empty values delegate
@@ -200,11 +203,43 @@ func (r *EncryptedSettingsRepo) UpdateAtomic(
 	ctx context.Context,
 	update func(current map[string]string) (map[string]string, error),
 ) error {
-	inner, ok := r.inner.(settingsAtomicUpdater)
+	return r.UpdateAtomicInTransaction(ctx, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		return update(current)
+	})
+}
+
+// UpdateValueAtomic preserves the raw store's key-specific serialization and
+// exposes only this key's plaintext to its owner.
+func (r *EncryptedSettingsRepo) UpdateValueAtomic(ctx context.Context, key string, update func(string) (string, error)) error {
+	inner, ok := r.inner.(interface {
+		UpdateValueAtomic(context.Context, string, func(string) (string, error)) error
+	})
 	if !ok {
-		return fmt.Errorf("settings store does not support atomic updates")
+		return fmt.Errorf("settings store does not support atomic value updates")
 	}
-	return inner.UpdateAtomic(ctx, func(rawCurrent map[string]string) (map[string]string, error) {
+	return inner.UpdateValueAtomic(ctx, key, func(raw string) (string, error) {
+		plain, err := r.cipher.DecryptIfEncrypted(raw, secret.SettingsAAD(key))
+		if err != nil {
+			return "", fmt.Errorf("decrypt setting %q: %w", key, err)
+		}
+		value, err := update(plain)
+		if err != nil {
+			return "", err
+		}
+		if SensitiveSettingKeys[key] && value != "" {
+			value, err = r.cipher.Encrypt(value, secret.SettingsAAD(key))
+		}
+		return value, err
+	})
+}
+
+// UpdateAtomicInTransaction preserves the plaintext callback contract and
+// passes through the raw store's transaction when it supports one.
+func (r *EncryptedSettingsRepo) UpdateAtomicInTransaction(
+	ctx context.Context,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	encryptedUpdate := func(rawCurrent map[string]string, tx pgx.Tx) (map[string]string, error) {
 		current := make(map[string]string, len(rawCurrent))
 		for key, value := range rawCurrent {
 			plain, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
@@ -213,7 +248,7 @@ func (r *EncryptedSettingsRepo) UpdateAtomic(
 			}
 			current[key] = plain
 		}
-		writes, err := update(current)
+		writes, err := update(current, tx)
 		if err != nil {
 			return nil, err
 		}
@@ -229,7 +264,18 @@ func (r *EncryptedSettingsRepo) UpdateAtomic(
 			encrypted[key] = value
 		}
 		return encrypted, nil
-	})
+	}
+	if inner, ok := r.inner.(interface {
+		UpdateAtomicInTransaction(context.Context, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	}); ok {
+		return inner.UpdateAtomicInTransaction(ctx, encryptedUpdate)
+	}
+	if inner, ok := r.inner.(settingsAtomicUpdater); ok {
+		return inner.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+			return encryptedUpdate(current, nil)
+		})
+	}
+	return fmt.Errorf("settings store does not support atomic updates")
 }
 
 // SetIfAbsent applies Set's encryption contract to a conditional write: the

@@ -3,7 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // fakePersonalCollections records the last command and answers fixtures.
@@ -22,9 +23,18 @@ type fakePersonalCollections struct {
 	list       handlers.PersonalCollectionListView
 	lastCreate handlers.PersonalCollectionCreateCommand
 	lastOrder  []string
-	lastGroup  *string
-	lastReq    handlers.CollectionGroupUpdateRequest
-	lastID     string
+	// holding answers PersonalCollectionsHoldingItem; holdingCalls records
+	// each call's profile and item.
+	holding      map[string]bool
+	holdingErr   error
+	holdingCalls []string
+	features     userstore.CollectionFeatures
+	// collages answers Capabilities' PosterCollages.
+	collages bool
+}
+
+func (f *fakePersonalCollections) PersonalCollectionFeatures(context.Context, int) (userstore.CollectionFeatures, error) {
+	return f.features, nil
 }
 
 func (f *fakePersonalCollections) ListPersonalCollections(_ context.Context, _ int, profileID string) (handlers.PersonalCollectionListView, error) {
@@ -37,12 +47,21 @@ func (f *fakePersonalCollections) ListPersonalCollections(_ context.Context, _ i
 	return f.list, nil
 }
 
+func (f *fakePersonalCollections) PersonalCollectionsHoldingItem(_ context.Context, _ int, profileID, itemID string) (map[string]bool, error) {
+	f.holdingCalls = append(f.holdingCalls, profileID+"/"+itemID)
+	if f.holdingErr != nil {
+		return nil, f.holdingErr
+	}
+	return f.holding, nil
+}
+
 func (f *fakePersonalCollections) Capabilities() handlers.CollectionCapabilitiesView {
 	return handlers.CollectionCapabilitiesView{
 		DisplayFilterFields:   []string{"type", "watched"},
 		DisplayFilterPresets:  handlers.CollectionDisplayFilterPresetsView{Watched: []string{"all", "watched", "unwatched"}, Media: []string{"all", "movie", "series"}},
 		CollectionDefaultSort: true, CollectionSortPreferences: true, EffectiveCollectionSort: true,
 		SortPreferenceKinds: []string{"library", "user", "watchlist", "favorites"},
+		PosterCollages:      f.collages,
 	}
 }
 
@@ -56,52 +75,43 @@ func (f *fakePersonalCollections) CreatePersonalCollection(_ context.Context, cm
 	}
 	v := fixtureCollectionView()
 	v.Name = cmd.Request.Name
+	v.Description = cmd.Request.Description
 	v.CollectionType = cmd.Request.CollectionType
-	v.AllowedProfileIDs = cmd.Request.AllowedProfileIDs
+	v.IsShared = cmd.Request.IsShared
 	return v, nil
 }
 
-func (f *fakePersonalCollections) ReorderPersonalCollections(_ context.Context, _ int, _ string, groupID *string, orderedIDs []string) error {
-	f.lastGroup, f.lastOrder = groupID, orderedIDs
+// ReorderPersonalCollections answers like the seam: ordered_ids must name
+// each of the acting profile's own collections (here c1) exactly once.
+func (f *fakePersonalCollections) ReorderPersonalCollections(_ context.Context, _ int, _ string, orderedIDs []string) error {
+	f.lastOrder = orderedIDs
 	if f.err != nil {
 		return f.err
 	}
-	if len(orderedIDs) == 0 {
-		return &handlers.APIError{Status: 400, Code: "bad_request", Message: "ordered_ids must include every visible collection in the group exactly once", Field: "ordered_ids"}
+	if !slices.Equal(orderedIDs, []string{"c1"}) {
+		return &handlers.APIError{Status: 400, Code: "bad_request", Message: "ordered_ids must name each of your own collections exactly once", Field: "ordered_ids"}
 	}
 	return nil
 }
 
-func (f *fakePersonalCollections) CreateCollectionGroup(_ context.Context, _ int, req handlers.CollectionGroupCreateRequest) (handlers.CollectionGroupView, error) {
-	if f.err != nil {
-		return handlers.CollectionGroupView{}, f.err
-	}
-	return handlers.CollectionGroupView{ID: "g1", Name: req.Name, Slug: "seasonal", DefaultSortMode: "manual"}, nil
+// errGroupsUnsupported is how the seams answer every personal collection
+// group operation since #1615.
+var errGroupsUnsupported = &handlers.APIError{Status: http.StatusNotImplemented, Code: "unsupported", Message: "The acting account does not support collection groups"}
+
+func (f *fakePersonalCollections) CreateCollectionGroup(context.Context, int, handlers.CollectionGroupCreateRequest) (handlers.CollectionGroupView, error) {
+	return handlers.CollectionGroupView{}, errGroupsUnsupported
 }
 
-func (f *fakePersonalCollections) UpdateCollectionGroup(_ context.Context, _ int, id string, req handlers.CollectionGroupUpdateRequest) (handlers.CollectionGroupView, error) {
-	f.lastID, f.lastReq = id, req
-	if f.err != nil {
-		return handlers.CollectionGroupView{}, f.err
-	}
-	if id != "g1" {
-		return handlers.CollectionGroupView{}, &handlers.APIError{Status: 400, Code: "bad_request", Message: "collection group not found"}
-	}
-	g := handlers.CollectionGroupView{ID: "g1", Name: "Seasonal", Slug: "seasonal", DefaultSortMode: "manual", SortOrder: 1}
-	if req.Name != nil {
-		g.Name = *req.Name
-	}
-	return g, nil
+func (f *fakePersonalCollections) UpdateCollectionGroup(context.Context, int, string, handlers.CollectionGroupUpdateRequest) (handlers.CollectionGroupView, error) {
+	return handlers.CollectionGroupView{}, errGroupsUnsupported
 }
 
-func (f *fakePersonalCollections) DeleteCollectionGroup(_ context.Context, _ int, id string) error {
-	f.lastID = id
-	return f.err
+func (f *fakePersonalCollections) DeleteCollectionGroup(context.Context, int, string) error {
+	return errGroupsUnsupported
 }
 
-func (f *fakePersonalCollections) ReorderCollectionGroups(_ context.Context, _ int, orderedIDs []string) error {
-	f.lastOrder = orderedIDs
-	return f.err
+func (f *fakePersonalCollections) ReorderCollectionGroups(context.Context, int, []string) error {
+	return errGroupsUnsupported
 }
 
 // fakeCollectionImports answers one imported collection and one search.
@@ -111,7 +121,6 @@ type fakeCollectionImports struct {
 	lastMDB    handlers.UserImportMDBListRequest
 	lastTMDB   handlers.UserImportTMDBRequest
 	lastList   handlers.UserImportTMDBListRequest
-	lastTrakt  handlers.UserImportTraktRequest
 	lastQuery  string
 }
 
@@ -145,11 +154,6 @@ func (f *fakeCollectionImports) ImportTMDBList(_ context.Context, _ int, _ strin
 	return f.view()
 }
 
-func (f *fakeCollectionImports) ImportTrakt(_ context.Context, _ int, _ string, req handlers.UserImportTraktRequest) (handlers.UserImportView, error) {
-	f.lastTrakt = req
-	return f.view()
-}
-
 func (f *fakeCollectionImports) SearchMDBList(_ context.Context, q string) (handlers.MDBListDiscoveryView, error) {
 	f.lastQuery = q
 	if f.err != nil {
@@ -169,7 +173,7 @@ func fixtureCollectionView() handlers.PersonalCollectionView {
 	stamp := fixedTime().Format(time.RFC3339Nano)
 	return handlers.PersonalCollectionView{
 		ID: "c1", ProfileID: "p-owner", CreatorProfileID: "p-owner", Name: "Rainy days", CollectionType: "manual",
-		AllowedProfileIDs: []string{}, QueryDefinition: json.RawMessage(`{}`), SortConfig: json.RawMessage(`{}`),
+		QueryDefinition: json.RawMessage(`{}`), SortConfig: json.RawMessage(`{}`),
 		ItemCount: 4, CreatedAt: stamp, UpdatedAt: stamp,
 	}
 }
@@ -177,12 +181,12 @@ func fixtureCollectionView() handlers.PersonalCollectionView {
 func collectionDeps(t *testing.T) (Dependencies, *fakePersonalCollections, *fakeCollectionImports) {
 	t.Helper()
 	deps := pilotDeps(nil, nil)
-	group := "g1"
-	grouped := fixtureCollectionView()
-	grouped.ID, grouped.GroupID, grouped.SortOrder = "c2", &group, 1
+	// The acting profile's own collection, then another profile's shared one.
+	shared := fixtureCollectionView()
+	shared.ID, shared.ProfileID, shared.CreatorProfileID, shared.Name, shared.IsShared = "c2", "p-primary", "p-primary", "Family night", true
 	pc := &fakePersonalCollections{list: handlers.PersonalCollectionListView{
-		Collections: []handlers.PersonalCollectionView{fixtureCollectionView(), grouped},
-		Groups:      []handlers.CollectionGroupView{{ID: "g1", Name: "Seasonal", Slug: "seasonal", DefaultSortMode: "manual"}},
+		Collections: []handlers.PersonalCollectionView{fixtureCollectionView(), shared},
+		Groups:      []handlers.CollectionGroupView{},
 	}}
 	ci := &fakeCollectionImports{configured: true}
 	deps.PersonalCollections = pc
@@ -190,138 +194,66 @@ func collectionDeps(t *testing.T) (Dependencies, *fakePersonalCollections, *fake
 	return deps, pc, ci
 }
 
-func TestListCollections(t *testing.T) {
-	deps, _, _ := collectionDeps(t)
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/collections", "", viewerHeaders())
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	want := `{"items":[{"id":"c1","profile_id":"p-owner","creator_profile_id":"p-owner","name":"Rainy days","description":"","collection_type":"manual","is_shared":false,"allowed_profile_ids":[],"query_definition":{},"sort_config":{},"sort_order":0,"group_id":null,"source_url":"","sync_schedule":"","next_sync_at":null,"last_sync_at":null,"last_sync_status":"","last_sync_message":"","item_count":4,"include_in_server_collections":false,"poster_url":"","poster_thumbhash":"","created_at":"2026-01-02T03:04:05.678Z","updated_at":"2026-01-02T03:04:05.678Z"},` +
-		`{"id":"c2","profile_id":"p-owner","creator_profile_id":"p-owner","name":"Rainy days","description":"","collection_type":"manual","is_shared":false,"allowed_profile_ids":[],"query_definition":{},"sort_config":{},"sort_order":1,"group_id":"g1","source_url":"","sync_schedule":"","next_sync_at":null,"last_sync_at":null,"last_sync_status":"","last_sync_message":"","item_count":4,"include_in_server_collections":false,"poster_url":"","poster_thumbhash":"","created_at":"2026-01-02T03:04:05.678Z","updated_at":"2026-01-02T03:04:05.678Z"}],` +
-		`"groups":[{"id":"g1","name":"Seasonal","slug":"seasonal","default_sort_mode":"manual","sort_order":0}]}` + "\n"
-	if rec.Body.String() != want {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	// Another profile sees an empty, never-null envelope.
-	rec = do(t, h, http.MethodGet, "/api/v2/collections", "", with(bearer(memberToken), "X-Profile-Id", "p-primary"))
-	if rec.Code != 200 || rec.Body.String() != `{"items":[],"groups":[]}`+"\n" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// The class: no session, no profile header, a locked profile.
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/collections", "", nil), TypeAuthenticationRequired)
-	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/collections", "", bearer(memberToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != locationProfileHeader {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/collections", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
-	// Unwired service and a service failure.
-	deps.PersonalCollections = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/collections", "", viewerHeaders()), TypeDependencyUnavailable)
-	deps.PersonalCollections = &fakePersonalCollections{err: errors.New("boom")}
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/collections", "", viewerHeaders()), TypeInternalError)
-}
-
 func TestGetCollectionCapabilities(t *testing.T) {
-	deps, _, _ := collectionDeps(t)
+	deps, pc, _ := collectionDeps(t)
+	deps.ScheduleZone = fixtureScheduleTimeZone
+	pc.features.Description = true
 	rec := do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/collections/capabilities", "", viewerHeaders())
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"groups":false,"imports":false,"import_sources":[],"artwork":false,"item_reorder":false,"display_filter_fields":["type","watched"],"display_filter_presets":{"watched":["all","watched","unwatched"],"media":["all","movie","series"]},"collection_default_sort":true,"collection_sort_preferences":true,"effective_collection_sort":true,"sort_preference_kinds":["library","user","watchlist","favorites"]}` + "\n"
+	want := `{"groups":false,"login_sharing":true,"imports":false,"import_sources":[],"artwork":false,"item_reorder":false,"display_filter_fields":["type","watched"],"display_filter_presets":{"watched":["all","watched","unwatched"],"media":["all","movie","series"]},"collection_default_sort":true,"collection_sort_preferences":true,"effective_collection_sort":true,"sort_preference_kinds":["library","user","watchlist","favorites"],"create_description":true,"mdblist_search":true,"schedule_time_zone":{"utc_offset":"-05:00","abbreviation":"CDT","name":"America/Chicago"},"sync_schedule_editable":false,"contains_item":true,"preview_posters":true,"poster_collages":false}` + "\n"
 	if !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
-}
-
-func TestCreateCollection(t *testing.T) {
-	deps, pc, _ := collectionDeps(t)
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"Smart","collection_type":"smart","query_definition":{"filters":[]},"allowed_profile_ids":["p-primary"],"is_shared":true}`, viewerHeaders())
-	if rec.Code != 201 || rec.Header().Get("Location") != "/api/v2/collections/c1" {
-		t.Fatalf("%d %s %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	// Collages need both the server's collage support and the account's artwork.
+	pc.collages = true
+	for _, artwork := range []bool{false, true} {
+		pc.features.Artwork = artwork
+		rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/collections/capabilities", "", viewerHeaders())
+		if want := fmt.Sprintf(`"poster_collages":%t`, artwork); !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("artwork %v: body = %s, want %s", artwork, rec.Body.String(), want)
+		}
 	}
-	if !strings.Contains(rec.Body.String(), `"name":"Smart","description":"","collection_type":"smart"`) || !strings.Contains(rec.Body.String(), `"allowed_profile_ids":["p-primary"]`) {
-		t.Fatalf("body = %s", rec.Body.String())
+	pc.collages, pc.features.Artwork = false, false
+	// A store that does not persist descriptions does not advertise them.
+	pc.features.Description = false
+	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/collections/capabilities", "", viewerHeaders())
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"create_description":false`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	cmd := pc.lastCreate
-	if cmd.UserID != 1 || cmd.ProfileID != "p-owner" || cmd.PosterFile != nil || !cmd.Request.IsShared || string(cmd.Request.QueryDefinition) != `{"filters":[]}` {
-		t.Fatalf("command = %+v", cmd)
-	}
-	// Validation: the schema (missing name), the seam (empty name), an
-	// unknown enum, and null on a non-nullable member.
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"collection_type":"manual"}`, viewerHeaders()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.name" || p.Errors[0].Code != codeRequired {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"x","collection_type":"playlist"}`, viewerHeaders()), TypeValidationFailed)
-	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"x","is_shared":null}`, viewerHeaders()), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.is_shared" || p.Errors[0].Code != codeInvalidType {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"x","extra":1}`, viewerHeaders()), TypeValidationFailed)
-	// The class and demo mode.
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections", `{"name":"x"}`, bearer(memberToken)), TypeValidationFailed)
-	demo := deps
-	demo.DemoSettings = fakeSettings{demo: true}
-	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPost, "/api/v2/collections", `{"name":"x"}`, viewerHeaders()), TypePermissionDenied)
 }
 
 func TestReorderCollections(t *testing.T) {
 	deps, pc, _ := collectionDeps(t)
 	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodPut, "/api/v2/collections/order", `{"group_id":"g1","ordered_ids":["c2"]}`, with(viewerHeaders(), "If-Match", "*"))
-	if rec.Code != 200 || pc.lastGroup == nil || *pc.lastGroup != "g1" || len(pc.lastOrder) != 1 || pc.lastOrder[0] != "c2" {
-		t.Fatalf("%d %v %v", rec.Code, pc.lastGroup, pc.lastOrder)
-	}
-	// Null and omitted group both target the ungrouped section.
+	// Null and omitted group both mean the profile's one flat order.
 	for _, body := range []string{`{"group_id":null,"ordered_ids":["c1"]}`, `{"ordered_ids":["c1"]}`} {
-		if rec := do(t, h, http.MethodPut, "/api/v2/collections/order", body, with(viewerHeaders(), "If-Match", "*")); rec.Code != 200 || pc.lastGroup != nil {
-			t.Fatalf("%s: %d %v", body, rec.Code, pc.lastGroup)
+		if rec := do(t, h, http.MethodPut, "/api/v2/collections/order", body, with(viewerHeaders(), "If-Match", "*")); rec.Code != 200 || !slices.Equal(pc.lastOrder, []string{"c1"}) {
+			t.Fatalf("%s: %d %v %s", body, rec.Code, pc.lastOrder, rec.Body.String())
 		}
 	}
-	// The seam's mismatch is a validation problem at ordered_ids.
-	p := requireProblem(t, do(t, h, http.MethodPut, "/api/v2/collections/order", `{"ordered_ids":[]}`, with(viewerHeaders(), "If-Match", "*")), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.ordered_ids" {
+	// Personal collection groups are gone: a group scope is refused before
+	// the seam, in the body and in the order read.
+	pc.lastOrder = nil
+	p := requireProblem(t, do(t, h, http.MethodPut, "/api/v2/collections/order", `{"group_id":"g1","ordered_ids":["c1"]}`, with(viewerHeaders(), "If-Match", "*")), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.group_id" || pc.lastOrder != nil {
+		t.Fatalf("errors = %+v, seam called with %v", p.Errors, pc.lastOrder)
+	}
+	p = requireProblem(t, do(t, h, http.MethodGet, "/api/v2/collections/order?group_id=g1", "", viewerHeaders()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "query.group_id" {
 		t.Fatalf("errors = %+v", p.Errors)
+	}
+	// Another profile's collection, even a shared one the profile can see, is
+	// not part of its order (D11): a validation problem at ordered_ids.
+	for _, body := range []string{`{"ordered_ids":["c2","c1"]}`, `{"ordered_ids":[]}`} {
+		p = requireProblem(t, do(t, h, http.MethodPut, "/api/v2/collections/order", body, with(viewerHeaders(), "If-Match", "*")), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "body.ordered_ids" {
+			t.Fatalf("%s: errors = %+v", body, p.Errors)
+		}
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/order", `{"ordered_ids":["c1"]}`, with(viewerHeaders(), "If-Match", "*")), TypeMethodNotAllowed)
 	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/collections/order", `{"ordered_ids":["c1"]}`, nil), TypeAuthenticationRequired)
-}
-
-func TestCollectionGroups(t *testing.T) {
-	deps, pc, _ := collectionDeps(t)
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodPost, "/api/v2/collections/groups", `{"name":"Seasonal","default_sort_mode":"manual"}`, with(viewerHeaders(), "If-Match", "*"))
-	if rec.Code != 201 || rec.Header().Get("Location") != "/api/v2/collections/groups/g1" {
-		t.Fatalf("%d %s %s", rec.Code, rec.Header().Get("Location"), rec.Body.String())
-	}
-	if want := `{"id":"g1","name":"Seasonal","slug":"seasonal","default_sort_mode":"manual","sort_order":0}` + "\n"; rec.Body.String() != want {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/groups", `{"name":"x","default_sort_mode":"random"}`, with(viewerHeaders(), "If-Match", "*")), TypeValidationFailed)
-
-	rec = do(t, h, http.MethodPatch, "/api/v2/collections/groups/g1", `{"name":"Winter"}`, with(viewerHeaders(), "If-Match", "*"))
-	if rec.Code != 200 || pc.lastID != "g1" || pc.lastReq.Name == nil || *pc.lastReq.Name != "Winter" || pc.lastReq.Slug != nil {
-		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), pc.lastReq)
-	}
-	p := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/collections/groups/g1", `{"slug":null}`, with(viewerHeaders(), "If-Match", "*")), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.slug" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-	// v1 answers an unknown group with 400; that is a validation problem.
-	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/collections/groups/g9", `{"name":"x"}`, with(viewerHeaders(), "If-Match", "*")), TypeNotFound)
-
-	if rec := do(t, h, http.MethodPut, "/api/v2/collections/groups/order", `{"ordered_ids":["g1"]}`, with(viewerHeaders(), "If-Match", "*")); rec.Code != 200 || len(pc.lastOrder) != 1 || pc.lastOrder[0] != "g1" {
-		t.Fatalf("%d %v", rec.Code, pc.lastOrder)
-	}
-	if rec := do(t, h, http.MethodDelete, "/api/v2/collections/groups/g1", "", with(viewerHeaders(), "If-Match", "*")); rec.Code != 204 || pc.lastID != "g1" {
-		t.Fatalf("%d %s", rec.Code, pc.lastID)
-	}
-	demo := deps
-	demo.DemoSettings = fakeSettings{demo: true}
-	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodDelete, "/api/v2/collections/groups/g1", "", with(viewerHeaders(), "If-Match", "*")), TypePermissionDenied)
-	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/collections/groups/g1", "", bearer(memberToken)), TypeValidationFailed)
 }
 
 func TestImportCollections(t *testing.T) {
@@ -357,20 +289,16 @@ func TestImportCollections(t *testing.T) {
 		t.Fatalf("%d %+v", rec.Code, ci.lastList)
 	}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/tmdb-list", `{"title":"My list"}`, viewerHeaders()), TypeValidationFailed)
-	rec = do(t, h, http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"Trending","preset":"trending"}`, viewerHeaders())
-	if rec.Code != 201 || ci.lastTrakt.Preset != "trending" || ci.lastTrakt.MediaType != "" {
-		t.Fatalf("%d %+v", rec.Code, ci.lastTrakt)
-	}
 	// The seam's field error, the class, demo mode, and an unwired service.
 	deps.CollectionImports = &fakeCollectionImports{err: &handlers.APIError{Status: 400, Code: "bad_request", Message: "url must be an MDBList list", Field: "url"}}
 	p = requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/collections/import/mdblist", `{"title":"Top","url":"u"}`, viewerHeaders()), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.url" {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
-	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"x","preset":"trending"}`, bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/tmdb", `{"title":"x","preset":"trending"}`, bearer(memberToken)), TypeValidationFailed)
 	demo := deps
 	demo.DemoSettings = fakeSettings{demo: true}
-	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"x","preset":"trending"}`, viewerHeaders()), TypePermissionDenied)
+	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPost, "/api/v2/collections/import/tmdb", `{"title":"x","preset":"trending"}`, viewerHeaders()), TypePermissionDenied)
 	deps.CollectionImports = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/collections/import/tmdb", `{"title":"x","preset":"trending"}`, viewerHeaders()), TypeDependencyUnavailable)
 }
@@ -424,21 +352,14 @@ func TestCollectionProblemPreservesUnsupportedSource(t *testing.T) {
 func (f *fakePersonalCollections) PersonalCollectionEditor(_ context.Context, _ int, _ string, id string) (handlers.PersonalCollectionEditorView, error) {
 	return handlers.PersonalCollectionEditorView{Collection: fixtureCollectionView(), Revision: 1}, f.err
 }
-func (f *fakePersonalCollections) PersonalCollectionOrderEditor(_ context.Context, _ int, _ string, g *string) (handlers.PersonalCollectionOrderView, error) {
-	return handlers.PersonalCollectionOrderView{GroupID: g, OrderedIDs: f.lastOrder, Revision: 1}, f.err
+func (f *fakePersonalCollections) PersonalCollectionOrderEditor(context.Context, int, string) (handlers.PersonalCollectionOrderView, error) {
+	return handlers.PersonalCollectionOrderView{OrderedIDs: f.lastOrder, Revision: 1}, f.err
 }
-func (f *fakePersonalCollections) PersonalCollectionGroupsEditor(_ context.Context, _ int) ([]handlers.CollectionGroupView, int64, error) {
-	return []handlers.CollectionGroupView{{ID: "g1", Name: "Seasonal", Slug: "seasonal", DefaultSortMode: "manual"}}, 1, f.err
+func (f *fakePersonalCollections) PersonalCollectionGroupsEditor(context.Context, int) ([]handlers.CollectionGroupView, int64, error) {
+	return nil, 0, errGroupsUnsupported
 }
-func (f *fakePersonalCollections) PersonalCollectionGroupEditor(_ context.Context, _ int, id string) (handlers.PersonalCollectionGroupEditorView, error) {
-	if id != "g1" {
-		return handlers.PersonalCollectionGroupEditorView{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "Collection group not found"}
-	}
-	name := "Seasonal"
-	if f.lastReq.Name != nil {
-		name = *f.lastReq.Name
-	}
-	return handlers.PersonalCollectionGroupEditorView{Group: handlers.CollectionGroupView{ID: id, Name: name, Slug: "seasonal", DefaultSortMode: "manual"}, Revision: 1}, f.err
+func (f *fakePersonalCollections) PersonalCollectionGroupEditor(context.Context, int, string) (handlers.PersonalCollectionGroupEditorView, error) {
+	return handlers.PersonalCollectionGroupEditorView{}, errGroupsUnsupported
 }
 func (f *fakePersonalCollections) PersonalCollectionItemsOrderEditor(_ context.Context, _ int, _ string, id string) (handlers.PersonalCollectionOrderView, error) {
 	return handlers.PersonalCollectionOrderView{OrderedIDs: []string{}, Revision: 1}, f.err
@@ -462,7 +383,7 @@ func TestImportableCollectionTemplatesKeepsPersonalSources(t *testing.T) {
 	if len(want) == 0 || !hasExcludedSource {
 		t.Fatal("built-in catalog must contain both importable and excluded sources")
 	}
-	got := importableCollectionTemplates(full)
+	got := creatableCollectionTemplates(full)
 
 	kept := map[templates.Source]int{}
 	for _, group := range got.Categories {

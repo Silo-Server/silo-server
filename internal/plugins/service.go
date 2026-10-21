@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
@@ -91,6 +92,9 @@ type Service struct {
 	launchGroup      singleflight.Group
 	runtimeRefreshMu sync.RWMutex
 	resident         *ResidentSupervisor
+	// lazyStartFailures records failed launches of non-resident plugins for
+	// the admin runtime state; see RuntimeState.
+	lazyStartFailures lazyStartFailures
 	// lifecycleBus, when set by PublishLifecycleChanges, carries every
 	// lifecycle change to the proxy nodes running the same installations.
 	lifecycleBus cache.EventBus
@@ -104,7 +108,7 @@ type Service struct {
 	// installationCache memoizes plugin_installations rows keyed by ID so the
 	// hot plugin-RPC path (ensureClient -> loadInstallation) and the metadata
 	// chain enabled-check answer from memory instead of a per-call DB read. It
-	// is wiped wholesale by invalidateInstallationCache, registered as a
+	// is wiped wholesale by InvalidateInstallationCache, registered as a
 	// lifecycle hook, so a cached row is at most one lifecycle event stale.
 	//
 	// installationCacheGen guards the read-through against an invalidate that
@@ -121,10 +125,9 @@ type Service struct {
 // install, enable, disable, upgrade, or uninstall on this replica reaches the
 // next event. Other replicas drop theirs on cache.EventPluginsChanged.
 //
-// The hook runs before every other lifecycle hook. Events that arrive while
-// the slower hooks run (resident reconcile, provider reloads) already see the
-// change, and the index rebuilt when this replica's own plugins_changed
-// publish comes back is not dropped again by a hook that runs after it.
+// The hook runs before every other lifecycle hook, so events that arrive
+// while the slower hooks run (resident reconcile, provider reloads) already
+// see the change.
 func (s *Service) SetEventDispatcher(d *EventDispatcher) {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
@@ -192,7 +195,7 @@ func NewService(
 	// silently forgotten by a new caller: every OnLifecycleChange (install /
 	// enable / disable / update / uninstall) wipes the cache, keeping the
 	// memoized rows correct without any external wiring.
-	svc.AddLifecycleHook(func(context.Context) { svc.invalidateInstallationCache() })
+	svc.AddLifecycleHook(func(context.Context) { svc.InvalidateInstallationCache() })
 	// Resident plugins (network access providers) are reconciled after every
 	// lifecycle change; the supervisor stays inert until StartResidents arms
 	// it once the API listener is bound.
@@ -267,7 +270,9 @@ func (s *Service) InstallLocal(ctx context.Context, req InstallArchiveRequest) (
 	if err != nil {
 		return nil, fmt.Errorf("read archive %q: %w", req.ArchivePath, err)
 	}
-	_, _, manifest, err := openPluginArchive(data)
+	// Refuse a package the installer would refuse before an installed copy
+	// is stopped to replace it.
+	_, _, manifest, err := openInstallArchive(data, req)
 	if err != nil {
 		return nil, err
 	}
@@ -306,17 +311,13 @@ func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest)
 		return nil, err
 	}
 
-	repositoryID := target.RepositoryID
 	existing, err := s.existingInstallationByPluginID(ctx, req.PluginID)
 	if err != nil {
 		return nil, err
 	}
 	var result *InstallResult
 	if target.LegacyArchive {
-		archiveReq := InstallArchiveRequest{
-			ArchiveURL:   target.ArchiveURL,
-			RepositoryID: &repositoryID,
-		}
+		archiveReq := target.ArchiveRequest()
 		if existing == nil {
 			result, err = s.installer.InstallRemote(ctx, archiveReq)
 		} else {
@@ -325,11 +326,7 @@ func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest)
 			})
 		}
 	} else {
-		binaryReq := InstallBinaryRequest{
-			BinaryURL:    target.ArchiveURL,
-			Checksum:     target.Checksum,
-			RepositoryID: &repositoryID,
-		}
+		binaryReq := target.BinaryRequest()
 		if existing == nil {
 			result, err = s.installer.InstallBinary(ctx, binaryReq)
 		} else {
@@ -451,7 +448,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	oldInstallation := existing[0]
 	result, err = s.replaceStopped(ctx, oldInstallation, func() (*InstallResult, error) {
-		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest)
+		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, nil)
 	})
 	if err != nil {
 		return nil, err
@@ -518,13 +515,14 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 		if installation == nil {
 			continue
 		}
-		// Builtin installations have no archive or binary; skip them explicitly
-		// instead of leaning on the tolerated ErrArchiveNotFound branch below
-		// (any other load error here is fatal to startup).
+		// Builtin installations have no archive or binary.
 		if installation.IsBuiltin() {
 			continue
 		}
 		if _, err := s.ensureLoadedInstallation(ctx, installation); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			if errors.Is(err, ErrArchiveNotFound) {
 				slog.WarnContext(ctx,
 					"plugin preload skipped: archive not found for enabled installation", "component", "plugins",
@@ -534,7 +532,17 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 				)
 				continue
 			}
-			return fmt.Errorf("preload plugin installation %d: %w", installation.ID, err)
+			// One plugin whose stored archive no longer verifies must not
+			// keep the server from starting; a fresh node loads every plugin
+			// from its archive, so a fatal error here would crash-loop it.
+			// The plugin stays unavailable and its RPCs report the same error.
+			slog.ErrorContext(ctx,
+				"plugin preload failed; continuing without it", "component", "plugins",
+				"installation_id", installation.ID,
+				"plugin_id", installation.PluginID,
+				"version", installation.Version,
+				"error", err,
+			)
 		}
 	}
 	s.OnLifecycleChange(ctx)
@@ -547,12 +555,37 @@ func (s *Service) Start(ctx context.Context, installationID int) (pluginClient, 
 	return s.start(ctx, installationID, true)
 }
 
-func (s *Service) start(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
-	installation, manifest, err := s.ensureInstallationCache(ctx, installationID, true)
+func (s *Service) start(ctx context.Context, installationID int, allowResident bool) (client pluginClient, err error) {
+	installation, err := s.loadInstallation(ctx, installationID, true)
 	if err != nil {
+		// No launch was attempted: a disabled, missing or unreadable row says
+		// nothing about whether the plugin can start.
+		return nil, err
+	}
+	// Record why a lazy launch failed, including an archive or config that
+	// cannot be loaded, so the admin API can show a plugin that cannot start.
+	// The failure is tied to the snapshot that was tried, not re-read, so an
+	// update that lands mid-launch is not marked failed. The supervisor
+	// reports failures of the resident plugins it launches itself; a refused
+	// resident says nothing about the plugin.
+	var manifest *pluginv1.PluginManifest
+	refusedResident := false
+	defer func() {
+		supervised := allowResident && (manifest == nil || isResidentManifest(manifest))
+		switch {
+		case err == nil:
+			s.lazyStartFailures.clear(installationID)
+		case !supervised && !refusedResident:
+			s.lazyStartFailures.record(installation, err)
+		}
+	}()
+	manifest, err = s.ensureLoadedInstallation(ctx, installation)
+	if err != nil {
+		manifest = nil
 		return nil, err
 	}
 	if !allowResident && isResidentManifest(manifest) {
+		refusedResident = true
 		return nil, fmt.Errorf("%w: resident plugin installation %d requires supervision", pluginhost.ErrPluginUnhealthy, installationID)
 	}
 	configEntries, err := s.globalConfigEntries(ctx, installation.ID)
@@ -593,7 +626,7 @@ func (s *Service) Stop(installationID int) error {
 // the stop and being reused with the new revision.
 func (s *Service) RefreshMarkerRuntime(installationID int) error {
 	s.runtimeRefreshMu.Lock()
-	s.invalidateInstallationCache()
+	s.InvalidateInstallationCache()
 	if err := s.Stop(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
 		s.runtimeRefreshMu.Unlock()
 		return err
@@ -859,7 +892,12 @@ func (s *Service) ensureClientForStart(ctx context.Context, installationID int, 
 	if err != nil {
 		return nil, err
 	}
-	return v.(pluginClient), nil
+	// A Host that reports success without a client leaves v nil.
+	client, ok := v.(pluginClient)
+	if !ok {
+		return nil, fmt.Errorf("%w: plugin installation %d started without a client", pluginhost.ErrPluginUnhealthy, installationID)
+	}
+	return client, nil
 }
 
 func (s *Service) doEnsureClient(ctx context.Context, installationID int, allowResident bool) (pluginClient, error) {
@@ -993,7 +1031,7 @@ func (s *Service) loadInstallation(ctx context.Context, installationID int, requ
 // cachedInstallation returns the plugin_installations row for installationID
 // from the in-memory cache, loading it from the store on a miss. The returned
 // *Installation is shared and must be treated as read-only by callers; it is
-// evicted wholesale by invalidateInstallationCache on every lifecycle change.
+// evicted wholesale by InvalidateInstallationCache on every lifecycle change.
 func (s *Service) cachedInstallation(ctx context.Context, installationID int) (*Installation, error) {
 	s.installationCacheMu.RLock()
 	cached, ok := s.installationCache[installationID]
@@ -1025,10 +1063,11 @@ func (s *Service) cachedInstallation(ctx context.Context, installationID int) (*
 	return installation, nil
 }
 
-// invalidateInstallationCache clears the in-memory installation cache. It is
+// InvalidateInstallationCache clears the in-memory installation cache. It is
 // registered as a lifecycle hook (see NewService) so OnLifecycleChange evicts
 // stale rows after every install / enable / disable / update / uninstall.
-func (s *Service) invalidateInstallationCache() {
+// Periodic provider reloads call it before reading changes made on other API nodes.
+func (s *Service) InvalidateInstallationCache() {
 	if s == nil {
 		return
 	}

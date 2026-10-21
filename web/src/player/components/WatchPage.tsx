@@ -16,6 +16,7 @@ import {
 } from "../utils/subtitleChoicePersistence";
 import { VideoPlayer } from "./VideoPlayer";
 import { fetchWatchDetail } from "@/hooks/queries/items";
+import { transientTrickplayError, useWatchTrickplay } from "@/hooks/queries/trickplay";
 import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
@@ -305,6 +306,53 @@ function WatchPagePlayer({
     () => playbackVersions.find((version) => version.file_id === session.mediaFileId),
     [playbackVersions, session.mediaFileId],
   );
+  const trickplayAvailable = activePlaybackVersion?.trickplay_available === true;
+  const trickplayQuery = useWatchTrickplay(
+    contentId,
+    session.mediaFileId ?? undefined,
+    trickplayAvailable,
+  );
+  // A failed refresh retains query data. A terminal response withdraws the
+  // cached previews; transient failures keep them until the query recovers.
+  const trickplay =
+    trickplayAvailable && (!trickplayQuery.isError || transientTrickplayError(trickplayQuery.error))
+      ? (trickplayQuery.data ?? null)
+      : null;
+  const refetchTrickplay = trickplayQuery.refetch;
+  const lastTrickplayRefresh = useRef<{ fileId: number | null; at: number } | null>(null);
+  const trickplayRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    lastTrickplayRefresh.current = null;
+    return () => {
+      if (trickplayRefreshTimer.current !== null) clearTimeout(trickplayRefreshTimer.current);
+      trickplayRefreshTimer.current = null;
+    };
+  }, [session.mediaFileId, trickplayAvailable]);
+  useEffect(() => {
+    // The query owns retry and polling delays after a manifest request fails.
+    if (trickplayQuery.isError && trickplayRefreshTimer.current !== null) {
+      clearTimeout(trickplayRefreshTimer.current);
+      trickplayRefreshTimer.current = null;
+    }
+  }, [trickplayQuery.isError]);
+  const handleTrickplayError = useCallback(() => {
+    if (trickplayQuery.isError) return;
+    const now = Date.now();
+    const previous = lastTrickplayRefresh.current;
+    const refresh = () => {
+      trickplayRefreshTimer.current = null;
+      lastTrickplayRefresh.current = { fileId: session.mediaFileId, at: Date.now() };
+      void refetchTrickplay({ cancelRefetch: false });
+    };
+    if (previous?.fileId === session.mediaFileId && now - previous.at < 60_000) {
+      if (trickplayRefreshTimer.current === null) {
+        trickplayRefreshTimer.current = setTimeout(refresh, 60_000 - (now - previous.at));
+      }
+      return;
+    }
+    if (trickplayRefreshTimer.current !== null) clearTimeout(trickplayRefreshTimer.current);
+    refresh();
+  }, [refetchTrickplay, session.mediaFileId, trickplayQuery.isError]);
 
   const handleEnded = useCallback(() => {
     onEnded?.({
@@ -350,7 +398,6 @@ function WatchPagePlayer({
         index,
         tracks: playableSubtitles,
         inventoryTrack,
-        showForcedSubtitles,
       });
       for (const request of requests) {
         void sendSubtitleChoiceRequest(config, request).catch(() => {
@@ -358,7 +405,7 @@ function WatchPagePlayer({
         });
       }
     },
-    [config, seriesContext, contentId, playableSubtitles, showForcedSubtitles],
+    [config, seriesContext, contentId, playableSubtitles],
   );
 
   useEffect(() => {
@@ -490,6 +537,32 @@ function WatchPagePlayer({
 
   const handleRealtimeEvent = useCallback(
     (event: PlaybackRealtimeEventEnvelope) => {
+      if (event.name === "marker_thumbnail_ready") {
+        const image = event.payload;
+        if (image.file_id !== session.mediaFileId || image.session_id !== session.sessionId) return;
+        setPlaybackVersions((current) =>
+          current.map((version) =>
+            version.file_id !== image.file_id
+              ? version
+              : {
+                  ...version,
+                  marker_segments: version.marker_segments?.map((marker) =>
+                    marker.kind === image.kind &&
+                    marker.start_seconds === image.start_seconds &&
+                    marker.end_seconds === image.end_seconds
+                      ? {
+                          ...marker,
+                          thumbnail_url: image.thumbnail_url,
+                          thumbnail_thumbhash: image.thumbnail_thumbhash,
+                          thumbnail_capture_seconds: image.thumbnail_capture_seconds,
+                        }
+                      : marker,
+                  ),
+                },
+          ),
+        );
+        return;
+      }
       if (event.name === "chapter_thumbnail_ready") {
         const { file_id, chapter_index, thumbnail_url, thumbnail_thumbhash } = event.payload;
         if (file_id !== session.mediaFileId) {
@@ -536,7 +609,7 @@ function WatchPagePlayer({
         ),
       );
     },
-    [session.mediaFileId],
+    [session.mediaFileId, session.sessionId],
   );
 
   // The plan is the player's contract: without one there is no transport, no
@@ -600,8 +673,11 @@ function WatchPagePlayer({
       streamUrl={session.streamUrl}
       plan={session.plan}
       planRevision={session.planRevision}
+      browserEngine={session.browserEngine}
+      nativeOriginalSupport={session.nativeOriginalSupport}
       shouldAutoPlay={session.shouldAutoPlay}
       replanning={session.replanning}
+      replacing={session.replacing}
       replanError={fallingBack ? null : session.error}
       replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}
@@ -609,12 +685,20 @@ function WatchPagePlayer({
       versions={playbackVersions}
       activeFileId={session.mediaFileId}
       chapters={activeChapters}
+      trickplay={trickplay}
+      trickplayUpdatedAt={trickplayQuery.dataUpdatedAt}
+      onTrickplayError={handleTrickplayError}
       onSwitchVersion={watchTogetherRoomId ? undefined : handleSwitchVersion}
       subtitleUrls={playableSubtitles}
       initialPosition={session.initialPosition}
       onQualitySelect={session.changeQuality}
       onSubtitleTrackChange={session.changeSubtitleTrack}
       onPlanFailure={session.recoverFromFailure}
+      onConnectionLost={session.recoverConnection}
+      onRetryConnection={session.retryConnection}
+      connectionStatus={session.connectionStatus}
+      connectionErrorTitle={session.connectionErrorTitle}
+      connectionError={session.connectionError}
       onPlanInvalidated={session.invalidatePlan}
       onReanchorSeek={session.reanchorSeek}
       onApplySubtitleTrack={session.applySubtitleTrack}

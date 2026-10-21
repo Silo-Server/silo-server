@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
+
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -40,6 +43,23 @@ type PluginHandler struct {
 	imageResolver *metadata.PluginImageResolver
 	uploads       *uploads.Manager
 	restartStatus *ServerRestartStatusTracker
+	// authProvidersChanged rebuilds the sign-in provider registry on every
+	// node after an auth binding write; nil when sign-in is not wired.
+	authProvidersChanged func(context.Context)
+}
+
+// SetAuthProvidersChanged registers the callback an auth binding write runs
+// so sign-in providers change without a restart.
+func (h *PluginHandler) SetAuthProvidersChanged(fn func(context.Context)) {
+	if h != nil {
+		h.authProvidersChanged = fn
+	}
+}
+
+func (h *PluginHandler) notifyAuthProvidersChanged(ctx context.Context) {
+	if h != nil && h.authProvidersChanged != nil {
+		h.authProvidersChanged(ctx)
+	}
 }
 
 func NewPluginHandler(
@@ -183,7 +203,8 @@ type PluginInstallationView struct {
 
 // PluginRuntimeView is one installation's process state. Resident marks a
 // plugin the supervisor keeps running (network access providers); State is
-// the supervisor's machine for those and running/stopped for lazily started
+// the supervisor's machine for those and running, stopped, or failed (the
+// last launch on this host failed, LastError says why) for lazily started
 // plugins.
 type PluginRuntimeView struct {
 	Resident      bool
@@ -217,9 +238,6 @@ type PluginPresentationView struct {
 }
 
 type PluginConfigSchemaView = plugins.ConfigSchemaView
-type pluginAdminFormJSON = plugins.AdminFormView
-type pluginAdminFormFieldJSON = plugins.AdminFormFieldView
-type pluginAdminFormSectionJSON = plugins.AdminFormSectionView
 
 type PluginCapabilityView struct {
 	Type          string                   `json:"type"`
@@ -229,6 +247,15 @@ type PluginCapabilityView struct {
 	Subscriptions []string                 `json:"subscriptions,omitempty"`
 	ConfigSchema  []PluginConfigSchemaView `json:"config_schema,omitempty"`
 	Metadata      map[string]any           `json:"metadata,omitempty"`
+	// AuthModes are an auth_provider.v1 capability's sign-in modes. The v2
+	// admin view derives the binding's sign-in URLs from them; the frozen
+	// v1 projection does not carry them.
+	AuthModes []string `json:"-"`
+	// RequestRouter is a request_router.v1 capability's descriptor, nil when
+	// the manifest declares none. The v2 admin view reads which connection
+	// fields the plugin can do without from it; the frozen v1 projection does
+	// not carry it.
+	RequestRouter *pluginv1.RequestRouterDescriptor `json:"-"`
 }
 
 type PluginRouteView struct {
@@ -881,13 +908,18 @@ func (h *PluginHandler) HandlePutAuthBinding(w http.ResponseWriter, r *http.Requ
 		AutoProvision:  req.AutoProvision,
 		DefaultLogin:   req.DefaultLogin,
 	}); err != nil {
+		if errors.Is(err, plugins.ErrAuthProviderAlreadyEnabled) {
+			writeError(w, http.StatusConflict, "provider_already_enabled", "Another sign-in provider is already enabled; turn it off first")
+			return
+		}
 		slog.ErrorContext(r.Context(), "saving plugin auth binding", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save auth binding")
 		return
 	}
 
-	h.restartStatus.MarkRequired("plugin_auth_binding")
-	w.Header().Set("X-Silo-Restart-Required", "true")
+	// Sign-in providers rebuild on every node; no restart is needed.
+	h.notifyAuthProvidersChanged(r.Context())
+	w.Header().Set("X-Silo-Restart-Required", "false")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1037,9 +1069,10 @@ func (h *PluginHandler) TestAdminPluginConfig(ctx context.Context, id int, in Pl
 	}
 }
 
-// SetAdminPluginAuthBinding replaces one auth binding row and marks a
-// server restart required. Errors: plugins.ErrInstallationNotFound,
-// ErrPluginBuiltinInstallation.
+// SetAdminPluginAuthBinding replaces one auth binding row; the sign-in
+// providers rebuild on every node without a restart. Errors:
+// plugins.ErrInstallationNotFound, ErrPluginBuiltinInstallation,
+// plugins.ErrAuthProviderAlreadyEnabled.
 func (h *PluginHandler) SetAdminPluginAuthBinding(ctx context.Context, id int, in PluginAuthBindingInput) error {
 	if h == nil || h.configs == nil {
 		return apiError(http.StatusServiceUnavailable, "unavailable", "Plugin stores not configured")
@@ -1050,8 +1083,22 @@ func (h *PluginHandler) SetAdminPluginAuthBinding(ctx context.Context, id int, i
 	if err := h.configs.UpsertAuthBinding(ctx, plugins.AuthBinding{InstallationID: id, CapabilityID: in.CapabilityID, Enabled: in.Enabled, DisplayOrder: in.DisplayOrder, AutoProvision: in.AutoProvision, DefaultLogin: in.DefaultLogin}); err != nil {
 		return err
 	}
-	h.restartStatus.MarkRequired("plugin_auth_binding")
+	h.notifyAuthProvidersChanged(ctx)
 	return nil
+}
+
+// TestAdminPluginAuthConnection runs the auth plugin's connection test on
+// staged configuration. Errors: plugins.ErrInstallationNotFound,
+// ErrPluginBuiltinInstallation, plugins.ErrInstallationDisabled,
+// plugins.ErrAuthConnectionTestUnsupported, *plugins.ConfigValidationError.
+func (h *PluginHandler) TestAdminPluginAuthConnection(ctx context.Context, id int, capabilityID string, staged []plugins.StagedConfig) (plugins.AuthConnectionTestResult, error) {
+	if h == nil || h.service == nil {
+		return plugins.AuthConnectionTestResult{}, apiError(http.StatusServiceUnavailable, "unavailable", "Plugin service not configured")
+	}
+	if err := h.pluginMutationTarget(ctx, id); err != nil {
+		return plugins.AuthConnectionTestResult{}, err
+	}
+	return h.service.TestAuthProviderConnection(ctx, id, capabilityID, staged)
 }
 
 // SetAdminPluginTaskBinding replaces one task binding row and marks a
@@ -1388,7 +1435,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	}
 	var runtime *PluginRuntimeView
 	if h.service != nil {
-		state := h.service.RuntimeState(installation.ID)
+		state := h.service.RuntimeStateOf(installation)
 		runtime = &PluginRuntimeView{Resident: state.Resident, State: string(state.State), RestartCount: state.RestartCount, LastError: state.LastError, LastStartedAt: state.LastStartedAt, NextRestartAt: state.NextRestartAt}
 		// Before the supervisor arms (boot) the capability says what will be
 		// resident. Once armed, its entries are the truth: an enabled
@@ -1496,10 +1543,6 @@ func configSchemasToJSON(schemas []*pluginv1.ConfigSchema) []PluginConfigSchemaV
 	return plugins.ConfigSchemaViews(schemas)
 }
 
-func adminFormToJSON(form *pluginv1.AdminFormDescriptor) *pluginAdminFormJSON {
-	return plugins.AdminFormViewFromProto(form)
-}
-
 func capabilitiesToJSON(descriptors []*pluginv1.CapabilityDescriptor) []PluginCapabilityView {
 	response := make([]PluginCapabilityView, 0, len(descriptors))
 	for _, descriptor := range descriptors {
@@ -1514,6 +1557,8 @@ func capabilitiesToJSON(descriptors []*pluginv1.CapabilityDescriptor) []PluginCa
 			Subscriptions: append([]string(nil), descriptor.GetSubscriptions()...),
 			ConfigSchema:  configSchemasToJSON(descriptor.GetConfigSchema()),
 			Metadata:      structToMap(descriptor.GetMetadata()),
+			AuthModes:     append([]string(nil), descriptor.GetAuthModes()...),
+			RequestRouter: descriptor.GetRequestRouter(),
 		})
 	}
 	return response
@@ -1669,7 +1714,8 @@ func (h *PluginHandler) loadInstallationCapabilities(
 	manifest *pluginv1.PluginManifest,
 ) ([]PluginCapabilityView, error) {
 	if manifest != nil {
-		return capabilitiesToJSON(manifest.GetCapabilities()), nil
+		views := capabilitiesToJSON(manifest.GetCapabilities())
+		return views, h.useStoredRequestRouters(ctx, installation, views)
 	}
 
 	records, err := h.installations.ListCapabilities(ctx, installation.ID)
@@ -1686,6 +1732,44 @@ func (h *PluginHandler) loadInstallationCapabilities(
 		response = append(response, capabilitiesToJSON([]*pluginv1.CapabilityDescriptor{descriptor})...)
 	}
 	return response, nil
+}
+
+// useStoredRequestRouters gives each request_router.v1 capability the
+// descriptor stored when the plugin was installed, which is what the requests
+// service reads. The installed manifest can declare flags that a host built on
+// an older SDK dropped when it stored the capability, and the admin form must
+// not offer a server setup that routing then refuses.
+func (h *PluginHandler) useStoredRequestRouters(ctx context.Context, installation *plugins.Installation, views []PluginCapabilityView) error {
+	if !slices.ContainsFunc(views, func(v PluginCapabilityView) bool { return v.Type == sdkcapability.RequestRouter }) {
+		return nil
+	}
+	records, err := h.installations.ListCapabilities(ctx, installation.ID)
+	if err != nil {
+		return err
+	}
+	return applyStoredRequestRouters(views, records)
+}
+
+// applyStoredRequestRouters sets each request_router.v1 view's descriptor to
+// the stored record's with the same ID, or none when no record has one.
+func applyStoredRequestRouters(views []PluginCapabilityView, records []*plugins.Capability) error {
+	stored := map[string]*pluginv1.RequestRouterDescriptor{}
+	for _, record := range records {
+		if record == nil || record.Type != sdkcapability.RequestRouter {
+			continue
+		}
+		descriptor, err := plugins.DecodeCapability(record)
+		if err != nil {
+			return err
+		}
+		stored[record.ID] = descriptor.GetRequestRouter()
+	}
+	for i := range views {
+		if views[i].Type == sdkcapability.RequestRouter {
+			views[i].RequestRouter = stored[views[i].ID]
+		}
+	}
+	return nil
 }
 
 func loadPluginManifest(installation *plugins.Installation) (*pluginv1.PluginManifest, error) {

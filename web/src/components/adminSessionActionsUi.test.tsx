@@ -268,6 +268,46 @@ describe("AdminSessionActions", () => {
     );
   });
 
+  async function renderInline(session: AdminSession) {
+    await act(async () => {
+      root.render(
+        <AdminSessionActions
+          session={session}
+          compact
+          layout="inline"
+          showInlineTerminate
+          extraMenuItems={<button type="button">View Logs</button>}
+        />,
+      );
+    });
+  }
+
+  it("offers pause, stop and message in the Activity page's inline layout", async () => {
+    mocks.sendCommand.mockResolvedValue({
+      command_id: "cmd-for-session-1",
+      sequence: 42,
+      outcome: "applied",
+      delivery: "dispatched",
+    });
+
+    await renderInline(baseSession);
+
+    expect(findButton(container, "Pause")).toBeTruthy();
+    expect(findButton(container, "Message")).toBeTruthy();
+    expect(findButton(container, "Terminate")).toBeTruthy();
+    expect(findButton(container, "View Logs")).toBeTruthy();
+
+    await click(findButton(container, "Stop"));
+    expect(mocks.sendCommand).toHaveBeenCalledWith(
+      {
+        sessionId: "session-1",
+        action: "stop",
+        identity: { command_id: "cmd-for-session-1", sequence: 42 },
+      },
+      { profileId: "owner" },
+    );
+  });
+
   it("reports a refused stale command without changing the shown state", async () => {
     mocks.sendCommand.mockRejectedValue(new Error("The command sequence is behind"));
 

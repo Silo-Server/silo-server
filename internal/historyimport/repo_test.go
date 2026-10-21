@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -293,7 +294,7 @@ func TestSourceAdminTokenEncryptionUsesSourceAAD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encryptSourceAdminToken: %v", err)
 	}
-	if ciphertext == "admin-token" || bytes.Contains([]byte(ciphertext), []byte("admin-token")) {
+	if strings.Contains(ciphertext, "admin-token") {
 		t.Fatalf("encrypted admin token leaked plaintext: %q", ciphertext)
 	}
 	plaintext, err := repo.cipher.Decrypt(ciphertext, sourceAdminTokenAAD(42))

@@ -141,9 +141,9 @@ function HeaderCopy({
 }) {
   if (libraryHadHits) {
     return (
-      <div className="text-muted-foreground flex items-center gap-2 px-3 pt-2 pb-1 text-[10px] font-medium tracking-[0.1em] uppercase">
+      <div className="text-muted-foreground flex items-center gap-2 px-3 pt-2 pb-1 text-[0.625rem] font-medium tracking-[0.1em] uppercase">
         <span>Request to Add</span>
-        <span className="bg-muted text-muted-foreground rounded-full px-1.5 text-[10px]">
+        <span className="bg-muted text-muted-foreground rounded-full px-1.5 text-[0.625rem]">
           {count}
         </span>
       </div>
@@ -152,12 +152,12 @@ function HeaderCopy({
 
   if (!libraryResultsKnown) {
     return (
-      <div className="text-muted-foreground px-3 pt-3 pb-1 text-[12px]">Discovery matches:</div>
+      <div className="text-muted-foreground px-3 pt-3 pb-1 text-[0.75rem]">Discovery matches:</div>
     );
   }
 
   return (
-    <div className="text-muted-foreground px-3 pt-3 pb-1 text-[12px]">Not in your library</div>
+    <div className="text-muted-foreground px-3 pt-3 pb-1 text-[0.75rem]">Not in your library</div>
   );
 }
 
@@ -276,7 +276,7 @@ function DialogRow({
       {state ? (
         <RequestStatusBadge state={state} className="shrink-0" />
       ) : reasonLabel ? (
-        <span className="text-muted-foreground shrink-0 text-[11px]" title={reasonLabel}>
+        <span className="text-muted-foreground shrink-0 text-[0.6875rem]" title={reasonLabel}>
           {reasonLabel}
         </span>
       ) : null}

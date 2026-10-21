@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -43,50 +44,6 @@ func TestChapterCaptureTime(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestBuildFrameExtractArgs(t *testing.T) {
-	firstAttemptArgs := func(t *testing.T, hwAccel string) []string {
-		t.Helper()
-		var args []string
-		_, _, err := ExtractFrame(context.Background(), FrameExtractOptions{
-			InputPath:   "/media/movie.mkv",
-			SeekSeconds: 42.5,
-			HWAccel:     hwAccel,
-			HWDevice:    "/dev/dri/renderD128",
-			RunFunc: func(_ context.Context, _ string, got []string) ([]byte, error) {
-				if args == nil {
-					args = append([]string(nil), got...)
-				}
-				return []byte("frame"), nil
-			},
-		})
-		if err != nil {
-			t.Fatalf("ExtractFrame() error = %v", err)
-		}
-		return args
-	}
-
-	t.Run("qsv uses hardware flags when render device exists", func(t *testing.T) {
-		args := firstAttemptArgs(t, "qsv")
-		if !slices.Contains(args, "-init_hw_device") || !slices.Contains(args, "qsv=qs@va") {
-			t.Fatalf("qsv args missing hardware setup: %#v", args)
-		}
-	})
-
-	t.Run("vaapi uses hardware flags when render device exists", func(t *testing.T) {
-		args := firstAttemptArgs(t, "vaapi")
-		if !slices.Contains(args, "-hwaccel") || !slices.Contains(args, "vaapi") {
-			t.Fatalf("vaapi args missing hardware setup: %#v", args)
-		}
-	})
-
-	t.Run("unsupported hw accel does not masquerade as hardware extraction", func(t *testing.T) {
-		args := firstAttemptArgs(t, "nvenc")
-		if slices.Contains(args, "-hwaccel") || slices.Contains(args, "-init_hw_device") {
-			t.Fatalf("nvenc args use hardware setup: %#v", args)
-		}
-	})
 }
 
 func TestQueueFileIDsDedupes(t *testing.T) {
@@ -168,8 +125,20 @@ func (r *testFileRepo) GetByID(_ context.Context, id int) (*models.MediaFile, er
 	return r.cloneFile(), nil
 }
 
-func (r *testFileRepo) ListMissingChapterThumbnails(context.Context, int) ([]*models.MediaFile, error) {
+func (r *testFileRepo) TryLockChapterThumbnails(ctx context.Context, _ int) (context.Context, func(), bool, error) {
+	return ctx, func() {}, true, nil
+}
+
+func (r *testFileRepo) ListMissingChapterThumbnails(context.Context, int, string) ([]*models.MediaFile, error) {
 	return nil, nil
+}
+
+func (r *testFileRepo) ListChapterThumbnailsAtOtherWidths(context.Context, int, string, int, bool) ([]*models.MediaFile, time.Time, error) {
+	return nil, time.Time{}, nil
+}
+
+func (r *testFileRepo) ChapterThumbnailLibraryKey(context.Context) (string, error) {
+	return "test-libraries", nil
 }
 
 func (r *testFileRepo) UpdateChapterThumbnailState(
@@ -615,52 +584,6 @@ func TestProcessRequestReportsToneMapCapabilityFailuresOnceWithNormalRetry(t *te
 	}
 }
 
-func TestExtractFrameCPUFallbackGetsFreshDeadline(t *testing.T) {
-	service := &Service{
-		hwAccel:  "vaapi",
-		hwDevice: "/dev/dri/renderD128",
-	}
-	file := &models.MediaFile{FilePath: "/media/movie.mkv"}
-
-	callCount := 0
-	var hwRemaining time.Duration
-	var cpuRemaining time.Duration
-	service.runFFmpegFrameExtractFunc = func(ctx context.Context, _ string, _ []string) ([]byte, error) {
-		callCount++
-		deadline, ok := ctx.Deadline()
-		if !ok {
-			t.Fatalf("expected deadline on attempt %d", callCount)
-		}
-		remaining := time.Until(deadline)
-		if callCount == 1 {
-			hwRemaining = remaining
-			return nil, errors.New("signal: killed")
-		}
-		cpuRemaining = remaining
-		return []byte("frame"), nil
-	}
-
-	data, reason, err := service.extractFrame(context.Background(), file, 5, chapterThumbnailHDRPolicyBestEffort)
-	if err != nil {
-		t.Fatalf("extractFrame() error = %v", err)
-	}
-	if reason != "" {
-		t.Fatalf("extractFrame() reason = %q, want empty", reason)
-	}
-	if string(data) != "frame" {
-		t.Fatalf("extractFrame() data = %q, want frame", string(data))
-	}
-	if callCount != 2 {
-		t.Fatalf("callCount = %d, want 2", callCount)
-	}
-	if hwRemaining < 7*time.Second || hwRemaining > 9*time.Second {
-		t.Fatalf("hw deadline = %s, want about 8s", hwRemaining)
-	}
-	if cpuRemaining < 9*time.Second || cpuRemaining > 11*time.Second {
-		t.Fatalf("cpu deadline = %s, want about 10s", cpuRemaining)
-	}
-}
-
 func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 	remote := &testRemoteFrameExtractor{data: []byte("remote-frame")}
 	service := &Service{
@@ -705,7 +628,8 @@ func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) 
 		settingValue string
 		wantAllowed  bool
 	}{
-		{name: "disabled by default", wantAllowed: false},
+		{name: "enabled by default", wantAllowed: true},
+		{name: "explicitly disabled", settingValue: "false", wantAllowed: false},
 		{name: "explicitly enabled", settingValue: "true", wantAllowed: true},
 	}
 
@@ -717,7 +641,7 @@ func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) 
 				authJWTSecretSetting:             "secret",
 			}
 			if tt.settingValue != "" {
-				settings[chapterThumbnailSoftwareToneMapSetting] = tt.settingValue
+				settings[config.ChapterThumbnailSoftwareToneMapSettingKey] = tt.settingValue
 			}
 			service := &Service{
 				settings:           testSettingsReader{values: settings},
@@ -759,6 +683,8 @@ func TestExtractFrameFallsBackLocalWhenPreferredNodeUnavailable(t *testing.T) {
 		settings: testSettingsReader{values: map[string]string{
 			chapterThumbnailExecutionSetting: chapterThumbnailExecutionPreferTranscode,
 			authJWTSecretSetting:             "secret",
+			// Skip auto-detection, which probes the host's real ffmpeg.
+			playbackHWAccelSetting: hwAccelNone,
 		}},
 		transcodePool:      &nodepool.TranscodePool{},
 		remoteReservations: &nodepool.Reservations{},

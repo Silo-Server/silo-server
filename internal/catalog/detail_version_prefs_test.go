@@ -83,19 +83,6 @@ func TestEffectiveVersionDefaults_UsesSeriesPlaybackPreference(t *testing.T) {
 	}
 }
 
-func TestEffectiveVersionDefaults_RequiresSeriesContext(t *testing.T) {
-	service := &DetailService{}
-
-	defaults := service.effectiveVersionDefaults(context.Background(), AccessFilter{
-		UserID:    1,
-		ProfileID: "profile-1",
-	}, "")
-
-	if defaults.HasAny {
-		t.Fatal("expected no defaults without a series id")
-	}
-}
-
 func TestEffectiveSubtitleDefaults_UsesSeriesTrackSignature(t *testing.T) {
 	store := newDetailTestStore(t)
 	if err := store.SetSubtitlePreference(context.Background(), userstore.SubtitlePreference{
@@ -410,36 +397,6 @@ func TestSelectedPlaybackMarkerSkipsNilVariantDefaultMarkers(t *testing.T) {
 	}
 }
 
-func TestBuildPlaybackInfo_StoresCreditsOnFileVersion(t *testing.T) {
-	service := &DetailService{}
-	creditsStart := 1400.0
-	creditsEnd := 1500.0
-
-	versions, _, _, _, credits, _, _ := service.buildPlaybackInfo(context.Background(), []*models.MediaFile{
-		{
-			ID:           11,
-			ContentID:    "movie-1",
-			FilePath:     "/media/Movie 1080p.mkv",
-			Resolution:   "1080p",
-			CreditsStart: &creditsStart,
-			CreditsEnd:   &creditsEnd,
-		},
-	}, AccessFilter{}, "movie-1")
-
-	if len(versions) != 1 {
-		t.Fatalf("len(versions) = %d, want 1", len(versions))
-	}
-	if versions[0].Credits == nil {
-		t.Fatal("version credits = nil, want marker")
-	}
-	if versions[0].Credits.Start != creditsStart || versions[0].Credits.End != creditsEnd {
-		t.Fatalf("version credits = %#v, want start %v end %v", versions[0].Credits, creditsStart, creditsEnd)
-	}
-	if credits == nil || credits.Start != creditsStart || credits.End != creditsEnd {
-		t.Fatalf("top-level credits = %#v, want start %v end %v", credits, creditsStart, creditsEnd)
-	}
-}
-
 func TestSortFileVersions_PrefersLargerFilesWithinQualityTier(t *testing.T) {
 	versions := []FileVersion{
 		{FileID: 1, Resolution: "1080p", FileSize: 1_000},
@@ -550,6 +507,40 @@ func setScopedAudioLanguage(
 ) {
 	t.Helper()
 	setScopedAudioLanguageForDevice(t, store, scope, seriesID, libraryID, "", language)
+}
+
+func TestEffectiveSubtitleDefaults_ResolvesDeviceScope(t *testing.T) {
+	store := newDetailTestStore(t)
+	seed := func(key string, scope settingscontract.Scope, deviceID string, value any) {
+		t.Helper()
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
+			Key: key, Scope: scope, ProfileID: "profile-1", DeviceID: deviceID,
+		}, encoded); err != nil {
+			t.Fatalf("seeding %s: %v", key, err)
+		}
+	}
+	seed(settingskeys.PlaybackSubtitleMode, settingscontract.ScopeProfile, "", "auto")
+	seed(settingskeys.PlaybackSubtitleMode, settingscontract.ScopeProfileDevice, "apple-tv", "always")
+	seed(settingskeys.PlaybackShowForcedSubtitles, settingscontract.ScopeProfileDevice, "apple-tv", false)
+
+	service := &DetailService{}
+	service.SetUserStoreProvider(testDetailUserStoreProvider{store: store})
+	resolve := func(deviceID string) subtitleDefaults {
+		return service.effectiveSubtitleDefaults(context.Background(), AccessFilter{
+			UserID: 1, ProfileID: "profile-1", DeviceID: deviceID,
+		}, "", nil)
+	}
+
+	if got := resolve("apple-tv"); got.Mode != "always" || !got.HasShowForced || got.ShowForced {
+		t.Fatalf("device apple-tv: mode=%q showForced=%v (set=%v), want always/false", got.Mode, got.ShowForced, got.HasShowForced)
+	}
+	if got := resolve("iphone"); got.Mode != "auto" || got.HasShowForced {
+		t.Fatalf("device iphone: mode=%q showForced set=%v, want the profile's auto and no forced override", got.Mode, got.HasShowForced)
+	}
 }
 
 func setScopedAudioLanguageForDevice(

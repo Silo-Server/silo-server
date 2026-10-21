@@ -4,16 +4,33 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/recommendations"
+	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
+
+// fakeAdminRecommendationsTime is the fixed time the fake reports, so the
+// contract fixtures stay byte-stable.
+var fakeAdminRecommendationsTime = time.Date(2026, 10, 3, 3, 0, 0, 0, time.UTC)
 
 type fakeAdminRecommendations struct {
 	calls int
 	last  recommendations.JobName
 	err   error
+
+	runsErr     error
+	noRuns      bool
+	conflict    string
+	conflictErr error
+	noRefresh   bool
+	refreshErr  error
+	resets      int
+	resetErr    error
+	sweepErr    error
 }
 
 func (f *fakeAdminRecommendations) StatusCounts(context.Context) (int, int, int, int, int, error) {
@@ -21,6 +38,63 @@ func (f *fakeAdminRecommendations) StatusCounts(context.Context) (int, int, int,
 }
 func (*fakeAdminRecommendations) IsRunning(job recommendations.JobName) bool {
 	return job == recommendations.JobEmbeddings
+}
+func (f *fakeAdminRecommendations) LastRuns(context.Context) (map[recommendations.JobName]recommendations.JobRuns, error) {
+	if f.runsErr != nil || f.noRuns {
+		return map[recommendations.JobName]recommendations.JobRuns{}, f.runsErr
+	}
+	return map[recommendations.JobName]recommendations.JobRuns{
+		recommendations.JobEmbeddings: {
+			Full: &taskmanager.ExecutionResult{
+				TaskKey: "recommendations.embeddings", Status: "failed",
+				StartedAt: fakeAdminRecommendationsTime, CompletedAt: fakeAdminRecommendationsTime.Add(90 * time.Second),
+				ResultData:   json.RawMessage(`{"embedded":0}`),
+				ErrorMessage: `embed batch: POST https://user:hunter2@embed.example/v1/embeddings: api_key=secret-value rejected`,
+			},
+			Partial: &taskmanager.ExecutionResult{
+				TaskKey: "recommendations.embeddings.catch_up", Status: "completed",
+				StartedAt: fakeAdminRecommendationsTime.Add(15 * time.Minute), CompletedAt: fakeAdminRecommendationsTime.Add(16 * time.Minute),
+				ResultData: json.RawMessage(`{"missing_only":true,"embedded":2}`),
+			},
+		},
+		recommendations.JobRecommendations: {
+			Full: &taskmanager.ExecutionResult{
+				TaskKey: "recommendations.cache", Status: "completed",
+				StartedAt: fakeAdminRecommendationsTime.Add(2 * time.Hour), CompletedAt: fakeAdminRecommendationsTime.Add(2*time.Hour + time.Minute),
+				ResultData: json.RawMessage(`{"profiles":2,"processed":2,"cached_rows":14,"build_errors":0}`),
+			},
+		},
+	}, nil
+}
+func (f *fakeAdminRecommendations) EmbeddingLockConflict(context.Context) (string, error) {
+	return f.conflict, f.conflictErr
+}
+func (f *fakeAdminRecommendations) CacheRefreshedAt(context.Context) (*time.Time, error) {
+	if f.refreshErr != nil || f.noRefresh {
+		return nil, f.refreshErr
+	}
+	at := fakeAdminRecommendationsTime.Add(2*time.Hour + time.Minute)
+	return &at, nil
+}
+func (f *fakeAdminRecommendations) StaleSweep(context.Context) (recommendations.StaleSweepStatus, error) {
+	if f.sweepErr != nil {
+		return recommendations.StaleSweepStatus{}, f.sweepErr
+	}
+	if f.noRuns {
+		return recommendations.StaleSweepStatus{}, nil
+	}
+	return recommendations.StaleSweepStatus{Pending: 7, LastRun: &taskmanager.ExecutionResult{
+		TaskKey: "recommendations.stale_sweep", Status: "completed",
+		StartedAt: fakeAdminRecommendationsTime.Add(3 * time.Hour), CompletedAt: fakeAdminRecommendationsTime.Add(3*time.Hour + 20*time.Second),
+		ResultData: json.RawMessage(`{"stale":3,"refreshed":2,"failed":1,"deferred":0,"queued":0}`),
+	}}, nil
+}
+func (f *fakeAdminRecommendations) ResetEmbeddings(context.Context) (recommendations.EmbeddingsReset, error) {
+	f.resets++
+	if f.resetErr != nil {
+		return recommendations.EmbeddingsReset{}, f.resetErr
+	}
+	return recommendations.EmbeddingsReset{Embeddings: 120, TasteProfiles: 3, TasteClusters: 9, CachedRows: 41}, nil
 }
 func (f *fakeAdminRecommendations) start(job recommendations.JobName) error {
 	f.calls++
@@ -63,10 +137,24 @@ func TestAdminRecommendationsTransport(t *testing.T) {
 		if rec.Code != 200 || f.calls != before+1 || f.last != tc.job || rec.Header().Get("Location") != "" || !strings.Contains(rec.Body.String(), `"status":"started"`) {
 			t.Fatalf("start %s: %d %s %#v", tc.path, rec.Code, rec.Body, f)
 		}
-		f.err = errors.New("private worker detail")
+		for _, busy := range []struct {
+			err   error
+			where string
+		}{
+			{fmt.Errorf("private worker detail: %w", recommendations.ErrJobRunning), "this process"},
+			{fmt.Errorf("private worker detail: %w", recommendations.ErrJobRunningElsewhere), "another server"},
+		} {
+			f.err = busy.err
+			rec = do(t, h, "POST", path, "", bearer(adminToken))
+			if rec.Code != 409 || !strings.Contains(rec.Body.String(), busy.where) || strings.Contains(rec.Body.String(), "private worker") {
+				t.Fatalf("conflict %s (%s): %d %s", tc.path, busy.where, rec.Code, rec.Body)
+			}
+		}
+		// Failing to take the cluster lock is not a conflict.
+		f.err = errors.New("private lock detail")
 		rec = do(t, h, "POST", path, "", bearer(adminToken))
-		if rec.Code != 409 || strings.Contains(rec.Body.String(), "private worker") {
-			t.Fatalf("conflict %s: %d %s", tc.path, rec.Code, rec.Body)
+		if rec.Code != 500 || strings.Contains(rec.Body.String(), "private lock") {
+			t.Fatalf("lock failure %s: %d %s", tc.path, rec.Code, rec.Body)
 		}
 		before = f.calls
 		rec = do(t, h, "POST", path, "", bearer(memberToken))
@@ -82,10 +170,53 @@ func TestAdminRecommendationsTransport(t *testing.T) {
 	}
 	deps.AdminRecommendations = nil
 	h = newTestHandler(t, deps)
-	for _, tc := range []struct{ method, path string }{{"GET", "/status"}, {"POST", "/trigger/embeddings"}, {"POST", "/trigger/taste-profiles"}, {"POST", "/trigger/cowatch"}, {"POST", "/trigger/recommendations"}} {
+	for _, tc := range []struct{ method, path string }{{"GET", "/status"}, {"POST", "/trigger/embeddings"}, {"POST", "/trigger/taste-profiles"}, {"POST", "/trigger/cowatch"}, {"POST", "/trigger/recommendations"}, {"POST", "/embeddings/reset"}} {
 		rec = do(t, h, tc.method, Prefix+"/admin/recommendations"+tc.path, "", bearer(adminToken))
 		if rec.Code != 503 {
 			t.Fatalf("unwired %s: %d %s", tc.path, rec.Code, rec.Body)
 		}
+	}
+}
+
+func TestAdminRecommendationsResetEmbeddings(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	f := &fakeAdminRecommendations{}
+	deps.AdminRecommendations = f
+	h := newTestHandler(t, deps)
+	path := Prefix + "/admin/recommendations/embeddings/reset"
+
+	rec := do(t, h, "POST", path, "", bearer(adminToken))
+	if rec.Code != 200 || f.resets != 1 {
+		t.Fatalf("reset: %d %s resets=%d", rec.Code, rec.Body, f.resets)
+	}
+	var out AdminRecommendationEmbeddingsReset
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out != (AdminRecommendationEmbeddingsReset{Embeddings: 120, TasteProfiles: 3, TasteClusters: 9, CachedRows: 41}) {
+		t.Fatalf("reset body = %+v", out)
+	}
+
+	for _, busy := range []error{
+		fmt.Errorf("private worker detail: %w", recommendations.ErrJobRunning),
+		fmt.Errorf("private worker detail: %w", recommendations.ErrJobRunningElsewhere),
+		recommendations.ErrStaleSweepRunning,
+	} {
+		f.resetErr = busy
+		rec = do(t, h, "POST", path, "", bearer(adminToken))
+		if rec.Code != 409 || !strings.Contains(rec.Body.String(), "Reset embeddings after it finishes") || strings.Contains(rec.Body.String(), "private worker") {
+			t.Fatalf("busy reset (%v): %d %s", busy, rec.Code, rec.Body)
+		}
+	}
+	f.resetErr = errors.New("private database detail")
+	rec = do(t, h, "POST", path, "", bearer(adminToken))
+	if rec.Code != 500 || strings.Contains(rec.Body.String(), "private database") {
+		t.Fatalf("failed reset: %d %s", rec.Code, rec.Body)
+	}
+
+	before := f.resets
+	rec = do(t, h, "POST", path, "", bearer(memberToken))
+	if rec.Code != 403 || f.resets != before {
+		t.Fatalf("member reset embeddings: %d resets=%d", rec.Code, f.resets)
 	}
 }

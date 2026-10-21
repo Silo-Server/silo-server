@@ -86,9 +86,10 @@ func (h *PersonsHandler) HandleGetPersons(w http.ResponseWriter, r *http.Request
 		Filter:                  filter,
 		IncludeTotal:            parseBool(q.Get("EnableTotalRecordCount"), true),
 	}
-	// Jellyfin 12 scopes people to the items under ParentId. Silo credits live
-	// on movies and series, so a library or movie/series parent is honored and
-	// any other parent (season, collection) matches nobody.
+	// Jellyfin 12 scopes people to the items under ParentId. A library, movie,
+	// series or episode parent is honored, with an episode credit counted
+	// under its series and that series' libraries; any other parent (season,
+	// collection) matches nobody.
 	if parentID := strings.TrimSpace(q.Get("ParentId")); parentID != "" {
 		if libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, parentID); err == nil && libraryID > 0 {
 			// A library the viewer cannot browse lists nobody, even when its

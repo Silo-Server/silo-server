@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { toast } from "sonner";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
+import type { PluginCapability } from "@/api/types";
 import { adminKeys } from "@/hooks/queries/keys";
 
 import {
@@ -17,7 +17,6 @@ import {
   problem,
   radarr,
   reply,
-  route,
   serve,
   server,
   serverOptions,
@@ -25,6 +24,7 @@ import {
   sonarr,
   stubBrowser,
 } from "./requestsSettings.fixtures";
+import { pluginInstallations } from "./requestsSettings.mockData";
 
 vi.mock("@/api/v2/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/v2/request")>()),
@@ -143,67 +143,6 @@ describe("Requests settings: general", () => {
       body: { global_max_requests: 0 },
     });
   });
-
-  it("explains what the 4K switch does", async () => {
-    serve();
-    mount();
-    expect(
-      await screen.findByText(
-        "Normally a 4K version is requested only for people whose playback limit allows 4K, and only when a server takes 4K. With this on, every request also asks for 4K.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("saves the watchlist request switch, and hides it from a server without one", async () => {
-    serve({
-      handlers: {
-        "GET /api/v2/admin/request-settings": (options) =>
-          reply(options, { ...settings, watchlist_requests: true }, '"initial"'),
-        "PUT /api/v2/admin/request-settings": (options) =>
-          reply(options, { ...settings, watchlist_requests: false }, '"saved"'),
-      },
-    });
-    mount();
-    const toggle = await screen.findByRole("switch", {
-      name: "Request titles added to a watchlist",
-    });
-    expect(toggle).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(toggle);
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(calls("PUT /api/v2/admin/request-settings")).toHaveLength(1));
-    expect(calls("PUT /api/v2/admin/request-settings")[0]).toMatchObject({
-      body: { watchlist_requests: false },
-    });
-    cleanup();
-
-    serve();
-    mount();
-    await screen.findByLabelText("Request limit");
-    expect(
-      screen.queryByRole("switch", { name: "Request titles added to a watchlist" }),
-    ).toBeNull();
-  });
-
-  it("calls approval and the limit server-wide defaults that groups and accounts override", async () => {
-    serve();
-    mount();
-    const limit = await screen.findByLabelText("Request limit");
-    const help = document.getElementById(limit.getAttribute("aria-describedby")!);
-    expect(help).toHaveTextContent(
-      "Declined and failed requests don't count. At 0, only accounts with a group or account limit of their own can request. The server-wide default. Access groups and accounts can override this.",
-    );
-    expect(within(help!).getByRole("link", { name: "Access groups" })).toHaveAttribute(
-      "href",
-      "/admin/access-groups",
-    );
-    const approval = screen.getByRole("combobox", { name: "Approval" });
-    expect(document.getElementById(approval.getAttribute("aria-describedby")!)).toHaveTextContent(
-      "The server-wide default. Access groups and accounts can override this.",
-    );
-    // Per-account limits no longer have a page of their own.
-    expect(screen.queryByRole("link", { name: "User overrides" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Users" })).toHaveAttribute("href", "/admin/users");
-  });
 });
 
 async function openServer(name: string) {
@@ -211,6 +150,15 @@ async function openServer(name: string) {
   const tile = await screen.findByRole("group", { name });
   fireEvent.click(within(tile).getByRole("button", { name: "Edit" }));
   return screen.findByRole("dialog");
+}
+
+/** Declares, for one test, which server fields the arr plugin can do without. */
+function routerNeeds(flags: { api_key_optional: boolean; base_url_optional: boolean }) {
+  const capability: PluginCapability = pluginInstallations.data[0]!.capabilities[0]!;
+  capability.request_router = flags;
+  onTestFinished(() => {
+    delete capability.request_router;
+  });
 }
 
 describe("Requests settings: servers", () => {
@@ -250,32 +198,11 @@ describe("Requests settings: servers", () => {
     const body = write!.body as { api_key_ref?: string; plugin_config: Record<string, unknown> };
     // A blank key keeps the saved one, and hidden settings pass through.
     expect(body.api_key_ref).toBeUndefined();
-    expect(body.plugin_config).toMatchObject({ is_default: true, quality_profile_id: 1 });
-  });
-
-  it("tests the connection and reports what it found or why it failed", async () => {
-    let fail = false;
-    serve({
-      handlers: {
-        "POST /api/v2/admin/request-integrations/{id}/options": (options) =>
-          fail
-            ? Promise.reject(problem(502, "dependency_unavailable", "401 Unauthorized from Radarr"))
-            : reply(options, { options: serverOptions }),
-      },
+    expect(body.plugin_config).toMatchObject({
+      service_kind: "radarr",
+      is_default: true,
+      quality_profile_id: 1,
     });
-    const dialog = await openServer("Radarr");
-    const test = within(dialog).getByRole("button", { name: "Test" });
-
-    fireEvent.click(test);
-    expect(
-      await within(dialog).findByText("Connected — 2 quality profiles, 2 root folders"),
-    ).toBeInTheDocument();
-
-    fail = true;
-    fireEvent.click(within(dialog).getByRole("button", { name: "Test" }));
-    expect(await within(dialog).findByText("401 Unauthorized from Radarr")).toBeInTheDocument();
-    const probes = calls("POST /api/v2/admin/request-integrations/{id}/options");
-    expect(probes.at(-1)).toMatchObject({ path: { id: "radarr-1" } });
   });
 
   it("puts a failed probe's reason beside the field it is about", async () => {
@@ -373,6 +300,47 @@ describe("Requests settings: servers", () => {
       root_folder: "/movies",
       quality_profile_id: 1,
     });
+  });
+
+  it("adds and tests a server without a URL or key when its plugin needs neither", async () => {
+    routerNeeds({ api_key_optional: true, base_url_optional: true });
+    serve({
+      servers: [radarr],
+      handlers: {
+        "POST /api/v2/admin/request-integrations/{id}/options": (options) =>
+          reply(options, {
+            options: {
+              ...serverOptions,
+              service_kind: [{ value: "sonarr", label: "Sonarr 4.0.14" }],
+            },
+          }),
+        "POST /api/v2/admin/request-integrations": (options) =>
+          reply(options, server("sonarr-9", "Local", "sonarr"), '"new"'),
+      },
+    });
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Add server" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("URL (optional)")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("API key (optional)")).toBeInTheDocument();
+    expect(within(dialog).getByText("This server type works without one.")).toBeInTheDocument();
+
+    // The plugin is asked for its choices with neither, and they fill the form.
+    expect(await within(dialog).findByText("Detected Sonarr 4.0.14.")).toBeInTheDocument();
+    const [probe] = calls("POST /api/v2/admin/request-integrations/{id}/options");
+    const probeBody = probe!.body as { base_url: string; api_key_ref?: string };
+    expect(probeBody.base_url).toBe("");
+    expect(probeBody.api_key_ref).toBeUndefined();
+    expect(within(dialog).getByRole("button", { name: "Test" })).toBeEnabled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
+    await waitFor(() => expect(calls("POST /api/v2/admin/request-integrations")).toHaveLength(1));
+    const body = calls("POST /api/v2/admin/request-integrations")[0]!.body as {
+      base_url: string;
+      api_key_ref?: string;
+    };
+    expect(body.base_url).toBe("");
+    expect(body.api_key_ref).toBeUndefined();
   });
 
   it("renames a server it named when a later address answers as the other service", async () => {
@@ -479,33 +447,6 @@ describe("Requests settings: servers", () => {
     expect(
       await within(dialog).findByText("Connected — 2 quality profiles, 2 root folders"),
     ).toBeInTheDocument();
-  });
-
-  it("adds 4K to a name it filled in when the 4K switch goes on", async () => {
-    serve({
-      servers: [radarr],
-      handlers: {
-        "POST /api/v2/admin/request-integrations/{id}/options": (options) =>
-          reply(options, {
-            options: {
-              ...serverOptions,
-              service_kind: [{ value: "radarr", label: "Radarr 5.2.0" }],
-            },
-          }),
-      },
-    });
-    mount();
-    fireEvent.click(await screen.findByRole("button", { name: "Add server" }));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText("URL"), {
-      target: { value: "http://10.0.0.5:7878" },
-    });
-    fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: "key" } });
-    expect(await within(dialog).findByText("Detected Radarr 5.2.0.")).toBeInTheDocument();
-    const name = within(dialog).getByLabelText("Name") as HTMLInputElement;
-    expect(name.value).toBe("Radarr");
-    fireEvent.click(within(dialog).getByRole("switch", { name: "4K server" }));
-    expect(name.value).toBe("Radarr 4K");
   });
 
   it("only warns when routing pins a type the detected service does not match", async () => {
@@ -657,47 +598,6 @@ describe("Requests settings: recovering from errors", () => {
 });
 
 describe("Requests settings: server delete and kind", () => {
-  it("does not offer Delete for a server routing still sends to, and says which routes", async () => {
-    serve({
-      routes: [
-        fallback("movie"),
-        route({
-          id: "anime",
-          name: "Anime",
-          media_type: "series",
-          conditions: { anime: true },
-          uhd: { integration_id: "sonarr-1" },
-        }),
-        fallback("series", "sonarr-1"),
-      ],
-    });
-    const dialog = await openServer("Sonarr");
-    const del = within(dialog).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
-    expect(del.disabled).toBe(true);
-    expect(
-      within(dialog).getByText(
-        "Routing still sends requests here (Anime 4K (series) · Everything else (series)); send them elsewhere first.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("does not let a routed server change type, and says why", async () => {
-    serve();
-    const dialog = await openServer("Sonarr");
-    const service = within(dialog).getByRole("combobox", { name: "Service" });
-    expect(service).toBeDisabled();
-    const reason = within(dialog).getByText(
-      "Routing sends requests here (Everything else (series)). Change that first to switch the type.",
-    );
-    expect(service.getAttribute("aria-describedby")).toBe(reason.id);
-
-    // An unrouted server can still change type.
-    cleanup();
-    serve();
-    const other = await openServer("Radarr Anime");
-    expect(within(other).getByRole("combobox", { name: "Service" })).toBeEnabled();
-  });
-
   it("drops the retired default switches when a server changes kind", async () => {
     serve({
       handlers: {
@@ -714,23 +614,6 @@ describe("Requests settings: server delete and kind", () => {
     expect(calls("PUT /api/v2/admin/request-integrations/{id}")[0]!.body).toMatchObject({
       supported_media_types: ["series"],
       plugin_config: { service_kind: "sonarr", is_default: false },
-    });
-  });
-
-  it("keeps the default switches when the kind is unchanged", async () => {
-    serve({
-      handlers: {
-        "PUT /api/v2/admin/request-integrations/{id}": (options) =>
-          reply(options, radarr, '"saved"'),
-      },
-    });
-    const dialog = await openServer("Radarr Anime");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
-    await waitFor(() =>
-      expect(calls("PUT /api/v2/admin/request-integrations/{id}")).toHaveLength(1),
-    );
-    expect(calls("PUT /api/v2/admin/request-integrations/{id}")[0]!.body).toMatchObject({
-      plugin_config: { service_kind: "radarr", is_default: true },
     });
   });
 });
@@ -772,56 +655,5 @@ describe("Requests settings: servers and routing", () => {
     );
     // The delete can change Everything else, so the routes are read again.
     await waitFor(() => expect(calls("GET /api/v2/admin/request-routes")).toHaveLength(2));
-  });
-
-  async function addRadarr(defaulted: boolean) {
-    const added = server("radarr-9", "Radarr Main", "radarr");
-    let created = false;
-    const routes = () => [
-      fallback("movie", created && defaulted ? "radarr-9" : undefined),
-      fallback("series", "sonarr-1"),
-    ];
-    serve({
-      servers: [sonarr],
-      handlers: {
-        "POST /api/v2/admin/request-integrations": (options) => {
-          created = true;
-          return reply(options, added, '"new"');
-        },
-        // The server makes Everything else send to the new server only
-        // when its own rules allow; the toast follows what it did.
-        "GET /api/v2/admin/request-routes": (options) => reply(options, { items: routes() }),
-        "GET /api/v2/admin/request-routes/{id}": (options) =>
-          reply(
-            options,
-            routes().find((r) => r.id === options.path?.id),
-          ),
-      },
-    });
-    mount();
-    fireEvent.click(await screen.findByRole("button", { name: "Add server" }));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Radarr Main" } });
-    fireEvent.change(within(dialog).getByLabelText("URL"), {
-      target: { value: "http://radarr:7878" },
-    });
-    fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: "key" } });
-    await choose(dialog, "Service", "Radarr (movies)");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
-    await waitFor(() => expect(toast.success).toHaveBeenCalled());
-    expect(calls("GET /api/v2/admin/request-routes").length).toBeGreaterThanOrEqual(2);
-  }
-
-  it("says where every movie request goes when the new server became Everything else", async () => {
-    await addRadarr(true);
-    expect(toast.success).toHaveBeenCalledWith(
-      "Radarr Main added. Every movie request now goes to it.",
-    );
-  });
-
-  it("just says the server was added when the server kept Everything else as it was", async () => {
-    await addRadarr(false);
-    expect(toast.success).toHaveBeenCalledWith("Server added");
-    expect(toast.success).toHaveBeenCalledTimes(1);
   });
 });

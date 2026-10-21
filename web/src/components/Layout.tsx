@@ -42,9 +42,14 @@ import { useSidebarItemDetailsGate } from "@/hooks/useSidebarItemDetailsGate";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { markCriticalContentLoaded, useCriticalContentLoaded } from "@/lib/startupPriority";
+import { useSettingsReturnPath } from "@/hooks/useSettingsReturnPath";
+import { useSidebarSwap } from "@/hooks/useSidebarSwap";
 
 // Only admins see the activity indicator, so everyone else skips downloading it.
 const ServerActivity = lazy(() => import("@/components/ServerActivity"));
+// Settings swap the app sidebar for their own; it loads with the settings pages.
+const UserSettingsSidebar = lazy(() => import("@/components/settings/UserSettingsSidebar"));
 
 /**
  * The lazily loaded activity indicator. Layout wraps every page, so a chunk
@@ -95,15 +100,25 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const { user } = useAuth();
   const { profile } = useCurrentProfile();
-  const showAdminActivity = useIsActingAdmin();
+  const criticalContentLoaded = useCriticalContentLoaded();
+  // The indicator's four requests wait for Home's first rows (see startupPriority).
+  const showAdminActivity = useIsActingAdmin() && criticalContentLoaded;
   const { isBackgroundBarVisible } = useWatchPlaybackController();
   const audiobookPlayback = useAudiobookPlaybackController();
   const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
 
   const isHomePath = location.pathname === "/";
+  // Only Home marks its own first content; every other page releases the
+  // deferred widgets as soon as it mounts.
+  useEffect(() => {
+    if (!isHomePath) markCriticalContentLoaded();
+  }, [isHomePath]);
   const isLibraryRoute = location.pathname.startsWith("/library/");
   const isItemRoute = location.pathname.startsWith("/item/");
   const isPersonRoute = location.pathname.startsWith("/person/");
+  const isSettingsRoute = /^\/settings(\/|$)/.test(location.pathname);
+  const settingsReturnPath = useSettingsReturnPath(isSettingsRoute, "/");
+  const sidebarSwap = useSidebarSwap(isSettingsRoute);
   const itemRouteLocation = `${location.pathname}${location.search}`;
   // Breakpoint changes naturally cause other layout renders; navigation only
   // needs the viewport value at the moment it is attempted.
@@ -385,13 +400,26 @@ export default function Layout({ children }: LayoutProps) {
           states; `collapsed` only drives the moving frame that hides everything
           past the 64px rail, so entering a detail page never resizes it. */}
         <div className="hidden lg:block" onTransitionEnd={handleSidebarTransitionEnd}>
-          <AppSidebar collapsed={visualDetailImmersion} />
+          {isSettingsRoute ? (
+            // Settings take over the sidebar column rather than adding a
+            // second one beside it. The fallback holds the column's place.
+            <Suspense
+              fallback={
+                <div className="border-sidebar-border/70 bg-sidebar/92 fixed top-0 bottom-0 left-0 z-40 w-[260px] border-r" />
+              }
+            >
+              <UserSettingsSidebar backTo={settingsReturnPath} swap={sidebarSwap} />
+            </Suspense>
+          ) : (
+            <AppSidebar collapsed={visualDetailImmersion} swap={sidebarSwap} />
+          )}
         </div>
 
         {/* Mobile header — visible below lg. Slides up on scroll-down within
           the Calendar route to free vertical space; pulling up reveals it. */}
         <div
           ref={mobileHeaderRef}
+          data-sticky-header
           className={`mobile-header glass-dark border-border/70 sticky top-0 z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out lg:hidden ${
             mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
           }`}
@@ -467,7 +495,9 @@ export default function Layout({ children }: LayoutProps) {
           {needsNoPadding ? (
             children
           ) : (
-            <div className="relative z-10 px-4 py-4 sm:px-6 lg:px-10 lg:py-8 xl:px-12">
+            // `--page-gutter` is published so fixed page chrome (the collection
+            // editor's save bar) can line up with this content column.
+            <div className="relative z-10 px-(--page-gutter) py-4 [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:py-8 lg:[--page-gutter:2.5rem] xl:[--page-gutter:3rem]">
               {children}
             </div>
           )}

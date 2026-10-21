@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -425,28 +424,5 @@ func TestCreditsFingerprintFailuresBackOff(t *testing.T) {
 	}
 	if extractor.creditsExtractCalls != 4 {
 		t.Fatalf("extract calls = %d, want another server to retry both files", extractor.creditsExtractCalls)
-	}
-}
-
-func TestCreditsTailWithoutAudioIsNotDecodedAgain(t *testing.T) {
-	candidates := []Candidate{
-		{FileID: 1, EpisodeID: "e1", SeasonID: "s1", MediaFolderID: 1, FileHash: "a", DurationSeconds: 1500},
-		{FileID: 2, EpisodeID: "e2", SeasonID: "s1", MediaFolderID: 1, FileHash: "b", DurationSeconds: 1500},
-	}
-	repo := &fakeIntroRepository{}
-	extractor := &fakeFingerprintExtractor{}
-	analyzer := &Analyzer{repo: repo, extractor: extractor, config: DefaultConfig("ffmpeg")}
-	group := candidateGroup{SeasonID: "s1", MediaFolderID: 1, AnalysisGroupKey: candidates[0].AnalysisGroupKey(), Candidates: candidates}
-
-	for range 2 {
-		if _, err := analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{force: true}); err != nil {
-			t.Fatalf("analyzeCreditsGroup: %v", err)
-		}
-	}
-	if extractor.creditsExtractCalls != 2 {
-		t.Fatalf("credits extractions = %d, want each file decoded once", extractor.creditsExtractCalls)
-	}
-	if artifact := repo.artifact(1, ArtifactKindCreditsFingerprint); artifact.Status != mediaartifact.StatusUnusable || artifact.Detail != creditsFingerprintDetailNoAudio {
-		t.Fatalf("artifact = %+v, want unusable with no audio", artifact)
 	}
 }

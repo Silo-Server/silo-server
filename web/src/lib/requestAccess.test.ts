@@ -2,13 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   clearLegacyRequestBlock,
-  describeInheritedValue,
   describeRequestPolicy,
   effectiveRequestPolicy,
-  formatRequestQuota,
   isZeroRequestLimit,
-  requestGroupLabel,
-  requestGroupLimitSummary,
   requestLimitBody,
   requestLimitChanges,
   requestLimitDraft,
@@ -120,22 +116,6 @@ describe("effective request policy", () => {
 });
 
 describe("request access wording", () => {
-  it("names groups without doubling the word", () => {
-    expect(requestGroupLabel("Kids")).toBe("Kids group");
-    expect(requestGroupLabel("Default Group")).toBe("Default Group");
-    expect(requestGroupLabel("")).toBe("its access group");
-  });
-
-  it("formats quotas", () => {
-    expect(formatRequestQuota({ unlimited: true })).toBe("no limit");
-    expect(formatRequestQuota({ unlimited: false, max: 2, days: 30 })).toBe(
-      "2 requests per 30 days",
-    );
-    expect(formatRequestQuota({ unlimited: false, max: 0, days: 7 })).toBe(
-      "no new requests (0 per 7 days)",
-    );
-  });
-
   it("reads naturally for a limit of zero", () => {
     expect(
       now({
@@ -150,25 +130,6 @@ describe("request access wording", () => {
     expect(now({ group: { name: "Kids", limit: { ...KIDS, max_requests: 0 } } })).toBe(
       "no new requests (0 per 7 days), an admin approves (from Kids group)",
     );
-  });
-
-  it("says where an inherited value comes from", () => {
-    const kids = { name: "Kids", limit: INHERIT };
-    expect(describeInheritedValue("x", { kind: "group", name: "Kids" }, kids)).toBe(
-      "Kids group: x",
-    );
-    expect(describeInheritedValue("x", { kind: "server" }, kids)).toBe(
-      "Kids group uses the server default: x",
-    );
-    expect(describeInheritedValue("x", { kind: "server" }, null)).toBe("Server default: x");
-  });
-
-  it("summarizes a group's own terms for its card", () => {
-    expect(requestGroupLimitSummary(KIDS)).toBe("Admin approves · 5 per 7 days");
-    expect(requestGroupLimitSummary({ limit_mode: "unlimited", approval_mode: "auto" })).toBe(
-      "Auto-approves · No request limit",
-    );
-    expect(requestGroupLimitSummary(INHERIT)).toBe("");
   });
 });
 

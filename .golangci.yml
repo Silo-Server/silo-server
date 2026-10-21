@@ -8,6 +8,7 @@ run:
   # core, so queueing concurrent runs (several agents, several worktrees)
   # beats running them side by side. Never pass --allow-parallel-runners.
   allow-serial-runners: true
+  modules-download-mode: readonly
 
 formatters:
   enable:
@@ -15,11 +16,13 @@ formatters:
     - goimports
 
   settings:
+    # Format files as touched.
     goimports:
       local-prefixes:
-        - github.com/streamapp/streamapp
+        - github.com/Silo-Server/silo-server
 
 linters:
+  default: none
   enable:
     - bodyclose
     - errcheck
@@ -34,36 +37,289 @@ linters:
     - unconvert
     - unused
     - wastedassign
+    - noctx
+    - nilnesserr
+    - durationcheck
+    - makezero
+    - asasalint
+    - gocheckcompilerdirectives
+    - nosprintfhostport
+    - usetesting
+    - rowserrcheck
+    - sqlclosecheck
+    - errchkjson
+    - exhaustive
+    - revive
+    - fatcontext
+    - forcetypeassert
+    - containedctx
+    - gosec
+    - bidichk
+    - nolintlint
+    - perfsprint
+    - predeclared
+    - iface
+    - interfacebloat
+    - errname
+    - recvcheck
+    - forbidigo
+    - gocritic
+    - funlen
+    - gocyclo
+    - nestif
+    - asciicheck
+    - exptostd
+    - gochecksumtype
+    - gomoddirectives
+    - iotamixing
+    - zerologlint
+    - reassign
+    - goprintffuncname
+    - mirror
+
+  # Unenrolled checks retain their selection reason. Failed scans are unmeasured.
+  # - prealloc # 222 findings; disabled pending review.
+  # - gocognit # Declined: funlen, gocyclo, and nestif own function limits.
+  # - mnd # Declined: broad style cleanup.
+  # - dupl # Declined: broad style cleanup.
+  # - wrapcheck # Declined: broad style cleanup.
+  # - contextcheck # not measured; needs a prototype for detached Background cancellation.
+  # - canonicalheader # 41 findings; disabled pending review.
+  # - nilnil # 879 findings; TEST nil/value contracts require review.
+  # - thelper # 195 findings; disabled pending review.
+  # - unparam # 227 findings; TEST public parameters require consumer review.
+  # - usestdlibvars # 244 findings; disabled pending review.
+  # - dupword # 43 findings; disabled pending review.
+  # - nakedret # 12 findings; disabled pending review.
+  # - intrange # 278 findings; disabled pending review.
+  # - modernize # 1405 findings; disabled pending review.
+  # - varnamelen # 7302 findings; disabled pending review.
+  # - tagliatelle # 1046 findings; disabled pending review.
+  # - copyloopvar # 83 findings; disabled pending review.
+  # - musttag # 108 findings; disabled pending review.
+  # - dogsled # 40 findings; disabled pending review.
+  # - embeddedstructfieldcheck # 765 findings; TEST mutex/embedding contracts require review.
+  # - whitespace # 57 findings; disabled pending review.
+  # - spancheck # Declined for six tracing sites.
+  # - err113 # Declined: error-style cleanup.
+  # - lll # Declined: line wrapping.
+  # - fieldalignment # Declined: struct reordering.
 
   settings:
-    # gocritic is enabled for exactly one check: the ruleguard rules under
-    # internal/routeinventory/lintrules/, defense in depth for the legacy
-    # native route inventory (docs/architecture/api-contract.md, "Legacy
-    # native route inventory"). The guarantee itself is structural — every
-    # listener entry function returns a sealed handler the generator checks —
-    # and these rules report the attempt early: a type assertion, type switch
-    # or generic instantiation whose type registers routes by its method set
-    # (alias, defined type, embedding or structural interface included), and
-    # reflect.Value.MethodByName, outside tests. ruleguard was chosen over
-    # forbidigo because forbidigo visits only identifier and selector nodes
-    # and cannot tell an assertion from a parameter type. Keep the check list
-    # to ruleguard: widening it enrolls the whole tree in gocritic's style set.
-    #
-    # gocritic is deliberately absent from linters.enable above and runs only
-    # through make lint-router-recovery (--enable-only gocritic), full-tree,
-    # which CI gates on. A changed-lines pass would find nothing that step
-    # does not, and it is the costliest linter here: gocritic rebuilds the
-    # ruleguard engine for every package, and each rebuild type-checks chi
-    # and net/http from source — about two seconds of fixed cost per package,
-    # nearly half the analysis time of a cold run over ./... .
+    funlen:
+      lines: 100
+      statements: -1
+    gocyclo:
+      min-complexity: 30
+    nestif:
+      min-complexity: 4
+
     gocritic:
       disable-all: true
       enabled-checks:
-        - ruleguard
-      settings:
-        ruleguard:
-          rules: '${base-path}/internal/routeinventory/lintrules/*.go'
-          failOn: all
+        - argOrder
+        # - assignOp # 21 findings; disabled.
+        - badCall
+        - badCond
+        - caseOrder
+        - codegenComment
+        - defaultCaseOrder
+        # - deprecatedComment # 1 findings; disabled.
+        - dupArg
+        - dupBranchBody
+        - dupCase
+        - dupSubExpr
+        - elseif
+        - exitAfterDefer
+        - flagDeref
+        - flagName
+        # - mapKey # 14 findings, all whitespace-trimming test inputs; disabled.
+        - newDeref
+        - offBy1
+        - regexpMust
+        - sloppyLen
+        - sloppyTypeAssert
+        - switchTrue
+        - typeSwitchVar
+        - underef
+        # - unlambda # 4 findings; disabled.
+        - unslice
+        - valSwap
+        - wrapperFunc
+        - badLock
+        - badRegexp
+        - badSyncOnceFunc
+        - deferInLoop
+        - externalErrorReassign
+        - sortSlice
+        - truncateCmp
+        - uncheckedInlineErr
+        # - weakCond # 10 findings, all regexp index results, which are full length when non-nil; disabled.
+        - badSorting
+        - dynamicFmtString
+        - evalOrder
+        - returnAfterHttpError
+        - sqlQuery
+        # - emptyFallthrough # 1 findings; disabled.
+        # - rangeValCopy # 1200 findings; disabled.
+        # - hugeParam # Declined: broad performance cleanup.
+        - rangeExprCopy
+        # - appendCombine # 17 findings; disabled.
+        - indexAlloc
+        # - preferStringWriter # 1 findings; disabled.
+        - preferFprint
+        - preferWriteByte
+        - sliceClear
+        # - stringXbytes # 28 findings; disabled.
+        # - boolExprSimplify # 1 findings; disabled.
+        # - builtinShadow # 123 findings; disabled.
+        - dupImport
+        # - emptyStringTest # 15 findings; disabled.
+        # - equalFold # 12 findings; disabled.
+        # - filepathJoin # 15 findings; disabled.
+        # - httpNoBody # 1114 findings; disabled.
+        # - importShadow # 97 findings; disabled.
+        # - nestingReduce # 19 findings; disabled.
+        - nilValReturn
+        - redundantSprint
+        - regexpPattern
+        # - sloppyReassign # 120 findings; disabled.
+        # - sprintfQuotedString # 16 findings; disabled.
+        # - stringConcatSimplify # 5 findings; disabled.
+        - timeExprSimplify
+        - unnecessaryBlock
+        - unnecessaryDefer
+
+    # gocritic.settings.hugeParam: declined broad performance cleanup.
+    # gocritic:
+    #   settings:
+    #     hugeParam:
+    #       sizeThreshold: 256
+    # nilnil: 879 findings; TEST remains inactive.
+    # nilnil:
+    #   detect-opposite: true
+    # nakedret: 12 findings; inactive.
+    # nakedret:
+    #   max-func-lines: 10
+
+    gomoddirectives:
+      # Allow local replace directives.
+      replace-local: true
+
+    # tagliatelle: 1046 findings; inactive.
+    # tagliatelle:
+    #   case:
+    #     rules:
+    #       json: snake
+    #       yaml: kebab
+    # varnamelen: 7302 findings; inactive.
+    # varnamelen:
+    #   min-name-length: 3
+    #   max-distance: 10
+    #   check-receiver: false
+    #   check-return: false
+    #   check-type-param: false
+    #   ignore-type-assert-ok: true
+    #   ignore-map-index-ok: true
+    #   ignore-chan-recv-ok: true
+    #   ignore-names: [err, fd, db, tx, mu, rl, wg]
+    #   ignore-decls:
+    #     - t testing.T
+    #     - b testing.B
+    #     - i int
+    #     - T any
+    #     - wg sync.WaitGroup
+    #     - w http.ResponseWriter
+    #     - r *http.Request
+    # copyloopvar: 83 findings; inactive.
+    # copyloopvar:
+    #   check-alias: true
+    # embeddedstructfieldcheck: 765 findings; TEST remains inactive.
+    # embeddedstructfieldcheck:
+    #   forbid-mutex: true
+
+    govet:
+      enable:
+        - nilness
+        - unusedwrite
+        - reflectvaluecompare
+        - sortslice
+        - deepequalerrors
+      # enable-all: true # Unmeasured; retain the repository analyzer set.
+      # disable: [fieldalignment] # Declined: struct reordering work.
+
+    rowserrcheck:
+      packages:
+        - github.com/jackc/pgx/v5
+
+    errchkjson:
+      check-error-free-encoding: true
+
+    exhaustive:
+      explicit-exhaustive-switch: true
+      explicit-exhaustive-map: true
+      default-signifies-exhaustive: false
+      # default-signifies-exhaustive: true # A default does not prove enum coverage.
+      # explicit-exhaustive-switch: false # Default-on exhaustiveness declined.
+
+    revive:
+      enable-default-rules: false
+      rules:
+        - name: unconditional-recursion
+        - name: datarace
+        - name: waitgroup-by-value
+        - name: range-val-address
+        - name: defer
+        - name: time-equal
+        - name: atomic
+        - name: identical-branches
+        - name: identical-ifelseif-branches
+        # - name: identical-switch-branches # 56 findings; disabled.
+        - name: identical-switch-conditions
+        # - name: var-naming # Declined naming work.
+        # - name: exported # Declined naming/documentation work.
+        # - name: package-comments # Declined naming/documentation work.
+        # - name: receiver-naming # Declined naming work.
+        # - name: confusing-naming # Declined naming work.
+        # - name: time-naming # Declined naming work.
+      # enable-all-rules: true # Select only measured zero-finding unnamed rules.
+
+    fatcontext:
+      check-struct-pointers: true
+
+    gosec:
+      excludes:
+        - G104 # errcheck owns unchecked errors.
+      # G201/G202 value-versus-identifier ruleguard: not measured; needs a prototype.
+      # severity: medium # Retain default security coverage.
+      # confidence: medium # Retain default security coverage.
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+    forbidigo:
+      forbid:
+        - pattern: '^time\.Sleep$'
+          msg: Wait on observable state; timing tests require a reasoned nolint.
+      analyze-types: true
+      exclude-godoc-examples: false
+
+    perfsprint:
+      int-conversion: true
+      err-error: true
+      errorf: true
+      sprintf1: true
+
+    iface:
+      enable: [identical, unused, opaque]
+
+    interfacebloat:
+      max: 20
+      # max: 10 # The agreed interface limit is 20.
+
+    recvcheck:
+      disable-builtin: false
 
     sloglint:
       # Require the context-carrying slog variants (InfoContext, …) wherever a
@@ -105,20 +361,95 @@ linters:
       - ^migrations/
 
     rules:
+      - path: _test\.go$
+        linters:
+          - noctx
+          - gosec
+          - forcetypeassert
+          - errchkjson
+      # Sleeps in production are not test synchronization.
+      - path-except: _test\.go$
+        linters:
+          - forbidigo
       # Allow repeated strings in test files
       - path: _test\.go
         linters:
           - goconst
-
-      # Tests may recover a router from a handler to walk it (the route
-      # inventory backstops do); they register nothing that ships.
-      - path: _test\.go
-        linters:
-          - gocritic
-        text: "^ruleguard: route inventory:"
 
       # Allow unchecked errors in test cleanup/defer
       - path: _test\.go
         text: "Error return value is not checked"
         linters:
           - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+# Unenrolled settings: unmeasured unless a decline or replacement is stated above.
+#     staticcheck:
+#       # All checks except these style checks and quickfix suggestions.
+#       checks:
+#         # package comment, initialism naming, receiver names, doc-comment form
+#         - all
+#         - -ST1000
+#         - -ST1003
+#         - -ST1016
+#         - -ST1020
+#         - -ST1021
+#         - -ST1022
+#         # Disable quickfix checks
+#         - -QF*
+#     gocognit:
+#       # Maximum cognitive complexity
+#       min-complexity: 30
+#     mnd:
+#       # Magic Number Detector settings
+#       checks:
+#         - argument
+#         - case
+#         - condition
+#         - operation
+#         - return
+#         - assign
+#       # Common constants that are acceptable
+#       ignored-numbers:
+#         - '0'
+#         - '1'
+#         - '2'
+#         - '10'
+#         - '100'
+#         - '1024'       # buffer sizes, byte units
+#         - '0o755'      # file modes
+#         - '0o644'
+#       # Functions where magic numbers are acceptable
+#       ignored-functions:
+#         - 'os.MkdirAll'
+#         - 'os.OpenFile'
+#         - 'os.WriteFile'
+#       # Ignore magic numbers in test files
+#       ignored-files:
+#         - '.*_test\.go'
+#     dupl:
+#       # Minimum token sequence for duplication detection
+#       threshold: 100
+#     wrapcheck:
+#       # No exempt packages, signatures, or interfaces.
+#       ignore-package-globs: []
+#       ignore-sigs: []
+#       ignore-interface-regexps: []
+# staticcheck.checks: repository defaults remain active; the alternate all/-ST*/-QF* selection is unmeasured.
+# sloglint.attr-only: true # Declined: retain the repository mixed-call policy.
+# sloglint.context: all # Declined: retain scope-aware context requirements.
+# sloglint.key-naming-case: kebab # Declined: retain snake_case log keys.
+# formatters:
+#   enable: [gci, gofumpt] # Declined companion formatting; retain gofmt/goimports.
+#   settings:
+#     gci:
+#       custom-order: true
+#     gofumpt:
+#       extra:
+#         group-params: true
+#         clothe-returns: true
+#         balance-calls: true

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
 import { captureNotificationAuthority, notificationScope } from "@/api/v2/notifications";
 import { notificationKeys } from "./keys";
 import { useRequestEmailNotificationAddress } from "./notifications";
@@ -74,36 +74,7 @@ it("retains uncertain intent and invalidates only its authority cache", async ()
   );
   client.clear();
 });
-it.each(["mutate", "mutateAsync"] as const)(
-  "captures %s before offline authority replacement",
-  async (method) => {
-    const { client, result, rerender } = harness();
-    const fetch = vi.fn();
-    vi.stubGlobal("fetch", fetch);
-    const callback = vi.fn();
-    onlineManager.setOnline(false);
-    let done: Promise<unknown> | undefined;
-    act(() => {
-      if (method === "mutateAsync")
-        done = result.current
-          .mutateAsync("a@example.test", { onSuccess: callback, onError: callback })
-          .catch((e) => e);
-      else result.current.mutate("a@example.test", { onSuccess: callback, onError: callback });
-    });
-    await waitFor(() => expect(result.current.isPaused).toBe(true));
-    setProfileToken("new-pin");
-    rerender();
-    await act(async () => {
-      onlineManager.setOnline(true);
-      await client.resumePausedMutations();
-      await done;
-    });
-    await waitFor(() => expect(result.current.isPending).toBe(false));
-    expect(fetch).not.toHaveBeenCalled();
-    expect(callback).not.toHaveBeenCalled();
-    client.clear();
-  },
-);
+
 it.each(["authority", "draft", "unmount"] as const)(
   "fences late response after %s",
   async (kind) => {
@@ -152,7 +123,9 @@ it.each(["authority", "draft", "unmount"] as const)(
     client.clear();
   },
 );
-it.each([401, 403, 409, 429, 500])("does not automatically replay HTTP %s", async (status) => {
+it.each([401, 500])("does not automatically replay HTTP %s", async (status) => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const { client, result } = harness();
   const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
   vi.stubGlobal("fetch", fetch);

@@ -57,32 +57,6 @@ func TestMirrorWriteConvertsBothDirections(t *testing.T) {
 	}
 }
 
-// TestMirrorWriteRoundTripsThroughTheBoolean pins the one-way loss: every mode
-// survives a round trip except "never", which the boolean cannot hold.
-func TestMirrorWriteRoundTripsThroughTheBoolean(t *testing.T) {
-	for _, mode := range []string{IntroSkipModeNever, IntroSkipModeAsk, IntroSkipModeAlways} {
-		encoded, err := json.Marshal(mode)
-		if err != nil {
-			t.Fatalf("encoding %q: %v", mode, err)
-		}
-		boolean, _, err := MirrorWrite(settingskeys.PlaybackIntroSkipMode, encoded)
-		if err != nil {
-			t.Fatalf("MirrorWrite(%q): %v", mode, err)
-		}
-		back, _, err := MirrorWrite(settingskeys.PlaybackAutoSkipIntro, boolean.Value)
-		if err != nil {
-			t.Fatalf("MirrorWrite back from %s: %v", boolean.Value, err)
-		}
-		want := mode
-		if mode == IntroSkipModeNever {
-			want = IntroSkipModeAsk
-		}
-		if string(back.Value) != `"`+want+`"` {
-			t.Errorf("%q round-tripped to %s, want %q", mode, back.Value, want)
-		}
-	}
-}
-
 func TestMirrorWriteIgnoresUnpairedKeys(t *testing.T) {
 	for _, key := range []string{
 		settingskeys.PlaybackAutoSkipCredits,

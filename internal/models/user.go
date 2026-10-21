@@ -31,16 +31,20 @@ type User struct {
 	MaxLocalStreamBitrateKbps  *int  // nil = inherit; 0 = explicit unlimited
 	TranscodeAllowed           *bool // nil = inherit
 	AudioTranscodeAllowed      *bool // nil = inherit
-	MaxProfiles                int
+	MaxProfiles                *int  // nil = inherit; at least 1
 	DownloadAllowed            *bool // nil = inherit
 	DownloadTranscodeAllowed   *bool // nil = inherit
 	RequestsAllowed            *bool // nil = inherit
 	AccessGroupID              *int64
 	// IsOwner marks the server Owner: the account that claimed the server at
 	// first-run setup. Only the Owner may change its own account.
-	IsOwner   bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	IsOwner bool
+	// BreakGlass marks a local admin account that keeps password sign-in
+	// when the server turns local passwords off (auth.local_password_login).
+	// Only admin accounts may hold it.
+	BreakGlass bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // CreateUserInput contains the fields required to create a new user.
@@ -72,7 +76,7 @@ type CreateUserInput struct {
 	MaxLocalStreamBitrateKbps  *int
 	TranscodeAllowed           *bool
 	AudioTranscodeAllowed      *bool
-	MaxProfiles                *int // nil = use DB default (5); minimum 1
+	MaxProfiles                *int // minimum 1
 	DownloadAllowed            *bool
 	DownloadTranscodeAllowed   *bool
 	RequestsAllowed            *bool
@@ -121,9 +125,12 @@ type UpdateUserInput struct {
 	MaxLocalStreamBitrateKbps  Optional[int]
 	TranscodeAllowed           Optional[bool]
 	AudioTranscodeAllowed      Optional[bool]
-	MaxProfiles                *int
+	MaxProfiles                Optional[int]
 	DownloadAllowed            Optional[bool]
 	DownloadTranscodeAllowed   Optional[bool]
 	RequestsAllowed            Optional[bool]
 	AccessGroupID              Optional[int64]
+	// BreakGlass sets or clears the break-glass flag. A role change away
+	// from admin always clears it.
+	BreakGlass *bool
 }

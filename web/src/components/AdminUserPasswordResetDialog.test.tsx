@@ -59,16 +59,6 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-it("offers three ways back in and starts on email", () => {
-  mount();
-  expect(screen.getByRole("dialog", { name: "Reset password for sample" })).toBeInTheDocument();
-  expect(screen.getByRole("radio", { name: "Email a reset link" })).toBeChecked();
-  expect(screen.getByRole("radio", { name: "Create a link to share" })).not.toBeChecked();
-  expect(screen.getByRole("radio", { name: "Set a temporary password" })).not.toBeChecked();
-  expect(screen.getByText(/Sent to sample@example.test. Works once/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Email link" })).toBeEnabled();
-});
-
 it("creates a link to share and copies it", async () => {
   issue.mockResolvedValue(linkFixture);
   mount();
@@ -83,6 +73,12 @@ it("creates a link to share and copies it", async () => {
 it("emails the link without showing it", async () => {
   issue.mockResolvedValue(emailFixture);
   mount();
+  expect(screen.getByRole("dialog", { name: "Reset password for sample" })).toBeInTheDocument();
+  expect(screen.getByRole("radio", { name: "Email a reset link" })).toBeChecked();
+  expect(screen.getByRole("radio", { name: "Create a link to share" })).not.toBeChecked();
+  expect(screen.getByRole("radio", { name: "Set a temporary password" })).not.toBeChecked();
+  expect(screen.getByText(/Sent to sample@example.test. Works once/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Email link" })).toBeEnabled();
   fireEvent.click(screen.getByRole("button", { name: "Email link" }));
   await screen.findByText(/Sent a reset link to sample@example.test/);
   expect(screen.queryByRole("button", { name: /Copy link/ })).toBeNull();
@@ -96,14 +92,6 @@ it("keeps every option after an unconfirmed email", async () => {
   await screen.findByText(/did not confirm delivery/);
   expect(screen.getByRole("radio", { name: "Create a link to share" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Email link" })).toBeEnabled();
-});
-
-it("explains why a delivery is unavailable", () => {
-  mount({ emailAvailable: false });
-  expect(screen.getByRole("radio", { name: "Email a reset link" })).toBeDisabled();
-  expect(screen.getByText(/Set up email in Settings/)).toBeInTheDocument();
-  // The first available option is picked instead.
-  expect(screen.getByRole("radio", { name: "Create a link to share" })).toBeChecked();
 });
 
 it("offers only a temporary password for a disabled account", () => {

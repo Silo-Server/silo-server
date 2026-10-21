@@ -4,11 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, waitFor } from "@testing-library/react";
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { mediaSurfaceKeys, sectionKeys } from "./keys";
+import { libraryKeys, mediaSurfaceKeys, sectionKeys } from "./keys";
 import { storage } from "@/utils/storage";
 import {
   effectiveSettingsQueryKey,
-  useSettingValue,
   useSettingValuesRealtime,
   type EffectiveSettingsMap,
 } from "./settingValues";
@@ -84,12 +83,6 @@ describe("useSettingValuesRealtime", () => {
     storage.set(storage.KEYS.PROFILE_ID, "profile-1");
   });
 
-  it("subscribes the user_settings channel", () => {
-    const { wrapper } = createHarness();
-    render(<Subscriber />, { wrapper });
-    expect(subscriptions.map((entry) => entry.channel)).toContain("user_settings");
-  });
-
   it.each(["profile-1", "profile-2"])(
     "refreshes Home only for its active profile (%s)",
     async (profileId) => {
@@ -116,37 +109,51 @@ describe("useSettingValuesRealtime", () => {
     },
   );
 
-  it("refetches a mounted reader when another device changes this profile", async () => {
-    const { wrapper } = createHarness();
-    let served = "dark";
-    v2Mock.mockImplementation(() =>
-      Promise.resolve({
-        revision: 1,
-        items: [
-          { key: SETTING_KEYS.UI_THEME, value: served, source: "profile", definition_revision: 1 },
-        ],
-      }),
-    );
-
-    function Reader() {
-      useSettingValuesRealtime();
-      const { value } = useSettingValue<string>(SETTING_KEYS.UI_THEME);
-      return <span data-testid="theme">{value}</span>;
+  // Another node can answer the first re-read before it has reloaded the
+  // administrator's defaults, so a server-default change is re-read once more
+  // after the server's cache TTL; a profile's own change is not.
+  it.each([
+    ["default", 2],
+    ["profile", 1],
+  ])("re-reads Home after a %s-scope Next Up change %d time(s)", async (scope, refreshes) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { queryClient, wrapper } = createHarness();
+      queryClient.setQueryData(mediaSurfaceKeys.refreshSignal(), 0);
+      render(<Subscriber />, { wrapper });
+      subscriptions
+        .find((entry) => entry.channel === "user_settings")
+        ?.handlers?.onEvent?.(
+          changedFrame({
+            key: SETTING_KEYS.UI_NEXT_UP_MODE,
+            scope,
+            ...(scope === "profile" ? { profile_id: "profile-1" } : {}),
+          }),
+        );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(refreshes);
+    } finally {
+      vi.useRealTimers();
     }
+  });
 
-    const view = render(<Reader />, { wrapper });
-    await waitFor(() => expect(view.getByTestId("theme").textContent).toBe("dark"));
-
-    // The other device's write lands on the server; this tab only learns of it
-    // through the channel.
-    served = "light";
+  it("refetches the library list when another device hides or shows a library", async () => {
+    const { queryClient, wrapper } = createHarness();
+    const librariesKey = libraryKeys.user("profile-1");
+    queryClient.setQueryData(librariesKey, [{ id: 1 }]);
+    render(<Subscriber />, { wrapper });
     subscriptions
       .find((entry) => entry.channel === "user_settings")
       ?.handlers?.onEvent?.(
-        changedFrame({ key: SETTING_KEYS.UI_THEME, scope: "profile", profile_id: "profile-1" }),
+        changedFrame({
+          key: SETTING_KEYS.UI_DISABLED_LIBRARY_IDS,
+          scope: "profile",
+          profile_id: "profile-1",
+        }),
       );
-
-    await waitFor(() => expect(view.getByTestId("theme").textContent).toBe("light"));
+    await waitFor(() => expect(queryClient.getQueryState(librariesKey)?.isInvalidated).toBe(true));
   });
 
   it("ignores a change addressed to another profile on the same account", () => {
@@ -190,21 +197,5 @@ describe("useSettingValuesRealtime", () => {
       });
 
     expect(queryClient.getQueryState(key)?.isInvalidated ?? false).toBe(false);
-  });
-
-  it("costs one invalidation pass per event without a manual refetch", () => {
-    const { queryClient, wrapper } = createHarness();
-    seedEffective(queryClient, "dark");
-    render(<Subscriber />, { wrapper });
-    const handlers = subscriptions.find((entry) => entry.channel === "user_settings")?.handlers;
-
-    // A burst of writes (a settings screen saving several keys at once) must
-    // not fan out into a fetch per event: nothing is observing these queries,
-    // so invalidation marks them stale and issues no request at all.
-    for (const key of [SETTING_KEYS.UI_THEME, SETTING_KEYS.UI_DATE_FORMAT]) {
-      handlers?.onEvent?.(changedFrame({ key, scope: "profile", profile_id: "profile-1" }));
-    }
-
-    expect(v2Mock).not.toHaveBeenCalled();
   });
 });

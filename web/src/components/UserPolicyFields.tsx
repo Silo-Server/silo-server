@@ -1,6 +1,12 @@
 import { useId, useState, type ReactNode } from "react";
 
-import type { AccessGroup, AdminUser, AdminUserEffectivePolicy, Library } from "@/api/types";
+import type {
+  AccessGroup,
+  AdminPolicyDefaults,
+  AdminUser,
+  AdminUserEffectivePolicy,
+  Library,
+} from "@/api/types";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
 import { StreamBitrateLimitInput } from "@/components/StreamBitrateLimitInput";
 import { Input } from "@/components/ui/input";
@@ -32,6 +38,7 @@ export interface UserPolicyState {
   maxTranscodes: number | null;
   maxRemoteStreamBitrateKbps: number | null;
   maxLocalStreamBitrateKbps: number | null;
+  maxProfiles: number | null;
   transcodeAllowed: boolean | null;
   audioTranscodeAllowed: boolean | null;
   downloadAllowed: boolean | null;
@@ -48,6 +55,7 @@ const POLICY_FIELDS = {
   maxTranscodes: "max_transcodes",
   maxRemoteStreamBitrateKbps: "max_remote_stream_bitrate_kbps",
   maxLocalStreamBitrateKbps: "max_local_stream_bitrate_kbps",
+  maxProfiles: "max_profiles",
   transcodeAllowed: "transcode_allowed",
   audioTranscodeAllowed: "audio_transcode_allowed",
   downloadAllowed: "download_allowed",
@@ -91,31 +99,19 @@ export function policyCreateFields(state: UserPolicyState): PolicyCreatePayload 
 // policy minus permissions, which have no inherit control here.
 export type PolicyInheritHints = Partial<Omit<AdminUserEffectivePolicy, "permissions">>;
 
-// Mirrors access.NoGroupPolicy(): the layer under an account that belongs to
-// no access group. Keep in sync with internal/access/groups.go.
-const NO_GROUP_POLICY = {
-  library_ids: null,
-  max_playback_quality: "",
-  max_streams: 0,
-  max_transcodes: 0,
-  max_remote_stream_bitrate_kbps: 0,
-  max_local_stream_bitrate_kbps: 0,
-  transcode_allowed: true,
-  audio_transcode_allowed: true,
-  download_allowed: true,
-  download_transcode_allowed: false,
-  requests_allowed: true,
-} satisfies Required<PolicyInheritHints>;
-
-// Inherit hints for the group currently selected in the form — not the group
-// the account was last saved with, so the hints follow the picker instead of
-// going stale. Returns undefined when the selected group is not in the loaded
-// list (still loading, or since deleted) so callers can fall back.
+// Inherit hints for the role and group currently selected in the form — not
+// the ones the account was last saved with, so the hints follow the pickers
+// instead of going stale. An admin or an ungrouped account takes the server's
+// built-in defaults. Returns undefined while those or the selected group are
+// not loaded (or the group was since deleted) so callers can fall back.
 export function policyInheritHints(
+  role: string,
   accessGroupID: number | null,
   accessGroups: AccessGroup[],
+  defaults: AdminPolicyDefaults | undefined,
 ): PolicyInheritHints | undefined {
-  if (accessGroupID === null) return NO_GROUP_POLICY;
+  if (role === "admin") return defaults?.admin;
+  if (accessGroupID === null) return defaults?.ungrouped;
   const group = accessGroups.find((candidate) => candidate.id === accessGroupID);
   if (group === undefined) return undefined;
   return {
@@ -125,6 +121,7 @@ export function policyInheritHints(
     max_transcodes: group.max_transcodes,
     max_remote_stream_bitrate_kbps: group.max_remote_stream_bitrate_kbps,
     max_local_stream_bitrate_kbps: group.max_local_stream_bitrate_kbps,
+    max_profiles: group.max_profiles,
     transcode_allowed: group.transcode_allowed,
     audio_transcode_allowed: group.audio_transcode_allowed,
     download_allowed: group.download_allowed,
@@ -156,8 +153,9 @@ export function effectiveAccessGroupID(role: string, accessGroupID: number | nul
 }
 
 // Where a field that is not overridden gets its value. Only a grouped account
-// inherits; an admin or an account outside every group gets the server's fixed
-// no-group defaults, so its fields name that source instead of a group.
+// inherits; an admin gets the server's admin defaults (full access) and an
+// account outside every group the no-group defaults, so their fields name that
+// source instead of a group.
 export type PolicyDefaultSource = "group" | "admin" | "server";
 
 export function policyDefaultSource(
@@ -203,6 +201,22 @@ interface PolicyContext {
   // What those fields currently evaluate to, shown next to the source. Absent
   // when unknown.
   effective?: PolicyInheritHints;
+  // Locks the menus. A disabled <fieldset> blocks the native controls, but
+  // Radix Select opens on pointerdown and only honors its own prop.
+  disabled?: boolean;
+}
+
+// Raw text of limit fields whose box holds no valid number. A cleared or
+// half-typed box is not in UserPolicyState, which keeps the last valid value,
+// so the form keeps these drafts itself and refuses to save while any remain,
+// even when the Limits tab is not mounted and native validation cannot see the
+// box. Keeping the text, not just a flag, lets a remounted field show it again.
+export type LimitPolicyKey = "maxStreams" | "maxTranscodes" | "maxProfiles";
+
+export interface LimitValidity {
+  invalidLimitDrafts: ReadonlyMap<LimitPolicyKey, string>;
+  // `undefined` clears the entry once the box holds a valid number again.
+  onInvalidLimitDraftChange: (key: LimitPolicyKey, draft: string | undefined) => void;
 }
 
 function defaultHint(source: PolicyDefaultSource, effectiveText: string | undefined): string {
@@ -219,6 +233,7 @@ function BooleanPolicyRow({
   onValueChange,
   source,
   effectiveValue,
+  disabled,
 }: {
   label: string;
   description?: string;
@@ -226,20 +241,25 @@ function BooleanPolicyRow({
   onValueChange: (value: boolean | null) => void;
   source: PolicyDefaultSource;
   effectiveValue?: boolean;
+  disabled?: boolean;
 }) {
   const id = useId();
   const selectValue = value === null ? INHERIT : value ? "allowed" : "blocked";
   return (
-    <div className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-      <div className="min-w-0">
+    <div className="border-border flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border px-3 py-2">
+      <div className="min-w-32 flex-1 break-words">
         <Label htmlFor={id}>{label}</Label>
         {description && <p className="text-muted-foreground text-xs">{description}</p>}
       </div>
       <Select
         value={selectValue}
         onValueChange={(next) => onValueChange(next === INHERIT ? null : next === "allowed")}
+        disabled={disabled}
       >
-        <SelectTrigger id={id} className="w-40 shrink-0">
+        <SelectTrigger
+          id={id}
+          className="max-w-full min-w-40 shrink-0 text-left whitespace-normal data-[size=default]:h-auto data-[size=default]:min-h-9 *:data-[slot=select-value]:line-clamp-none"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -257,10 +277,10 @@ function BooleanPolicyRow({
   );
 }
 
-function limitDraftValue(draft: string): number | null {
+function limitDraftValue(draft: string, min: number): number | null {
   if (draft.trim() === "") return null;
   const parsed = Number(draft);
-  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  if (!Number.isInteger(parsed) || parsed < min) return null;
   return parsed;
 }
 
@@ -312,28 +332,45 @@ function LimitPolicyField({
   onValueChange,
   source,
   effectiveValue,
+  min = 0,
+  invalidDraft,
+  onInvalidDraftChange,
 }: {
   label: string;
   value: number | null;
   onValueChange: (value: number | null) => void;
   source: PolicyDefaultSource;
   effectiveValue?: number;
+  /** The lowest value; with 0 allowed it means unlimited. */
+  min?: number;
+  // The invalid text left behind when the field last unmounted, or undefined.
+  // The field reopens overridden with that text so it shows the pending edit
+  // instead of the stale saved value.
+  invalidDraft: string | undefined;
+  onInvalidDraftChange: (draft: string | undefined) => void;
 }) {
   const id = useId();
   // Override is tracked locally because "overriding, but nothing typed yet" has
   // no representation in UserPolicyState: while the box is empty the field
   // keeps inheriting rather than pinning 0, which would mean unlimited.
-  const [overridden, setOverridden] = useState(value !== null);
+  const [overridden, setOverridden] = useState(value !== null || invalidDraft !== undefined);
   // The raw string stays local so a cleared or half-typed box is an unsaved
   // edit instead of collapsing to 0 or NaN.
-  const [draft, setDraft] = useState(() => (value === null ? "" : String(value)));
-  const draftValue = limitDraftValue(draft);
+  const [draft, setDraft] = useState(() => invalidDraft ?? (value === null ? "" : String(value)));
+  const draftValue = limitDraftValue(draft, min);
+  const help =
+    draftValue === null
+      ? `Enter a whole number${min > 0 ? ` of at least ${min}` : ""}, or turn Override off to ${DEFAULT_SOURCE_TEXT[source].revert}.`
+      : min === 0
+        ? "0 = unlimited"
+        : undefined;
 
   function handleOverrideChange(checked: boolean) {
     setOverridden(checked);
     if (!checked) {
       setDraft("");
       onValueChange(null);
+      onInvalidDraftChange(undefined);
       return;
     }
     // Seed the value the field already resolves to. With no hint available the
@@ -341,11 +378,13 @@ function LimitPolicyField({
     // value, so an unknown limit is never silently saved as unlimited.
     setDraft(effectiveValue === undefined ? "" : String(effectiveValue));
     onValueChange(effectiveValue ?? null);
+    onInvalidDraftChange(effectiveValue === undefined ? "" : undefined);
   }
 
   function handleDraftChange(raw: string) {
     setDraft(raw);
-    const parsed = limitDraftValue(raw);
+    const parsed = limitDraftValue(raw, min);
+    onInvalidDraftChange(parsed === null ? raw : undefined);
     if (parsed === null) return;
     onValueChange(parsed);
   }
@@ -368,17 +407,13 @@ function LimitPolicyField({
       <Input
         id={id}
         type="number"
-        min={0}
+        min={min}
         step={1}
         required
         value={draft}
         onChange={(event) => handleDraftChange(event.target.value)}
       />
-      <p className="text-muted-foreground text-xs">
-        {draftValue === null
-          ? `Enter a whole number, or turn Override off to ${DEFAULT_SOURCE_TEXT[source].revert}.`
-          : "0 = unlimited"}
-      </p>
+      {help && <p className="text-muted-foreground text-xs">{help}</p>}
     </PolicyOverrideField>
   );
 }
@@ -389,12 +424,14 @@ function StreamBitratePolicyField({
   onValueChange,
   source,
   effectiveValue,
+  disabled,
 }: {
   label: string;
   value: number | null;
   onValueChange: (value: number | null) => void;
   source: PolicyDefaultSource;
   effectiveValue?: number;
+  disabled?: boolean;
 }) {
   const id = useId();
   // Same override model as LimitPolicyField: turning Override on seeds the
@@ -422,6 +459,7 @@ function StreamBitratePolicyField({
         id={id}
         label={label}
         value={value}
+        disabled={disabled}
         // A custom box without a valid value keeps the last one; the form's
         // required/pattern validation blocks saving until it is fixed.
         onValueChange={(kbps) => {
@@ -439,6 +477,7 @@ export function PolicyAccessFields({
   source,
   effective,
   libraries,
+  disabled,
 }: PolicyContext & { libraries: Library[] }) {
   return (
     <>
@@ -463,6 +502,7 @@ export function PolicyAccessFields({
           onValueChange={(downloadAllowed) => onChange({ ...state, downloadAllowed })}
           source={source}
           effectiveValue={effective?.download_allowed}
+          disabled={disabled}
         />
         <BooleanPolicyRow
           label="Download Transcodes"
@@ -472,6 +512,7 @@ export function PolicyAccessFields({
           }
           source={source}
           effectiveValue={effective?.download_transcode_allowed}
+          disabled={disabled}
         />
       </div>
       <BooleanPolicyRow
@@ -481,13 +522,22 @@ export function PolicyAccessFields({
         onValueChange={(requestsAllowed) => onChange({ ...state, requestsAllowed })}
         source={source}
         effectiveValue={effective?.requests_allowed}
+        disabled={disabled}
       />
     </>
   );
 }
 
 // Limits-tab policy fields: stream/transcode ceilings and the quality gate.
-export function PolicyLimitFields({ state, onChange, source, effective }: PolicyContext) {
+export function PolicyLimitFields({
+  state,
+  onChange,
+  source,
+  effective,
+  disabled,
+  invalidLimitDrafts,
+  onInvalidLimitDraftChange,
+}: PolicyContext & LimitValidity) {
   const qualityId = useId();
   const qualityValue: PlaybackQualityPreset | typeof INHERIT =
     state.maxPlaybackQuality === null
@@ -502,6 +552,8 @@ export function PolicyLimitFields({ state, onChange, source, effective }: Policy
           onValueChange={(maxStreams) => onChange({ ...state, maxStreams })}
           source={source}
           effectiveValue={effective?.max_streams}
+          invalidDraft={invalidLimitDrafts.get("maxStreams")}
+          onInvalidDraftChange={(draft) => onInvalidLimitDraftChange("maxStreams", draft)}
         />
         <LimitPolicyField
           label="Max Transcodes"
@@ -509,6 +561,8 @@ export function PolicyLimitFields({ state, onChange, source, effective }: Policy
           onValueChange={(maxTranscodes) => onChange({ ...state, maxTranscodes })}
           source={source}
           effectiveValue={effective?.max_transcodes}
+          invalidDraft={invalidLimitDrafts.get("maxTranscodes")}
+          onInvalidDraftChange={(draft) => onInvalidLimitDraftChange("maxTranscodes", draft)}
         />
         <StreamBitratePolicyField
           label="Max remote stream bitrate"
@@ -518,6 +572,7 @@ export function PolicyLimitFields({ state, onChange, source, effective }: Policy
           }
           source={source}
           effectiveValue={effective?.max_remote_stream_bitrate_kbps}
+          disabled={disabled}
         />
         <StreamBitratePolicyField
           label="Max local stream bitrate"
@@ -527,6 +582,7 @@ export function PolicyLimitFields({ state, onChange, source, effective }: Policy
           }
           source={source}
           effectiveValue={effective?.max_local_stream_bitrate_kbps}
+          disabled={disabled}
         />
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -536,6 +592,7 @@ export function PolicyLimitFields({ state, onChange, source, effective }: Policy
           onValueChange={(transcodeAllowed) => onChange({ ...state, transcodeAllowed })}
           source={source}
           effectiveValue={effective?.transcode_allowed}
+          disabled={disabled}
         />
         <BooleanPolicyRow
           label="Audio Transcoding"
@@ -544,11 +601,13 @@ export function PolicyLimitFields({ state, onChange, source, effective }: Policy
           onValueChange={(audioTranscodeAllowed) => onChange({ ...state, audioTranscodeAllowed })}
           source={source}
           effectiveValue={effective?.audio_transcode_allowed}
+          disabled={disabled}
         />
       </div>
       <div className="space-y-1">
         <Label htmlFor={qualityId}>Max Playback Quality</Label>
         <Select
+          disabled={disabled}
           value={qualityValue}
           onValueChange={(value) =>
             onChange({
@@ -585,6 +644,16 @@ export function PolicyLimitFields({ state, onChange, source, effective }: Policy
             : PLAYBACK_QUALITY_OPTIONS.find((option) => option.value === qualityValue)?.description}
         </p>
       </div>
+      <LimitPolicyField
+        label="Max Profiles"
+        min={1}
+        value={state.maxProfiles}
+        onValueChange={(maxProfiles) => onChange({ ...state, maxProfiles })}
+        source={source}
+        effectiveValue={effective?.max_profiles}
+        invalidDraft={invalidLimitDrafts.get("maxProfiles")}
+        onInvalidDraftChange={(draft) => onInvalidLimitDraftChange("maxProfiles", draft)}
+      />
     </>
   );
 }

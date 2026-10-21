@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import type { DisplayQueryDefinition } from "@/api/types";
@@ -15,13 +17,6 @@ describe("displayFiltersToQueryDefinition", () => {
     expect(displayFiltersToQueryDefinition("watched", "all")).toEqual({
       match: "all",
       groups: [{ match: "all", rules: [{ field: "watched", op: "is", value: true }] }],
-    });
-  });
-
-  it("builds a watched=false rule for the unwatched preset", () => {
-    expect(displayFiltersToQueryDefinition("unwatched", "all")).toEqual({
-      match: "all",
-      groups: [{ match: "all", rules: [{ field: "watched", op: "is", value: false }] }],
     });
   });
 
@@ -49,14 +44,6 @@ describe("displayFiltersToQueryDefinition", () => {
         },
       ],
     });
-  });
-
-  it("omits library_ids / media_scope / sort / limit (filter-only fragment)", () => {
-    const fragment = displayFiltersToQueryDefinition("watched", "movie")!;
-    expect(fragment).not.toHaveProperty("library_ids");
-    expect(fragment).not.toHaveProperty("media_scope");
-    expect(fragment).not.toHaveProperty("sort");
-    expect(fragment).not.toHaveProperty("limit");
   });
 });
 
@@ -103,14 +90,6 @@ describe("queryDefinitionToDisplayFilters", () => {
       ],
     };
     expect(queryDefinitionToDisplayFilters(def)).toEqual({ watch: "unwatched", media: "series" });
-  });
-
-  it("round-trips both presets through the fragment", () => {
-    const fragment = displayFiltersToQueryDefinition("watched", "movie");
-    expect(queryDefinitionToDisplayFilters(fragment)).toEqual({
-      watch: "watched",
-      media: "movie",
-    });
   });
 
   it("tolerates a group with a missing rules array", () => {

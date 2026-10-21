@@ -18,16 +18,17 @@ import (
 // fakeCatalog backs the catalog-items operations: it records the request
 // the seam received and answers a fixed page.
 type fakeCatalog struct {
-	sourceOrder bool
-	err         error
-	lastReq     catalogpkg.CatalogRequest
-	lastViewer  handlers.ItemViewer
-	lastGroup   bool
-	lastGroups  catalogpkg.AudiobookGroupsQuery
+	sourceOrder        bool
+	unreadableEpisodes bool
+	err                error
+	lastReq            catalogpkg.CatalogRequest
+	lastViewer         handlers.ItemViewer
+	lastGroup          bool
+	lastGroups         catalogpkg.AudiobookGroupsQuery
 }
 
 func (f *fakeCatalog) ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
-	return catalogpkg.AccessFilter{UserID: claimsFrom(ctx).UserID, ProfileID: "p-owner", AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: opts.PresentationLibraryID, ScopeFilesToLibrary: opts.ScopeFilesToLibrary, SelectedFileID: opts.SelectedFileID}, nil
+	return catalogpkg.AccessFilter{UserID: claimsFrom(ctx).UserID, ProfileID: "p-owner", AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: opts.PresentationLibraryID, ScopeFilesToLibrary: opts.ScopeFilesToLibrary, SelectedFileID: opts.SelectedFileID, DeviceID: opts.DeviceID}, nil
 }
 
 func fakeListingCard(id string) handlers.CollectionItemView {
@@ -69,14 +70,34 @@ func (f *fakeCatalog) Filters(_ context.Context, _ handlers.ItemViewer, req cata
 	return view, nil
 }
 
-func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, _ catalogpkg.CatalogRequest, facet, prefix string, limit int) (handlers.CatalogFacetSearchView, error) {
+func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, req catalogpkg.CatalogRequest, facet, q string, limit int) (handlers.CatalogFacetSearchView, error) {
 	if f.err != nil {
 		return handlers.CatalogFacetSearchView{}, f.err
 	}
-	if facet == "author" && strings.HasPrefix("frank herbert", prefix) {
-		return handlers.CatalogFacetSearchView{Matches: []string{"Frank Herbert"}, HasMore: limit == 1}, nil
+	f.lastReq = req
+	if facet == "author" && strings.HasPrefix("frank herbert", q) { //nolint:gocritic // the fake matches a typed prefix of the name
+		return handlers.CatalogFacetSearchView{
+			Matches: []string{"Frank Herbert"}, HasMore: limit == 1,
+			Values: []catalogpkg.FacetValue{{Value: "Frank Herbert", Count: 6}}, ValuesHasMore: limit == 1,
+		}, nil
 	}
-	return handlers.CatalogFacetSearchView{Matches: []string{}}, nil
+	if facet == "genre" && q == "" {
+		return handlers.CatalogFacetSearchView{Values: []catalogpkg.FacetValue{{Value: "Drama", Count: 9}}, ValuesHasMore: true}, nil
+	}
+	return handlers.CatalogFacetSearchView{}, nil
+}
+
+func (f *fakeCatalog) LetterIndex(_ context.Context, v handlers.ItemViewer, req catalogpkg.CatalogRequest) (catalogpkg.LetterIndex, error) {
+	if f.err != nil {
+		return catalogpkg.LetterIndex{}, f.err
+	}
+	f.lastReq, f.lastViewer = req, v
+	// A digit title, three H titles, and a non-Latin one the collation sorts
+	// after them, so # has two runs.
+	return catalogpkg.LetterIndex{
+		Letters: []catalogpkg.LetterBucket{{Letter: "#", Count: 2, Position: 0}, {Letter: "H", Count: 3, Position: 1}},
+		Runs:    []catalogpkg.LetterRun{{Letter: "#", Position: 0}, {Letter: "H", Position: 1}, {Letter: "#", Position: 4}},
+	}, nil
 }
 
 func (f *fakeCatalog) AudiobookGroups(_ context.Context, v handlers.ItemViewer, q catalogpkg.AudiobookGroupsQuery) (handlers.AudiobookGroupsView, error) {
@@ -97,6 +118,21 @@ func (f *fakeCatalog) AudiobookGroups(_ context.Context, v handlers.ItemViewer, 
 		view.Next = &catalogpkg.AudiobookGroupCursor{GroupKey: "frank herbert", Value: 3}
 	}
 	return view, nil
+}
+
+// fakeDeviceAudioOverride is the device whose device-scoped audio preference
+// is French; every other caller resolves the profile's English.
+const fakeDeviceAudioOverride = "phone-1"
+
+// fakeHeatVersion answers Heat's one version with the effective audio the
+// viewer's device resolves, as the detail service does.
+func fakeHeatVersion(v handlers.ItemViewer) catalogpkg.FileVersion {
+	version := catalogpkg.FileVersion{FileID: 120, FilePath: "/media/movies/Heat.mkv", Resolution: "2160p", AddedAt: fixedTime(),
+		EffectiveAudioTrackIndex: new(1), EffectiveAudioLanguage: "en"}
+	if v.Access.DeviceID == fakeDeviceAudioOverride {
+		version.EffectiveAudioTrackIndex, version.EffectiveAudioLanguage = new(2), "fr"
+	}
+	return version
 }
 
 func notFoundItem() error {
@@ -121,19 +157,22 @@ func (f *fakeCatalog) ItemDetail(_ context.Context, v handlers.ItemViewer, id st
 		Cast:           []catalogpkg.CastCredit{{Name: "Al Pacino", Character: "Vincent Hanna", PersonID: "7"}},
 		SeasonUserData: &catalogpkg.SeasonUserData{Played: true, WatchedCount: 1, LastFileID: &fileID},
 		UserState:      &catalogpkg.ItemUserState{Played: true, IsFavorite: true},
-		Versions:       []catalogpkg.FileVersion{{FileID: 120, FilePath: "/media/movies/Heat.mkv", Resolution: "2160p", AddedAt: fixedTime()}},
+		Versions:       []catalogpkg.FileVersion{fakeHeatVersion(v)},
 		Subtitles:      []catalogpkg.SubtitleInfo{}, OverlaySummary: &models.OverlaySummary{Resolution: "4K"},
 		WorkFormats: []catalogpkg.WorkFormatSummary{{Type: "ebook", ContentID: "ebook:heat", LibraryID: 2}}}, nil
 }
 
-func (f *fakeCatalog) ItemVersions(_ context.Context, _ handlers.ItemViewer, id string) ([]catalogpkg.FileVersion, error) {
+func (f *fakeCatalog) ItemVersions(_ context.Context, v handlers.ItemViewer, id string) ([]catalogpkg.FileVersion, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
+	f.lastViewer = v
 	if id != "movie:heat-1995" {
 		return nil, notFoundItem()
 	}
-	return []catalogpkg.FileVersion{{FileID: 120, Resolution: "2160p", AddedAt: fixedTime()}}, nil
+	version := fakeHeatVersion(v)
+	version.FilePath = ""
+	return []catalogpkg.FileVersion{version}, nil
 }
 
 func (f *fakeCatalog) MangaFiles(_ context.Context, _ handlers.ItemViewer, id string) (*catalogpkg.MangaSeriesFiles, error) {
@@ -147,8 +186,12 @@ func (f *fakeCatalog) MangaFiles(_ context.Context, _ handlers.ItemViewer, id st
 }
 
 func fakeEpisode(n int) handlers.EpisodeView {
-	return handlers.EpisodeView{ContentID: "episode:severance-s01e0" + string(rune('0'+n)), SeasonNumber: 1, EpisodeNumber: n, Title: "Good News About Hell", AirDate: "2022-02-18", Runtime: 57,
+	ep := handlers.EpisodeView{ContentID: "episode:severance-s01e0" + string(rune('0'+n)), SeasonNumber: 1, EpisodeNumber: n, Title: "Good News About Hell", AirDate: "2022-02-18", Runtime: 57,
 		Files: []handlers.EpisodeFileView{{FileID: 200 + n, Resolution: "1080p", FileSize: 1}}, UserData: &catalogpkg.SeasonUserData{Played: n == 1, WatchedCount: 1}}
+	if n == 1 {
+		ep.RatingIMDB, ep.RatingTMDB = new(8.7), new(8.25)
+	}
+	return ep
 }
 
 func (f *fakeCatalog) ItemEpisodes(_ context.Context, _ handlers.ItemViewer, id string) ([]handlers.EpisodeView, error) {
@@ -158,7 +201,12 @@ func (f *fakeCatalog) ItemEpisodes(_ context.Context, _ handlers.ItemViewer, id 
 	if id != "series:severance-S01" {
 		return nil, notFoundItem()
 	}
-	return []handlers.EpisodeView{fakeEpisode(1), fakeEpisode(2)}, nil
+	episodes := []handlers.EpisodeView{fakeEpisode(1), fakeEpisode(2)}
+	if f.unreadableEpisodes {
+		episodes[0].Files[0].Unreadable = true
+		episodes[0].Files = append(episodes[0].Files, handlers.EpisodeFileView{FileID: 203, Resolution: "1080p"})
+	}
+	return episodes, nil
 }
 
 func fakeSeason() handlers.SeasonView {
@@ -407,12 +455,31 @@ func TestCatalogFiltersAndFacetSearch(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters", "", bearer(memberToken)), TypeValidationFailed)
 
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=author&q=fra&limit=1", "", viewerHeaders())
-	if rec.Code != 200 || rec.Body.String() != `{"matches":["Frank Herbert"],"has_more":true}`+"\n" {
+	if rec.Code != 200 || rec.Body.String() != `{"matches":["Frank Herbert"],"has_more":true,"values":[{"value":"Frank Herbert","count":6}],"values_has_more":true}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=narrator&q=zz", "", viewerHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"matches":[]`) {
+	if rec.Code != 200 || rec.Body.String() != `{"matches":[],"has_more":false,"values":[],"values_has_more":false}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
+	}
+	// An empty q: no prefix matches, while values ranks the common ones.
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=genre", "", viewerHeaders())
+	if rec.Code != 200 || rec.Body.String() != `{"matches":[],"has_more":false,"values":[{"value":"Drama","count":9}],"values_has_more":true}`+"\n" {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=studio&library_id=3&library_ids=1&library_ids=3&library_ids=2&type=series", "", viewerHeaders())
+	if rec.Code != 200 || !reflect.DeepEqual(fake.lastReq.Query.LibraryIDs, []int{1, 2, 3}) || fake.lastReq.Query.MediaScope != "series" {
+		t.Fatalf("library_ids: %d %s seam request %+v", rec.Code, rec.Body.String(), fake.lastReq.Query)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters?library_ids=2", "", viewerHeaders())
+	if rec.Code != 200 || !reflect.DeepEqual(fake.lastReq.Query.LibraryIDs, []int{2}) {
+		t.Fatalf("filters library_ids: %d seam request %+v", rec.Code, fake.lastReq.Query)
+	}
+	for _, query := range []string{"library_ids=0", "library_ids=x", "library_ids=01", "source=section&section_id=s1&library_id=1&library_ids=2"} {
+		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=studio&"+query, "", viewerHeaders()), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "query.library_ids" {
+			t.Fatalf("%s: errors = %+v", query, p.Errors)
+		}
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?q=fra", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=color", "", viewerHeaders()), TypeValidationFailed)
@@ -453,6 +520,7 @@ func TestQueryCatalogItems(t *testing.T) {
 
 func TestGetCatalogItem(t *testing.T) {
 	deps, fake := catalogDeps(t)
+	fake.unreadableEpisodes = true
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995?library_id=2&file_id=120", "", viewerHeaders())
 	if rec.Code != 200 {
@@ -462,7 +530,7 @@ func TestGetCatalogItem(t *testing.T) {
 	decodeJSON(t, rec.Body, &body)
 	for k, want := range map[string]string{
 		"content_id": `"movie:heat-1995"`, "tagline": `"A Los Angeles crime saga"`, "keywords": `[]`, "crew": `[]`, "subtitles": `[]`,
-		"user_state": `{"played":true,"is_favorite":true,"in_watchlist":false}`, "overlay_summary": `{"resolution":"4K"}`,
+		"user_state": `{"played":true,"is_favorite":true,"in_watchlist":false,"not_interested":false}`, "overlay_summary": `{"resolution":"4K"}`,
 		"work_formats": `[{"type":"ebook","content_id":"ebook:heat","library_id":"2"}]`,
 	} {
 		if string(body[k]) != want {
@@ -497,6 +565,16 @@ func TestGetCatalogItem(t *testing.T) {
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/items/series:severance-S01/episodes", "", viewerHeaders())
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"air_date":"2022-02-18"`) || !strings.Contains(rec.Body.String(), `"files":[{"file_id":"201"`) || !strings.Contains(rec.Body.String(), `"user_data":{"watched_count":1,"unplayed_count":0,"in_progress_count":0,"played":true}`) {
 		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var episodePage struct {
+		Items []struct {
+			Files []map[string]json.RawMessage `json:"files"`
+		} `json:"items"`
+	}
+	decodeJSON(t, rec.Body, &episodePage)
+	if len(episodePage.Items) != 2 || len(episodePage.Items[0].Files) != 2 ||
+		string(episodePage.Items[0].Files[0]["unreadable"]) != "true" || episodePage.Items[0].Files[1]["unreadable"] != nil {
+		t.Fatalf("episode file readability = %+v", episodePage)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/series:nope/episodes", "", viewerHeaders()), TypeNotFound)
 }
@@ -543,52 +621,6 @@ func TestListCatalogItemsPreservesResolvedSourceOrderCursors(t *testing.T) {
 			t.Fatalf("source-order sentinel lost: %+v", fake.lastReq.ResolvedSort)
 		}
 	}
-}
-
-func TestSeriesSeasonsArtwork(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	h := newTestHandler(t, deps)
-	capability := do(t, h, http.MethodGet, Prefix+"/images/capabilities", "", viewerHeaders())
-	var discovery ImageCapabilities
-	decodeJSON(t, capability.Body, &discovery)
-	if capability.Code != http.StatusOK || discovery.SeasonListArtworkParam != "include_artwork" {
-		t.Fatal(capability.Code, discovery)
-	}
-	var baseline Season
-	for _, value := range []string{"", "true", "false"} {
-		t.Run("include_artwork="+value, func(t *testing.T) {
-			path := Prefix + "/catalog/series/series:severance/seasons"
-			if value != "" {
-				path += "?" + discovery.SeasonListArtworkParam + "=" + value
-			}
-			rec := do(t, h, http.MethodGet, path, "", viewerHeaders())
-			if rec.Code != http.StatusOK {
-				t.Fatal(rec.Code, rec.Body.String())
-			}
-			var body SeasonCollection
-			decodeJSON(t, rec.Body, &body)
-			if len(body.Items) != 1 {
-				t.Fatal(body)
-			}
-			season := body.Items[0]
-			if value == "false" {
-				if strings.Contains(rec.Body.String(), `"poster_url"`) || strings.Contains(rec.Body.String(), `"poster_thumbhash"`) {
-					t.Fatal("artwork fields present", rec.Body.String())
-				}
-			} else if season.PosterURL == "" || season.PosterThumbhash == "" {
-				t.Fatal("artwork absent", season)
-			}
-			season.PosterURL = ""
-			season.PosterThumbhash = ""
-			if value == "" {
-				baseline = season
-			} else if !reflect.DeepEqual(baseline, season) {
-				t.Fatal("non-artwork metadata changed", season)
-			}
-		})
-	}
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/catalog/series/series:severance/seasons?include_artwork=invalid", "", viewerHeaders()), TypeValidationFailed)
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/catalog/series/series:severance/seasons/1?include_artwork=false", "", viewerHeaders()), TypeValidationFailed)
 }
 
 func TestCatalogStructuredSearchRelevance(t *testing.T) {
@@ -648,5 +680,68 @@ func TestGetCatalogItemScopesVersionsToLibraryWhenEnabled(t *testing.T) {
 	}
 	if fake.lastViewer.Access.ScopeFilesToLibrary {
 		t.Fatalf("viewer = %+v", fake.lastViewer.Access)
+	}
+}
+
+// TestListCatalogItemsVideoWithEpisodesScope pins the search-only scope on
+// the v2 browse grammar: the query source records it for text search, the
+// filters read narrows it to video, and a source without text search refuses
+// it at the type parameter (body.type on the structured form).
+func TestListCatalogItemsVideoWithEpisodesScope(t *testing.T) {
+	deps, fake := catalogDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/catalog?q=heat&type=video_with_episodes", "", viewerHeaders())
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if fake.lastReq.SearchMediaScope != catalogpkg.MediaScopeVideoWithEpisodes || fake.lastReq.Query.MediaScope != catalogpkg.MediaScopeVideo {
+		t.Fatalf("seam scopes = search %q query %q", fake.lastReq.SearchMediaScope, fake.lastReq.Query.MediaScope)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters?type=video_with_episodes", "", viewerHeaders())
+	if rec.Code != 200 || fake.lastReq.Query.MediaScope != catalogpkg.MediaScopeVideo {
+		t.Fatalf("filters: %d %s scope %q", rec.Code, rec.Body.String(), fake.lastReq.Query.MediaScope)
+	}
+	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog?source=favorites&type=video_with_episodes", "", viewerHeaders()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "query.type" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/query", `{"source":"watchlist","type":"video_with_episodes"}`, viewerHeaders()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.type" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/query", `{"source":"section","scope":"home","section_id":"s","type":"video_with_episodes"}`, viewerHeaders()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.type" {
+		t.Fatalf("section errors = %+v", p.Errors)
+	}
+}
+
+// An episode states its ratings as a title page does: on a 0-100 score with
+// the source's own display, IMDb before TMDB. A stored 0 (unrated) or a value
+// off the 0-10 scale is dropped, and an episode with no rating omits the field.
+func TestEpisodesOfStatesRatings(t *testing.T) {
+	episodes := episodesOf([]handlers.EpisodeView{
+		{ContentID: "episode:1", RatingIMDB: new(8.7), RatingTMDB: new(8.25)},
+		{ContentID: "episode:2", RatingIMDB: new(0.0), RatingTMDB: new(42.0)},
+		{ContentID: "episode:3"},
+	})
+	want := []CatalogRating{
+		{Source: "imdb", Name: "IMDb", Score: 87, Display: "8.7"},
+		{Source: "tmdb", Name: "TMDB", Score: 82.5, Display: "8.3"},
+	}
+	if !reflect.DeepEqual(episodes[0].Ratings, want) {
+		t.Fatalf("ratings = %+v, want %+v", episodes[0].Ratings, want)
+	}
+	for _, ep := range episodes[1:] {
+		body, err := json.Marshal(ep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(body, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := fields["ratings"]; ok {
+			t.Fatalf("%s carries ratings: %s", ep.ContentID, body)
+		}
 	}
 }

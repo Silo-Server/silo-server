@@ -56,6 +56,10 @@ func pluginConfigurationHandler(f *fakePluginConfiguration) (http.Handler, Depen
 // The seam's typed errors map to one problem each on every mutation, and
 // no refusal reaches the seam.
 func TestAdminPluginMutationRefusals(t *testing.T) {
+	f := &fakePluginConfiguration{probeSuccess: true}
+	h, deps := pluginConfigurationHandler(f)
+	deps.AdminPluginConfiguration = nil
+	missing := NewHandler(deps)
 	for _, tc := range []struct{ name, method, path, body string }{
 		{"config", "PUT", "/config", `{"key":"account","value":{"region":"us"}}`},
 		{"probe", "POST", "/config/test", `{"key":"account","value":{}}`},
@@ -63,8 +67,7 @@ func TestAdminPluginMutationRefusals(t *testing.T) {
 		{"task", "PUT", "/task-bindings/sync", `{"enabled":true,"trigger":{"type":"startup"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakePluginConfiguration{probeSuccess: true}
-			h, deps := pluginConfigurationHandler(f)
+			*f = fakePluginConfiguration{probeSuccess: true}
 			path := Prefix + "/admin/plugins/installations/7" + tc.path
 			requireProblem(t, do(t, h, tc.method, path, tc.body, nil), TypeAuthenticationRequired)
 			requireProblem(t, do(t, h, tc.method, path, tc.body, bearer(memberToken)), TypePermissionDenied)
@@ -85,8 +88,7 @@ func TestAdminPluginMutationRefusals(t *testing.T) {
 			}
 			f.err = &handlers.APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Plugin service not configured"}
 			requireProblem(t, do(t, h, tc.method, path, tc.body, bearer(adminToken)), TypeDependencyUnavailable)
-			deps.AdminPluginConfiguration = nil
-			requireProblem(t, do(t, NewHandler(deps), tc.method, path, tc.body, bearer(adminToken)), TypeDependencyUnavailable)
+			requireProblem(t, do(t, missing, tc.method, path, tc.body, bearer(adminToken)), TypeDependencyUnavailable)
 		})
 	}
 }
@@ -127,7 +129,7 @@ func TestAdminPluginBindingWrites(t *testing.T) {
 	h, _ := pluginConfigurationHandler(f)
 	base := Prefix + "/admin/plugins/installations/7/"
 	rec := do(t, h, "PUT", base+"auth-binding", `{"capability_id":"oidc","enabled":true,"display_order":3,"auto_provision":true,"default_login":false}`, actingRequestAdmin)
-	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || rec.Header().Get("X-Silo-Restart-Required") != "true" || f.lastID != 7 || f.lastAuth != (handlers.PluginAuthBindingInput{CapabilityID: "oidc", Enabled: true, DisplayOrder: 3, AutoProvision: true, DefaultLogin: false}) {
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || rec.Header().Get("X-Silo-Restart-Required") != "false" || f.lastID != 7 || f.lastAuth != (handlers.PluginAuthBindingInput{CapabilityID: "oidc", Enabled: true, DisplayOrder: 3, AutoProvision: true, DefaultLogin: false}) {
 		t.Fatal(rec.Code, rec.Header(), f.lastAuth)
 	}
 	requireProblem(t, do(t, h, "PUT", base+"auth-binding", `{"capability_id":" ","enabled":true,"display_order":0,"auto_provision":false,"default_login":false}`, actingRequestAdmin), TypeValidationFailed)
@@ -138,6 +140,17 @@ func TestAdminPluginBindingWrites(t *testing.T) {
 	if f.lastAuth != before || f.calls != 2 {
 		t.Fatal(f.lastAuth, f.calls)
 	}
+	// Account creation is on unless the operator turns it off.
+	if rec := do(t, h, "PUT", base+"auth-binding", `{"capability_id":"oidc","enabled":true,"display_order":3,"default_login":false}`, actingRequestAdmin); rec.Code != http.StatusNoContent || !f.lastAuth.AutoProvision {
+		t.Fatal(rec.Code, f.lastAuth)
+	}
+	if rec := do(t, h, "PUT", base+"auth-binding", `{"capability_id":"oidc","enabled":true,"display_order":3,"auto_provision":false,"default_login":false}`, actingRequestAdmin); rec.Code != http.StatusNoContent || f.lastAuth.AutoProvision {
+		t.Fatal(rec.Code, f.lastAuth)
+	}
+	// A second enabled sign-in provider is refused.
+	f.err = plugins.ErrAuthProviderAlreadyEnabled
+	requireProblem(t, do(t, h, "PUT", base+"auth-binding", `{"capability_id":"ldap","enabled":true,"display_order":0,"default_login":false}`, actingRequestAdmin), TypeProviderAlreadyEnabled)
+	f.err = nil
 	f.calls = 0
 	rec = do(t, h, "PUT", base+"task-bindings/sync", `{"enabled":false,"trigger":{"type":"cron","expression":"0 * * * *"}}`, actingRequestAdmin)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"restart_required":true`) || f.lastTaskCap != "sync" || f.lastTask.Enabled || f.lastTask.Trigger["expression"] != "0 * * * *" {

@@ -5,11 +5,18 @@ retain the demo write guard. Scoped API keys retain their existing account and
 access-group grants; they cannot impersonate accounts. A household primary
 profile is not a server administrator.
 
+An `admin:users` key cannot create or promote an administrator, or set an
+administrator account's password, recovery email (`email`), role, or break-glass
+flag. These writes return 403 (`insufficient_scope` in v1, `permission_denied`
+in v2), including on the key owner's own account. Email is a recovery credential
+because a reset link permits a full login session. Other account fields remain
+subject to the Owner rules, and ordinary accounts remain editable within the scope.
+
 `GET /api/v2/admin/users/capabilities` reports account management, guarded
 configuration, transactional default-profile creation, and access-group support.
 It also reports the account projections below that depend on optional services:
 `account_devices`, `watch_summary`, `account_downloads` (the downloads list, summary
-and series monitors) and `request_usage`. A read whose flag is false answers 503.
+and series monitors), `request_usage` and `profile_sections` (profile page layouts). A read whose flag is false answers 503.
 Unsupported services return a capability or dependency Problem Details response.
 The existing paginated account list remains at `GET /api/v2/admin/users`.
 
@@ -31,10 +38,13 @@ Audiobookshelf-compatible sessions, approved device sign-ins not yet collected,
 and its Jellyfin-compatible sessions) only when it sets a password or changes
 `enabled`. Access-group, permission and playback-quality changes keep the
 account signed in: they advance `access_policy_revision`, each request resolves
-the current policy, connected events sockets receive `access_changed` (see
-[realtime-api.md](realtime-api.md#access-changes)), and PIN-protected profiles
-must enter their PIN again. Library, stream-limit and download overrides never
-signed the account out and still do not.
+the current policy, and connected events sockets receive `access_changed` (see
+[realtime-api.md](realtime-api.md#access-changes)). Profile verification tokens
+stay valid: they are bound to each profile's own PIN, not to the account's
+policy (see
+[profile-verification-tokens.md](architecture/profile-verification-tokens.md)).
+Library, stream-limit and download overrides never signed the account out and
+still do not.
 
 A role change also keeps the account signed in, but admin checks trust the role
 in the access token, so the token must be replaced. Every request that presents
@@ -62,6 +72,21 @@ value; `0` explicitly allows unlimited bitrate. Both access-group fields
 default to `0`. Values are nonnegative integers in kbps. A policy edit changes
 new playback sessions, not streams already playing.
 
+`max_profiles` is the household profile limit and is a nullable account override
+as well. `null` inherits the access group's `max_profiles`, and a value of at least
+1 replaces it. An administrator or an account outside every group inherits 5, and
+an access group created without a value gets 5. `effective_policy.max_profiles` is
+the limit that profile creation enforces: an account at its limit gets
+`409 profile_limit_reached`, and profiles it already has above a lowered limit are
+kept. The bridge v1 body has no inherit state for this field, so its
+`max_profiles` reports the limit that applies. A v1 update stores an override,
+except that sending back the inherited limit an account reported leaves it
+inheriting, and an explicit `null` clears an override back to inherit, as with
+the other policy fields. The group's own limit is v2-only: the v1
+access-group body carries no `max_profiles`, so a group limit is set and read
+through the v2 access-group operations. `GET /api/v2/admin/users/capabilities` reports `profile_limits: true`
+when access groups and account overrides take `max_profiles`.
+
 `POST /api/v2/admin/users` returns 201 with `{ "id": "..." }` and `Location`.
 Default-profile creation, when requested, uses the existing transactional
 provisioner. Unsupported transactional profile storage fails before account
@@ -79,21 +104,58 @@ requires starting a new listing. Account capabilities advertise
 An identity lookup does not reserve an identity or authorize a change. Conditional
 account updates and database uniqueness remain authoritative at write time.
 
+## Policy defaults
+
+An account's unset policy field takes its access group's value. Admin accounts
+never belong to a group: their unset fields resolve to full access, the access
+the Owner has, and an override on an admin account still restricts it. A
+regular account with no group uses the built-in no-group values, which match
+full access except that server-prepared downloads
+(`download_transcode_allowed`) are off.
+
+`GET /api/v2/admin/users/policy-defaults` returns both layers, `admin` and
+`ungrouped`, in the shape of `effective_policy` without `permissions`, so
+clients show where a default comes from without keeping their own copy. The
+values come from the server build. Account capabilities advertise
+`policy_defaults`. Existing `admin:users` keys may use this read.
+
+## Library lists
+
+An account's or access group's `library_ids` is `null` for every library and an
+array for exactly the listed ones, so `[]` allows none. Create and update return
+`422 validation_failed` at `body.library_ids` when the array names a library that
+does not exist; a guarded update checks its precondition first. Whichever API
+writes these lists, and the [invitation](invitations-api.md) lists too, the
+database keeps only libraries that exist, and a write racing a library delete
+waits for it as it would behind a foreign key.
+
+Deleting a library removes its ID from every account, access group and
+invitation in the same transaction. A list left with no IDs stays `[]` and never
+widens to `null`. The edited accounts and groups get new revisions, so an editor
+holding the old ETag gets 412 instead of writing the deleted library back.
+
 ## Passwords
 
 Account editor and list rows carry `password_login` and `password_change_required`.
-`password_login` is false when an external authentication provider manages the
-account's sign-in. Password actions do not apply to such an account, and clients
-hide them. `password_change_required` is true while the account holds a temporary
-password.
+`password_login` is true while the account can sign in with a local password: local
+password sign-in is on for it and it has a password. Linking an external sign-in
+identity turns it off unless the account is break-glass. Setting a password on
+update turns local password sign-in back on, so `password_login` is true afterwards;
+this is how an administrator recovers an account whose provider is gone, and
+clients keep the set-password action for accounts where it is false. Only the server
+Owner may set the password of its own account while `password_login` is false for it
+(403 `permission_denied`; v1 answers `owner_protected`), so an admin cannot turn its own password sign-in back on and
+keep its role through provider demotion. A password
+reset link needs `password_login` (see below). `password_change_required` is true
+while the account holds a temporary password.
 
 Create and update accept `require_password_change` to make the password in the same
 request temporary. At its next sign-in the account must choose a new password before
 its session can do anything else (see
 [temporary passwords](auth-api.md#temporary-passwords)). The flag is only valid
 alongside `password`; sending it alone returns `422 validation_failed` at
-`body.require_password_change`. An account without local password sign-in cannot
-hold a temporary password; updating one with the flag returns `409 conflict`. A
+`body.require_password_change`. Because the password write turns local password
+sign-in on, the flag also works for an account that had it off. A
 password sent without the flag is not temporary and clears a pending change. Setting a password still revokes the account's login
 sessions.
 
@@ -114,13 +176,15 @@ instead. `link` returns the URL for the administrator to share with the account
 holder. The URL is a bearer credential for the account's password until it expires.
 
 An account holds at most one live link: issuing a new one replaces the old. The link
-works once. Any other password change also retires it. The public side of the flow
+works once. Changing the password or recovery email also retires it; changing only
+the email's letter case preserves it. The public side of the flow
 is described in [password reset links](auth-api.md#password-reset-links).
 
 | Condition | Result |
 |-----------|--------|
 | No such account | `404 not_found` |
-| External provider manages sign-in, account disabled, or no email address for `email` | `409 conflict` |
+| Account without local password sign-in (`password_login` false), account disabled, or no email address for `email` | `409 conflict` |
+| Recovery email or account eligibility changed while issuing the link | `409 conflict`; reload the account before trying again |
 | Email not configured for `email` | `409 capability_not_configured` |
 | No server public URL (`server.public_url`) | `409 capability_not_configured` |
 
@@ -150,6 +214,10 @@ they:
 - create an administrator, promote an account to administrator, or invite one;
 - update, delete, or issue a password reset for another administrator or the
   Owner;
+- change an access-policy override on their own account (libraries, playback
+  quality, stream, transcode and bitrate limits, the transcode, download and
+  request switches). An update that re-sends the stored values is not a change;
+  other fields of their own account stay editable;
 - create an API key for another administrator or the Owner, or change or revoke
   one of their keys.
 
@@ -257,6 +325,36 @@ request service resolves it: `requests_enabled` (the server switch), `allowed`
 (false when the account's switch, group or approval mode blocks it), `unlimited`,
 `used`, `max_requests`, `window_days`, `window_start`, `remaining` and
 `auto_approve`. An unlimited account is not counted, so `used` is 0.
+
+### Profile page layouts
+
+An administrator can read and correct one profile's home or library page layout
+without impersonating the account. The routes take the same `scope` and
+`library_id` query and the same shapes as the profile's own `/api/v2/profile/sections`
+routes, so a client reuses its types and editor:
+
+| Route below `/api/v2/admin/users/{id}/profiles/{profile_id}` | Response |
+| --- | --- |
+| `GET /sections` | The profile's saved overrides (`listAdminUserProfileSectionOverrides`), as `listProfileSectionOverrides` |
+| `GET /sections/settings` | The page as the profile's layout orders it (`getAdminUserProfileSectionSettings`), as `getProfileSectionSettings` |
+| `PUT /sections` | Replaces the override set (`replaceAdminUserProfileSectionOverrides`); 204 |
+| `DELETE /sections` | Deletes the override set, so the profile follows the admin layout again (`resetAdminUserProfileSectionOverrides`); 204 |
+
+A profile that is not one of the account's answers 404, as does an unknown account
+or, for a library page, a library that does not exist or is disabled. The
+administrator's own library access does not limit which library pages they can address.
+Each write acts on that one profile; other profiles on the account and on the
+server keep their layouts. `PUT` runs the profile route's validation and recipe
+gate with the account's own role, not the administrator's: the profile re-saves
+its whole set on every change, so a section it could not save itself would make
+its later saves fail. The settings read applies no library-access
+filter: it lists every section the layout orders, including ones the account cannot
+currently see, so a full-replacement save keeps their positions.
+
+A write or reset for a profile other than the caller's acting profile logs the
+same structured audit record as an administrator's setting write (`settings changed
+for another profile`, identity only), with `setting_key` `profile_sections`, `scope`
+set to the page scope, and `library_id` for a library page. Account capabilities advertise `profile_sections`.
 
 ### Account downloads
 

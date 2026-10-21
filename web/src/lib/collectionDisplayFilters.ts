@@ -31,26 +31,6 @@ export function collectionMediaFilterLabel(value: UserCollectionMediaFilter): st
   return COLLECTION_MEDIA_FILTER_OPTIONS.find((option) => option.value === value)?.label ?? "All";
 }
 
-export function collectionWatchFilterOptionsFromPresets(
-  presets: readonly UserCollectionWatchFilter[] | undefined,
-): typeof COLLECTION_WATCH_FILTER_OPTIONS {
-  if (!presets) {
-    return COLLECTION_WATCH_FILTER_OPTIONS;
-  }
-  const allowed = new Set<UserCollectionWatchFilter>(presets);
-  return COLLECTION_WATCH_FILTER_OPTIONS.filter((option) => allowed.has(option.value));
-}
-
-export function collectionMediaFilterOptionsFromPresets(
-  presets: readonly UserCollectionMediaFilter[] | undefined,
-): typeof COLLECTION_MEDIA_FILTER_OPTIONS {
-  if (!presets) {
-    return COLLECTION_MEDIA_FILTER_OPTIONS;
-  }
-  const allowed = new Set<UserCollectionMediaFilter>(presets);
-  return COLLECTION_MEDIA_FILTER_OPTIONS.filter((option) => allowed.has(option.value));
-}
-
 // The display filters are persisted as a filter-only QueryDefinition fragment:
 // a single AND group holding the watched / type rules. It intentionally omits
 // library_ids / media_scope / sort / limit (those are owned elsewhere), so the

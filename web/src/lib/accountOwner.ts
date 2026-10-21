@@ -1,8 +1,9 @@
 import type { AdminUser } from "@/api/types";
 
 // The server Owner is the account that set up the server, or the one ownership
-// was last transferred to. Only the Owner may grant the admin role or change,
-// reset, or delete another admin; nobody else may change the Owner's account,
+// was last transferred to. Only the Owner may grant the admin role, change an
+// admin's access policy, or change, reset, or delete another admin; nobody
+// else may change the Owner's account,
 // the Owner itself cannot be deleted, and only the Owner may view as another
 // admin. The server enforces all of this; these helpers only keep the admin UI
 // from offering refused actions.
@@ -16,6 +17,21 @@ export function canManageAccount(
   if (target.id === viewerId) return true;
   if (target.is_owner) return false;
   return target.role !== "admin" || viewerIsOwner;
+}
+
+/**
+ * Whether the viewer may change the target's access policy: libraries,
+ * playback limits, downloads and requests. Only the Owner changes an admin's,
+ * including an admin's own.
+ */
+export function canChangeAccessPolicy(
+  target: AdminUser,
+  viewerId: number | undefined,
+  viewerIsOwner: boolean,
+): boolean {
+  return (
+    canManageAccount(target, viewerId, viewerIsOwner) && (target.role !== "admin" || viewerIsOwner)
+  );
 }
 
 /** Whether the viewer may make the target account the server Owner. */

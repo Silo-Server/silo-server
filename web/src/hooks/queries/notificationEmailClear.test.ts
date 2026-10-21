@@ -68,27 +68,6 @@ it("updates only the captured email preferences cache and rejects a stale receip
   client.clear();
 });
 
-it("does not replay address clear on authentication or service failure", async () => {
-  const client = new QueryClient();
-  const { result } = renderHook(() => useClearEmailNotificationAddress(), {
-    wrapper: ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client }, children),
-  });
-  for (const status of [401, 403, 500]) {
-    const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
-    vi.stubGlobal("fetch", fetch);
-    await act(async () => {
-      await expect(result.current.mutateAsync()).rejects.toThrow();
-    });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(String(fetch.mock.calls[0]![0])).toContain(
-      "/api/v2/notifications/email-preferences/address",
-    );
-    expect(fetch.mock.calls[0]![1].method).toBe("DELETE");
-  }
-  client.clear();
-});
-
 it.each(["mutate", "mutateAsync"] as const)(
   "keeps %s authority immutable across offline pause and replacement",
   async (method) => {

@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
+import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useItemEpisodes, useSeasons } from "@/hooks/queries/episodes";
+import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -11,7 +13,7 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useMissingSeasonsRequestable } from "@/hooks/useCanRequest";
 import { RequestSeasonsDialog } from "@/components/RequestSeasonsDialog";
 import CastCarousel from "@/components/CastCarousel";
-import CrewList from "@/components/CrewList";
+import { buildCrewGroups } from "@/components/castCrewGroups";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import SplitItemDialog from "@/components/SplitItemDialog";
@@ -33,6 +35,11 @@ import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { hasMachineTranslation } from "./components/machineTranslation";
+import EpisodesTranslationAction from "./components/EpisodesTranslationAction";
+
+/** Series lead with their creators; one without Creator credits keeps showing its directors. */
+const SERIES_LEAD_JOBS = ["Creator", "Director"] as const;
 
 export default function SeriesContent({
   item,
@@ -44,9 +51,18 @@ export default function SeriesContent({
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
+  const { startShuffle } = useStartShuffle();
+  const { search } = useLocation();
+  // Follow the item to its new content ID, keeping the query string (such as
+  // ?libraryId=) so the page keeps its library scope.
+  const followReplacedItem = (contentID: string) =>
+    navigate({ pathname: `/item/${contentID}`, search }, { replace: true });
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = useIsActingAdmin();
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const { profile: currentProfile } = useCurrentProfile();
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
 
@@ -61,6 +77,7 @@ export default function SeriesContent({
   const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(item.content_id);
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
   const seasons = useMemo(() => seasonsData?.seasons ?? [], [seasonsData?.seasons]);
+  const crewGroups = useMemo(() => buildCrewGroups(item.crew ?? [], "Creator"), [item.crew]);
 
   const title = item.title ?? "";
   const firstYear = item.first_air_date?.slice(0, 4);
@@ -77,6 +94,21 @@ export default function SeriesContent({
 
   const primaryAction = resolveSeriesPrimaryAction(item);
   const singleSeasonEpisodesQuery = useItemEpisodes(singleSeason?.content_id);
+  // A single-season show lists its episodes here rather than on a season
+  // page, so this page starts the season's on-view translation (the season
+  // job covers its episodes) when an episode reports a missing description.
+  const singleSeasonPendingLanguage = singleSeasonEpisodesQuery.data?.episodes.find(
+    (episode) => episode.pending_translation_language,
+  )?.pending_translation_language;
+  const { translating: episodesTranslating, onTranslate: onTranslateEpisodes } =
+    useOnViewTranslation(
+      singleSeason
+        ? {
+            content_id: singleSeason.content_id,
+            pending_translation_language: singleSeasonPendingLanguage,
+          }
+        : undefined,
+    );
   const singleSeasonEpisodeLinkState = singleSeason
     ? {
         parentSeasonHref: `/item/${singleSeason.content_id}`,
@@ -139,8 +171,18 @@ export default function SeriesContent({
             overview={item.overview}
             overviewTranslating={overviewTranslating}
             onTranslateOverview={onTranslateOverview}
+            overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
+            taglineMachineTranslated={hasMachineTranslation(
+              item.machine_translated_fields,
+              "tagline",
+            )}
             crewLine={
-              <HeroCrewLine crew={item.crew ?? []} genres={item.genres} jobLabel="Created by" />
+              <HeroCrewLine
+                crew={item.crew ?? []}
+                genres={item.genres}
+                jobLabel="Created by"
+                leadJobs={SERIES_LEAD_JOBS}
+              />
             }
             actions={
               <MediaUserActionBar
@@ -156,18 +198,23 @@ export default function SeriesContent({
                         refreshMetadataMutation.mutate({
                           item,
                           mode,
-                          onReplaced: (contentID) =>
-                            navigate(`/item/${contentID}`, { replace: true }),
+                          onReplaced: followReplacedItem,
                         })
                     : undefined
                 }
                 isRefreshing={refreshMetadataMutation.isPending}
                 isAdmin={isAdmin}
+                canManageTrickplay={canManageTrickplay}
                 canCurateMetadata={canCurateMetadata}
                 onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
                 onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
                 onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
                 onRequestSeasons={canRequestSeasons ? () => setRequestSeasonsOpen(true) : undefined}
+                onShuffle={
+                  episodeCount > 1
+                    ? () => startShuffle({ kind: "series", id: item.content_id })
+                    : undefined
+                }
               />
             }
           />
@@ -195,9 +242,15 @@ export default function SeriesContent({
                 <section>
                   <div className="mb-5 flex items-center justify-between gap-3">
                     <h2 className="text-xl font-semibold tracking-tight">Episodes</h2>
-                    <span className="text-muted-foreground text-sm">
-                      {singleSeason.episode_count} total
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <EpisodesTranslationAction
+                        translating={episodesTranslating}
+                        onTranslate={onTranslateEpisodes}
+                      />
+                      <span className="text-muted-foreground text-sm">
+                        {singleSeason.episode_count} total
+                      </span>
+                    </div>
                   </div>
                   <SeasonEpisodeGrid
                     episodes={singleSeasonEpisodesQuery.data?.episodes ?? []}
@@ -223,6 +276,7 @@ export default function SeriesContent({
               item={item}
               open={matchOpen}
               onOpenChange={setMatchOpen}
+              onReplaced={followReplacedItem}
             />
           )}
           {canCurateMetadata && (
@@ -237,16 +291,16 @@ export default function SeriesContent({
         </>
       }
     >
-      {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
-
+      {/* Local extras play in Silo, so they lead; YouTube videos follow. */}
       {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
 
-      {item.cast && item.cast.length > 0 && (
-        <DetailSection title="Cast">
-          <CastCarousel cast={item.cast} prefetchPeople />
+      {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
+
+      {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
+        <DetailSection title="Cast & Crew">
+          <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
         </DetailSection>
       )}
-      {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} />}
 
       {similarLoading ? (
         <RecommendationGridSkeleton />

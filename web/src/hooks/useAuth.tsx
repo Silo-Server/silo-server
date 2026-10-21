@@ -1,11 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { endSessionWithProvider } from "@/api/v2/providerLogout";
+import { clearSignedOut, markSignedOut, markSessionEnded } from "@/lib/externalSignIn";
 import type { ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ApiClientError,
   bootstrapAccessToken,
   captureSessionIdentity,
   getAccessToken,
   isSessionIdentityCurrent,
+  lastRefreshFailureWasProviderOutage,
+  lastRefreshFailureWasTransient,
   onProfileUnverified,
   onRoleChanged,
   onSessionRejected,
@@ -16,12 +21,15 @@ import {
   setRefreshToken,
   type SessionIdentitySnapshot,
 } from "@/api/client";
-import { storage } from "@/utils/storage";
+import { endProfileEpoch, storage } from "@/utils/storage";
+import { isProfileLaunchPending } from "@/lib/profileLaunch";
 import type { LoginResponse, Profile, User } from "@/api/types";
 import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
 import { listProfiles, verifyProfilePIN, type ProfileVerification } from "@/hooks/queries/profiles";
 import { restoreUserSession, sessionFromTokenPair, userFromAccount } from "@/api/v2/account";
 import { queryClient } from "@/lib/query-client";
+import { authProviderQueryOptions } from "@/hooks/queries/authProviders";
+import { homeLayoutQueryOptions } from "@/hooks/queries/sections";
 import {
   clearStoredImpersonationAdminSession,
   loadStoredImpersonationAdminSession,
@@ -45,6 +53,21 @@ interface AuthState {
   /** Re-reads the public setup status, e.g. after the wizard records completion. */
   refreshSetupStatus: () => Promise<void>;
   providers: AuthProviderOption[];
+  /** Re-reads the server's current sign-in providers and local-password policy. */
+  refreshSignInProviders: () => Promise<void>;
+  /**
+   * The stored session could not be restored because the server or its
+   * sign-in provider could not be reached (not because it was refused). The
+   * session is kept; retrySessionRestore tries again.
+   */
+  sessionRestoreUnavailable: boolean;
+  /**
+   * With sessionRestoreUnavailable: the server answered 503
+   * provider_unavailable, so it is the sign-in provider that could not be
+   * reached rather than the server.
+   */
+  sessionRestoreProviderUnavailable: boolean;
+  retrySessionRestore: () => void;
   isImpersonating: boolean;
   /** Resolves with the signed-in account; a temporary password confines it to changing the password. */
   login: (username: string, password: string, provider?: string) => Promise<User>;
@@ -57,13 +80,31 @@ interface AuthState {
   signup: (username: string, email: string, password: string, inviteCode: string) => Promise<void>;
   beginImpersonation: (data: LoginResponse, returnPath: string) => void;
   endImpersonation: () => Promise<void>;
+  /** Signs out of Silo and, when the sign-in provider offers it, out of the provider too. */
   logout: () => void;
+  /**
+   * Signs out of Silo only, leaving the sign-in provider's own session open,
+   * for "Not you? Switch account" before signing in as someone else.
+   */
+  logoutOfSiloOnly: () => void;
+  clearLoginSession: () => void;
   selectProfile: (profile: Profile, profileToken?: string) => void;
   verifyProfilePin: (profileId: string, pin: string) => Promise<ProfileVerification>;
   clearProfile: () => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
+
+/**
+ * Start loading Home as soon as the session token is back, alongside the
+ * account read instead of after it. Home's requests only need the token and
+ * the stored profile, and on HTTP/1.1 a request that starts early also gets a
+ * connection ahead of the shell's own startup reads.
+ */
+function prefetchStartupHome() {
+  if (window.location.pathname !== "/" || !storage.get(storage.KEYS.PROFILE_ID)) return;
+  void queryClient.prefetchQuery(homeLayoutQueryOptions(queryClient));
+}
 
 export function getBootstrapProfile(profiles: Profile[]): Profile | null {
   if (profiles.length !== 1) {
@@ -96,6 +137,17 @@ function isRecoverableImpersonationAuthError(error: unknown): boolean {
   return error.status === 400 && error.code === "not_impersonating";
 }
 
+/**
+ * Whether a failed account read is the server refusing the session (a 4xx
+ * answer) rather than failing to answer at all (a network error, a timeout,
+ * a 5xx, a gateway page). Only a refusal may end a stored session.
+ */
+function isSessionRefusal(error: unknown): boolean {
+  const status =
+    error instanceof V2ProblemError || error instanceof ApiClientError ? error.status : null;
+  return status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
 export async function initializeAuthSession<TUser>({
   refreshToken,
   hasStoredImpersonationAdminSession,
@@ -106,16 +158,24 @@ export async function initializeAuthSession<TUser>({
   recoverPreservedAdminSession,
   clearTokens,
   clearActiveAuthState,
+  markRestoreUnavailable = () => {},
 }: {
   refreshToken: string | null;
   hasStoredImpersonationAdminSession: boolean;
-  bootstrapAccessToken: () => Promise<boolean>;
+  /**
+   * Exchanges the stored refresh token: true when restored, false when the
+   * server refused the session, "unavailable" when it could not answer
+   * (5xx, such as 503 provider_unavailable, or no network).
+   */
+  bootstrapAccessToken: () => Promise<boolean | "unavailable">;
   fetchCurrentUser: () => Promise<TUser>;
   applyCurrentUser: (user: TUser) => void;
   restoreProfile: () => void;
   recoverPreservedAdminSession: () => Promise<boolean>;
   clearTokens: () => void;
   clearActiveAuthState: () => void;
+  /** Keeps the stored session for a retry after an outage. */
+  markRestoreUnavailable?: () => void;
 }): Promise<void> {
   if (!refreshToken) {
     try {
@@ -130,6 +190,12 @@ export async function initializeAuthSession<TUser>({
   }
 
   const bootstrapped = await bootstrapAccessToken();
+  if (bootstrapped === "unavailable") {
+    // The server said nothing about the session (a fail_closed provider
+    // outage keeps it valid), so the refresh token stays for a retry.
+    markRestoreUnavailable();
+    return;
+  }
   if (!bootstrapped) {
     if (hasStoredImpersonationAdminSession) {
       try {
@@ -153,6 +219,12 @@ export async function initializeAuthSession<TUser>({
     applyCurrentUser(currentUser);
     restoreProfile();
   } catch (error) {
+    if (!isSessionRefusal(error)) {
+      // The session was restored; only reading the account failed (a
+      // timeout, the network, a 5xx). Keep it for a retry.
+      markRestoreUnavailable();
+      return;
+    }
     if (hasStoredImpersonationAdminSession && isRecoverableImpersonationAuthError(error)) {
       try {
         const recovered = await recoverPreservedAdminSession();
@@ -224,7 +296,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [setupLoading, setSetupLoading] = useState(true);
   const [setupRequired, setSetupRequired] = useState(false);
   const [setupCompleted, setSetupCompleted] = useState(false);
-  const [providers, setProviders] = useState<AuthProviderOption[]>([]);
+  // Public discovery is fetched explicitly at boot and when a sign-in surface
+  // needs it. Clearing account caches must not start another public read.
+  const providerQuery = useQuery({ ...authProviderQueryOptions(), enabled: false }, queryClient);
+  const providers = providerQuery.data?.items ?? [];
+  const refreshSignInProviders = useCallback(async () => {
+    try {
+      await queryClient.fetchQuery(authProviderQueryOptions());
+    } catch {
+      // Keep the last known discovery until the next visit or provider write.
+    }
+  }, []);
+  const [sessionRestoreUnavailable, setSessionRestoreUnavailable] = useState(false);
+  const [sessionRestoreProviderUnavailable, setSessionRestoreProviderUnavailable] = useState(false);
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
   const isImpersonating = Boolean(user?.impersonation?.active);
   const soleProfileBootstrapRef = useRef<string | null>(null);
   // The committed account, for the auth callbacks, which run after commit.
@@ -271,9 +356,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setAccessToken(data.access_token);
       setRefreshToken(data.refresh_token);
+      setSessionRestoreUnavailable(false);
+      clearSignedOut();
       if (!options.preserveStoredImpersonationAdminSession) {
         clearStoredImpersonationAdminSession();
       }
+      endProfileEpoch();
       clearProfile();
       setUser(data.user);
       setSetupRequired(false);
@@ -284,6 +372,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearActiveAuthState = useCallback(() => {
     setAccessToken(null);
     setRefreshToken(null);
+    setSessionRestoreUnavailable(false);
+    endProfileEpoch();
     clearProfile();
     queryClient.clear();
     setUser(null);
@@ -303,6 +393,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const restoredSession = await restoreUserSession(storedSession);
       // A sign-in that replaced the session during the exchange keeps it.
       if (!isCurrent()) return false;
+      endProfileEpoch();
       clearProfile();
       queryClient.clear();
       setAccessToken(restoredSession.accessToken);
@@ -372,13 +463,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const logout = useCallback(() => {
-    // Fire and forget the server logout
-    if (getAccessToken()) {
-      v2("POST /api/v2/auth/logout").catch(() => {});
-    }
+  const endSession = useCallback(
+    (withProvider: boolean) => {
+      // Fire and forget the server logout, and the sign-in provider's own
+      // logout when asked and it offers one; the bearer is captured before
+      // the state clears. The mark keeps /login from sending this tab
+      // straight back to the provider.
+      const accessToken = getAccessToken();
+      markSignedOut();
+      if (accessToken) {
+        void endSessionWithProvider(accessToken, undefined, { withProvider });
+      }
+      clearAuthState();
+      void refreshSignInProviders();
+    },
+    [clearAuthState, refreshSignInProviders],
+  );
+  // An administrator viewing as someone leaves the account's provider
+  // session alone: the server answers no provider sign-out for it anyway.
+  const logout = useCallback(() => endSession(!isImpersonating), [endSession, isImpersonating]);
+  const logoutOfSiloOnly = useCallback(() => endSession(false), [endSession]);
+  // A successful session revocation already ended the server session.
+  const clearLoginSession = useCallback(() => {
+    markSessionEnded("signed-out");
     clearAuthState();
-  }, [clearAuthState]);
+    void refreshSignInProviders();
+  }, [clearAuthState, refreshSignInProviders]);
 
   const verifyProfilePin = useCallback(
     async (profileId: string, pin: string): Promise<ProfileVerification> => {
@@ -433,7 +543,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           // The admin session is gone too; fall through to sign-in.
         }
-        if (isCurrent()) clearActiveAuthState();
+        if (isCurrent()) {
+          markSessionEnded("ended");
+          clearActiveAuthState();
+        }
       })().finally(() => {
         if (sessionRejectionRef.current?.handling === handling) sessionRejectionRef.current = null;
       });
@@ -450,9 +563,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Independent reads: a failed provider list must not blank the setup
         // status, or an admin visiting /setup during that outage would see
         // the finished wizard again.
-        const [status, availableProviders] = await Promise.allSettled([
+        const [status] = await Promise.allSettled([
           v2("GET /api/v2/system/setup"),
-          v2("GET /api/v2/auth/providers"),
+          queryClient.fetchQuery(authProviderQueryOptions()),
         ]);
         if (cancelled) {
           return;
@@ -464,9 +577,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSetupRequired(false);
           setSetupCompleted(false);
         }
-        setProviders(
-          availableProviders.status === "fulfilled" ? (availableProviders.value.items ?? []) : [],
-        );
       } finally {
         if (!cancelled) {
           setSetupLoading(false);
@@ -482,6 +592,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // session's tokens.
       let session = captureSessionIdentity();
       const superseded = () => cancelled || !isSessionIdentityCurrent(session);
+      let providerOutage = false;
       try {
         await initializeAuthSession({
           refreshToken: storage.get(storage.KEYS.REFRESH_TOKEN),
@@ -491,8 +602,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Installing the restored token starts the session the rest of
             // the restore answers for. The refresh single-flight already
             // discards an exchange that another sign-in overtook.
-            if (restored) session = captureSessionIdentity();
+            if (restored) {
+              session = captureSessionIdentity();
+              prefetchStartupHome();
+            }
+            if (!restored && lastRefreshFailureWasTransient()) {
+              providerOutage = lastRefreshFailureWasProviderOutage();
+              return "unavailable";
+            }
             return restored;
+          },
+          markRestoreUnavailable: () => {
+            if (superseded()) {
+              return;
+            }
+            setSessionRestoreUnavailable(true);
+            setSessionRestoreProviderUnavailable(providerOutage);
           },
           fetchCurrentUser: () => v2("GET /api/v2/account/me").then(userFromAccount),
           applyCurrentUser: (currentUser) => {
@@ -543,7 +668,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [clearActiveAuthState, recoverPreservedAdminSession, restoreProfile]);
+  }, [clearActiveAuthState, recoverPreservedAdminSession, restoreProfile, restoreAttempt]);
+
+  const retrySessionRestore = useCallback(() => {
+    setSessionRestoreUnavailable(false);
+    setLoading(true);
+    setRestoreAttempt((attempt) => attempt + 1);
+  }, []);
 
   useEffect(() => {
     if (!user) {
@@ -552,6 +683,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (profile || storage.get(storage.KEYS.PROFILE_ID)) {
+      return;
+    }
+    // Asked to show "Who's watching?" at launch: even a lone unlocked profile
+    // waits to be picked.
+    if (isProfileLaunchPending()) {
       return;
     }
 
@@ -675,6 +811,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setupCompleted,
         refreshSetupStatus,
         providers,
+        refreshSignInProviders,
+        sessionRestoreUnavailable,
+        sessionRestoreProviderUnavailable,
+        retrySessionRestore,
         isImpersonating,
         login,
         settleTemporaryPassword,
@@ -685,6 +825,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         beginImpersonation,
         endImpersonation,
         logout,
+        logoutOfSiloOnly,
+        clearLoginSession,
         selectProfile,
         verifyProfilePin,
         clearProfile,

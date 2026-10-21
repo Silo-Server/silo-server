@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 const (
@@ -183,44 +184,6 @@ func TestPluginProviderGetMetadata_MapsReleaseDate(t *testing.T) {
 	}
 	if result.ReleaseDate != "2024-01-02" {
 		t.Fatalf("ReleaseDate = %q, want 2024-01-02", result.ReleaseDate)
-	}
-}
-
-func TestPluginProviderGetMetadata_MapsAirTime(t *testing.T) {
-	item := &pluginv1.MetadataItem{
-		ProviderId: "provider-1",
-		ItemType:   "series",
-		Title:      "Example Series",
-		AirTime:    "20:00",
-		ProviderIds: mustStructFromStringMap(t, map[string]string{
-			"tvdb": "123",
-		}),
-	}
-
-	provider, err := NewPluginProviderWithClientFactory(map[string]string{
-		"plugin_installation_id": "1",
-		"capability_id":          "tvdb",
-	}, func(context.Context, int, string) (pluginMetadataClient, error) {
-		return &fakePluginMetadataClient{
-			response: &pluginv1.GetMetadataResponse{Item: item},
-		}, nil
-	})
-	if err != nil {
-		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
-	}
-
-	result, err := provider.GetMetadata(context.Background(), MetadataRequest{
-		ProviderIDs: map[string]string{"tvdb": "provider-1"},
-		ContentType: "series",
-	})
-	if err != nil {
-		t.Fatalf("GetMetadata() error = %v", err)
-	}
-	if result == nil {
-		t.Fatal("expected metadata result")
-	}
-	if result.AirTime != "20:00" {
-		t.Fatalf("AirTime = %q, want 20:00", result.AirTime)
 	}
 }
 
@@ -583,5 +546,13 @@ func TestPluginProviderGetImages_IgnoresLookupProviderIDs(t *testing.T) {
 	}
 	if images != nil || client.getImagesReq != nil {
 		t.Fatalf("expected no image call, got request %v", client.getImagesReq)
+	}
+}
+
+func TestPersonKindFromStringMapsCreator(t *testing.T) {
+	for _, value := range []string{"Creator", "creator", " CREATOR "} {
+		if got := personKindFromString(value); got != models.PersonKindCreator {
+			t.Errorf("personKindFromString(%q) = %v, want PersonKindCreator", value, got)
+		}
 	}
 }

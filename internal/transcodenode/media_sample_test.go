@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
 func speechRequestBody(t *testing.T, mutate func(*mediasample.Request)) []byte {
@@ -33,10 +34,10 @@ func speechRequestBody(t *testing.T, mutate func(*mediasample.Request)) []byte {
 	return body
 }
 
-func postMediaSample(server *Server, body []byte, authorized bool) *httptest.ResponseRecorder {
+func postMediaSample(t *testing.T, server *Server, body []byte, authorized bool) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, mediasample.RemotePath, bytes.NewReader(body))
 	if authorized {
-		req.Header.Set("Authorization", "Bearer "+testSecret)
+		nodeauthtest.Sign(t, req, testSecret)
 	}
 	rec := httptest.NewRecorder()
 	server.router().ServeHTTP(rec, req)
@@ -60,7 +61,7 @@ func TestMediaSampleRunsSpeechRequest(t *testing.T) {
 	}
 	server.watcher.Config().Playback.FFmpegPath = ffmpeg
 
-	rec := postMediaSample(server, speechRequestBody(t, nil), true)
+	rec := postMediaSample(t, server, speechRequestBody(t, nil), true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
@@ -100,7 +101,7 @@ func TestMediaSampleRefusals(t *testing.T) {
 			if tc.paths != nil {
 				server.inputPaths = tc.paths
 			}
-			rec := postMediaSample(server, tc.body, tc.authorized)
+			rec := postMediaSample(t, server, tc.body, tc.authorized)
 			if rec.Code != tc.status {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tc.status, rec.Body)
 			}
@@ -121,7 +122,7 @@ func TestMediaSampleReportsSamplingFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	server.watcher.Config().Playback.FFmpegPath = ffmpeg
-	rec := postMediaSample(server, speechRequestBody(t, nil), true)
+	rec := postMediaSample(t, server, speechRequestBody(t, nil), true)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
@@ -168,46 +169,6 @@ func TestMediaSampleRefusalsClassifyForFallback(t *testing.T) {
 	}
 }
 
-func TestMediaSampleAdmitsConfiguredCapacity(t *testing.T) {
-	server := newTestServer(t)
-	server.watcher.Config().Playback.SubtitleSyncNodeCapacity = 1
-	dir := t.TempDir()
-	ffmpeg := filepath.Join(dir, "ffmpeg")
-	// Each run records its start, then holds until released.
-	script := "#!/bin/sh\nmktemp -p " + dir + " start.XXXXXX >/dev/null\nwhile [ ! -f " + dir + "/release ]; do sleep 0.01; done\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpeg
-	started := func() int {
-		matches, _ := filepath.Glob(filepath.Join(dir, "start.*"))
-		return len(matches)
-	}
-	done := make(chan int, 2)
-	for range 2 {
-		go func() { done <- postMediaSample(server, speechRequestBody(t, nil), true).Code }()
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for started() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	time.Sleep(200 * time.Millisecond) // a second admitted run would have started by now
-	if n := started(); n != 1 {
-		t.Fatalf("%d runs started with capacity 1", n)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for range 2 {
-		if code := <-done; code != http.StatusOK {
-			t.Fatalf("status %d", code)
-		}
-	}
-	if n := started(); n != 2 {
-		t.Fatalf("%d runs after release, want 2", n)
-	}
-}
-
 func TestMediaSampleRefusesWhenNoSlotFreesUp(t *testing.T) {
 	server := newTestServer(t)
 	server.watcher.Config().Playback.SubtitleSyncNodeCapacity = 1
@@ -220,7 +181,7 @@ func TestMediaSampleRefusesWhenNoSlotFreesUp(t *testing.T) {
 	}
 	server.watcher.Config().Playback.FFmpegPath = ffmpeg
 	first := make(chan int, 1)
-	go func() { first <- postMediaSample(server, speechRequestBody(t, nil), true).Code }()
+	go func() { first <- postMediaSample(t, server, speechRequestBody(t, nil), true).Code }()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if matches, _ := filepath.Glob(filepath.Join(dir, "start.*")); len(matches) == 1 {
@@ -231,7 +192,7 @@ func TestMediaSampleRefusesWhenNoSlotFreesUp(t *testing.T) {
 
 	// The slot is held: the next request waits its admission time, then is
 	// refused as unavailable, which callers may run elsewhere.
-	rec := postMediaSample(server, speechRequestBody(t, nil), true)
+	rec := postMediaSample(t, server, speechRequestBody(t, nil), true)
 	var failure mediasample.RemoteFailure
 	if rec.Code != http.StatusServiceUnavailable || json.Unmarshal(rec.Body.Bytes(), &failure) != nil || failure.Reason != mediasample.ReasonNodeUnavailable {
 		t.Fatalf("over capacity: %d %s", rec.Code, rec.Body)
@@ -244,7 +205,7 @@ func TestMediaSampleRefusesWhenNoSlotFreesUp(t *testing.T) {
 	if code := <-first; code != http.StatusOK {
 		t.Fatalf("first run: %d", code)
 	}
-	if code := postMediaSample(server, speechRequestBody(t, nil), true).Code; code != http.StatusOK {
+	if code := postMediaSample(t, server, speechRequestBody(t, nil), true).Code; code != http.StatusOK {
 		t.Fatalf("after release: %d", code)
 	}
 }

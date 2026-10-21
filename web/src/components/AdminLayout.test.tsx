@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,9 +18,19 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
 vi.mock("@/hooks/queries/admin/policy", () => ({
   usePolicyCapability: () => ({ data: undefined }),
 }));
-vi.mock("@/components/AdminSidebar", () => ({ default: () => null }));
+// Stand-ins that expose just what the shell wires up: the sidebar's search
+// hook-up and whether the palette is open.
+vi.mock("@/components/AdminSidebar", () => ({
+  default: ({ onSearch }: { onSearch?: () => void }) =>
+    onSearch ? (
+      <button type="button" onClick={onSearch}>
+        Sidebar search
+      </button>
+    ) : null,
+}));
 vi.mock("@/components/AdminSectionCommandDialog", () => ({
-  AdminSectionCommandDialog: () => null,
+  AdminSectionCommandDialog: ({ open }: { open?: boolean }) =>
+    open ? <p>Command palette</p> : null,
 }));
 vi.mock("@/components/ServerActivity", () => ({ default: () => null }));
 vi.mock("@/playback/watchPlaybackContext", () => ({
@@ -49,6 +59,7 @@ function renderAdmin(initialPath = "/admin") {
         children: [
           { index: true, element: <h1>Admin dashboard</h1> },
           { path: "users", element: <h1>Admin users</h1> },
+          { path: "sections", element: <h1>Admin sections</h1> },
         ],
       },
     ],
@@ -89,19 +100,20 @@ describe("AdminLayout search shortcut hint", () => {
   it("names Ctrl off Apple platforms", () => {
     renderAdmin();
 
-    const [search] = screen.getAllByRole("button", { name: "Search admin sections" });
+    const search = screen.getByRole("button", { name: "Search admin sections" });
     expect(search).toHaveAttribute("title", "Search admin sections (Ctrl K)");
-    expect(screen.getByText("Ctrl K")).toBeInTheDocument();
     expect(screen.queryByText(/⌘/)).not.toBeInTheDocument();
   });
+});
 
-  it("names the command glyph on Apple platforms", () => {
-    mocks.shortcutLabel = "⌘ K";
+describe("AdminLayout search", () => {
+  it("opens the command palette from the desktop sidebar's search field", () => {
     renderAdmin();
+    expect(screen.queryByText("Command palette")).not.toBeInTheDocument();
 
-    const [search] = screen.getAllByRole("button", { name: "Search admin sections" });
-    expect(search).toHaveAttribute("title", "Search admin sections (⌘ K)");
-    expect(screen.getByText("⌘ K")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sidebar search" }));
+
+    expect(screen.getByText("Command palette")).toBeInTheDocument();
   });
 });
 

@@ -2,56 +2,35 @@ package sections
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 )
 
-func TestResolve_NoOverrides(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
-		{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "Favorites", ItemLimit: 10, Config: json.RawMessage(`{}`)},
-	}
-
-	result := Resolve(admin, nil)
-	if len(result) != 2 {
-		t.Fatalf("expected 2 sections, got %d", len(result))
-	}
-	if result[0].Title != "Recently Added" {
-		t.Errorf("first section title = %q", result[0].Title)
-	}
-}
-
-func TestResolve_HiddenOverride(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
-		{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "Favorites", ItemLimit: 10, Config: json.RawMessage(`{}`)},
-	}
-
-	overrides := []ProfileSectionOverride{
-		{SectionID: "1", Hidden: true},
-	}
-
-	result := Resolve(admin, overrides)
-	if len(result) != 1 {
-		t.Fatalf("expected 1 section (1 hidden), got %d", len(result))
-	}
-	if result[0].ID != "2" {
-		t.Errorf("remaining section ID = %q, want %q", result[0].ID, "2")
-	}
-}
-
-func TestResolve_RemovedOverrideSkipsAdminSection(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
-		{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "Favorites", ItemLimit: 10, Config: json.RawMessage(`{}`)},
-	}
-
-	overrides := []ProfileSectionOverride{
-		{SectionID: "1", Removed: true},
-	}
-
-	result := Resolve(admin, overrides)
-	if len(result) != 1 || result[0].ID != "2" {
-		t.Fatalf("resolved IDs = %#v, want only section 2", result)
+// Hidden and removed overrides drop a row at runtime; settings drop only
+// removed rows, admin or custom.
+func TestResolveDropsHiddenAndRemovedSections(t *testing.T) {
+	recent := &PageSection{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)}
+	favorites := &PageSection{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "Favorites", ItemLimit: 10, Config: json.RawMessage(`{}`)}
+	for _, tc := range []struct {
+		name     string
+		resolve  func([]*PageSection, []ProfileSectionOverride) []ResolvedSection
+		admin    []*PageSection
+		override ProfileSectionOverride
+		wantIDs  []string
+	}{
+		{"hidden override", Resolve, []*PageSection{recent, favorites}, ProfileSectionOverride{SectionID: "1", Hidden: true}, []string{"2"}},
+		{"removed override skips admin section", Resolve, []*PageSection{recent, favorites}, ProfileSectionOverride{SectionID: "1", Removed: true}, []string{"2"}},
+		{"settings skip removed section", ResolveForSettings, []*PageSection{recent}, ProfileSectionOverride{SectionID: "1", Removed: true}, nil},
+		{"settings skip removed custom section", ResolveForSettings, []*PageSection{recent}, ProfileSectionOverride{ID: "custom-1", SectionType: "genre", Title: "My Action", Removed: true}, []string{"1"}},
+	} {
+		var got []string
+		for _, section := range tc.resolve(tc.admin, []ProfileSectionOverride{tc.override}) {
+			got = append(got, section.ID)
+		}
+		if !slices.Equal(got, tc.wantIDs) {
+			t.Fatalf("%s: resolved IDs = %v, want %v", tc.name, got, tc.wantIDs)
+		}
 	}
 }
 
@@ -99,24 +78,6 @@ func TestResolve_UserAddedSection(t *testing.T) {
 	}
 }
 
-func TestResolve_RemovedCustomSection(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "A", ItemLimit: 20, Config: json.RawMessage(`{}`)},
-	}
-
-	overrides := []ProfileSectionOverride{
-		{ID: "custom-1", SectionType: "genre", Title: "My Action", Removed: true},
-	}
-
-	result := Resolve(admin, overrides)
-	if len(result) != 1 {
-		t.Fatalf("expected removed custom section to be skipped, got %d sections", len(result))
-	}
-	if result[0].ID != "1" {
-		t.Fatalf("remaining section ID = %q, want %q", result[0].ID, "1")
-	}
-}
-
 func TestResolve_HiddenCustomSection(t *testing.T) {
 	overrides := []ProfileSectionOverride{{
 		ID: "custom-1", SectionType: "trending_discover", Hidden: true,
@@ -155,36 +116,46 @@ func TestResolveForSettings_IncludesHidden(t *testing.T) {
 	}
 }
 
-func TestResolveForSettings_SkipsRemovedSection(t *testing.T) {
+// TestResolveForSettings_KeepsAdminTitleAsDefault: the settings view keeps
+// the admin row's own title beside the profile's rename, so the profile can
+// see what it renamed and go back to it; a profile-built row has no admin
+// title.
+func TestResolveForSettings_KeepsAdminTitleAsDefault(t *testing.T) {
 	admin := []*PageSection{
 		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
+		{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "Favorites", ItemLimit: 10, Config: json.RawMessage(`{}`)},
 	}
-
+	pos := 2
 	overrides := []ProfileSectionOverride{
-		{SectionID: "1", Removed: true},
+		{SectionID: "1", Title: "New this week"},
+		{ID: "custom-1", IsUserAdded: true, UserSectionType: SectionHiddenGems, UserTitle: "Hidden gems", Position: &pos},
 	}
 
 	result := ResolveForSettings(admin, overrides)
-	if len(result) != 0 {
-		t.Fatalf("expected removed section to be omitted from settings, got %d entries", len(result))
+	if len(result) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(result))
 	}
-}
-
-func TestResolveForSettings_SkipsRemovedCustomSection(t *testing.T) {
-	admin := []*PageSection{
-		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
+	got := map[string][2]string{}
+	for _, r := range result {
+		got[r.ID] = [2]string{r.Title, r.DefaultTitle}
 	}
-
-	overrides := []ProfileSectionOverride{
-		{ID: "custom-1", SectionType: "genre", Title: "My Action", Removed: true},
+	want := map[string][2]string{
+		"1":        {"New this week", "Recently Added"},
+		"2":        {"Favorites", "Favorites"},
+		"custom-1": {"Hidden gems", ""},
 	}
-
-	result := ResolveForSettings(admin, overrides)
-	if len(result) != 1 {
-		t.Fatalf("expected removed custom section to be omitted from settings, got %d entries", len(result))
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("section %s (title, default title) = %q, want %q", id, got[id], w)
+		}
 	}
-	if result[0].ID != "1" {
-		t.Fatalf("remaining section ID = %q, want %q", result[0].ID, "1")
+	// v1 bodies embed ResolvedSection; the field must never reach them.
+	raw, err := json.Marshal(result[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "Recently Added") {
+		t.Errorf("ResolvedSection JSON carries the default title: %s", raw)
 	}
 }
 
@@ -224,7 +195,7 @@ func TestResolveEmptySectionIDPrefersExplicitUserFields(t *testing.T) {
 	overrides := []ProfileSectionOverride{{
 		ID:              "conflicting",
 		SectionType:     SectionTrendingDiscover,
-		Config:          json.RawMessage(`{"source":"trakt","window":"week"}`),
+		Config:          json.RawMessage(`{"source":"tmdb","window":"week"}`),
 		IsUserAdded:     false,
 		UserSectionType: SectionTrendingDiscover,
 		UserConfig:      json.RawMessage(`{"source":"tmdb","window":"day"}`),
@@ -238,22 +209,47 @@ func TestResolveEmptySectionIDPrefersExplicitUserFields(t *testing.T) {
 	}
 }
 
-func TestResolveBackwardCompatLegacyUserAdded(t *testing.T) {
-	// An override with the OLD shape (no IsUserAdded flag, but SectionID empty)
-	// should still resolve correctly using the legacy fields.
-	admin := []*PageSection{}
-	overrides := []ProfileSectionOverride{
-		{
-			ID:          "u2",
-			ProfileID:   "p1",
-			Scope:       "home",
-			SectionID:   "",
-			SectionType: "recently_added",
-			Title:       "My recents",
-		},
+func TestResolve_ReplacesRawSectionTypeTitle(t *testing.T) {
+	admin := []*PageSection{
+		{ID: "1", Position: 0, SectionType: "trending_on_server", Title: "trending_on_server", Config: json.RawMessage(`{"window":"7d"}`)},
+		{ID: "2", Position: 1, SectionType: "trending_on_server", Title: "Hot Right Now", Config: json.RawMessage(`{"window":"7d"}`)},
+		{ID: "3", Position: 2, SectionType: "format_showcase", Title: "format_showcase", Config: json.RawMessage(`{"format":"4k","sort":"recent"}`)},
 	}
-	resolved := Resolve(admin, overrides)
-	if len(resolved) != 1 || resolved[0].SectionType != "recently_added" || resolved[0].Title != "My recents" {
-		t.Fatalf("legacy user-added not resolved correctly: %+v", resolved)
+
+	result := Resolve(admin, nil)
+	if result[0].Title != "Trending This Week" {
+		t.Errorf("raw-key title = %q, want %q", result[0].Title, "Trending This Week")
+	}
+	if result[1].Title != "Hot Right Now" {
+		t.Errorf("custom title = %q, want unchanged", result[1].Title)
+	}
+	if result[2].Title != "New in 4K" {
+		t.Errorf("most specific preset = %q, want %q", result[2].Title, "New in 4K")
+	}
+}
+
+// TestResolveForSettings_RawKeyAdminTitleIsNotARename: an admin row saved with
+// the raw section_type key gets the preset name in both Title and DefaultTitle,
+// so settings does not report a rename the profile never made.
+func TestResolveForSettings_RawKeyAdminTitleIsNotARename(t *testing.T) {
+	admin := []*PageSection{
+		{ID: "1", Position: 0, SectionType: "trending_on_server", Title: "trending_on_server", Config: json.RawMessage(`{"window":"7d"}`)},
+		{ID: "2", Position: 1, SectionType: "trending_on_server", Title: "trending_on_server", Config: json.RawMessage(`{"window":"7d"}`)},
+	}
+	overrides := []ProfileSectionOverride{{SectionID: "2", Title: "My trending"}}
+
+	result := ResolveForSettings(admin, overrides)
+	got := map[string][2]string{}
+	for _, r := range result {
+		got[r.ID] = [2]string{r.Title, r.DefaultTitle}
+	}
+	want := map[string][2]string{
+		"1": {"Trending This Week", "Trending This Week"},
+		"2": {"My trending", "Trending This Week"},
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("section %s (title, default title) = %q, want %q", id, got[id], w)
+		}
 	}
 }

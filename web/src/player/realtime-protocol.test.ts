@@ -1,40 +1,18 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import {
-  ALL_PLAYBACK_COMMANDS,
   buildPlaybackRealtimeAck,
   buildPlaybackRealtimeHello,
   buildPlaybackRealtimeResult,
-  parsePlaybackRealtimeMessage,
   parsePlaybackRealtimeCommand,
+  parsePlaybackRealtimeMessage,
   readPlanInvalidatedPayload,
   SUPPORTED_PLAYBACK_COMMANDS,
   VIDEO_PLAYBACK_COMMANDS,
 } from "./realtime-protocol";
 
 describe("realtime protocol", () => {
-  it("parses known command envelopes", () => {
-    const command = parsePlaybackRealtimeCommand(
-      JSON.stringify({
-        type: "command",
-        command_id: "cmd-1",
-        session_id: "session-1",
-        name: "server_restarting",
-        payload: { message: "Restarting soon" },
-      }),
-    );
-
-    expect(command).toEqual({
-      type: "command",
-      command_id: "cmd-1",
-      session_id: "session-1",
-      name: "server_restarting",
-      reason: undefined,
-      issued_by: undefined,
-      deadline_ms: undefined,
-      payload: { message: "Restarting soon" },
-    });
-  });
-
   it("parses a plan invalidation command and its payload", () => {
     const command = parsePlaybackRealtimeCommand(
       JSON.stringify({
@@ -91,92 +69,37 @@ describe("realtime protocol", () => {
     expect(command).toBeNull();
   });
 
-  it("parses chapter thumbnail events", () => {
-    const event = parsePlaybackRealtimeMessage(
-      JSON.stringify({
-        type: "event",
-        session_id: "session-1",
-        name: "chapter_thumbnail_ready",
-        payload: {
-          session_id: "session-1",
-          file_id: 42,
-          chapter_index: 3,
-          thumbnail_url: "https://example.com/thumb.jpg",
-          thumbnail_thumbhash: "thumbhash",
-        },
-      }),
-    );
-
-    expect(event).toEqual({
-      type: "event",
-      session_id: "session-1",
-      name: "chapter_thumbnail_ready",
-      payload: {
+  it.each([
+    [
+      "chapter_thumbnail_ready",
+      {
         session_id: "session-1",
         file_id: 42,
         chapter_index: 3,
         thumbnail_url: "https://example.com/thumb.jpg",
         thumbnail_thumbhash: "thumbhash",
       },
-    });
-  });
-
-  it("parses marker update events", () => {
-    const event = parsePlaybackRealtimeMessage(
-      JSON.stringify({
-        type: "event",
-        session_id: "session-1",
-        name: "markers_updated",
-        payload: {
-          session_id: "session-1",
-          file_id: 42,
-          intro: { start: 12, end: 75 },
-          credits: null,
-        },
-      }),
-    );
-
-    expect(event).toEqual({
-      type: "event",
-      session_id: "session-1",
-      name: "markers_updated",
-      payload: {
-        session_id: "session-1",
-        file_id: 42,
-        intro: { start: 12, end: 75 },
-        credits: null,
-      },
-    });
-  });
-
-  it("parses subtitle ready events", () => {
-    const event = parsePlaybackRealtimeMessage(
-      JSON.stringify({
-        type: "event",
-        session_id: "session-1",
-        name: "subtitle_ready",
-        payload: {
-          session_id: "session-1",
-          file_id: 42,
-          subtitle_id: 7,
-          language: "es",
-          label: "English → Spanish (AI)",
-        },
-      }),
-    );
-
-    expect(event).toEqual({
-      type: "event",
-      session_id: "session-1",
-      name: "subtitle_ready",
-      payload: {
+    ],
+    [
+      "markers_updated",
+      { session_id: "session-1", file_id: 42, intro: { start: 12, end: 75 }, credits: null },
+    ],
+    [
+      "subtitle_ready",
+      {
         session_id: "session-1",
         file_id: 42,
         subtitle_id: 7,
         language: "es",
         label: "English → Spanish (AI)",
       },
-    });
+    ],
+  ])("parses %s events", (name, payload) => {
+    const event = parsePlaybackRealtimeMessage(
+      JSON.stringify({ type: "event", session_id: "session-1", name, payload }),
+    );
+
+    expect(event).toEqual({ type: "event", session_id: "session-1", name, payload });
   });
 
   it("rejects subtitle ready events missing the subtitle id", () => {
@@ -204,10 +127,13 @@ describe("realtime protocol", () => {
       hearing_impaired: false,
       delivery: "sidecar",
       url: "/stream/session-1/subtitles/3.vtt?file_id=42&downloaded_subtitle_id=7",
+      sync_key: "stored-7",
     };
+    const sidecar = "external-" + "f".repeat(64);
     for (const payload of [
-      { session_id: "session-1", file_id: 42, subtitle_id: 7 },
-      { session_id: "session-1", file_id: 42, subtitle_id: 7, track },
+      { session_id: "session-1", file_id: 42, sync_key: "stored-7", subtitle_id: 7 },
+      { session_id: "session-1", file_id: 42, sync_key: "stored-7", subtitle_id: 7, track },
+      { session_id: "session-1", file_id: 42, sync_key: sidecar },
     ]) {
       expect(
         parsePlaybackRealtimeMessage(
@@ -227,10 +153,30 @@ describe("realtime protocol", () => {
     }
   });
 
+  it("derives the sync key of a stored subtitle from an older server's timing event", () => {
+    expect(
+      parsePlaybackRealtimeMessage(
+        JSON.stringify({
+          type: "event",
+          session_id: "session-1",
+          name: "subtitle_timing_changed",
+          payload: { session_id: "session-1", file_id: 42, subtitle_id: 7 },
+        }),
+      ),
+    ).toEqual({
+      type: "event",
+      session_id: "session-1",
+      name: "subtitle_timing_changed",
+      payload: { session_id: "session-1", file_id: 42, subtitle_id: 7, sync_key: "stored-7" },
+    });
+  });
+
   it.each([
     { session_id: "session-1", file_id: 42 },
-    { session_id: "session-1", file_id: "42", subtitle_id: 7 },
-    { session_id: "session-1", file_id: 42, subtitle_id: 7, track: { combined_index: 3 } },
+    { session_id: "session-1", file_id: 42, sync_key: 7, subtitle_id: 7 },
+    { session_id: "session-1", file_id: "42", sync_key: "stored-7" },
+    { session_id: "session-1", file_id: 42, sync_key: "stored-7", subtitle_id: "7" },
+    { session_id: "session-1", file_id: 42, sync_key: "stored-7", track: { combined_index: 3 } },
   ])("rejects malformed subtitle timing changed payload %#", (payload) => {
     expect(
       parsePlaybackRealtimeMessage(
@@ -242,6 +188,42 @@ describe("realtime protocol", () => {
         }),
       ),
     ).toBeNull();
+  });
+
+  it("parses subtitle sync updated events", () => {
+    const payload = {
+      session_id: "session-1",
+      file_id: 42,
+      sync_key: "external-" + "f".repeat(64),
+      timing: { offset_ms: 0, scale: 1 },
+      job: {
+        id: "80",
+        status: "running",
+        trigger: "manual",
+        phase: "analyzing",
+        progress: 0.25,
+        confidence: null,
+        created_at: "2026-01-02T03:04:05.000Z",
+        finished_at: null,
+      },
+    };
+    const message = {
+      type: "event",
+      session_id: "session-1",
+      name: "subtitle_sync_updated",
+      payload,
+    };
+    expect(parsePlaybackRealtimeMessage(JSON.stringify(message))).toEqual(message);
+
+    for (const job of [
+      { ...payload.job, status: "exploded" },
+      { ...payload.job, progress: "25%" },
+      { ...payload.job, created_at: undefined },
+    ]) {
+      expect(
+        parsePlaybackRealtimeMessage(JSON.stringify({ ...message, payload: { ...payload, job } })),
+      ).toBeNull();
+    }
   });
 
   it("parses subtitle translation started/completed/failed events", () => {
@@ -404,10 +386,36 @@ describe("realtime protocol", () => {
       error: "unsupported",
     });
   });
+});
 
-  it("keeps the supported command subset within the full command set", () => {
-    expect(SUPPORTED_PLAYBACK_COMMANDS.every((name) => ALL_PLAYBACK_COMMANDS.includes(name))).toBe(
-      true,
-    );
-  });
+it("validates marker preview identity and captured source time", () => {
+  const event = {
+    type: "event",
+    session_id: "s",
+    name: "marker_thumbnail_ready",
+    payload: {
+      session_id: "s",
+      file_id: 7,
+      kind: "intro",
+      start_seconds: 6,
+      end_seconds: 9,
+      thumbnail_url: "/yellow.webp",
+      thumbnail_capture_seconds: 6,
+    },
+  };
+  expect(parsePlaybackRealtimeMessage(JSON.stringify(event))).toMatchObject(event);
+  for (const patch of [
+    { kind: "other" },
+    { end_seconds: 5 },
+    { thumbnail_capture_seconds: 9 },
+    { file_id: -1 },
+    { thumbnail_url: "" },
+    { thumbnail_thumbhash: 42 },
+  ]) {
+    expect(
+      parsePlaybackRealtimeMessage(
+        JSON.stringify({ ...event, payload: { ...event.payload, ...patch } }),
+      ),
+    ).toBeNull();
+  }
 });

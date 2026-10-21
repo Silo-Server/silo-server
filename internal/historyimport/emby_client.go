@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -87,7 +86,21 @@ type embyItem struct {
 		PlayCount             int        `json:"PlayCount"`
 		LastPlayedDate        *time.Time `json:"LastPlayedDate"`
 		Played                bool       `json:"Played"`
+		// UnplayedItemCount is a series' unwatched episode count; nil when
+		// Emby left it out.
+		UnplayedItemCount *int `json:"UnplayedItemCount"`
 	} `json:"UserData"`
+}
+
+func (item embyItem) retainedSize() int64 {
+	size := sizeOf[embyItem]() + stringBytes(item.ID, item.Name, item.Type, item.SeriesName, item.SeriesID) + stringMapBytes(item.ProviderIDs)
+	if item.UserData.LastPlayedDate != nil {
+		size += sizeOf[time.Time]()
+	}
+	if item.UserData.UnplayedItemCount != nil {
+		size += sizeOf[int]()
+	}
+	return size
 }
 
 type embyUser struct {
@@ -214,31 +227,52 @@ func (c *EmbyClient) AuthenticateServerUser(ctx context.Context, baseURL, userna
 }
 
 func (c *EmbyClient) FetchItems(ctx context.Context, auth embyLocalAuth, filter string) ([]embyItem, error) {
-	return c.fetchItems(ctx, auth, filter, "Movie,Episode")
+	return c.fetchItems(ctx, auth, "Items", filter, "Movie,Episode")
 }
 
 // FetchFavoriteItems includes seasons so the provider can report the season
 // favorites Silo has no target for, rather than dropping them silently.
 func (c *EmbyClient) FetchFavoriteItems(ctx context.Context, auth embyLocalAuth) ([]embyItem, error) {
-	return c.fetchItems(ctx, auth, "IsFavorite", "Movie,Series,Season,Episode")
+	return c.fetchItems(ctx, auth, "Items", "IsFavorite", "Movie,Series,Season,Episode")
 }
 
-// fetchItems pages through the user's items so a large library is read in
-// bounded responses instead of one body racing the client timeout.
-func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, filter, includeItemTypes string) ([]embyItem, error) {
+// FetchResumeItems pages through the user's Continue Watching row. Emby leaves
+// out items the user hid from it, which the IsResumable filter still returns
+// with unchanged user data, and shows at most one episode per series. The
+// endpoint needs a type filter: without one Emby 4.10 answers with no items.
+func (c *EmbyClient) FetchResumeItems(ctx context.Context, auth embyLocalAuth) ([]embyItem, error) {
+	return c.fetchItems(ctx, auth, "Items/Resume", "", "Movie,Episode")
+}
+
+// fetchItems pages through one of the user's item lists (endpoint is relative
+// to /Users/{id}) so a large library is read in bounded responses instead of
+// one body racing the client timeout.
+func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, endpoint, filter, includeItemTypes string) ([]embyItem, error) {
 	var items []embyItem
+	var budget listingBudget
 	for startIndex := 0; ; {
+		if err := budget.startPage(); err != nil {
+			return nil, fmt.Errorf("fetching Emby %s with filter %q: %w", endpoint, filter, err)
+		}
 		query := url.Values{}
 		query.Set("Recursive", "true")
 		query.Set("EnableUserData", "true")
 		query.Set("Fields", embyItemFields)
 		query.Set("IncludeItemTypes", includeItemTypes)
-		query.Set("Filters", filter)
+		if filter != "" {
+			query.Set("Filters", filter)
+		}
 		query.Set("StartIndex", strconv.Itoa(startIndex))
 		query.Set("Limit", strconv.Itoa(embyPageSize))
-		payload, err := c.getItems(ctx, auth, query)
+		payload, err := c.getItems(ctx, auth, endpoint, query, &budget)
+		if err == nil {
+			err = budget.addItems(len(payload.Items))
+		}
+		if err == nil {
+			err = retainItems(ctx, payload.Items)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("fetching Emby items with filter %s: %w", filter, err)
+			return nil, fmt.Errorf("fetching Emby %s with filter %q: %w", endpoint, filter, err)
 		}
 		items = append(items, payload.Items...)
 		startIndex += len(payload.Items)
@@ -262,22 +296,30 @@ func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, id
 	for chunk := range slices.Chunk(ids, embyIDChunkSize) {
 		query := url.Values{}
 		query.Set("Recursive", "true")
+		// A series' user data carries its unplayed count, which tells a
+		// finished show from one hidden from Continue Watching.
+		query.Set("EnableUserData", "true")
 		query.Set("Fields", embyItemFields)
 		query.Set("Ids", strings.Join(chunk, ","))
 		if strings.TrimSpace(includeItemTypes) != "" {
 			query.Set("IncludeItemTypes", includeItemTypes)
 		}
-		payload, err := c.getItems(ctx, auth, query)
+		payload, err := c.getItems(ctx, auth, "Items", query, nil)
 		if err != nil {
 			return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
 		}
-		items = append(items, payload.Items...)
+		kept := keepRequested(payload.Items, chunk, func(item embyItem) string { return item.ID })
+		if err := retainItems(ctx, kept); err != nil {
+			return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
+		}
+		items = append(items, kept...)
 	}
 	return items, nil
 }
 
-func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, query url.Values) (embyItemsResponse, error) {
-	path := fmt.Sprintf("%s/Users/%s/Items?%s", auth.BaseURL, url.PathEscape(auth.UserID), query.Encode())
+// getItems reads one /Users/{id} item list response; budget may be nil.
+func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, endpoint string, query url.Values, budget *listingBudget) (embyItemsResponse, error) {
+	path := fmt.Sprintf("%s/Users/%s/%s?%s", auth.BaseURL, url.PathEscape(auth.UserID), endpoint, query.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return embyItemsResponse{}, err
@@ -285,13 +327,18 @@ func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, query url
 	req.Header.Set("X-Emby-Token", auth.AccessToken)
 	req.Header.Set("X-Emby-Authorization", embyAuthorizationHeader(auth.UserID, auth.AccessToken))
 	var payload embyItemsResponse
-	if err := c.doJSON(req, &payload); err != nil {
+	if err := c.doJSONWithBudget(req, &payload, budget); err != nil {
 		return embyItemsResponse{}, err
 	}
 	return payload, nil
 }
 
 func (c *EmbyClient) doJSON(req *http.Request, out any) error {
+	return c.doJSONWithBudget(req, out, nil)
+}
+
+// doJSONWithBudget is doJSON for one page of a listing; budget may be nil.
+func (c *EmbyClient) doJSONWithBudget(req *http.Request, out any, budget *listingBudget) error {
 	if err := c.limiter.Wait(req.Context(), req.URL); err != nil {
 		return err
 	}
@@ -302,14 +349,14 @@ func (c *EmbyClient) doJSON(req *http.Request, out any) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		body := readUpstreamErrorBody(resp.Body)
 		return &embyHTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	if out == nil {
-		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		discardUpstreamBody(resp.Body)
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return decodeUpstreamJSON(req.Context(), resp.Body, out, budget)
 }
 
 type embyHTTPError struct {
@@ -341,8 +388,8 @@ func UpstreamHTTPStatus(err error) int {
 }
 
 func shouldTryAnotherBase(err error) bool {
-	httpErr, ok := err.(*embyHTTPError)
-	if !ok {
+	var httpErr *embyHTTPError
+	if !errors.As(err, &httpErr) {
 		return true
 	}
 	return httpErr.StatusCode == http.StatusNotFound

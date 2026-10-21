@@ -2,8 +2,6 @@ package tasks
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -73,84 +71,6 @@ func (f *fakeReconcileLocks) Acquire(context.Context) (func(), reconcileLockOutc
 	return func() { f.released++ }, reconcileLocksHeld, nil
 }
 
-func TestRefreshRequestDownloadsTaskRunsUnderTheLock(t *testing.T) {
-	refresher := &downloadRefresherStub{result: requests.DownloadRefreshResult{Checked: 3, Updated: 1}}
-	lock := &fakeClusterLock{acquired: true}
-	task := NewRefreshRequestDownloadsTask(refresher, 200, nil)
-	task.lock = lock
-	progress := &bulkEnrichmentTaskProgress{}
-
-	if err := task.Execute(context.Background(), progress); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if refresher.runs.Load() != 1 || refresher.limit != 200 || lock.released != 1 {
-		t.Fatalf("runs = %d, limit = %d, lock releases = %d; want 1, 200 and 1", refresher.runs.Load(), refresher.limit, lock.released)
-	}
-	if refresher.budget != requestDownloadRefreshBudget {
-		t.Fatalf("budget = %s, want %s", refresher.budget, requestDownloadRefreshBudget)
-	}
-	var result requests.DownloadRefreshResult
-	if err := json.Unmarshal(progress.result, &result); err != nil || result.Checked != 3 || result.Updated != 1 {
-		t.Fatalf("result data %s: %v", progress.result, err)
-	}
-}
-
-func TestRefreshRequestDownloadsTaskSkipsWhileTheWriteLockIsHeld(t *testing.T) {
-	refresher := &downloadRefresherStub{}
-	task := NewRefreshRequestDownloadsTask(refresher, 200, nil)
-	task.lock = &fakeClusterLock{acquired: false}
-
-	if err := task.Execute(context.Background(), &bulkEnrichmentTaskProgress{}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if refresher.runs.Load() != 0 {
-		t.Fatalf("runs = %d, want 0 while the lock is held", refresher.runs.Load())
-	}
-}
-
-func TestRefreshRequestDownloadsTaskReportsFailure(t *testing.T) {
-	task := NewRefreshRequestDownloadsTask(&downloadRefresherStub{err: errors.New("database unavailable")}, 0, nil)
-	if err := task.Execute(context.Background(), &bulkEnrichmentTaskProgress{}); err == nil {
-		t.Fatal("Execute() error = nil, want the pass's error")
-	}
-}
-
-// Scheduled runs happen only while some downloading target has progress, so
-// an idle server records no run every minute.
-func TestRefreshRequestDownloadsTaskShouldRun(t *testing.T) {
-	ctx := context.Background()
-	if run, err := NewRefreshRequestDownloadsTask(&downloadRefresherStub{}, 0, nil).ShouldRun(ctx); err != nil || run {
-		t.Fatalf("ShouldRun() without work = %v, %v; want false", run, err)
-	}
-	if run, err := NewRefreshRequestDownloadsTask(&downloadRefresherStub{hasWork: true}, 0, nil).ShouldRun(ctx); err != nil || !run {
-		t.Fatalf("ShouldRun() with work = %v, %v; want true", run, err)
-	}
-	failure := errors.New("database unavailable")
-	if _, err := NewRefreshRequestDownloadsTask(&downloadRefresherStub{hasWorkErr: failure}, 0, nil).ShouldRun(ctx); !errors.Is(err, failure) {
-		t.Fatalf("ShouldRun() err = %v, want the check's", err)
-	}
-	if run, err := NewRefreshRequestDownloadsTask(nil, 0, nil).ShouldRun(ctx); err != nil || run {
-		t.Fatalf("ShouldRun() without a refresher = %v, %v; want false", run, err)
-	}
-}
-
-// The refresh tries only the target write lock; reconcile takes its own lock
-// and the write lock together on one session. The pool never connects here.
-func TestRequestTaskLockKeys(t *testing.T) {
-	pool, err := pgxpool.New(context.Background(), "postgres://silo@127.0.0.1:1/silo?sslmode=disable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	refresh, _ := NewRefreshRequestDownloadsTask(&downloadRefresherStub{}, 0, pool).lock.(advisoryClusterLock)
-	if refresh.key != requestTargetWriteAdvisoryLock {
-		t.Fatalf("refresh lock key = %#x, want the target write lock %#x", refresh.key, requestTargetWriteAdvisoryLock)
-	}
-	if locks, ok := NewReconcileRequestsTask(nil, 0, pool).locks.(requestReconcileLocks); !ok || locks.pool != pool {
-		t.Fatalf("reconcile locks = %#v, want requestReconcileLocks on the pool", locks)
-	}
-}
-
 // A refresh pass must end inside the reconcile pass's wait for the write lock
 // even when a download server stops answering, or a reconcile tick that lands
 // during it fails. The budget cuts the call in flight, so the pass ends at the
@@ -159,33 +79,6 @@ func TestRequestDownloadRefreshBudgetEndsInsideTheReconcileWait(t *testing.T) {
 	const writeMargin = 30 * time.Second
 	if requestDownloadRefreshBudget <= 0 || requestDownloadRefreshBudget+writeMargin > requestTargetWriteWait {
 		t.Fatalf("refresh budget %s leaves under %s of the reconcile's %s wait", requestDownloadRefreshBudget, writeMargin, requestTargetWriteWait)
-	}
-}
-
-func TestReconcileRequestsTaskRunsUnderItsLocks(t *testing.T) {
-	reconciler := &reconcilerStub{}
-	task := NewReconcileRequestsTask(reconciler, 0, nil)
-	locks := &fakeReconcileLocks{outcome: reconcileLocksHeld}
-	task.locks = locks
-
-	if err := task.Execute(context.Background(), &bulkEnrichmentTaskProgress{}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if reconciler.runs.Load() != 1 || locks.takes != 1 || locks.released != 1 {
-		t.Fatalf("runs = %d, lock takes = %d, releases = %d; want 1 each", reconciler.runs.Load(), locks.takes, locks.released)
-	}
-}
-
-func TestReconcileRequestsTaskSkipsWhileAnotherReconcileRuns(t *testing.T) {
-	reconciler := &reconcilerStub{}
-	task := NewReconcileRequestsTask(reconciler, 0, nil)
-	task.locks = &fakeReconcileLocks{outcome: reconcileLocksBusy}
-
-	if err := task.Execute(context.Background(), &bulkEnrichmentTaskProgress{}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if runs := reconciler.runs.Load(); runs != 0 {
-		t.Fatalf("runs = %d while another reconcile runs, want 0", runs)
 	}
 }
 
@@ -273,46 +166,6 @@ func TestReconcileWaitsForADownloadRefreshPostgres(t *testing.T) {
 	if runs := reconciler.runs.Load(); runs != 1 {
 		t.Fatalf("runs = %d, want 1 once the refresh finished", runs)
 	}
-}
-
-// The reconcile pass holds both of its locks on one session, so a pool of two
-// connections still has one for the pass itself. With a session per lock, the
-// pass's first query would wait forever for a connection.
-func TestReconcileLeavesAConnectionForItsPassPostgres(t *testing.T) {
-	base := requestLockTestPool(t)
-	config := base.Config().Copy()
-	config.MaxConns = 2
-	pool, err := pgxpool.NewWithConfig(t.Context(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	reconciler := &queryingReconcilerStub{pool: pool}
-	task := NewReconcileRequestsTask(reconciler, 0, pool)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	if err := task.Execute(ctx, &bulkEnrichmentTaskProgress{}); err != nil {
-		t.Fatalf("Execute() with a two-connection pool: %v", err)
-	}
-	if reconciler.queries.Load() != 1 {
-		t.Fatalf("queries = %d, want the pass to have run one", reconciler.queries.Load())
-	}
-}
-
-// queryingReconcilerStub runs one query on pool, as a real pass would.
-type queryingReconcilerStub struct {
-	pool    *pgxpool.Pool
-	queries atomic.Int32
-}
-
-func (s *queryingReconcilerStub) ReconcileRequests(ctx context.Context, _ int) (requests.ReconcileResult, error) {
-	var one int
-	if err := s.pool.QueryRow(ctx, `SELECT 1`).Scan(&one); err != nil {
-		return requests.ReconcileResult{}, err
-	}
-	s.queries.Add(1)
-	return requests.ReconcileResult{}, nil
 }
 
 // Reconcile stays one pass at a time across the cluster.

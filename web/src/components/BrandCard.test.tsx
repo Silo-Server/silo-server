@@ -20,17 +20,17 @@ const card = (overrides: Partial<DiscoverBrandCard> = {}): DiscoverBrandCard => 
 });
 
 describe("BrandCard", () => {
-  it("links a studio or network tile to its browse page", () => {
-    expect(renderCard({ kind: "studio", card: card() })).toHaveAttribute(
-      "href",
-      "/requests/browse/studio/a24",
-    );
-  });
-
   it("opens a genre on movies unless series are asked for and supported", () => {
     expect(
       renderCard({ kind: "genre", card: card({ slug: "sci fi", display_name: "Sci-Fi" }) }),
     ).toHaveAttribute("href", "/requests/browse/genre/sci%20fi?media_type=movie");
+    expect(
+      renderCard({
+        kind: "genre",
+        card: card({ slug: "comedy", display_name: "Comedy" }),
+        defaultMediaTypeForGenre: "series",
+      }),
+    ).toHaveAttribute("href", "/requests/browse/genre/comedy?media_type=movie");
   });
 
   it("opens a genre on series when asked and supported", () => {

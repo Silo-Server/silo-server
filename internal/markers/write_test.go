@@ -7,46 +7,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestBuildUpdatePayloadPreservesPerSegmentConfidence(t *testing.T) {
-	result := Result{
-		ProviderID:  "introdb",
-		SourceClass: models.MarkerSourceOnline,
-		Algorithm:   "introdb:v3",
-		Markers: []Marker{
-			{Kind: MarkerKindIntro, Start: 10 * time.Second, End: 60 * time.Second, Confidence: 0.7},
-			{Kind: MarkerKindCredits, Start: 1500 * time.Second, End: 1790 * time.Second, Confidence: 0.9},
-			{Kind: MarkerKindRecap, Start: 0, End: 30 * time.Second, Confidence: 0.5},
-		},
-	}
-
-	payload := BuildUpdatePayload(result)
-
-	if payload.Intro.Confidence == nil || *payload.Intro.Confidence != 0.7 {
-		t.Errorf("intro confidence = %v, want 0.7", payload.Intro.Confidence)
-	}
-	if payload.Credits.Confidence == nil || *payload.Credits.Confidence != 0.9 {
-		t.Errorf("credits confidence = %v, want 0.9", payload.Credits.Confidence)
-	}
-	if payload.Recap.Confidence == nil || *payload.Recap.Confidence != 0.5 {
-		t.Errorf("recap confidence = %v, want 0.5", payload.Recap.Confidence)
-	}
-	if sc := payload.SummaryConfidence(); sc == nil || *sc != 0.9 {
-		t.Errorf("summary confidence = %v, want 0.9 (max)", sc)
-	}
-	if payload.Intro.Algorithm != "introdb:v3" {
-		t.Errorf("intro algorithm = %q, want introdb:v3", payload.Intro.Algorithm)
-	}
-	if payload.Intro.Start == nil || *payload.Intro.Start != 10 {
-		t.Errorf("intro start = %v, want 10", payload.Intro.Start)
-	}
-	if payload.Recap.Start == nil || *payload.Recap.Start != 0 {
-		t.Errorf("recap start = %v, want 0", payload.Recap.Start)
-	}
-	if payload.Preview.Present() {
-		t.Errorf("preview should be absent (no preview marker)")
-	}
-}
-
 func TestBuildUpdatePayloadPerMarkerProvider(t *testing.T) {
 	// A merged result: each marker carries its own provider/algorithm.
 	result := Result{
@@ -248,62 +208,13 @@ func TestCanWriteMarkerUpdateMatchesRangesWithTolerance(t *testing.T) {
 	}
 }
 
-// A new detector version must be able to overwrite what the version it
-// replaces wrote, even at lower confidence.
-func TestCanWriteMarkerUpdateLetsReplacementVersionsOverwrite(t *testing.T) {
-	payload := func(algorithm string, confidence float64, start, end float64) SegmentPayload {
-		return SegmentPayload{Start: new(start), End: new(end), Source: models.MarkerSourceScanner,
-			Confidence: new(confidence), Algorithm: algorithm}
-	}
-	cases := []struct {
-		name               string
-		existing, incoming SegmentPayload
-		want               bool
-	}{
-		{"chromaprint v2 over dialogue v1", payload("chromaprint:dialogue:v1", 0.9, 10, 70), payload("chromaprint:v2", 0.75, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
-		{"dialogue v2 over chromaprint v2", payload("chromaprint:v2", 0.9, 10, 70), payload("chromaprint:dialogue:v2", 0.75, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
-		{"chapter over over-extended legacy silence", payload("chapter:silence:v1", 0.98, 60, 140), payload("chapter:v1", 0.95, 60, 120), true},
-		{"silence v2 over chapter", payload("chapter:v1", 0.95, 60, 120), payload("chapter:silence:v2", 0.98, 60, 122), true},
-		{"chromaprint v3 over dialogue v2", payload("chromaprint:dialogue:v2", 0.9, 10, 70), payload("chromaprint:v3", 0.3, 12, 70), true},            //nolint:misspell // Persisted algorithm identifier.
-		{"dialogue v3 over chromaprint v3", payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:dialogue:v3", 0.65, 12, 70), true},           //nolint:misspell // Persisted algorithm identifier.
-		{"episode copy over chromaprint v3", payload("chromaprint:dialogue:v3", 0.9, 10, 70), payload("episode-version-copy:v1", 0.85, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
-		{"chromaprint v4 over dialogue v3", payload("chromaprint:dialogue:v3", 0.9, 10, 70), payload("chromaprint:v4", 0.65, 12, 70), true},           //nolint:misspell // Persisted algorithm identifier.
-		{"legacy chromaprint cannot replace v2", payload("chromaprint:v2", 0.75, 12, 70), payload("chromaprint:dialogue:v1", 0.9, 10, 70), false},     //nolint:misspell // Persisted algorithm identifier.
-	}
-	for _, tc := range cases {
-		if got := CanWriteMarkerUpdate(tc.existing, tc.incoming); got != tc.want {
-			t.Errorf("%s: CanWriteMarkerUpdate = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
-// A re-analysis that rescores a Chromaprint intro lower must replace the stored
-// score, while other detectors keep the higher-confidence result.
-func TestCanWriteMarkerUpdateLetsChromaprintRescoreDownward(t *testing.T) {
-	payload := func(algorithm string, confidence, start, end float64) SegmentPayload {
-		return SegmentPayload{Start: new(start), End: new(end), Source: models.MarkerSourceScanner,
-			Confidence: new(confidence), Algorithm: algorithm}
-	}
-	if !CanWriteMarkerUpdate(payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:v3", 0.65, 10, 70)) {
-		t.Error("a lower Chromaprint rescore of the same range was rejected")
-	}
-	if CanWriteMarkerUpdate(payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:v3", 0.9, 10.2, 70.2)) {
-		t.Error("an identical Chromaprint result should stay a no-op")
-	}
-	if !CanWriteMarkerUpdate(payload("chromaprint:dialogue:v3", 0.9, 14, 70), payload("chromaprint:v3", 0.65, 10, 70)) { //nolint:misspell // Persisted algorithm identifier.
-		t.Error("a same-version plain rescore must replace a refined marker whose subtitle is gone")
-	}
-	if CanWriteMarkerUpdate(payload("chromaprint:dialogue:v3", 0.9, 14, 70), payload("chromaprint:v2", 0.9, 10, 70)) { //nolint:misspell // Persisted algorithm identifier.
-		t.Error("an older Chromaprint version must not replace a newer refined marker")
-	}
-	if CanWriteMarkerUpdate(payload("chapter:v1", 0.95, 60, 120), payload("chapter:v1", 0.85, 60, 125)) {
-		t.Error("a lower-confidence chapter result must not replace a higher one")
-	}
-}
-
+// Scanner algorithms rank by detector and version. A new detector version
+// must be able to overwrite what the version it replaces wrote, even at
+// lower confidence; a re-analysis that rescores a Chromaprint intro lower
+// replaces the stored score, while other detectors keep the higher result.
 // Credits detectors rank like their intro counterparts: chapters above
 // version copies above season-scored audio above video alone.
-func TestCanWriteMarkerUpdateRanksCreditsDetectors(t *testing.T) {
+func TestCanWriteMarkerUpdateRanksScannerAlgorithms(t *testing.T) {
 	payload := func(algorithm string, confidence, start, end float64) SegmentPayload {
 		return SegmentPayload{Start: new(start), End: new(end), Source: models.MarkerSourceScanner,
 			Confidence: new(confidence), Algorithm: algorithm}
@@ -319,6 +230,24 @@ func TestCanWriteMarkerUpdateRanksCreditsDetectors(t *testing.T) {
 		existing, incoming SegmentPayload
 		want               bool
 	}{
+		{"silence v2 corrects an equal-confidence range", payload("chapter:silence:v2", 0.98, 60, 120), payload("chapter:silence:v2", 0.98, 60, 122), true},
+		{"chapter replaces chromaprint v4 at lower confidence", payload("chromaprint:v4", 0.98, 60, 120), payload("chapter:v1", 0.95, 60, 120), true},                           //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint v4 cannot replace chapter", payload("chapter:v1", 0.95, 60, 120), payload("chromaprint:v4", 0.85, 60, 120), false},                                        //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint v4 cannot replace episode copy at higher confidence", payload("episode-version-copy:v1", 0.85, 60, 120), payload("chromaprint:v4", 0.98, 60, 120), false}, //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint v2 over dialogue v1", payload("chromaprint:dialogue:v1", 0.9, 10, 70), payload("chromaprint:v2", 0.75, 12, 70), true},                                     //nolint:misspell // Persisted algorithm identifier.
+		{"dialogue v2 over chromaprint v2", payload("chromaprint:v2", 0.9, 10, 70), payload("chromaprint:dialogue:v2", 0.75, 12, 70), true},                                     //nolint:misspell // Persisted algorithm identifier.
+		{"chapter over over-extended legacy silence", payload("chapter:silence:v1", 0.98, 60, 140), payload("chapter:v1", 0.95, 60, 120), true},
+		{"silence v2 over chapter", payload("chapter:v1", 0.95, 60, 120), payload("chapter:silence:v2", 0.98, 60, 122), true},
+		{"chromaprint v3 over dialogue v2", payload("chromaprint:dialogue:v2", 0.9, 10, 70), payload("chromaprint:v3", 0.3, 12, 70), true},            //nolint:misspell // Persisted algorithm identifier.
+		{"dialogue v3 over chromaprint v3", payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:dialogue:v3", 0.65, 12, 70), true},           //nolint:misspell // Persisted algorithm identifier.
+		{"episode copy over chromaprint v3", payload("chromaprint:dialogue:v3", 0.9, 10, 70), payload("episode-version-copy:v1", 0.85, 12, 70), true}, //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint v4 over dialogue v3", payload("chromaprint:dialogue:v3", 0.9, 10, 70), payload("chromaprint:v4", 0.65, 12, 70), true},           //nolint:misspell // Persisted algorithm identifier.
+		{"legacy chromaprint cannot replace v2", payload("chromaprint:v2", 0.75, 12, 70), payload("chromaprint:dialogue:v1", 0.9, 10, 70), false},     //nolint:misspell // Persisted algorithm identifier.
+		{"chromaprint rescored lower over the same range", payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:v3", 0.65, 10, 70), true},
+		{"identical chromaprint result is a no-op", payload("chromaprint:v3", 0.9, 10, 70), payload("chromaprint:v3", 0.9, 10.2, 70.2), false},
+		{"same-version plain rescore replaces a refined marker whose subtitle is gone", payload("chromaprint:dialogue:v3", 0.9, 14, 70), payload("chromaprint:v3", 0.65, 10, 70), true}, //nolint:misspell // Persisted algorithm identifier.
+		{"older chromaprint cannot replace a newer refined marker", payload("chromaprint:dialogue:v3", 0.9, 14, 70), payload("chromaprint:v2", 0.9, 10, 70), false},                     //nolint:misspell // Persisted algorithm identifier.
+		{"lower-confidence chapter cannot replace a higher one", payload("chapter:v1", 0.95, 60, 120), payload("chapter:v1", 0.85, 60, 125), false},
 		{"chapter over audio", payload("credits-audio:v1", 0.9, 1300, 1400), payload("credits-chapter:v1", 0.95, 1310, 1400), true},
 		{"audio cannot replace chapter", payload("credits-chapter:v1", 0.95, 1310, 1400), payload("credits-audio:v1", 0.9, 1300, 1400), false},
 		{"audio cannot replace version copy", payload("credits-version-copy:v1", 0.85, 1310, 1400), payload("credits-audio:video:v1", 0.95, 1300, 1400), false},
@@ -351,5 +280,25 @@ func TestSameSeasonScoredVersion(t *testing.T) {
 		if got := sameSeasonScoredVersion(tc.a, tc.b); got != tc.want {
 			t.Errorf("sameSeasonScoredVersion(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
 		}
+	}
+}
+
+func TestManualDeletionRejectsAutomaticProjection(t *testing.T) {
+	file := &models.MediaFile{Duration: 1000, IntroMarkersSource: new(models.MarkerSourceManual)}
+	for _, source := range []string{models.MarkerSourceOnline, models.MarkerSourcePlugin, models.MarkerSourceScanner, models.MarkerSourceS3} {
+		result := Result{ProviderID: "provider", SourceClass: source, Markers: []Marker{
+			{Kind: MarkerKindIntro, Start: 10 * time.Second, End: 30 * time.Second},
+			{Kind: MarkerKindRecap, Start: 40 * time.Second, End: 60 * time.Second},
+		}}
+		next := ApplyResult(file, result)
+		if next.IntroStart != nil || next.IntroEnd != nil || next.RecapStart == nil || *next.RecapStart != 40 {
+			t.Fatalf("%s restored deleted intro or suppressed unrelated recap: %+v", source, next.MarkerSegments)
+		}
+		if file.RecapStart != nil {
+			t.Fatal("projection mutated stored snapshot")
+		}
+	}
+	if !CanWriteMarkerUpdate(SegmentPayload{Source: models.MarkerSourceManual}, SegmentPayload{Source: models.MarkerSourceManual, Start: new(12.0), End: new(34.0)}) {
+		t.Fatal("explicit manual replacement must be allowed")
 	}
 }

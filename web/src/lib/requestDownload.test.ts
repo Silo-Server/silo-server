@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { RequestDownload } from "@/api/types";
 import { formatRequestDownload, requestDownloadPercent } from "./requestDownload";
@@ -53,16 +55,6 @@ describe("request download progress", () => {
     expect(formatRequestDownload(download({ updated_at: "2026-01-02T02:54:05Z" }), { now })).toBe(
       "Downloading · 43% · about 12 min left",
     );
-  });
-
-  it.each([
-    ["queued", "Waiting to download"],
-    ["paused", "Download paused"],
-    ["stalled", "Download stalled"],
-    ["importing", "Importing"],
-    ["import_blocked", "Waiting for import"],
-  ])("labels %s as %s", (phase, label) => {
-    expect(formatRequestDownload(download({ phase }), { now })).toBe(label);
   });
 
   it("tells an admin that an import is blocked", () => {

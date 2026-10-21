@@ -1,12 +1,14 @@
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAccountPasswordCapability, useChangeAccountPassword } from "@/hooks/queries/account";
+import { AccountSignInSection } from "./AccountSignInSection";
 
 function passwordByteLength(value: string) {
   return new TextEncoder().encode(value).length;
@@ -58,12 +60,10 @@ export default function AccountSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Account</h2>
-        <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-          Manage the sign-in credential shared by every profile on this account.
-        </p>
-      </div>
+      <PageHeader
+        title="Account"
+        subtitle="Manage the sign-in credential shared by every profile on this account."
+      />
 
       <SettingsGroup
         title="Password"
@@ -142,6 +142,8 @@ export default function AccountSettings() {
           </form>
         )}
       </SettingsGroup>
+
+      <AccountSignInSection />
     </div>
   );
 }

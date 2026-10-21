@@ -4,15 +4,19 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
 // The device-pairing domain: a device without a keyboard opens a pairing
 // request, shows a code, and polls; a logged-in browser looks the request up
-// and approves or denies it. One state machine, six operations plus the
+// and approves or denies it. One state machine, seven operations plus the
 // capability document. The states and their poll/lookup answers:
 //
 //	pending   — waiting for a decision (poll: 200, keep polling)
@@ -20,12 +24,29 @@ import (
 //	            and answers 200 with the token pair, moving to consumed)
 //	consumed  — the device collected its tokens (poll/lookup: 200)
 //	denied    — refused by the approver (poll/lookup: 200)
+//	canceled  — withdrawn by the device through cancelDeviceLogin
+//	            (poll/lookup: 200)
 //	expired   — the request outlived its window (poll/lookup: 200 with
 //	            status expired; a decision on it: 410 device_login_expired)
 //
-// A decision on a request that is already consumed, denied, approved by
-// another identity, or of the other purpose is 409 conflict; an unknown
-// request is 404 not_found.
+// A decision on a request that is already consumed, denied, withdrawn by the
+// device, approved by another identity, or of the other purpose is 409
+// conflict; an unknown request is 404 not_found.
+//
+// User codes are unique only among one server's requests, and the
+// verification URI is always this server's own address: there is no
+// cross-deployment code space. Every operation that takes a user code (the
+// lookup and the three decisions) spends the per-address device_lookup
+// budget, which bounds guessing; see docs/architecture/device-login.md.
+//
+// Jellyfin Quick Connect requests (client_purpose jellyfin_quick_connect)
+// are opened by Jellyfin apps on the Jellyfin-compatible API and carry
+// six-digit codes. Those codes are found only for a signed-in login session,
+// which the public lookup reads when a bearer token is sent (401 without a
+// valid one, 403 from an impersonation session), and every
+// lookup or decision with one also spends the account's Quick Connect code
+// budget (429 rate_limited once spent). They are approved for a profile
+// through approve-handoff; approve answers 409 conflict.
 
 // TokenPair is the credential response login, setup, signup and device poll
 // share. Every response carrying it is Cache-Control: no-store.
@@ -44,7 +65,10 @@ func tokenPairFromView(v handlers.TokenPairView) TokenPair {
 type DeviceLoginCapability struct {
 	Capability
 	RemotePlaybackHandoff bool  `json:"remote_playback_handoff" doc:"Whether approve-handoff (remote playback pairing) is supported" example:"true"`
+	JellyfinQuickConnect  bool  `json:"jellyfin_quick_connect" doc:"Whether a signed-in approver can look up six-digit Jellyfin Quick Connect codes and approve them for a profile through approve-handoff" example:"true"`
 	ProtocolVersions      []int `json:"protocol_versions" doc:"Pairing protocol versions this server speaks" example:"[2]"`
+	Cancel                bool  `json:"cancel" doc:"Whether a device can withdraw its own request with cancelDeviceLogin" example:"true"`
+	OpenedSignal          bool  `json:"opened_signal" doc:"Whether pollDeviceLogin reports opened once an approver has looked the request up, and lookups hold the code while it is being approved" example:"true"`
 }
 
 // DeviceLoginCapabilityOutput is the getDeviceLoginCapability response.
@@ -69,12 +93,12 @@ type StartDeviceLoginInput struct {
 // DeviceLoginStart is the opened pairing request as the device sees it.
 type DeviceLoginStart struct {
 	DeviceCode              string  `json:"device_code" doc:"Secret the device polls with; never shown to a person" example:"d3v1c3c0d3"`
-	UserCode                string  `json:"user_code" doc:"Short code a person types into the approving browser" example:"ABCD-1234"`
-	MatchCode               string  `json:"match_code" doc:"Confirmation code shown on both screens so the approver can match them" example:"42"`
-	VerificationURI         string  `json:"verification_uri" doc:"Page where the approver enters the user code" example:"https://silo.example.test/link"`
-	VerificationURIComplete string  `json:"verification_uri_complete" doc:"verification_uri with the user code prefilled" example:"https://silo.example.test/link?code=ABCD-1234"`
+	UserCode                string  `json:"user_code" doc:"Short code a person types into the approving browser or app: eight digits, shown grouped 4+4. Lookups ignore spaces and dashes. Unique only on this server" example:"4821-7730"`
+	MatchCode               string  `json:"match_code" doc:"Legacy confirmation words; clients compare user_code instead and do not display this" example:"warm pony"`
+	VerificationURI         string  `json:"verification_uri" doc:"Page on this server where the approver enters the user code; server.public_url when configured, otherwise the address the device used" example:"https://silo.example.test/activate"`
+	VerificationURIComplete string  `json:"verification_uri_complete" doc:"verification_uri with the user code prefilled, for the QR code" example:"https://silo.example.test/activate?code=48217730"`
 	ExpiresAt               Instant `json:"expires_at" doc:"When the request expires" example:"2026-01-02T03:14:05.678Z"`
-	ExpiresIn               int     `json:"expires_in" doc:"Seconds until the request expires" example:"600"`
+	ExpiresIn               int     `json:"expires_in" doc:"Seconds until the request expires" example:"900"`
 	Interval                int     `json:"interval" doc:"Minimum seconds between polls" example:"5"`
 	DeviceName              string  `json:"device_name" doc:"Device name as recorded" example:"Living room TV"`
 	DevicePlatform          string  `json:"device_platform" doc:"Platform as recorded" example:"tvos"`
@@ -90,21 +114,24 @@ type DeviceLoginStartOutput struct {
 // GetDeviceLoginInput identifies a pairing request to the approver by either
 // code; at least one must be given.
 type GetDeviceLoginInput struct {
-	Token string `query:"token" doc:"Browser code from the verification link" example:"br0ws3rc0d3"`
-	Code  string `query:"code" doc:"User code the person typed" example:"ABCD-1234"`
+	Token string `query:"token" doc:"Browser code from a verification link issued before user codes moved into the link" example:"br0ws3rc0d3"`
+	Code  string `query:"code" doc:"User code from the verification link or typed by the person. A six-digit Jellyfin Quick Connect code is found only when the request carries a signed-in session's bearer token" example:"48217730"`
 }
 
 // DeviceLogin is the pairing request as the approver sees it.
 type DeviceLogin struct {
-	Status         string   `json:"status" enum:"pending,approved,denied,consumed,expired" doc:"Current state; see the domain notes" example:"pending"`
-	UserCode       string   `json:"user_code" doc:"User code; empty once the request is no longer decidable" example:"ABCD-1234"`
-	MatchCode      string   `json:"match_code" doc:"Confirmation code shown on the device" example:"42"`
+	Status         string   `json:"status" enum:"pending,approved,denied,consumed,canceled,expired" doc:"Current state; see the domain notes" example:"pending"`
+	UserCode       string   `json:"user_code" doc:"User code: eight digits as 4821-7730, or six digits for a Jellyfin Quick Connect request; empty once the request is no longer decidable" example:"4821-7730"`
+	MatchCode      string   `json:"match_code" doc:"Legacy confirmation words; not displayed" example:"warm pony"`
 	DeviceName     string   `json:"device_name" doc:"Device name the request was opened with" example:"Living room TV"`
 	DevicePlatform string   `json:"device_platform" doc:"Platform the request was opened with" example:"tvos"`
 	IPAddressHint  string   `json:"ip_address_hint" doc:"Partially masked address the request came from" example:"192.168.1.x"`
 	ExpiresAt      *Instant `json:"expires_at,omitempty" doc:"When the request expires; absent once expired or unknown" example:"2026-01-02T03:14:05.678Z"`
-	ClientPurpose  string   `json:"client_purpose" doc:"Purpose the request was opened with" example:"device_login"`
+	RequestedAt    Instant  `json:"requested_at" doc:"When the device opened the request" example:"2026-01-02T03:04:05.678Z"`
+	ClientPurpose  string   `json:"client_purpose" doc:"Purpose the request was opened with: device_login, remote_playback, or jellyfin_quick_connect for a Jellyfin app signing in with Quick Connect, which is approved for a profile through approve-handoff" example:"device_login"`
 	Temporary      bool     `json:"temporary" doc:"Whether the resulting session will be temporary" example:"false"`
+	ServerID       string   `json:"server_id,omitempty" doc:"This deployment's server identity, for app links that must reach the same server; absent when unavailable" example:"3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35"`
+	ServerName     string   `json:"server_name" doc:"Server display name the approver signs the device in to" example:"Silo"`
 }
 
 // DeviceLoginOutput is the getDeviceLogin response.
@@ -122,8 +149,10 @@ type PollDeviceLoginInput struct {
 // DeviceLoginPoll is the poll answer. Tokens are present exactly once, on the
 // poll that collects an approved request.
 type DeviceLoginPoll struct {
-	Status           string     `json:"status" enum:"pending,approved,denied,consumed,expired" doc:"State after this poll; approved carries tokens" example:"pending"`
+	Status           string     `json:"status" enum:"pending,approved,denied,consumed,canceled,expired" doc:"State after this poll; approved carries tokens" example:"pending"`
 	PollAfter        int        `json:"poll_after" doc:"Seconds to wait before polling again" example:"5"`
+	Opened           bool       `json:"opened" doc:"A pending request an approver has looked up; the device keeps its code and tells the person to continue on their phone" example:"false"`
+	ExpiresAt        *Instant   `json:"expires_at,omitempty" doc:"The pending request's current expiry, which approver lookups can move past the start answer's; the device moves its local deadline here. Absent on every other status" example:"2026-01-02T03:14:05.678Z"`
 	Tokens           *TokenPair `json:"tokens,omitempty" doc:"The issued credentials; present only when status is approved"`
 	ProfileID        string     `json:"profile_id" doc:"Profile the temporary session is bound to; empty for a full login" example:""`
 	ProfileToken     string     `json:"profile_token" doc:"X-Profile-Token for the bound profile; empty for a full login" example:""`
@@ -134,6 +163,23 @@ type DeviceLoginPoll struct {
 // DeviceLoginPollOutput is the pollDeviceLogin response.
 type DeviceLoginPollOutput struct {
 	Body DeviceLoginPoll
+}
+
+// CancelDeviceLoginInput is the device withdrawing its own request.
+type CancelDeviceLoginInput struct {
+	Body struct {
+		DeviceCode string `json:"device_code" minLength:"1" doc:"The device code from startDeviceLogin" example:"d3v1c3c0d3"`
+	}
+}
+
+// DeviceLoginCancel is the request's state after the cancel.
+type DeviceLoginCancel struct {
+	Status string `json:"status" enum:"canceled,denied,consumed,expired" doc:"canceled when the request was pending or approved but not collected; otherwise its unchanged state" example:"canceled"`
+}
+
+// DeviceLoginCancelOutput is the cancelDeviceLogin response.
+type DeviceLoginCancelOutput struct {
+	Body DeviceLoginCancel
 }
 
 // DecideDeviceLoginInput identifies the request being approved or denied by
@@ -162,25 +208,53 @@ const (
 	bucketDevicePoll   = "device_poll"
 )
 
+// deviceDecisionSessionRule describes who may decide a pairing request.
+const deviceDecisionSessionRule = "Only a signed-in login session decides: an API key or an impersonation session is 403 permission_denied, because an approval gives the device a login session of the account."
+
+// deviceDecisionClaims admits only a login session to a device decision
+// (handlers.deviceDecisionSessionError has the reasons).
+func deviceDecisionClaims(ctx context.Context) (*auth.Claims, *Problem) {
+	claims := claimsFrom(ctx)
+	if claims == nil {
+		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	}
+	if !claims.IsOwnLoginSession() {
+		return nil, NewProblem(TypePermissionDenied, "Approving or denying a device needs a signed-in session; API keys and impersonation sessions cannot.")
+	}
+	return claims, nil
+}
+
 func registerDeviceLogin(reg *Registry) {
 	// The lookups identify the request by a code, not a path parameter, so
 	// their 404 is the operation's own; a decision on a finished request is
 	// 409 and on an expired one 410 (device_login_expired).
 	lookup := humaOp(http.MethodGet, Prefix+"/auth/device", "getDeviceLogin", "device-login",
 		"Describe a pairing request to the person approving it.")
-	lookup.Errors = []int{http.StatusNotFound}
+	lookup.Description = "A six-digit Jellyfin Quick Connect code is looked up only for the account's own signed-in session: send its bearer token. Without a valid one the lookup is 401, and from an impersonation session 403. Each such lookup also spends the account's Quick Connect code budget."
+	lookup.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusTooManyRequests}
+	lookup.Metadata = map[string]any{metaAttachSession: true}
 	Register(reg, Operation{
 		Operation: lookup,
 		Class:     ClassPublic, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
 	}, reg.getDeviceLogin)
 	approve := humaOp(http.MethodPost, Prefix+"/auth/device/approve", "approveDeviceLogin", "device-login",
 		"Approve a pairing request as the caller's account.")
-	approve.Errors = []int{http.StatusNotFound, http.StatusConflict, http.StatusGone}
-	Register(reg, Operation{Operation: approve, RetrySafety: RetrySafetyDomainIdentity, Class: ClassAuthenticated, ServiceBacked: true}, reg.approveDeviceLogin)
+	approve.Description = deviceDecisionSessionRule
+	approve.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusGone}
+	// The decisions take a user code too, so they spend the lookup's
+	// guessing budget rather than only the generic authenticated limiter.
+	Register(reg, Operation{
+		Operation: approve, RetrySafety: RetrySafetyDomainIdentity,
+		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
+	}, reg.approveDeviceLogin)
 	handoff := humaOp(http.MethodPost, Prefix+"/auth/device/approve-handoff", "approveDeviceHandoff", "device-login",
-		"Approve a remote-playback pairing request for the caller's verified profile.")
-	handoff.Errors = []int{http.StatusConflict, http.StatusGone}
-	Register(reg, Operation{Operation: handoff, RetrySafety: RetrySafetyDomainIdentity, Class: ClassProfileScoped, ServiceBacked: true}, reg.approveDeviceHandoff)
+		"Approve a pairing request for the caller's verified profile: a remote-playback handoff or a Jellyfin Quick Connect request.")
+	handoff.Description = deviceDecisionSessionRule
+	handoff.Errors = []int{http.StatusForbidden, http.StatusConflict, http.StatusGone}
+	Register(reg, Operation{
+		Operation: handoff, RetrySafety: RetrySafetyDomainIdentity,
+		Class: ClassProfileScoped, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
+	}, reg.approveDeviceHandoff)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/auth/device/capability", "getDeviceLoginCapability", "device-login",
 			"Describe device pairing support."),
@@ -188,8 +262,12 @@ func registerDeviceLogin(reg *Registry) {
 	}, reg.getDeviceLoginCapability)
 	deny := humaOp(http.MethodPost, Prefix+"/auth/device/deny", "denyDeviceLogin", "device-login",
 		"Deny a pairing request.")
-	deny.Errors = []int{http.StatusNotFound, http.StatusConflict, http.StatusGone}
-	Register(reg, Operation{Operation: deny, RetrySafety: RetrySafetyDomainIdentity, Class: ClassAuthenticated, ServiceBacked: true}, reg.denyDeviceLogin)
+	deny.Description = deviceDecisionSessionRule
+	deny.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusGone}
+	Register(reg, Operation{
+		Operation: deny, RetrySafety: RetrySafetyDomainIdentity,
+		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketDeviceLookup,
+	}, reg.denyDeviceLogin)
 	poll := humaOp(http.MethodPost, Prefix+"/auth/device/poll", "pollDeviceLogin", "device-login",
 		"Poll a pairing request from the device and collect its tokens once approved.")
 	poll.Errors = []int{http.StatusNotFound}
@@ -197,6 +275,13 @@ func registerDeviceLogin(reg *Registry) {
 		Operation: poll, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketDevicePoll,
 	}, reg.pollDeviceLogin)
+	cancel := humaOp(http.MethodPost, Prefix+"/auth/device/cancel", "cancelDeviceLogin", "device-login",
+		"Withdraw the device's own pairing request so its code can no longer be approved.")
+	cancel.Errors = []int{http.StatusNotFound}
+	Register(reg, Operation{
+		Operation: cancel, RetrySafety: RetrySafetyNaturalIdempotent,
+		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketDevicePoll,
+	}, reg.cancelDeviceLogin)
 	start := humaOp(http.MethodPost, Prefix+"/auth/device/start", "startDeviceLogin", "device-login",
 		"Open a pairing request from a device.")
 	start.DefaultStatus = http.StatusCreated
@@ -216,9 +301,31 @@ func (reg *Registry) getDeviceLoginCapability(_ context.Context, _ *CapabilityIn
 		Body: DeviceLoginCapability{
 			Capability:            Capability{State: state},
 			RemotePlaybackHandoff: true,
+			JellyfinQuickConnect:  true,
 			ProtocolVersions:      []int{2},
+			Cancel:                true,
+			OpenedSignal:          true,
 		},
 	}, nil
+}
+
+// deviceLoginBaseURL is where the approver's verification page lives: the
+// configured public URL, with any path it is served under, when there is
+// one, since a phone off the TV's network can't open a LAN address;
+// otherwise the origin the device used.
+func (reg *Registry) deviceLoginBaseURL(r *http.Request) string {
+	if reg.deps.ServerConnections.PublicURL != nil {
+		publicURL := strings.TrimSpace(reg.deps.ServerConnections.PublicURL())
+		if origin, ok := netaccess.NormalizeOrigin(publicURL); ok {
+			if u, err := url.Parse(publicURL); err == nil {
+				return origin + strings.TrimRight(u.EscapedPath(), "/")
+			}
+		}
+	}
+	if r == nil {
+		return ""
+	}
+	return handlers.RequestBaseURL(r)
 }
 
 func (reg *Registry) startDeviceLogin(ctx context.Context, in *StartDeviceLoginInput) (*DeviceLoginStartOutput, error) {
@@ -239,8 +346,8 @@ func (reg *Registry) startDeviceLogin(ctx context.Context, in *StartDeviceLoginI
 	}
 	if r != nil {
 		input.UserAgent = r.UserAgent()
-		input.BaseURL = handlers.RequestBaseURL(r)
 	}
+	input.BaseURL = reg.deviceLoginBaseURL(r)
 	result, err := reg.deps.Devices.StartDeviceLogin(ctx, input)
 	if err != nil {
 		return nil, deviceProblem(err)
@@ -269,7 +376,22 @@ func (reg *Registry) getDeviceLogin(ctx context.Context, in *GetDeviceLoginInput
 		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: "query.code", Code: codeRequired, Detail: "Either token or code is required."})
 	}
-	info, err := reg.deps.Devices.LookupDeviceLogin(ctx, auth.DeviceLoginLookupInput{BrowserCode: in.Token, UserCode: in.Code})
+	input := auth.DeviceLoginLookupInput{BrowserCode: in.Token, UserCode: in.Code, MarkOpened: true}
+	claims := claimsFrom(ctx)
+	if claims.IsOwnLoginSession() {
+		input.AccountID = claims.UserID
+	}
+	// A Quick Connect code is looked up only for the account's own session.
+	// Without one the answer is the same for every six-digit code, so it says
+	// nothing about which exist, and a client holding an expired token learns
+	// to refresh it instead of reading the code as unknown.
+	if in.Token == "" && auth.IsQuickConnectCode(in.Code) && input.AccountID == 0 {
+		if claims != nil {
+			return nil, NewProblem(TypePermissionDenied, "Only the account's own signed-in session can look up a Quick Connect code.")
+		}
+		return nil, NewProblem(TypeAuthenticationRequired, "Sign in to look up a Quick Connect code.")
+	}
+	info, err := reg.deps.Devices.LookupDeviceLogin(ctx, input)
 	if err != nil {
 		return nil, deviceProblem(err)
 	}
@@ -280,8 +402,11 @@ func (reg *Registry) getDeviceLogin(ctx context.Context, in *GetDeviceLoginInput
 		DeviceName:     info.DeviceName,
 		DevicePlatform: info.DevicePlatform,
 		IPAddressHint:  info.IPAddressHint,
+		RequestedAt:    NewInstant(info.RequestedAt),
 		ClientPurpose:  info.ClientPurpose,
 		Temporary:      info.Temporary,
+		ServerName:     reg.serverDisplayName(ctx),
+		ServerID:       reg.knownServerID(ctx),
 	}
 	if !info.ExpiresAt.IsZero() {
 		out.ExpiresAt = ptr(NewInstant(info.ExpiresAt))
@@ -289,15 +414,28 @@ func (reg *Registry) getDeviceLogin(ctx context.Context, in *GetDeviceLoginInput
 	return &DeviceLoginOutput{Body: out}, nil
 }
 
+// serverDisplayName is the branded server name the approver sees.
+func (reg *Registry) serverDisplayName(ctx context.Context) string {
+	if reg.deps.Branding != nil {
+		if name := reg.deps.Branding.Load(ctx).ServerName; name != "" {
+			return name
+		}
+	}
+	return branding.DefaultServerName
+}
+
 func (reg *Registry) pollDeviceLogin(ctx context.Context, in *PollDeviceLoginInput) (*DeviceLoginPollOutput, error) {
 	if reg.deps.Devices == nil {
 		return nil, unavailable("device login")
 	}
-	result, err := reg.deps.Devices.PollDeviceLogin(ctx, in.Body.DeviceCode)
+	result, err := reg.deps.Devices.PollDeviceLogin(withClientDevice(ctx), in.Body.DeviceCode)
 	if err != nil {
 		return nil, deviceProblem(err)
 	}
-	out := DeviceLoginPoll{Status: result.Status, PollAfter: result.PollAfter}
+	out := DeviceLoginPoll{Status: result.Status, PollAfter: result.PollAfter, Opened: result.Opened}
+	if result.Status == auth.DeviceLoginStatusPending && !result.ExpiresAt.IsZero() {
+		out.ExpiresAt = ptr(NewInstant(result.ExpiresAt))
+	}
 	if result.Tokens != nil {
 		out.Tokens = ptr(tokenPairFromView(*result.Tokens))
 		if result.Temporary {
@@ -312,18 +450,29 @@ func (reg *Registry) pollDeviceLogin(ctx context.Context, in *PollDeviceLoginInp
 	return &DeviceLoginPollOutput{Body: out}, nil
 }
 
+func (reg *Registry) cancelDeviceLogin(ctx context.Context, in *CancelDeviceLoginInput) (*DeviceLoginCancelOutput, error) {
+	if reg.deps.Devices == nil {
+		return nil, unavailable("device login")
+	}
+	status, err := reg.deps.Devices.CancelDeviceLogin(ctx, in.Body.DeviceCode)
+	if err != nil {
+		return nil, deviceProblem(err)
+	}
+	return &DeviceLoginCancelOutput{Body: DeviceLoginCancel{Status: status}}, nil
+}
+
 func (reg *Registry) approveDeviceLogin(ctx context.Context, in *DecideDeviceLoginInput) (*DeviceLoginDecisionOutput, error) {
 	if reg.deps.Devices == nil {
 		return nil, unavailable("device login")
 	}
-	claims := claimsFrom(ctx)
-	if claims == nil {
-		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	claims, p := deviceDecisionClaims(ctx)
+	if p != nil {
+		return nil, p
 	}
 	if p := decisionCodes(in); p != nil {
 		return nil, p
 	}
-	d, err := reg.deps.Devices.ApproveDeviceLogin(ctx, auth.DeviceLoginLookupInput{BrowserCode: in.Body.Token, UserCode: in.Body.Code}, claims.UserID)
+	d, err := reg.deps.Devices.ApproveDeviceLogin(ctx, decisionLookup(in, claims.UserID), claims.UserID)
 	if err != nil {
 		return nil, deviceProblem(err)
 	}
@@ -334,6 +483,9 @@ func (reg *Registry) approveDeviceHandoff(ctx context.Context, in *DecideDeviceL
 	if reg.deps.Devices == nil {
 		return nil, unavailable("device login")
 	}
+	if _, p := deviceDecisionClaims(ctx); p != nil {
+		return nil, p
+	}
 	scope, ok := scopeFrom(ctx)
 	if !ok || scope.UserID == 0 || scope.ProfileID == "" {
 		return nil, NewProblem(TypePermissionDenied, "An active verified profile is required.")
@@ -341,7 +493,7 @@ func (reg *Registry) approveDeviceHandoff(ctx context.Context, in *DecideDeviceL
 	if p := decisionCodes(in); p != nil {
 		return nil, p
 	}
-	d, err := reg.deps.Devices.ApproveDeviceHandoff(ctx, auth.DeviceLoginLookupInput{BrowserCode: in.Body.Token, UserCode: in.Body.Code}, scope.UserID, scope.ProfileID)
+	d, err := reg.deps.Devices.ApproveDeviceHandoff(ctx, decisionLookup(in, scope.UserID), scope.UserID, scope.ProfileID)
 	if err != nil {
 		return nil, deviceProblem(err)
 	}
@@ -352,18 +504,25 @@ func (reg *Registry) denyDeviceLogin(ctx context.Context, in *DecideDeviceLoginI
 	if reg.deps.Devices == nil {
 		return nil, unavailable("device login")
 	}
-	claims := claimsFrom(ctx)
-	if claims == nil {
-		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	claims, p := deviceDecisionClaims(ctx)
+	if p != nil {
+		return nil, p
 	}
 	if p := decisionCodes(in); p != nil {
 		return nil, p
 	}
-	d, err := reg.deps.Devices.DenyDeviceLogin(ctx, auth.DeviceLoginLookupInput{BrowserCode: in.Body.Token, UserCode: in.Body.Code}, claims.UserID)
+	d, err := reg.deps.Devices.DenyDeviceLogin(ctx, decisionLookup(in, claims.UserID), claims.UserID)
 	if err != nil {
 		return nil, deviceProblem(err)
 	}
 	return &DeviceLoginDecisionOutput{Body: DeviceLoginDecision{Status: d.Status}}, nil
+}
+
+// decisionLookup identifies the request a decision names. The deciding
+// account is the lookup's account, so a Quick Connect code is found and
+// spends that account's budget.
+func decisionLookup(in *DecideDeviceLoginInput, accountID int) auth.DeviceLoginLookupInput {
+	return auth.DeviceLoginLookupInput{BrowserCode: in.Body.Token, UserCode: in.Body.Code, AccountID: accountID}
 }
 
 // decisionCodes requires one of the two identifying codes. v1 forwards an

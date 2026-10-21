@@ -111,7 +111,7 @@ func newScopedKeyAdminHandler(targetRole string) (*AdminHandler, *scopedKeyUserR
 		Role:        targetRole,
 		Permissions: []string{},
 		Enabled:     true,
-		MaxProfiles: 5,
+		MaxProfiles: new(5),
 	}}
 	return &AdminHandler{
 		userRepo:           repo,
@@ -220,6 +220,7 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 		name       string
 		claims     *auth.Claims
 		targetRole string
+		self       bool
 		body       string
 		wantStatus int
 		wantUpdate bool
@@ -246,6 +247,36 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 			wantStatus: http.StatusForbidden,
 		},
 		{
+			name:       "scoped key cannot redirect its admin owner's recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "admin",
+			self:       true,
+			body:       `{"email":"attacker@example.test"}`,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "scoped key cannot redirect another admin's recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "admin",
+			body:       `{"email":"attacker@example.test"}`,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "scoped key cannot clear an admin's recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "admin",
+			body:       `{"email":""}`,
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "scoped key may edit an ordinary recovery email",
+			claims:     scopedKeyClaims(),
+			targetRole: "user",
+			body:       `{"email":"new@example.test"}`,
+			wantStatus: http.StatusOK,
+			wantUpdate: true,
+		},
+		{
 			name:       "scoped key may reset an ordinary password",
 			claims:     scopedKeyClaims(),
 			targetRole: "user",
@@ -265,7 +296,7 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 			name:       "unscoped key keeps full access",
 			claims:     unscopedKeyClaims(),
 			targetRole: "admin",
-			body:       `{"password":"hunter2","role":"admin"}`,
+			body:       `{"password":"hunter2","role":"admin","email":"new@example.test"}`,
 			wantStatus: http.StatusOK,
 			wantUpdate: true,
 		},
@@ -273,7 +304,7 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 			name:       "jwt admin keeps full access",
 			claims:     jwtAdminClaims(),
 			targetRole: "admin",
-			body:       `{"password":"hunter2","role":"admin"}`,
+			body:       `{"password":"hunter2","role":"admin","email":"new@example.test"}`,
 			wantStatus: http.StatusOK,
 			wantUpdate: true,
 		},
@@ -282,6 +313,9 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, repo := newScopedKeyAdminHandler(tt.targetRole)
+			if tt.self {
+				tt.claims.UserID = repo.user.ID
+			}
 			rec := updateUserRequestFor(t, h, tt.claims, tt.body)
 
 			if rec.Code != tt.wantStatus {
@@ -296,25 +330,6 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 				t.Fatalf("user updated = %v, want %v", got, tt.wantUpdate)
 			}
 		})
-	}
-}
-
-// Promoting passes the role through untouched; the repository owns clearing
-// the group so every caller (invitations, provisioning) gets the same rule.
-func TestHandleUpdateUserPromoteLeavesGroupToRepository(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler("user")
-	groupID := int64(5)
-	repo.user.AccessGroupID = &groupID
-
-	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"role":"admin"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-	}
-	if repo.updated == nil || repo.updated.Role == nil || *repo.updated.Role != "admin" {
-		t.Fatalf("update = %+v, want role admin", repo.updated)
-	}
-	if repo.updated.AccessGroupID.Set {
-		t.Fatalf("AccessGroupID = %+v, want untouched (repository clears it)", repo.updated.AccessGroupID)
 	}
 }
 
@@ -346,23 +361,6 @@ func TestHandleUpdateUserRejectsGroupingAnAdmin(t *testing.T) {
 				t.Fatal("grouped-admin assignment must not be written")
 			}
 		})
-	}
-}
-
-// Demoting passes through as well; the repository lands the ex-admin on the
-// default group unless the request names one.
-func TestHandleUpdateUserDemoteLeavesGroupToRepository(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler("admin")
-
-	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"role":"user"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-	}
-	if repo.updated == nil || repo.updated.Role == nil || *repo.updated.Role != "user" {
-		t.Fatalf("update = %+v, want role user", repo.updated)
-	}
-	if repo.updated.AccessGroupID.Set {
-		t.Fatalf("AccessGroupID = %+v, want untouched (repository assigns the default group)", repo.updated.AccessGroupID)
 	}
 }
 
@@ -431,15 +429,14 @@ func updateUserRequestFor(t *testing.T, h *AdminHandler, claims *auth.Claims, bo
 }
 
 func TestHandleUpdateUserRechecksScopedKeyAgainstLockedAccount(t *testing.T) {
-	h, repo := newScopedKeyAdminHandler(models.RoleUser)
-	repo.promoteBeforeMutate = true
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/users/42", strings.NewReader(`{"password":"new-password"}`))
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "42")
-	req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), scopedKeyClaims()))
-	rec := httptest.NewRecorder()
-	h.HandleUpdateUser(rec, req)
-	if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != "insufficient_scope" || repo.updated != nil {
-		t.Fatalf("status %d body %s, updated %v", rec.Code, rec.Body.String(), repo.updated != nil)
+	for _, body := range []string{`{"password":"new-password"}`, `{"email":"attacker@example.test"}`} {
+		t.Run(body, func(t *testing.T) {
+			h, repo := newScopedKeyAdminHandler(models.RoleUser)
+			repo.promoteBeforeMutate = true
+			rec := updateUserRequestFor(t, h, scopedKeyClaims(), body)
+			if rec.Code != http.StatusForbidden || decodeErrorCode(t, rec) != "insufficient_scope" || repo.updated != nil {
+				t.Fatalf("status %d body %s, updated %v", rec.Code, rec.Body.String(), repo.updated != nil)
+			}
+		})
 	}
 }

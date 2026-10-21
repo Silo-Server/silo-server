@@ -34,7 +34,7 @@ const BASE_CLIENT_FEATURES_V3 = [FEATURE_PLAYBACK_PLAN_V3];
  * `plan_invalidated` command (see `VideoPlayer`) and replans off the plan the
  * server names.
  */
-export const VIDEO_CLIENT_FEATURES_V3 = [FEATURE_PLAN_INVALIDATED_V3];
+export const VIDEO_CLIENT_FEATURES_V3 = [FEATURE_PLAN_INVALIDATED_V3, "marker_thumbnails_v1"];
 
 /**
  * `client_features` is the contract's single advertisement location, and a
@@ -43,6 +43,34 @@ export const VIDEO_CLIENT_FEATURES_V3 = [FEATURE_PLAN_INVALIDATED_V3];
  */
 function clientFeaturesV3(extra: string[] | undefined): string[] {
   return [...BASE_CLIENT_FEATURES_V3, ...(extra ?? [])];
+}
+
+/**
+ * Contract bounds on a replan's `failure`, in UTF-8 bytes. The server refuses a
+ * replan that exceeds them, which would turn a recoverable failure into a stuck
+ * player, so a long diagnostic is cut rather than sent whole.
+ */
+const FAILURE_BYTE_LIMITS = { classification: 64, message: 512, decoder_name: 128 } as const;
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  const bytes = new TextEncoder().encode(value);
+  if (bytes.length <= maxBytes) return value;
+  // A character cut at the boundary decodes to U+FFFD; drop it.
+  return new TextDecoder().decode(bytes.subarray(0, maxBytes)).replace(/\uFFFD$/, "");
+}
+
+/** A failure the server accepts: each field within its contract bound. */
+export function boundFailureV3(failure: FailureV3): FailureV3 {
+  const bounded: FailureV3 = {
+    classification: truncateUtf8(failure.classification, FAILURE_BYTE_LIMITS.classification),
+  };
+  if (failure.message !== undefined) {
+    bounded.message = truncateUtf8(failure.message, FAILURE_BYTE_LIMITS.message);
+  }
+  if (failure.decoder_name !== undefined) {
+    bounded.decoder_name = truncateUtf8(failure.decoder_name, FAILURE_BYTE_LIMITS.decoder_name);
+  }
+  return bounded;
 }
 
 function clampPosition(seconds: number): number {
@@ -74,7 +102,6 @@ export interface StartRequestInput {
   progressPersistence?: ProgressPersistenceV3;
   explicitAudioTrackIndex?: number | null;
   subtitleTrackIndex?: number | null;
-  metered: boolean;
   bandwidthEstimateKbps?: number | null;
   bandwidthCapKbps?: number | null;
   clientCapabilities: ClientCodecCapabilitiesV3;
@@ -102,7 +129,6 @@ export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
     // The web player renders ASS with its own typesetting engine, so it asks
     // the server to keep authored fidelity rather than flatten it.
     subtitle_fidelity_preference: "preserve",
-    metered: input.metered,
     client_capabilities: input.clientCapabilities,
     client_playback_context: input.clientPlaybackContext,
     ...(input.forceStartPosition || input.position > 0
@@ -132,7 +158,6 @@ export interface ReplanRequestInput extends ReplanOptions {
   qualityPreference: string;
   attemptedPlanKeys: string[];
   attemptCount: number;
-  metered: boolean;
   bandwidthEstimateKbps?: number | null;
   bandwidthCapKbps?: number | null;
   clientCapabilities: ClientCodecCapabilitiesV3;
@@ -173,11 +198,10 @@ export function buildReplanRequestV3(input: ReplanRequestInput): ReplanRequestV3
     attempt_count: input.attemptCount,
     quality_preference: input.qualityPreference,
     position_seconds: clampPosition(input.positionSeconds),
-    metered: input.metered,
     selected_tracks: selectedTracks,
     client_capabilities: input.clientCapabilities,
     client_playback_context: input.clientPlaybackContext,
-    ...(input.failure ? { failure: input.failure } : {}),
+    ...(input.failure ? { failure: boundFailureV3(input.failure) } : {}),
     ...(input.bandwidthEstimateKbps != null
       ? { bandwidth_estimate_kbps: input.bandwidthEstimateKbps }
       : {}),

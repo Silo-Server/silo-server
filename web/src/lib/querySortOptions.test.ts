@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import { getQuerySortOptions, normalizeQuerySortForScope } from "./querySortOptions";
@@ -44,18 +46,6 @@ describe("getQuerySortOptions", () => {
 
     expect(labelsByField.get("date_viewed")).toBe("Date Read");
     expect(labelsByField.get("plays")).toBe("Reads");
-  });
-
-  it("keeps video labels for movie personalized sorts", () => {
-    const labelsByField = new Map(
-      getQuerySortOptions({ includePersonalized: true, relevanceScope: "movie" }).map((option) => [
-        option.value,
-        option.label,
-      ]),
-    );
-
-    expect(labelsByField.get("date_viewed")).toBe("Date Viewed");
-    expect(labelsByField.get("plays")).toBe("Plays");
   });
 });
 

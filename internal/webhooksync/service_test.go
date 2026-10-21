@@ -6,39 +6,31 @@ import (
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 )
 
-func TestShouldApplyPlexWebhookEvent(t *testing.T) {
+func TestPlexWebhookAction(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]bool{
-		"media.scrobble": true,
-		"media.stop":     true,
-		"media.pause":    true,
-		"media.play":     false,
-		"media.resume":   false,
-		"library.new":    false,
-		"":               false,
+	cases := []struct {
+		event         string
+		wantAction    string
+		wantCompleted bool
+		wantOK        bool
+	}{
+		{event: "media.scrobble", wantAction: ActionImportProgress, wantCompleted: true, wantOK: true},
+		{event: "media.stop", wantAction: ActionImportProgress, wantOK: true},
+		{event: "media.pause", wantAction: ActionImportProgress, wantOK: true},
+		{event: "media.play", wantAction: ActionPlaybackStarted, wantOK: true},
+		{event: "media.resume"},
+		{event: ""},
 	}
 
-	for event, want := range cases {
-		event := event
-		want := want
-		t.Run(event, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.event, func(t *testing.T) {
 			t.Parallel()
-			if got := shouldApplyPlexWebhookEvent(event); got != want {
-				t.Fatalf("shouldApplyPlexWebhookEvent(%q) = %v, want %v", event, got, want)
+			action, completed, ok := plexWebhookAction(tc.event)
+			if action != tc.wantAction || completed != tc.wantCompleted || ok != tc.wantOK {
+				t.Fatalf("plexWebhookAction(%q) = (%q, %v, %v), want (%q, %v, %v)", tc.event, action, completed, ok, tc.wantAction, tc.wantCompleted, tc.wantOK)
 			}
 		})
-	}
-}
-
-func TestBuildWebhookURL(t *testing.T) {
-	t.Parallel()
-
-	if got := buildWebhookURL("", "abc123"); got != "/api/v2/webhook-sync/webhooks/abc123" {
-		t.Fatalf("unexpected relative webhook URL: %q", got)
-	}
-	if got := buildWebhookURL("https://example.com/", "abc123"); got != "https://example.com/api/v2/webhook-sync/webhooks/abc123" {
-		t.Fatalf("unexpected absolute webhook URL: %q", got)
 	}
 }
 

@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "id": "4",
+      "installation_id": "3",
+      "provider_id": "plugin:3:oidc",
+      "provider_name": "Company SSO",
+      "username": "alice",
+      "email": "alice@example.test",
+      "display_name": "Alice Example",
+      "linked_at": "2026-01-02T03:04:05.000Z",
+      "last_sign_in_at": "2026-01-03T04:05:06.000Z",
+      "last_checked_at": "2026-01-03T16:07:08.000Z"
+    }
+  ],
+  "can_unlink": false
+}

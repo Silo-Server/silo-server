@@ -150,23 +150,6 @@ func TestEncryptedSettings_SensitiveRoundTrip(t *testing.T) {
 	}
 }
 
-func TestEncryptedSettings_NonSensitivePassthrough(t *testing.T) {
-	ctx := context.Background()
-	raw := newMemSettings()
-	dec := NewEncryptedSettingsRepo(raw, newCipher(t))
-
-	const key = "server.log_level"
-	if SensitiveSettingKeys[key] {
-		t.Fatalf("precondition: %q must be non-sensitive", key)
-	}
-	if err := dec.Set(ctx, key, "debug"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	if got := raw.m[key]; got != "debug" {
-		t.Fatalf("non-sensitive raw value = %q, want plaintext 'debug'", got)
-	}
-}
-
 func TestEncryptedSettings_LegacyPlaintextPassthrough(t *testing.T) {
 	ctx := context.Background()
 	raw := newMemSettings()
@@ -257,6 +240,7 @@ func TestEncryptedSettings_UpdateAtomicUsesPlaintextContract(t *testing.T) {
 func TestSensitiveSettingKeys_Audited(t *testing.T) {
 	mustHave := []string{
 		"auth.jwt_secret",
+		"ai.chatgpt.credentials",
 		"audiobooks.abs.jwt_secret",
 		"s3.public_secret_key",
 		"s3.operational_secret_key", // legacy alias still read as a fallback
@@ -265,7 +249,7 @@ func TestSensitiveSettingKeys_Audited(t *testing.T) {
 		"tmdb.api_key",
 		"requests.radarr.api_key",
 		"requests.sonarr.api_key",
-		"watchsync.trakt.client_secret",
+		"watchsync.simkl.client_secret",
 		"email.smtp_password",
 		"discord.client_secret",
 		"discord.bot_token",

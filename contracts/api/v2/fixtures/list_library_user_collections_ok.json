@@ -6,6 +6,7 @@
       "name": "Rainy days",
       "collection_type": "manual",
       "item_count": 4,
+      "poster_is_collage": false,
       "created_at": "2026-01-02T03:04:05.000Z",
       "updated_at": "2026-01-02T03:04:05.000Z"
     }

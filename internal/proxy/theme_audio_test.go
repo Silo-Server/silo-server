@@ -5,10 +5,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -57,14 +57,7 @@ func TestThemeAudioRouteServesOnlyThemeTokens(t *testing.T) {
 	srv.nodeRowID = func() (int, bool) { return 11, true }
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
-	sign := func(claims streamtoken.Claims) string {
-		t.Helper()
-		token, err := streamtoken.Sign(claims, secret, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return token
-	}
+	sign := func(claims streamtoken.Claims) string { return signToken(t, claims, secret, time.Minute) }
 	direct := themeDirectClaims(path, size, modified)
 	directToken := sign(direct)
 
@@ -115,8 +108,10 @@ func TestThemeConversionHeadAndRelay(t *testing.T) {
 	const secret = "proxy-theme-relay-secret"
 	path, size, modified := writeThemeAudio(t)
 	var relayed *http.Request
+	var relayedSigned bool
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		relayed = r.Clone(r.Context())
+		relayedSigned = nodeauthtest.Signed(r, secret)
 		w.Header().Set("Content-Type", playback.AudioOnlyRemuxMIMEV3)
 		_, _ = w.Write([]byte("converted"))
 	}))
@@ -125,14 +120,7 @@ func TestThemeConversionHeadAndRelay(t *testing.T) {
 	srv.nodeRowID = func() (int, bool) { return 11, true }
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
-	sign := func(claims streamtoken.Claims) string {
-		t.Helper()
-		token, err := streamtoken.Sign(claims, secret, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return token
-	}
+	sign := func(claims streamtoken.Claims) string { return signToken(t, claims, secret, time.Minute) }
 
 	// No FFmpeg is configured here: HEAD must answer without starting one.
 	local := themeAACClaims(path, size, modified)
@@ -152,7 +140,7 @@ func TestThemeConversionHeadAndRelay(t *testing.T) {
 		t.Fatalf("relayed conversion = %d %q", got.status, got.body)
 	}
 	if relayed == nil || relayed.URL.Path != "/remux/theme-transport" || relayed.URL.Query().Get("seek") != "4" ||
-		relayed.Header.Get("X-Silo-Stream-Token") != relayToken || !strings.HasPrefix(relayed.Header.Get("Authorization"), "Bearer ") {
+		relayed.Header.Get("X-Silo-Stream-Token") != relayToken || !relayedSigned {
 		t.Fatalf("relayed request = %+v", relayed)
 	}
 

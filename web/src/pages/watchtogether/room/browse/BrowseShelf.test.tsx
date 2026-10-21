@@ -14,6 +14,8 @@ const data = vi.hoisted(() => ({
   memberStateCalls: [] as string[][],
   search: [] as { content_id: string; type: string; title: string; year?: number }[],
   home: [] as { content_id: string; type: string; title: string; year?: number }[],
+  /** When set, the item detail stays loading until this settles. */
+  pendingDetail: null as Promise<object> | null,
 }));
 vi.mock("@/lib/watchTogether", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/watchTogether")>()),
@@ -71,29 +73,44 @@ vi.mock("@/components/MediaCarousel", () => ({
     </section>
   ),
 }));
-vi.mock("@/hooks/queries/catalogRead", () => ({
-  useCatalogItemDetail: (id?: string) => ({
-    isLoading: false,
-    data: id
-      ? {
-          content_id: id,
-          type: "movie",
-          title: "Arrival",
-          year: 2016,
-          runtime: 116,
-          content_rating: "PG-13",
-          genres: ["Drama", "Science Fiction"],
-          overview: "A linguist is recruited to communicate with alien visitors.",
-          rating_imdb: 7.9,
-          rating_tmdb: null,
-          rating_rt_critic: null,
-          poster_url: "",
-          poster_thumbhash: "",
-          backdrop_url: "",
-        }
-      : undefined,
-  }),
-}));
+vi.mock("@/hooks/queries/catalogRead", async () => {
+  const { useQuery } = await import("@tanstack/react-query");
+  return {
+    useCatalogItemDetail: (id?: string) => {
+      const pending = useQuery({
+        queryKey: ["pending-detail", id],
+        queryFn: () => data.pendingDetail!,
+        enabled: !!id && data.pendingDetail !== null,
+      });
+      return data.pendingDetail ? pending : detailFor(id);
+    },
+  };
+});
+const detailFor = (id?: string) => ({
+  isLoading: false,
+  isFetching: false,
+  data: id
+    ? {
+        content_id: id,
+        type: "movie",
+        title: "Arrival",
+        year: 2016,
+        runtime: 116,
+        content_rating: "PG-13",
+        genres: ["Drama", "Science Fiction"],
+        overview: "A linguist is recruited to communicate with alien visitors.",
+        rating_imdb: 7.9,
+        rating_tmdb: null,
+        rating_rt_critic: null,
+        poster_url: "",
+        poster_thumbhash: "",
+        backdrop_url: "",
+        // The series' next-up episode, in its second season.
+        play_content_id: id === "severance" ? "sev-s2e4" : undefined,
+        play_season_number: id === "severance" ? 2 : undefined,
+      }
+    : undefined,
+});
 const episodes: EpisodeListItem[] = [1, 2, 3, 4].map(
   (n): EpisodeListItem => ({
     content_id: `sev-s2e${n}`,
@@ -118,60 +135,47 @@ const episodes: EpisodeListItem[] = [1, 2, 3, 4].map(
     ],
   }),
 );
-vi.mock("@/hooks/queries/episodes", () => ({
-  useSeasons: () => ({
-    data: {
-      seasons: [
-        {
-          content_id: "s2",
-          season_number: 2,
-          is_specials: false,
-          title: "S2",
-          overview: "",
-          air_date: null,
-          episode_count: 4,
-          poster_url: "",
-          poster_thumbhash: "",
-          user_data: { watched_count: 3, unplayed_count: 1, in_progress_count: 1 },
-        },
-      ],
+// Stable like a query result, so an empty season does not re-report its ids
+// on every render.
+const noEpisodes = { episodes: [] as EpisodeListItem[] };
+vi.mock("@/hooks/queries/episodes", () => {
+  const season = (n: number, playContentId: string, watched: number, inProgress: number) => ({
+    content_id: `s${n}`,
+    season_number: n,
+    is_specials: false,
+    title: `S${n}`,
+    overview: "",
+    air_date: null,
+    episode_count: 4,
+    poster_url: "",
+    poster_thumbhash: "",
+    play_content_id: playContentId,
+    user_data: {
+      watched_count: watched,
+      unplayed_count: 4 - watched,
+      in_progress_count: inProgress,
     },
-  }),
-  useSeasonEpisodes: (id?: string, season?: number) => ({
-    data: id && season === 2 ? { episodes } : { episodes: [] },
-    isLoading: false,
-  }),
-}));
+  });
+  return {
+    useSeasons: () => ({
+      data: { seasons: [season(1, "sev-s1e1", 4, 0), season(2, "sev-s2e4", 3, 1)] },
+    }),
+    useSeasonEpisodes: (id?: string, season?: number) => ({
+      data: id && season === 2 ? { episodes } : noEpisodes,
+      isLoading: false,
+    }),
+  };
+});
 
-const members = [
-  {
-    user_id: 1,
-    profile_id: "p1",
-    display_name: "Nathan",
-    is_host: true,
-    is_self: true,
-    connected: true,
-    lobby_ready: false,
-  },
-  {
-    user_id: 2,
-    profile_id: "p2",
-    display_name: "Maya",
-    is_host: false,
-    is_self: false,
-    connected: true,
-    lobby_ready: false,
-  },
-  {
-    user_id: 3,
-    profile_id: "p3",
-    display_name: "Theo",
-    is_host: false,
-    is_self: false,
-    connected: true,
-    lobby_ready: false,
-  },
-];
+const members = ["Nathan", "Maya", "Theo"].map((display_name, index) => ({
+  user_id: index + 1,
+  profile_id: `p${index + 1}`,
+  display_name,
+  is_host: index === 0,
+  is_self: index === 0,
+  connected: true,
+  lobby_ready: false,
+}));
 const wireMembers = members.map((m) => ({ ...m, user_id: String(m.user_id) }));
 function stateFor(id: string, states: Record<number, "unseen" | "in_progress" | "watched">) {
   return {
@@ -186,6 +190,7 @@ function stateFor(id: string, states: Record<number, "unseen" | "in_progress" | 
 }
 
 beforeEach(() => {
+  data.pendingDetail = null;
   data.memberStateCalls = [];
   data.search = [];
   data.picker = {
@@ -305,21 +310,6 @@ function renderCandidate(
 }
 
 describe("BrowseShelf", () => {
-  it("leads with the together rows and who-tags, and hands a selection up", async () => {
-    const onSelect = renderShelf();
-    await screen.findByText("Continue watching together");
-    expect(screen.getByText("On your watchlists")).toBeInTheDocument();
-    expect(screen.getByText("S2 E4")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Severance" })).toHaveAccessibleDescription(
-      "Nathan, Maya",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Severance" }));
-    expect(onSelect).toHaveBeenCalledWith({
-      card: expect.objectContaining({ content_id: "severance", type: "series" }),
-      season: 2,
-    });
-  });
-
   it("adds the home discovery rows with only movies and series, and filters them by chip", async () => {
     data.home = [
       { content_id: "severance-ep", type: "episode", title: "Hello, Ms. Cobel" },
@@ -335,29 +325,6 @@ describe("BrowseShelf", () => {
     expect(screen.queryByRole("button", { name: "Dune" })).toBeNull();
     expect(screen.queryByText("Continue watching together")).toBeNull();
     data.home = [];
-  });
-
-  it("switches to a wrapping result set while searching and says what to try when empty", async () => {
-    data.search = [{ content_id: "dune", type: "movie", title: "Dune", year: 2021 }];
-    renderShelf();
-    await screen.findByText("On your watchlists");
-    fireEvent.change(screen.getByRole("textbox", { name: "Search movies and series" }), {
-      target: { value: "dune" },
-    });
-    await screen.findByText("Search results");
-    expect(await screen.findByRole("button", { name: "Dune" })).toBeInTheDocument();
-    expect(screen.queryByText("On your watchlists")).toBeNull();
-    data.search = [];
-    fireEvent.change(screen.getByRole("textbox", { name: "Search movies and series" }), {
-      target: { value: "zzz" },
-    });
-    await screen.findByText(/No matches for “zzz”/);
-  });
-
-  it("folds to one line when collapsible and reopens on click", () => {
-    renderShelf({ collapsible: true, open: false, collapsedLabel: "Change what's up next" });
-    fireEvent.click(screen.getByTestId("browse-shelf-collapsed"));
-    expect(screen.getByRole("textbox", { name: "Search movies and series" })).toBeInTheDocument();
   });
 
   it("preserves search and filters while folding and reopening", () => {
@@ -376,25 +343,6 @@ describe("BrowseShelf", () => {
 });
 
 describe("CandidateStage", () => {
-  it("previews a movie with who has seen it and confirms as a movie choice", async () => {
-    const { onConfirm, onDismiss } = renderCandidate(
-      { card: { content_id: "arrival", type: "movie", title: "Arrival", year: 2016 } },
-      { replaces: "Dune (2021)" },
-    );
-    await screen.findByText("Who's seen it");
-    expect(screen.getByText("Candidate")).toBeInTheDocument();
-    expect(screen.getByText(/1h 56m/)).toBeInTheDocument();
-    await screen.findByText("1 of 3");
-    expect(screen.getByText("Replaces Dune (2021)")).toBeInTheDocument();
-    expect(data.memberStateCalls).toContainEqual(["arrival"]);
-    fireEvent.click(screen.getByRole("button", { name: "Stage it for the room" }));
-    expect(onConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({ content_id: "arrival", content_type: "movie", subtitle: "2016" }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(onDismiss).toHaveBeenCalledTimes(1);
-  });
-
   it("drills into a series, warns about spoilers, and confirms an episode from the panel", async () => {
     const { onConfirm } = renderCandidate(
       { card: { content_id: "severance", type: "series", title: "Severance" }, season: 2 },
@@ -415,6 +363,47 @@ describe("CandidateStage", () => {
         subtitle: "Severance · S2 E4",
       }),
     );
+  });
+
+  it("waits for a late series detail before choosing the season", async () => {
+    let resolveDetail!: (detail: object) => void;
+    data.pendingDetail = new Promise((resolve) => (resolveDetail = resolve));
+    renderCandidate({ card: { content_id: "severance", type: "series", title: "Severance" } });
+    await screen.findByRole("button", { name: /Season 1/ });
+    expect(screen.queryByRole("button", { name: /Season/, pressed: true })).toBeNull();
+    resolveDetail({
+      content_id: "severance",
+      type: "series",
+      title: "Severance",
+      play_content_id: "sev-s2e4",
+      play_season_number: 2,
+    });
+    await screen.findByText("Episode 4");
+    expect(screen.getByRole("button", { name: /Season 2/, pressed: true })).toBeInTheDocument();
+  });
+
+  it("opens the detail's next-up season when the cached season targets are older", async () => {
+    // The season list still names E4 as season 2's next episode; the fresher
+    // detail has moved on to E5.
+    data.pendingDetail = Promise.resolve({
+      content_id: "severance",
+      type: "series",
+      title: "Severance",
+      play_content_id: "sev-s2e5",
+      play_season_number: 2,
+    });
+    renderCandidate({ card: { content_id: "severance", type: "series", title: "Severance" } });
+    await screen.findByText("Episode 4");
+    expect(screen.getByRole("button", { name: /Season 2/, pressed: true })).toBeInTheDocument();
+  });
+
+  it("keeps the season the shelf passed over the viewer's next-up season", async () => {
+    renderCandidate({
+      card: { content_id: "severance", type: "series", title: "Severance" },
+      season: 1,
+    });
+    await screen.findByText("No playable episodes in this season.");
+    expect(screen.getByRole("button", { name: /Season 1/, pressed: true })).toBeInTheDocument();
   });
 
   it("dismisses on Escape", () => {

@@ -128,23 +128,15 @@ func TestPlaybackInfoDoesNotStripWhenClientPlaysDolbyVision(t *testing.T) {
 	}
 }
 
+// An SDR display rejects the HDR10 base layer too, so the strip must not be
+// offered even though an executor could run it.
 func TestPlaybackInfoWithoutStripOrToneMapStillHasNoRoute(t *testing.T) {
-	for name, tc := range map[string]struct {
-		unsupported []string
-		localStrip  bool
-	}{
-		"SDR display rejects the HDR10 base layer": {unsupported: androidTVSDRDisplay, localStrip: true},
-		"no executor has the dovi_rpu filter":      {unsupported: androidTVDVProfile8Disabled, localStrip: false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			handler, routeID := newDVStripHandler(t, tc.localStrip)
+	handler, routeID := newDVStripHandler(t, true)
 
-			rr := servePlaybackInfo(handler, routeID, androidTVRangeProfile(tc.unsupported...))
+	rr := servePlaybackInfo(handler, routeID, androidTVRangeProfile(androidTVSDRDisplay...))
 
-			if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
-				t.Fatalf("status = %d body = %s, want PlaybackUnavailable", rr.Code, rr.Body.String())
-			}
-		})
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
+		t.Fatalf("status = %d body = %s, want PlaybackUnavailable", rr.Code, rr.Body.String())
 	}
 }
 
@@ -234,28 +226,6 @@ func TestCompatCopyVideoMasterManifestForStripOmitsDolbyVision(t *testing.T) {
 	}
 }
 
-func TestCompatCopyVideoMasterManifestForProfile7StripAdvertisesPQ(t *testing.T) {
-	source := PlaybackMediaSource{
-		ID: "source-1",
-		Version: catalog.FileVersion{
-			Bitrate: 60_000,
-			VideoTracks: []models.VideoTrack{{
-				Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
-				DVProfile: 7, DVLevel: 6, DVBLCompatID: 6, VideoRangeType: "DOVIWithEL",
-			}},
-			AudioTracks: []models.AudioTrack{{Codec: "aac", Profile: "LC", Default: true}},
-		},
-		HLSRemux:       true,
-		DVStripToHDR10: true,
-	}
-
-	got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", ""))
-
-	if !strings.Contains(got, "VIDEO-RANGE=PQ") || strings.Contains(got, "dvh1") {
-		t.Fatalf("profile 7 strip master must describe the HDR10 base layer:\n%s", got)
-	}
-}
-
 func TestCompatWebOSDolbyVisionMPEGTSSkipsStrip(t *testing.T) {
 	source := PlaybackMediaSource{
 		HLSRemux:       true,
@@ -289,18 +259,23 @@ func dvStripNode(t *testing.T, url string, transformations ...playback.Transform
 }
 
 var dvStripTransformation = playback.TransformationV3{
-	Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1",
+	Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3,
 }
 
 func TestCompatDVStripRoutingRequiresCapableExecutors(t *testing.T) {
 	capable := dvStripNode(t, "http://capable:8080", dvStripTransformation)
 	legacy := dvStripNode(t, "http://legacy:8080")
+	// A node still on recipe 1 strips the RPUs but keeps the enhancement-layer
+	// NAL units, so it cannot run the current recipe.
+	staleTransformation := dvStripTransformation
+	staleTransformation.RecipeVersion = "1"
+	stale := dvStripNode(t, "http://stale:8080", staleTransformation)
 	handler := &PlaybackHandler{compatDVStripLocalProbe: func() bool { return false }}
 
 	eligible, excluded := handler.compatDVStripRouting(context.Background(), nil, map[string]struct{}{"other": {}}, 0)
 
-	if !eligible(capable) || eligible(legacy) || eligible(nil) {
-		t.Fatal("strip routing must accept only nodes advertising server_dv7_to_hdr10")
+	if !eligible(capable) || eligible(legacy) || eligible(stale) || eligible(nil) {
+		t.Fatal("strip routing must accept only nodes advertising the current server_dv7_to_hdr10 recipe")
 	}
 	if _, ok := excluded[noderouting.ShapeHLSRemuxAPI]; !ok {
 		t.Fatalf("excluded shapes = %v, want the API remux shape removed when local FFmpeg lacks dovi_rpu", excluded)
@@ -431,7 +406,7 @@ func TestCompatTranscodeNodeCanStripReadsStoredReport(t *testing.T) {
 func TestCompatDVStripOnAPIHostRequiresLocalAudioRecipeForDownmix(t *testing.T) {
 	localRegistry := func(audio bool) func(context.Context, string, tonemap.Capabilities) (*playback.TransformationRegistryV3, error) {
 		return func(context.Context, string, tonemap.Capabilities) (*playback.TransformationRegistryV3, error) {
-			specs := []playback.TransformationSpecV3{{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true}}
+			specs := []playback.TransformationSpecV3{{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, Available: true}}
 			if audio {
 				specs = append(specs, playback.TransformationSpecV3{
 					Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true,

@@ -12,8 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -73,11 +72,9 @@ func TestThemeInputAuthorizerRequiresExactActiveUnchangedFile(t *testing.T) {
 
 func themeRemuxRequest(t *testing.T, token, transport string) *http.Request {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/remux/"+transport, nil)
+	req := withNodeRouteParams(httptest.NewRequest(http.MethodGet, "/remux/"+transport, nil), map[string]string{"session_id": transport})
 	req.Header.Set("X-Silo-Stream-Token", token)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("session_id", transport)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	return req
 }
 
 func TestHandleRemuxConvertsApprovedThemeOnly(t *testing.T) {
@@ -87,11 +84,7 @@ func TestHandleRemuxConvertsApprovedThemeOnly(t *testing.T) {
 	// and must not be what approves a theme conversion.
 	server.inputPaths = denyInputPaths{}
 	path, size, modified := writeNodeTheme(t)
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf theme-aac-bytes\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	useFakeFFmpeg(t, server, "#!/bin/sh\nprintf theme-aac-bytes\n")
 	claims := streamtoken.Claims{
 		SessionID: "theme-transport", MediaPath: path, PlayMethod: streamtoken.PlayMethodThemeAAC, AudioOnly: true,
 		TranscodeAudio: true, TargetCodecAudio: "aac", TargetAudioChannels: 2, TargetAudioBitrateKbps: 192,
@@ -154,12 +147,12 @@ func TestHandleRemuxConvertsApprovedThemeOnly(t *testing.T) {
 }
 
 func TestHWCapabilitiesAdvertisesThemeExecutionOnlyWithAuthority(t *testing.T) {
-	server := newTestServer(t)
+	server := newProbingTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 42, true }
 	features := func() []string {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-		request.Header.Set("Authorization", "Bearer "+testSecret)
+		nodeauthtest.Sign(t, request, testSecret)
 		recorder := httptest.NewRecorder()
 		server.Handler().ServeHTTP(recorder, request)
 		if recorder.Code == http.StatusServiceUnavailable {

@@ -30,12 +30,38 @@ function render(child: ReactNode) {
 }
 
 describe("useCanRequest", () => {
-  it("returns discoveryEnabled=false when requests_enabled is false", () => {
-    mocks.useRequestFeatureStatus.mockReturnValue({
-      data: { requests_enabled: false },
-      isLoading: false,
-    });
-    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p1" } });
+  it.each([
+    [
+      "requests are off",
+      { data: { requests_enabled: false }, isLoading: false },
+      { id: "p1" },
+      false,
+      false,
+    ],
+    [
+      "there is no profile",
+      { data: { requests_enabled: true }, isLoading: false },
+      null,
+      false,
+      false,
+    ],
+    [
+      "requests are on with a profile",
+      { data: { requests_enabled: true }, isLoading: false },
+      { id: "p1" },
+      true,
+      false,
+    ],
+    [
+      "the feature status is loading",
+      { data: undefined, isLoading: true },
+      { id: "p1" },
+      false,
+      true,
+    ],
+  ])("resolves discovery when %s", (_label, status, profile, discoveryEnabled, isResolving) => {
+    mocks.useRequestFeatureStatus.mockReturnValue(status);
+    mocks.useCurrentProfile.mockReturnValue({ profile });
 
     let captured: ReturnType<typeof useCanRequest> | null = null;
     render(
@@ -46,77 +72,7 @@ describe("useCanRequest", () => {
       />,
     );
 
-    expect(captured).toEqual({
-      discoveryEnabled: false,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-  });
-
-  it("returns discoveryEnabled=false when there is no profile", () => {
-    mocks.useRequestFeatureStatus.mockReturnValue({
-      data: { requests_enabled: true },
-      isLoading: false,
-    });
-    mocks.useCurrentProfile.mockReturnValue({ profile: null });
-
-    let captured: ReturnType<typeof useCanRequest> | null = null;
-    render(
-      <CaptureHook
-        onResult={(r) => {
-          captured = r;
-        }}
-      />,
-    );
-
-    expect(captured).toEqual({
-      discoveryEnabled: false,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-  });
-
-  it("returns discoveryEnabled=true when requests are enabled and there is a profile", () => {
-    mocks.useRequestFeatureStatus.mockReturnValue({
-      data: { requests_enabled: true },
-      isLoading: false,
-    });
-    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p1" } });
-
-    let captured: ReturnType<typeof useCanRequest> | null = null;
-    render(
-      <CaptureHook
-        onResult={(r) => {
-          captured = r;
-        }}
-      />,
-    );
-
-    expect(captured).toEqual({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-  });
-
-  it("returns isResolving=true and discoveryEnabled=false while the feature status is still loading", () => {
-    mocks.useRequestFeatureStatus.mockReturnValue({ data: undefined, isLoading: true });
-    mocks.useCurrentProfile.mockReturnValue({ profile: { id: "p1" } });
-
-    let captured: ReturnType<typeof useCanRequest> | null = null;
-    render(
-      <CaptureHook
-        onResult={(r) => {
-          captured = r;
-        }}
-      />,
-    );
-
-    expect(captured).toEqual({
-      discoveryEnabled: false,
-      isResolving: true,
-      submitDisabledReason: null,
-    });
+    expect(captured).toEqual({ discoveryEnabled, isResolving, submitDisabledReason: null });
   });
 });
 

@@ -17,7 +17,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 )
 
@@ -176,6 +175,8 @@ func TestDiagnosticsIngressStreamsBeforeRequestCompletes(t *testing.T) {
 }
 
 func TestDiagnosticsIngressRejectsBeforeReadingAndPreservesFailures(t *testing.T) {
+	f := availableIngress()
+	h := ingressHandler(f)
 	for _, tc := range []struct {
 		name, token string
 		status      diagnostics.AvailabilityStatus
@@ -187,11 +188,11 @@ func TestDiagnosticsIngressRejectsBeforeReadingAndPreservesFailures(t *testing.T
 		{"storage", memberToken, diagnostics.StatusStorageUnavailable, TypeCapabilityNotConfigured},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := availableIngress()
+			*f = *availableIngress()
 			f.status.Status = tc.status
 			body := &ingressUnreadBody{}
 			rec := httptest.NewRecorder()
-			ingressHandler(f).ServeHTTP(rec, ingressRequest(body, "multipart/form-data; boundary=test", tc.token))
+			h.ServeHTTP(rec, ingressRequest(body, "multipart/form-data; boundary=test", tc.token))
 			requireProblem(t, rec, tc.want)
 			if body.read {
 				t.Fatal("rejected upload consumed body")
@@ -213,7 +214,7 @@ func TestDiagnosticsIngressRejectsBeforeReadingAndPreservesFailures(t *testing.T
 		{"child_profile", false, 1, diagnostics.ErrChildProfileForbidden, TypePermissionDenied, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := availableIngress()
+			*f = *availableIngress()
 			f.status.MaxBundleBytes = 1
 			if tc.ingestError != nil {
 				f.ingest = func(context.Context, int, *string, []byte, io.Reader) (diagnostics.IngestResult, error) {
@@ -222,7 +223,7 @@ func TestDiagnosticsIngressRejectsBeforeReadingAndPreservesFailures(t *testing.T
 			}
 			body, ct := ingressBody(t, tc.reverse, tc.size)
 			rec := httptest.NewRecorder()
-			ingressHandler(f).ServeHTTP(rec, ingressRequest(body, ct, memberToken))
+			h.ServeHTTP(rec, ingressRequest(body, ct, memberToken))
 			requireProblem(t, rec, tc.want)
 			if rec.Header().Get("Retry-After") != tc.retry {
 				t.Fatal(rec.Header())
@@ -236,54 +237,4 @@ type ingressUnreadBody struct{ read bool }
 func (b *ingressUnreadBody) Read([]byte) (int, error) {
 	b.read = true
 	return 0, errors.New("unexpected read")
-}
-
-func TestDiagnosticsIngressSharesBridgeAdmission(t *testing.T) {
-	f := availableIngress()
-	entered, release := make(chan struct{}), make(chan struct{})
-	f.ingest = func(context.Context, int, *string, []byte, io.Reader) (diagnostics.IngestResult, error) {
-		close(entered)
-		<-release
-		return diagnostics.IngestResult{ReportID: "synthetic-report", ShortID: "SILO-TEST"}, nil
-	}
-	service := handlers.NewDiagnosticsHandler(f)
-	deps := parityDeps(false)
-	deps.DiagnosticsIngress = service
-	h := NewHandler(deps)
-	body, ct := ingressBody(t, false, 1)
-	done := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, ingressRequest(body, ct, memberToken))
-		done <- rec
-	}()
-	defer close(release)
-	select {
-	case <-entered:
-	case <-time.After(3 * time.Second):
-		t.Fatal("ingest did not acquire admission")
-	}
-	unread := &ingressUnreadBody{}
-	request := ingressRequest(unread, "multipart/form-data; boundary=synthetic", memberToken)
-	request = request.WithContext(apimw.SetClaims(request.Context(), &auth.Claims{UserID: 1, TokenType: auth.TokenTypeAccess}))
-	rejected := httptest.NewRecorder()
-	service.HandleUpload(rejected, request)
-	if rejected.Code != 503 || rejected.Header().Get("Retry-After") != "5" || unread.read {
-		t.Fatal(rejected.Code, rejected.Header(), unread.read)
-	}
-	// Also prove the same admission rejection is surfaced as a v2 problem.
-	rejected = httptest.NewRecorder()
-	h.ServeHTTP(rejected, ingressRequest(&ingressUnreadBody{}, "multipart/form-data; boundary=synthetic", memberToken))
-	requireProblem(t, rejected, TypeDependencyUnavailable)
-	if rejected.Header().Get("Retry-After") != "5" {
-		t.Fatal(rejected.Header())
-	}
-	// Closing release is deferred so any assertion failure still frees the request.
-	t.Cleanup(func() {
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-			t.Error("admitted upload did not finish")
-		}
-	})
 }

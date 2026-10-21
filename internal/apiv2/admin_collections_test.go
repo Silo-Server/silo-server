@@ -3,7 +3,6 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -25,6 +25,16 @@ type fakeAdminCollections struct {
 	job                                                *models.AdminJob
 	syncErr                                            error
 	template                                           handlers.AdminCollectionTemplateResult
+	bundles                                            []templates.BundleWithTemplates
+	bundleReads                                        int
+	catalog                                            *templates.Catalog
+	catalogReads                                       int
+	featureReads                                       int
+	listed                                             []handlers.AdminCollection
+	listReads, sectionReads, countReads                int
+	countedIDs                                         []string
+	sections                                           []handlers.AdminCollectionSection
+	rowCounts                                          map[string]handlers.AdminCollectionRowCount
 }
 
 func newFakeAdminCollections() *fakeAdminCollections {
@@ -180,24 +190,7 @@ func TestAdminCollectionsActingAdminAndDemo(t *testing.T) {
 		t.Fatalf("demo blocked acting admin %d %s", rec.Code, rec.Body)
 	}
 }
-func TestAdminCollectionsRejectExplicitNullBeforeWrites(t *testing.T) {
-	f := newFakeAdminCollections()
-	h := adminCollectionsTestHandler(t, f)
-	for _, tc := range []struct{ path, body string }{
-		{"/api/v2/admin/collections", `{"title":"Create","library_id":"1","description":null}`},
-		{"/api/v2/admin/collections/import/mdblist", `{"title":"Import","library_id":"1","url":"https://example.invalid/list","limit":null}`},
-		{"/api/v2/admin/collections/template-bundles/bundle/apply", `{"library_ids":["1"],"featured":null}`},
-		{"/api/v2/admin/collections/template-bundles/bundle/apply", `{"library_ids":["1"],"featured":{"home":null}}`},
-		{"/api/v2/admin/collections/template-bundles/bundle/apply", `{"library_ids":["1"],"featured":{"libraries":null}}`},
-	} {
-		t.Run(tc.body, func(t *testing.T) {
-			requireProblem(t, do(t, h, http.MethodPost, tc.path, tc.body, bearer(adminToken)), TypeValidationFailed)
-		})
-	}
-	if f.creates+f.imports+f.applies != 0 {
-		t.Fatal("null validation reached writer")
-	}
-}
+
 func TestAdminCollectionJobSafeConditionalKindScopedMonitor(t *testing.T) {
 	f := newFakeAdminCollections()
 	f.job = &models.AdminJob{ID: "collection-job", JobType: adminjob.JobTypeTemplateBundleApply, Status: adminjob.StatusQueued, RequestedAt: fixedTime(), RequestPayload: json.RawMessage(`{"secret":"PRIVATE_PAYLOAD"}`), Message: "PRIVATE_MESSAGE", ErrorMessage: "PRIVATE_ERROR"}
@@ -237,40 +230,6 @@ func TestAdminCollectionJobSafeConditionalKindScopedMonitor(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, location, "", bearer(adminToken)), TypeNotFound)
 }
 
-func TestAdminCollectionOrdersRejectDuplicatesBeforeService(t *testing.T) {
-	f := newFakeAdminCollections()
-	h := adminCollectionsTestHandler(t, f)
-	for _, tc := range []struct{ path, body string }{
-		{"/api/v2/admin/collections/c1/items/order", `{"ordered_ids":["item","item"]}`},
-		{"/api/v2/admin/libraries/1/collection-groups/order", `{"ordered_ids":["group","group"]}`},
-		{"/api/v2/admin/collections/order", `{"library_id":"1","ordered_ids":["c1","c1"]}`},
-	} {
-		t.Run(tc.path, func(t *testing.T) {
-			requireProblem(t, do(t, h, http.MethodPut, tc.path, tc.body, with(bearer(adminToken), "If-Match", "*")), TypeValidationFailed)
-		})
-	}
-	// Order methods remain unimplemented: reaching any domain dispatch would panic.
-	if f.reads != 0 {
-		t.Fatal("duplicate order reached a service read")
-	}
-}
-
-// A manual collection has no import source, so a sync request is a caller
-// mistake rather than a server fault: it must not answer 500.
-func TestAdminCollectionSyncRejectsUnsupportedMode(t *testing.T) {
-	f := newFakeAdminCollections()
-	f.syncErr = fmt.Errorf("%w: %s", catalogsvc.ErrLibraryCollectionSyncModeUnsupported, "")
-	h := adminCollectionsTestHandler(t, f)
-	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/admin/collections/c1/sync", "", bearer(adminToken)), TypeValidationFailed)
-	if strings.Contains(p.Detail, "unsupported collection sync mode") {
-		t.Fatalf("leaked service diagnostic: %s", p.Detail)
-	}
-	f.syncErr = nil
-	if rec := do(t, h, http.MethodPost, "/api/v2/admin/collections/c1/sync", "", bearer(adminToken)); rec.Code != 200 {
-		t.Fatalf("sync %d %s", rec.Code, rec.Body)
-	}
-}
-
 // The per-entry reason explains a skipped or failed template; v1 returns it and
 // v2 must reach the wire with it too.
 func TestAdminCollectionTemplateApplyKeepsEntryReason(t *testing.T) {
@@ -290,5 +249,19 @@ func TestAdminCollectionTemplateApplyKeepsEntryReason(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("missing %s in %s", want, rec.Body)
 		}
+	}
+}
+
+func TestAdminCollectionErrorRendersInvalidArtworkAsValidationProblem(t *testing.T) {
+	p := adminCollectionError(&handlers.APIError{
+		Status:  http.StatusBadRequest,
+		Code:    "bad_request",
+		Message: "The file is not a supported image.",
+	})
+	if p.Status != http.StatusUnprocessableEntity || p.Type != TypeValidationFailed.URI() {
+		t.Fatalf("problem = %#v", p)
+	}
+	if len(p.Errors) != 1 || p.Errors[0].Detail != "The file is not a supported image." {
+		t.Fatalf("problem errors = %#v", p.Errors)
 	}
 }

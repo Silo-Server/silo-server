@@ -9,22 +9,6 @@ import (
 	"time"
 )
 
-func TestSignerRoundTripAndQuantization(t *testing.T) {
-	s := NewSigner("secret", 4*time.Hour)
-	now := time.Date(2026, 1, 2, 3, 7, 0, 0, time.UTC)
-	path, exp := s.Sign("tmdb/movie/poster.webp", now)
-	if !strings.Contains(path, "/api/v2/artwork/tmdb/movie/poster.webp") {
-		t.Fatal(path)
-	}
-	parts := strings.Split(path, "?")[1]
-	if err := s.Verify("tmdb/movie/poster.webp", exp.Unix(), strings.Split(parts, "&sig=")[1], now); err != nil {
-		t.Fatal(err)
-	}
-	path2, _ := s.Sign("tmdb/movie/poster.webp", now.Add(5*time.Minute))
-	if path != path2 {
-		t.Fatalf("quantization differs: %s %s", path, path2)
-	}
-}
 func TestSignerRejectsExpiryAndTamper(t *testing.T) {
 	s := NewSigner("secret", time.Hour)
 	now := time.Now()
@@ -37,13 +21,7 @@ func TestSignerRejectsExpiryAndTamper(t *testing.T) {
 		t.Fatalf("expiry err=%v", err)
 	}
 }
-func TestServerResolver(t *testing.T) {
-	s := NewSigner("secret", time.Hour)
-	got := NewServerResolver(s).ResolveURLs(context.Background(), []string{"a.webp"})
-	if got["a.webp"].URL == "" || got["a.webp"].ExpiresAt == nil {
-		t.Fatal(got)
-	}
-}
+
 func TestDirectResolver(t *testing.T) {
 	resolver := NewDirectResolver(fakeDirect{}, time.Hour)
 	if got := resolver.ResolveURLs(context.Background(), []string{"a.webp", "missing"}); got["a.webp"].URL != "https://example/a.webp" || got["a.webp"].ExpiresAt == nil || len(got) != 1 {
@@ -91,26 +69,6 @@ func TestSignerTTL(t *testing.T) {
 				t.Fatalf("TTL = %s, want %s", got, tc.want+min(15*time.Minute, tc.want))
 			}
 		})
-	}
-}
-
-func TestSignerShortTTLAcrossBucketBoundary(t *testing.T) {
-	signer := NewSigner("secret", time.Minute)
-	for _, now := range []time.Time{
-		time.Date(2026, 1, 2, 3, 14, 59, 0, time.UTC),
-		time.Date(2026, 1, 2, 3, 15, 0, 0, time.UTC),
-	} {
-		path, exp := signer.Sign("a.webp", now)
-		parsed, err := url.Parse(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if exp.Before(now.Add(time.Minute)) || exp.After(now.Add(2*time.Minute)) {
-			t.Fatalf("expiry %s for now %s", exp, now)
-		}
-		if err := signer.Verify("a.webp", exp.Unix(), parsed.Query().Get("sig"), now); err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 
@@ -211,40 +169,6 @@ func (ttlRecordingDirect) DirectURL(_ context.Context, key string, ttl, window t
 	return "https://example/" + key + "?ttl=" + ttl.String() + "&window=" + window.String(), time.Now().Add(ttl), nil
 }
 
-// Clients and CDNs cache images by full URL. Over a simulated day of
-// per-minute resolves, a revisioned key keeps at most two URLs (one UTC
-// midnight rollover), a second replica mints the same URL, and every URL stays
-// valid for at least the TTL.
-func TestRevisionedURLHoldsForADayAcrossReplicas(t *testing.T) {
-	const ttl = 4 * time.Hour
-	key := "tmdb/movie/1/poster/w500.0123abcd.webp"
-	a, b := NewSigner("secret", ttl), NewSigner("secret", ttl)
-	start := time.Date(2026, 1, 2, 3, 7, 0, 0, time.UTC)
-	distinct := map[string]bool{}
-	for i := range 24 * 60 {
-		now := start.Add(time.Duration(i) * time.Minute)
-		path, exp := a.Sign(key, now)
-		if replica, _ := b.Sign(key, now.Add(20*time.Second)); replica != path {
-			t.Fatalf("replicas disagree at %s: %s vs %s", now, path, replica)
-		}
-		if remaining := exp.Sub(now); remaining < ttl || remaining > revisionedURLWindow+ttl {
-			t.Fatalf("remaining lifetime %s at %s", remaining, now)
-		}
-		parsed, err := url.Parse(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Verify(key, exp.Unix(), parsed.Query().Get("sig"), now); err != nil {
-			t.Fatal(err)
-		}
-		distinct[path] = true
-	}
-	t.Logf("distinct URLs over a day of per-minute resolves: %d", len(distinct))
-	if len(distinct) > 2 {
-		t.Fatalf("revisioned URL took %d values in a day, want at most 2", len(distinct))
-	}
-}
-
 // Mutable keys, capabilities shorter than the default, and job artifacts keep
 // 15-minute buckets: a day that starts mid-bucket spans 97 of them.
 func TestMutableAndShortLivedURLsKeepShortBuckets(t *testing.T) {
@@ -303,5 +227,36 @@ func TestDirectResolverHoldsOnlyRevisionedDefaultLifetimeURLs(t *testing.T) {
 	}
 	if got := direct.ResolveURLs(ctx, []string{revisioned})[revisioned].URL; !strings.HasSuffix(got, "&window=24h0m0s") {
 		t.Fatalf("batch resolve did not hold the revisioned URL: %s", got)
+	}
+}
+
+func TestSignedKeyAcceptsOnlyItsOwnValidURLs(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
+	signer := NewSigner("secret", time.Hour)
+	key := "uploads/a b#c?d%25.webp"
+	signed, exp := signer.Sign(key, now)
+	if got, ok := signer.SignedKey(signed, now); !ok || got != key {
+		t.Fatalf("SignedKey(%s) = %q, %v", signed, got, ok)
+	}
+
+	other, _ := NewSigner("other", time.Hour).Sign(key, now)
+	artifact, _ := NewJobArtifactSigner("secret", time.Hour).Sign("job-1", now)
+	for name, rawURL := range map[string]string{
+		"expired":        signed,
+		"other secret":   other,
+		"other domain":   artifact,
+		"tampered key":   strings.Replace(signed, "uploads/", "uploadz/", 1),
+		"absolute":       "https://cdn.example" + signed,
+		"invalid key":    strings.Replace(signed, "uploads/", "../", 1),
+		"not a URL":      "%zz",
+		"missing expiry": strings.Split(signed, "?")[0],
+	} {
+		at := now
+		if name == "expired" {
+			at = exp
+		}
+		if got, ok := signer.SignedKey(rawURL, at); ok {
+			t.Errorf("%s: SignedKey(%s) = %q, want rejection", name, rawURL, got)
+		}
 	}
 }

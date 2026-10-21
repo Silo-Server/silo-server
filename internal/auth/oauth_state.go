@@ -42,7 +42,14 @@ func SignState(secret []byte, p StatePayload) string {
 	return bodyB64 + "." + sig
 }
 
-// VerifyState parses, verifies the HMAC, checks expiry, and returns the payload.
+// ErrStateExpired is a state whose signature verified but whose expiry has
+// passed. VerifyState returns the payload with it, so the callback can still
+// send the flow's own client its session_expired failure.
+var ErrStateExpired = errors.New("state expired")
+
+// VerifyState parses, verifies the HMAC, checks expiry, and returns the
+// payload. An expired but authentic state returns the payload together
+// with ErrStateExpired.
 func VerifyState(secret []byte, signed string) (StatePayload, error) {
 	parts := strings.SplitN(signed, ".", 2)
 	if len(parts) != 2 {
@@ -67,7 +74,7 @@ func VerifyState(secret []byte, signed string) (StatePayload, error) {
 		return StatePayload{}, fmt.Errorf("unmarshal state body: %w", err)
 	}
 	if time.Now().After(p.ExpiresAt) {
-		return StatePayload{}, errors.New("state expired")
+		return p, ErrStateExpired
 	}
 	return p, nil
 }

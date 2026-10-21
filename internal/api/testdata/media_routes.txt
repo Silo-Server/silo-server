@@ -10,6 +10,13 @@ PATCH /api/v2/*	non-media
 POST /api/v2/*	non-media
 PUT /api/v2/*	non-media
 TRACE /api/v2/*	non-media
+GET /api/v2/account/identities	non-media
+POST /api/v2/account/identities/link-complete	non-media
+POST /api/v2/account/identities/link-credentials	non-media
+POST /api/v2/account/identities/link-network	non-media
+POST /api/v2/account/identities/link-start	non-media
+POST /api/v2/account/identities/link-ticket	non-media
+DELETE /api/v2/account/identities/{id}	non-media
 GET /api/v2/account/me	non-media
 POST /api/v2/account/password	non-media
 GET /api/v2/account/password/capability	non-media
@@ -18,6 +25,13 @@ POST /api/v2/admin/access-groups	non-media
 DELETE /api/v2/admin/access-groups/{id}	non-media
 GET /api/v2/admin/access-groups/{id}	non-media
 PUT /api/v2/admin/access-groups/{id}	non-media
+GET /api/v2/admin/ai/capabilities	non-media
+GET /api/v2/admin/ai/chatgpt	non-media
+DELETE /api/v2/admin/ai/chatgpt/accounts/{client_id}	non-media
+POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select	non-media
+POST /api/v2/admin/ai/chatgpt/login	non-media
+POST /api/v2/admin/ai/chatgpt/login/complete	non-media
+GET /api/v2/admin/ai/chatgpt/models	non-media
 GET /api/v2/admin/api-keys	non-media
 POST /api/v2/admin/api-keys	non-media
 GET /api/v2/admin/api-keys/capabilities	non-media
@@ -66,7 +80,6 @@ GET /api/v2/admin/collections/capabilities	non-media
 POST /api/v2/admin/collections/import/mdblist	non-media
 POST /api/v2/admin/collections/import/tmdb	non-media
 POST /api/v2/admin/collections/import/tmdb-list	non-media
-POST /api/v2/admin/collections/import/trakt	non-media
 GET /api/v2/admin/collections/order	non-media
 PUT /api/v2/admin/collections/order	non-media
 POST /api/v2/admin/collections/preview	non-media
@@ -85,6 +98,7 @@ PUT /api/v2/admin/collections/{id}/items/order	non-media
 DELETE /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/poster	non-media
+GET /api/v2/admin/collections/{id}/sections	non-media
 POST /api/v2/admin/collections/{id}/sync	non-media
 GET /api/v2/admin/dashboard/capabilities	non-media
 DELETE /api/v2/admin/dashboard/layout	non-media
@@ -97,6 +111,21 @@ GET /api/v2/admin/diagnostics/reports	non-media
 DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
+GET /api/v2/admin/downloads/devices	non-media
+GET /api/v2/admin/downloads/entries	non-media
+GET /api/v2/admin/downloads/preparations	non-media
+POST /api/v2/admin/downloads/preparations/cancel	non-media
+GET /api/v2/admin/downloads/preparations/capabilities	non-media
+POST /api/v2/admin/downloads/preparations/pause	non-media
+POST /api/v2/admin/downloads/preparations/resume	non-media
+POST /api/v2/admin/downloads/revoke	non-media
+GET /api/v2/admin/downloads/storage	non-media
+GET /api/v2/admin/downloads/storage/capabilities	non-media
+GET /api/v2/admin/downloads/storage/events	non-media
+GET /api/v2/admin/downloads/storage/files	non-media
+POST /api/v2/admin/downloads/storage/files/delete	non-media
+POST /api/v2/admin/downloads/storage/locations/{location}/cleanup	non-media
+POST /api/v2/admin/downloads/storage/locations/{location}/untracked/delete	non-media
 POST /api/v2/admin/email/test	non-media
 POST /api/v2/admin/files/{fileId}/contribute	non-media
 GET /api/v2/admin/files/{fileId}/contributions	non-media
@@ -149,6 +178,8 @@ POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
+GET /api/v2/admin/items/{id}/trickplay	non-media
+POST /api/v2/admin/items/{id}/trickplay/regenerate	non-media
 PATCH /api/v2/admin/jellyfin-compat/settings	non-media
 GET /api/v2/admin/jellyfin-compat/status	non-media
 POST /api/v2/admin/jellyfin-compat/web/install	non-media
@@ -162,6 +193,9 @@ GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
 PUT /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation	non-media
+GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel	non-media
 GET /api/v2/admin/literary-works/items/{content_id}/candidates	non-media
 POST /api/v2/admin/literary-works/link	non-media
 POST /api/v2/admin/literary-works/matches/confirm	non-media
@@ -185,12 +219,15 @@ GET /api/v2/admin/network-access/{provider}/status	non-media
 GET /api/v2/admin/node-sessions	non-media
 GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
+GET /api/v2/admin/nodes/capabilities	non-media
 POST /api/v2/admin/nodes/force-reload	non-media
 DELETE /api/v2/admin/nodes/{id}	non-media
 PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
+POST /api/v2/admin/nodes/{id}/drain	non-media
 POST /api/v2/admin/nodes/{id}/force-reload	non-media
 POST /api/v2/admin/nodes/{id}/reprobe	non-media
+POST /api/v2/admin/nodes/{id}/resume	non-media
 POST /api/v2/admin/notifications/discord/test	non-media
 POST /api/v2/admin/notifications/push/apple/test	non-media
 POST /api/v2/admin/notifications/push/fcm/test	non-media
@@ -215,6 +252,7 @@ POST /api/v2/admin/plugins/installations	non-media
 DELETE /api/v2/admin/plugins/installations/{id}	non-media
 PUT /api/v2/admin/plugins/installations/{id}	non-media
 PUT /api/v2/admin/plugins/installations/{id}/auth-binding	non-media
+POST /api/v2/admin/plugins/installations/{id}/auth-binding/test	non-media
 PUT /api/v2/admin/plugins/installations/{id}/config	non-media
 POST /api/v2/admin/plugins/installations/{id}/config/test	non-media
 POST /api/v2/admin/plugins/installations/{id}/restart	non-media
@@ -248,6 +286,7 @@ PATCH /api/v2/admin/rate-limits/config	non-media
 GET /api/v2/admin/rate-limits/status	non-media
 GET /api/v2/admin/rating-sources	non-media
 GET /api/v2/admin/rating-sources/capabilities	non-media
+POST /api/v2/admin/recommendations/embeddings/reset	non-media
 GET /api/v2/admin/recommendations/status	non-media
 POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
@@ -311,8 +350,6 @@ PUT /api/v2/admin/settings	non-media
 POST /api/v2/admin/settings/check/{kind}	non-media
 GET /api/v2/admin/settings/effective	non-media
 GET /api/v2/admin/settings/restart-keys	non-media
-GET /api/v2/admin/settings/sections	non-media
-PUT /api/v2/admin/settings/sections	non-media
 GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
@@ -346,10 +383,12 @@ GET /api/v2/admin/tasks/{key}/metrics	non-media
 POST /api/v2/admin/tasks/{key}/run	non-media
 GET /api/v2/admin/tasks/{key}/triggers	non-media
 PUT /api/v2/admin/tasks/{key}/triggers	non-media
+GET /api/v2/admin/trickplay/libraries	non-media
 GET /api/v2/admin/unmatched	non-media
 GET /api/v2/admin/users	non-media
 POST /api/v2/admin/users	non-media
 GET /api/v2/admin/users/capabilities	non-media
+GET /api/v2/admin/users/policy-defaults	non-media
 DELETE /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}	non-media
 PUT /api/v2/admin/users/{id}	non-media
@@ -358,15 +397,25 @@ GET /api/v2/admin/users/{id}/devices	non-media
 GET /api/v2/admin/users/{id}/download-subscriptions	non-media
 GET /api/v2/admin/users/{id}/downloads	non-media
 GET /api/v2/admin/users/{id}/downloads/summary	non-media
+GET /api/v2/admin/users/{id}/identities	non-media
+POST /api/v2/admin/users/{id}/identities	non-media
+DELETE /api/v2/admin/users/{id}/identities/{identity_id}	non-media
 POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
 POST /api/v2/admin/users/{id}/password-reset	non-media
 GET /api/v2/admin/users/{id}/profiles	non-media
+DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+PUT /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections/settings	non-media
 GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
 POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/admin/users/{id}/watch-summary	non-media
+DELETE /api/v2/admin/users/{user_id}/login-sessions	non-media
+GET /api/v2/admin/users/{user_id}/login-sessions	non-media
+DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -379,21 +428,28 @@ PUT /api/v2/audio-prefs/{series_id}	non-media
 GET /api/v2/auth/device	non-media
 POST /api/v2/auth/device/approve	non-media
 POST /api/v2/auth/device/approve-handoff	non-media
+POST /api/v2/auth/device/cancel	non-media
 GET /api/v2/auth/device/capability	non-media
 POST /api/v2/auth/device/deny	non-media
 POST /api/v2/auth/device/poll	non-media
 POST /api/v2/auth/device/start	non-media
+GET /api/v2/auth/external-sign-in/capabilities	non-media
 POST /api/v2/auth/impersonation/end	non-media
 POST /api/v2/auth/login	non-media
 POST /api/v2/auth/logout	non-media
+POST /api/v2/auth/network/{id}/sign-in	non-media
 GET /api/v2/auth/oauth/capabilities	non-media
 POST /api/v2/auth/oauth/complete	non-media
 GET /api/v2/auth/oauth/{install_id}/callback	non-media
 POST /api/v2/auth/oauth/{install_id}/init	non-media
+GET /api/v2/auth/oauth/{install_id}/native/start	non-media
+GET /api/v2/auth/oauth/{install_id}/start	non-media
 POST /api/v2/auth/plugin-launch	non-media
+GET /api/v2/auth/provider-logout	non-media
 GET /api/v2/auth/providers	non-media
 POST /api/v2/auth/refresh	non-media
 GET /api/v2/auth/sessions	non-media
+GET /api/v2/auth/sessions/capabilities	non-media
 DELETE /api/v2/auth/sessions/{id}	non-media
 POST /api/v2/auth/setup	non-media
 GET /api/v2/auth/signup	non-media
@@ -406,6 +462,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/not-interested	non-media
 GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
@@ -422,6 +479,7 @@ POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
+POST /api/v2/catalog/letters	non-media
 GET /api/v2/catalog/people	non-media
 GET /api/v2/catalog/people/{id}	non-media
 POST /api/v2/catalog/people/{id}/refresh	non-media
@@ -446,7 +504,6 @@ GET /api/v2/collections/import/mdblist/search	non-media
 GET /api/v2/collections/import/mdblist/top	non-media
 POST /api/v2/collections/import/tmdb	non-media
 POST /api/v2/collections/import/tmdb-list	non-media
-POST /api/v2/collections/import/trakt	non-media
 GET /api/v2/collections/order	non-media
 PUT /api/v2/collections/order	non-media
 POST /api/v2/collections/preview	non-media
@@ -470,6 +527,7 @@ GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
 DELETE /api/v2/devices/{device_id}	non-media
+PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
 GET /api/v2/diagnostics/capabilities	non-media
 POST /api/v2/diagnostics/reports	non-media
@@ -481,6 +539,7 @@ GET /api/v2/direct-download	media	transfer	viewer_egress	false	true
 HEAD /api/v2/direct-download	media	transfer	viewer_egress	false	true
 GET /api/v2/direct-download-proxy	media	transfer	viewer_egress	false	true
 HEAD /api/v2/direct-download-proxy	media	transfer	viewer_egress	false	true
+POST /api/v2/direct-download/links	non-media
 GET /api/v2/docs	non-media
 HEAD /api/v2/docs	non-media
 GET /api/v2/docs/init.js	non-media
@@ -503,12 +562,13 @@ PATCH /api/v2/downloads/subscriptions/{id}	non-media
 DELETE /api/v2/downloads/{id}	non-media
 PATCH /api/v2/downloads/{id}	non-media
 GET /api/v2/downloads/{id}/artwork/{kind}	non-media
-GET /api/v2/downloads/{id}/file	non-media
-HEAD /api/v2/downloads/{id}/file	non-media
-GET /api/v2/downloads/{id}/file-proxy	non-media
-HEAD /api/v2/downloads/{id}/file-proxy	non-media
+GET /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+GET /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
 GET /api/v2/downloads/{id}/manifest	non-media
-GET /api/v2/downloads/{id}/subtitles/{ref}	non-media
+POST /api/v2/downloads/{id}/prepare	non-media
+GET /api/v2/downloads/{id}/subtitles/{ref}	media	transfer	viewer_egress	false	true
 GET /api/v2/ebooks/{content_id}/annotations	non-media
 POST /api/v2/ebooks/{content_id}/annotations	non-media
 DELETE /api/v2/ebooks/{content_id}/annotations/{annotation_id}	non-media
@@ -527,6 +587,7 @@ DELETE /api/v2/favorites/{item_id}	non-media
 GET /api/v2/favorites/{item_id}	non-media
 PUT /api/v2/favorites/{item_id}	non-media
 GET /api/v2/history	non-media
+GET /api/v2/history-imports/capability	non-media
 POST /api/v2/history-imports/emby-connect/login	non-media
 POST /api/v2/history-imports/plex/auth/check	non-media
 POST /api/v2/history-imports/plex/auth/pin	non-media
@@ -535,6 +596,7 @@ POST /api/v2/history-imports/runs	non-media
 GET /api/v2/history-imports/runs/{id}	non-media
 GET /api/v2/history-imports/sources	non-media
 POST /api/v2/history/remove	non-media
+GET /api/v2/home/capabilities	non-media
 DELETE /api/v2/home/dismissals/{surface}/{item_id}	non-media
 PUT /api/v2/home/dismissals/{surface}/{item_id}	non-media
 GET /api/v2/home/layout	non-media
@@ -558,6 +620,8 @@ GET /api/v2/libraries/skipped-roots	non-media
 GET /api/v2/libraries/stale-ids	non-media
 POST /api/v2/libraries/stale-ids/{content_id}/rematch	non-media
 GET /api/v2/libraries/unmatched-items	non-media
+DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
+PUT /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
 DELETE /api/v2/libraries/{id}	non-media
 PATCH /api/v2/libraries/{id}	non-media
 POST /api/v2/libraries/{id}/check-mount	non-media
@@ -587,6 +651,10 @@ DELETE /api/v2/markers/files/{file_id}/{segment}	non-media
 GET /api/v2/markers/items/{item_id}	non-media
 PUT /api/v2/markers/items/{item_id}	non-media
 GET /api/v2/network-access/capabilities	non-media
+GET /api/v2/not-interested	non-media
+DELETE /api/v2/not-interested/{item_id}	non-media
+GET /api/v2/not-interested/{item_id}	non-media
+PUT /api/v2/not-interested/{item_id}	non-media
 GET /api/v2/notifications	non-media
 GET /api/v2/notifications/capabilities	non-media
 DELETE /api/v2/notifications/discord-link	non-media
@@ -609,6 +677,9 @@ POST /api/v2/notifications/push/devices	non-media
 GET /api/v2/notifications/push/devices/capabilities	non-media
 DELETE /api/v2/notifications/push/devices/{device_id}	non-media
 POST /api/v2/notifications/read-all	non-media
+GET /api/v2/notifications/series	non-media
+DELETE /api/v2/notifications/series/{series_id}/mute	non-media
+PUT /api/v2/notifications/series/{series_id}/mute	non-media
 GET /api/v2/notifications/sync	non-media
 GET /api/v2/notifications/unread-count	non-media
 GET /api/v2/notifications/web-push/subscriptions	non-media
@@ -631,6 +702,7 @@ GET /api/v2/openapi.json	non-media
 POST /api/v2/password-resets	non-media
 GET /api/v2/password-resets/{token}	non-media
 POST /api/v2/password-resets/{token}/complete	non-media
+GET /api/v2/playback/bandwidth-probe	media	transfer	viewer_egress	false	true
 GET /api/v2/playback/capabilities	non-media
 POST /api/v2/playback/route-events	non-media
 GET /api/v2/playback/sessions/control/capabilities	non-media
@@ -678,6 +750,8 @@ DELETE /api/v2/profiles/{id}/avatar	non-media
 PUT /api/v2/profiles/{id}/avatar	non-media
 POST /api/v2/profiles/{id}/verify-pin	non-media
 GET /api/v2/progress	non-media
+GET /api/v2/progress/capabilities	non-media
+DELETE /api/v2/progress/{media_item_id}/position	non-media
 GET /api/v2/ratings	non-media
 DELETE /api/v2/ratings/{item_id}	non-media
 GET /api/v2/ratings/{item_id}	non-media
@@ -718,6 +792,7 @@ POST /api/v2/scan/cancel	non-media
 GET /api/v2/scan/capabilities	non-media
 GET /api/v2/sections/recipes	non-media
 GET /api/v2/sections/recipes/{type}/candidates	non-media
+GET /api/v2/sections/seasonal-themes	non-media
 GET /api/v2/settings/contract	non-media
 GET /api/v2/settings/contract/capabilities	non-media
 DELETE /api/v2/settings/device/subtitle-appearance	non-media
@@ -734,6 +809,12 @@ PUT /api/v2/settings/values/nav.shortcuts/item	non-media
 DELETE /api/v2/settings/values/{key}	non-media
 GET /api/v2/settings/values/{key}	non-media
 PUT /api/v2/settings/values/{key}	non-media
+POST /api/v2/shuffles	non-media
+GET /api/v2/shuffles/capabilities	non-media
+DELETE /api/v2/shuffles/{shuffle_id}	non-media
+GET /api/v2/shuffles/{shuffle_id}	non-media
+POST /api/v2/shuffles/{shuffle_id}/advance	non-media
+POST /api/v2/shuffles/{shuffle_id}/skip	non-media
 GET /api/v2/stream/{session_id}	non-media
 HEAD /api/v2/stream/{session_id}	non-media
 GET /api/v2/stream/{session_id}/subtitles/{track}	non-media
@@ -760,6 +841,10 @@ PUT /api/v2/subtitles/stored/{id}/timing	non-media
 GET /api/v2/subtitles/sync/status	non-media
 POST /api/v2/subtitles/upload	non-media
 GET /api/v2/subtitles/{media_file_id}	non-media
+GET /api/v2/subtitles/{media_file_id}/sync	non-media
+GET /api/v2/subtitles/{media_file_id}/sync/{key}	non-media
+POST /api/v2/subtitles/{media_file_id}/sync/{key}	non-media
+PUT /api/v2/subtitles/{media_file_id}/sync/{key}/timing	non-media
 POST /api/v2/sync/progress	non-media
 GET /api/v2/sync/progress/capabilities	non-media
 POST /api/v2/sync/progress/snapshots	non-media
@@ -768,7 +853,6 @@ GET /api/v2/system/connections	non-media
 GET /api/v2/system/identity	non-media
 GET /api/v2/system/info	non-media
 GET /api/v2/system/setup	non-media
-GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
 GET /api/v2/user/libraries	non-media
@@ -806,6 +890,7 @@ POST /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote	non
 GET /api/v2/watch-together/rooms/{room_id}/ws	non-media
 POST /api/v2/watch-together/rooms/{room_id}/ws-ticket	non-media
 GET /api/v2/watch/{id}	non-media
+GET /api/v2/watch/{id}/trickplay	non-media
 DELETE /api/v2/watched/{id}	non-media
 POST /api/v2/watched/{id}	non-media
 GET /api/v2/watchlist	non-media
@@ -1208,6 +1293,13 @@ PATCH /api/v2/*	non-media
 POST /api/v2/*	non-media
 PUT /api/v2/*	non-media
 TRACE /api/v2/*	non-media
+GET /api/v2/account/identities	non-media
+POST /api/v2/account/identities/link-complete	non-media
+POST /api/v2/account/identities/link-credentials	non-media
+POST /api/v2/account/identities/link-network	non-media
+POST /api/v2/account/identities/link-start	non-media
+POST /api/v2/account/identities/link-ticket	non-media
+DELETE /api/v2/account/identities/{id}	non-media
 GET /api/v2/account/me	non-media
 POST /api/v2/account/password	non-media
 GET /api/v2/account/password/capability	non-media
@@ -1216,6 +1308,13 @@ POST /api/v2/admin/access-groups	non-media
 DELETE /api/v2/admin/access-groups/{id}	non-media
 GET /api/v2/admin/access-groups/{id}	non-media
 PUT /api/v2/admin/access-groups/{id}	non-media
+GET /api/v2/admin/ai/capabilities	non-media
+GET /api/v2/admin/ai/chatgpt	non-media
+DELETE /api/v2/admin/ai/chatgpt/accounts/{client_id}	non-media
+POST /api/v2/admin/ai/chatgpt/accounts/{client_id}/select	non-media
+POST /api/v2/admin/ai/chatgpt/login	non-media
+POST /api/v2/admin/ai/chatgpt/login/complete	non-media
+GET /api/v2/admin/ai/chatgpt/models	non-media
 GET /api/v2/admin/api-keys	non-media
 POST /api/v2/admin/api-keys	non-media
 GET /api/v2/admin/api-keys/capabilities	non-media
@@ -1264,7 +1363,6 @@ GET /api/v2/admin/collections/capabilities	non-media
 POST /api/v2/admin/collections/import/mdblist	non-media
 POST /api/v2/admin/collections/import/tmdb	non-media
 POST /api/v2/admin/collections/import/tmdb-list	non-media
-POST /api/v2/admin/collections/import/trakt	non-media
 GET /api/v2/admin/collections/order	non-media
 PUT /api/v2/admin/collections/order	non-media
 POST /api/v2/admin/collections/preview	non-media
@@ -1283,6 +1381,7 @@ PUT /api/v2/admin/collections/{id}/items/order	non-media
 DELETE /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/poster	non-media
+GET /api/v2/admin/collections/{id}/sections	non-media
 POST /api/v2/admin/collections/{id}/sync	non-media
 GET /api/v2/admin/dashboard/capabilities	non-media
 DELETE /api/v2/admin/dashboard/layout	non-media
@@ -1295,6 +1394,21 @@ GET /api/v2/admin/diagnostics/reports	non-media
 DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
+GET /api/v2/admin/downloads/devices	non-media
+GET /api/v2/admin/downloads/entries	non-media
+GET /api/v2/admin/downloads/preparations	non-media
+POST /api/v2/admin/downloads/preparations/cancel	non-media
+GET /api/v2/admin/downloads/preparations/capabilities	non-media
+POST /api/v2/admin/downloads/preparations/pause	non-media
+POST /api/v2/admin/downloads/preparations/resume	non-media
+POST /api/v2/admin/downloads/revoke	non-media
+GET /api/v2/admin/downloads/storage	non-media
+GET /api/v2/admin/downloads/storage/capabilities	non-media
+GET /api/v2/admin/downloads/storage/events	non-media
+GET /api/v2/admin/downloads/storage/files	non-media
+POST /api/v2/admin/downloads/storage/files/delete	non-media
+POST /api/v2/admin/downloads/storage/locations/{location}/cleanup	non-media
+POST /api/v2/admin/downloads/storage/locations/{location}/untracked/delete	non-media
 POST /api/v2/admin/email/test	non-media
 POST /api/v2/admin/files/{fileId}/contribute	non-media
 GET /api/v2/admin/files/{fileId}/contributions	non-media
@@ -1347,6 +1461,8 @@ POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
+GET /api/v2/admin/items/{id}/trickplay	non-media
+POST /api/v2/admin/items/{id}/trickplay/regenerate	non-media
 PATCH /api/v2/admin/jellyfin-compat/settings	non-media
 GET /api/v2/admin/jellyfin-compat/status	non-media
 POST /api/v2/admin/jellyfin-compat/web/install	non-media
@@ -1360,6 +1476,9 @@ GET /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 POST /api/v2/admin/libraries/{library_id}/collection-groups	non-media
 GET /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
 PUT /api/v2/admin/libraries/{library_id}/collection-groups/order	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation	non-media
+GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs	non-media
+POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel	non-media
 GET /api/v2/admin/literary-works/items/{content_id}/candidates	non-media
 POST /api/v2/admin/literary-works/link	non-media
 POST /api/v2/admin/literary-works/matches/confirm	non-media
@@ -1383,12 +1502,15 @@ GET /api/v2/admin/network-access/{provider}/status	non-media
 GET /api/v2/admin/node-sessions	non-media
 GET /api/v2/admin/nodes	non-media
 POST /api/v2/admin/nodes	non-media
+GET /api/v2/admin/nodes/capabilities	non-media
 POST /api/v2/admin/nodes/force-reload	non-media
 DELETE /api/v2/admin/nodes/{id}	non-media
 PUT /api/v2/admin/nodes/{id}	non-media
 POST /api/v2/admin/nodes/{id}/check	non-media
+POST /api/v2/admin/nodes/{id}/drain	non-media
 POST /api/v2/admin/nodes/{id}/force-reload	non-media
 POST /api/v2/admin/nodes/{id}/reprobe	non-media
+POST /api/v2/admin/nodes/{id}/resume	non-media
 POST /api/v2/admin/notifications/discord/test	non-media
 POST /api/v2/admin/notifications/push/apple/test	non-media
 POST /api/v2/admin/notifications/push/fcm/test	non-media
@@ -1413,6 +1535,7 @@ POST /api/v2/admin/plugins/installations	non-media
 DELETE /api/v2/admin/plugins/installations/{id}	non-media
 PUT /api/v2/admin/plugins/installations/{id}	non-media
 PUT /api/v2/admin/plugins/installations/{id}/auth-binding	non-media
+POST /api/v2/admin/plugins/installations/{id}/auth-binding/test	non-media
 PUT /api/v2/admin/plugins/installations/{id}/config	non-media
 POST /api/v2/admin/plugins/installations/{id}/config/test	non-media
 POST /api/v2/admin/plugins/installations/{id}/restart	non-media
@@ -1446,6 +1569,7 @@ PATCH /api/v2/admin/rate-limits/config	non-media
 GET /api/v2/admin/rate-limits/status	non-media
 GET /api/v2/admin/rating-sources	non-media
 GET /api/v2/admin/rating-sources/capabilities	non-media
+POST /api/v2/admin/recommendations/embeddings/reset	non-media
 GET /api/v2/admin/recommendations/status	non-media
 POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
@@ -1509,8 +1633,6 @@ PUT /api/v2/admin/settings	non-media
 POST /api/v2/admin/settings/check/{kind}	non-media
 GET /api/v2/admin/settings/effective	non-media
 GET /api/v2/admin/settings/restart-keys	non-media
-GET /api/v2/admin/settings/sections	non-media
-PUT /api/v2/admin/settings/sections	non-media
 GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
@@ -1544,10 +1666,12 @@ GET /api/v2/admin/tasks/{key}/metrics	non-media
 POST /api/v2/admin/tasks/{key}/run	non-media
 GET /api/v2/admin/tasks/{key}/triggers	non-media
 PUT /api/v2/admin/tasks/{key}/triggers	non-media
+GET /api/v2/admin/trickplay/libraries	non-media
 GET /api/v2/admin/unmatched	non-media
 GET /api/v2/admin/users	non-media
 POST /api/v2/admin/users	non-media
 GET /api/v2/admin/users/capabilities	non-media
+GET /api/v2/admin/users/policy-defaults	non-media
 DELETE /api/v2/admin/users/{id}	non-media
 GET /api/v2/admin/users/{id}	non-media
 PUT /api/v2/admin/users/{id}	non-media
@@ -1556,15 +1680,25 @@ GET /api/v2/admin/users/{id}/devices	non-media
 GET /api/v2/admin/users/{id}/download-subscriptions	non-media
 GET /api/v2/admin/users/{id}/downloads	non-media
 GET /api/v2/admin/users/{id}/downloads/summary	non-media
+GET /api/v2/admin/users/{id}/identities	non-media
+POST /api/v2/admin/users/{id}/identities	non-media
+DELETE /api/v2/admin/users/{id}/identities/{identity_id}	non-media
 POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
 POST /api/v2/admin/users/{id}/password-reset	non-media
 GET /api/v2/admin/users/{id}/profiles	non-media
+DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+PUT /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
+GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections/settings	non-media
 GET /api/v2/admin/users/{id}/settings/values	non-media
 DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
 POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/admin/users/{id}/watch-summary	non-media
+DELETE /api/v2/admin/users/{user_id}/login-sessions	non-media
+GET /api/v2/admin/users/{user_id}/login-sessions	non-media
+DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}	non-media
 GET /api/v2/api-keys	non-media
 POST /api/v2/api-keys	non-media
 GET /api/v2/api-keys/scopes	non-media
@@ -1577,21 +1711,28 @@ PUT /api/v2/audio-prefs/{series_id}	non-media
 GET /api/v2/auth/device	non-media
 POST /api/v2/auth/device/approve	non-media
 POST /api/v2/auth/device/approve-handoff	non-media
+POST /api/v2/auth/device/cancel	non-media
 GET /api/v2/auth/device/capability	non-media
 POST /api/v2/auth/device/deny	non-media
 POST /api/v2/auth/device/poll	non-media
 POST /api/v2/auth/device/start	non-media
+GET /api/v2/auth/external-sign-in/capabilities	non-media
 POST /api/v2/auth/impersonation/end	non-media
 POST /api/v2/auth/login	non-media
 POST /api/v2/auth/logout	non-media
+POST /api/v2/auth/network/{id}/sign-in	non-media
 GET /api/v2/auth/oauth/capabilities	non-media
 POST /api/v2/auth/oauth/complete	non-media
 GET /api/v2/auth/oauth/{install_id}/callback	non-media
 POST /api/v2/auth/oauth/{install_id}/init	non-media
+GET /api/v2/auth/oauth/{install_id}/native/start	non-media
+GET /api/v2/auth/oauth/{install_id}/start	non-media
 POST /api/v2/auth/plugin-launch	non-media
+GET /api/v2/auth/provider-logout	non-media
 GET /api/v2/auth/providers	non-media
 POST /api/v2/auth/refresh	non-media
 GET /api/v2/auth/sessions	non-media
+GET /api/v2/auth/sessions/capabilities	non-media
 DELETE /api/v2/auth/sessions/{id}	non-media
 POST /api/v2/auth/setup	non-media
 GET /api/v2/auth/signup	non-media
@@ -1604,6 +1745,7 @@ GET /api/v2/calendar	non-media
 GET /api/v2/capabilities/downloads	non-media
 GET /api/v2/capabilities/ebooks	non-media
 GET /api/v2/capabilities/metadata-ai	non-media
+GET /api/v2/capabilities/not-interested	non-media
 GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
@@ -1620,6 +1762,7 @@ POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
+POST /api/v2/catalog/letters	non-media
 GET /api/v2/catalog/people	non-media
 GET /api/v2/catalog/people/{id}	non-media
 POST /api/v2/catalog/people/{id}/refresh	non-media
@@ -1644,7 +1787,6 @@ GET /api/v2/collections/import/mdblist/search	non-media
 GET /api/v2/collections/import/mdblist/top	non-media
 POST /api/v2/collections/import/tmdb	non-media
 POST /api/v2/collections/import/tmdb-list	non-media
-POST /api/v2/collections/import/trakt	non-media
 GET /api/v2/collections/order	non-media
 PUT /api/v2/collections/order	non-media
 POST /api/v2/collections/preview	non-media
@@ -1668,6 +1810,7 @@ GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
 DELETE /api/v2/devices/{device_id}	non-media
+PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
 GET /api/v2/diagnostics/capabilities	non-media
 POST /api/v2/diagnostics/reports	non-media
@@ -1679,6 +1822,7 @@ GET /api/v2/direct-download	media	transfer	viewer_egress	false	true
 HEAD /api/v2/direct-download	media	transfer	viewer_egress	false	true
 GET /api/v2/direct-download-proxy	media	transfer	viewer_egress	false	true
 HEAD /api/v2/direct-download-proxy	media	transfer	viewer_egress	false	true
+POST /api/v2/direct-download/links	non-media
 GET /api/v2/docs	non-media
 HEAD /api/v2/docs	non-media
 GET /api/v2/docs/init.js	non-media
@@ -1701,12 +1845,13 @@ PATCH /api/v2/downloads/subscriptions/{id}	non-media
 DELETE /api/v2/downloads/{id}	non-media
 PATCH /api/v2/downloads/{id}	non-media
 GET /api/v2/downloads/{id}/artwork/{kind}	non-media
-GET /api/v2/downloads/{id}/file	non-media
-HEAD /api/v2/downloads/{id}/file	non-media
-GET /api/v2/downloads/{id}/file-proxy	non-media
-HEAD /api/v2/downloads/{id}/file-proxy	non-media
+GET /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file	media	transfer	viewer_egress	false	true
+GET /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
+HEAD /api/v2/downloads/{id}/file-proxy	media	transfer	viewer_egress	false	true
 GET /api/v2/downloads/{id}/manifest	non-media
-GET /api/v2/downloads/{id}/subtitles/{ref}	non-media
+POST /api/v2/downloads/{id}/prepare	non-media
+GET /api/v2/downloads/{id}/subtitles/{ref}	media	transfer	viewer_egress	false	true
 GET /api/v2/ebooks/{content_id}/annotations	non-media
 POST /api/v2/ebooks/{content_id}/annotations	non-media
 DELETE /api/v2/ebooks/{content_id}/annotations/{annotation_id}	non-media
@@ -1725,6 +1870,7 @@ DELETE /api/v2/favorites/{item_id}	non-media
 GET /api/v2/favorites/{item_id}	non-media
 PUT /api/v2/favorites/{item_id}	non-media
 GET /api/v2/history	non-media
+GET /api/v2/history-imports/capability	non-media
 POST /api/v2/history-imports/emby-connect/login	non-media
 POST /api/v2/history-imports/plex/auth/check	non-media
 POST /api/v2/history-imports/plex/auth/pin	non-media
@@ -1733,6 +1879,7 @@ POST /api/v2/history-imports/runs	non-media
 GET /api/v2/history-imports/runs/{id}	non-media
 GET /api/v2/history-imports/sources	non-media
 POST /api/v2/history/remove	non-media
+GET /api/v2/home/capabilities	non-media
 DELETE /api/v2/home/dismissals/{surface}/{item_id}	non-media
 PUT /api/v2/home/dismissals/{surface}/{item_id}	non-media
 GET /api/v2/home/layout	non-media
@@ -1756,6 +1903,8 @@ GET /api/v2/libraries/skipped-roots	non-media
 GET /api/v2/libraries/stale-ids	non-media
 POST /api/v2/libraries/stale-ids/{content_id}/rematch	non-media
 GET /api/v2/libraries/unmatched-items	non-media
+DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
+PUT /api/v2/libraries/unmatched-items/{content_id}/ignore	non-media
 DELETE /api/v2/libraries/{id}	non-media
 PATCH /api/v2/libraries/{id}	non-media
 POST /api/v2/libraries/{id}/check-mount	non-media
@@ -1785,6 +1934,10 @@ DELETE /api/v2/markers/files/{file_id}/{segment}	non-media
 GET /api/v2/markers/items/{item_id}	non-media
 PUT /api/v2/markers/items/{item_id}	non-media
 GET /api/v2/network-access/capabilities	non-media
+GET /api/v2/not-interested	non-media
+DELETE /api/v2/not-interested/{item_id}	non-media
+GET /api/v2/not-interested/{item_id}	non-media
+PUT /api/v2/not-interested/{item_id}	non-media
 GET /api/v2/notifications	non-media
 GET /api/v2/notifications/capabilities	non-media
 DELETE /api/v2/notifications/discord-link	non-media
@@ -1807,6 +1960,9 @@ POST /api/v2/notifications/push/devices	non-media
 GET /api/v2/notifications/push/devices/capabilities	non-media
 DELETE /api/v2/notifications/push/devices/{device_id}	non-media
 POST /api/v2/notifications/read-all	non-media
+GET /api/v2/notifications/series	non-media
+DELETE /api/v2/notifications/series/{series_id}/mute	non-media
+PUT /api/v2/notifications/series/{series_id}/mute	non-media
 GET /api/v2/notifications/sync	non-media
 GET /api/v2/notifications/unread-count	non-media
 GET /api/v2/notifications/web-push/subscriptions	non-media
@@ -1829,6 +1985,7 @@ GET /api/v2/openapi.json	non-media
 POST /api/v2/password-resets	non-media
 GET /api/v2/password-resets/{token}	non-media
 POST /api/v2/password-resets/{token}/complete	non-media
+GET /api/v2/playback/bandwidth-probe	media	transfer	viewer_egress	false	true
 GET /api/v2/playback/capabilities	non-media
 POST /api/v2/playback/route-events	non-media
 GET /api/v2/playback/sessions/control/capabilities	non-media
@@ -1876,6 +2033,8 @@ DELETE /api/v2/profiles/{id}/avatar	non-media
 PUT /api/v2/profiles/{id}/avatar	non-media
 POST /api/v2/profiles/{id}/verify-pin	non-media
 GET /api/v2/progress	non-media
+GET /api/v2/progress/capabilities	non-media
+DELETE /api/v2/progress/{media_item_id}/position	non-media
 GET /api/v2/ratings	non-media
 DELETE /api/v2/ratings/{item_id}	non-media
 GET /api/v2/ratings/{item_id}	non-media
@@ -1916,6 +2075,7 @@ POST /api/v2/scan/cancel	non-media
 GET /api/v2/scan/capabilities	non-media
 GET /api/v2/sections/recipes	non-media
 GET /api/v2/sections/recipes/{type}/candidates	non-media
+GET /api/v2/sections/seasonal-themes	non-media
 GET /api/v2/settings/contract	non-media
 GET /api/v2/settings/contract/capabilities	non-media
 DELETE /api/v2/settings/device/subtitle-appearance	non-media
@@ -1932,6 +2092,12 @@ PUT /api/v2/settings/values/nav.shortcuts/item	non-media
 DELETE /api/v2/settings/values/{key}	non-media
 GET /api/v2/settings/values/{key}	non-media
 PUT /api/v2/settings/values/{key}	non-media
+POST /api/v2/shuffles	non-media
+GET /api/v2/shuffles/capabilities	non-media
+DELETE /api/v2/shuffles/{shuffle_id}	non-media
+GET /api/v2/shuffles/{shuffle_id}	non-media
+POST /api/v2/shuffles/{shuffle_id}/advance	non-media
+POST /api/v2/shuffles/{shuffle_id}/skip	non-media
 GET /api/v2/stream/{session_id}	non-media
 HEAD /api/v2/stream/{session_id}	non-media
 GET /api/v2/stream/{session_id}/subtitles/{track}	non-media
@@ -1958,6 +2124,10 @@ PUT /api/v2/subtitles/stored/{id}/timing	non-media
 GET /api/v2/subtitles/sync/status	non-media
 POST /api/v2/subtitles/upload	non-media
 GET /api/v2/subtitles/{media_file_id}	non-media
+GET /api/v2/subtitles/{media_file_id}/sync	non-media
+GET /api/v2/subtitles/{media_file_id}/sync/{key}	non-media
+POST /api/v2/subtitles/{media_file_id}/sync/{key}	non-media
+PUT /api/v2/subtitles/{media_file_id}/sync/{key}/timing	non-media
 POST /api/v2/sync/progress	non-media
 GET /api/v2/sync/progress/capabilities	non-media
 POST /api/v2/sync/progress/snapshots	non-media
@@ -1966,7 +2136,6 @@ GET /api/v2/system/connections	non-media
 GET /api/v2/system/identity	non-media
 GET /api/v2/system/info	non-media
 GET /api/v2/system/setup	non-media
-GET /api/v2/theme/admin-css	non-media
 GET /api/v2/theme/branding	non-media
 GET /api/v2/theme/capabilities	non-media
 GET /api/v2/user/libraries	non-media
@@ -2004,6 +2173,7 @@ POST /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote	non
 GET /api/v2/watch-together/rooms/{room_id}/ws	non-media
 POST /api/v2/watch-together/rooms/{room_id}/ws-ticket	non-media
 GET /api/v2/watch/{id}	non-media
+GET /api/v2/watch/{id}/trickplay	non-media
 DELETE /api/v2/watched/{id}	non-media
 POST /api/v2/watched/{id}	non-media
 GET /api/v2/watchlist	non-media

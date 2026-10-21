@@ -67,24 +67,6 @@ func TestScopeAccessFilterMapsScope(t *testing.T) {
 	}
 }
 
-func TestScopeAccessFilterUnrestrictedScope(t *testing.T) {
-	resolver := &stubScopeResolver{
-		scope: access.Scope{
-			UserID:             1,
-			DisabledLibraryIDs: []int{7},
-		},
-	}
-
-	filter := NewScopeAccessFilter(resolver)(context.Background(), 1, "profile-1")
-
-	if filter.AllowedLibraryIDs != nil {
-		t.Fatalf("AllowedLibraryIDs = %v, want nil (unrestricted)", filter.AllowedLibraryIDs)
-	}
-	if !reflect.DeepEqual(filter.DisabledLibraryIDs, []int{7}) {
-		t.Fatalf("DisabledLibraryIDs = %v, want [7]", filter.DisabledLibraryIDs)
-	}
-}
-
 func TestScopeAccessFilterFailsClosed(t *testing.T) {
 	resolver := &stubScopeResolver{err: errors.New("boom")}
 

@@ -2,18 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { components } from "@/api/v2/schema";
 import { v2Problem } from "@/api/v2/problems.test-support";
+import { everyRecipe } from "@/lib/homeRows/recipeCatalogFixture.test-support";
+import { matchRecipePreset } from "@/lib/recipes";
 
 import {
   buildHomeLayoutFile,
   importPage,
-  legacyTraktSectionIds,
   mergeImportedPage,
+  overrideToWrite,
   parseHomeLayoutFile,
   planHomeLayoutImport,
   fileReferences,
   HOME_LAYOUT_MAX_LENGTH,
   type HomeLayoutFile,
   type HomeLayoutImportTarget,
+  type SectionOverrideWrite,
 } from "./homeLayoutTransfer";
 
 type SectionOverrideRead = components["schemas"]["SectionOverride"];
@@ -66,7 +69,8 @@ function target(overrides: Partial<HomeLayoutImportTarget> = {}): HomeLayoutImpo
       ["recently_added", { adminOnly: false }],
       ["profile_activity_feed", { adminOnly: false }],
       ["trending_discover", { adminOnly: false }],
-      ["custom_filter", { adminOnly: true }],
+      ["custom_filter", { adminOnly: false }],
+      ["admin_curated_list", { adminOnly: true }],
     ]),
     allowAdminOnlyRecipes: true,
     personalCollectionIds: new Set(["mine"]),
@@ -81,7 +85,7 @@ function sequentialIds() {
 }
 
 describe("buildHomeLayoutFile", () => {
-  it("writes each customized page without IDs or timestamps", () => {
+  it("writes every page without IDs or timestamps", () => {
     const libraries = [{ id: 1, name: "Movies", type: "movie", sort_order: 0 }];
     const file = buildHomeLayoutFile({
       serverId: "server-a",
@@ -128,6 +132,7 @@ describe("buildHomeLayoutFile", () => {
             },
           ],
         },
+        { scope: "library", library_id: 1, overrides: [] },
       ],
     });
   });
@@ -194,6 +199,8 @@ describe("parseHomeLayoutFile", () => {
             ],
           },
           { scope: "home", overrides: [{ section_id: "duplicate-page" }] },
+          // Empty after dropping its damaged entries, so not a page to reset.
+          { scope: "library", library_id: 2, overrides: [null, 7] },
           { scope: "library", overrides: [] },
           { scope: "admin", overrides: [] },
         ],
@@ -289,9 +296,11 @@ describe("planHomeLayoutImport on the same server", () => {
             scope: "home",
             overrides: [
               { user_section_type: "collection", user_config: { user_collection_id: "theirs" } },
-              { section_type: "custom_filter", title: "Filtered" },
-              { section_type: "genre", title: "Legacy genre" },
-              { user_section_type: "trending_discover", user_config: { source: "trakt" } },
+              {
+                section_type: "admin_curated_list",
+                title: "Staff picks",
+                config: { item_ids: ["x"] },
+              },
               { user_section_type: "hidden_gems", removed: true },
             ],
           },
@@ -306,9 +315,7 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan.skippedPages).toEqual(["Library 9"]);
     expect(plan.skippedSections).toEqual([
       { page: "Home", title: "collection", reason: "collection" },
-      { page: "Home", title: "Filtered", reason: "custom_disabled" },
-      { page: "Home", title: "Legacy genre", reason: "custom_disabled" },
-      { page: "Home", title: "trending_discover", reason: "trakt" },
+      { page: "Home", title: "Staff picks", reason: "custom_disabled" },
     ]);
   });
 
@@ -474,6 +481,26 @@ describe("planHomeLayoutImport on the same server", () => {
     ]);
   });
 
+  it("skips a Next up row, which the server adds only itself", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        pages: [
+          {
+            scope: "home",
+            overrides: [{ user_section_type: "next_up", user_title: "On deck" }],
+          },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.skippedSections).toEqual([
+      { page: "Home", title: "On deck", reason: "unknown_recipe" },
+    ]);
+    expect(plan.pages).toEqual([]);
+  });
+
   it("skips sections limited to libraries this profile can't open", () => {
     const plan = planHomeLayoutImport(
       layoutFile({
@@ -523,6 +550,103 @@ describe("planHomeLayoutImport on the same server", () => {
       { page: "Home", title: "None", reason: "library" },
       { page: "Home", title: "Single", reason: "library" },
     ]);
+  });
+});
+
+describe("home layout round trip on the same profile", () => {
+  const libraries = [
+    { id: 1, name: "Movies", type: "movie" },
+    { id: 2, name: "TV Shows", type: "series" },
+  ];
+  const customHome = [
+    stored({ id: "o1", section_id: "admin-1", hidden: true }),
+    stored({ id: "o2", section_id: "admin-2", position: 0, title: "Renamed" }),
+    stored({
+      id: "o3",
+      position: 1,
+      is_user_added: true,
+      user_section_type: "hidden_gems",
+      user_title: "Gems",
+      user_config: {},
+    }),
+  ];
+  const customMovies = [stored({ id: "o4", section_id: "admin-9", removed: true })];
+  // Changes made after the export, which the import must undo.
+  const changedSince = {
+    home: [
+      stored({ id: "c1", section_id: "admin-1", position: 4 }),
+      stored({ id: "c2", is_user_added: true, user_section_type: "trending_discover" }),
+    ],
+    library: [stored({ id: "c3", section_id: "admin-8", hidden: true })],
+  };
+
+  // Exports the given saved pages, then imports the file over `changedSince`
+  // and returns what each page saves.
+  async function roundTrip(saved: { home: SectionOverrideRead[]; movies: SectionOverrideRead[] }) {
+    const exported = buildHomeLayoutFile({
+      serverId: "server-a",
+      exportedAt: new Date("2026-09-29T12:00:00.000Z"),
+      libraries,
+      pages: [
+        { scope: "home", overrides: saved.home },
+        { scope: "library", libraryId: 1, overrides: saved.movies },
+        { scope: "library", libraryId: 2, overrides: [] },
+      ],
+    });
+    const parsed = parseHomeLayoutFile(JSON.stringify(exported));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const plan = planHomeLayoutImport(parsed.file, target(), sequentialIds());
+    const saves = new Map<string, unknown>();
+    for (const page of plan.pages) {
+      await importPage(
+        page,
+        plan.sameServer,
+        {
+          listSaved: async () => changedSince[page.scope],
+          save: async (overrides) => saves.set(page.label, overrides),
+        },
+        sequentialIds(),
+      );
+    }
+    return { plan, saves };
+  }
+
+  it("restores the server's rows from an export of the default layout", async () => {
+    const { plan, saves } = await roundTrip({ home: [], movies: [] });
+
+    expect(plan.pages.map((page) => page.label)).toEqual(["Home", "Movies", "TV Shows"]);
+    expect(plan.skippedPages).toEqual([]);
+    expect(plan.skippedSections).toEqual([]);
+    expect(Object.fromEntries(saves)).toEqual({ Home: [], Movies: [], "TV Shows": [] });
+  });
+
+  it("restores a custom layout, including pages left on the server's rows", async () => {
+    const { plan, saves } = await roundTrip({ home: customHome, movies: customMovies });
+
+    expect(plan.pages.map((page) => page.label)).toEqual(["Home", "Movies", "TV Shows"]);
+    // IDs are new or reused from the profile's saved rows; the rows match.
+    const withoutIds = (overrides: unknown) =>
+      (overrides as SectionOverrideWrite[]).map(({ id: _id, ...rest }) => rest);
+    expect(withoutIds(saves.get("Home"))).toEqual(customHome.map(overrideToWrite));
+    expect(withoutIds(saves.get("Movies"))).toEqual(customMovies.map(overrideToWrite));
+    expect(saves.get("TV Shows")).toEqual([]);
+  });
+
+  it("leaves pages alone when the file comes from another server", () => {
+    const plan = planHomeLayoutImport(
+      layoutFile({
+        server_id: "server-b",
+        pages: [
+          { scope: "home", overrides: [] },
+          { scope: "library", library_id: 1, overrides: [{ section_id: "their-admin-1" }] },
+        ],
+      }),
+      target(),
+      sequentialIds(),
+    );
+
+    expect(plan.pages).toEqual([]);
+    expect(plan.skippedServerSectionChanges).toBe(1);
   });
 });
 
@@ -703,8 +827,6 @@ describe("planHomeLayoutImport on another server", () => {
 });
 
 describe("mergeImportedPage", () => {
-  const noTrakt = new Set<string>();
-
   it("replaces the whole page on the same server, reusing the saved override IDs the server resolves", () => {
     const page = {
       scope: "home" as const,
@@ -723,68 +845,10 @@ describe("mergeImportedPage", () => {
       stored({ id: "old-custom", user_section_type: "hidden_gems", is_user_added: true }),
     ];
 
-    expect(mergeImportedPage(page, existing, true, noTrakt, sequentialIds())).toEqual([
+    expect(mergeImportedPage(page, existing, true, sequentialIds())).toEqual([
       { id: "saved-1", section_id: "admin-1", position: 0, hidden: true },
       { id: "new-1", section_id: "admin-2", position: 1 },
       { id: "new-custom", user_section_type: "hidden_gems", position: 2 },
-    ]);
-  });
-
-  it("leaves legacy Trakt admin sections as the profile saved them", () => {
-    const trakt = new Set([
-      "trakt-saved",
-      "trakt-unsaved-hidden",
-      "trakt-unsaved-shown",
-      "trakt-omitted",
-    ]);
-    const page = {
-      scope: "home" as const,
-      label: "Home",
-      overrides: [
-        { section_id: "trakt-saved", position: 0 },
-        { section_id: "trakt-unsaved-hidden", hidden: true },
-        { section_id: "trakt-unsaved-shown", position: 3 },
-      ],
-    };
-    const existing = [
-      stored({ id: "saved-a", section_id: "trakt-saved", hidden: true }),
-      stored({ id: "saved-b", section_id: "trakt-omitted", removed: true }),
-    ];
-
-    expect(mergeImportedPage(page, existing, true, trakt, sequentialIds())).toEqual([
-      { id: "saved-a", section_id: "trakt-saved", hidden: true },
-      { id: "new-1", section_id: "trakt-unsaved-hidden", hidden: true },
-      { id: "saved-b", section_id: "trakt-omitted", removed: true },
-    ]);
-  });
-
-  it("keeps saved profile-built Trakt sections on either server", () => {
-    const page = {
-      scope: "home" as const,
-      label: "Home",
-      overrides: [{ id: "new-1", user_section_type: "hidden_gems" }],
-    };
-    const existing = [
-      stored({
-        id: "trakt-row",
-        user_section_type: "trending_discover",
-        user_config: { source: "trakt" },
-      }),
-      stored({ id: "plain-row", user_section_type: "hidden_gems", user_config: {} }),
-    ];
-    const kept = {
-      id: "trakt-row",
-      user_section_type: "trending_discover",
-      user_config: { source: "trakt" },
-    };
-
-    expect(mergeImportedPage(page, existing, true, noTrakt, sequentialIds())).toEqual([
-      { id: "new-1", user_section_type: "hidden_gems" },
-      kept,
-    ]);
-    expect(mergeImportedPage(page, existing, false, noTrakt, sequentialIds())).toEqual([
-      kept,
-      { id: "new-1", user_section_type: "hidden_gems" },
     ]);
   });
 
@@ -799,7 +863,7 @@ describe("mergeImportedPage", () => {
       stored({ id: "old-custom", user_section_type: "hidden_gems", is_user_added: true }),
     ];
 
-    expect(mergeImportedPage(page, existing, false, noTrakt, sequentialIds())).toEqual([
+    expect(mergeImportedPage(page, existing, false, sequentialIds())).toEqual([
       { id: "keep", section_id: "admin-1", position: 3, hidden: true },
       { id: "new-1", user_section_type: "hidden_gems" },
     ]);
@@ -827,24 +891,6 @@ describe("fileReferences", () => {
   });
 });
 
-describe("legacyTraktSectionIds", () => {
-  it("finds Trakt-sourced admin sections in the page view and saved overrides", () => {
-    const settings = [
-      { id: "trending", is_custom: false, config: { source: "trakt", window: "week" } },
-      { id: "list", is_custom: false, config: { source_provider: "trakt" } },
-      { id: "tmdb", is_custom: false, config: { source: "tmdb" } },
-      { id: "custom", is_custom: true, config: { source: "trakt" } },
-    ];
-    const existing = [
-      stored({ id: "o1", section_id: "removed-trakt", config: { source: "trakt" } }),
-    ];
-
-    expect(legacyTraktSectionIds(settings, existing)).toEqual(
-      new Set(["trending", "list", "removed-trakt"]),
-    );
-  });
-});
-
 describe("importPage", () => {
   const page = {
     scope: "home" as const,
@@ -859,61 +905,8 @@ describe("importPage", () => {
       if (result instanceof Error) throw result;
       return result;
     });
-    return {
-      listSaved: vi.fn(async () => [removedUnlisted]),
-      listView: vi.fn(async () => [{ id: "shown", is_custom: false }]),
-      save,
-    };
+    return { listSaved: vi.fn(async () => [removedUnlisted]), save };
   }
-
-  it("saves the merged page once when the server accepts it", async () => {
-    const api = fakeApi([undefined]);
-
-    await expect(importPage(page, true, api, sequentialIds())).resolves.toEqual({
-      keptSavedChanges: false,
-    });
-    expect(api.save).toHaveBeenCalledTimes(1);
-    expect(api.save).toHaveBeenCalledWith([{ id: "new-custom", user_section_type: "hidden_gems" }]);
-  });
-
-  it("retries a refused same-server save with every saved admin-section change kept", async () => {
-    const api = fakeApi([
-      v2Problem(422, "validation_failed", "The request did not pass validation; see errors."),
-      undefined,
-    ]);
-
-    await expect(importPage(page, true, api, sequentialIds())).resolves.toEqual({
-      keptSavedChanges: true,
-    });
-    expect(api.save).toHaveBeenCalledTimes(2);
-    expect(api.save).toHaveBeenLastCalledWith([
-      { id: "new-custom", user_section_type: "hidden_gems" },
-      { id: "saved-gone", section_id: "gone", removed: true },
-    ]);
-  });
-
-  it("keeps a saved override whose config masks a legacy Trakt source", async () => {
-    const masking = stored({ id: "saved-mask", section_id: "masked", config: { source: "tmdb" } });
-    const api = {
-      listSaved: vi.fn(async () => [masking]),
-      listView: vi.fn(async () => [{ id: "masked", is_custom: false, config: { source: "tmdb" } }]),
-      save: vi
-        .fn()
-        .mockRejectedValueOnce(v2Problem(422, "validation_failed", "invalid"))
-        .mockResolvedValueOnce(undefined),
-    };
-
-    await expect(importPage(page, true, api, sequentialIds())).resolves.toEqual({
-      keptSavedChanges: true,
-    });
-    expect(api.save).toHaveBeenNthCalledWith(1, [
-      { id: "new-custom", user_section_type: "hidden_gems" },
-    ]);
-    expect(api.save).toHaveBeenLastCalledWith([
-      { id: "new-custom", user_section_type: "hidden_gems" },
-      { id: "saved-mask", section_id: "masked", config: { source: "tmdb" } },
-    ]);
-  });
 
   it("refuses a page over the save endpoint's override limit", async () => {
     const big = {
@@ -932,17 +925,102 @@ describe("importPage", () => {
     expect(api.save).not.toHaveBeenCalled();
   });
 
-  it("doesn't retry other failures", async () => {
+  it("passes a refused save through without retrying", async () => {
     const refused = v2Problem(422, "validation_failed", "invalid");
-    const unavailable = v2Problem(503, "dependency_unavailable", "down");
+    const api = fakeApi([refused]);
 
-    const other = fakeApi([unavailable]);
-    await expect(importPage(page, true, other, sequentialIds())).rejects.toBe(unavailable);
-    expect(other.save).toHaveBeenCalledTimes(1);
+    await expect(importPage(page, true, api, sequentialIds())).rejects.toBe(refused);
+    expect(api.save).toHaveBeenCalledTimes(1);
+  });
+});
 
-    const otherServer = fakeApi([refused]);
-    await expect(importPage(page, false, otherServer, sequentialIds())).rejects.toBe(refused);
-    expect(otherServer.save).toHaveBeenCalledTimes(1);
-    expect(otherServer.listView).not.toHaveBeenCalled();
+// Characterization for the Home rows redesign (#1705): one profile-built row
+// of each kind, stored as the server echoes what the editor saves, survives
+// export and import unchanged. The redesign must not change these.
+describe("home layout round trip for every row kind", () => {
+  const presetRows = everyRecipe().flatMap((def) =>
+    def.presets.slice(0, 1).map((preset) => ({
+      section_type: def.type,
+      title: preset.display_name,
+      config: { ...preset.default_params },
+    })),
+  );
+  const ownRows = [
+    ...presetRows,
+    { section_type: "custom_filter", title: "90s Horror", config: { match: "any", groups: [] } },
+    { section_type: "genre", title: "Horror", config: { filter_type: "movie", groups: [] } },
+    { section_type: "collection", title: "Mine", config: { user_collection_id: "mine" } },
+    { section_type: "collection", title: "Ghibli", config: { library_collection_id: "lib-1" } },
+  ];
+  const exported = buildHomeLayoutFile({
+    serverId: "server-a",
+    exportedAt: new Date("2026-09-29T12:00:00.000Z"),
+    libraries: [{ id: 1, name: "Movies", type: "movie" }],
+    pages: [
+      {
+        scope: "home",
+        overrides: [
+          stored({
+            id: "o-admin",
+            section_id: "admin-1",
+            position: 0,
+            hidden: true,
+            title: "Renamed",
+          }),
+          ...ownRows.map((row, index) =>
+            stored({
+              ...row,
+              id: `o-${index}`,
+              position: index + 1,
+              is_user_added: true,
+              featured: index === 0,
+              item_limit: 20,
+            }),
+          ),
+        ],
+      },
+    ],
+  });
+
+  function importAs(allowAdminOnlyRecipes: boolean) {
+    const parsed = parseHomeLayoutFile(JSON.stringify(exported));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const recipes = new Map(
+      everyRecipe().map((def) => [def.type, { adminOnly: def.admin_only }] as const),
+    );
+    return planHomeLayoutImport(
+      parsed.file,
+      target({ recipes, allowAdminOnlyRecipes }),
+      sequentialIds(),
+    );
+  }
+
+  it("imports every kind back unchanged into an admin account", () => {
+    const plan = importAs(true);
+    const written = exported.pages[0]!.overrides;
+
+    expect(plan.skippedSections).toEqual([]);
+    expect(plan.pages[0]!.overrides).toEqual(
+      written.map((override, index) =>
+        override.section_id ? override : { ...override, id: `new-${index}` },
+      ),
+    );
+    // Rows saved from a preset still name that preset after the trip.
+    for (const override of plan.pages[0]!.overrides.slice(1, presetRows.length + 1)) {
+      const def = everyRecipe().find((d) => d.type === override.section_type)!;
+      expect(matchRecipePreset(def, override.config)?.display_name).toBe(override.title);
+    }
+  });
+
+  it("imports rule rows but not Editor's picks into an account that is not an admin", () => {
+    const plan = importAs(false);
+
+    expect(plan.skippedSections).toEqual([
+      { page: "Home", title: "Editor's Picks", reason: "custom_disabled" },
+    ]);
+    expect(plan.pages[0]!.overrides).toHaveLength(exported.pages[0]!.overrides.length - 1);
+    expect(plan.pages[0]!.overrides.map((override) => override.title)).toEqual(
+      expect.arrayContaining(["90s Horror", "Horror"]),
+    );
   });
 });

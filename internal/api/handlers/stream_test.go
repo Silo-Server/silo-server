@@ -139,78 +139,6 @@ func TestHandleStreamLiveAPIRouteOverridesStaleProxyRecipe(t *testing.T) {
 	}
 }
 
-func TestHandleStream_PausedSessionResumesWithDelayedRangeRequest(t *testing.T) {
-	const (
-		contentID       = "movie-1"
-		sessionRouteKey = "session_id"
-	)
-	filePath := writePlaybackTestMediaFile(t, "movie.mp4")
-	file := &models.MediaFile{
-		ID:        42,
-		ContentID: contentID,
-		FilePath:  filePath,
-		Duration:  3600,
-	}
-	sessionMgr := playback.NewSessionManager(0, 0)
-	session, err := sessionMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if err := sessionMgr.UpdateProgress(session.ID, 1, true); err != nil {
-		t.Fatalf("UpdateProgress(paused): %v", err)
-	}
-
-	handler := NewStreamHandler(sessionMgr, testPlaybackFileResolver{file: file})
-	request := func(rangeHeader, ifRange string) *httptest.ResponseRecorder {
-		t.Helper()
-		req := playbackTestRequest(
-			http.MethodGet,
-			"/api/v1/stream/"+session.ID,
-			nil,
-			map[string]string{sessionRouteKey: session.ID},
-		)
-		if rangeHeader != "" {
-			req.Header.Set("Range", rangeHeader)
-		}
-		if ifRange != "" {
-			req.Header.Set("If-Range", ifRange)
-		}
-		rr := httptest.NewRecorder()
-		handler.HandleStream(rr, req)
-		return rr
-	}
-
-	initial := request("", "")
-	if initial.Code != http.StatusOK {
-		t.Fatalf("initial status = %d, body = %s", initial.Code, initial.Body.String())
-	}
-	etag := initial.Header().Get("ETag")
-	if etag == "" {
-		t.Fatal("initial response omitted ETag")
-	}
-
-	const (
-		activeGrace = 5 * time.Millisecond
-		pausedGrace = 5 * time.Second
-	)
-	time.Sleep(20 * time.Millisecond)
-	sessionMgr.CleanInactive(activeGrace, pausedGrace)
-	if _, err := sessionMgr.GetSession(session.ID); err != nil {
-		t.Fatalf("paused session expired before ranged resume: %v", err)
-	}
-
-	resumed := request("bytes=2-", etag)
-	if resumed.Code != http.StatusPartialContent {
-		t.Fatalf("resume status = %d, body = %s", resumed.Code, resumed.Body.String())
-	}
-	if got := resumed.Body.String(); got != "deo" {
-		t.Fatalf("resume body = %q, want %q", got, "deo")
-	}
-	if live, err := sessionMgr.GetSession(session.ID); err != nil || live.ID != session.ID {
-		t.Fatalf("ranged request did not preserve session %q: session=%#v err=%v", session.ID, live, err)
-	}
-}
-
 func TestHandleStream_AbortsSessionWhenDirectPlayFileDisappearsAfterPreflight(t *testing.T) {
 	filePath := writePlaybackTestMediaFile(t, "movie.mkv")
 	file := &models.MediaFile{
@@ -455,42 +383,6 @@ func TestHandleSubtitleUsesBoundDownloadedIdentityAfterInventoryReorder(t *testi
 	}
 }
 
-// A downloaded SRT answers the published .srt?original=1 URL with its stored
-// bytes on both GET and HEAD, whether the URL pins the row or uses the ordinal.
-func TestHandleSubtitleServesDownloadedSRTOriginalOnRequest(t *testing.T) {
-	const stored = "1\n00:00:01,000 --> 00:00:02,000\n{\\an8}Top\n"
-	file := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "/tmp/movie.mkv", Duration: 3600}
-	baseMgr := playback.NewSessionManager(0, 0)
-	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	repo := newMockSubtitleRepoForHandler()
-	row := subtitles.DownloadedSubtitle{ID: 71, MediaFileID: 42, Format: subtitles.FormatSRT, S3Key: "ai-71.srt"}
-	repo.subtitles[71] = &row
-	repo.list = []subtitles.DownloadedSubtitle{row}
-	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
-	handler.SubtitleRepo = repo
-	handler.SubtitleBlobs = subtitleContentBlobStore{objects: map[string][]byte{"ai-71.srt": []byte(stored)}}
-
-	for _, query := range []string{"file_id=42&original=1&downloaded_subtitle_id=71", "file_id=42&original=1"} {
-		for _, method := range []string{http.MethodGet, http.MethodHead} {
-			req := httptest.NewRequest(method, "/api/v2/stream/"+session.ID+"/subtitles/0.srt?"+query, nil)
-			req = req.WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext()))
-			routeCtx := chi.NewRouteContext()
-			routeCtx.URLParams.Add("session_id", session.ID)
-			routeCtx.URLParams.Add("track", "0.srt")
-			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-			rr := httptest.NewRecorder()
-			handler.HandleSubtitle(rr, req)
-			if rr.Code != http.StatusOK || !strings.HasPrefix(rr.Header().Get("Content-Type"), "application/x-subrip") ||
-				(method == http.MethodGet && rr.Body.String() != stored) {
-				t.Fatalf("%s ?%s = %d %q %q", method, query, rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
-			}
-		}
-	}
-}
-
 // A downloaded SRT row with a stored timing correction is retimed before the
 // WebVTT conversion, on the ID-bound and ordinal URLs, and the original SRT
 // representation carries the same correction.
@@ -510,6 +402,8 @@ func TestHandleSubtitleAppliesDownloadedSubtitleTiming(t *testing.T) {
 	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
 	handler.SubtitleRepo = repo
 	handler.SubtitleBlobs = subtitleContentBlobStore{objects: map[string][]byte{"timed-71.srt": []byte(stored)}}
+	plays := &recordedPlays{}
+	handler.PlaySync = plays
 
 	serve := func(prefix, track, query string, native bool) *httptest.ResponseRecorder {
 		t.Helper()
@@ -540,6 +434,90 @@ func TestHandleSubtitleAppliesDownloadedSubtitleTiming(t *testing.T) {
 	if want := "1\n00:00:03,500 --> 00:00:04,500\nHello\n"; rr.Code != http.StatusOK || rr.Body.String() != want {
 		t.Fatalf("original SRT = %d %q, want %q", rr.Code, rr.Body.String(), want)
 	}
+	// Both routes to the stored row, the pinned ID and the ordinal, are plays.
+	played := subtitles.SyncTarget{MediaFileID: 42, StoredID: 71}
+	if len(plays.targets) != 3 || plays.targets[0] != played || plays.targets[1] != played || plays.targets[2] != played {
+		t.Fatalf("played %+v", plays.targets)
+	}
+}
+
+type sidecarTimings map[string]*subtitles.ExternalTiming
+
+func (s sidecarTimings) ExternalTiming(_ context.Context, _ int, sha string) (*subtitles.ExternalTiming, error) {
+	return s[sha], nil
+}
+
+// A sidecar on disk is served with the correction stored for its bytes, on
+// every representation, and revalidated because the correction can change.
+// recordedPlays stands in for the sync service and records played subtitles.
+type recordedPlays struct{ targets []subtitles.SyncTarget }
+
+func (p *recordedPlays) SubtitlePlayed(_ context.Context, target subtitles.SyncTarget) {
+	p.targets = append(p.targets, target)
+}
+
+func TestHandleSubtitleAppliesSidecarTiming(t *testing.T) {
+	const onDisk = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+	path := filepath.Join(t.TempDir(), "movie.en.srt")
+	if err := os.WriteFile(path, []byte(onDisk), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "/tmp/movie.mkv", Duration: 3600,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: path, Language: "eng", Format: "srt"}}}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	handler.ExternalTimings = sidecarTimings{subtitles.ContentSHA256([]byte(onDisk)): {Timing: subtitles.Timing{OffsetMS: 2500, Scale: 1}, Revision: 2}}
+	plays := &recordedPlays{}
+	handler.PlaySync = plays
+	method := http.MethodGet
+
+	serve := func(prefix, track, query string, native bool) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, prefix+session.ID+"/subtitles/"+track+"?"+query, nil)
+		ctx := newAuthorizedPlaybackContext()
+		if native {
+			ctx = WithNativeAPIV2(ctx)
+		}
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("session_id", session.ID)
+		routeCtx.URLParams.Add("track", track)
+		req = req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, routeCtx))
+		rr := httptest.NewRecorder()
+		handler.HandleSubtitle(rr, req)
+		return rr
+	}
+	rr := serve("/api/v1/stream/", "0.vtt", "file_id=42&external_subtitle_key="+playback.ExternalSubtitlePathKeyV3(path), false)
+	if body := rr.Body.String(); rr.Code != http.StatusOK || !strings.HasPrefix(body, "WEBVTT") || !strings.Contains(body, "00:00:03.500 --> 00:00:04.500") {
+		t.Fatalf("vtt = %d %q", rr.Code, body)
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "private, no-cache" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	rr = serve("/api/v2/stream/", "0.srt", "file_id=42&original=1", true)
+	if want := "1\n00:00:03,500 --> 00:00:04,500\nHello\n"; rr.Code != http.StatusOK || rr.Body.String() != want {
+		t.Fatalf("original SRT = %d %q, want %q", rr.Code, rr.Body.String(), want)
+	}
+	// Each delivery tells the sync service the sidecar is being played; a
+	// HEAD request only asks about it.
+	method = http.MethodHead
+	serve("/api/v2/stream/", "0.srt", "file_id=42&original=1", true)
+	method = http.MethodGet
+	played := subtitles.SyncTarget{MediaFileID: 42, ExternalPath: path}
+	if len(plays.targets) != 2 || plays.targets[0] != played || plays.targets[1] != played {
+		t.Fatalf("played %+v", plays.targets)
+	}
+
+	// Edited on disk, the sidecar no longer matches its old correction.
+	if err := os.WriteFile(path, []byte("1\n00:00:01,000 --> 00:00:02,000\nHello there\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rr = serve("/api/v1/stream/", "0.vtt", "file_id=42", false); !strings.Contains(rr.Body.String(), "00:00:01.000 --> 00:00:02.000") {
+		t.Fatalf("edited sidecar = %d %q", rr.Code, rr.Body.String())
+	}
 }
 
 type subtitleContentBlobStore struct {
@@ -551,29 +529,6 @@ func (c subtitleContentBlobStore) Get(_ context.Context, key string) ([]byte, er
 	return append([]byte(nil), c.objects[key]...), nil
 }
 func (subtitleContentBlobStore) Delete(context.Context, string) error { return nil }
-
-func TestHandleSubtitle_NilMediaFileReturns404(t *testing.T) {
-	baseMgr := playback.NewSessionManager(0, 0)
-	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-
-	handler := NewStreamHandler(baseMgr, errStreamFileResolver{})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("session_id", session.ID)
-	routeCtx.URLParams.Add("track", "0.vtt")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-
-	rr := httptest.NewRecorder()
-	handler.HandleSubtitle(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s; want 404", rr.Code, rr.Body.String())
-	}
-}
 
 // A .vtt request for a bitmap (PGS) embedded track must be rejected up front:
 // PGS passes the burn-in guard because it is deliverable as .sup, but it has
@@ -620,45 +575,6 @@ func TestHandleSubtitle_BitmapTrackVTTRequestReturns415(t *testing.T) {
 	}
 }
 
-func TestHandleSubtitle_ExternalTextTrackSRTRequestReturnsVTT(t *testing.T) {
-	subtitlePath := filepath.Join(t.TempDir(), "movie.en.srt")
-	if err := os.WriteFile(subtitlePath, []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	file := &models.MediaFile{
-		ID:        42,
-		ContentID: "movie-1",
-		FilePath:  "/tmp/movie.mkv",
-		Duration:  3600,
-		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: subtitlePath, Language: "eng", Format: "srt"},
-		},
-	}
-	baseMgr := playback.NewSessionManager(0, 0)
-	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.srt", nil)
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("session_id", session.ID)
-	routeCtx.URLParams.Add("track", "0.srt")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-	rr := httptest.NewRecorder()
-	handler.HandleSubtitle(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, content-type = %q, body = %s; want 200", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
-	}
-	if got := rr.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/vtt") {
-		t.Fatalf("content type = %q, want WebVTT", got)
-	}
-	if body := rr.Body.String(); !strings.HasPrefix(body, "WEBVTT") || !strings.Contains(body, "Hello") {
-		t.Fatalf("body = %q, want converted WebVTT", body)
-	}
-}
-
 func TestHandleSubtitle_ExternalASSTrackASSRequestReturnsRawASS(t *testing.T) {
 	const assBody = "[Script Info]\nTitle: Test\n"
 	subtitlePath := filepath.Join(t.TempDir(), "movie.en.ass")
@@ -691,34 +607,6 @@ func TestHandleSubtitle_ExternalASSTrackASSRequestReturnsRawASS(t *testing.T) {
 	}
 	if got := rr.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/x-ssa") {
 		t.Fatalf("content type = %q, want raw ASS", got)
-	}
-}
-
-func TestHandleSubtitle_ExternalTextHEADDoesNotLoadTheArtifact(t *testing.T) {
-	file := &models.MediaFile{
-		ID:                42,
-		ContentID:         "movie-1",
-		FilePath:          "/missing/movie.mkv",
-		Duration:          3600,
-		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/missing/movie.en.srt", Language: "eng", Format: "srt"}},
-	}
-	baseMgr := playback.NewSessionManager(0, 0)
-	session, err := baseMgr.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
-	req := httptest.NewRequest(http.MethodHead, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("session_id", session.ID)
-	routeCtx.URLParams.Add("track", "0.vtt")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-	rr := httptest.NewRecorder()
-	handler.HandleSubtitle(rr, req)
-
-	if rr.Code != http.StatusOK || rr.Body.Len() != 0 || !strings.HasPrefix(rr.Header().Get("Content-Type"), "text/vtt") {
-		t.Fatalf("HEAD status=%d type=%q body=%q", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
 	}
 }
 

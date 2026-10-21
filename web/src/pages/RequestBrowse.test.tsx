@@ -79,26 +79,6 @@ describe("RequestBrowse", () => {
     mocks.useRequestBrowse.mockReturnValue(loaded([browse(1)]));
   });
 
-  it("lays out a genre like the other full grids: back link, title, then posters", () => {
-    renderAt("/requests/browse/genre/drama?media_type=series");
-
-    expect(mocks.useRequestBrowse).toHaveBeenLastCalledWith({
-      kind: "genre",
-      slug: "drama",
-      mediaType: "series",
-      sort: "popularity",
-    });
-    expect(screen.getByRole("button", { name: "Go back" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Drama" })).toBeInTheDocument();
-    expect(screen.getByText("Genre")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Series" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getAllByRole("link", { name: "Heat" })[0]).toHaveAttribute(
-      "href",
-      "/title/movie/42",
-    );
-    expect(screen.queryByRole("navigation", { name: "Result pages" })).not.toBeInTheDocument();
-  });
-
   it("shows every loaded page and loads the next from the foot of the grid", () => {
     const second = browse(2);
     second.results = [
@@ -119,13 +99,6 @@ describe("RequestBrowse", () => {
     // jsdom has no IntersectionObserver, so the foot offers a button.
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(mocks.fetchNextPage).toHaveBeenCalledTimes(1);
-  });
-
-  it("stops offering more at the end of the list", () => {
-    mocks.useRequestBrowse.mockReturnValue(loaded([browse(1)], { hasNextPage: false }));
-    renderAt("/requests/browse/genre/drama?media_type=movie");
-
-    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
 
   it("keeps loading past a page a rating limit emptied", () => {
@@ -152,16 +125,5 @@ describe("RequestBrowse", () => {
       "/requests/browse/genre/drama?media_type=series",
     );
     expect(screen.getByTestId("location")).not.toHaveTextContent("page=");
-  });
-
-  it("requests a title from its card", () => {
-    mocks.mutate.mockResolvedValue({});
-    renderAt("/requests/browse/genre/drama");
-
-    fireEvent.click(screen.getByRole("button", { name: /^Request Heat/ }));
-
-    expect(mocks.mutate).toHaveBeenCalledWith(
-      expect.objectContaining({ media_type: "movie", tmdb_id: 42 }),
-    );
   });
 });

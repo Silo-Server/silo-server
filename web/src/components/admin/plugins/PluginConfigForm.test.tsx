@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PluginConfigSchema } from "@/api/types";
 
 import { PluginConfigForm } from "./PluginConfigForm";
+import { field } from "./adminFormField.test-support";
 
 const schema: PluginConfigSchema = {
   key: "account",
@@ -15,45 +16,13 @@ const schema: PluginConfigSchema = {
   required: true,
   admin_form: {
     fields: [
-      {
-        key: "api_key",
-        label: "API Key",
-        control: "PASSWORD",
-        required: false,
-        secret: true,
-        multiline: false,
-      },
-      {
-        key: "region",
-        label: "Region",
-        control: "TEXT",
-        required: false,
-        secret: false,
-        multiline: false,
-      },
+      field("api_key", "API Key", "PASSWORD", { secret: true }),
+      field("region", "Region", "TEXT"),
     ],
   },
 };
 
 describe("PluginConfigForm secrets", () => {
-  it("leaves the title and border to the page panel when bare", () => {
-    const schema = {
-      key: "account",
-      title: "Account title",
-      description: "Account description",
-      json_schema: JSON.stringify({ type: "object", properties: { token: { type: "string" } } }),
-      required: false,
-    };
-    const { container, rerender } = render(<PluginConfigForm schema={schema} onSave={vi.fn()} />);
-    expect(screen.getByText("Account title")).toBeInTheDocument();
-    expect(container.querySelector("fieldset")).toHaveClass("border");
-
-    rerender(<PluginConfigForm bare schema={schema} onSave={vi.fn()} />);
-    expect(screen.queryByText("Account title")).not.toBeInTheDocument();
-    expect(screen.queryByText("Account description")).not.toBeInTheDocument();
-    expect(container.querySelector("fieldset")).not.toHaveClass("border");
-  });
-
   it("derives a form when a plugin only supplies JSON Schema", () => {
     render(
       <PluginConfigForm
@@ -111,6 +80,24 @@ describe("PluginConfigForm secrets", () => {
     );
   });
 
+  it("sends an emptied field as an explicit clear so the stored value goes", async () => {
+    const onSave = vi.fn();
+    render(
+      <PluginConfigForm
+        schema={schema}
+        value={{ region: "us-east" }}
+        configuredSecrets={["api_key"]}
+        onSave={onSave}
+      />,
+    );
+
+    await userEvent.clear(screen.getByLabelText("Region"));
+    await userEvent.click(screen.getByRole("button", { name: "Save config" }));
+    const [, value, clearSecrets] = onSave.mock.lastCall!;
+    expect(value).toEqual({ region: "" });
+    expect(clearSecrets).toEqual([]);
+  });
+
   it("does not offer to clear a required saved secret into an invalid config", () => {
     const requiredSchema: PluginConfigSchema = {
       ...schema,
@@ -134,22 +121,6 @@ describe("PluginConfigForm secrets", () => {
     expect(screen.queryByRole("button", { name: "Clear saved secret" })).not.toBeInTheDocument();
   });
 
-  it("keeps the submitted snapshot immutable while a save is pending", () => {
-    render(
-      <PluginConfigForm
-        schema={schema}
-        value={{ region: "us-east" }}
-        configuredSecrets={["api_key"]}
-        onSave={vi.fn()}
-        isSaving
-      />,
-    );
-
-    expect(screen.getByLabelText("Region")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save config" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Clear saved secret" })).toBeDisabled();
-  });
-
   it("tests the exact draft including staged secret removals", async () => {
     const onTest = vi.fn().mockResolvedValue({
       success: false,
@@ -171,5 +142,33 @@ describe("PluginConfigForm secrets", () => {
     expect(onTest).toHaveBeenCalledWith("account", expect.objectContaining({ region: "us-east" }), [
       "api_key",
     ]);
+  });
+
+  it("reports each edit and staged secret removal as the entry it would save", async () => {
+    const onDraftChange = vi.fn();
+    render(
+      <PluginConfigForm
+        schema={schema}
+        value={{ region: "us-east" }}
+        configuredSecrets={["api_key"]}
+        onSave={vi.fn()}
+        onDraftChange={onDraftChange}
+      />,
+    );
+
+    await userEvent.clear(screen.getByLabelText("Region"));
+    await userEvent.type(screen.getByLabelText("Region"), "eu");
+    expect(onDraftChange).toHaveBeenLastCalledWith(
+      "account",
+      expect.objectContaining({ region: "eu" }),
+      [],
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear saved secret" }));
+    expect(onDraftChange).toHaveBeenLastCalledWith(
+      "account",
+      expect.objectContaining({ region: "eu" }),
+      ["api_key"],
+    );
   });
 });

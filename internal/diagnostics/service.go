@@ -173,7 +173,7 @@ func (s *Service) Ingest(ctx context.Context, userID int, profileID *string, man
 	manifest, err := contract.ValidateManifest(manifestJSON)
 	if err != nil {
 		s.logRejected(ctx, "", userID, "", "", int64(len(manifestJSON)), "invalid_manifest")
-		return IngestResult{}, fmt.Errorf("%w: invalid manifest: %v", ErrInvalidBundle, err)
+		return IngestResult{}, fmt.Errorf("%w: invalid manifest: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on client input; the validation error is only reported
 	}
 	if manifest.Archive.Bytes > settings.MaxBundleBytes {
 		s.logRejected(ctx, "", userID, manifest.Report.Platform, manifest.Report.Type, manifest.Archive.Bytes, "too_large")
@@ -441,7 +441,7 @@ func classifyBundleUploadError(err error) error {
 	case errors.Is(err, ErrInvalidBundle),
 		errors.Is(err, ErrTooManyEntries),
 		errors.Is(err, ErrCompressionRatio):
-		return fmt.Errorf("%w: %v", ErrInvalidBundle, err)
+		return fmt.Errorf("%w: %v", ErrInvalidBundle, err) //nolint:errorlint // deliberately collapses entry-count and ratio errors into the invalid-bundle verdict
 	default:
 		return err
 	}

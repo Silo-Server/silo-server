@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useRequestGroupLimit } from "@/hooks/queries/admin/requests";
+import { useAdminPolicyDefaults } from "@/hooks/queries/admin/users";
 import {
   PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
@@ -170,6 +171,7 @@ export function LibraryAccessCard({
     changedRows,
     rebase,
   });
+  const defaults = useAdminPolicyDefaults().data;
   const groupSelectId = useId();
   const radioName = useId();
   const d = draft.draft;
@@ -193,7 +195,7 @@ export function LibraryAccessCard({
   if (draft.editing && d) {
     // Hints follow the group picked here; other cards see the change after it saves.
     const hintGroupId = effectiveAccessGroupID(base.role, d.groupId);
-    const groupHints = policyInheritHints(hintGroupId, groups);
+    const groupHints = policyInheritHints(base.role, hintGroupId, groups, defaults);
     const draftHints =
       hintGroupId === effectiveAccessGroupID(base.role, base.access_group_id)
         ? savedUserPolicyInheritHints(base, groupHints)

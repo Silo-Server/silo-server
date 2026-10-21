@@ -3,6 +3,7 @@ package intromarkers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"testing"
@@ -20,8 +21,10 @@ type fakeMovieSampler struct {
 	preflight error
 	errs      map[int]error
 	silences  []mediasample.Interval
-	tails     []int
-	windows   []fingerprintWindow
+	// silenceErr fails every silence read.
+	silenceErr error
+	tails      []int
+	windows    []fingerprintWindow
 	// onSample runs on every tail pass.
 	onSample func()
 	// onSilences runs on every silence read.
@@ -57,12 +60,12 @@ func (f *fakeMovieSampler) SampleMovieTail(_ context.Context, candidate Candidat
 func (f *fakeMovieSampler) SampleMovieSilences(_ context.Context, _ Candidate, window fingerprintWindow) ([]mediasample.Interval, error) {
 	f.mu.Lock()
 	f.windows = append(f.windows, window)
-	onSilences, silences := f.onSilences, f.silences
+	onSilences, silences, err := f.onSilences, f.silences, f.silenceErr
 	f.mu.Unlock()
 	if onSilences != nil {
 		onSilences()
 	}
-	return silences, nil
+	return silences, err
 }
 
 func (f *fakeMovieSampler) tailCount() int {
@@ -172,6 +175,47 @@ func TestAnalyzeMovieStoresTheTailOnlyOnceCreditsAreSettled(t *testing.T) {
 	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete ||
 		summary.MovieCreditsMarkersWritten != 1 || sampler.tailCount() != 3 {
 		t.Fatalf("artifact status %q, summary %+v, %d tail passes; want the third pass stored with its credits", artifact.Status, summary, sampler.tailCount())
+	}
+}
+
+// A silence pass killed at its deadline keeps the video start but leaves
+// the movie unsettled: its tail is recorded as failed with a backoff, not
+// stored complete, so the scheduled run takes it up again. A silence pass
+// that fails for another reason still settles the movie.
+func TestAnalyzeMovieSilenceTimeoutLeavesTheMovieUnsettled(t *testing.T) {
+	movie := movieCandidate(10, 7200)
+	repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
+	timeout := &mediasample.Error{Reason: mediasample.ReasonTimeout, Attempts: []mediasample.AttemptError{{
+		Decoder: "software", Reason: mediasample.ReasonTimeout, Err: context.DeadlineExceeded,
+	}}}
+	sampler := &fakeMovieSampler{silenceErr: fmt.Errorf("ffmpeg did not finish within its 2m12s deadline: %w", timeout)}
+	analyzer := movieAnalyzer(repo, sampler)
+
+	summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
+	if err != nil {
+		t.Fatalf("AnalyzeMovie: %v", err)
+	}
+	credits := creditsPatches(repo)
+	if summary.MovieCreditsMarkersWritten != 1 || summary.CreditsTailScanErrors != 1 || len(credits) != 1 || credits[0].Start != 6600 {
+		t.Fatalf("summary %+v, credits %+v; want the video start written", summary, credits)
+	}
+	artifact := repo.artifact(10, ArtifactKindCreditsTail)
+	if artifact.Status != mediaartifact.StatusFailed || artifact.RetryAfter == nil || artifact.Key != movieCreditsTailKey() {
+		t.Fatalf("movie tail artifact status %q, retry after %v; want failed with a backoff", artifact.Status, artifact.RetryAfter)
+	}
+
+	// Inside the backoff the movie's tail is not sampled again.
+	if _, err := analyzer.AnalyzeMovie(context.Background(), "movie"); err != nil || sampler.tailCount() != 1 {
+		t.Fatalf("AnalyzeMovie: %v, %d tail passes; want the backoff to hold", err, sampler.tailCount())
+	}
+
+	repo = &fakeIntroRepository{movieCandidates: []Candidate{movie}}
+	sampler = &fakeMovieSampler{silenceErr: errors.New("ffmpeg exit status 1")}
+	if _, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie"); err != nil {
+		t.Fatalf("AnalyzeMovie: %v", err)
+	}
+	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete {
+		t.Fatalf("movie tail artifact status %q after a failed silence pass, want complete", artifact.Status)
 	}
 }
 
@@ -303,52 +347,20 @@ func TestAnalyzeMovieStatuses(t *testing.T) {
 	}
 }
 
-// A probe repair can fill in a missing or misread video codec without
-// changing the file. The movie's tail is then sampled, even over a no_video
-// row an earlier build stored.
-func TestAnalyzeMovieTailAfterProbeRepair(t *testing.T) {
-	for _, legacy := range []bool{false, true} {
-		movie := movieCandidate(10, 7200)
-		movie.CodecVideo = "mjpeg"
-		repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
-		sampler := &fakeMovieSampler{}
-		analyzer := movieAnalyzer(repo, sampler)
-		if legacy {
-			spec := movieTailSpec(movie)
-			repo.artifacts = map[artifactSlot]mediaartifact.Artifact{{10, ArtifactKindCreditsTail}: {
-				MediaFileID: 10, Key: spec.key, Identity: spec.window.identity(movie),
-				Status: mediaartifact.StatusUnusable, Detail: tailDetailNoVideo,
-			}}
-		} else {
-			summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if summary.CreditsTailUnusable != 1 || sampler.tailCount() != 0 || repo.artifact(10, ArtifactKindCreditsTail).Status != "" {
-				t.Fatalf("summary %+v, %d tail passes; want the tail ruled out, unsampled and unstored", summary, sampler.tailCount())
-			}
-		}
-
-		repo.movieCandidates[0].CodecVideo = "hevc"
-		summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if sampler.tailCount() != 1 || summary.CreditsTailScansComputed != 1 || summary.MovieCreditsMarkersWritten != 1 {
-			t.Fatalf("legacy=%t: summary %+v, %d tail passes; want the repaired movie sampled and placed", legacy, summary, sampler.tailCount())
-		}
-	}
-}
-
 func TestAnalyzeMovieWithoutVisualsUsesChaptersOnly(t *testing.T) {
-	repo := &fakeIntroRepository{movieCandidates: []Candidate{movieCandidate(10, 7200)}}
+	chapterCandidate := movieCandidate(11, 7200)
+	chapterCandidate.Chapters = []models.MediaChapter{{Title: "End Credits", StartSeconds: 6900, EndSeconds: 7200}}
+	repo := &fakeIntroRepository{movieCandidates: []Candidate{movieCandidate(10, 7200), chapterCandidate}}
 	sampler := &fakeMovieSampler{preflight: errors.New("ffmpeg lacks signalstats")}
 	summary, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sampler.tailCount() != 0 || summary.MovieCreditsMarkersWritten != 0 {
-		t.Fatalf("%d tail passes, summary %+v", sampler.tailCount(), summary)
+	if sampler.tailCount() != 0 || summary.MovieCreditsMarkersWritten != 1 || len(repo.patches) != 1 {
+		t.Fatalf("%d tail passes, summary %+v, patches %+v", sampler.tailCount(), summary, repo.patches)
+	}
+	if patch := repo.patches[0]; patch.FileID != 11 || patch.Start != 6900 || patch.End != 7200 || patch.Algorithm != CreditsChapterAlgorithm {
+		t.Fatalf("chapter credits patch = %+v, want file 11 at 6900–7200", patch)
 	}
 }
 

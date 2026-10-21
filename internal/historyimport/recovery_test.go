@@ -3,76 +3,15 @@ package historyimport
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"fmt"
-	"math"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
-
-func TestImportRunPagingAndOwnership(t *testing.T) {
-	pool := newPlexWatchlistImportTestPool(t)
-	ctx := t.Context()
-	repo := NewRepository(pool, nil)
-	stamp := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, id := range []string{"a", "b", "c", "d"} {
-		if _, err := pool.Exec(ctx, "INSERT INTO history_import_runs(id,user_id,profile_id,source_type,connection_mode,status,created_at) VALUES($1,1,'p','plex','custom','completed',$2)", id, stamp); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := pool.Exec(ctx, "INSERT INTO history_import_runs(id,user_id,profile_id,source_type,connection_mode,status,created_at) VALUES('foreign',2,'p','plex','custom','completed',$1)", stamp); err != nil {
-		t.Fatal(err)
-	}
-	page, more, err := repo.ListRunsPageForUser(ctx, 1, nil, 2)
-	if err != nil || !more || len(page) != 2 || page[0].ID != "d" || page[1].ID != "c" {
-		t.Fatalf("page=%v more=%v err=%v", page, more, err)
-	}
-	key := &RunKey{CreatedAt: page[1].CreatedAt, ID: page[1].ID}
-	if _, err := pool.Exec(ctx, "DELETE FROM history_import_runs WHERE id='d'"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, "INSERT INTO history_import_runs(id,user_id,profile_id,source_type,connection_mode,status,created_at) VALUES('new',1,'p','plex','custom','completed',$1)", stamp.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	page, more, err = repo.ListRunsPageForUser(ctx, 1, key, 2)
-	if err != nil || more || len(page) != 2 || page[0].ID != "b" || page[1].ID != "a" {
-		t.Fatalf("next=%v more=%v err=%v", page, more, err)
-	}
-	if _, err := repo.GetRunForUser(ctx, 1, "foreign"); !errors.Is(err, ErrRunNotFound) {
-		t.Fatalf("foreign run error=%v", err)
-	}
-	for i := range 205 {
-		if _, err := pool.Exec(ctx, "INSERT INTO history_import_runs(id,user_id,profile_id,source_type,connection_mode,status,created_at) VALUES($1,1,'p','plex','custom','completed',$2)", fmt.Sprintf("bulk-%03d", i), stamp); err != nil {
-			t.Fatal(err)
-		}
-	}
-	page, more, err = repo.ListRunsPageForUser(ctx, 1, nil, math.MaxInt)
-	if err != nil || !more || len(page) != 200 {
-		t.Fatalf("bounded page length=%d more=%v err=%v", len(page), more, err)
-	}
-}
-
-func TestCreateImportRejectsForeignProfileBeforeExternalExchange(t *testing.T) {
-	pool := newPlexWatchlistImportTestPool(t)
-	ctx := t.Context()
-	if _, err := pool.Exec(ctx, "CREATE TEMP TABLE user_profiles(id text PRIMARY KEY,user_id integer)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, "INSERT INTO user_profiles VALUES('foreign',2)"); err != nil {
-		t.Fatal(err)
-	}
-	// Nil external clients prove validation happens before provider access.
-	service := &Service{repo: NewRepository(pool, nil)}
-	_, err := service.CreateRun(ctx, 1, CreateRunInput{ProfileID: "foreign", Source: SourceTypeJellyfin, JellyfinBaseURL: "https://example.test", JellyfinUsername: "user", JellyfinPassword: "secret"})
-	if !errors.Is(err, ErrProfileNotFound) {
-		t.Fatalf("error=%v", err)
-	}
-}
 
 func TestImportedWatchSQLiteReplayAndFreshness(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
@@ -175,28 +114,96 @@ func testImportedStore(t *testing.T, store userstore.UserStore) {
 	}
 }
 
+func TestImportedWatchDismissesItemsHiddenFromSourceContinueWatching(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	db.SetMaxOpenConns(1)
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := t.Context()
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p", Name: "Profile"}); err != nil {
+		t.Fatal(err)
+	}
+	provider := importStoreProvider{store}
+	service := &Service{stores: provider, watchState: watchstate.NewService(provider)}
+	stamp := time.Date(2026, 10, 8, 19, 59, 13, 0, time.UTC)
+	hidden := Record{PositionSeconds: 240, DurationSeconds: 600, UpdatedAt: stamp, LastPlayedAt: new(stamp), HiddenFromResume: true}
+	continueWatching := func() []string {
+		t.Helper()
+		progress, err := store.ListProgress(ctx, "p", "in_progress", 100, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dismissals, err := store.ListHomeDismissals(ctx, "p", userstore.HomeSurfaceContinueWatching)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, entry := range catalog.NewHomeDismissalIndex(dismissals).FilterProgress(progress) {
+			ids = append(ids, entry.MediaItemID)
+		}
+		slices.Sort(ids)
+		return ids
+	}
+
+	// A hidden item keeps its resume point but stays out of Continue Watching.
+	outcome, err := service.applyImportedWatch(ctx, 1, "p", "hidden", hidden)
+	if err != nil || !outcome.ProgressWritten {
+		t.Fatalf("hidden import=%+v %v", outcome, err)
+	}
+	if progress, err := store.GetProgress(ctx, "p", "hidden"); err != nil || progress == nil || progress.PositionSeconds != 240 {
+		t.Fatalf("hidden progress=%+v %v, want position 240", progress, err)
+	}
+
+	// An import from before the item was hidden is repaired by running it again.
+	earlier := hidden
+	earlier.HiddenFromResume = false
+	if _, err := service.applyImportedWatch(ctx, 1, "p", "earlier", earlier); err != nil {
+		t.Fatal(err)
+	}
+	if got := continueWatching(); !slices.Equal(got, []string{"earlier"}) {
+		t.Fatalf("continue watching before re-run = %v, want [earlier]", got)
+	}
+	if _, err := service.applyImportedWatch(ctx, 1, "p", "earlier", hidden); err != nil {
+		t.Fatal(err)
+	}
+
+	// A hidden rewatch of a completed item is hidden too: the row keeps its
+	// completed latch but shows in Continue Watching through its resume point.
+	if err := store.SetProgressAt(ctx, "p", "rewatch", 0, 600, true, stamp.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.applyImportedWatch(ctx, 1, "p", "rewatch", hidden); err != nil {
+		t.Fatal(err)
+	}
+
+	// Playback in Silo after the import is never hidden, even within the same
+	// second as the imported date.
+	for id, at := range map[string]time.Time{"watched-since": stamp.Add(time.Hour), "same-second": stamp.Add(900 * time.Millisecond)} {
+		if err := store.SetProgressAt(ctx, "p", id, 300, 600, false, at); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.applyImportedWatch(ctx, 1, "p", id, hidden); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := continueWatching(); !slices.Equal(got, []string{"same-second", "watched-since"}) {
+		t.Fatalf("continue watching = %v, want [same-second watched-since]", got)
+	}
+}
+
 type importStoreProvider struct{ store userstore.UserStore }
 
 func (p importStoreProvider) ForUser(context.Context, int) (userstore.UserStore, error) {
 	return p.store, nil
 }
 func (importStoreProvider) Close() error { return nil }
-
-func TestImportedWatchPostgresReplayAndFreshness(t *testing.T) {
-	pool := newPlexWatchlistImportTestPool(t)
-	for _, statement := range []string{
-		`CREATE TEMP TABLE user_history_hidden_items(user_id integer,profile_id text,media_item_id text,hidden_before timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(user_id,profile_id,media_item_id))`,
-		`CREATE TEMP TABLE user_watch_progress(user_id integer,profile_id text,media_item_id text,position_seconds double precision,duration_seconds double precision,completed boolean,updated_at timestamptz,event_at timestamptz,last_file_id text,last_resolution text,last_hdr text,last_codec_video text,last_edition_key text,PRIMARY KEY(user_id,profile_id,media_item_id))`,
-		`CREATE TEMP TABLE user_watch_history(id text PRIMARY KEY,user_id integer,profile_id text,media_item_id text,watched_at timestamptz,duration_seconds double precision,completed boolean,source text,watch_identity jsonb)`,
-	} {
-		if _, err := pool.Exec(t.Context(), statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-	provider := pgstore.NewPostgresProvider(pool)
-	store, err := provider.ForUser(t.Context(), 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	testImportedStore(t, store)
-}

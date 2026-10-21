@@ -2,7 +2,9 @@ package contractspec
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	contracts "github.com/Silo-Server/silo-server/contracts/api/v2"
@@ -14,13 +16,69 @@ func TestCommittedArtifactPassesLint(t *testing.T) {
 	if findings := Lint(contracts.OpenAPI); len(findings) != 0 {
 		t.Fatalf("committed openapi.json fails lint:\n  %s", strings.Join(findings, "\n  "))
 	}
+	if findings := Lint(seedDocument(t)); len(findings) != 0 {
+		t.Fatalf("seed document fails lint: %v", findings)
+	}
 }
 
-// mutate decodes the committed artifact, applies fn, and re-encodes it.
+// Seeded rule tests need only the operations they mutate. The committed artifact
+// gates above and in diff_test.go still validate the complete document.
+var seededDocument = sync.OnceValues(func() ([]byte, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(contracts.OpenAPI, &doc); err != nil {
+		return nil, err
+	}
+	paths := doc["paths"].(map[string]any)
+	keptPaths := map[string]any{}
+	for _, path := range []string{"/api/v2/system/info", "/api/v2/openapi.json", "/api/v2/profiles/{id}", "/api/v2/progress", "/api/v2/system/setup"} {
+		operation, ok := paths[path]
+		if !ok {
+			return nil, fmt.Errorf("seed operation missing: %s", path)
+		}
+		keptPaths[path] = operation
+	}
+	allSchemas := schemas(doc)
+	keptSchemas := map[string]any{}
+	var retainReferences func(any)
+	retainReferences = func(value any) {
+		switch v := value.(type) {
+		case map[string]any:
+			if ref, ok := v["$ref"].(string); ok && strings.HasPrefix(ref, "#/components/schemas/") {
+				name := strings.TrimPrefix(ref, "#/components/schemas/")
+				if _, seen := keptSchemas[name]; !seen {
+					keptSchemas[name] = allSchemas[name]
+					retainReferences(allSchemas[name])
+				}
+			}
+			for _, child := range v {
+				retainReferences(child)
+			}
+		case []any:
+			for _, child := range v {
+				retainReferences(child)
+			}
+		}
+	}
+	retainReferences(keptPaths)
+	doc["paths"] = keptPaths
+	doc["components"].(map[string]any)["schemas"] = keptSchemas
+	return json.Marshal(doc)
+})
+
+func seedDocument(t *testing.T) []byte {
+	t.Helper()
+	data, err := seededDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// mutate decodes a fresh seeded document, applies fn, and re-encodes it.
 func mutate(t *testing.T, fn func(doc map[string]any)) []byte {
 	t.Helper()
 	var doc map[string]any
-	if err := json.Unmarshal(contracts.OpenAPI, &doc); err != nil {
+	if err := json.Unmarshal(seedDocument(t), &doc); err != nil {
 		t.Fatal(err)
 	}
 	fn(doc)

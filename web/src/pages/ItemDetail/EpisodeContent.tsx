@@ -5,6 +5,7 @@ import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/p
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
@@ -15,6 +16,7 @@ import {
   useRefreshItemMetadata,
 } from "@/hooks/queries/items";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
+import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
@@ -46,8 +48,11 @@ import {
   canCurateMetadata as canCurateMetadataForUser,
   canEditMarkers as canEditMarkersForUser,
 } from "@/lib/permissions";
+import { isEpisodeUnwatched } from "@/lib/episodeSpoilers";
+import { formatDate } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
+import { hasMachineTranslation } from "./components/machineTranslation";
 
 export default function EpisodeContent({ item }: { item: ItemDetail & { type: "episode" } }) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
@@ -75,6 +80,9 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   // An API node without redetect-markers (rolling deploy, rollback) keeps the
   // older intro-only re-detection.
   const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const canRedetectMarkers = markerCapabilities.data?.redetect_markers === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
@@ -83,6 +91,12 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const sortedVersions = useMemo(() => sortByResolution(item.versions ?? []), [item.versions]);
   const userData =
     item.user_data && "position_seconds" in item.user_data ? item.user_data : undefined;
+  const { hideOverviews } = useEpisodeSpoilerPrefs();
+  // Keyed by episode so a reveal survives an on-view translation of the same
+  // episode but not navigation to the next one.
+  const [revealedOverviewId, setRevealedOverviewId] = useState<string | null>(null);
+  const overviewHidden =
+    hideOverviews && isEpisodeUnwatched(item.user_data) && revealedOverviewId !== item.content_id;
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(
@@ -166,7 +180,6 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
       setSubtitlePreference.mutate({
         prefId: item.series_id,
         selection,
-        showForcedSubtitles: item.effective_show_forced_subtitles,
       });
     }
   };
@@ -189,7 +202,6 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
       setSubtitlePreference.mutate({
         prefId: item.series_id,
         selection: null,
-        showForcedSubtitles: item.effective_show_forced_subtitles,
       });
     }
   };
@@ -303,16 +315,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
               />
               {item.air_date && (
                 <span className="metadata-badge">
-                  {(() => {
-                    const d = new Date(item.air_date);
-                    return Number.isNaN(d.getTime())
-                      ? item.air_date
-                      : new Intl.DateTimeFormat(undefined, {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        }).format(d);
-                  })()}
+                  {formatDate(item.air_date, "medium") || item.air_date}
                 </span>
               )}
               <QualityBadges summary={selectedMediaSummary} />
@@ -322,12 +325,16 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
           overview={item.overview}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
+          overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
+          overviewHidden={overviewHidden}
+          onRevealOverview={() => setRevealedOverviewId(item.content_id)}
           crewLine={<HeroCrewLine crew={item.crew ?? []} />}
           actions={
             <WatchedActionBar
               compactMobile
               item={item}
               contentId={item.content_id}
+              canAddToCollection={false}
               watchTogether={watchTogether.menu}
               playHref={
                 item.versions && item.versions.length > 0 ? `/watch/${item.content_id}` : undefined
@@ -381,6 +388,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
               isAdmin={isAdmin}
               canCurateMetadata={canCurateMetadata}
               canEditMarkers={canEditMarkers}
+              canManageTrickplay={canManageTrickplay}
               onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
               onShowMediaInfo={
                 canCurateMetadata && (item.versions?.length ?? 0) > 0

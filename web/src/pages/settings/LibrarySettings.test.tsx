@@ -8,7 +8,6 @@ import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/set
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import {
   buildLibraryPlaybackMutations,
-  buildLibraryPlaybackSummaryFromState,
   createLibraryPlaybackEditorState,
 } from "./libraryPlaybackPreferences";
 
@@ -140,23 +139,6 @@ describe("library playback editor state", () => {
     ).toBe("none");
     expect(createLibraryPlaybackEditorState({}).subtitleLanguage).toBe("inherit");
   });
-
-  it("summarizes an untouched library as using profile defaults", () => {
-    expect(buildLibraryPlaybackSummaryFromState(createLibraryPlaybackEditorState({}))).toBe(
-      "Uses profile defaults",
-    );
-  });
-
-  it("summarizes only the overridden playback fields", () => {
-    expect(
-      buildLibraryPlaybackSummaryFromState({
-        audioLanguage: "ja",
-        subtitleLanguage: "en",
-        subtitleMode: "always",
-        showForcedSubtitles: "off",
-      }),
-    ).toBe("Audio: Japanese • Subtitles: English • Behavior: Always on • Forced subtitles: Off");
-  });
 });
 
 describe("library playback mutations", () => {
@@ -232,45 +214,10 @@ describe("LibrarySettings", () => {
     });
   });
 
-  it("renders the inherited summary for libraries without playback overrides", () => {
-    const markup = renderToStaticMarkup(<LibrarySettings />);
+  it("lists hidden libraries so each keeps a switch to show it again", () => {
+    renderToStaticMarkup(<LibrarySettings />);
 
-    expect(markup).toContain("Uses profile defaults");
-    expect(markup).toContain("Remember library pages");
-    expect(markup).toContain("Edit playback overrides");
-  });
-
-  it("renders the playback override summary from the values resolved for that library", () => {
-    mocks.useEffectiveSettings.mockImplementation(
-      (options?: { libraryIds?: readonly number[] }) => {
-        if (!options?.libraryIds?.length) {
-          return { data: {}, isLoading: false };
-        }
-        return {
-          isLoading: false,
-          data: {
-            ...resolved(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, "ja", "profile_library", {
-              library_id: options.libraryIds[0],
-            }),
-            ...resolved(SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE, "en", "profile_library", {
-              library_id: options.libraryIds[0],
-            }),
-            ...resolved(SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, "always", "profile_library", {
-              library_id: options.libraryIds[0],
-            }),
-            ...resolved(SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES, false, "profile_library", {
-              library_id: options.libraryIds[0],
-            }),
-          },
-        };
-      },
-    );
-
-    const markup = renderToStaticMarkup(<LibrarySettings />);
-
-    expect(markup).toContain(
-      "Audio: Japanese • Subtitles: English • Behavior: Always on • Forced subtitles: Off",
-    );
+    expect(mocks.useAvailableUserLibraries).toHaveBeenCalledWith({ includeHidden: true });
   });
 
   it("resolves each library's overrides with that library in context", () => {

@@ -255,18 +255,41 @@ func originMatches(origin *url.URL, expected string) bool {
 }
 
 type eventsSessionValidator interface {
-	IsValid(context.Context, string) (bool, error)
+	ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error)
 }
 
 // NewEventsSocketV2 reuses the current account, session and viewer authorities.
-func NewEventsSocketV2(events *EventsHandler, tickets *evt.SocketTicketStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker, publicURL string) *EventsSocketV2 {
+func NewEventsSocketV2(events *EventsHandler, tickets *evt.SocketTicketStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider, publicURL string) *EventsSocketV2 {
 	h := &EventsSocketV2{Events: events, Tickets: tickets, PublicOrigin: publicURL}
-	h.Validate = newSocketAuthorityValidator(sessions, users, resolver, primary)
+	h.Validate = newSocketAuthorityValidator(sessions, users, resolver, actingAdmin)
 	return h
 }
 
-func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, primary apimw.PrimaryProfileChecker) EventsSocketValidator {
-	if sessions == nil || users == nil || resolver == nil || primary == nil {
+// refuseRemotePlaybackSocket narrows validate to sessions that are not a
+// remote-playback handoff, for a socket a handoff may not hold. The ticket
+// route is already closed to handoffs, but a ticket minted before the session
+// was bound, or by an older node during a rolling deploy, would otherwise
+// connect and pass every recheck.
+func refuseRemotePlaybackSocket(validate EventsSocketValidator) EventsSocketValidator {
+	if validate == nil {
+		return nil
+	}
+	return func(ctx context.Context, identity evt.SocketIdentity) (context.Context, *auth.Claims, error) {
+		validated, claims, err := validate(ctx, identity)
+		if err == nil && claims.IsRemotePlayback() {
+			return ctx, nil, evt.ErrSocketTicket
+		}
+		return validated, claims, err
+	}
+}
+
+// newSocketAuthorityValidator checks a socket identity against the current
+// login session, account and profile. The admin role holds only while
+// actingAdmin allows it, the decision the HTTP admin routes apply: as the
+// account's primary profile, or with no profile while the household does not
+// require one. Otherwise the identity validates with the user role.
+func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider) EventsSocketValidator {
+	if sessions == nil || users == nil || resolver == nil || actingAdmin == nil {
 		return nil
 	}
 	return func(ctx context.Context, identity evt.SocketIdentity) (context.Context, *auth.Claims, error) {
@@ -279,15 +302,22 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		// the credential. A changed role, scope or profile verification under
 		// a valid session is an access change the client can recover from by
 		// refetching and reconnecting.
-		valid, err := sessions.IsValid(checkCtx, identity.SessionID)
+		// A remote-playback session's ticket names its bound profile; its
+		// role is "user" whatever the account's role is.
+		authority, valid, err := sessions.ActiveSession(checkCtx, identity.SessionID)
 		if err != nil || !valid {
 			return ctx, nil, evt.ErrSocketTicket
+		}
+		if authority.IsRemotePlayback() && identity.ProfileID != authority.BoundProfileID {
+			// An older release minted it without the bound profile; the
+			// client fetches a new ticket.
+			return ctx, nil, errSocketAccessChanged
 		}
 		user, err := users.GetByID(checkCtx, identity.UserID)
 		if err != nil || user == nil || !user.Enabled {
 			return ctx, nil, evt.ErrSocketTicket
 		}
-		if user.Role != identity.Role {
+		if authority.Role != identity.Role {
 			return ctx, nil, errSocketAccessChanged
 		}
 		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken})
@@ -302,13 +332,17 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if identity.AccessFingerprint != "" && !scope.PreferencesDegraded && identity.AccessFingerprint != eventsScopeFingerprint(scope) {
 			return ctx, nil, errSocketAccessChanged
 		}
-		role := user.Role
-		if role == eventsAdminRole && identity.ProfileID != "" {
-			isPrimary, found, err := primary(checkCtx, identity.UserID, identity.ProfileID)
-			if err != nil || !found {
+		role := authority.Role
+		if role == eventsAdminRole {
+			acting, err := actingAdmin(checkCtx, apimw.ActingAdminRequest{
+				Claims:    &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess},
+				ProfileID: identity.ProfileID,
+				DeviceID:  identity.DeviceID,
+			})
+			if err != nil {
 				return ctx, nil, evt.ErrSocketTicket
 			}
-			if !isPrimary {
+			if !acting {
 				role = string(scopeUser)
 			}
 		}
@@ -316,6 +350,7 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 			return ctx, nil, errSocketAccessChanged
 		}
 		claims := &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess}
+		authority.Narrow(claims)
 		ctx = apimw.SetClaims(ctx, claims)
 		ctx = apimw.SetProfileID(ctx, identity.ProfileID)
 		ctx = access.SetScope(ctx, scope)

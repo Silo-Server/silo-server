@@ -2,18 +2,16 @@
 package subdl
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -49,7 +47,7 @@ func New(cfg Config) *Provider {
 		dlBase = defaultDLBaseURL
 	}
 	return &Provider{
-		client:    &http.Client{Timeout: 15 * time.Second},
+		client:    &http.Client{Timeout: 15 * time.Second, CheckRedirect: sameOriginRedirects},
 		baseURL:   base,
 		dlBaseURL: dlBase,
 		apiKey:    cfg.APIKey,
@@ -100,17 +98,17 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("subdl: search request: %w", err)
+		// The request URL carries the API key; keep it out of the error text.
+		return nil, fmt.Errorf("subdl: search request: %w", logredact.SanitizeURLError(err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("subdl: search returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("subdl: search returned %d: %s", resp.StatusCode, subtitles.ProviderErrorBody(resp.Body))
 	}
 
 	var searchResp searchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+	if err := json.NewDecoder(subtitles.LimitProviderResponse(resp.Body)).Decode(&searchResp); err != nil {
 		return nil, fmt.Errorf("subdl: decode response: %w", err)
 	}
 
@@ -127,7 +125,7 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 		language := subtitles.NormalizeProviderLanguage("subdl", rawLanguage)
 		format := detectFormat(s.ReleaseName)
 		result := subtitles.SubtitleResult{
-			ID:              s.URL, // relative download path
+			ID:              resultID(s.URL),
 			Provider:        "subdl",
 			Language:        language,
 			ReleaseName:     s.ReleaseName,
@@ -141,12 +139,13 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 }
 
 func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.SubtitleFormat, error) {
+	downloadURL, err := p.downloadURL(id)
+	if err != nil {
+		return nil, "", err
+	}
 	if err := p.limiter.Wait(ctx); err != nil {
 		return nil, "", err
 	}
-
-	// id is the relative download URL from search results
-	downloadURL := p.dlBaseURL + id
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", downloadURL, nil)
 	if err != nil {
@@ -155,55 +154,24 @@ func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.S
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, "", fmt.Errorf("subdl: download request: %w", err)
+		return nil, "", fmt.Errorf("subdl: download request: %w", logredact.SanitizeURLError(err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, "", fmt.Errorf("subdl: download returned %d: %s", resp.StatusCode, string(body))
+		return nil, "", fmt.Errorf("subdl: download returned %d: %s", resp.StatusCode, subtitles.ProviderErrorBody(resp.Body))
 	}
 
-	zipData, err := io.ReadAll(resp.Body)
+	zipData, err := subtitles.ReadProviderResponse(resp.Body)
 	if err != nil {
 		return nil, "", fmt.Errorf("subdl: read zip: %w", err)
 	}
 
-	return extractSubtitleFromZip(zipData)
-}
-
-// extractSubtitleFromZip finds the first subtitle file in a ZIP archive.
-func extractSubtitleFromZip(data []byte) ([]byte, subtitles.SubtitleFormat, error) {
-	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	content, format, err := subtitles.ExtractSubtitleFromZip(zipData)
 	if err != nil {
-		return nil, "", fmt.Errorf("subdl: open zip: %w", err)
+		return nil, "", fmt.Errorf("subdl: %w", err)
 	}
-
-	subtitleExts := map[string]subtitles.SubtitleFormat{
-		".srt": subtitles.FormatSRT,
-		".ass": subtitles.FormatASS,
-		".ssa": subtitles.FormatSSA,
-		".vtt": subtitles.FormatVTT,
-		".sub": subtitles.FormatSUB,
-	}
-
-	for _, f := range reader.File {
-		ext := strings.ToLower(filepath.Ext(f.Name))
-		if format, ok := subtitleExts[ext]; ok {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, "", fmt.Errorf("subdl: open zip entry: %w", err)
-			}
-			content, err := io.ReadAll(rc)
-			rc.Close()
-			if err != nil {
-				return nil, "", fmt.Errorf("subdl: read zip entry: %w", err)
-			}
-			return content, format, nil
-		}
-	}
-
-	return nil, "", fmt.Errorf("subdl: no subtitle file found in zip archive")
+	return content, format, nil
 }
 
 func detectFormat(filename string) subtitles.SubtitleFormat {

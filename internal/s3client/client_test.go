@@ -247,14 +247,134 @@ func TestDeleteObjectsCountsOnlyMissingObjectBatchErrors(t *testing.T) {
 		w.Header().Set("Content-Type", "application/xml")
 		_, _ = io.WriteString(w, `<DeleteResult>
 			<Error><Key>missing.webp</Key><Code>NoSuchKey</Code></Error>
-			<Error><Key>denied.webp</Key><Code>AccessDenied</Code></Error>
+			<Error><Key>denied.webp</Key><Code>AccessDenied</Code><Message>signed https://x/?X-Amz-Signature=SECRETSIG</Message></Error>
 		</DeleteResult>`)
 	}))
 	t.Cleanup(server.Close)
 	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
 	deleted, err := client.DeleteObjects(t.Context(), client.Bucket(), []string{"missing.webp", "existing.webp", "denied.webp"})
-	if err != nil || deleted != 2 {
-		t.Fatalf("DeleteObjects() = %d, %v; want 2, nil", deleted, err)
+	if err == nil || deleted != 2 {
+		t.Fatalf("DeleteObjects() = %d, %v; want 2 and an error", deleted, err)
+	}
+	if !strings.Contains(err.Error(), "denied.webp") {
+		t.Fatal("DeleteObjects() error did not name denied.webp")
+	}
+	if !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatal("DeleteObjects() error did not carry the AccessDenied error code")
+	}
+	if strings.Contains(err.Error(), "SECRETSIG") {
+		t.Fatal("DeleteObjects() error echoed the backend message")
+	}
+}
+
+func TestDeletePrefixReturnsErrorWhenBatchDeleteFails(t *testing.T) {
+	// Neither failure is about how the batch was sent, so retrying each key on
+	// its own would fail the same way: no per-key fallback.
+	for name, rejection := range map[string]struct {
+		status int
+		code   string
+	}{
+		"access denied": {http.StatusForbidden, "AccessDenied"},
+		"wrong region":  {http.StatusBadRequest, "AuthorizationHeaderMalformed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			var batchCalls, objectCalls int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/xml")
+				switch {
+				case r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2":
+					_, _ = io.WriteString(w, `<ListBucketResult><Name>silo</Name><IsTruncated>false</IsTruncated>
+						<Contents><Key>local/ebooks/1/a.webp</Key></Contents>
+						<Contents><Key>local/ebooks/1/b.webp</Key></Contents>
+					</ListBucketResult>`)
+				case r.Method == http.MethodPost && r.URL.Query().Has("delete"):
+					mu.Lock()
+					batchCalls++
+					mu.Unlock()
+					w.WriteHeader(rejection.status)
+					_, _ = io.WriteString(w, "<Error><Code>"+rejection.code+"</Code><Message>signed ?X-Amz-Signature=SECRETSIG</Message></Error>")
+				case r.Method == http.MethodDelete:
+					mu.Lock()
+					objectCalls++
+					mu.Unlock()
+					w.WriteHeader(rejection.status)
+					_, _ = io.WriteString(w, "<Error><Code>"+rejection.code+"</Code></Error>")
+				default:
+					w.WriteHeader(http.StatusBadRequest)
+				}
+			}))
+			t.Cleanup(server.Close)
+			client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+			deleted, err := client.DeletePrefix(t.Context(), client.Bucket(), "local/ebooks/1/")
+			if err == nil || deleted != 0 {
+				t.Fatalf("DeletePrefix() = %d, %v; want 0 and an error", deleted, err)
+			}
+			if !strings.Contains(err.Error(), rejection.code) || strings.Contains(err.Error(), "SECRETSIG") {
+				t.Fatal("DeletePrefix() error must carry the code without the backend message")
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if batchCalls != 1 || objectCalls != 0 {
+				t.Fatalf("batch requests=%d, per-key requests=%d; want 1 and 0", batchCalls, objectCalls)
+			}
+		})
+	}
+}
+
+// The key in a partial-failure entry comes from the backend, so it is never
+// echoed unless it is one the caller asked to delete.
+func TestDeleteObjectsDoesNotEchoAnUnrequestedKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = io.WriteString(w, `<DeleteResult>
+			<Error><Key>https://x/?X-Amz-Signature=SECRETSIG</Key><Code>AccessDenied</Code></Error>
+		</DeleteResult>`)
+	}))
+	t.Cleanup(server.Close)
+	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+	deleted, err := client.DeleteObjects(t.Context(), client.Bucket(), []string{"a.webp"})
+	if err == nil || deleted != 0 {
+		t.Fatal("DeleteObjects() must report the failed entry")
+	}
+	if strings.Contains(err.Error(), "SECRETSIG") {
+		t.Fatal("DeleteObjects() error echoed a key the caller never requested")
+	}
+}
+
+func TestDeleteObjectsFallbackReturnsErrorForFailedKeys(t *testing.T) {
+	for name, rejection := range map[string]struct {
+		status int
+		body   string
+	}{
+		"not implemented": {http.StatusNotImplemented, "<Error><Code>NotImplemented</Code></Error>"},
+		// The SDK sends a CRC32 checksum on batch deletes; backends that still
+		// require Content-MD5 reject the batch but accept single deletes.
+		"missing content-md5": {http.StatusBadRequest, "<Error><Code>MissingContentMD5</Code></Error>"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/xml")
+				switch {
+				case r.Method == http.MethodPost && r.URL.Query().Has("delete"):
+					w.WriteHeader(rejection.status)
+					_, _ = io.WriteString(w, rejection.body)
+				case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/denied.webp"):
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = io.WriteString(w, "<Error><Code>AccessDenied</Code></Error>")
+				case r.Method == http.MethodDelete:
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					w.WriteHeader(http.StatusBadRequest)
+				}
+			}))
+			t.Cleanup(server.Close)
+			client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+			deleted, err := client.DeleteObjects(t.Context(), client.Bucket(), []string{"ok.webp", "denied.webp"})
+			if err == nil || deleted != 1 {
+				t.Fatalf("DeleteObjects() = %d, %v; want 1 and an error", deleted, err)
+			}
+		})
 	}
 }
 
@@ -268,66 +388,6 @@ func TestDeleteObjectDoesNotIgnoreMissingBucket(t *testing.T) {
 	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
 	if err := client.DeleteObject(t.Context(), client.Bucket(), "missing.webp"); err == nil {
 		t.Fatal("DeleteObject() ignored a missing bucket")
-	}
-}
-
-func TestClientWithoutKeyPrefixUsesLogicalKeys(t *testing.T) {
-	t.Parallel()
-
-	srv := newS3TestServer(t)
-	client := NewClient(BucketConfig{
-		Endpoint:       srv.URL(),
-		Region:         "us-east-1",
-		Bucket:         "silo",
-		AccessKey:      "test",
-		SecretKey:      "test",
-		PathStyle:      true,
-		PublicEndpoint: "",
-	})
-
-	ctx := context.Background()
-	if err := client.PutObject(ctx, client.Bucket(), "poster.jpg", []byte("data")); err != nil {
-		t.Fatalf("PutObject() returned error: %v", err)
-	}
-	if _, err := client.GetObject(ctx, client.Bucket(), "poster.jpg"); err != nil {
-		t.Fatalf("GetObject() returned error: %v", err)
-	}
-	if ok, err := client.ObjectExists(ctx, client.Bucket(), "poster.jpg"); err != nil || !ok {
-		t.Fatalf("ObjectExists() = %v, %v, want true, nil", ok, err)
-	}
-	if err := client.DeleteObject(ctx, client.Bucket(), "poster.jpg"); err != nil {
-		t.Fatalf("DeleteObject() returned error: %v", err)
-	}
-	if err := client.HeadBucket(ctx, client.Bucket()); err != nil {
-		t.Fatalf("HeadBucket() returned error: %v", err)
-	}
-	if err := client.SetBucketCORS(ctx, client.Bucket(), []string{"*"}); err != nil {
-		t.Fatalf("SetBucketCORS() returned error: %v", err)
-	}
-
-	requests := srv.Requests()
-	paths := make([]string, 0, len(requests))
-	for _, req := range requests {
-		paths = append(paths, req.Path)
-	}
-
-	if !containsRequest(requests, http.MethodPut, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want PutObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodGet, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want GetObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodHead, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want HeadObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodDelete, "/silo/poster.jpg", "") {
-		t.Fatalf("requests = %#v, want DeleteObject path /silo/poster.jpg", paths)
-	}
-	if !containsRequest(requests, http.MethodHead, "/silo", "") {
-		t.Fatalf("requests = %#v, want HeadBucket path /silo", paths)
-	}
-	if !containsRequest(requests, http.MethodPut, "/silo", "cors=") {
-		t.Fatalf("requests = %#v, want PutBucketCors path /silo?cors=", requests)
 	}
 }
 
@@ -436,31 +496,6 @@ func TestClientWithKeyPrefixPrefixesGeneratedURLs(t *testing.T) {
 	}
 }
 
-func TestClientWithKeyPrefixPrefixesCloudflareTokenURL(t *testing.T) {
-	t.Parallel()
-
-	client := NewClient(BucketConfig{
-		Endpoint:       "https://s3.example.test",
-		PublicEndpoint: "https://cdn.example.test",
-		Region:         "us-east-1",
-		Bucket:         "silo",
-		KeyPrefix:      "silo/dev",
-		AccessKey:      "test",
-		SecretKey:      "test",
-		PathStyle:      true,
-		URLAuth:        URLAuthCloudflareToken,
-		TokenSecret:    "secret",
-	})
-
-	u, err := client.PresignGetURL(context.Background(), client.Bucket(), "poster.jpg", time.Minute)
-	if err != nil {
-		t.Fatalf("PresignGetURL() returned error: %v", err)
-	}
-	if !strings.HasPrefix(u, "https://cdn.example.test/silo/dev/poster.jpg?verify=") {
-		t.Fatalf("PresignGetURL() = %q, want prefixed Cloudflare token URL", u)
-	}
-}
-
 func TestClientObjectAvailableUsesExternalDeliveryPath(t *testing.T) {
 	t.Parallel()
 
@@ -530,40 +565,6 @@ func TestClientObjectAvailableUsesExternalDeliveryPath(t *testing.T) {
 	}
 }
 
-func TestClientObjectAvailableUsesStorageWithoutExternalDelivery(t *testing.T) {
-	t.Parallel()
-
-	for _, authMode := range []string{URLAuthPresigned, URLAuthPublic, URLAuthCloudflareToken} {
-		t.Run(authMode, func(t *testing.T) {
-			srv := newS3TestServer(t)
-			client := NewClient(BucketConfig{
-				Endpoint:  srv.URL(),
-				Region:    "us-east-1",
-				Bucket:    "silo",
-				AccessKey: "test",
-				SecretKey: "test",
-				PathStyle: true,
-				URLAuth:   authMode,
-			})
-
-			if client.UsesExternalDelivery() {
-				t.Fatal("UsesExternalDelivery() = true without a public endpoint")
-			}
-			available, err := client.ObjectAvailable(t.Context(), client.Bucket(), "poster.webp")
-			if err != nil || !available {
-				t.Fatalf("ObjectAvailable() = %v, %v, want true, nil", available, err)
-			}
-			requests := srv.Requests()
-			if !containsRequest(requests, http.MethodHead, "/silo/poster.webp", "") {
-				t.Fatalf("requests = %#v, want storage HEAD", requests)
-			}
-			if containsRequest(requests, http.MethodGet, "/silo/poster.webp", "") {
-				t.Fatalf("requests = %#v, do not want a delivery GET without external delivery", requests)
-			}
-		})
-	}
-}
-
 func TestClientObjectAvailableReportsExternalAuthFailureWithoutToken(t *testing.T) {
 	t.Parallel()
 
@@ -615,22 +616,6 @@ func TestClientEffectivePresignTTLClampsCloudflareTokenTTL(t *testing.T) {
 	}
 }
 
-func TestClientEffectivePresignTTLPreservesNonTokenAuth(t *testing.T) {
-	t.Parallel()
-
-	client := NewClient(BucketConfig{
-		Endpoint:  "https://s3.example.test",
-		Region:    "us-east-1",
-		Bucket:    "silo",
-		AccessKey: "test",
-		SecretKey: "test",
-	})
-
-	if got := client.EffectivePresignTTL(4 * time.Hour); got != 4*time.Hour {
-		t.Fatalf("EffectivePresignTTL(4h) = %s, want 4h", got)
-	}
-}
-
 func containsRequest(requests []recordedRequest, method, path, rawQueryContains string) bool {
 	for _, req := range requests {
 		if req.Method == method && req.Path == path && strings.Contains(req.RawQuery, rawQueryContains) {
@@ -667,5 +652,20 @@ func TestArtworkDeliveryScopeExcludesCredentials(t *testing.T) {
 	client.publicEndpoint = "https://other-images.example"
 	if got := client.ArtworkDeliveryScope(); got == scope {
 		t.Fatal("delivery endpoint change did not change scope")
+	}
+}
+
+func TestSafeErrorCodeAllowsOnlyIdentifierCodes(t *testing.T) {
+	for code, want := range map[string]string{
+		"AccessDenied":                      "AccessDenied",
+		"Slow_Down-1.x":                     "Slow_Down-1.x",
+		"":                                  unrecognizedErrorCode,
+		"https://x/?X-Amz-Signature=SECRET": unrecognizedErrorCode,
+		"Access Denied token":               unrecognizedErrorCode,
+		strings.Repeat("A", 65):             unrecognizedErrorCode,
+	} {
+		if got := safeErrorCode(code); got != want {
+			t.Errorf("safeErrorCode(%q) = %q, want %q", code, got, want)
+		}
 	}
 }

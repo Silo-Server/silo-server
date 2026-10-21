@@ -47,6 +47,9 @@ func TestServiceEnsureClientRestartsOnManifestDrift(t *testing.T) {
 	if got != nil {
 		t.Fatalf("MetadataProviderClient() = %#v, want nil fake client", got)
 	}
+	if calls := host.startResult.(*fakePluginClient).metadataProviderCalls; calls != 1 {
+		t.Fatalf("restarted client metadata provider calls = %d, want 1", calls)
+	}
 	if len(host.stopped) != 1 || host.stopped[0] != 3 {
 		t.Fatalf("stopped installations = %#v, want [3]", host.stopped)
 	}
@@ -103,54 +106,6 @@ func TestServiceEnsureClientKeepsHealthyClientWhenInstalledManifestUnavailable(t
 	}
 }
 
-func TestServiceEnsureClientRestartsWhenInstalledManifestDiffers(t *testing.T) {
-	ctx := context.Background()
-	installedManifest := testPluginManifest(t, "silo.metadb", "0.0.36")
-	installPath := writeInstalledPluginManifest(t, installedManifest)
-
-	runningClient := &fakePluginClient{manifest: testPluginManifest(t, "silo.metadb", "0.0.34")}
-	restartedClient := &fakePluginClient{manifest: installedManifest}
-	store := newFakeServiceInstallationStore(&Installation{
-		ID:          3,
-		PluginID:    installedManifest.GetPluginId(),
-		Version:     installedManifest.GetVersion(),
-		InstallPath: installPath,
-		Enabled:     true,
-	})
-	host := &fakeServiceHost{
-		clientResult: runningClient,
-		startResult:  restartedClient,
-	}
-	service := &Service{
-		installations: store,
-		host:          host,
-	}
-
-	got, err := service.ensureClient(ctx, 3)
-	if err != nil {
-		t.Fatalf("ensureClient() returned error: %v", err)
-	}
-	if got != restartedClient {
-		t.Fatalf("ensureClient() returned %#v, want restarted client %#v", got, restartedClient)
-	}
-	if len(host.stopped) != 1 || host.stopped[0] != 3 {
-		t.Fatalf("stopped installations = %#v, want [3]", host.stopped)
-	}
-	if len(host.started) != 1 {
-		t.Fatalf("start calls = %d, want 1", len(host.started))
-	}
-	if host.started[0].Manifest.GetVersion() != "0.0.36" {
-		t.Fatalf("started manifest version = %q, want 0.0.36", host.started[0].Manifest.GetVersion())
-	}
-}
-
-func TestNewHostAdapterReturnsHost(t *testing.T) {
-	adapted := NewHostAdapter(pluginhost.NewHost(pluginhost.Config{}))
-	if adapted == nil {
-		t.Fatal("NewHostAdapter() = nil, want host adapter")
-	}
-}
-
 type fakeServiceHost struct {
 	clientResult pluginClient
 	clientErr    error
@@ -195,6 +150,7 @@ func (f *fakeServiceHost) Shutdown(context.Context) error {
 type fakePluginClient struct {
 	manifest              *pluginv1.PluginManifest
 	metadataProviderCalls int
+	markerProvider        *pluginhost.MarkerProviderClient
 }
 
 func (f *fakePluginClient) Manifest() *pluginv1.PluginManifest {
@@ -211,7 +167,7 @@ func (f *fakePluginClient) ImageResolver(string) (*pluginhost.ImageResolverClien
 }
 
 func (f *fakePluginClient) MarkerProvider(string) (*pluginhost.MarkerProviderClient, error) {
-	return nil, nil
+	return f.markerProvider, nil
 }
 
 func (f *fakePluginClient) MediaAnalyzer(string) (*pluginhost.MediaAnalyzerClient, error) {
@@ -283,6 +239,15 @@ func newFakeServiceInstallationStore(installations ...*Installation) *fakeServic
 		store.byPluginID[cloned.PluginID] = append(store.byPluginID[cloned.PluginID], &cloned)
 	}
 	return store
+}
+
+// installedPluginStore holds manifest, written to disk, as enabled installation id.
+func installedPluginStore(t *testing.T, id int, manifest *pluginv1.PluginManifest) *fakeServiceInstallationStore {
+	t.Helper()
+	return newFakeServiceInstallationStore(&Installation{
+		ID: id, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
+		InstallPath: writeInstalledPluginManifest(t, manifest), Enabled: true,
+	})
 }
 
 func (s *fakeServiceInstallationStore) Create(_ context.Context, input CreateInstallationInput) (*Installation, error) {

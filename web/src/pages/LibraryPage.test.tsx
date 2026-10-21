@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { v2Problem } from "@/api/v2/problems.test-support";
 
 const mocks = vi.hoisted(() => ({
   ownerKey: "profile-1",
@@ -12,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   recommendedMounts: 0,
 }));
 
+vi.mock("@/hooks/queries/shuffles", () => ({
+  useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
+}));
 vi.mock("@/hooks/queries/libraries", () => ({
   useUserLibraries: () => ({
     data: [{ id: 7, name: "Movies", type: "movie", sort_order: 0 }],
@@ -19,24 +23,8 @@ vi.mock("@/hooks/queries/libraries", () => ({
   }),
 }));
 
-vi.mock("@/hooks/queries/libraryPageState", () => ({
-  libraryPageStateWriteRetryDelay: (error: unknown, fallbackDelayMs: number) => {
-    const status =
-      typeof error === "object" && error !== null && "status" in error
-        ? (error as { status?: unknown }).status
-        : undefined;
-    if (
-      typeof status === "number" &&
-      status >= 400 &&
-      status < 500 &&
-      status !== 408 &&
-      status !== 425 &&
-      status !== 429
-    ) {
-      return null;
-    }
-    return fallbackDelayMs;
-  },
+vi.mock("@/hooks/queries/libraryPageState", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/libraryPageState")>()),
   useLibraryPageStatePreference: () => ({
     ownerKey: mocks.ownerKey,
     isLoading: false,
@@ -264,46 +252,34 @@ describe("LibraryPage saved state", () => {
     }
   });
 
-  it("retries a transient rate-limit rejection without looping", async () => {
+  it("does not carry a terminal retry marker into a different profile", async () => {
     vi.useFakeTimers();
-    const rateLimited = Object.assign(new Error("rate limited"), { status: 429 });
-    mocks.saveLibrarySearch.mockRejectedValueOnce(rateLimited);
+    mocks.saveLibrarySearch.mockRejectedValueOnce(
+      v2Problem(422, "validation_failed", "invalid setting"),
+    );
     try {
-      renderPage();
+      const view = renderPage();
 
       expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1);
-      await mocks.saveLibrarySearch.mock.results[0]?.value.catch(() => undefined);
-
       await act(async () => {
-        vi.advanceTimersByTime(2_000);
-        await Promise.resolve();
+        await mocks.saveLibrarySearch.mock.results[0]?.value.catch(() => undefined);
       });
-      expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2);
-      await expect(mocks.saveLibrarySearch.mock.results[1]?.value).resolves.toBeUndefined();
-
       await act(async () => {
         vi.advanceTimersByTime(60_000);
         await Promise.resolve();
       });
+      expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1);
+
+      mocks.ownerKey = "profile-2";
+      view.rerender(page());
+      await act(async () => {
+        await Promise.resolve();
+      });
       expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2);
+      await expect(mocks.saveLibrarySearch.mock.results[1]?.value).resolves.toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("does not carry a terminal retry marker into a different profile", async () => {
-    const rejected = Object.assign(new Error("invalid setting"), { status: 422 });
-    mocks.saveLibrarySearch.mockRejectedValueOnce(rejected);
-    const view = renderPage();
-
-    expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1);
-    await mocks.saveLibrarySearch.mock.results[0]?.value.catch(() => undefined);
-
-    mocks.ownerKey = "profile-2";
-    view.rerender(page());
-
-    await waitFor(() => expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2));
-    await expect(mocks.saveLibrarySearch.mock.results[1]?.value).resolves.toBeUndefined();
   });
 
   it("does not carry an in-flight submission marker into a different profile", async () => {
@@ -348,7 +324,13 @@ describe("LibraryPage saved state", () => {
     expect(mocks.saveLibrarySearch).not.toHaveBeenCalledWith(7, "tab=collections");
   });
 
-  it("clears inherited URL state when the new profile has no saved value", async () => {
+  it.each([
+    ["has no saved value", { savedSearch: undefined }],
+    [
+      "disables remembering",
+      { rememberEnabled: false, savedSearch: "tab=library&sort=year&order=desc" },
+    ],
+  ])("clears inherited URL state when the new profile %s", async (_change, newProfile) => {
     mocks.savedSearch = "tab=collections";
     const view = renderPage("/libraries/7");
 
@@ -357,24 +339,7 @@ describe("LibraryPage saved state", () => {
     );
 
     mocks.ownerKey = "profile-2";
-    mocks.savedSearch = undefined;
-    view.rerender(page("/libraries/7"));
-
-    await waitFor(() => expect(screen.getByTestId("location-search")).toBeEmptyDOMElement());
-    expect(mocks.saveLibrarySearch).not.toHaveBeenCalledWith(7, "tab=collections");
-  });
-
-  it("clears inherited URL state when the new profile disables remembering", async () => {
-    mocks.savedSearch = "tab=collections";
-    const view = renderPage("/libraries/7");
-
-    await waitFor(() =>
-      expect(screen.getByTestId("location-search")).toHaveTextContent("?tab=collections"),
-    );
-
-    mocks.ownerKey = "profile-2";
-    mocks.rememberEnabled = false;
-    mocks.savedSearch = "tab=library&sort=year&order=desc";
+    Object.assign(mocks, newProfile);
     view.rerender(page("/libraries/7"));
 
     await waitFor(() => expect(screen.getByTestId("location-search")).toBeEmptyDOMElement());

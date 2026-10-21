@@ -1,24 +1,18 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment node
 
-import { filterSettingsSearchGroups } from "@/components/settings/settingsSearch";
+import { describe, expect, it } from "vitest";
 
 import { buildAdminCommandNavSections } from "./adminNavigation";
 
-function hrefsFor(query: string): string[] {
-  return filterSettingsSearchGroups(buildAdminCommandNavSections(undefined), query).flatMap(
-    (group) => group.items.map((item) => item.href),
-  );
-}
-
 describe("admin command palette", () => {
-  it.each(["sonarr", "radarr", "request servers", "routing", "anime", "quota", "request limit"])(
-    "finds the Requests settings page for %s",
-    (query) => {
-      expect(hrefsFor(query)).toContain("/admin/settings/requests");
-    },
-  );
+  it("groups a topic's pages under the topic, so a bare Settings says whose", () => {
+    const requests = buildAdminCommandNavSections(undefined).find(
+      (group) => group.label === "Requests",
+    );
 
-  it("still finds the request queue", () => {
-    expect(hrefsFor("approvals")).toContain("/admin/requests");
+    expect(requests?.items.map((item) => [item.label, item.href])).toEqual([
+      ["Queue", "/admin/requests"],
+      ["Settings", "/admin/settings/requests"],
+    ]);
   });
 });

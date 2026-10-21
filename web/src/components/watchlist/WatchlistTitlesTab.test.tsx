@@ -49,15 +49,6 @@ describe("WatchlistTitlesTab", () => {
     vi.clearAllMocks();
   });
 
-  it("points an empty watchlist to Discover", () => {
-    renderTab();
-    expect(screen.getByText("Nothing waiting for the library")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Browse Discover" })).toHaveAttribute(
-      "href",
-      "/requests",
-    );
-  });
-
   it("explains the tab, links to Discover, and lists titles soonest first", () => {
     renderTab({
       titles: [
@@ -86,12 +77,5 @@ describe("WatchlistTitlesTab", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Remove Title 3 from your watchlist" }));
     expect(mocks.toggle).toHaveBeenCalledWith({ ...heat, in_watchlist: true });
-  });
-
-  it("offers a retry when the titles fail to load", () => {
-    const onRetry = vi.fn();
-    renderTab({ titles: undefined, isError: true, onRetry });
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });

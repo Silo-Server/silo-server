@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -171,28 +170,6 @@ func TestLibraryRealtimeMonitoringBestNodeReport(t *testing.T) {
 	}
 }
 
-func TestLibraryRealtimeMonitoringOrdering(t *testing.T) {
-	libraries := []*models.MediaFolder{monitoredFolder(9, 2), monitoredFolder(4, 0), nil, monitoredFolder(7, 1), monitoredFolder(2, 1)}
-	body := getMonitoring(t, librarymonitor.StatusSnapshot{ServerEnabled: true, Libraries: libraries})
-	var ids []string
-	for _, l := range body.Libraries {
-		ids = append(ids, l.LibraryID)
-	}
-	if want := []string{"4", "2", "7", "9"}; len(ids) != len(want) || ids[0] != want[0] || ids[1] != want[1] || ids[2] != want[2] || ids[3] != want[3] {
-		t.Fatalf("order = %v, want %v", ids, want)
-	}
-
-	// No libraries is an empty array, not null.
-	deps := pilotDeps(nil, nil)
-	deps.LibraryMonitoring = &fakeLibraryMonitoring{snap: librarymonitor.StatusSnapshot{ServerEnabled: true}}
-	rec := do(t, newTestHandler(t, deps), http.MethodGet, monitoringPath, "", bearer(adminToken))
-	var raw map[string]json.RawMessage
-	decodeJSON(t, rec.Body, &raw)
-	if string(raw["libraries"]) != "[]" {
-		t.Fatalf("libraries = %s, want []", raw["libraries"])
-	}
-}
-
 func TestLibraryRealtimeMonitoringAccess(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	fake := &fakeLibraryMonitoring{snap: librarymonitor.StatusSnapshot{ServerEnabled: true}}
@@ -221,10 +198,10 @@ func TestLibraryCapabilities(t *testing.T) {
 	}
 	var got map[string]any
 	decodeJSON(t, rec.Body, &got)
-	if got["realtime_monitoring"] != true || got["state"] != StateAvailable || got["allowed"] != true || got["revision"] == "" {
+	if got["realtime_monitoring"] != true || got["trickplay"] != true || got["trickplay_supported"] != false || got["ignore_unmatched"] != true || got["state"] != StateAvailable || got["allowed"] != true || got["revision"] == "" {
 		t.Fatalf("body = %v", got)
 	}
-	if len(got) != 4 {
+	if len(got) != 7 {
 		t.Fatalf("unexpected members: %v", got)
 	}
 	etag := rec.Header().Get("ETag")

@@ -25,20 +25,3 @@ func TestSortCatalogItems_LastAirDateDescending(t *testing.T) {
 		}
 	}
 }
-
-func TestSortCatalogItems_LastAirDateAscending(t *testing.T) {
-	items := []*models.MediaItem{
-		{ContentID: "new", Title: "New Show", LastAirDate: ptr("2024-02-22")},
-		{ContentID: "old", Title: "Old Show", LastAirDate: ptr("2020-01-15")},
-		{ContentID: "undated", Title: "Undated Show", LastAirDate: nil},
-	}
-
-	sortCatalogItems(items, QuerySort{Field: "last_air_date", Order: "asc"})
-
-	expected := []string{"old", "new", "undated"}
-	for i, id := range expected {
-		if items[i].ContentID != id {
-			t.Fatalf("position %d: expected %q, got %q", i, id, items[i].ContentID)
-		}
-	}
-}

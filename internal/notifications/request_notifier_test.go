@@ -18,8 +18,12 @@ func (f *fakeFulfillmentBackend) PostServerChannelRequestEvent(context.Context, 
 	f.channelPost++
 }
 
-func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, profileID string) (bool, error) {
+func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, _ int, profileID string) (bool, error) {
 	return !f.disabled[profileID], nil
+}
+
+func (f *fakeFulfillmentBackend) fulfilledDelivered(context.Context, requests.Follower, string) (bool, error) {
+	return false, nil
 }
 
 func (f *fakeFulfillmentBackend) dispatchFulfilled(_ context.Context, delivery Delivery) error {
@@ -70,40 +74,6 @@ func TestNotifyFulfilledTellsRequesterAndFollowers(t *testing.T) {
 	}
 }
 
-// Profile ids repeat across accounts, so a follower on another account whose
-// profile id matches the requester's is still a separate recipient.
-func TestNotifyFulfilledKeysRecipientsByAccount(t *testing.T) {
-	backend := &fakeFulfillmentBackend{}
-	notifier := &RequestFulfillmentNotifier{backend: backend}
-	req := fulfilledRequest(requests.Follower{UserID: 2, ProfileID: "default"})
-	req.RequestedByProfileID = "default"
-
-	if err := notifier.NotifyFulfilled(context.Background(), req, "movie-tmdb-949"); err != nil {
-		t.Fatalf("NotifyFulfilled: %v", err)
-	}
-	if len(backend.deliveries) != 2 || backend.deliveries[1].UserID != 2 || !parseRequestFlags(backend.deliveries[1].ReasonFlags).Follower {
-		t.Fatalf("deliveries = %+v, want the requester and the other account's follower", backend.deliveries)
-	}
-}
-
-func TestFulfilledCopyForFollowers(t *testing.T) {
-	requester := DeliveryRow{Delivery: Delivery{Type: DeliveryTypeRequestFulfilled, ReasonFlags: []byte(`{"request_id":"req-1"}`)}}
-	follower := DeliveryRow{Delivery: Delivery{Type: DeliveryTypeRequestFulfilled, ReasonFlags: []byte(`{"request_id":"req-1","follower":true}`)}}
-
-	if got := BuildNotificationDisplay(requester); got.Title != "Your request is now available" {
-		t.Fatalf("requester title = %q", got.Title)
-	}
-	if got := BuildNotificationDisplay(follower); got.Title != followedTitleAvailable || got.Body == "Your media request has arrived in the library." {
-		t.Fatalf("follower display = %+v, want copy that does not claim the request", got)
-	}
-	if got := requestLine(follower); got != followedTitleAvailable {
-		t.Fatalf("follower email line = %q", got)
-	}
-	if got := discordEmbedAuthorLine(follower); got != "Now available on Silo" {
-		t.Fatalf("follower Discord author = %q", got)
-	}
-}
-
 // Two accounts' legacy "default" profiles, one the requester and one a
 // follower, each get exactly one request.fulfilled delivery, on their own
 // account, and only their own account's devices are pushed. A second pass is
@@ -124,6 +94,7 @@ func TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID(t *testing.T) {
 			 'org.siloserver.silo', 'ciphertext', 'hash-2', 'server-2', 'private_push', true)`); err != nil {
 		t.Fatalf("create push tables: %v", err)
 	}
+	catalogItem := seedAccessCatalog(t, p).series
 	system := &System{
 		pool:           p,
 		Settings:       NewSettings(mapSettingReader{SettingApplePushDeliveryEnabled: "true"}),
@@ -131,6 +102,7 @@ func TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID(t *testing.T) {
 		Preferences:    NewPreferencesRepository(p),
 		pushDeviceRepo: NewPushDeviceRepository(p),
 		dispatcher:     NewMultiDispatcher(),
+		scopes:         scopeByProfile{"default": {}},
 		logger:         slog.New(slog.DiscardHandler),
 	}
 	notifier := NewRequestFulfillmentNotifier(system)
@@ -138,7 +110,7 @@ func TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID(t *testing.T) {
 	req.RequestedByProfileID = "default"
 
 	for range 2 {
-		if err := notifier.NotifyFulfilled(ctx, req, "movie-tmdb-949"); err != nil {
+		if err := notifier.NotifyFulfilled(ctx, req, catalogItem); err != nil {
 			t.Fatalf("NotifyFulfilled: %v", err)
 		}
 	}

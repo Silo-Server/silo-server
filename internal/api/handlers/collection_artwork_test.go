@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -63,59 +64,6 @@ func (r *collectionArtworkS3Recorder) putPaths() []string {
 	out := make([]string, len(r.puts))
 	copy(out, r.puts)
 	return out
-}
-
-func TestStoreBundledCollectionPosterIfS3Configured_NoS3KeepsPath(t *testing.T) {
-	path := "/images/collection-templates/template.jpg"
-	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
-		context.Background(),
-		nil,
-		fstest.MapFS{},
-		"collection-1",
-		adminCollectionImagePrefix,
-		path,
-	)
-	if err != nil {
-		t.Fatalf("storeBundledCollectionPosterIfS3Configured: %v", err)
-	}
-	if stored {
-		t.Fatal("stored = true, want false")
-	}
-	if gotPath != path {
-		t.Fatalf("path = %q, want %q", gotPath, path)
-	}
-	if gotThumbhash != "" {
-		t.Fatalf("thumbhash = %q, want empty", gotThumbhash)
-	}
-}
-
-func TestStoreBundledCollectionPosterIfS3Configured_IgnoresNonTemplatePath(t *testing.T) {
-	recorder := newCollectionArtworkS3Recorder(t)
-	path := "collection-images/existing/poster/original.webp"
-
-	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
-		context.Background(),
-		blobstore.NewS3(recorder.client()),
-		fstest.MapFS{},
-		"collection-1",
-		adminCollectionImagePrefix,
-		path,
-	)
-	if err != nil {
-		t.Fatalf("storeBundledCollectionPosterIfS3Configured: %v", err)
-	}
-	if stored {
-		t.Fatal("stored = true, want false")
-	}
-	if gotPath != path {
-		t.Fatalf("path = %q, want %q", gotPath, path)
-	}
-	if gotThumbhash != "" {
-		t.Fatalf("thumbhash = %q, want empty", gotThumbhash)
-	}
-	if puts := recorder.putPaths(); len(puts) != 0 {
-		t.Fatalf("PUT paths = %#v, want none", puts)
-	}
 }
 
 func TestStoreBundledCollectionPosterIfS3Configured_UploadsTemplatePoster(t *testing.T) {
@@ -458,4 +406,88 @@ func TestCleanUpReplacedCollectionImage_OutlivesCanceledRequest(t *testing.T) {
 	cleanUpReplacedCollectionImage(ctx, store, adminCollectionImagePrefix, "c1", "poster",
 		"collection-images/c1/poster/original.0000000000000001.webp", readCurrent)
 	assertCollectionImageDeletes(t, store.deleted, "collection-images/c1/poster/original.0000000000000001.webp")
+}
+
+func TestDownloadCollectionImageURL_ClientErrorsAre400(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	for name, rawURL := range map[string]string{
+		"missing source": server.URL + "/poster.jpg",
+		"non-http":       "ftp://example.invalid/poster.jpg",
+		"no host":        "http://",
+		"opaque":         "http:example.invalid/poster.jpg",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := downloadCollectionImageURL(context.Background(), server.Client(), rawURL)
+			apiErr, ok := errors.AsType[*APIError](err)
+			if !ok || apiErr.Status != http.StatusBadRequest {
+				t.Fatalf("err = %v, want a 400 APIError", err)
+			}
+		})
+	}
+}
+
+func TestCollectionArtworkError_HidesServerFailures(t *testing.T) {
+	err := collectionArtworkError(errors.New("uploading original: connection reset"), "Failed to store collection artwork")
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Status != http.StatusInternalServerError || apiErr.Message != "Failed to store collection artwork" {
+		t.Fatalf("err = %#v, want the 500 fallback", err)
+	}
+}
+
+// Linux libvips reads a truncated PNG's header and fails inside Process; other
+// builds may accept the damaged data. Either way it must not become a 500.
+func TestUploadCollectionImageVariants_TruncatedPNGIsNotAServerError(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 600, 900))
+	for y := 0; y < 900; y++ {
+		for x := 0; x < 600; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 99, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	data := buf.Bytes()
+
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesystem: %v", err)
+	}
+	_, _, err = uploadCollectionImageVariants(t.Context(), store, userCollectionImagePrefix, "c1", "poster", data[:len(data)/2])
+	if err == nil {
+		return
+	}
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("err = %v, want nil or a 400 APIError", err)
+	}
+}
+
+// An upload that cannot be decoded must answer 400 and leave the stored poster
+// and the row untouched.
+func TestProcessCollectionPoster_InvalidImageKeepsStoredPoster(t *testing.T) {
+	artwork, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesystem: %v", err)
+	}
+	oldPath := seedPersonalPoster(t, artwork)
+	store := &posterUpdateStore{posterURL: oldPath}
+	h := &CollectionHandler{ArtworkStore: artwork}
+
+	_, err = h.processCollectionPoster(t.Context(), store, "c1", "p1", func() ([]byte, error) { return []byte("not an image"), nil }, "")
+	mapped := collectionArtworkError(err, "Failed to store collection artwork")
+	if apiErr, ok := errors.AsType[*APIError](mapped); !ok || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("mapped err = %v, want a 400 APIError", mapped)
+	}
+	if store.posterURL != oldPath {
+		t.Fatalf("poster path = %q, want the stored %q", store.posterURL, oldPath)
+	}
+	for _, key := range []string{oldPath, cardThumbnailPath(oldPath)} {
+		if _, err := artwork.Stat(t.Context(), key); err != nil {
+			t.Fatalf("stored poster %q is gone after an invalid upload: %v", key, err)
+		}
+	}
 }

@@ -36,7 +36,7 @@ func TestRequiredNewNotificationInbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	system := notifications.NewSystem(e.pool, nil, e.stores, nil, nil, nil, nil, nil, nil)
+	system := notifications.NewSystem(e.pool, nil, e.stores, nil, nil, nil, nil, nil, nil, nil)
 	server := httptest.NewServer(api.NewRouter(api.Dependencies{
 		Config: e.config(), AppContext: t.Context(), DB: e.pool, SecretCipher: cipher, ClientIPResolver: clientip.NewResolver(nil),
 		NodeID: "fixture-node", PublicURL: publicURL, UserStoreProvider: e.stores, PolicySystem: e.policy, Notifications: system,

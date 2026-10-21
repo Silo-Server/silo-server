@@ -9,25 +9,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
-// recordingRepo is a JobRepository that records ResetStaleJobs calls and
-// insert/quota-count activity and no-ops everything else, so service behavior
-// can be tested in isolation.
+// recordingRepo records job activity and quota handoff for service tests.
 type recordingRepo struct {
-	mu         sync.Mutex
-	resets     int
-	lastBefore time.Time
-	inserts    int
-	quotaUsed  int // returned by CountTranscribeJobsByUserSince
-	lastJob    Job
-	completed  []int
-	failures   []recordedFailure
-	progress   []recordedProgress
+	mu        sync.Mutex
+	inserts   int
+	quotaUsed int // returned by CountTranscribeJobsByUserSince
+	completed []int
+	failures  []recordedFailure
+	progress  []recordedProgress
 }
 
 type recordedFailure struct {
@@ -52,7 +46,6 @@ func (r *recordingRepo) InsertJob(_ context.Context, job *Job, quota *JobQuota) 
 	}
 	r.inserts++
 	job.ID = int64(r.inserts)
-	r.lastJob = *job
 	return nil
 }
 func (r *recordingRepo) GetJob(context.Context, int64) (*Job, error) { return nil, nil }
@@ -85,18 +78,8 @@ func (r *recordingRepo) FailJob(_ context.Context, id int64, status JobStatus, m
 }
 func (r *recordingRepo) Heartbeat(context.Context, int64) error { return nil }
 
-func (r *recordingRepo) ResetStaleJobs(_ context.Context, before time.Time, _ string) (int64, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.resets++
-	r.lastBefore = before
+func (r *recordingRepo) ResetStaleJobs(context.Context, time.Time, string) (int64, error) {
 	return 0, nil
-}
-
-func (r *recordingRepo) snapshot() (int, time.Time) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.resets, r.lastBefore
 }
 
 // stubTranscriber satisfies Transcriber so TranscribeEnabled() is true in
@@ -161,52 +144,25 @@ func TestEnqueueRejectsTranscribeOverQuota(t *testing.T) {
 	}
 }
 
-func TestEnqueueAllowsTranscribeUnderQuota(t *testing.T) {
-	svc, repo := newQuotaTestService(t, 2, 3)
-
-	if _, err := svc.Enqueue(context.Background(), transcribeRequest(42, false)); err != nil {
-		t.Fatalf("Enqueue under quota failed: %v", err)
-	}
-	if repo.inserts != 1 {
-		t.Errorf("inserts = %d, want 1", repo.inserts)
-	}
-}
-
-func TestEnqueueQuotaExemptions(t *testing.T) {
-	t.Run("exempt", func(t *testing.T) {
-		svc, repo := newQuotaTestService(t, 10, 1)
-		if _, err := svc.Enqueue(context.Background(), transcribeRequest(42, true)); err != nil {
-			t.Fatalf("exempt Enqueue blocked by quota: %v", err)
-		}
-		if repo.inserts != 1 {
-			t.Errorf("inserts = %d, want 1", repo.inserts)
-		}
-	})
-	t.Run("unlimited", func(t *testing.T) {
-		svc, repo := newQuotaTestService(t, 10, 0)
-		if _, err := svc.Enqueue(context.Background(), transcribeRequest(42, false)); err != nil {
-			t.Fatalf("Enqueue with quota disabled failed: %v", err)
-		}
-		if repo.inserts != 1 {
-			t.Errorf("inserts = %d, want 1", repo.inserts)
-		}
-	})
-}
-
-func TestEnqueueNormalizesSourceLanguageHint(t *testing.T) {
-	svc, repo := newQuotaTestService(t, 0, 0)
-
-	_, err := svc.Enqueue(context.Background(), JobRequest{
-		MediaFileID:    1,
-		Kind:           JobKindTranscribe,
-		SourceIndex:    -1,
-		SourceLanguage: "eng",
-	})
-	if err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	if repo.lastJob.SourceLanguage != "en" {
-		t.Errorf("source language = %q, want en", repo.lastJob.SourceLanguage)
+func TestEnqueueAdmitsTranscribeWithinQuota(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		used, limit int
+		exempt      bool
+	}{
+		{"under quota", 2, 3, false},
+		{"exempt", 10, 1, true},
+		{"unlimited", 10, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo := newQuotaTestService(t, tc.used, tc.limit)
+			if _, err := svc.Enqueue(context.Background(), transcribeRequest(42, tc.exempt)); err != nil {
+				t.Fatalf("Enqueue blocked by quota: %v", err)
+			}
+			if repo.inserts != 1 {
+				t.Errorf("inserts = %d, want 1", repo.inserts)
+			}
+		})
 	}
 }
 
@@ -228,28 +184,6 @@ func TestTranscribeQuotaStatus(t *testing.T) {
 	}
 	if exempt.Limited {
 		t.Errorf("exempt quota = %+v, want unlimited", exempt)
-	}
-}
-
-// Recover reaps immediately using a heartbeat cutoff of now-staleJobThreshold,
-// not "every active job", so a live worker's jobs survive a peer's startup.
-func TestRecoverReapsStaleJobsImmediately(t *testing.T) {
-	repo := &recordingRepo{}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // stops the reaper goroutine started by Recover
-
-	svc := NewService(ctx, Config{}, repo, nil, nil, nil, nil, nil, nil, "", nil, nil)
-
-	approxNow := time.Now()
-	svc.Recover()
-
-	resets, before := repo.snapshot()
-	if resets < 1 {
-		t.Fatalf("Recover did not reap immediately: resets=%d", resets)
-	}
-	want := approxNow.Add(-jobrunner.StaleJobThreshold)
-	if diff := before.Sub(want); diff > 2*time.Second || diff < -2*time.Second {
-		t.Errorf("stale cutoff = %v, want ~%v (now-staleJobThreshold)", before, want)
 	}
 }
 

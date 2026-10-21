@@ -23,6 +23,7 @@ vi.mock("@/hooks/queries/profiles", () => ({
 }));
 vi.mock("@/hooks/queries/history-import", () => ({
   useHistoryImportSources: () => ({ data: [], isLoading: false }),
+  useHistoryImportCapability: () => ({ data: undefined }),
   useHistoryImportRuns: () => ({
     data: [
       {
@@ -143,13 +144,6 @@ it("counts skipped items once in a running import's progress", () => {
   expect(screen.getAllByText("An import item could not be processed.")).toHaveLength(2);
 });
 
-it("imports only into the member's own profile when it isn't the primary profile", () => {
-  renderPage();
-  expect(screen.queryByRole("combobox", { name: "Import into profile" })).toBeNull();
-  expect(screen.getByText(/The history goes into your profile, Member\./)).toBeTruthy();
-  expect(screen.queryByText(/into Member/)).toBeNull();
-});
-
 it("lets the primary profile choose the profile and names each run's profile", () => {
   state.primary = true;
   renderPage();
@@ -157,10 +151,13 @@ it("lets the primary profile choose the profile and names each run's profile", (
   expect(screen.getByText(/into Member/)).toBeTruthy();
 });
 
-it("lets an admin choose the profile", () => {
+it("imports only into its own profile from an admin's non-primary profile", () => {
+  // The server refuses a non-primary profile's cross-profile import even on
+  // an admin account, so the picker must not offer it.
   state.role = "admin";
   renderPage();
-  expect(screen.getByRole("combobox", { name: "Import into profile" })).toBeTruthy();
+  expect(screen.queryByRole("combobox", { name: "Import into profile" })).toBeNull();
+  expect(screen.getByText(/The history goes into your profile, Member\./)).toBeTruthy();
 });
 
 it("keeps the server's message for a secondary profile's refused import", () => {

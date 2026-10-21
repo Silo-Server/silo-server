@@ -4,15 +4,15 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { V2ProblemError } from "@/api/v2/request";
-import {
-  buildLibraryCollectionCatalogHref,
-  buildUserCollectionCatalogHref,
-} from "./catalogSearchParams";
+import { buildUserCollectionCatalogHref } from "./catalogSearchParams";
 
 const mocks = vi.hoisted(() => ({
   useCatalogWindow: vi.fn(),
 }));
 
+vi.mock("@/hooks/queries/shuffles", () => ({
+  useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
+}));
 vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogWindow: (...args: unknown[]) => mocks.useCatalogWindow(...args),
   useCatalogFilters: () => ({ data: undefined, isLoading: false }),
@@ -102,16 +102,6 @@ it("titles a collection by its name even when the result is already known on mou
   renderCatalog(buildUserCollectionCatalogHref("collection-1", "Weekend picks"));
 
   expect(document.title).toContain("Weekend picks");
-});
-
-it("treats a missing library collection the same way", () => {
-  mocks.useCatalogWindow.mockReturnValue(catalogWindow(catalogProblem(404)));
-
-  renderCatalog(buildLibraryCollectionCatalogHref("collection-2", "Staff picks", 4));
-
-  expect(
-    screen.getByRole("heading", { level: 1, name: "This collection isn't available" }),
-  ).toBeInTheDocument();
 });
 
 it("keeps a loaded collection when only a later page answers 404", () => {

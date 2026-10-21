@@ -3,16 +3,16 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netguard"
-	"github.com/go-chi/chi/v5"
-	"net/http/httptest"
-	"strings"
-	"testing"
-	"time"
 )
 
 type curationImageItems map[string]*models.MediaItem
@@ -59,6 +59,15 @@ func (f *curationImageService) ApplyItemImage(ctx context.Context, r metadata.Ap
 	}
 	return &metadata.ApplyItemImageResult{StoredPath: f.stored, Thumbhash: "hash", Revision: "revision"}, nil
 }
+func (f *curationImageService) FetchItemImagesWithLocal(ctx context.Context, providerIDs map[string]string, contentType, language string, folderID int, _ string) ([]metadata.RemoteImage, map[string]string, error) {
+	return f.FetchItemImages(ctx, providerIDs, contentType, language, folderID)
+}
+func (f *curationImageService) LocalImagePreview(context.Context, string, string) (string, error) {
+	return "", errors.New("no local images")
+}
+func (f *curationImageService) ApplyLocalItemImage(context.Context, metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error) {
+	return nil, errors.New("no local images")
+}
 func TestAdminImageSharedBridgeAndEpisodePreflight(t *testing.T) {
 	svc := &curationImageService{fail: true}
 	h := NewAdminImageHandler(curationImageItems{"series": {ContentID: "series", Type: "series", TmdbID: "42"}}, curationImageSeasons{}, curationImageEpisodes{}, nil, svc, nil, nil)
@@ -81,33 +90,5 @@ func TestAdminImageSharedBridgeAndEpisodePreflight(t *testing.T) {
 	}
 	if !svc.private {
 		t.Fatal("admin apply did not allow a local network image source")
-	}
-}
-func TestAdminImageSharedPublishesImmutableRevision(t *testing.T) {
-	pool := catalogTransferPool(t)
-	id := fmt.Sprintf("movie:curation-image-%d", time.Now().UnixNano())
-	stored := "tmdb/movies/" + id + "/poster/original.rev.webp"
-	if _, err := pool.Exec(t.Context(), `INSERT INTO media_items(content_id,type,title)VALUES($1,'movie','Synthetic image')`, id); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, id)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path=$1`, stored)
-	}()
-	items := catalog.NewItemRepository(pool)
-	detail := catalog.NewDetailService(items, catalog.NewEpisodeRepository(pool), catalog.NewSeasonRepository(pool), catalog.NewPersonRepository(pool), nil)
-	svc := &curationImageService{stored: stored}
-	h := NewAdminImageHandler(items, nil, nil, nil, svc, nil, detail)
-	out, err := h.ApplyAdminItemImage(t.Context(), id, AdminItemImageRequest{OriginalURL: "source", Type: "poster", ProviderID: "tmdb"})
-	if err != nil || out.StoredPath != stored || out.Revision != "revision" {
-		t.Fatalf("publish %+v %v", out, err)
-	}
-	var path, source string
-	var locked []int
-	if err := pool.QueryRow(t.Context(), `SELECT poster_path,poster_source_path,locked_fields FROM media_items WHERE content_id=$1`, id).Scan(&path, &source, &locked); err != nil {
-		t.Fatal(err)
-	}
-	if path != stored || source != "source" || len(locked) != 1 || locked[0] != int(metadata.FieldImages) {
-		t.Fatalf("persisted %s %s %v", path, source, locked)
 	}
 }

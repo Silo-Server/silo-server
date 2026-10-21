@@ -1,19 +1,26 @@
-import ContinueWatchingCard from "@/components/ContinueWatchingCard";
-import MediaCarousel from "@/components/MediaCarousel";
+import { memo, useMemo } from "react";
+import { ContinueWatchingRowCard } from "@/components/ContinueWatchingCard";
+import MediaCarousel, { type MediaCarouselWindowing } from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
-import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
-import { buildSectionCatalogHref, isSectionBrowseSupported } from "@/pages/catalogSearchParams";
+import { buildSectionCatalogHref } from "@/pages/catalogSearchParams";
 import type { ResolvedSection } from "@/api/types";
 import { Pin, PinOff } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
-import { carouselCardWidthClasses } from "@/lib/uiCustomization";
+import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { carouselCardWidthClasses, WIDE_CAROUSEL_CARD_WIDTH_CLASSES } from "@/lib/uiCustomization";
+import { initialCarouselSlideCount, visibleCarouselSlideCount } from "@/lib/carouselWindow";
 
 interface SectionRowProps {
   section: ResolvedSection;
   /** Library ID this section belongs to (enables pin-to-sidebar) */
   libraryId?: number;
+  /**
+   * The row is on screen at first paint (the first Home row): its visible
+   * cards load their artwork eagerly at high fetch priority.
+   */
+  priority?: boolean;
 }
 
 function SectionPinButton({
@@ -45,75 +52,79 @@ function SectionPinButton({
   );
 }
 
-export default function SectionRow({ section, libraryId }: SectionRowProps) {
-  const navigate = useViewTransitionNavigate();
-  const browseSupported = isSectionBrowseSupported(section.section_type);
-  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
-  const { cardPresentation } = useUICustomization();
-  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
-
-  const handleViewAll = () => {
-    if (!browseSupported) {
-      return;
-    }
-
-    navigate(
+export default memo(function SectionRow({ section, libraryId, priority = false }: SectionRowProps) {
+  const browseHref = useMemo(
+    () =>
       libraryId
         ? buildSectionCatalogHref({
             scope: "library",
-            libraryId: libraryId,
+            libraryId,
             sectionId: section.id,
             title: section.title,
           })
-        : buildSectionCatalogHref({
-            scope: "home",
-            sectionId: section.id,
-            title: section.title,
-          }),
-    );
-  };
+        : buildSectionCatalogHref({ scope: "home", sectionId: section.id, title: section.title }),
+    [libraryId, section.id, section.title],
+  );
+  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
+  const { cardPresentation } = useUICustomization();
+  const posterSize = cardPresentation.poster_size;
+  const posterWidthClasses = carouselCardWidthClasses(posterSize);
+  const isProgressRow =
+    section.section_type === "continue_watching" || section.section_type === "next_up";
+  // One spoiler lookup per row rather than one per card.
+  const { hideImages, hideOverviews } = useEpisodeSpoilerPrefs({ enabled: isProgressRow });
+  const spoilerPrefs = useMemo(() => ({ hideImages, hideOverviews }), [hideImages, hideOverviews]);
+  // Progress rows stay wide (16:9) whenever they hold any video, matching the
+  // native apps, so Continue Watching keeps its shape as movies and episodes
+  // come and go. Only a Continue Watching row made up entirely of books uses
+  // the poster variant, where audiobook covers render square and ebook covers
+  // upright 2:3.
+  const progressCardVariant: "wide" | "poster" =
+    section.section_type === "continue_watching" &&
+    section.items.length > 0 &&
+    section.items.every((it) => it.type === "audiobook" || it.type === "ebook")
+      ? "poster"
+      : "wide";
+  const slideSize = isProgressRow && progressCardVariant === "wide" ? "wide" : posterSize;
+  const windowing = useMemo<MediaCarouselWindowing>(
+    () => ({
+      initialCount: initialCarouselSlideCount(slideSize),
+      placeholderClassName:
+        slideSize === "wide"
+          ? WIDE_CAROUSEL_CARD_WIDTH_CLASSES
+          : carouselCardWidthClasses(slideSize),
+    }),
+    [slideSize],
+  );
+  const priorityCount = priority ? visibleCarouselSlideCount(slideSize) : 0;
 
   if (section.items.length === 0) return null;
 
-  const headerActions =
-    libraryId && browseSupported ? (
-      <SectionPinButton sectionId={section.id} sectionTitle={section.title} libraryId={libraryId} />
-    ) : undefined;
+  const headerActions = libraryId ? (
+    <SectionPinButton sectionId={section.id} sectionTitle={section.title} libraryId={libraryId} />
+  ) : undefined;
 
   return (
     <MediaCarousel
       title={section.title}
-      onViewAll={
-        browseSupported && section.total_count > section.item_limit ? handleViewAll : undefined
-      }
+      titleHref={browseHref}
+      viewAllHref={browseHref}
       headerActions={headerActions}
+      windowing={windowing}
     >
-      {section.section_type === "continue_watching" || section.section_type === "next_up"
-        ? (() => {
-            // Continue Watching with only movies, audiobooks, and/or ebooks
-            // looks better as upright covers (audiobook covers render square
-            // within the poster variant; ebook covers are naturally 2:3).
-            // Episodes (incl. Next Up) keep the wide variant so stills are
-            // shown with their natural 16:9 framing.
-            const cardVariant: "wide" | "poster" =
-              section.section_type === "continue_watching" &&
-              section.items.length > 0 &&
-              section.items.every(
-                (it) => it.type === "movie" || it.type === "audiobook" || it.type === "ebook",
-              )
-                ? "poster"
-                : "wide";
-            return section.items.map((item) => (
-              <ContinueWatchingCard
-                key={item.content_id}
-                sectionItem={item}
-                libraryId={libraryId}
-                overlayPrefs={overlayPrefs}
-                quickActionMode={quickActionMode}
-                variant={cardVariant}
-              />
-            ));
-          })()
+      {isProgressRow
+        ? section.items.map((item, index) => (
+            <ContinueWatchingRowCard
+              key={item.content_id}
+              sectionItem={item}
+              libraryId={libraryId}
+              overlayPrefs={overlayPrefs}
+              quickActionMode={quickActionMode}
+              variant={progressCardVariant}
+              spoilerPrefs={spoilerPrefs}
+              priority={index < priorityCount}
+            />
+          ))
         : section.items.map((item, index) => (
             <div key={`${item.content_id}-${index}`} className={posterWidthClasses} role="listitem">
               <SectionItemCard
@@ -121,9 +132,10 @@ export default function SectionRow({ section, libraryId }: SectionRowProps) {
                 libraryId={libraryId}
                 overlayPrefs={overlayPrefs}
                 quickActionMode={quickActionMode}
+                priority={index < priorityCount}
               />
             </div>
           ))}
     </MediaCarousel>
   );
-}
+});

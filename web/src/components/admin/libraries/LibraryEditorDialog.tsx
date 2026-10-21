@@ -77,6 +77,8 @@ export interface LibraryEditorDialogProps {
   onOpenChange: (open: boolean) => void;
   library: Library | null;
   chapterThumbnailsSupported: boolean;
+  /** Undefined when the server does not offer seek previews. */
+  trickplaySupported?: boolean;
 }
 
 export function LibraryEditorDialog({
@@ -84,6 +86,7 @@ export function LibraryEditorDialog({
   onOpenChange,
   library,
   chapterThumbnailsSupported,
+  trickplaySupported,
 }: LibraryEditorDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -92,6 +95,7 @@ export function LibraryEditorDialog({
           key={library?.id ?? "new"}
           library={library}
           chapterThumbnailsSupported={chapterThumbnailsSupported}
+          trickplaySupported={trickplaySupported}
           onClose={() => onOpenChange(false)}
         />
       </DialogContent>
@@ -102,10 +106,12 @@ export function LibraryEditorDialog({
 function LibraryEditorBody({
   library,
   chapterThumbnailsSupported,
+  trickplaySupported,
   onClose,
 }: {
   library: Library | null;
   chapterThumbnailsSupported: boolean;
+  trickplaySupported?: boolean;
   onClose: () => void;
 }) {
   const [section, setSection] = useState<SectionId>("general");
@@ -212,6 +218,7 @@ function LibraryEditorBody({
                 <AdvancedFields
                   form={form}
                   chapterThumbnailsSupported={chapterThumbnailsSupported}
+                  trickplaySupported={trickplaySupported}
                 />
               )}
             </TabsContent>

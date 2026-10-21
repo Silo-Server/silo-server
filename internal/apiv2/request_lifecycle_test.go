@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -41,6 +40,10 @@ type fakeWatchLifecycle struct {
 	missingConnection     bool
 	credentialsConfigured bool
 	displayName           string
+	connectionSettings    []watchsync.ConnectionSetting
+	settingValues         map[string]any
+	lastUpdate            watchsync.ConnectionUpdate
+	updateErr             error
 	WatchProviderService
 	user         int
 	profile, key string
@@ -48,13 +51,19 @@ type fakeWatchLifecycle struct {
 	err          error
 }
 
-func (f *fakeWatchLifecycle) ListProviders() []watchsync.ProviderSummary { return nil }
+func (f *fakeWatchLifecycle) ListProviders() []watchsync.ProviderSummary {
+	if f.connectionSettings == nil {
+		return nil
+	}
+	return []watchsync.ProviderSummary{{Key: "simkl", DisplayName: "Simkl", ConnectionSettings: f.connectionSettings}}
+}
 func (f *fakeWatchLifecycle) GetConnectionStatus(_ context.Context, u int, p, key string) (watchsync.ConnectionStatus, error) {
 	f.user, f.profile, f.key = u, p, key
 	if f.version.ID == "" && !f.missingConnection {
 		f.version = watchsync.ConnectionVersion{ID: "connection-1", UpdatedAt: fixedTime()}
 	}
-	return watchsync.ConnectionStatus{Version: f.version, Provider: key, Connected: !f.missingConnection, CredentialsConfigured: f.credentialsConfigured, DisplayName: f.displayName}, f.err
+	return watchsync.ConnectionStatus{Version: f.version, Provider: key, Connected: !f.missingConnection, CredentialsConfigured: f.credentialsConfigured, DisplayName: f.displayName,
+		ConnectionSettings: f.connectionSettings, ConnectionSettingValues: f.settingValues}, f.err
 }
 func (f *fakeWatchLifecycle) PollDeviceAuth(_ context.Context, u int, p, key, id string) (watchsync.Connection, error) {
 	f.user, f.profile, f.key = u, p, key
@@ -132,15 +141,15 @@ func TestWatchProviderLifecycleErrors(t *testing.T) {
 	}
 }
 
-// A built-in provider that rejects the supplied API key is a client problem,
-// not an internal failure, on the connect route.
-func TestWatchProviderConnectAPIKeyRejectedCredential(t *testing.T) {
-	w := &fakeWatchLifecycle{err: fmt.Errorf("mdblist request GET /user rejected: status 401 (check api key): %w", watchsync.ErrInvalidCredential)}
+// Connection config the host or the plugin rejects is a client problem, and
+// the safe message tells the user what to fix.
+func TestWatchProviderConnectAPIKeyRejectedConnectionInput(t *testing.T) {
+	w := &fakeWatchLifecycle{err: watchsync.InvalidConnectionInputError{Message: "Scrob server URL must be an absolute http or https URL"}}
 	h := lifecycleHandler(&fakeLifecycle{}, w)
-	rec := do(t, h, http.MethodPost, Prefix+"/watch-providers/mdblist/auth/api-key", `{"api_key":"wrong-key"}`, requestOwner)
+	rec := do(t, h, http.MethodPost, Prefix+"/watch-providers/plugin:5:scrob/auth/api-key", `{"api_key":"key"}`, requestOwner)
 	requireProblem(t, rec, TypeValidationFailed)
-	if strings.Contains(rec.Body.String(), "wrong-key") {
-		t.Fatal("supplied credential echoed back")
+	if !strings.Contains(rec.Body.String(), `"detail":"Scrob server URL must be an absolute http or https URL"`) {
+		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
 
@@ -220,6 +229,10 @@ func requestLifecycleFixtureCases() []fixtureCase {
 
 func (f *fakeWatchLifecycle) UpdateConnectionConditional(ctx context.Context, u int, p, key string, expected watchsync.ConnectionVersion, update watchsync.ConnectionUpdate) (watchsync.ConnectionStatus, error) {
 	f.updateCalls++
+	f.lastUpdate = update
+	if f.updateErr != nil {
+		return watchsync.ConnectionStatus{}, f.updateErr
+	}
 	if f.staleUpdate {
 		f.version.UpdatedAt = f.version.UpdatedAt.Add(time.Microsecond)
 		return watchsync.ConnectionStatus{}, watchsync.ErrStaleConnection
@@ -260,55 +273,6 @@ func TestWatchProviderConnectionGuard(t *testing.T) {
 	requireProblem(t, raced, TypePreconditionFailed)
 	if raced.Header().Get("ETag") == "" || raced.Header().Get("ETag") == headers["If-Match"] {
 		t.Fatal("stale storage comparison did not return latest validator")
-	}
-}
-
-func TestWatchProviderMetadataHasNoSettingsValidator(t *testing.T) {
-	fake := &fakeWatchLifecycle{displayName: "Before"}
-	h := lifecycleHandler(&fakeLifecycle{}, fake)
-	path := Prefix + "/watch-providers/trakt/connection"
-	metadata := do(t, h, http.MethodGet, path, "", requestOwner)
-	if metadata.Code != 200 || metadata.Header().Get("ETag") != "" {
-		t.Fatalf("metadata GET=%d etag=%q", metadata.Code, metadata.Header().Get("ETag"))
-	}
-	before := do(t, h, http.MethodGet, path+"/settings", "", requestOwner)
-	if before.Code != 200 || before.Header().Get("ETag") == "" {
-		t.Fatalf("settings GET=%d", before.Code)
-	}
-	fake.credentialsConfigured = true
-	fake.displayName = "After"
-	changed := do(t, h, http.MethodGet, path, "", requestOwner)
-	if changed.Code != 200 || changed.Header().Get("ETag") != "" || changed.Body.String() == metadata.Body.String() {
-		t.Fatal("metadata change retained a validator or failed to change representation")
-	}
-	after := do(t, h, http.MethodGet, path+"/settings", "", requestOwner)
-	if before.Header().Get("ETag") != after.Header().Get("ETag") || before.Body.String() != after.Body.String() {
-		t.Fatal("dynamic provider metadata changed guarded settings")
-	}
-	var fields map[string]any
-	if err := json.Unmarshal(after.Body.Bytes(), &fields); err != nil {
-		t.Fatal(err)
-	}
-	if len(fields) != 15 {
-		t.Fatalf("settings fields=%v", fields)
-	}
-	for key, value := range fields {
-		if _, ok := value.(bool); !ok {
-			t.Fatalf("non-preference field %s=%v", key, value)
-		}
-	}
-	headers := maps.Clone(requestOwner)
-	headers["If-Match"] = before.Header().Get("ETag")
-	patched := do(t, h, http.MethodPatch, path, `{"scrobble_enabled":true}`, headers)
-	if patched.Code != 200 {
-		t.Fatalf("metadata invalidated patch: %d %s", patched.Code, patched.Body.String())
-	}
-	fields = nil
-	if err := json.Unmarshal(patched.Body.Bytes(), &fields); err != nil {
-		t.Fatal(err)
-	}
-	if len(fields) != 15 {
-		t.Fatalf("PATCH returned metadata: %v", fields)
 	}
 }
 

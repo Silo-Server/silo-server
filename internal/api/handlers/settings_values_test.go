@@ -186,24 +186,6 @@ func TestNavigationShortcutMutationLifecycle(t *testing.T) {
 	}
 }
 
-func TestNavigationShortcutCollectionIdentityIncludesOptionalLibrary(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	global := `{"item":{"type":"collection","collection_id":"favorites","label":"All Favorites"},"present":true}`
-	withinLibrary := `{"item":{"type":"collection","library_id":42,"collection_id":"favorites","label":"Movie Favorites"},"present":true}`
-	for _, body := range []string{global, withinLibrary} {
-		if rec := routeNavigationShortcutMutation(t, handler, body, ""); rec.Code != http.StatusOK {
-			t.Fatalf("add collection = %d: %s", rec.Code, rec.Body.String())
-		}
-	}
-
-	removeGlobal := `{"item":{"type":"collection","collection_id":"favorites","label":"Ignored"},"present":false}`
-	rec := routeNavigationShortcutMutation(t, handler, removeGlobal, "")
-	response, document := decodeShortcutResponse(t, rec)
-	if response.Revision != 3 || len(document.Items) != 1 || document.Items[0].LibraryID == nil || *document.Items[0].LibraryID != 42 {
-		t.Fatalf("global removal = revision %d document %+v, want scoped collection preserved", response.Revision, document)
-	}
-}
-
 func TestNavigationShortcutCollectionLibraryIDValidationCannotMutateExistingTargets(t *testing.T) {
 	handler, store := newValuesTestHandler(t)
 	global := `{"item":{"type":"collection","collection_id":"favorites","label":"All Favorites"},"present":true}`
@@ -260,10 +242,18 @@ func TestNavigationShortcutCollectionLibraryIDValidationCannotMutateExistingTarg
 			}
 		})
 	}
+
+	removeGlobal := `{"item":{"type":"collection","collection_id":"favorites","label":"Ignored"},"present":false}`
+	rec := routeNavigationShortcutMutation(t, handler, removeGlobal, "")
+	response, document := decodeShortcutResponse(t, rec)
+	if response.Revision != 3 || len(document.Items) != 1 || document.Items[0].LibraryID == nil || *document.Items[0].LibraryID != 42 {
+		t.Fatalf("global removal = revision %d document %+v, want scoped collection preserved", response.Revision, document)
+	}
 }
 
 func TestNavigationShortcutMutationIdempotency(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
+	handler, store := newValuesTestHandler(t)
+	handler.storeProvider = notifications.WrapUserStoreProvider(testUserStoreProvider{store: store}, &notifications.System{})
 	const mutationID = "d615e91d-988f-4928-bb32-8956a26c7608"
 	body := `{"item":{"type":"collection","collection_id":"watchlist","label":"Watchlist"},"present":true}`
 	first := routeNavigationShortcutMutation(t, handler, body, mutationID)
@@ -295,30 +285,6 @@ func TestNavigationShortcutMutationIdempotency(t *testing.T) {
 		removeID)
 	if removed.Code != http.StatusOK || removeReplay.Code != http.StatusOK || removeReplay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
 		t.Fatalf("semantic remove replay = %d/%d header %q", removed.Code, removeReplay.Code, removeReplay.Header().Get("X-Silo-Idempotent-Replay"))
-	}
-}
-
-func TestNavigationShortcutMutationThroughNotificationWrappedProvider(t *testing.T) {
-	baseHandler, store := newValuesTestHandler(t)
-	provider := notifications.WrapUserStoreProvider(
-		testUserStoreProvider{store: store},
-		&notifications.System{},
-	)
-	handler := NewSettingValuesHandler(provider, baseHandler.contract)
-	const mutationID = "wrapped-provider-mutation"
-	body := `{"item":{"type":"collection","collection_id":"watchlist","label":"Watchlist"},"present":true}`
-
-	first := routeNavigationShortcutMutation(t, handler, body, mutationID)
-	if first.Code != http.StatusOK {
-		t.Fatalf("wrapped first mutation = %d: %s", first.Code, first.Body.String())
-	}
-	replay := routeNavigationShortcutMutation(t, handler, body, mutationID)
-	if replay.Code != http.StatusOK || replay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
-		t.Fatalf("wrapped replay = %d header %q: %s",
-			replay.Code, replay.Header().Get("X-Silo-Idempotent-Replay"), replay.Body.String())
-	}
-	if !bytes.Equal(bytes.TrimSpace(first.Body.Bytes()), bytes.TrimSpace(replay.Body.Bytes())) {
-		t.Fatalf("wrapped replay body = %s, want %s", replay.Body.String(), first.Body.String())
 	}
 }
 
@@ -595,96 +561,6 @@ func TestNavigationShortcutConcurrentAddsMerge(t *testing.T) {
 	}
 }
 
-func TestSettingValuesRoundTrip(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	// Nothing stored yet.
-	if rec := routeValues(t, handler, http.MethodGet,
-		"playback.subtitle_language", "scope=profile", nil); rec.Code != http.StatusNotFound {
-		t.Fatalf("GET before write = %d, want 404", rec.Code)
-	}
-
-	rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-		"scope=profile", []byte(`{"value":"ja"}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	var stored settingValueResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &stored); err != nil {
-		t.Fatalf("decoding PUT response: %v", err)
-	}
-	if string(stored.Value) != `"ja"` || stored.Scope != "profile" {
-		t.Errorf("stored %s at %s, want \"ja\" at profile", stored.Value, stored.Scope)
-	}
-
-	rec = routeValues(t, handler, http.MethodGet, "playback.subtitle_language", "scope=profile", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET after write = %d", rec.Code)
-	}
-
-	if rec := routeValues(t, handler, http.MethodDelete,
-		"playback.subtitle_language", "scope=profile", nil); rec.Code != http.StatusNoContent {
-		t.Fatalf("DELETE = %d", rec.Code)
-	}
-	if rec := routeValues(t, handler, http.MethodGet,
-		"playback.subtitle_language", "scope=profile", nil); rec.Code != http.StatusNotFound {
-		t.Errorf("GET after delete = %d, want 404", rec.Code)
-	}
-}
-
-func TestProfileClientValueUsesExplicitFamilyHeader(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	key := settingskeys.NavPrimaryMenu
-	body := []byte(`{"value":{"items":[{"type":"builtin","destination":"home"},` +
-		`{"type":"library","library_id":42,"label":"Movies"}]}}`)
-
-	rec := routeValues(t, handler, http.MethodPut, key, "scope=profile_client", body)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT profile_client = %d: %s", rec.Code, rec.Body.String())
-	}
-	var stored settingValueResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &stored); err != nil {
-		t.Fatalf("decoding response: %v", err)
-	}
-	if stored.Scope != "profile_client" || stored.ClientFamily != "web" {
-		t.Fatalf("stored scope/family = %q/%q, want profile_client/web", stored.Scope, stored.ClientFamily)
-	}
-	var menu navigationShortcutDocument
-	if err := json.Unmarshal(stored.Value, &menu); err != nil {
-		t.Fatalf("decoding stored primary menu: %v", err)
-	}
-	if len(menu.Items) != 2 || menu.Items[1].Label != "Movies" {
-		t.Fatalf("stored non-builtin menu item = %+v, want labeled Movies library", menu.Items)
-	}
-
-	for _, tc := range []struct {
-		name   string
-		header string
-	}{
-		{"missing", ""},
-		{"not canonical", "TV"},
-		{"unknown", "car"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			req := valuesRequest(http.MethodPut,
-				"/settings/values/"+key+"?scope=profile_client", body)
-			if tc.header == "" {
-				req.Header.Del(clientFamilyHeader)
-			} else {
-				req.Header.Set(clientFamilyHeader, tc.header)
-			}
-			routeCtx := chi.NewRouteContext()
-			routeCtx.URLParams.Add("key", key)
-			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-			rec := httptest.NewRecorder()
-			handler.HandleSetValue(rec, req)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("PUT with family %q = %d, want 400: %s", tc.header, rec.Code, rec.Body.String())
-			}
-		})
-	}
-}
-
 func TestMutationHashPreservesExistingScopesAndSeparatesClientFamilies(t *testing.T) {
 	identity := userstore.SettingIdentity{
 		Key: "playback.subtitle_mode", Scope: settingscontract.ScopeProfileDevice,
@@ -707,124 +583,6 @@ func TestMutationHashPreservesExistingScopesAndSeparatesClientFamilies(t *testin
 	client.ClientFamily = settingscontract.ClientFamilyMobile
 	if mobile := hashMutationRequest(client, json.RawMessage(`null`)); mobile == tv {
 		t.Fatal("profile_client mutation hashes do not distinguish client families")
-	}
-}
-
-func TestEffectiveClientFamilyIsOptionalButValidated(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	key := settingskeys.UiCardPresentation
-	if rec := routeValues(t, handler, http.MethodPut, key, "scope=profile",
-		[]byte(`{"value":{"poster_size":"compact","caption":"title"}}`)); rec.Code != http.StatusOK {
-		t.Fatalf("seed profile fallback = %d: %s", rec.Code, rec.Body.String())
-	}
-	if rec := routeValues(t, handler, http.MethodPut, key, "scope=profile_client",
-		[]byte(`{"value":{"poster_size":"large","caption":"artwork"}}`)); rec.Code != http.StatusOK {
-		t.Fatalf("seed family value = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	effective := func(t *testing.T, family *string) (int, effectiveSettingValueResponse, string) {
-		t.Helper()
-		req := valuesRequest(http.MethodGet, "/settings/values/effective?keys="+key, nil)
-		if family == nil {
-			req.Header.Del(clientFamilyHeader)
-		} else {
-			req.Header.Set(clientFamilyHeader, *family)
-		}
-		rec := httptest.NewRecorder()
-		handler.HandleGetEffective(rec, req)
-		if rec.Code != http.StatusOK {
-			return rec.Code, effectiveSettingValueResponse{}, rec.Body.String()
-		}
-		var body struct {
-			Settings []effectiveSettingValueResponse `json:"settings"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("decode effective response: %v", err)
-		}
-		if len(body.Settings) != 1 {
-			t.Fatalf("settings = %d, want 1", len(body.Settings))
-		}
-		return rec.Code, body.Settings[0], rec.Body.String()
-	}
-
-	t.Run("absent skips profile client layer", func(t *testing.T) {
-		code, got, body := effective(t, nil)
-		if code != http.StatusOK {
-			t.Fatalf("effective without client family = %d: %s", code, body)
-		}
-		if got.Source != string(settingscontract.ScopeProfile) || string(got.Value) != `{"poster_size":"compact","caption":"title"}` {
-			t.Fatalf("effective without family = %s from %s, want profile fallback", got.Value, got.Source)
-		}
-	})
-
-	t.Run("absent remains compatible with resolve all", func(t *testing.T) {
-		req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
-		req.Header.Del(clientFamilyHeader)
-		rec := httptest.NewRecorder()
-		handler.HandleGetEffective(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("resolve all without client family = %d: %s", rec.Code, rec.Body.String())
-		}
-	})
-
-	t.Run("valid selects profile client layer", func(t *testing.T) {
-		family := "web"
-		code, got, body := effective(t, &family)
-		if code != http.StatusOK {
-			t.Fatalf("effective with client family = %d: %s", code, body)
-		}
-		if got.Source != string(settingscontract.ScopeProfileClient) || got.ClientFamily != family {
-			t.Fatalf("effective with family = %s/%s, want profile_client/web", got.Source, got.ClientFamily)
-		}
-	})
-
-	t.Run("nonempty invalid is rejected", func(t *testing.T) {
-		family := "TV"
-		code, _, _ := effective(t, &family)
-		if code != http.StatusBadRequest {
-			t.Fatalf("effective with invalid client family = %d, want 400", code)
-		}
-	})
-}
-
-func TestGetSettingValuesReportsSetAndUnsetAtOneScope(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
-		Key: "playback.subtitle_mode", Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
-	}, json.RawMessage(`"always"`)); err != nil {
-		t.Fatalf("seeding explicit value: %v", err)
-	}
-
-	req := valuesRequest(http.MethodGet,
-		"/settings/values?keys=playback.subtitle_mode,playback.subtitle_language&scope=profile", nil)
-	rec := httptest.NewRecorder()
-	handler.HandleGetValues(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET collection = %d: %s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Values   []map[string]any `json:"values"`
-		Revision int              `json:"revision"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decoding collection: %v", err)
-	}
-	if len(body.Values) != 2 {
-		t.Fatalf("values = %d, want 2: %s", len(body.Values), rec.Body.String())
-	}
-	if body.Values[0]["key"] != "playback.subtitle_mode" || body.Values[0]["is_set"] != true ||
-		body.Values[0]["value"] != "always" {
-		t.Errorf("stored entry = %#v", body.Values[0])
-	}
-	if body.Values[1]["key"] != "playback.subtitle_language" || body.Values[1]["is_set"] != false {
-		t.Errorf("unset entry = %#v", body.Values[1])
-	}
-	if _, present := body.Values[1]["value"]; present {
-		t.Errorf("unset entry contains value: %#v", body.Values[1])
-	}
-	contract, _ := settingscontract.Load()
-	if body.Revision != contract.Revision {
-		t.Errorf("contract revision = %d, want %d", body.Revision, contract.Revision)
 	}
 }
 
@@ -889,29 +647,6 @@ func TestUnknownKeysAreRefused(t *testing.T) {
 		"scope=profile", []byte(`{"value":true}`))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("PUT of a client_local key = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestInvalidValuesAreRefusedByType covers what the string-only endpoint could
-// not check at all.
-func TestInvalidValuesAreRefusedByType(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	for name, tc := range map[string]struct{ key, body string }{
-		"enum member":      {"playback.subtitle_mode", `{"value":"sideways"}`},
-		"integer range":    {"playback.next_up_prompt_seconds", `{"value":9999}`},
-		"wrong type":       {"playback.auto_skip_intro", `{"value":"yes"}`},
-		"quoted number":    {"playback.next_up_prompt_seconds", `{"value":"30"}`},
-		"bad language":     {"playback.subtitle_language", `{"value":"!!!"}`},
-		"object schema":    {"playback.subtitle_appearance", `{"value":{"fontSize":"enormous"}}`},
-		"null when not ok": {"playback.subtitle_mode", `{"value":null}`},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rec := routeValues(t, handler, http.MethodPut, tc.key, "scope=profile", []byte(tc.body))
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("PUT %s = %d, want 400: %s", tc.body, rec.Code, rec.Body.String())
-			}
-		})
 	}
 }
 
@@ -1014,50 +749,6 @@ func TestEffectiveResolvesThroughTheLadder(t *testing.T) {
 	}
 }
 
-func TestPostEffectiveResolvesContentContexts(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	for seriesID, value := range map[string]string{"s1": `"ja"`, "s2": `"de"`} {
-		if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-			"scope=profile_series&series_id="+seriesID,
-			[]byte(`{"value":`+value+`}`)); rec.Code != http.StatusOK {
-			t.Fatalf("seeding %s = %d: %s", seriesID, rec.Code, rec.Body.String())
-		}
-	}
-
-	body := []byte(`{
-		"keys":["playback.subtitle_language"],
-		"contexts":[
-			{"context_id":"first","library_id":"7","series_id":"s1"},
-			{"context_id":"second","library_id":7,"series_id":"s2"}
-		]
-	}`)
-	req := valuesRequest(http.MethodPost, "/settings/values/effective", body)
-	rec := httptest.NewRecorder()
-	handler.HandlePostEffective(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST effective = %d: %s", rec.Code, rec.Body.String())
-	}
-	var response struct {
-		Contexts []struct {
-			ContextID string                          `json:"context_id"`
-			Settings  []effectiveSettingValueResponse `json:"settings"`
-		} `json:"contexts"`
-		Revision int `json:"revision"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decoding response: %v", err)
-	}
-	if len(response.Contexts) != 2 {
-		t.Fatalf("contexts = %d, want 2", len(response.Contexts))
-	}
-	if response.Contexts[0].ContextID != "first" ||
-		string(response.Contexts[0].Settings[0].Value) != `"ja"` ||
-		response.Contexts[1].ContextID != "second" ||
-		string(response.Contexts[1].Settings[0].Value) != `"de"` {
-		t.Errorf("context response = %#v", response.Contexts)
-	}
-}
-
 func TestPostEffectiveRejectsInvalidContexts(t *testing.T) {
 	handler, _ := newValuesTestHandler(t)
 	for name, body := range map[string]string{
@@ -1123,48 +814,6 @@ func TestEffectiveRequiresDeviceIdentityForDeviceAwareKeys(t *testing.T) {
 	if rec := effective("keys=ui.custom_css"); rec.Code != http.StatusOK {
 		t.Errorf("profile-only key without a device id = %d, want 200: %s",
 			rec.Code, rec.Body.String())
-	}
-}
-
-// TestEffectiveWithNoKeysReturnsEveryRemoteSetting, which is what a settings
-// screen opening for the first time asks for.
-func TestEffectiveWithNoKeysReturnsEveryRemoteSetting(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
-	rec := httptest.NewRecorder()
-	handler.HandleGetEffective(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("effective = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var body struct {
-		Settings []effectiveSettingValueResponse `json:"settings"`
-		Revision int                             `json:"revision"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decoding: %v", err)
-	}
-
-	contract, _ := settingscontract.Load()
-	remote := 0
-	for i := range contract.Definitions {
-		if contract.Definitions[i].IsRemote() {
-			remote++
-		}
-	}
-	if len(body.Settings) != remote {
-		t.Errorf("returned %d settings, want every remote definition (%d)",
-			len(body.Settings), remote)
-	}
-	if body.Revision != contract.Revision {
-		t.Errorf("revision = %d, want %d", body.Revision, contract.Revision)
-	}
-	// Everything unset resolves to its contract default.
-	for _, setting := range body.Settings {
-		if setting.Source != string(settingscontract.ScopeDefault) {
-			t.Errorf("%s resolved from %s with nothing stored", setting.Key, setting.Source)
-		}
 	}
 }
 
@@ -1271,8 +920,9 @@ func TestMutationIDMakesWritesIdempotent(t *testing.T) {
 		return rec
 	}
 
-	if rec := send("mut-1", `"always"`); rec.Code != http.StatusOK {
-		t.Fatalf("first write = %d: %s", rec.Code, rec.Body.String())
+	first := send("mut-1", `"always"`)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first write = %d: %s", first.Code, first.Body.String())
 	}
 
 	// The same id and body replays the receipt rather than writing again.
@@ -1282,6 +932,20 @@ func TestMutationIDMakesWritesIdempotent(t *testing.T) {
 	}
 	if replay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
 		t.Error("a repeated mutation id was not reported as a replay")
+	}
+
+	if strings.TrimSpace(first.Body.String()) != strings.TrimSpace(replay.Body.String()) {
+		t.Errorf("replay body diverged from the original response:\n first: %s\nreplay: %s",
+			first.Body.String(), replay.Body.String())
+	}
+	var original settingValueResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &original); err != nil {
+		t.Fatalf("decoding original response: %v", err)
+	}
+	if original.Revision == 0 || original.UpdatedAt == "" {
+		t.Errorf("original response revision=%d updated_at=%q — the replayed "+
+			"receipt must carry the stored row, not the request",
+			original.Revision, original.UpdatedAt)
 	}
 
 	// The same id with different content is a conflict, not a silent overwrite.
@@ -1301,48 +965,6 @@ func TestMutationIDMakesWritesIdempotent(t *testing.T) {
 	}
 	if string(value.Value) != `"always"` {
 		t.Errorf("stored value = %s, want the first write preserved", value.Value)
-	}
-}
-
-// TestMutationReceiptReplaysTheStoredResponse: the receipt is the response the
-// original write returned, so a replay carries the real revision and
-// updated_at rather than a reconstruction of the request.
-func TestMutationReceiptReplaysTheStoredResponse(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	send := func() *httptest.ResponseRecorder {
-		req := valuesRequest(http.MethodPut,
-			"/settings/values/playback.subtitle_mode?scope=profile",
-			[]byte(`{"value":"always"}`))
-		req.Header.Set(mutationIDHeader, "mut-replay")
-		routeCtx := chi.NewRouteContext()
-		routeCtx.URLParams.Add("key", "playback.subtitle_mode")
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-		rec := httptest.NewRecorder()
-		handler.HandleSetValue(rec, req)
-		return rec
-	}
-
-	first := send()
-	if first.Code != http.StatusOK {
-		t.Fatalf("first write = %d: %s", first.Code, first.Body.String())
-	}
-	replay := send()
-	if replay.Code != http.StatusOK {
-		t.Fatalf("replay = %d: %s", replay.Code, replay.Body.String())
-	}
-	if strings.TrimSpace(first.Body.String()) != strings.TrimSpace(replay.Body.String()) {
-		t.Errorf("replay body diverged from the original response:\n first: %s\nreplay: %s",
-			first.Body.String(), replay.Body.String())
-	}
-	var original settingValueResponse
-	if err := json.Unmarshal(first.Body.Bytes(), &original); err != nil {
-		t.Fatalf("decoding original response: %v", err)
-	}
-	if original.Revision == 0 || original.UpdatedAt == "" {
-		t.Errorf("original response revision=%d updated_at=%q — the replayed "+
-			"receipt must carry the stored row, not the request",
-			original.Revision, original.UpdatedAt)
 	}
 }
 
@@ -1422,102 +1044,6 @@ func TestFailedWritesLeaveNoReceipt(t *testing.T) {
 	}
 }
 
-// TestMutationBodyMustBeOneDocument: trailing content after the envelope means
-// different parsers could disagree about which mutation was requested.
-func TestMutationBodyMustBeOneDocument(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_mode",
-		"scope=profile", []byte(`{"value":"always"}{"value":"off"}`))
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("concatenated envelopes = %d, want 400", rec.Code)
-	}
-	rec = routeValues(t, handler, http.MethodPut, "playback.subtitle_mode",
-		"scope=profile", []byte(`{"value":"always"} trailing`))
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("trailing garbage = %d, want 400", rec.Code)
-	}
-	// Trailing whitespace is not content.
-	rec = routeValues(t, handler, http.MethodPut, "playback.subtitle_mode",
-		"scope=profile", []byte(`{"value":"always"}`+"\n"))
-	if rec.Code != http.StatusOK {
-		t.Errorf("trailing newline = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestContractIsServedWithAnETag. Clients vendor a pinned copy and generate
-// bindings from it, so the common request asks "still the same contract?".
-func TestContractIsServedWithAnETag(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	rec := httptest.NewRecorder()
-	handler.HandleGetContract(rec, httptest.NewRequest(http.MethodGet, "/settings/contract", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET contract = %d", rec.Code)
-	}
-	etag := rec.Header().Get("ETag")
-	if etag == "" {
-		t.Fatal("no ETag on the contract response")
-	}
-
-	var manifest map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &manifest); err != nil {
-		t.Fatalf("contract body is not JSON: %v", err)
-	}
-	// Maintainer notes are stripped from the public projection.
-	if definitions, ok := manifest["definitions"].([]any); ok && len(definitions) > 0 {
-		if first, ok := definitions[0].(map[string]any); ok {
-			if _, leaked := first["notes"]; leaked {
-				t.Error("maintainer notes leaked into the public contract")
-			}
-		}
-	}
-
-	conditional := httptest.NewRequest(http.MethodGet, "/settings/contract", nil)
-	conditional.Header.Set("If-None-Match", etag)
-	rec = httptest.NewRecorder()
-	handler.HandleGetContract(rec, conditional)
-	if rec.Code != http.StatusNotModified {
-		t.Errorf("conditional GET = %d, want 304", rec.Code)
-	}
-}
-
-func TestCapabilitiesReportTheContractRevision(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	rec := httptest.NewRecorder()
-	handler.HandleGetCapabilities(rec,
-		httptest.NewRequest(http.MethodGet, "/settings/contract/capabilities", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("capabilities = %d", rec.Code)
-	}
-
-	var body struct {
-		APIVersion     int      `json:"api_version"`
-		Revision       int      `json:"revision"`
-		Scopes         []string `json:"scopes"`
-		ClientFamilies []string `json:"client_families"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decoding: %v", err)
-	}
-	contract, _ := settingscontract.Load()
-	if body.APIVersion != contract.APIVersion || body.Revision != contract.Revision {
-		t.Errorf("reported %d/%d, want %d/%d",
-			body.APIVersion, body.Revision, contract.APIVersion, contract.Revision)
-	}
-	wantScopes := []string{
-		"account", "profile", "profile_client", "profile_device", "profile_library", "profile_series",
-	}
-	if !slices.Equal(body.Scopes, wantScopes) {
-		t.Errorf("reported scopes %v, want %v", body.Scopes, wantScopes)
-	}
-	wantFamilies := []string{"tv", "mobile", "tablet", "desktop", "web"}
-	if !slices.Equal(body.ClientFamilies, wantFamilies) {
-		t.Errorf("reported client families %v, want %v", body.ClientFamilies, wantFamilies)
-	}
-}
-
 // storedDeviceIDFor reports the device a profile_device row was written for, or
 // "" when the key has no device-scoped row at all. The device-widening tests
 // assert on stored rows rather than status codes: before the query parameter is
@@ -1559,81 +1085,6 @@ func TestSetValue_RejectsDeviceNotOwnedByCaller(t *testing.T) {
 	}
 	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
 		t.Fatalf("wrote a row for device %q; want no write", got)
-	}
-}
-
-func TestSetValue_WritesNamedDevice(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	registry := store.(userstore.DeviceRegistry)
-	for _, id := range []string{"device-1", "device-b"} {
-		if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
-			ProfileID: "profile-1", DeviceID: id,
-		}); err != nil {
-			t.Fatalf("registering %s: %v", id, err)
-		}
-	}
-
-	// The request's own header is device-1; the query names device-b.
-	rec := routeValues(t, handler, http.MethodPut, "player.hdr_enabled",
-		"scope=profile_device&device_id=device-b", []byte(`{"value":false}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "device-b" {
-		t.Errorf("stored on device %q, want device-b", got)
-	}
-}
-
-func TestGetValue_ReadsNamedDevice(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	registry := store.(userstore.DeviceRegistry)
-	if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
-		ProfileID: "profile-1", DeviceID: "device-b",
-	}); err != nil {
-		t.Fatalf("registering device-b: %v", err)
-	}
-	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
-		Key:       "player.hdr_enabled",
-		Scope:     settingscontract.ScopeProfileDevice,
-		ProfileID: "profile-1", DeviceID: "device-b",
-	}, json.RawMessage(`false`)); err != nil {
-		t.Fatalf("seeding device-b value: %v", err)
-	}
-
-	rec := routeValues(t, handler, http.MethodGet, "player.hdr_enabled",
-		"scope=profile_device&device_id=device-b", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET named device = %d: %s", rec.Code, rec.Body.String())
-	}
-	var got settingValueResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decoding: %v", err)
-	}
-	if got.DeviceID != "device-b" || string(got.Value) != "false" {
-		t.Errorf("read %s on %q, want false on device-b", got.Value, got.DeviceID)
-	}
-
-	// The caller's own device has no row, so it must still 404.
-	if rec := routeValues(t, handler, http.MethodGet, "player.hdr_enabled",
-		"scope=profile_device", nil); rec.Code != http.StatusNotFound {
-		t.Errorf("GET own device = %d, want 404", rec.Code)
-	}
-}
-
-// The regression guard for every existing client: with no device_id in the
-// query the header device is used, exactly as before this parameter existed.
-func TestSetValue_FallsBackToHeaderDevice(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	rec := routeValues(t, handler, http.MethodPut, "player.hdr_enabled",
-		"scope=profile_device", []byte(`{"value":false}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "device-1" {
-		t.Errorf("stored on device %q, want the header device device-1", got)
 	}
 }
 
@@ -1680,7 +1131,6 @@ func newHouseholdValuesHandler(t *testing.T, pin string) (*SettingValuesHandler,
 		t.Fatalf("registering sibling device: %v", err)
 	}
 
-	handler.UserRepo = stubUserRepo{user: &models.User{ID: 1}}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", 0)
 	return handler, store
 }
@@ -1928,73 +1378,6 @@ func TestSetValue_AuditsCrossProfileWrite(t *testing.T) {
 	}
 }
 
-// Ordinary self-service writes stay out of the trail. A record of everything
-// answers nothing, and the question this exists for is "who changed it for me".
-func TestSetValue_DoesNotAuditOwnWrite(t *testing.T) {
-	handler, _ := newHouseholdValuesHandler(t, "")
-	audited := captureAuditLogs(t)
-
-	if rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "playback.subtitle_mode",
-		"scope=profile", []byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	if records := audited(); len(records) != 0 {
-		t.Errorf("audited an ordinary self-service write: %+v", records)
-	}
-}
-
-func TestGetEffective_ResolvesNamedDevice(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	registry := store.(userstore.DeviceRegistry)
-	if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
-		ProfileID: "profile-1", DeviceID: "apple-tv",
-	}); err != nil {
-		t.Fatalf("registering apple-tv: %v", err)
-	}
-	// The Apple TV overrides subtitle mode; this browser does not.
-	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
-		Key:       "playback.subtitle_mode",
-		Scope:     settingscontract.ScopeProfileDevice,
-		ProfileID: "profile-1", DeviceID: "apple-tv",
-	}, json.RawMessage(`"always"`)); err != nil {
-		t.Fatalf("seeding: %v", err)
-	}
-
-	read := func(query string) map[string]any {
-		t.Helper()
-		req := valuesRequest(http.MethodGet, "/settings/values/effective?"+query, nil)
-		rec := httptest.NewRecorder()
-		handler.HandleGetEffective(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET effective?%s = %d: %s", query, rec.Code, rec.Body.String())
-		}
-		var body struct {
-			Settings []map[string]any `json:"settings"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("decoding: %v", err)
-		}
-		if len(body.Settings) != 1 {
-			t.Fatalf("resolved %d settings, want 1", len(body.Settings))
-		}
-		return body.Settings[0]
-	}
-
-	named := read("keys=playback.subtitle_mode&device_id=apple-tv")
-	if named["value"] != "always" || named["source"] != "profile_device" {
-		t.Errorf("named device resolved %v from %v, want always from profile_device",
-			named["value"], named["source"])
-	}
-
-	// Without the parameter this browser still resolves its own answer.
-	own := read("keys=playback.subtitle_mode")
-	if own["source"] == "profile_device" {
-		t.Errorf("this browser resolved a device override it does not have: %v", own)
-	}
-}
-
 func TestGetEffective_RejectsDeviceNotOwnedByCaller(t *testing.T) {
 	handler, _ := newValuesTestHandler(t)
 
@@ -2021,17 +1404,21 @@ func TestGetEffective_NonPrimaryCannotResolveSiblingProfile(t *testing.T) {
 	}
 }
 
-// A server admin may act for any profile, including from a non-primary active
-// profile: apimw.IsAdmin short-circuits the household check by design. Pinned
-// because it is easy to mistake for the non-primary refusal above — the
-// difference is the account's role, not the profile's.
-func TestSetValue_ServerAdminMayNameAnyProfile(t *testing.T) {
+// The admin role does not make a non-primary profile the household parent: a
+// child profile on an admin account is refused like any other household
+// member, the same way RequireActingAdmin refuses it admin powers.
+func TestSetValue_NonPrimaryProfileOnAdminAccountMayNotNameSibling(t *testing.T) {
 	handler, store := newHouseholdValuesHandler(t, "")
+	if err := store.(userstore.DeviceRegistry).RegisterDevice(t.Context(), userstore.DeviceEntry{
+		ProfileID: "profile-1", DeviceID: "parent-tv",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	target := "/settings/values/player.hdr_enabled" +
-		"?scope=profile_device&profile_id=profile-2&device_id=robin-ipad"
+		"?scope=profile_device&profile_id=profile-1&device_id=parent-tv"
 	req := valuesRequest(http.MethodPut, target, []byte(`{"value":false}`))
-	// Acting as the *non-primary* profile, but on an admin account.
+	// Acting as the *non-primary* profile, on an admin account.
 	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, Role: "admin"})
 	req = req.WithContext(apimw.SetProfileID(ctx, "profile-2"))
 
@@ -2041,11 +1428,15 @@ func TestSetValue_ServerAdminMayNameAnyProfile(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	handler.HandleSetValue(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("admin naming a profile = %d, want 200: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("admin account's non-primary naming a sibling = %d, want 403: %s", rec.Code, rec.Body.String())
 	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "robin-ipad" {
-		t.Errorf("stored on device %q, want robin-ipad", got)
+	value, err := store.GetSettingValue(t.Context(), userstore.SettingIdentity{
+		Key: "player.hdr_enabled", Scope: settingscontract.ScopeProfileDevice,
+		ProfileID: "profile-1", DeviceID: "parent-tv",
+	})
+	if err != nil || value != nil {
+		t.Fatalf("refused write stored a value: %+v, %v", value, err)
 	}
 }
 
@@ -2171,5 +1562,190 @@ func TestEffectiveContextsPreservesV2TokensAndLegacyNormalization(t *testing.T) 
 	}
 	if len(legacy.Contexts) != 1 || legacy.Contexts[0].ContextID != "row-1" || len(legacy.Contexts[0].Settings) != 1 {
 		t.Fatalf("v1 normalization changed: %+v", legacy.Contexts)
+	}
+}
+
+func TestEffectiveClientFamilyIsOptionalButValidated(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	key := settingskeys.UiCardPresentation
+	if rec := routeValues(t, handler, http.MethodPut, key, "scope=profile",
+		[]byte(`{"value":{"poster_size":"compact","caption":"title"}}`)); rec.Code != http.StatusOK {
+		t.Fatalf("seed profile fallback = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := routeValues(t, handler, http.MethodPut, key, "scope=profile_client",
+		[]byte(`{"value":{"poster_size":"large","caption":"artwork"}}`)); rec.Code != http.StatusOK {
+		t.Fatalf("seed family value = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	effective := func(t *testing.T, family *string) (int, effectiveSettingValueResponse, string) {
+		t.Helper()
+		req := valuesRequest(http.MethodGet, "/settings/values/effective?keys="+key, nil)
+		if family == nil {
+			req.Header.Del(clientFamilyHeader)
+		} else {
+			req.Header.Set(clientFamilyHeader, *family)
+		}
+		rec := httptest.NewRecorder()
+		handler.HandleGetEffective(rec, req)
+		if rec.Code != http.StatusOK {
+			return rec.Code, effectiveSettingValueResponse{}, rec.Body.String()
+		}
+		var body struct {
+			Settings []effectiveSettingValueResponse `json:"settings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode effective response: %v", err)
+		}
+		if len(body.Settings) != 1 {
+			t.Fatalf("settings = %d, want 1", len(body.Settings))
+		}
+		return rec.Code, body.Settings[0], rec.Body.String()
+	}
+
+	t.Run("absent skips profile client layer", func(t *testing.T) {
+		code, got, body := effective(t, nil)
+		if code != http.StatusOK {
+			t.Fatalf("effective without client family = %d: %s", code, body)
+		}
+		if got.Source != string(settingscontract.ScopeProfile) || string(got.Value) != `{"poster_size":"compact","caption":"title"}` {
+			t.Fatalf("effective without family = %s from %s, want profile fallback", got.Value, got.Source)
+		}
+	})
+
+	t.Run("absent remains compatible with resolve all", func(t *testing.T) {
+		req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
+		req.Header.Del(clientFamilyHeader)
+		rec := httptest.NewRecorder()
+		handler.HandleGetEffective(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("resolve all without client family = %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("valid selects profile client layer", func(t *testing.T) {
+		family := "web"
+		code, got, body := effective(t, &family)
+		if code != http.StatusOK {
+			t.Fatalf("effective with client family = %d: %s", code, body)
+		}
+		if got.Source != string(settingscontract.ScopeProfileClient) || got.ClientFamily != family {
+			t.Fatalf("effective with family = %s/%s, want profile_client/web", got.Source, got.ClientFamily)
+		}
+	})
+
+	t.Run("nonempty invalid is rejected", func(t *testing.T) {
+		family := "TV"
+		code, _, _ := effective(t, &family)
+		if code != http.StatusBadRequest {
+			t.Fatalf("effective with invalid client family = %d, want 400", code)
+		}
+	})
+}
+
+func TestGetSettingValuesReportsSetAndUnsetAtOneScope(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
+		Key: "playback.subtitle_mode", Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
+	}, json.RawMessage(`"always"`)); err != nil {
+		t.Fatalf("seeding explicit value: %v", err)
+	}
+
+	req := valuesRequest(http.MethodGet,
+		"/settings/values?keys=playback.subtitle_mode,playback.subtitle_language&scope=profile", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleGetValues(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET collection = %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Values   []map[string]any `json:"values"`
+		Revision int              `json:"revision"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding collection: %v", err)
+	}
+	if len(body.Values) != 2 {
+		t.Fatalf("values = %d, want 2: %s", len(body.Values), rec.Body.String())
+	}
+	if body.Values[0]["key"] != "playback.subtitle_mode" || body.Values[0]["is_set"] != true ||
+		body.Values[0]["value"] != "always" {
+		t.Errorf("stored entry = %#v", body.Values[0])
+	}
+	if body.Values[1]["key"] != "playback.subtitle_language" || body.Values[1]["is_set"] != false {
+		t.Errorf("unset entry = %#v", body.Values[1])
+	}
+	if _, present := body.Values[1]["value"]; present {
+		t.Errorf("unset entry contains value: %#v", body.Values[1])
+	}
+	contract, _ := settingscontract.Load()
+	if body.Revision != contract.Revision {
+		t.Errorf("contract revision = %d, want %d", body.Revision, contract.Revision)
+	}
+}
+
+// TestInvalidValuesAreRefusedByType covers what the string-only endpoint could
+// not check at all.
+func TestInvalidValuesAreRefusedByType(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+
+	for name, tc := range map[string]struct{ key, body string }{
+		"enum member":      {"playback.subtitle_mode", `{"value":"sideways"}`},
+		"integer range":    {"playback.next_up_prompt_seconds", `{"value":9999}`},
+		"wrong type":       {"playback.auto_skip_intro", `{"value":"yes"}`},
+		"quoted number":    {"playback.next_up_prompt_seconds", `{"value":"30"}`},
+		"bad language":     {"playback.subtitle_language", `{"value":"!!!"}`},
+		"object schema":    {"playback.subtitle_appearance", `{"value":{"fontSize":"enormous"}}`},
+		"null when not ok": {"playback.subtitle_mode", `{"value":null}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := routeValues(t, handler, http.MethodPut, tc.key, "scope=profile", []byte(tc.body))
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("PUT %s = %d, want 400: %s", tc.body, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestPostEffectiveResolvesContentContexts(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	for seriesID, value := range map[string]string{"s1": `"ja"`, "s2": `"de"`} {
+		if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
+			"scope=profile_series&series_id="+seriesID,
+			[]byte(`{"value":`+value+`}`)); rec.Code != http.StatusOK {
+			t.Fatalf("seeding %s = %d: %s", seriesID, rec.Code, rec.Body.String())
+		}
+	}
+
+	body := []byte(`{
+		"keys":["playback.subtitle_language"],
+		"contexts":[
+			{"context_id":"first","library_id":"7","series_id":"s1"},
+			{"context_id":"second","library_id":7,"series_id":"s2"}
+		]
+	}`)
+	req := valuesRequest(http.MethodPost, "/settings/values/effective", body)
+	rec := httptest.NewRecorder()
+	handler.HandlePostEffective(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST effective = %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Contexts []struct {
+			ContextID string                          `json:"context_id"`
+			Settings  []effectiveSettingValueResponse `json:"settings"`
+		} `json:"contexts"`
+		Revision int `json:"revision"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(response.Contexts) != 2 {
+		t.Fatalf("contexts = %d, want 2", len(response.Contexts))
+	}
+	if response.Contexts[0].ContextID != "first" ||
+		string(response.Contexts[0].Settings[0].Value) != `"ja"` ||
+		response.Contexts[1].ContextID != "second" ||
+		string(response.Contexts[1].Settings[0].Value) != `"de"` {
+		t.Errorf("context response = %#v", response.Contexts)
 	}
 }

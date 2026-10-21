@@ -1,0 +1,56 @@
+{
+  "file_id": "42",
+  "interval_ms": 10000,
+  "thumbnail_width": 300,
+  "thumbnail_height": 126,
+  "tile_columns": 10,
+  "tile_rows": 10,
+  "thumbnail_count": 1020,
+  "sheets": [
+    {
+      "index": 0,
+      "url": "/api/v2/artwork/trickplay/42/9913/0.9913.jpg?exp=1767409445&sig=a"
+    },
+    {
+      "index": 1,
+      "url": "/api/v2/artwork/trickplay/42/9913/1.9913.jpg?exp=1767409445&sig=b"
+    },
+    {
+      "index": 2,
+      "url": "/api/v2/artwork/trickplay/42/9913/2.9913.jpg?exp=1767409445&sig=c"
+    },
+    {
+      "index": 3,
+      "url": "/api/v2/artwork/trickplay/42/9913/3.9913.jpg?exp=1767409445&sig=d"
+    },
+    {
+      "index": 4,
+      "url": "/api/v2/artwork/trickplay/42/9913/4.9913.jpg?exp=1767409445&sig=e"
+    },
+    {
+      "index": 5,
+      "url": "/api/v2/artwork/trickplay/42/9913/5.9913.jpg?exp=1767409445&sig=f"
+    },
+    {
+      "index": 6,
+      "url": "/api/v2/artwork/trickplay/42/9913/6.9913.jpg?exp=1767409445&sig=g"
+    },
+    {
+      "index": 7,
+      "url": "/api/v2/artwork/trickplay/42/9913/7.9913.jpg?exp=1767409445&sig=h"
+    },
+    {
+      "index": 8,
+      "url": "/api/v2/artwork/trickplay/42/9913/8.9913.jpg?exp=1767409445&sig=i"
+    },
+    {
+      "index": 9,
+      "url": "/api/v2/artwork/trickplay/42/9913/9.9913.jpg?exp=1767409445&sig=j"
+    },
+    {
+      "index": 10,
+      "url": "/api/v2/artwork/trickplay/42/9913/10.9913.jpg?exp=1767409445&sig=k"
+    }
+  ],
+  "expires_at": "2026-01-03T03:04:05.000Z"
+}

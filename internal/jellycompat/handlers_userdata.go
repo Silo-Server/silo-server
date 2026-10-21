@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
 // UserDataHandler serves Jellyfin favorites and played-state routes.
@@ -208,7 +209,7 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	targets, err := h.resolvePlayedTargets(r, session, chi.URLParam(r, "itemId"))
+	targets, err := h.resolveMarkTargets(r, session, chi.URLParam(r, "itemId"), played)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -244,48 +245,98 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 }
 
 func (h *UserDataHandler) resolvePlayedTargets(r *http.Request, session *Session, rawItemID string) ([]string, error) {
+	targets, _, err := h.resolvePlayedTargetsWithParent(r, session, rawItemID)
+	return targets, err
+}
+
+// resolveMarkTargets resolves the leaf items a played or unplayed mark writes.
+func (h *UserDataHandler) resolveMarkTargets(r *http.Request, session *Session, rawItemID string, played bool) ([]string, error) {
+	if played {
+		return h.resolvePlayedTargets(r, session, rawItemID)
+	}
+	return h.resolveUnplayedTargets(r, session, rawItemID)
+}
+
+// resolveUnplayedTargets is resolvePlayedTargets for an unplayed mark. A series
+// or season also clears its watched episodes that no longer have a library
+// file, which the episode listings leave out; otherwise their completed
+// progress keeps the series in Next Up.
+func (h *UserDataHandler) resolveUnplayedTargets(r *http.Request, session *Session, rawItemID string) ([]string, error) {
+	targets, parent, err := h.resolvePlayedTargetsWithParent(r, session, rawItemID)
+	if err != nil || parent.kind == "" {
+		return targets, err
+	}
+	resolver, ok := h.userData.(interface {
+		ParentUnplayedTargets(context.Context, *Session, string, string) ([]string, error)
+	})
+	if !ok {
+		return targets, nil
+	}
+	extra, err := resolver.ParentUnplayedTargets(r.Context(), session, parent.kind, parent.id)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		seen[target] = struct{}{}
+	}
+	return appendUniqueContentIDs(targets, seen, extra...), nil
+}
+
+// playedTargetNotFound answers a played mark on an unknown item.
+const playedTargetNotFound = "Item not found"
+
+// playedParent names the series or season a played mark expanded; kind is
+// empty for a movie or episode.
+type playedParent struct {
+	kind, id string
+}
+
+func (h *UserDataHandler) resolvePlayedTargetsWithParent(r *http.Request, session *Session, rawItemID string) ([]string, playedParent, error) {
 	if seasonID, err := h.codec.DecodeStringID(EncodedIDSeason, rawItemID); err == nil {
-		return h.resolvePlayedTargetsForSeason(r, session, seasonID)
+		targets, err := h.resolvePlayedTargetsForSeason(r, session, seasonID)
+		return targets, playedParent{kind: watchstate.ParentSeason, id: seasonID}, err
 	}
 
 	contentID, _, err := decodeItemOrMediaSourceID(r.Context(), h.codec, rawItemID)
 	if errors.Is(err, errMediaSourceOwnerNotFound) {
-		return nil, &HTTPError{StatusCode: http.StatusNotFound, Message: "Item not found"}
+		return nil, playedParent{}, &HTTPError{StatusCode: http.StatusNotFound, Message: playedTargetNotFound}
 	}
 	if err != nil {
-		return nil, err
+		return nil, playedParent{}, err
 	}
 	return h.resolvePlayedTargetsForItem(r, session, contentID)
 }
 
-func (h *UserDataHandler) resolvePlayedTargetsForItem(r *http.Request, session *Session, contentID string) ([]string, error) {
+func (h *UserDataHandler) resolvePlayedTargetsForItem(r *http.Request, session *Session, contentID string) ([]string, playedParent, error) {
 	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
 	if err != nil {
-		return nil, err
+		return nil, playedParent{}, err
 	}
 
 	switch strings.ToLower(detail.Type) {
 	case "movie", "episode":
-		return []string{detail.ContentID}, nil
+		return []string{detail.ContentID}, playedParent{}, nil
 	case "season":
-		return h.resolvePlayedTargetsForSeason(r, session, detail.ContentID)
+		targets, err := h.resolvePlayedTargetsForSeason(r, session, detail.ContentID)
+		return targets, playedParent{kind: watchstate.ParentSeason, id: detail.ContentID}, err
 	case "series":
 		seasons, err := h.content.ListSeasons(r.Context(), session, detail.ContentID, nil)
 		if err != nil {
-			return nil, err
+			return nil, playedParent{}, err
 		}
 		targets := make([]string, 0)
 		seen := make(map[string]struct{})
 		for _, season := range seasons {
 			episodes, err := h.content.ListEpisodes(r.Context(), session, detail.ContentID, season.SeasonNumber, nil)
 			if err != nil {
-				return nil, err
+				return nil, playedParent{}, err
 			}
 			targets = appendUniqueContentIDs(targets, seen, episodeContentIDs(episodes)...)
 		}
-		return targets, nil
+		return targets, playedParent{kind: watchstate.ParentSeries, id: detail.ContentID}, nil
 	default:
-		return nil, &HTTPError{StatusCode: http.StatusNotFound, Message: "Item not found"}
+		return nil, playedParent{}, &HTTPError{StatusCode: http.StatusNotFound, Message: playedTargetNotFound}
 	}
 }
 
@@ -374,7 +425,7 @@ func (h *UserDataHandler) HandleUpdateUserData(w http.ResponseWriter, r *http.Re
 			req.Played = new(*req.PlayCount > 0)
 		}
 		if req.Played != nil {
-			targets, err := h.resolvePlayedTargets(r, session, chi.URLParam(r, "itemId"))
+			targets, err := h.resolveMarkTargets(r, session, chi.URLParam(r, "itemId"), *req.Played)
 			if err != nil {
 				writeCompatUpstreamError(w, err)
 				return

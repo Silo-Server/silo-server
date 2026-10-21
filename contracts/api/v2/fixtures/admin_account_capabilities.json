@@ -1,5 +1,5 @@
 {
-  "revision": "3e80f34ad9af826167c783a6ecd6eabd2af95e2b281d1ff306392027e53233f6",
+  "revision": "c537fe27b1bb7a978c5584e48aa7f4503db9c74bbd825ce421b75ac378bb5f9c",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -7,11 +7,15 @@
   "default_profile": true,
   "exact_identity_filter": true,
   "access_groups": true,
+  "profile_limits": true,
   "password_reset_link": true,
   "password_reset_email": true,
   "ownership_transfer": true,
   "account_devices": true,
+  "login_sessions": true,
   "watch_summary": true,
   "account_downloads": true,
-  "request_usage": true
+  "request_usage": true,
+  "policy_defaults": true,
+  "profile_sections": true
 }

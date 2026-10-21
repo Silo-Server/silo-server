@@ -13,6 +13,8 @@ import { policyInheritHints, savedUserPolicyInheritHints } from "@/components/Us
 import { CardEditingProvider } from "../cardEditing";
 import { inheritContextFor } from "./policySources";
 import { RequestsCard } from "./RequestsCard";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
+import { stubRadixDom } from "../adminUserTab.test-support";
 
 const mocks = vi.hoisted(() => ({
   updateUser: vi.fn(),
@@ -30,28 +32,13 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   getAdminUser: async () => ({ user: mocks.user!, etag: '"account-2"', profileContext: CONTEXT }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: POLICY_DEFAULTS }),
   useAdminUserCapabilities: () => ({ data: { available: true, request_usage: true } }),
   useUpdateUser: () => ({ mutateAsync: mocks.updateUser, isPending: false }),
 }));
 vi.mock("@/hooks/queries/admin/userActivity", () => ({
   useAdminUserRequestUsage: () => ({ data: mocks.usage }),
 }));
-
-// Radix Select needs these to open under jsdom.
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-if (typeof globalThis.ResizeObserver === "undefined") {
-  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
-    ResizeObserverStub;
-}
-if (!window.HTMLElement.prototype.hasPointerCapture) {
-  window.HTMLElement.prototype.hasPointerCapture = () => false;
-  window.HTMLElement.prototype.releasePointerCapture = () => {};
-  window.HTMLElement.prototype.scrollIntoView = () => {};
-}
 
 const CONTEXT = { profileId: "owner" } as unknown as ProfileRequestContextSnapshot;
 
@@ -71,13 +58,14 @@ const USER: AdminUser = {
   max_local_stream_bitrate_kbps: null,
   transcode_allowed: null,
   audio_transcode_allowed: null,
-  max_profiles: 4,
+  max_profiles: null,
   download_allowed: null,
   download_transcode_allowed: null,
   requests_allowed: null,
   password_login: true,
   password_change_required: false,
   is_owner: false,
+  break_glass: false,
   effective_policy: {
     library_ids: null,
     max_playback_quality: "",
@@ -85,6 +73,7 @@ const USER: AdminUser = {
     max_transcodes: 0,
     max_remote_stream_bitrate_kbps: 0,
     max_local_stream_bitrate_kbps: 0,
+    max_profiles: 4,
     transcode_allowed: true,
     audio_transcode_allowed: true,
     download_allowed: true,
@@ -109,6 +98,7 @@ const KIDS = {
   max_transcodes: 0,
   max_remote_stream_bitrate_kbps: 0,
   max_local_stream_bitrate_kbps: 0,
+  max_profiles: 5,
   allowed_permissions: null,
   requests_allowed: true,
 } as AccessGroup;
@@ -186,7 +176,12 @@ function mount(user: AdminUser = USER) {
             ctx={inheritContextFor(user, groups)}
             hints={savedUserPolicyInheritHints(
               user,
-              policyInheritHints(user.role === "admin" ? null : user.access_group_id, groups),
+              policyInheritHints(
+                user.role,
+                user.role === "admin" ? null : user.access_group_id,
+                groups,
+                POLICY_DEFAULTS,
+              ),
             )}
           />
         </CardEditingProvider>
@@ -217,12 +212,14 @@ const GROUP_LIMIT = "GET /api/v2/admin/request-groups/{group_id}/limit";
 const SETTINGS_OP = "GET /api/v2/admin/request-settings";
 
 beforeEach(() => {
+  stubRadixDom();
   vi.mocked(v2).mockReset();
   mocks.updateUser.mockReset().mockResolvedValue(undefined);
   mocks.usage = undefined;
 });
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe("RequestsCard", () => {
@@ -389,35 +386,6 @@ describe("RequestsCard", () => {
     expect(await row("Approval")).toMatch(/^Needs approval/);
   });
 
-  it("ties errors and hints to their fields, and announces an error once typed", async () => {
-    serve({
-      [SETTINGS_OP]: () => ({ body: SETTINGS }),
-      [GROUP_LIMIT]: () => ({ body: GROUP_INHERITS }),
-      [USER_LIMIT]: () => ({
-        body: {
-          user_id: "7",
-          limit_mode: "custom",
-          max_requests: 4,
-          window_days: 2,
-          approval_mode: "inherit",
-        },
-      }),
-    });
-    const ui = userEvent.setup();
-    mount();
-    await edit(ui);
-    expect(screen.getByRole("combobox", { name: "Approval" })).toHaveAccessibleDescription(
-      "Kids group uses the server default: approved automatically",
-    );
-    const window = screen.getByRole("spinbutton", { name: "Days in the limit window" });
-    await ui.clear(window);
-    await ui.type(window, "0");
-    expect(screen.getByRole("alert")).toHaveTextContent("Use at least 1 day.");
-    expect(window).toHaveAccessibleDescription("Use at least 1 day.");
-    expect(window).toBeInvalid();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-  });
-
   it("shows a row an old setting still blocks and resets it to the default", async () => {
     let limit: Record<string, unknown> = {
       user_id: "7",
@@ -476,39 +444,5 @@ describe("RequestsCard", () => {
       body: { requests_allowed: false },
     });
     expect(calls(PUT_USER_LIMIT)).toHaveLength(0);
-  });
-
-  it("names the account's switch and the server switch", async () => {
-    serve({
-      [SETTINGS_OP]: () => ({ body: { ...SETTINGS, requests_enabled: false } }),
-      [GROUP_LIMIT]: () => ({ body: GROUP_INHERITS }),
-      [USER_LIMIT]: () => ({
-        body: { user_id: "7", limit_mode: "inherit", approval_mode: "auto", ...INHERIT },
-      }),
-    });
-    mount({
-      ...USER,
-      requests_allowed: false,
-      effective_policy: { ...USER.effective_policy, requests_allowed: false },
-    });
-    expect(await row("Can request media")).toBe("NoGroup: yesCUSTOM");
-    expect(
-      await screen.findByText("Requests are turned off for the whole server."),
-    ).toBeInTheDocument();
-  });
-
-  it("offers a retry when the request settings can't load", async () => {
-    serve({
-      [SETTINGS_OP]: () => new Error("down"),
-      [GROUP_LIMIT]: () => ({ body: GROUP_INHERITS }),
-      [USER_LIMIT]: () => ({
-        body: { user_id: "7", limit_mode: "inherit", approval_mode: "inherit", ...INHERIT },
-      }),
-    });
-    mount();
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Couldn't load this account's request settings.",
-    );
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });

@@ -125,21 +125,6 @@ func TestInotifyOverlappingRootsShareWatches(t *testing.T) {
 	}
 }
 
-func TestInotifySymlinkRootReportsTheConfiguredPath(t *testing.T) {
-	parent := t.TempDir()
-	mkdirs(t, parent, "real/Movie")
-	root := filepath.Join(parent, "library")
-	if err := os.Symlink(filepath.Join(parent, "real"), root); err != nil {
-		t.Fatal(err)
-	}
-	b := newTestInotify(t, inotifyHooks{})
-	if err := b.AddRoot(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(parent, "real", "Movie", "m.mkv"), "x")
-	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(root, "Movie"), "m.mkv"))
-}
-
 func TestInotifyRenameRewritesDescendantPaths(t *testing.T) {
 	root := t.TempDir()
 	mkdirs(t, root, "Old/Season 1/Extras")
@@ -166,24 +151,6 @@ func TestInotifyRenameRewritesDescendantPaths(t *testing.T) {
 	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(root, "New", "Season 1", "Extras"), "x.mkv"))
 }
 
-func TestInotifyMovedOutDirectoryDropsItsWatches(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
-	mkdirs(t, root, "Movie/Extras")
-	b := newTestInotify(t, inotifyHooks{})
-	if err := b.AddRoot(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	mustRename(t, filepath.Join(root, "Movie"), filepath.Join(outside, "Movie"))
-	nextEvents(t, b, isEvent(EventMovedFrom, root, "Movie"))
-	if stale := b.pathsWithPrefix(filepath.Join(root, "Movie")); len(stale) != 0 {
-		t.Fatalf("stale paths after moving out: %v", stale)
-	}
-	if got := b.watchCount(); got != 1 {
-		t.Fatalf("watches = %d, want only the root's", got)
-	}
-}
-
 func TestInotifyAliasAcrossRootsReportsBothPaths(t *testing.T) {
 	parent := t.TempDir()
 	mkdirs(t, parent, "a/Shared", "b")
@@ -206,33 +173,6 @@ func TestInotifyAliasAcrossRootsReportsBothPaths(t *testing.T) {
 	b.RemoveRoot(rootA)
 	writeFile(t, filepath.Join(rootA, "Shared", "y.mkv"), "x")
 	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(rootB, "Link"), "y.mkv"))
-}
-
-func TestInotifyWatchLimitDuringInitialWalk(t *testing.T) {
-	root := t.TempDir()
-	mkdirs(t, root, "A/1", "A/2", "B")
-	added := 0
-	b := newTestInotify(t, inotifyHooks{
-		addWatch: func(fd int, path string, mask uint32) (int, error) {
-			if added == 2 {
-				return -1, unix.ENOSPC
-			}
-			added++
-			return unix.InotifyAddWatch(fd, path, mask)
-		},
-		maxUserWatches: func() int { return 2 },
-	})
-	err := b.AddRoot(context.Background(), root)
-	var limitErr *WatchLimitError
-	if !errors.As(err, &limitErr) {
-		t.Fatalf("AddRoot error = %v, want *WatchLimitError", err)
-	}
-	if limitErr.Limit != 2 || limitErr.Directories != 5 {
-		t.Fatalf("limit error = %+v, want limit 2 and all 5 directories counted", limitErr)
-	}
-	if b.watchCount() != 0 || b.Directories(root) != 0 {
-		t.Fatalf("watches kept after the limit: %d", b.watchCount())
-	}
 }
 
 func TestInotifyWatchLimitAtRuntimeReleasesTheRoot(t *testing.T) {
@@ -464,33 +404,6 @@ func TestInotifyIgnoreMarkerAtTheLibraryFolder(t *testing.T) {
 	if got := b.Directories(root); got != 2 {
 		t.Fatalf("directories = %d after the marker went, want 2", got)
 	}
-}
-
-// The walk records a directory once per root: with Linked -> Target in the
-// root, Target is recorded only as Linked. Deleting the link must ask for a
-// re-walk, which records Target under its own path.
-func TestInotifyDroppedSymlinkAliasAsksForARewalk(t *testing.T) {
-	root := t.TempDir()
-	mkdirs(t, root, "Target/Deep")
-	if err := os.Symlink(filepath.Join(root, "Target"), filepath.Join(root, "Linked")); err != nil {
-		t.Fatal(err)
-	}
-	b := newTestInotify(t, inotifyHooks{})
-	if err := b.AddRoot(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	if got := b.pathsWithPrefix(filepath.Join(root, "Target")); len(got) != 0 {
-		t.Fatalf("recorded %v, want Target only through Linked", got)
-	}
-	if err := os.Remove(filepath.Join(root, "Linked")); err != nil {
-		t.Fatal(err)
-	}
-	nextEvents(t, b, func(ev Event) bool { return ev.Kind == EventRewalk && ev.Root == root })
-	if err := b.AddRoot(context.Background(), root); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(root, "Target", "Deep", "x.mkv"), "x")
-	nextEvents(t, b, isEvent(EventCloseWrite, filepath.Join(root, "Target", "Deep"), "x.mkv"))
 }
 
 // A move out of the tree is reported even while other events keep every

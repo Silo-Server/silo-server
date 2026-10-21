@@ -8,34 +8,6 @@ import (
 	"testing"
 )
 
-func TestCompareFingerprintsFindsSharedRange(t *testing.T) {
-	left := make([]uint32, 400)
-	right := make([]uint32, 400)
-	for i := range left {
-		left[i] = uint32(i + 1000)
-		right[i] = uint32(i + 5000)
-	}
-	for i := 40; i < 300; i++ {
-		left[i] = uint32(i)
-		right[i] = uint32(i)
-	}
-
-	segments := CompareFingerprints([]fingerprintInput{
-		{Candidate: Candidate{FileID: 1, EpisodeID: "ep1", DurationSeconds: 1200}, Points: left},
-		{Candidate: Candidate{FileID: 2, EpisodeID: "ep2", DurationSeconds: 1200}, Points: right},
-	}, DefaultConfig("ffmpeg"))
-
-	if len(segments) != 2 {
-		t.Fatalf("expected two file segments, got %d", len(segments))
-	}
-	if got := segments[1].End - segments[1].Start; got < 30 {
-		t.Fatalf("expected at least 30s segment, got %.3f", got)
-	}
-	if segments[1].Algorithm != ChromaprintAlgorithm {
-		t.Fatalf("unexpected algorithm %q", segments[1].Algorithm)
-	}
-}
-
 func TestCompareFingerprintsSkipsSameEpisodePairs(t *testing.T) {
 	points := make([]uint32, 400)
 	for i := range points {
@@ -70,6 +42,11 @@ func TestCompareFingerprintsFindsSharedRangeWithOffset(t *testing.T) {
 
 	if len(segments) != 2 {
 		t.Fatalf("expected two file segments, got %d", len(segments))
+	}
+	for fileID, segment := range segments {
+		if segment.Algorithm != ChromaprintAlgorithm {
+			t.Fatalf("file %d algorithm = %q, want %q", fileID, segment.Algorithm, ChromaprintAlgorithm)
+		}
 	}
 	// 40 points in, shifted back by the Chromaprint start lead.
 	if want := 40*DefaultPointHopSeconds + chromaprintStartLeadSeconds; math.Abs(segments[1].Start-want) > 0.01 {
@@ -170,18 +147,10 @@ func TestCompareFingerprintsLimitsComparisonsToNeighbors(t *testing.T) {
 	// Episodes 1-10 share one intro; only neighbors within
 	// compareNeighborEpisodes are compared, and every file still matches.
 	const episodes = 10
-	intro := make([]uint32, 300)
-	introRNG := rand.New(rand.NewPCG(0, 1))
-	for i := range intro {
-		intro[i] = introRNG.Uint32()
-	}
+	intro := randomPoints(300, 0, 1)
 	inputs := make([]fingerprintInput, 0, episodes)
 	for e := 1; e <= episodes; e++ {
-		points := make([]uint32, 500)
-		rng := rand.New(rand.NewPCG(uint64(e), 1))
-		for i := range points {
-			points[i] = rng.Uint32()
-		}
+		points := randomPoints(500, uint64(e), 1)
 		copy(points[100:], intro)
 		inputs = append(inputs, fingerprintInput{
 			Candidate: Candidate{FileID: 100 + e, EpisodeID: string(rune('a' + e)), EpisodeNumber: episodes + 1 - e, DurationSeconds: 1800},
@@ -202,18 +171,10 @@ func TestCompareFingerprintsLimitsComparisonsToNeighbors(t *testing.T) {
 func TestCompareFingerprintsWidensSearchForUnmatchedFiles(t *testing.T) {
 	// Episode 1 shares its intro only with episode 12, beyond its eight
 	// neighbors; the other episodes share nothing.
-	intro := make([]uint32, 300)
-	introRNG := rand.New(rand.NewPCG(0, 1))
-	for i := range intro {
-		intro[i] = introRNG.Uint32()
-	}
+	intro := randomPoints(300, 0, 1)
 	inputs := make([]fingerprintInput, 0, 12)
 	for e := 1; e <= 12; e++ {
-		points := make([]uint32, 500)
-		rng := rand.New(rand.NewPCG(uint64(e), 3))
-		for i := range points {
-			points[i] = rng.Uint32()
-		}
+		points := randomPoints(500, uint64(e), 3)
 		if e == 1 || e == 12 {
 			copy(points[100:], intro)
 		}
@@ -238,17 +199,9 @@ func TestCompareFingerprintsCountsEpisodeVersionsOnce(t *testing.T) {
 	// Episode 2 has five versions whose shared audio runs 40 points past the
 	// intro; episodes 3 and 4 carry only the intro. Five votes from one
 	// episode must not outweigh two from others.
-	intro := make([]uint32, 340)
-	introRNG := rand.New(rand.NewPCG(0, 1))
-	for i := range intro {
-		intro[i] = introRNG.Uint32()
-	}
+	intro := randomPoints(340, 0, 1)
 	build := func(fileID int, episode string, number, length int) fingerprintInput {
-		points := make([]uint32, 600)
-		rng := rand.New(rand.NewPCG(uint64(fileID), 5))
-		for i := range points {
-			points[i] = rng.Uint32()
-		}
+		points := randomPoints(600, uint64(fileID), 5)
 		copy(points[100:], intro[:length])
 		return fingerprintInput{
 			Candidate: Candidate{FileID: fileID, EpisodeID: episode, EpisodeNumber: number, DurationSeconds: 1800},
@@ -274,18 +227,10 @@ func TestCompareFingerprintsWindowCountsEpisodesNotVersions(t *testing.T) {
 	// Episode 1's only partner is episode 10. Episode 2 has nine versions;
 	// counted as one neighbor, the window still reaches episodes 3-9 and the
 	// fallback reaches episode 10.
-	intro := make([]uint32, 300)
-	introRNG := rand.New(rand.NewPCG(0, 1))
-	for i := range intro {
-		intro[i] = introRNG.Uint32()
-	}
+	intro := randomPoints(300, 0, 1)
 	var inputs []fingerprintInput
 	add := func(fileID, number int, shared bool) {
-		points := make([]uint32, 500)
-		rng := rand.New(rand.NewPCG(uint64(fileID), 9))
-		for i := range points {
-			points[i] = rng.Uint32()
-		}
+		points := randomPoints(500, uint64(fileID), 9)
 		if shared {
 			copy(points[100:], intro)
 		}
@@ -325,18 +270,10 @@ func TestCompareFingerprintsFallbackCountsEpisodesNotVersions(t *testing.T) {
 	// Episode 1's only partner is episode 11. Episodes 2-9 fill the neighbor
 	// window and episode 10 has 60 versions, more than the fallback budget
 	// if versions were counted separately.
-	intro := make([]uint32, 300)
-	introRNG := rand.New(rand.NewPCG(0, 1))
-	for i := range intro {
-		intro[i] = introRNG.Uint32()
-	}
+	intro := randomPoints(300, 0, 1)
 	var inputs []fingerprintInput
 	add := func(fileID, number int, shared bool) {
-		points := make([]uint32, 500)
-		rng := rand.New(rand.NewPCG(uint64(fileID), 11))
-		for i := range points {
-			points[i] = rng.Uint32()
-		}
+		points := randomPoints(500, uint64(fileID), 11)
 		if shared {
 			copy(points[100:], intro)
 		}
@@ -375,11 +312,7 @@ func TestCompareFingerprintsWidensSearchForFilesOnlyAnotherSearchReached(t *test
 	cue, intro := shared(140), shared(300)
 	var inputs []fingerprintInput
 	for e := 1; e <= 31; e++ {
-		points := make([]uint32, 900)
-		prng := rand.New(rand.NewPCG(uint64(e), 17))
-		for i := range points {
-			points[i] = prng.Uint32()
-		}
+		points := randomPoints(900, uint64(e), 17)
 		switch e {
 		case 1:
 			copy(points[600:], cue)
@@ -421,11 +354,7 @@ func TestCompareFingerprintsFallbackSearchesNearestEpisodesFirst(t *testing.T) {
 	cue, intro := shared(140), shared(300)
 	var inputs []fingerprintInput
 	add := func(fileID, number int) {
-		points := make([]uint32, 900)
-		prng := rand.New(rand.NewPCG(uint64(fileID), 23))
-		for i := range points {
-			points[i] = prng.Uint32()
-		}
+		points := randomPoints(900, uint64(fileID), 23)
 		switch fileID {
 		case 1:
 			copy(points[100:], intro)
@@ -462,18 +391,10 @@ func TestCompareFingerprintsFallbackSearchesNearestEpisodesFirst(t *testing.T) {
 // seasonInputs builds episodes whose fingerprints share intro[:introLen[i]] at
 // point 100, over random per-episode audio.
 func seasonInputs(introLen []int) []fingerprintInput {
-	intro := make([]uint32, 400)
-	introRNG := rand.New(rand.NewPCG(0, 1))
-	for i := range intro {
-		intro[i] = introRNG.Uint32()
-	}
+	intro := randomPoints(400, 0, 1)
 	inputs := make([]fingerprintInput, 0, len(introLen))
 	for e, length := range introLen {
-		points := make([]uint32, 700)
-		rng := rand.New(rand.NewPCG(uint64(e+1), 7))
-		for i := range points {
-			points[i] = rng.Uint32()
-		}
+		points := randomPoints(700, uint64(e+1), 7)
 		copy(points[100:], intro[:length])
 		inputs = append(inputs, fingerprintInput{
 			Candidate: Candidate{FileID: e + 1, EpisodeID: fmt.Sprintf("e%d", e+1), EpisodeNumber: e + 1, DurationSeconds: 1800},
@@ -570,4 +491,15 @@ func TestUsualIntroDurationMatchesPairwiseScan(t *testing.T) {
 			t.Fatalf("trial %d: usualIntroDuration = (%.2f, %d), want (%.2f, %d)", trial, usual, sharing, wantUsual, wantSharing)
 		}
 	}
+}
+
+// randomPoints returns n fingerprint points drawn in order from a PCG seeded
+// with seed and stream, so a fixture is the same on every run.
+func randomPoints(n int, seed, stream uint64) []uint32 {
+	rng := rand.New(rand.NewPCG(seed, stream))
+	points := make([]uint32, n)
+	for i := range points {
+		points[i] = rng.Uint32()
+	}
+	return points
 }

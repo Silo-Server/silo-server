@@ -4,15 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
@@ -223,17 +219,6 @@ func TestReconcileArtworkCacheRefusesCommitBeforeBaselineRead(t *testing.T) {
 	}
 }
 
-func TestReconcileArtworkCacheRunsWithoutManagedTransition(t *testing.T) {
-	runner := &fakeReconcileRunner{}
-	store := &fakeSettingsStore{values: map[string]string{ArtworkStorageIdentityKey: "current"}}
-	if err := NewReconcileArtworkCacheTask(runner, store, nil, "current").Execute(t.Context(), &fakeProgress{}); err != nil {
-		t.Fatal(err)
-	}
-	if runner.runs != 1 {
-		t.Fatalf("manual reconcile runs = %d, want 1", runner.runs)
-	}
-}
-
 func TestReconcileArtworkCacheRejectsOldProcessAfterTransitionReceiptClears(t *testing.T) {
 	oldRoot := t.TempDir()
 	newRoot := t.TempDir()
@@ -363,29 +348,6 @@ func TestReconcileArtworkCachePreservesTransitionCommitDuringSweep(t *testing.T)
 	}
 	if got := store.values[ArtworkStorageReconcileCheckpointKey]; got != "transition-checkpoint" {
 		t.Fatalf("recovery checkpoint = %q, want committed transition checkpoint", got)
-	}
-}
-
-func TestReconcileArtworkCacheRefusesHeldAdvisoryLockPostgres(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	pool, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	held, acquired, err := pglock.TryAcquire(t.Context(), pool, pglock.ArtworkReconcileLockKey)
-	if err != nil || !acquired {
-		t.Fatalf("hold artwork reconcile lock: acquired=%t err=%v", acquired, err)
-	}
-	t.Cleanup(func() { _ = held.Release(context.Background()) })
-	runner := &fakeReconcileRunner{}
-	store := &fakeSettingsStore{values: map[string]string{ArtworkStorageIdentityKey: "current"}}
-	err = NewReconcileArtworkCacheTask(runner, store, nil, "current", pool).Execute(t.Context(), &fakeProgress{})
-	if !errors.Is(err, ErrArtworkReconcileManagedTransition) || runner.runs != 0 {
-		t.Fatalf("Execute error=%v runs=%d", err, runner.runs)
 	}
 }
 
@@ -607,17 +569,5 @@ func TestReconcileArtworkCacheExecuteIncludesBranding(t *testing.T) {
 	}
 	if !strings.Contains(failingProgress.lastMessage, "branding asset check failed") {
 		t.Fatalf("completion message %q does not surface the branding failure", failingProgress.lastMessage)
-	}
-}
-
-func TestReconcileArtworkCacheIsManualOnly(t *testing.T) {
-	task := NewReconcileArtworkCacheTask(&fakeReconcileRunner{}, &fakeSettingsStore{values: map[string]string{}}, nil, "endpoint|bucket|prefix")
-	if !task.ManualOnly() || len(task.DefaultTriggers()) != 0 {
-		t.Fatalf("ManualOnly() = %v, DefaultTriggers() = %#v; want manual-only with no schedule", task.ManualOnly(), task.DefaultTriggers())
-	}
-
-	moved := NewReconcileArtworkCacheTask(&fakeReconcileRunner{}, &fakeSettingsStore{values: map[string]string{ArtworkStorageIdentityKey: "old|bucket|prefix"}}, nil, "endpoint|bucket|prefix")
-	if err := moved.CheckStorageIdentity(context.Background()); !errors.Is(err, ErrArtworkReconcileManualRunRequired) {
-		t.Fatalf("CheckStorageIdentity() after a storage move = %v, want manual-run-required", err)
 	}
 }

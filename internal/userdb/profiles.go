@@ -2,6 +2,7 @@ package userdb
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -92,16 +93,16 @@ func GetProfile(db *sql.DB, id string) (*Profile, error) {
 		       require_advisory_age,
 		       quality_preference, language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, show_forced_subtitles,
-		       library_restrictions_enabled, max_playback_quality, created_at, updated_at
+		       library_restrictions_enabled, max_playback_quality, pin_revision, created_at, updated_at
 		FROM profiles WHERE id = ?`, id,
 	).Scan(
 		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating, &p.MaxAdvisoryAge,
 		&p.RequireAdvisoryAge,
 		&p.QualityPreference, &p.Language, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview, &p.ShowForcedSubtitles,
-		&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.CreatedAt, &p.UpdatedAt,
+		&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.PINRevision, &p.CreatedAt, &p.UpdatedAt,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -121,7 +122,7 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 		       require_advisory_age,
 		       quality_preference, language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, show_forced_subtitles,
-		       library_restrictions_enabled, max_playback_quality, created_at, updated_at
+		       library_restrictions_enabled, max_playback_quality, pin_revision, created_at, updated_at
 		FROM profiles ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing profiles: %w", err)
@@ -136,7 +137,7 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 			&p.RequireAdvisoryAge,
 			&p.QualityPreference, &p.Language, &p.SubtitleLanguage, &p.SubtitleMode,
 			&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview, &p.ShowForcedSubtitles,
-			&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.CreatedAt, &p.UpdatedAt,
+			&p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.PINRevision, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning profile row: %w", err)
 		}
@@ -192,6 +193,9 @@ func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileIn
 			setClauses = append(setClauses, "pin_hash = ?")
 			args = append(args, string(hash))
 		}
+		// The profiles_pin_revision trigger advances pin_revision whenever
+		// pin_hash changes, which invalidates every token minted for the old
+		// PIN, and only this profile's.
 	}
 	if u.IsChild != nil {
 		setClauses = append(setClauses, "is_child = ?")
@@ -298,8 +302,9 @@ func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileIn
 	return nil
 }
 
-// DeleteProfile removes a profile and cascades deletion to favorites,
-// watchlist, watch_progress, and personal_collections (plus their items).
+// DeleteProfile removes a profile and every row of its own: lists, watch
+// progress and history, preferences, settings and personal collections
+// (plus their items), matching the Postgres store.
 func DeleteProfile(db *sql.DB, id string) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -327,7 +332,11 @@ func DeleteProfile(db *sql.DB, id string) error {
 	if err != nil {
 		return fmt.Errorf("deleting collection items for profile %s: %w", id, err)
 	}
-	if _, err := tx.Exec(`DELETE FROM personal_collection_profiles WHERE profile_id = ?`, id); err != nil {
+	if _, err := tx.Exec(`
+		DELETE FROM personal_collection_profiles
+		WHERE profile_id = ? OR collection_id IN (
+			SELECT id FROM personal_collections WHERE creator_profile_id = ?
+		)`, id, id); err != nil {
 		return fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
 	}
 
@@ -337,12 +346,22 @@ func DeleteProfile(db *sql.DB, id string) error {
 	cascadeTables := []string{
 		"favorites",
 		"watchlist",
+		"not_interested",
 		"watch_progress",
+		"watch_history",
+		"hidden_history_items",
+		"home_item_dismissals",
 		"collection_sort_preferences",
 		"personal_collections",
 		"profile_allowed_libraries",
+		sqliteAudioPreferencesTable,
+		sqliteSubtitlePreferencesTable,
 		"series_playback_preferences",
 		"library_playback_preferences",
+		"profile_onboarding",
+		"profile_section_overrides",
+		"user_devices",
+		"user_device_settings",
 		"user_setting_values",
 	}
 	for _, table := range cascadeTables {
@@ -353,6 +372,12 @@ func DeleteProfile(db *sql.DB, id string) error {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE %s = ?", table, column), id); err != nil {
 			return fmt.Errorf("deleting from %s for profile %s: %w", table, id, err)
 		}
+	}
+
+	// Jellyfin display preferences carry the profile in their key.
+	prefix := userstore.ProfileDisplayPrefsPrefix(id)
+	if _, err := tx.Exec(`DELETE FROM jellycompat_displayprefs WHERE substr(prefs_id, 1, length(?)) = ?`, prefix, prefix); err != nil {
+		return fmt.Errorf("deleting display preferences for profile %s: %w", id, err)
 	}
 
 	// Delete the profile itself.
@@ -377,7 +402,7 @@ func DeleteProfile(db *sql.DB, id string) error {
 func VerifyPIN(db *sql.DB, profileID string, pin string) (bool, error) {
 	var pinHash string
 	err := db.QueryRow("SELECT pin_hash FROM profiles WHERE id = ?", profileID).Scan(&pinHash)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, fmt.Errorf("profile %s not found", profileID)
 	}
 	if err != nil {
@@ -388,7 +413,7 @@ func VerifyPIN(db *sql.DB, profileID string, pin string) (bool, error) {
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(pinHash), []byte(pin))
-	if err == bcrypt.ErrMismatchedHashAndPassword {
+	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
 		return false, nil
 	}
 	if err != nil {

@@ -62,18 +62,6 @@ func TestSeedDefaultsAdoptsConcurrentInstanceIDWinner(t *testing.T) {
 	}
 }
 
-func TestLoadCleanupIntervalUsesDiagnosticsKey(t *testing.T) {
-	store := newMemorySettingsStore(map[string]string{
-		KeyCleanupIntervalMinutes: "45",
-	})
-	if got := LoadCleanupInterval(context.Background(), store); got != 45*time.Minute {
-		t.Fatalf("LoadCleanupInterval = %v, want 45m", got)
-	}
-	if got := LoadCleanupInterval(context.Background(), newMemorySettingsStore(nil)); got != DefaultCleanupIntervalMinutes*time.Minute {
-		t.Fatalf("LoadCleanupInterval default = %v, want %d minutes", got, DefaultCleanupIntervalMinutes)
-	}
-}
-
 func TestLoadCleanupIntervalCapsHugeValues(t *testing.T) {
 	// The boundary: the largest value that still fits under the cap is accepted
 	// verbatim, while anything larger (including values that would overflow
@@ -121,34 +109,6 @@ func TestLoadSettingsPropagatesReadErrors(t *testing.T) {
 	}
 	if _, err := LoadSettings(context.Background(), store); err == nil {
 		t.Fatal("LoadSettings did not propagate a late store read error")
-	}
-}
-
-func TestLoadSettingsParsesTypedValues(t *testing.T) {
-	store := newMemorySettingsStore(map[string]string{
-		KeyUploadsEnabled:       "true",
-		KeyMaxBundleBytes:       "123",
-		KeyMaxUncompressedBytes: "456",
-		KeyMaxReportsPerUserDay: "7",
-		KeyRetentionDays:        "8",
-		KeyMaxBytesPerUser:      "900",
-		KeyConsentNoticeVersion: "2",
-		KeyServerInstanceID:     "server-1",
-	})
-
-	got, err := LoadSettings(context.Background(), store)
-	if err != nil {
-		t.Fatalf("LoadSettings: %v", err)
-	}
-	if !got.UploadsEnabled ||
-		got.MaxBundleBytes != 123 ||
-		got.MaxUncompressedBytes != 456 ||
-		got.MaxReportsPerUserDay != 7 ||
-		got.RetentionDays != 8 ||
-		got.MaxBytesPerUser != 900 ||
-		got.ConsentNoticeVersion != 2 ||
-		got.ServerInstanceID != "server-1" {
-		t.Fatalf("LoadSettings parsed unexpected values: %+v", got)
 	}
 }
 

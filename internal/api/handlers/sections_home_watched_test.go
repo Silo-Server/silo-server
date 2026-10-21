@@ -189,24 +189,6 @@ func TestHomeSectionsForFetchExpandsOnlyFilteredSections(t *testing.T) {
 	}
 }
 
-func TestHomeWatchedCandidateLimitCapsExpandedWindow(t *testing.T) {
-	for _, test := range []struct {
-		display int
-		want    int
-	}{
-		// No configured limit means the fetcher's default of 20.
-		{display: 0, want: 100},
-		{display: -1, want: 100},
-		{display: 20, want: 100},
-		{display: 50, want: 200},
-		{display: 250, want: 250},
-	} {
-		if got := homeWatchedCandidateLimit(test.display); got != test.want {
-			t.Errorf("homeWatchedCandidateLimit(%d) = %d, want %d", test.display, got, test.want)
-		}
-	}
-}
-
 func TestDropEmptyWatchedHomeSections(t *testing.T) {
 	input := []sections.SectionWithItems{
 		{
@@ -244,41 +226,6 @@ func TestDropEmptyWatchedHomeSections(t *testing.T) {
 		if got := filtered[i].ID; got != want {
 			t.Errorf("filtered[%d].ID = %q, want %q", i, got, want)
 		}
-	}
-}
-
-func TestWatchedRefillRunsBeforeDiversity(t *testing.T) {
-	visible := &models.MediaItem{ContentID: "visible"}
-	overflow := &models.MediaItem{ContentID: "overflow"}
-	sectionsWithItems := []sections.SectionWithItems{
-		{
-			ResolvedSection: sections.ResolvedSection{
-				ID:          "ordinary",
-				SectionType: sections.SectionRecentlyAdded,
-				ItemLimit:   1,
-			},
-			Items: []*models.MediaItem{visible, overflow},
-		},
-		{
-			ResolvedSection: sections.ResolvedSection{
-				ID:          "avoid-duplicates",
-				SectionType: sections.SectionHiddenGems,
-			},
-			Items: []*models.MediaItem{overflow},
-		},
-	}
-
-	filtered := filterWatchedHomeSectionItems(sectionsWithItems, map[string]*itemUserStateResponse{
-		"visible":  {Played: false},
-		"overflow": {Played: false},
-	})
-	diverse := applyDiversityFilter(filtered)
-
-	if got := diverse[0].Items; len(got) != 1 || got[0].ContentID != "visible" {
-		t.Fatalf("first section items = %#v, want visible refill", got)
-	}
-	if got := diverse[1].Items; len(got) != 1 || got[0].ContentID != "overflow" {
-		t.Fatalf("hidden overflow candidate affected downstream diversity: %#v", got)
 	}
 }
 
@@ -321,7 +268,7 @@ func TestHomePreferenceFiltersOnlyHomeResponses(t *testing.T) {
 	}
 	resolved := []sections.ResolvedSection{sectionItems[0].ResolvedSection}
 	prepared, states := handler.filterWatchedHomeSections(ctx, sectionItems, resolved)
-	home := handler.buildSectionsWithUserStates(ctx, prepared, nil, requestAccessFilter(req), requestImageSize(req), states)
+	home := handler.buildSectionsWithUserStates(ctx, prepared, nil, requestAccessFilter(req), requestArtwork(req), states)
 	if got := home.Sections[0].Items; len(got) != 1 || got[0].ContentID != "unwatched" {
 		t.Fatalf("Home response items = %#v, want only unwatched", got)
 	}

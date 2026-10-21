@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"cmp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -122,6 +123,11 @@ const (
 	SourceHLGBT709  SourceKind = "hlg_bt709"
 	SourceSDRBT709  SourceKind = "sdr_bt709"
 	SourceSDRBT2020 SourceKind = "sdr_bt2020"
+	// SourceDolbyVision is a Dolby Vision base layer that is not a standard
+	// signal on its own: Profile 5's IPTPQc2, or a compatibility id of 0. Only
+	// an executor that applies the stream's RPU reshaping can convert it; read
+	// as plain PQ it comes out green and magenta.
+	SourceDolbyVision SourceKind = DynamicRangeDolbyVision
 )
 
 // SourceMetadata contains the catalog facts used to resolve an HDR base signal
@@ -232,16 +238,42 @@ func ResolveSource(source SourceMetadata) SourceResolution {
 	case DynamicRangeHDR10, DynamicRangeHDR10Plus:
 		candidate = SourcePQ
 	case DynamicRangeHLG:
+		// Cameras also record HLG with BT.709 primaries. Declaring those as
+		// BT.2020 oversaturates the conversion, and their decoded frames fail
+		// the source preflight. SourceHLGBT709 declares a BT.709 matrix too,
+		// while its preflight also accepts BT.2020-matrix frames, so it needs
+		// both tags. Any other mix keeps the BT.2020 kind, whose preflight
+		// rejects it rather than decoding it with the wrong matrix.
+		primaries := normalizeColorValue(source.ColorPrimaries)
+		matrix := normalizeColorValue(source.ColorSpace)
 		candidate = SourceHLG
+		if colorIsBT709(primaries) && colorIsBT709(matrix) {
+			candidate = SourceHLGBT709
+		}
 	case DynamicRangeDolbyVision:
-		// Profile 5 and compatibility id 0 carry a Dolby-proprietary base
-		// signal. Legacy rows omit the presence facts, so their default zero
-		// values cannot establish a safe base layer either.
-		if source.DVProfile == 5 || !source.DVConfigPresent || !source.DVBLCompatIDPresent || source.DVBLCompatID == 0 {
+		// Legacy rows omit the presence facts, so their default zero values
+		// cannot establish a base layer.
+		if !source.DVConfigPresent || !source.DVBLCompatIDPresent || !source.DVBLPresent {
 			return SourceResolution{}
 		}
-		if !source.DVBLPresent {
-			return SourceResolution{}
+		// Profile 5 and compatibility id 0 carry a Dolby-proprietary base
+		// signal that only the RPU can map back to PQ, so they convert only
+		// through an executor that applies it. Profile 5 always signals this.
+		// On any other profile id 0 is nonstandard and says nothing about the
+		// base: only a PQ-tagged one takes this path, because an untagged base
+		// can be plain SDR that the RPU path renders blown out. Its decoded
+		// frames must then prove both the tag and the RPU.
+		if source.DVProfile == 5 || source.DVBLCompatID == 0 {
+			if !source.DVRPUPresent {
+				return SourceResolution{}
+			}
+			if source.DVProfile == 5 {
+				return SourceResolution{Kind: SourceDolbyVision}
+			}
+			if !transferIsPQ(normalizeColorValue(source.ColorTransfer)) {
+				return SourceResolution{}
+			}
+			return SourceResolution{Kind: SourceDolbyVision, PreflightRequired: true}
 		}
 		candidate = sourceKindForCompatibilityID(source.DVBLCompatID)
 		if candidate == "" {
@@ -264,16 +296,6 @@ func ResolveSource(source SourceMetadata) SourceResolution {
 		preflight = true
 	}
 	return SourceResolution{Kind: candidate, PreflightRequired: preflight}
-}
-
-// ClassifySource returns only classifications that are safe without executor
-// preflight; ambiguous or unsupported sources return an empty kind.
-func ClassifySource(source SourceMetadata) SourceKind {
-	resolution := ResolveSource(source)
-	if resolution.PreflightRequired {
-		return ""
-	}
-	return resolution.Kind
 }
 
 // sourceKindForCompatibilityID maps standardized Dolby Vision base-layer
@@ -441,20 +463,6 @@ func rangeIsLimited(value string) bool {
 	return value == "tv" || value == "mpeg" || value == "limited"
 }
 
-// SourceKindFor maps already trusted dynamic-range metadata to a base signal.
-// Call ResolveSource when the completeness of the metadata is not guaranteed.
-func SourceKindFor(dynamicRange string, dvBLCompatID int) SourceKind {
-	switch strings.ToLower(strings.TrimSpace(dynamicRange)) {
-	case DynamicRangeHDR10, DynamicRangeHDR10Plus:
-		return SourcePQ
-	case DynamicRangeHLG:
-		return SourceHLG
-	case DynamicRangeDolbyVision:
-		return sourceKindForCompatibilityID(dvBLCompatID)
-	}
-	return ""
-}
-
 // SourceTransfer returns the FFmpeg transfer characteristic for a source kind.
 func SourceTransfer(kind SourceKind) string {
 	if kind == SourceHLG || kind == SourceHLGBT709 {
@@ -488,9 +496,49 @@ func IsSDRSource(kind SourceKind) bool {
 	return kind == SourceSDRBT709 || kind == SourceSDRBT2020
 }
 
+// SoftwareUploadFilter moves CPU-decoded frames onto a QSV or VAAPI device
+// ahead of the hardware tone-map graph: 8-bit nv12 for SDR sources, 10-bit
+// p010le for HDR ones. Playback and the source preflight share it so the
+// preflight tests the upload playback actually runs.
+func SoftwareUploadFilter(kind SourceKind) string {
+	format := "p010le"
+	if IsSDRSource(kind) {
+		format = "nv12"
+	}
+	return "format=" + format + ",hwupload,"
+}
+
 // AllSourceKinds returns every base signal supported by capability probes.
 func AllSourceKinds() []SourceKind {
+	return append(StandardSourceKinds(), SourceDolbyVision)
+}
+
+// StandardSourceKinds returns the base signals every executor class converts.
+// SourceDolbyVision is left out: only some executors apply the RPU, so its
+// absence does not make an inventory incomplete.
+func StandardSourceKinds() []SourceKind {
 	return []SourceKind{SourcePQ, SourceHLG, SourceHLGBT709, SourceSDRBT709, SourceSDRBT2020}
+}
+
+// FilterAppliesDolbyVision reports whether a probed tone-map filter can apply
+// a Dolby Vision RPU, the only safe way to convert SourceDolbyVision. Jellyfin
+// FFmpeg's tonemapx, tonemap_opencl and tonemap_cuda take apply_dovi;
+// tonemap_vaapi, scale_vt and the Hable fallback do not.
+func FilterAppliesDolbyVision(filter string) bool {
+	switch filter {
+	case SoftwareFilterBT2390, HardwareFilterOpenCL, HardwareFilterCUDA:
+		return true
+	}
+	return false
+}
+
+// dolbyVisionOption makes RPU application explicit on SourceDolbyVision
+// graphs instead of relying on the filters' default.
+func dolbyVisionOption(kind SourceKind) string {
+	if kind == SourceDolbyVision {
+		return ":apply_dovi=1"
+	}
+	return ""
 }
 
 // ValidSourceKind reports whether kind is a supported, serializable base signal.
@@ -566,7 +614,9 @@ func (c Capabilities) PreferredMode(policy Policy, kind SourceKind) Mode {
 }
 
 // SourceParameters builds the FFmpeg setparams stage that declares the input
-// base signal before conversion.
+// base signal before conversion. SourceDolbyVision is declared as the PQ
+// BT.2020 signal its RPU reshapes to; the RPU, not these tags, drives the
+// conversion.
 func SourceParameters(kind SourceKind) string {
 	return "setparams=range=tv:color_primaries=" + SourcePrimaries(kind) + ":color_trc=" + SourceTransfer(kind) + ":colorspace=" + SourceMatrix(kind)
 }
@@ -580,7 +630,7 @@ func SoftwareFilter(kind SourceKind, filterName string) string {
 	}
 	if filterName == SoftwareFilterBT2390 {
 		return SourceParameters(kind) +
-			",tonemapx=tonemap=bt2390" +
+			",tonemapx=tonemap=bt2390" + toneMapPeakOption + dolbyVisionOption(kind) +
 			",zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p," + HDRMetadataRemovalFilter()
 	}
 	return SourceParameters(kind) +
@@ -626,26 +676,65 @@ func VAAPIFilter(kind SourceKind) string {
 	return SourceParameters(kind) + "," + vaapiToneMapFilter()
 }
 
-// QSVFilter builds the Intel HDR-to-SDR conversion graph. Intel's VAAPI/VPP
-// tone mapper can severely crush midtones on otherwise valid PQ sources, so
-// HDR frames take Jellyfin FFmpeg's GPU OpenCL path and return to the VAAPI
-// surface family before the existing QSV encoder interop. SDR base layers only
-// need color conversion and retain the cheaper VAAPI path.
-func QSVFilter(kind SourceKind) string {
+// IntelFilter builds the Intel HDR-to-SDR conversion graph that QSV and VAAPI
+// on an Intel GPU share, scaled to height (0 keeps the source size). Intel's
+// VAAPI/VPP tone mapper crushes PQ midtones and turns HLG teal and inverted
+// (#2414), so HDR frames take Jellyfin FFmpeg's GPU OpenCL path and return to
+// VAAPI surfaces, which the VAAPI encoder takes directly and QSV takes through
+// QSVInteropFilter. SDR base layers only need color conversion and retain the
+// cheaper VAAPI path.
+//
+// HDR frames are scaled before tone mapping, never after. A VAAPI filter that
+// reads the OpenCL output releases the surface back to the tone mapper's pool
+// without waiting for the GPU, and on Intel Arrow Lake (iHD 26.3, jellyfin-ffmpeg
+// 8.1.3) the scaled frames then came out with blocks of the next frame during
+// motion, although the OpenCL interop should order that access itself. Passing
+// the surface straight to the encoder, which holds it until the encode
+// completes, avoids it.
+func IntelFilter(kind SourceKind, height int) string {
 	if IsSDRSource(kind) {
-		return VAAPIFilter(kind)
+		filter := VAAPIFilter(kind)
+		if height > 0 {
+			filter += ",scale_vaapi=w=-2:h=" + strconv.Itoa(height) + ":format=nv12"
+		}
+		return filter
 	}
-	return SourceParameters(kind) +
-		",scale_vaapi=format=p010" +
-		",hwmap=derive_device=opencl:mode=read" +
-		"," + openCLToneMapFilter() +
-		",hwmap=derive_device=vaapi:mode=write:reverse=1:extra_hw_frames=16,format=vaapi"
+	return IntelOpenCLToneMapFilter(kind, height) + "," + IntelOpenCLReturnFilter()
 }
 
-// openCLToneMapFilter matches Jellyfin's BT.2390 GPU recipe. A fixed 100-nit
-// SDR peak keeps output stable across sources while preserving PQ midtones.
-func openCLToneMapFilter() string {
-	return HardwareFilterOpenCL + "=format=nv12:p=bt709:t=bt709:m=bt709:tonemap=bt2390:peak=100:desat=0"
+// IntelOpenCLToneMapFilter is the HDR part of IntelFilter that ends with the
+// tone-mapped frame still on the OpenCL device, for graphs that composite onto
+// it there. IntelOpenCLReturnFilter then hands it back to VAAPI.
+func IntelOpenCLToneMapFilter(kind SourceKind, height int) string {
+	size := ""
+	if height > 0 {
+		size = "w=-2:h=" + strconv.Itoa(height) + ":"
+	}
+	return SourceParameters(kind) +
+		",scale_vaapi=" + size + "format=p010" +
+		",hwmap=derive_device=opencl:mode=read" +
+		"," + openCLToneMapFilter(kind)
+}
+
+// IntelOpenCLReturnFilter hands OpenCL frames back to VAAPI: the reverse hwmap
+// makes the filter before it render into VAAPI surfaces, so that filter must
+// allocate its output frames rather than pass its input through. Before a QSV
+// encode only QSVInteropFilter may follow it, and before a VAAPI encode no
+// VAAPI filter may.
+func IntelOpenCLReturnFilter() string {
+	return "hwmap=derive_device=vaapi:mode=write:reverse=1:extra_hw_frames=16,format=vaapi"
+}
+
+// toneMapPeakOption pins the source peak tonemapx and tonemap_opencl map to
+// SDR at 1000 nits (the option counts in tens of nits), so every source
+// converts on the same curve. Left unset, both filters read a Dolby Vision
+// frame's peak from its RPU instead, and a title mastered at 4000 nits comes
+// out about a third darker in the midtones.
+const toneMapPeakOption = ":peak=100"
+
+// openCLToneMapFilter matches Jellyfin's BT.2390 GPU recipe.
+func openCLToneMapFilter(kind SourceKind) string {
+	return HardwareFilterOpenCL + "=format=nv12:p=bt709:t=bt709:m=bt709:tonemap=bt2390" + toneMapPeakOption + ":desat=0" + dolbyVisionOption(kind)
 }
 
 // vaapiToneMapFilter returns the HDR luminance and color conversion stage.
@@ -658,10 +747,15 @@ func vaapiSDRFilter() string {
 	return "scale_vaapi=format=nv12:out_color_primaries=bt709:out_color_transfer=bt709:out_color_matrix=bt709:out_range=tv"
 }
 
-// CUDAFilter returns the CUDA HDR-to-SDR conversion stage with Dolby Vision
-// enhancement processing disabled so the validated base layer is used.
-func CUDAFilter() string {
-	return HardwareFilterCUDA + "=tonemap=bt2390:format=nv12:p=bt709:t=bt709:m=bt709:r=tv:apply_dovi=0"
+// CUDAFilter returns the CUDA HDR-to-SDR conversion stage. Dolby Vision
+// processing stays off so a standard base layer converts as validated, except
+// for SourceDolbyVision, whose base only the RPU can map.
+func CUDAFilter(kind SourceKind) string {
+	applyDolbyVision := "0"
+	if kind == SourceDolbyVision {
+		applyDolbyVision = "1"
+	}
+	return HardwareFilterCUDA + "=tonemap=bt2390:format=nv12:p=bt709:t=bt709:m=bt709:r=tv:apply_dovi=" + applyDolbyVision
 }
 
 // VideoToolboxFilter builds Apple's HDR-to-SDR pixel-transfer conversion.
@@ -705,6 +799,9 @@ func videoToolboxSurfacePixelFormat(sourceVideoBitDepth int) string {
 // QSV encoder surface. The extra scale_vaapi stage is required by Intel's
 // driver for real decoded HEVC frames even when tonemap_vaapi already emitted
 // NV12; omitting it leaves FFmpeg trying an unsupported software auto-scale.
+// After the OpenCL tone mapper its scale_vaapi must stay a passthrough, with
+// no size or color options, so no VAAPI filter reads the OpenCL output (see
+// IntelFilter).
 func QSVInteropFilter() string {
 	return "scale_vaapi=format=nv12,hwmap=derive_device=qsv:mode=read+write,format=qsv"
 }
@@ -712,7 +809,7 @@ func QSVInteropFilter() string {
 // qsvVAAPIInitDevice builds the Intel-specific VAAPI device declaration used
 // to derive a QSV encoding device.
 func qsvVAAPIInitDevice(device string) string {
-	return "vaapi=va:" + device + ",driver=iHD,kernel_driver=i915,vendor_id=0x8086"
+	return "vaapi=va:" + device + ",driver=iHD,kernel_driver=i915,vendor_id=" + intelPCIVendorID
 }
 
 // initHWDeviceFlag is FFmpeg's hardware-device declaration flag, shared by
@@ -732,6 +829,22 @@ func QSVInitDeviceArgs(device string) []string {
 // filter graph and encoder reference.
 func VAAPIInitDeviceArgs(alias, device string) []string {
 	return []string{initHWDeviceFlag, "vaapi=" + alias + ":" + device}
+}
+
+// VAAPIOpenCLInitArgs declares the OpenCL device a VAAPI graph derives from
+// the VAAPI device alias, when OpenCLToneMaps says the graph needs one.
+func VAAPIOpenCLInitArgs(alias, filter string, kind SourceKind) []string {
+	if !OpenCLToneMaps(filter, kind) {
+		return nil
+	}
+	return []string{initHWDeviceFlag, "opencl=ocl@" + alias}
+}
+
+// OpenCLToneMaps reports whether a recipe frozen with filter converts kind on
+// OpenCL. SDR bases convert on VAAPI alone, so they keep working on a host
+// without an OpenCL runtime.
+func OpenCLToneMaps(filter string, kind SourceKind) bool {
+	return filter == HardwareFilterOpenCL && !IsSDRSource(kind)
 }
 
 // HDRMetadataRemovalFilter removes side data that would otherwise incorrectly

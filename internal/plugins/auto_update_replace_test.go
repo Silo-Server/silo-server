@@ -10,7 +10,7 @@ import (
 func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 	installations := &fakeAutoUpdateInstallations{
 		list: []*Installation{
-			{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true},
+			{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.2.9", UpdatePolicy: "auto", Enabled: true},
 		},
 	}
 	host := &fakeAutoUpdateHost{}
@@ -19,20 +19,21 @@ func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 		entries: []CatalogEntry{
 			{
 				RepositoryID: 7,
+				RepoURL:      "https://github.com/Silo-Server/silo-plugin-metadata-tmdb",
 				Manifest: &pluginv1.PluginManifest{
 					PluginId: "silo.tmdb",
-					Version:  "1.1.0",
+					Version:  "1.2.10",
 				},
 			},
 		},
 		resolved: &ResolvedCatalogInstall{
 			RepositoryID: 7,
-			ArchiveURL:   "https://plugins.example.test/tmdb",
+			ArchiveURL:   "https://github.com/Silo-Server/silo-plugin-metadata-tmdb/releases/download/v1.2.10/plugin-linux-amd64",
 			Checksum:     "deadbeef",
 		},
 	}
 	service := NewAutoUpdateService(
-		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
+		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, URL: DefaultRepositoryURL, Enabled: true}}},
 		installations,
 		catalog,
 		installer,
@@ -62,59 +63,6 @@ func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 	}
 	if len(host.stopped) != 1 || host.stopped[0] != 41 {
 		t.Fatalf("stopped installations = %#v, want [41]", host.stopped)
-	}
-}
-
-func TestAutoUpdateServiceCheckMatchesRenamedRepositoryByStablePluginIdentity(t *testing.T) {
-	installations := &fakeAutoUpdateInstallations{
-		list: []*Installation{
-			{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true},
-		},
-	}
-	installer := &fakeAutoUpdateInstaller{}
-	catalog := &fakeAutoUpdateCatalog{
-		entries: []CatalogEntry{
-			{
-				RepositoryID: 7,
-				RepoURL:      "https://github.com/Silo-Server/silo-plugin-metadata-tmdb",
-				Manifest: &pluginv1.PluginManifest{
-					PluginId: "silo.tmdb",
-					Version:  "1.1.0",
-				},
-			},
-		},
-		resolved: &ResolvedCatalogInstall{
-			RepositoryID: 7,
-			ArchiveURL:   "https://github.com/Silo-Server/silo-plugin-metadata-tmdb/releases/download/v1.1.0/plugin-linux-amd64",
-			Checksum:     "deadbeef",
-		},
-	}
-	service := NewAutoUpdateService(
-		&fakeAutoUpdateRepositories{list: []*Repository{{
-			ID:      7,
-			URL:     DefaultRepositoryURL,
-			Enabled: true,
-		}}},
-		installations,
-		catalog,
-		installer,
-		&fakeAutoUpdateHost{},
-		nil,
-		nil,
-	)
-
-	summary, err := service.Check(context.Background(), AutoUpdateOptions{})
-	if err != nil {
-		t.Fatalf("Check() returned error: %v", err)
-	}
-	if summary.UpdatesApplied != 1 {
-		t.Fatalf("UpdatesApplied = %d, want 1", summary.UpdatesApplied)
-	}
-	if len(installer.replaceBinary) != 1 || installer.replaceBinary[0].existingID != 41 {
-		t.Fatalf("replace binary calls = %#v, want one in-place replacement for installation 41", installer.replaceBinary)
-	}
-	if len(installations.deletedIDs) != 0 {
-		t.Fatalf("deleted installation IDs = %#v, want none", installations.deletedIDs)
 	}
 }
 
@@ -196,34 +144,6 @@ func TestAutoUpdateServiceCheckFiresOnChangeAfterMutation(t *testing.T) {
 			t.Fatalf("onChange calls = %d, want 0", calls)
 		}
 	})
-
-	t.Run("nil onChange is safe after mutation", func(t *testing.T) {
-		installations := &fakeAutoUpdateInstallations{
-			list: []*Installation{{ID: 44, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}},
-		}
-		service := NewAutoUpdateService(
-			&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
-			installations,
-			&fakeAutoUpdateCatalog{
-				entries: []CatalogEntry{{
-					RepositoryID: 7,
-					Manifest:     &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: "1.1.0"},
-				}},
-				resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"},
-			},
-			&fakeAutoUpdateInstaller{},
-			&fakeAutoUpdateHost{},
-			nil,
-			nil,
-		)
-		summary, err := service.Check(context.Background(), AutoUpdateOptions{})
-		if err != nil {
-			t.Fatalf("Check() with nil onChange returned error: %v", err)
-		}
-		if summary.UpdatesApplied != 1 {
-			t.Fatalf("UpdatesApplied = %d, want 1", summary.UpdatesApplied)
-		}
-	})
 }
 
 func TestCompareVersions(t *testing.T) {
@@ -245,48 +165,6 @@ func TestCompareVersions(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("compareVersions(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
 		}
-	}
-}
-
-func TestAutoUpdateMultiDigitVersion(t *testing.T) {
-	installations := &fakeAutoUpdateInstallations{
-		list: []*Installation{{ID: 50, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.2.9", UpdatePolicy: "auto", Enabled: true}},
-	}
-	host := &fakeAutoUpdateHost{}
-	installer := &fakeAutoUpdateInstaller{}
-	catalog := &fakeAutoUpdateCatalog{
-		entries: []CatalogEntry{{
-			RepositoryID: 7,
-			Manifest: &pluginv1.PluginManifest{
-				PluginId: "silo.tmdb",
-				Version:  "1.2.10",
-			},
-		}},
-		resolved: &ResolvedCatalogInstall{
-			RepositoryID: 7,
-			ArchiveURL:   "https://plugins.example.test/tmdb",
-			Checksum:     "deadbeef",
-		},
-	}
-	service := NewAutoUpdateService(
-		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
-		installations,
-		catalog,
-		installer,
-		host,
-		nil,
-		nil,
-	)
-
-	summary, err := service.Check(context.Background(), AutoUpdateOptions{
-		SeedDefaultRepository: true,
-		AutoInstallDefaults:   false,
-	})
-	if err != nil {
-		t.Fatalf("Check() returned error: %v", err)
-	}
-	if summary.UpdatesApplied != 1 {
-		t.Fatalf("UpdatesApplied = %d, want 1 (1.2.10 should be newer than 1.2.9)", summary.UpdatesApplied)
 	}
 }
 

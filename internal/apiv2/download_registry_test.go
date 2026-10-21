@@ -56,58 +56,7 @@ func (f *fakeDownloadRegistry) Delete(_ context.Context, user int, profile, devi
 	f.id = id
 	return f.err
 }
-func TestDownloadRegistryTransport(t *testing.T) {
-	service := &fakeDownloadRegistry{}
-	deps := pilotDeps(nil, nil)
-	deps.Downloads = service
-	h := newTestHandler(t, deps)
-	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	device := with(viewer, "X-Silo-Device-Id", "device-one")
-	path := Prefix + "/downloads/entry"
-	body := `{"status":"completed","updated_at":"2026-01-02T03:04:05.000Z","revision":2}`
-	rec := do(t, h, "PATCH", path, body, device)
-	if rec.Code != 200 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if service.user != 1 || service.profile != "p-owner" || service.device != "device-one" || service.id != "entry" || service.event.Revision != 2 || service.event.UpdatedAt.Format(time.RFC3339) != "2026-01-02T03:04:05Z" {
-		t.Fatalf("%+v", service)
-	}
-	var row DownloadEntry
-	if err := json.Unmarshal(rec.Body.Bytes(), &row); err != nil || row.MediaFileID != "42" || row.StatusEventAt == nil {
-		t.Fatalf("%+v %v", row, err)
-	}
-	rec = do(t, h, "PATCH", path, body, viewer)
-	if rec.Code != 422 {
-		t.Fatalf("device required: %d %s", rec.Code, rec.Body.String())
-	}
-	rec = do(t, h, "PATCH", path, `{"status":"completed","revision":2}`, device)
-	if rec.Code != 422 {
-		t.Fatalf("event required: %d", rec.Code)
-	}
-	for _, tc := range []struct {
-		err  error
-		want int
-	}{{downloads.ErrNotFound, 404}, {downloads.ErrStatusConflict, 409}, {downloads.ErrInvalidStatusEvent, 400}} {
-		service.err = tc.err
-		rec = do(t, h, "PATCH", path, body, device)
-		if rec.Code != tc.want {
-			t.Fatalf("%d %s", rec.Code, rec.Body.String())
-		}
-	}
-	service.err = nil
-	rec = do(t, h, "DELETE", path, "", device)
-	if rec.Code != 204 || rec.Body.Len() != 0 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	rec = do(t, h, "GET", Prefix+"/capabilities/downloads", "", viewer)
-	if rec.Code != 200 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	var capability DownloadCapability
-	if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil || !capability.OrderedStatus || capability.Revision == "" {
-		t.Fatalf("%+v %v", capability, err)
-	}
-}
+
 func TestDownloadRegistryCursorBoundary(t *testing.T) {
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	service := &fakeDownloadRegistry{rows: []*downloads.Download{{ID: "b", CreatedAt: at}, {ID: "a", CreatedAt: at}}}

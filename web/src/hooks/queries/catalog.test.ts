@@ -3,13 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import queryCatalogItemsOk from "../../../../contracts/api/v2/fixtures/query_catalog_items_ok.json";
 
 import getCatalogFiltersOk from "../../../../contracts/api/v2/fixtures/get_catalog_filters_ok.json";
-import searchCatalogFacetOk from "../../../../contracts/api/v2/fixtures/search_catalog_facet_ok.json";
 
 import { setProfileId } from "@/api/client";
 import { createEmptyQueryDefinition } from "@/api/types";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 
-import { fetchCatalogFacetSearch, fetchCatalogFilters, fetchCatalogPage } from "./catalog";
+import {
+  createCatalogSearchState,
+  fetchCatalogFilters,
+  fetchCatalogItems,
+  fetchCatalogPage,
+  MAX_CATALOG_PAGE,
+} from "./catalog";
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
 
@@ -33,25 +38,6 @@ describe("catalog browse and facets on the v2 contract", () => {
     vi.unstubAllGlobals();
   });
 
-  it("fetches query-source facets and flattens the technical block", async () => {
-    const fetchMock = stubFetch(getCatalogFiltersOk);
-
-    const filters = await fetchCatalogFilters({
-      source: "query",
-      query_definition: createEmptyQueryDefinition(),
-    });
-
-    const url = requestedUrl(fetchMock);
-    expect(url.pathname).toBe("/api/v2/catalog/filters");
-    expect(url.searchParams.get("source")).toBe("query");
-    expect(url.searchParams.has("skip_technical")).toBe(false);
-    expect(filters.genres).toEqual(["Crime"]);
-    expect(filters.authors).toEqual(["Frank Herbert"]);
-    expect(filters.resolutions).toEqual(["2160p"]);
-    expect(filters.subtitle_languages).toEqual(["en"]);
-    expect(filters).not.toHaveProperty("technical");
-  });
-
   it("asks for lightweight facets with skip_technical and never forwards the overlay", async () => {
     const fetchMock = stubFetch({ ...getCatalogFiltersOk, technical: undefined });
 
@@ -71,24 +57,6 @@ describe("catalog browse and facets on the v2 contract", () => {
     expect(url.searchParams.get("library_id")).toBe("7");
     expect(url.searchParams.has("q")).toBe(false);
     expect(url.searchParams.has("sort")).toBe(false);
-  });
-
-  it("searches one facet by prefix", async () => {
-    const fetchMock = stubFetch(searchCatalogFacetOk);
-
-    const result = await fetchCatalogFacetSearch(
-      { source: "query", query_definition: createEmptyQueryDefinition() },
-      "author",
-      "fra",
-      10,
-    );
-
-    const url = requestedUrl(fetchMock);
-    expect(url.pathname).toBe("/api/v2/catalog/filters/search");
-    expect(url.searchParams.get("facet")).toBe("author");
-    expect(url.searchParams.get("q")).toBe("fra");
-    expect(url.searchParams.get("limit")).toBe("10");
-    expect(result).toEqual({ matches: ["Frank Herbert"], has_more: true });
   });
 
   it("posts structured filters, query cap and explicit sorting without bracket parameters", async () => {
@@ -124,6 +92,43 @@ describe("catalog browse and facets on the v2 contract", () => {
     expect(result.items[0]?.rating_imdb).toBeNull();
   });
 
+  it("reads a collection's items a page at a time within the query's limit maximum", async () => {
+    const item = queryCatalogItemsOk.items[0];
+    const pageOf = (n: number, offset: number, next?: string) => ({
+      ...queryCatalogItemsOk,
+      items: Array.from({ length: n }, (_, i) => ({ ...item, content_id: `c-${offset + i}` })),
+      page: { has_more: Boolean(next), next_cursor: next ?? "" },
+    });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(pageOf(100, 0, "p2")))
+      .mockResolvedValueOnce(jsonResponse(pageOf(100, 100, "p3")))
+      .mockResolvedValueOnce(jsonResponse(pageOf(30, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+    const state = createCatalogSearchState("library_collection", { collection_id: "c1" });
+
+    const all = await fetchCatalogItems(state);
+    const bodies = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+    expect(all).toHaveLength(230);
+    expect(bodies.map((body) => body.limit)).toEqual([100, 100, 100]);
+    expect(bodies.map((body) => body.cursor)).toEqual([undefined, "p2", "p3"]);
+    expect(bodies.every((body) => body.limit <= MAX_CATALOG_PAGE)).toBe(true);
+
+    // A capped read keeps one limit for every page, since the cursor is bound
+    // to it, even when a page comes back short with more to follow.
+    fetchMock.mockReset();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(pageOf(50, 0, "p2")))
+      .mockResolvedValueOnce(jsonResponse(pageOf(100, 50, "p3")))
+      .mockResolvedValueOnce(jsonResponse(pageOf(100, 150, "p4")));
+    const capped = await fetchCatalogItems(state, { max: 150 });
+    expect(capped).toHaveLength(150);
+    expect(capped.at(-1)?.content_id).toBe("c-149");
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).limit)).toEqual([
+      100, 100,
+    ]);
+  });
+
   it.each([undefined, ""])(
     "jumps using the opaque seed when the continuation is %s and skips the total",
     async (nextCursor) => {
@@ -152,7 +157,16 @@ describe("catalog browse and facets on the v2 contract", () => {
       window_cursor: "opaque-window",
       page: { has_more: true, next_cursor: "next-boundary" },
     });
-    const signal = new AbortController().signal;
+    const controller = new AbortController();
+    const signal = controller.signal;
+    // The caller's abort reaches the in-flight request's signal.
+    let forwarded: boolean | undefined;
+    const respond = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementationOnce(async (input, init) => {
+      controller.abort();
+      forwarded = init?.signal?.aborted;
+      return respond(input, init);
+    });
     const result = await fetchCatalogPage(
       { source: "query", q: "Heat", query_definition: createEmptyQueryDefinition() },
       60,
@@ -165,7 +179,7 @@ describe("catalog browse and facets on the v2 contract", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body).toMatchObject({ cursor: "previous-boundary", skip_total: true });
     expect(body).not.toHaveProperty("seek");
-    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBe(signal);
+    expect(forwarded).toBe(true);
     expect(result).toMatchObject({
       snapshot: "opaque-window",
       next_cursor: "next-boundary",
@@ -216,27 +230,6 @@ describe("catalog browse and facets on the v2 contract", () => {
       section_id: "recent",
       limit: 60,
     });
-  });
-
-  it("preserves provider search diagnostics", async () => {
-    const diagnostics = {
-      provider: "postgres",
-      mode: "keyword",
-      semantic_used: false,
-      fallback_reason: "semantic_unavailable",
-      index_pending_updates: 4,
-    };
-    stubFetch({
-      ...queryCatalogItemsOk,
-      window_cursor: "opaque-window",
-      search_diagnostics: diagnostics,
-    });
-    const result = await fetchCatalogPage(
-      { source: "query", q: "Dune", query_definition: createEmptyQueryDefinition() },
-      60,
-      0,
-    );
-    expect(result.search_diagnostics).toEqual(diagnostics);
   });
 
   it("rejects seeks outside the server bound before dispatch", async () => {

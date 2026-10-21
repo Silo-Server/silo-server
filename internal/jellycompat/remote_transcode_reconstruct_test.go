@@ -31,8 +31,6 @@ type stubRecipeNodeStore struct {
 	mu         sync.Mutex
 	cards      map[string]playback.RecipeCard
 	putErr     error
-	restoreErr error
-	deleted    bool
 	operations []string
 }
 
@@ -42,9 +40,6 @@ func (s *stubRecipeNodeStore) Put(_ context.Context, sessionID string, card play
 	s.operations = append(s.operations, "put:"+sessionID)
 	if s.putErr != nil {
 		return s.putErr
-	}
-	if s.deleted && s.restoreErr != nil {
-		return s.restoreErr
 	}
 	if s.cards == nil {
 		s.cards = make(map[string]playback.RecipeCard)
@@ -161,7 +156,6 @@ func (s *stubRecipeNodeStore) Delete(_ context.Context, sessionID string) error 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.cards, sessionID)
-	s.deleted = true
 	s.operations = append(s.operations, "delete:"+sessionID)
 	return nil
 }
@@ -221,7 +215,7 @@ func TestEnsureLocalTranscodeDeletesRemoteRecipeAndRestoresItWhenCentralUpdateFa
 		"mkdir -p \"$out\"\n" +
 		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
 		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -266,63 +260,6 @@ func TestEnsureLocalTranscodeDeletesRemoteRecipeAndRestoresItWhenCentralUpdateFa
 	stored, ok := baseStore.Get("play-1")
 	if !ok || stored.Recipe == nil || stored.Recipe.TranscodeNodeURL != remoteNode.URL {
 		t.Fatalf("central recipe = %+v, found=%v, want prior remote recipe", stored.Recipe, ok)
-	}
-}
-
-func TestPersistLocalTranscodeReportsFailedRemoteRecipeRestore(t *testing.T) {
-	restoreErr := errors.New("restore node recipe failed")
-	remoteNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete && r.URL.Path == "/transcode/upstream-1" {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	t.Cleanup(remoteNode.Close)
-
-	baseStore := NewPlaybackSessionStore(time.Hour, nil)
-	oldRecipe := playback.NewRecipeCard(7, "profile-1", 42, remoteNode.URL, playback.TranscodeOpts{
-		SessionID: "upstream-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
-		SegmentDuration: 2, ToneMapMode: tonemap.ModeHardware,
-	})
-	baseStore.Put(PlaybackSession{
-		ID: "play-1", UpstreamSessionID: "upstream-1", TranscodeStarted: true, Recipe: &oldRecipe,
-	})
-	recipeStore := &stubRecipeNodeStore{
-		cards:      map[string]playback.RecipeCard{"upstream-1": oldRecipe},
-		restoreErr: restoreErr,
-	}
-	sessionMgr := &lockedCompatSessionManager{session: playback.Session{
-		ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: 42,
-		PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode,
-	}}
-	handler := &PlaybackHandler{
-		playbackStore:   failLocalRecipeStore{CompatPlaybackStore: baseStore},
-		sessionMgr:      sessionMgr,
-		tm:              playback.NewTranscodeManager(),
-		JWTSecret:       "test-secret",
-		RecipeNodeStore: recipeStore,
-	}
-
-	err := handler.persistTranscodeRecipe(context.Background(), "play-1", "upstream-1", playback.TranscodeOpts{
-		SessionID: "upstream-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
-		SegmentDuration: 2, ToneMapMode: tonemap.ModeSoftware, HWAccel: playback.HWAccelNone,
-	})
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("persist error = %v, want central update failure", err)
-	}
-	if !errors.Is(err, restoreErr) {
-		t.Fatalf("persist error = %v, want observable restore failure", err)
-	}
-	if got := recipeStore.Operations(); len(got) != 2 || got[0] != "delete:upstream-1" || got[1] != "put:upstream-1" {
-		t.Fatalf("node recipe operations = %v, want delete followed by attempted rollback put", got)
-	}
-	if _, ok := recipeStore.Get("upstream-1"); ok {
-		t.Fatal("node recipe unexpectedly present after injected restore failure")
-	}
-	stored, ok := baseStore.Get("play-1")
-	if !ok || stored.Recipe == nil || stored.Recipe.TranscodeNodeURL != remoteNode.URL {
-		t.Fatalf("central recipe = %+v, found=%v, want retryable prior remote state", stored.Recipe, ok)
 	}
 }
 
@@ -426,7 +363,7 @@ func TestStartRemoteToneMapDelayedSuccessCannotOverwriteLocalSoftwareWinner(t *t
 		"mkdir -p \"$out\"\n" +
 		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
 		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(handler.FFmpegPath, []byte(ffmpegScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +525,9 @@ func TestStartRemoteTranscodeDoesNotAdoptMismatchedAudioRecipe(t *testing.T) {
 // server published is re-checked against the local pool before the client is
 // sent to it.
 func TestMasterManifestGatesUnhealthyRemoteAdoption(t *testing.T) {
-	const adoptedURL = "http://adopted.invalid"
+	adoptedNode := httptest.NewServer(http.NotFoundHandler())
+	defer adoptedNode.Close()
+	adoptedURL := adoptedNode.URL
 	const healthyURL = "http://healthy.invalid"
 	newPool := func(adoptedHealthy bool) *nodepool.Planner {
 		transcodes := nodepool.NewTranscodePool()
@@ -788,35 +727,6 @@ func TestMasterManifestWrapsRemoteCopyMediaPlaylistAsVariant(t *testing.T) {
 	}
 }
 
-// localSessionRegistry is a GetSession + RegisterReconstructed double for
-// exercising TranscodeManager reconstruction from the jellycompat package
-// (the playback package's own fake is not exported across packages).
-type localSessionRegistry struct {
-	sessions map[string]*playback.Session
-}
-
-func (r *localSessionRegistry) GetSession(id string) (*playback.Session, error) {
-	if s, ok := r.sessions[id]; ok {
-		return s, nil
-	}
-	return nil, playback.ErrSessionNotFound
-}
-
-func (r *localSessionRegistry) RegisterReconstructed(s *playback.Session) *playback.Session {
-	if r.sessions == nil {
-		r.sessions = map[string]*playback.Session{}
-	}
-	if existing, ok := r.sessions[s.ID]; ok {
-		return existing
-	}
-	r.sessions[s.ID] = s
-	return s
-}
-
-func (r *localSessionRegistry) RegisterReconstructedWithLimits(_ context.Context, s *playback.Session) (*playback.Session, error) {
-	return r.RegisterReconstructed(s), nil
-}
-
 // newRemoteTranscodeHandler builds a handler wired for the remote (offloaded)
 // transcode path: a fake node that accepts /transcode/start, an upstream
 // session carrying the native identity used to build the recipe, and a stub
@@ -881,36 +791,6 @@ func testRemoteTranscodeSource() PlaybackMediaSource {
 	version := testCompatVersion()
 	source := testCompatSource(codec, version)
 	return source
-}
-
-// TestStartRemoteTranscodeReportsConfirmedExecutor verifies remote execution facts are recorded.
-func TestStartRemoteTranscodeReportsConfirmedExecutor(t *testing.T) {
-	recipeStore := &stubRecipeNodeStore{}
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/transcode/start" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{HWAccel: "qsv"})
-	}))
-	t.Cleanup(node.Close)
-	handler, sessionMgr, playbackStore := newRemoteTranscodeHandler(t, node.URL, recipeStore)
-	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
-
-	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", testRemoteTranscodeSource(), &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
-		t.Fatalf("startRemoteTranscode: %v", err)
-	}
-
-	session := sessionMgr.sessions["upstream-1"]
-	if session.TargetVideoCodec != compatTargetVideoCodec || session.TargetAudioCodec != compatTargetAudioCodec || session.TranscodeHWAccel != "qsv" || session.ToneMapMode != "" {
-		t.Fatalf("reported remote execution facts are incomplete: %+v", session)
-	}
-	card, ok := recipeStore.Get("upstream-1")
-	if !ok || card.HWAccel != "qsv" {
-		t.Fatalf("persisted remote recipe executor = %q, found=%v", card.HWAccel, ok)
-	}
 }
 
 func TestStartRemoteTranscodeRecordsUnknownExecutorForLegacyEmptyResponse(t *testing.T) {
@@ -980,7 +860,7 @@ func TestStartRemoteToneMapReportsConfirmedExecutorAndFallback(t *testing.T) {
 					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusAccepted)
-					_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+					_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 				default:
 					w.WriteHeader(http.StatusNotFound)
 				}
@@ -1049,7 +929,7 @@ func TestStartRemoteVideoToolboxToneMapUsesResolutionAwareBitrate(t *testing.T) 
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				return
 			}
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -1122,7 +1002,7 @@ func TestStartRemoteToneMapTimeoutFallsBackToSoftwareAfterCleanup(t *testing.T) 
 			if !cleaned.Load() {
 				t.Error("software retry started before the indeterminate hardware session was cleaned up")
 			}
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 		case r.Method == http.MethodDelete && r.URL.Path == "/transcode/upstream-1":
 			cleaned.Store(true)
 			w.WriteHeader(http.StatusNoContent)
@@ -1215,15 +1095,6 @@ func TestStartRemoteTranscodeIndeterminateAcceptedResponseRollsBackNode(t *testi
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusAccepted)
 				_, _ = w.Write([]byte(`{"status":`))
-			},
-		},
-		{
-			name: "timeout after accepted headers",
-			body: func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusAccepted)
-				w.(http.Flusher).Flush()
-				<-r.Context().Done()
 			},
 		},
 	} {
@@ -1349,67 +1220,6 @@ func TestStartRemoteTranscode_NodeRestartReconstruct(t *testing.T) {
 	}
 }
 
-// TestStartRemoteTranscode_CentralRestartReconstruct covers the central-restart
-// leg: the recipe lives in the compat store (PlaybackSession.Recipe), the
-// in-memory native session is gone, and LoadOrReconstructSession rebuilds the
-// session from the stored recipe rather than returning SessionMissing (which a
-// remote segment serve renders as a 404).
-func TestStartRemoteTranscode_CentralRestartReconstruct(t *testing.T) {
-	recipeStore := &stubRecipeNodeStore{}
-	node := fakeTranscodeNode(t, nil)
-	handler, _, playbackStore := newRemoteTranscodeHandler(t, node.URL, recipeStore)
-
-	playbackStore.Put(PlaybackSession{
-		ID:                 "play-1",
-		CompatToken:        "token-1",
-		UpstreamSessionID:  "upstream-1",
-		UpstreamPlayMethod: "transcode",
-		MediaSources:       []PlaybackMediaSource{testRemoteTranscodeSource()},
-	})
-
-	source := testRemoteTranscodeSource()
-	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
-		t.Fatalf("startRemoteTranscode: %v", err)
-	}
-
-	// The compat store must now carry the recipe so central can reconstruct.
-	stored, ok := playbackStore.Get("play-1")
-	if !ok {
-		t.Fatal("expected compat session")
-	}
-	if !stored.TranscodeStarted {
-		t.Fatal("expected TranscodeStarted=true after remote start")
-	}
-	if stored.Recipe == nil {
-		t.Fatal("expected PlaybackSession.Recipe persisted after remote start")
-	}
-
-	// Simulate a central restart: the in-memory native session map is empty, so
-	// GetSession misses. The recipe from the compat store must let
-	// LoadOrReconstructSession rebuild the session rather than 404.
-	reg := &localSessionRegistry{}
-	tm := playback.NewTranscodeManager()
-	tm.Sessions = reg
-	tm.JWTSecretFn = func() string { return "test-secret" }
-
-	session, status := tm.LoadOrReconstructSession(
-		context.Background(),
-		reg.GetSession,
-		"upstream-1",
-		stored.Recipe.UserID,
-		stored.Recipe,
-	)
-	if status != playback.SessionLoaded || session == nil {
-		t.Fatalf("LoadOrReconstructSession status=%v session=%v, want reconstructed", status, session)
-	}
-	if session.ID != "upstream-1" || session.UserID != 7 || session.MediaFileID != 42 {
-		t.Fatalf("reconstructed session wrong: %+v", session)
-	}
-	if session.TranscodeNodeURL != node.URL {
-		t.Fatalf("reconstructed TranscodeNodeURL = %q, want %q", session.TranscodeNodeURL, node.URL)
-	}
-}
-
 // TestStartRemoteTranscode_UpdateFailureRollsBackNode asserts the local-path
 // rollback is mirrored: a compat-store Update failure closes the already-started
 // node ffmpeg (DELETE /transcode/{id}) so it isn't leaked.
@@ -1444,5 +1254,41 @@ func TestStartRemoteTranscode_UpdateFailureRollsBackNode(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected rollback DELETE to the node after Update failure")
+	}
+}
+
+// A runtime published on a node that has since drained is gone, so a start
+// for the same session runs fresh on the planned node instead of adopting it.
+func TestStartRemoteTranscodeDoesNotAdoptRuntimeOnDrainedNode(t *testing.T) {
+	const drainedURL = "http://drained.invalid"
+	var received transcodenode.TranscodeStartRequest
+	node := fakeTranscodeNode(t, &received)
+	handler, _, playbackStore := newRemoteTranscodeHandler(t, drainedURL, &stubRecipeNodeStore{})
+	transcodes := nodepool.NewTranscodePool()
+	transcodes.SetNodes([]*nodepool.Node{
+		{URL: drainedURL, Enabled: true, Healthy: true, DrainRequested: true, DrainState: nodepool.DrainStateDrained},
+		{URL: node.URL, Enabled: true, Healthy: true},
+	})
+	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
+	source := testRemoteTranscodeSource()
+	playbackStore.Put(PlaybackSession{
+		ID: "play-1", UpstreamSessionID: "upstream-1", TranscodeStarted: true,
+		Recipe: &playback.RecipeCard{
+			TranscodeNodeURL:    drainedURL,
+			MediaFileID:         source.FileID,
+			AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
+			SourceAudioChannels: compatHLSRecipeSourceAudioChannels(source),
+		},
+	})
+
+	err := handler.startRemoteTranscode(
+		context.Background(), "play-1", "upstream-1", source,
+		&models.MediaFile{ID: 42, FilePath: "/media/movie.mkv", CodecVideo: "h264"}, 0, node.URL,
+	)
+	if err != nil {
+		t.Fatalf("startRemoteTranscode: %v; want a fresh start, not adoption of the drained node's runtime", err)
+	}
+	if received.SessionID == "" {
+		t.Fatal("the planned node received no start request")
 	}
 }

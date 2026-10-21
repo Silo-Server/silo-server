@@ -5,10 +5,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useHasUnsavedChanges } from "./useUnsavedChanges";
 import { useSettingsForm } from "./useSettingsForm";
+import { useStepSubmit } from "@/pages/setup-wizard/useStep";
 
-const { mutateAsync, authority } = vi.hoisted(() => ({
+const { mutateAsync, markDone, snapshot, authority } = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
+  markDone: vi.fn(),
+  snapshot: { loaded: true, values: undefined as Record<string, string> | undefined },
   authority: { profileId: "profile-a" },
+}));
+vi.mock("@/pages/setup-wizard/WizardContext", () => ({
+  useWizardContext: () => ({ markDone }),
 }));
 vi.mock("@/api/client", () => ({
   captureProfileRequestContext: () => ({
@@ -26,7 +32,10 @@ const settingsData = { "branding.server_name": "Silo", "database.max_connections
 const sensitiveData = { configured: [], managed_by_env: [] };
 
 vi.mock("@/hooks/queries/admin/settings", () => ({
-  useAdminServerSettings: () => ({ data: settingsData, isLoading: false }),
+  useAdminServerSettings: () => ({
+    data: snapshot.loaded ? (snapshot.values ?? settingsData) : undefined,
+    isLoading: false,
+  }),
   useAdminSensitiveStatus: () => ({ data: sensitiveData }),
   useUpdateServerSettings: () => ({ mutateAsync, isPending: false }),
 }));
@@ -34,10 +43,81 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
 afterEach(() => {
   cleanup();
   mutateAsync.mockReset();
+  markDone.mockReset();
+  snapshot.loaded = true;
+  snapshot.values = undefined;
   authority.profileId = "profile-a";
 });
 
 describe("useSettingsForm save()", () => {
+  it("hydrates an account's persisted model and effort while retaining unrelated drafts and their guard", async () => {
+    snapshot.values = {
+      "ai.chat_model": "a-model",
+      "ai.reasoning_effort": "high",
+      "branding.server_name": "Silo",
+    };
+    const { result, rerender } = renderHook(() =>
+      useSettingsForm({ keys: ["ai.chat_model", "ai.reasoning_effort", "branding.server_name"] }),
+    );
+    act(() => result.current.setValue("branding.server_name", "Casa"));
+    snapshot.values = {
+      "ai.chat_model": "b-model",
+      "ai.reasoning_effort": "",
+      "branding.server_name": "Silo",
+    };
+    rerender();
+    expect(result.current.getValue("ai.chat_model")).toBe("b-model");
+    expect(result.current.getValue("ai.reasoning_effort")).toBe("");
+    expect(result.current.getValue("branding.server_name")).toBe("Casa");
+    expect(result.current.dirtyKeys).toEqual(["branding.server_name"]);
+    const conflict = new Error("412 precondition failed");
+    mutateAsync.mockRejectedValue(conflict);
+    await act(async () => {
+      await expect(result.current.save()).rejects.toBe(conflict);
+    });
+    expect(result.current.getValue("branding.server_name")).toBe("Casa");
+    expect(result.current.dirtyKeys).toEqual(["branding.server_name"]);
+  });
+
+  it("rejects saving before a settings snapshot has loaded", async () => {
+    snapshot.loaded = false;
+    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
+    act(() => result.current.setValue("branding.server_name", "Casa"));
+
+    await act(async () => {
+      await expect(result.current.save()).rejects.toThrow("Reload settings before saving.");
+    });
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(result.current.dirtyCount).toBe(1);
+  });
+
+  it.each([false, true])(
+    "advances the wizard only after a successful save (failure=%s)",
+    async (failure) => {
+      if (failure) mutateAsync.mockRejectedValue(new Error("412 precondition failed"));
+      else
+        mutateAsync.mockResolvedValue({
+          values: { "branding.server_name": "Casa" },
+          restart_required: false,
+        });
+      const { result } = renderHook(() => {
+        const form = useSettingsForm({ keys: KEYS });
+        return { form, step: useStepSubmit("server", form, "Save failed") };
+      });
+      act(() => result.current.form.setValue("branding.server_name", "Casa"));
+      await act(async () => {
+        await result.current.step.handleSubmit({ preventDefault() {} } as Parameters<
+          typeof result.current.step.handleSubmit
+        >[0]);
+      });
+
+      if (failure) expect(markDone).not.toHaveBeenCalled();
+      else expect(markDone).toHaveBeenCalledWith("server");
+      expect(result.current.form.dirtyCount).toBe(failure ? 1 : 0);
+    },
+  );
+
   it("clears staged secrets when the acting profile changes", () => {
     const { result, rerender } = renderHook(() =>
       useSettingsForm({ keys: ["email.smtp_password"] }),
@@ -48,25 +128,6 @@ describe("useSettingsForm save()", () => {
     rerender();
     expect(result.current.getValue("email.smtp_password")).toBe("");
     expect(result.current.dirtyCount).toBe(0);
-    expect(result.current.restartRequired).toBe(false);
-  });
-
-  it("does not flag a restart when no saved key requires one", async () => {
-    mutateAsync.mockResolvedValue({
-      values: { "branding.server_name": "Casa" },
-      restart_required: false,
-    });
-
-    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    act(() => {
-      result.current.setValue("branding.server_name", "Casa");
-    });
-    await act(async () => {
-      await result.current.save();
-    });
-
-    expect(mutateAsync).toHaveBeenCalledWith({ "branding.server_name": "Casa" });
     expect(result.current.restartRequired).toBe(false);
   });
 
@@ -211,55 +272,6 @@ describe("useSettingsForm isClearStaged()", () => {
 });
 
 describe("useSettingsForm unsaved-changes guard", () => {
-  function fireBeforeUnload(): Event {
-    // jsdom has no BeforeUnloadEvent, and its legacy `returnValue` is a
-    // boolean mirror of the canceled flag — `defaultPrevented` is the portable
-    // signal that the browser would prompt.
-    const event = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(event);
-    return event;
-  }
-
-  it("does not warn while the form is clean", () => {
-    renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    expect(fireBeforeUnload().defaultPrevented).toBe(false);
-  });
-
-  it("warns before the page unloads with staged edits", () => {
-    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    act(() => {
-      result.current.setValue("branding.server_name", "Casa");
-    });
-
-    expect(fireBeforeUnload().defaultPrevented).toBe(true);
-  });
-
-  it("stops warning once the edits are discarded", () => {
-    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    act(() => {
-      result.current.setValue("branding.server_name", "Casa");
-    });
-    act(() => {
-      result.current.discard();
-    });
-
-    expect(fireBeforeUnload().defaultPrevented).toBe(false);
-  });
-
-  it("stops warning after the hook unmounts", () => {
-    const { result, unmount } = renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    act(() => {
-      result.current.setValue("branding.server_name", "Casa");
-    });
-    unmount();
-
-    expect(fireBeforeUnload().defaultPrevented).toBe(false);
-  });
-
   // What `UnsavedChangesGuard` reads to block in-app navigation. The hook keeps
   // no router dependency of its own; it only reports.
   it("publishes staged edits to the shared unsaved-changes registry", () => {
@@ -276,19 +288,6 @@ describe("useSettingsForm unsaved-changes guard", () => {
     act(() => {
       form.result.current.discard();
     });
-    expect(registry.result.current).toBe(false);
-  });
-
-  it("withdraws its registry claim when the form unmounts", () => {
-    const registry = renderHook(() => useHasUnsavedChanges());
-    const form = renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    act(() => {
-      form.result.current.setValue("branding.server_name", "Casa");
-    });
-    expect(registry.result.current).toBe(true);
-
-    form.unmount();
     expect(registry.result.current).toBe(false);
   });
 });

@@ -96,6 +96,23 @@ func CompatibleTag(value string) string {
 	return CanonicalTag(value)
 }
 
+// RegisteredTag is CompatibleTag limited to tags whose primary language subtag
+// is registered, for reading a language out of free-form names. Words that are
+// merely shaped like a language code, such as "cc" or "ai" in a file name,
+// return "". The registry includes every ISO 639-3 code, so many three-letter
+// words ("sub", "dub") still pass.
+func RegisteredTag(value string) string {
+	tag := CompatibleTag(value)
+	primary, _, _ := strings.Cut(tag, "-")
+	if primary == "" {
+		return ""
+	}
+	if _, err := language.ParseBase(primary); err != nil {
+		return ""
+	}
+	return tag
+}
+
 // bibliographicCodes holds the ISO 639-2/B codes that differ from the 639-2/T
 // form. Media filenames and older tags use either spelling.
 var bibliographicCodes = map[string]string{
@@ -212,9 +229,11 @@ func CanonicalCountry(value string) string {
 	return region.String()
 }
 
-// CanonicalCountries returns a copy of values with each entry canonicalized
-// and empties dropped. Preserves nil so callers can keep the SQL NULL
-// distinction from an empty array.
+// CanonicalCountries returns a copy of values with each entry canonicalized,
+// empties dropped, and repeats removed (first occurrence wins). Providers
+// spell the same country differently (TMDB "US", TVDB "usa"), so two codes
+// that differ before canonicalization can collapse to one. Preserves nil so
+// callers can keep the SQL NULL distinction from an empty array.
 func CanonicalCountries(values []string) []string {
 	if values == nil {
 		return nil
@@ -225,6 +244,26 @@ func CanonicalCountries(values []string) []string {
 		if c != "" {
 			out = append(out, c)
 		}
+	}
+	return UniqueCountries(out)
+}
+
+// UniqueCountries returns values with exact repeats removed, keeping the
+// first occurrence's position. It does not canonicalize, so read paths can
+// clean rows stored with duplicate codes without rewriting values an admin
+// entered by hand. Preserves nil.
+func UniqueCountries(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
 	}
 	return out
 }

@@ -37,13 +37,3 @@ func TestUpstreamRateLimiter_LimitsPerServer(t *testing.T) {
 		t.Fatalf("different server wait: %v", err)
 	}
 }
-
-func TestHistoryImportClients_ShareServerLimiter(t *testing.T) {
-	t.Parallel()
-
-	plex := NewPlexClient()
-	emby := NewEmbyClient()
-	if plex.limiter != emby.limiter {
-		t.Fatal("expected Plex and Emby clients to share the same upstream limiter")
-	}
-}

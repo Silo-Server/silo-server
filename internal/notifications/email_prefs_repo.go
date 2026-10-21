@@ -387,10 +387,11 @@ func (r *EmailPrefsRepository) UnsubscribeByToken(ctx context.Context, token str
 	return tag.RowsAffected() > 0, nil
 }
 
-// DeleteForProfile purges the profile's email prefs (profile deletion).
-func (r *EmailPrefsRepository) DeleteForProfile(ctx context.Context, profileID string) error {
+// DeleteForProfile purges the account profile's email prefs (profile
+// deletion).
+func (r *EmailPrefsRepository) DeleteForProfile(ctx context.Context, userID int, profileID string) error {
 	_, err := r.pool.Exec(ctx,
-		`DELETE FROM notification_email_prefs WHERE profile_id = $1`, profileID)
+		`DELETE FROM notification_email_prefs WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
 	if err != nil {
 		return fmt.Errorf("delete email prefs: %w", err)
 	}
@@ -398,24 +399,24 @@ func (r *EmailPrefsRepository) DeleteForProfile(ctx context.Context, profileID s
 }
 
 // ListActiveRecipients returns every profile with email notifications on and
-// a verified destination address. Disabled or deleted accounts drop out of
-// the join.
-func (r *EmailPrefsRepository) ListActiveRecipients(ctx context.Context) ([]accountRecipient[string], error) {
+// a verified destination address, keyed by the row's account and profile.
+// Disabled or deleted accounts drop out of the join.
+func (r *EmailPrefsRepository) ListActiveRecipients(ctx context.Context) ([]accountRecipient[profileKey], error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT p.profile_id, p.mode, p.watermark_created_at, p.watermark_id,
+		SELECT p.user_id, p.profile_id, p.mode, p.watermark_created_at, p.watermark_id,
 		       p.last_digest_at, p.last_attempt_at, p.consecutive_failures
 		FROM notification_email_prefs p
 		JOIN users u ON u.id = p.user_id AND u.enabled
 		WHERE p.mode <> 'off' AND p.custom_email <> ''
-		ORDER BY p.profile_id`)
+		ORDER BY p.user_id, p.profile_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list email recipients: %w", err)
 	}
 	defer rows.Close()
-	out := make([]accountRecipient[string], 0, 8)
+	out := make([]accountRecipient[profileKey], 0, 8)
 	for rows.Next() {
-		var rec accountRecipient[string]
-		if err := rows.Scan(&rec.Key, &rec.Mode, &rec.WatermarkCreatedAt, &rec.WatermarkID,
+		var rec accountRecipient[profileKey]
+		if err := rows.Scan(&rec.Key.userID, &rec.Key.profileID, &rec.Mode, &rec.WatermarkCreatedAt, &rec.WatermarkID,
 			&rec.LastDigestAt, &rec.LastAttemptAt, &rec.ConsecutiveFailures); err != nil {
 			return nil, fmt.Errorf("scan email recipient: %w", err)
 		}
@@ -428,15 +429,15 @@ func (r *EmailPrefsRepository) ListActiveRecipients(ctx context.Context) ([]acco
 // SKIP LOCKED makes concurrent nodes pass over each other's in-flight
 // profiles instead of double-sending; (nil, nil) means another node holds
 // the row.
-func (r *EmailPrefsRepository) claimForUpdate(ctx context.Context, tx pgx.Tx, profileID string) (*accountRecipient[string], error) {
-	rec := accountRecipient[string]{Key: profileID}
+func (r *EmailPrefsRepository) claimForUpdate(ctx context.Context, tx pgx.Tx, key profileKey) (*accountRecipient[profileKey], error) {
+	rec := accountRecipient[profileKey]{Key: key}
 	err := tx.QueryRow(ctx, `
 		SELECT mode, watermark_created_at, watermark_id, last_digest_at,
 		       last_attempt_at, consecutive_failures
 		FROM notification_email_prefs
-		WHERE profile_id = $1
+		WHERE user_id = $1 AND profile_id = $2
 		FOR UPDATE SKIP LOCKED`,
-		profileID,
+		key.userID, key.profileID,
 	).Scan(&rec.Mode, &rec.WatermarkCreatedAt, &rec.WatermarkID,
 		&rec.LastDigestAt, &rec.LastAttemptAt, &rec.ConsecutiveFailures)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -449,33 +450,33 @@ func (r *EmailPrefsRepository) claimForUpdate(ctx context.Context, tx pgx.Tx, pr
 }
 
 // destinationForSend resolves where the locked profile's email goes — its
-// verified address — plus the row's owner and unsubscribe token. Read under
-// the claim so a mid-pass address removal fails cleanly instead of sending
-// to a stale recipient.
-func (r *EmailPrefsRepository) destinationForSend(ctx context.Context, tx pgx.Tx, profileID string) (email string, userID int, unsubscribeToken string, err error) {
+// verified address — plus its unsubscribe token. Read under the claim so a
+// mid-pass address removal fails cleanly instead of sending to a stale
+// recipient.
+func (r *EmailPrefsRepository) destinationForSend(ctx context.Context, tx pgx.Tx, key profileKey) (email string, unsubscribeToken string, err error) {
 	err = tx.QueryRow(ctx, `
-		SELECT p.custom_email, p.user_id, p.unsubscribe_token
+		SELECT p.custom_email, p.unsubscribe_token
 		FROM notification_email_prefs p
 		JOIN users u ON u.id = p.user_id AND u.enabled
-		WHERE p.profile_id = $1`,
-		profileID,
-	).Scan(&email, &userID, &unsubscribeToken)
+		WHERE p.user_id = $1 AND p.profile_id = $2`,
+		key.userID, key.profileID,
+	).Scan(&email, &unsubscribeToken)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", 0, "", fmt.Errorf("profile %s has no usable account", profileID)
+		return "", "", fmt.Errorf("profile %s has no usable account", key)
 	}
 	if err != nil {
-		return "", 0, "", fmt.Errorf("resolve email destination: %w", err)
+		return "", "", fmt.Errorf("resolve email destination: %w", err)
 	}
-	return email, userID, unsubscribeToken, nil
+	return email, unsubscribeToken, nil
 }
 
 // setUnsubscribeToken backfills a missing unsubscribe token under the claim
 // lock (rows migrated from the account-level table start without one).
-func (r *EmailPrefsRepository) setUnsubscribeToken(ctx context.Context, tx pgx.Tx, profileID, token string) error {
+func (r *EmailPrefsRepository) setUnsubscribeToken(ctx context.Context, tx pgx.Tx, key profileKey, token string) error {
 	_, err := tx.Exec(ctx, `
-		UPDATE notification_email_prefs SET unsubscribe_token = $2, updated_at = now()
-		WHERE profile_id = $1 AND unsubscribe_token = ''`,
-		profileID, token)
+		UPDATE notification_email_prefs SET unsubscribe_token = $3, updated_at = now()
+		WHERE user_id = $1 AND profile_id = $2 AND unsubscribe_token = ''`,
+		key.userID, key.profileID, token)
 	if err != nil {
 		return fmt.Errorf("set unsubscribe token: %w", err)
 	}
@@ -485,17 +486,17 @@ func (r *EmailPrefsRepository) setUnsubscribeToken(ctx context.Context, tx pgx.T
 // markSent advances the watermark past everything the email covered and
 // resets failure backoff. digestAt is non-nil for digest sends (including
 // empty digests, so eligibility stops re-checking until tomorrow).
-func (r *EmailPrefsRepository) markSent(ctx context.Context, tx pgx.Tx, profileID string, watermark Cursor, digestAt *time.Time) error {
+func (r *EmailPrefsRepository) markSent(ctx context.Context, tx pgx.Tx, key profileKey, watermark Cursor, digestAt *time.Time) error {
 	_, err := tx.Exec(ctx, `
 		UPDATE notification_email_prefs SET
-			watermark_created_at = $2,
-			watermark_id = $3,
-			last_digest_at = COALESCE($4, last_digest_at),
+			watermark_created_at = $3,
+			watermark_id = $4,
+			last_digest_at = COALESCE($5, last_digest_at),
 			last_attempt_at = now(),
 			consecutive_failures = 0,
 			updated_at = now()
-		WHERE profile_id = $1`,
-		profileID, watermark.CreatedAt, watermark.ID, digestAt)
+		WHERE user_id = $1 AND profile_id = $2`,
+		key.userID, key.profileID, watermark.CreatedAt, watermark.ID, digestAt)
 	if err != nil {
 		return fmt.Errorf("mark email sent: %w", err)
 	}
@@ -504,14 +505,14 @@ func (r *EmailPrefsRepository) markSent(ctx context.Context, tx pgx.Tx, profileI
 
 // markFailure records a failed send for backoff; the watermark stays put so
 // the next eligible pass retries the same items.
-func (r *EmailPrefsRepository) markFailure(ctx context.Context, tx pgx.Tx, profileID string) error {
+func (r *EmailPrefsRepository) markFailure(ctx context.Context, tx pgx.Tx, key profileKey) error {
 	_, err := tx.Exec(ctx, `
 		UPDATE notification_email_prefs SET
 			last_attempt_at = now(),
 			consecutive_failures = consecutive_failures + 1,
 			updated_at = now()
-		WHERE profile_id = $1`,
-		profileID)
+		WHERE user_id = $1 AND profile_id = $2`,
+		key.userID, key.profileID)
 	if err != nil {
 		return fmt.Errorf("mark email failure: %w", err)
 	}

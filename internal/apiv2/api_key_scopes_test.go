@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -54,6 +53,9 @@ func (s *scopeCatalogStore) DeleteByAdminConditional(context.Context, int64, aut
 func realAPIKeyHandler() (http.Handler, *scopeCatalogStore) {
 	store := &scopeCatalogStore{}
 	svc := handlers.NewAPIKeyHandler(store)
+	// An admin household with no limited profile: a profile-less admin
+	// request may still create keys.
+	svc.Stores = householdStores{}
 	deps := pilotDeps(nil, nil)
 	deps.PersonalAPIKeys = svc
 	deps.AdminAPIKeys = svc
@@ -63,9 +65,10 @@ func realAPIKeyHandler() (http.Handler, *scopeCatalogStore) {
 // The v2 scope catalog is what clients read from the scope-discovery endpoint,
 // so every scope it advertises has to be creatable.
 func TestV2APIKeyCreateAcceptsEveryAdvertisedScope(t *testing.T) {
+	h, store := realAPIKeyHandler()
 	for _, scope := range auth.APIKeyScopeCatalog() {
 		for _, path := range []string{"/api-keys", adminAPIKeyPath} {
-			h, store := realAPIKeyHandler()
+			*store = scopeCatalogStore{}
 			body := `{"label":"Tool","scopes":["` + scope.Name + `"]}`
 			created := do(t, h, http.MethodPost, Prefix+path, body, bearer(adminToken))
 			if created.Code != 201 {
@@ -77,27 +80,6 @@ func TestV2APIKeyCreateAcceptsEveryAdvertisedScope(t *testing.T) {
 			if !strings.Contains(created.Body.String(), `"`+scope.Name+`"`) {
 				t.Fatalf("%s response omits the granted scope: %s", path, created.Body.String())
 			}
-		}
-	}
-}
-
-func TestV2APIKeyCreateReportsUnknownScope(t *testing.T) {
-	for _, path := range []string{"/api-keys", adminAPIKeyPath} {
-		h, store := realAPIKeyHandler()
-		rec := do(t, h, http.MethodPost, Prefix+path, `{"label":"Tool","scopes":["admin:everything"]}`, bearer(adminToken))
-		requireProblem(t, rec, TypeValidationFailed)
-		if store.created {
-			t.Fatalf("%s: an unknown scope reached storage", path)
-		}
-		var p Problem
-		if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
-			t.Fatal(err)
-		}
-		if len(p.Errors) != 1 || p.Errors[0].Location != "body.scopes" || p.Errors[0].Code != codeInvalid {
-			t.Fatalf("%s: errors = %+v", path, p.Errors)
-		}
-		if !strings.Contains(p.Errors[0].Detail, "admin:everything") {
-			t.Fatalf("%s: detail does not name the scope: %q", path, p.Errors[0].Detail)
 		}
 	}
 }

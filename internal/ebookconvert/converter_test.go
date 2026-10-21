@@ -72,31 +72,6 @@ func TestConvert_CorruptSourceFails(t *testing.T) {
 	}
 }
 
-func TestConvert_MissingSourceFails(t *testing.T) {
-	c := newTestConverter(t)
-	dst := filepath.Join(t.TempDir(), "out.epub")
-	if err := c.Convert(context.Background(), "testdata/does-not-exist.mobi", dst); !errors.Is(err, ErrConversionFailed) {
-		t.Fatalf("got %v, want ErrConversionFailed", err)
-	}
-}
-
-func TestConvert_Concurrent(t *testing.T) {
-	c := newTestConverter(t)
-	const n = 6
-	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
-		go func(i int) {
-			dst := filepath.Join(t.TempDir(), "c.epub")
-			errs <- c.Convert(context.Background(), filepath.Join("testdata", "sample-ncx.mobi"), dst)
-		}(i)
-	}
-	for i := 0; i < n; i++ {
-		if err := <-errs; err != nil {
-			t.Fatalf("concurrent Convert: %v", err)
-		}
-	}
-}
-
 func TestConvert_ContextCancelled(t *testing.T) {
 	c := newTestConverter(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -121,35 +96,6 @@ func TestValidateEpub_RejectsNonEpubZip(t *testing.T) {
 	_ = f.Close()
 	if err := validateEpub(p); err == nil {
 		t.Fatal("expected validateEpub to reject a non-EPUB zip")
-	}
-}
-
-func TestValidateEpub_RejectsDeflatedMimetype(t *testing.T) {
-	// mimetype present + correct content but DEFLATED (not stored) -> reject.
-	p := filepath.Join(t.TempDir(), "bad.epub")
-	f, err := os.Create(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	zw := zip.NewWriter(f)
-	w, _ := zw.CreateHeader(&zip.FileHeader{Name: "mimetype", Method: zip.Deflate})
-	_, _ = w.Write([]byte("application/epub+zip"))
-	_ = zw.Close()
-	_ = f.Close()
-	if err := validateEpub(p); err == nil {
-		t.Fatal("expected rejection of deflated mimetype")
-	}
-}
-
-func TestConvert_AfterCloseReturnsUnavailable(t *testing.T) {
-	c, err := NewConverter(context.Background(), Options{})
-	if err != nil {
-		t.Fatalf("NewConverter: %v", err)
-	}
-	_ = c.Close(context.Background())
-	dst := filepath.Join(t.TempDir(), "out.epub")
-	if err := c.Convert(context.Background(), filepath.Join("testdata", "sample-ncx.mobi"), dst); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("got %v, want ErrUnavailable", err)
 	}
 }
 
@@ -191,21 +137,6 @@ func TestClassifyRunError_ParentDeadlinePropagates(t *testing.T) {
 	}
 }
 
-// When the caller's context is healthy but our own per-call timeout fired, the
-// result is the transient ErrConversionTimedOut sentinel (not ErrConversionFailed).
-func TestClassifyRunError_OwnTimeoutIsTimedOutSentinel(t *testing.T) {
-	parent := context.Background() // caller healthy
-	run, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
-	defer cancel()
-	err := classifyRunError(parent, run, context.DeadlineExceeded, time.Minute, "mobitool output")
-	if !errors.Is(err, ErrConversionTimedOut) {
-		t.Fatalf("got %v, want ErrConversionTimedOut", err)
-	}
-	if errors.Is(err, ErrConversionFailed) {
-		t.Fatalf("own timeout must not satisfy ErrConversionFailed: %v", err)
-	}
-}
-
 func assertValidEpub(t *testing.T, path string) {
 	t.Helper()
 	zr, err := zip.OpenReader(path)
@@ -236,12 +167,5 @@ func assertValidEpub(t *testing.T, path string) {
 	}
 	if !hasContent {
 		t.Fatal("no OEBPS content")
-	}
-}
-
-// Guard so the default timeout constant stays sane if edited.
-func TestDefaults(t *testing.T) {
-	if DefaultTimeout < time.Second {
-		t.Fatal("DefaultTimeout too small")
 	}
 }

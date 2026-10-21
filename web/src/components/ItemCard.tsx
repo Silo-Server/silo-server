@@ -20,14 +20,11 @@ import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
-const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
 function formatDate(value?: string | null) {
   if (!value) {
     return null;
   }
-  const date = new Date(DATE_ONLY_PATTERN.test(value) ? `${value}T00:00:00` : value);
-  return formatPreferredDate(date, "medium") || null;
+  return formatPreferredDate(value, "medium") || null;
 }
 
 function formatRuntime(minutes?: number | null) {
@@ -223,23 +220,23 @@ export default function ItemCard({
           <MediaCardArtwork
             src={item.poster_url}
             alt={displayTitle}
-            fallbackLabel={displayTitle}
+            mediaType={item.type}
             thumbhash={item.poster_thumbhash}
             square={item.type === "audiobook"}
             scrim="background"
           >
             {item.status === "pending" && (
-              <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
+              <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
                 Scanning
               </span>
             )}
             {item.status === "unmatched" && (
-              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-red-500/25 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] text-red-300 uppercase">
+              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-red-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-red-300 uppercase">
                 Unmatched
               </span>
             )}
             {item.status === "ambiguous" && (
-              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] text-amber-200 uppercase">
+              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-amber-200 uppercase">
                 Ambiguous
               </span>
             )}
@@ -254,7 +251,7 @@ export default function ItemCard({
               <div className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-1.5">
                 {mangaStatus ? (
                   <span
-                    className={`glass-chip min-w-0 truncate rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
+                    className={`glass-chip min-w-0 truncate rounded-full border px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
                   >
                     {mangaStatus.label}
                   </span>
@@ -262,7 +259,7 @@ export default function ItemCard({
                   <span />
                 )}
                 {mangaCountLabel && (
-                  <span className="glass-chip text-foreground inline-flex min-w-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
+                  <span className="glass-chip text-foreground inline-flex min-w-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
                     <Layers className="size-3 shrink-0" />
                     <span className="truncate">{mangaCountLabel}</span>
                   </span>
@@ -324,7 +321,7 @@ export default function ItemCard({
           {showMetadata && episodeLabels?.episodeTitle ? (
             <ViewTransitionLink
               to={itemHref}
-              className="text-muted-foreground mt-1 block truncate text-[12px] font-medium hover:underline"
+              className="text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
             >
               {episodeLabels.episodeTitle}
             </ViewTransitionLink>

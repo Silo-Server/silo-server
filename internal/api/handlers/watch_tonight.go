@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -59,7 +60,7 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 			limit = n
 		}
 	}
-	resp, err := h.WatchTonight(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), limit)
+	resp, err := h.watchTonight(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), limit, true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -70,6 +71,17 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 // WatchTonight is the Watch Tonight seam: the merged, boosted and enriched
 // list the v1 and v2 handlers both answer. limit must already be validated.
 func (h *RecommendationsHandler) WatchTonight(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, limit int) (WatchTonightView, error) {
+	return h.watchTonight(ctx, userID, profileID, filter, limit, false)
+}
+
+// watchTonight is WatchTonight. With emptyOnFetchError, a failed item lookup
+// answers the list without items instead of an error, as the frozen v1 route
+// always has.
+func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, limit int, emptyOnFetchError bool) (WatchTonightView, error) {
+	// The reader and the filter below each leave out what the profile
+	// watched; read that once.
+	ctx = recommendations.WithWatchedSetMemo(ctx)
+
 	// Fan out: recommendation candidates + live CW/Next-Up in parallel.
 	var (
 		recResult recommendations.WatchTonightResult
@@ -203,15 +215,23 @@ func (h *RecommendationsHandler) WatchTonight(ctx context.Context, userID int, p
 		return resp, nil
 	}
 
-	itemMap, overlayMap, stateMap, enrichedEpMeta := h.enrichItems(ctx, userID, profileID, filter, contentIDs)
+	enriched, err := h.enrichItems(ctx, userID, profileID, filter, contentIDs)
+	if err != nil {
+		slog.WarnContext(ctx, "WatchTonight: item details failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		if emptyOnFetchError {
+			return resp, nil
+		}
+		return WatchTonightView{}, recommendationsUnavailable("Failed to fetch item details")
+	}
 
+	artwork := h.featuredCardArtwork(ctx, enriched.items, filter.Artwork())
 	for _, m := range merged {
-		mi, ok := itemMap[m.scored.MediaItemID]
+		mi, ok := enriched.items[m.scored.MediaItemID]
 		if !ok || mi == nil {
 			continue
 		}
 
-		item := h.buildSectionItem(ctx, mi, overlayMap, stateMap)
+		item := h.buildSectionItem(mi, enriched.overlays, enriched.states, artwork[mi.ContentID])
 		item.ItemSource = m.source
 
 		// Apply CW/Next-Up metadata (position, duration, progress).
@@ -235,7 +255,7 @@ func (h *RecommendationsHandler) WatchTonight(ctx context.Context, userID int, p
 
 		// Fill in episode metadata from the enrichment step for items that came
 		// through the episodes table (CW/Next-Up episodes).
-		if epMeta, ok := enrichedEpMeta[m.scored.MediaItemID]; ok {
+		if epMeta, ok := enriched.episodeMeta[m.scored.MediaItemID]; ok {
 			if epMeta.SeriesID != nil && item.SeriesID == "" {
 				item.SeriesID = *epMeta.SeriesID
 			}
@@ -378,48 +398,55 @@ func (h *RecommendationsHandler) fetchLiveCWAndNextUp(ctx context.Context, userI
 	return cwItems, nextUpItems, nil
 }
 
+// watchTonightEnrichment is what enrichItems loads for a set of content IDs.
+// An ID missing from items is one the viewer cannot see or that no longer
+// exists.
+type watchTonightEnrichment struct {
+	items       map[string]*models.MediaItem
+	overlays    map[string]*models.OverlaySummary
+	states      map[string]*itemUserStateResponse
+	episodeMeta map[string]sections.SectionItemMeta
+}
+
 // enrichItems fetches full MediaItem objects, overlay summaries, and user states
 // for the given content IDs. Handles both movies/series (from media_items) and
 // episodes (from episodes table) since CW/Next-Up items are episode content IDs.
-func (h *RecommendationsHandler) enrichItems(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, contentIDs []string) (
-	itemMap map[string]*models.MediaItem,
-	overlayMap map[string]*models.OverlaySummary,
-	stateMap map[string]*itemUserStateResponse,
-	episodeMeta map[string]sections.SectionItemMeta,
-) {
+// A failed item or episode lookup is an error: answering without the items
+// would look like an empty list. Overlays and user states are decorations and
+// degrade to absent.
+func (h *RecommendationsHandler) enrichItems(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, contentIDs []string) (watchTonightEnrichment, error) {
+	var out watchTonightEnrichment
 	if h.Fetcher == nil || len(contentIDs) == 0 {
-		return nil, nil, nil, nil
+		return out, nil
 	}
 
 	// Fetch movies/series from media_items table.
 	mediaItems, err := h.Fetcher.FetchItemsByContentIDs(ctx, contentIDs, filter)
 	if err != nil {
-		slog.ErrorContext(ctx, "WatchTonight: fetch items failed", "component", "api", "error", err)
-		return nil, nil, nil, nil
+		return out, fmt.Errorf("fetch items: %w", err)
 	}
 
-	itemMap = make(map[string]*models.MediaItem, len(mediaItems)*2)
+	out.items = make(map[string]*models.MediaItem, len(mediaItems)*2)
 	for _, mi := range mediaItems {
-		itemMap[mi.ContentID] = mi
+		out.items[mi.ContentID] = mi
 	}
 
 	// Also fetch episodes — CW/Next-Up content IDs are typically episode IDs.
-	episodeItems, epMeta, epErr := h.Fetcher.FetchEpisodesByContentIDs(ctx, contentIDs, filter)
-	if epErr != nil {
-		slog.ErrorContext(ctx, "WatchTonight: fetch episodes failed", "component", "api", "error", epErr)
-	} else {
-		for _, item := range episodeItems {
-			itemMap[item.ContentID] = item
-		}
-		episodeMeta = epMeta
-		mediaItems = append(mediaItems, episodeItems...)
+	episodeItems, epMeta, err := h.Fetcher.FetchEpisodesByContentIDs(ctx, contentIDs, filter)
+	if err != nil {
+		return out, fmt.Errorf("fetch episodes: %w", err)
 	}
+	for _, item := range episodeItems {
+		out.items[item.ContentID] = item
+	}
+	out.episodeMeta = epMeta
+	mediaItems = append(mediaItems, episodeItems...)
 
 	overlays, err := h.Fetcher.ListOverlaySummaries(ctx, contentIDs, filter)
 	if err != nil {
-		slog.ErrorContext(ctx, "WatchTonight: overlay summaries failed", "component", "api", "error", err)
+		slog.WarnContext(ctx, "WatchTonight: overlay summaries failed", "component", "api", "error", err)
 	} else {
-		overlayMap = overlays
+		out.overlays = overlays
 	}
 
 	if h.storeProvider != nil {
@@ -430,41 +457,39 @@ func (h *RecommendationsHandler) enrichItems(ctx context.Context, userID int, pr
 				EbookProgressStore: h.EbookProgress,
 			})
 			if stateErr == nil {
-				stateMap = states
+				out.states = states
 			}
 		}
 	}
 
-	return itemMap, overlayMap, stateMap, episodeMeta
+	return out, nil
 }
 
-// buildSectionItem constructs a sectionItemResponse from a MediaItem,
-// applying presigning and overlay/state lookups.
-func (h *RecommendationsHandler) buildSectionItem(ctx context.Context, mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse) sectionItemResponse {
+// buildSectionItem constructs a sectionItemResponse from a MediaItem with its
+// resolved artwork (see featuredCardArtwork) and overlay/state lookups.
+func (h *RecommendationsHandler) buildSectionItem(mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse, urls sectionItemImageURLs) sectionItemResponse {
 	item := sectionItemResponse{
-		ContentID:         mi.ContentID,
-		Type:              mi.Type,
-		Title:             mi.Title,
-		Year:              mi.Year,
-		Genres:            mi.Genres,
-		Status:            mi.Status,
-		RatingIMDB:        mi.RatingIMDB,
-		RatingTMDB:        mi.RatingTMDB,
-		RatingRTCritic:    mi.RatingRTCritic,
-		RatingRTAudience:  mi.RatingRTAudience,
-		OriginalLanguage:  mi.OriginalLanguage,
-		Overview:          mi.Overview,
-		PosterThumbhash:   mi.PosterThumbhash,
-		BackdropThumbhash: mi.BackdropThumbhash,
+		ContentID:              mi.ContentID,
+		Type:                   mi.Type,
+		Title:                  mi.Title,
+		Year:                   mi.Year,
+		Genres:                 mi.Genres,
+		Status:                 mi.Status,
+		RatingIMDB:             mi.RatingIMDB,
+		RatingTMDB:             mi.RatingTMDB,
+		RatingRTCritic:         mi.RatingRTCritic,
+		RatingRTAudience:       mi.RatingRTAudience,
+		OriginalLanguage:       mi.OriginalLanguage,
+		Overview:               mi.Overview,
+		PosterThumbhash:        mi.PosterThumbhash,
+		BackdropThumbhash:      mi.BackdropThumbhash,
+		PosterIsEpisodeStill:   mi.PosterIsEpisodeStill,
+		BackdropIsEpisodeStill: mi.BackdropIsEpisodeStill,
 	}
 	if item.Genres == nil {
 		item.Genres = []string{}
 	}
-	if h.DetailSvc != nil {
-		item.PosterURL = h.DetailSvc.PresignURL(ctx, featuredPosterPath(mi.PosterPath), "featured")
-		item.BackdropURL = h.DetailSvc.PresignURL(ctx, featuredBackdropPath(mi.BackdropPath), "featured")
-		item.LogoURL = h.DetailSvc.PresignURL(ctx, mi.LogoPath, "featured")
-	}
+	item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
 	if overlayMap != nil {
 		item.OverlaySummary = overlayMap[mi.ContentID]
 	}

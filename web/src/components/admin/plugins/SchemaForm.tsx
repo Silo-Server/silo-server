@@ -78,6 +78,9 @@ function isPending(
   return Boolean(field.dynamic_options) && Boolean(optionsLoading) && options.length === 0;
 }
 
+// Stands in for a SELECT option whose value is the empty string.
+const EMPTY_OPTION_VALUE = "\u0000empty";
+
 // Loading placeholder for a single dynamic SELECT: a select-sized row with a
 // spinner and a shimmer bar, so the field reads as "fetching from the service".
 function SelectSkeleton() {
@@ -233,10 +236,18 @@ export function SchemaForm({
       if (isPending(field, options, optionsLoading)) {
         return <SelectSkeleton />;
       }
+      // Radix reserves the empty string for "no selection", so an option
+      // whose value is "" (a plugin's "Provider default") travels as a
+      // stand-in and is written back as "".
+      const current = String(effectiveValue(field, values) ?? "");
+      const hasEmptyOption = options.some((option) => option.value === "");
+      const toItem = (value: string) => (value === "" ? EMPTY_OPTION_VALUE : value);
       return (
         <Select
-          value={String(effectiveValue(field, values) ?? "")}
-          onValueChange={(nextValue) => setField(field.key, nextValue)}
+          value={hasEmptyOption ? toItem(current) : current}
+          onValueChange={(nextValue) =>
+            setField(field.key, nextValue === EMPTY_OPTION_VALUE ? "" : nextValue)
+          }
           disabled={locked}
         >
           <SelectTrigger id={id} className="w-full" aria-describedby={describedBy}>
@@ -244,7 +255,7 @@ export function SchemaForm({
           </SelectTrigger>
           <SelectContent>
             {options.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
+              <SelectItem key={option.value} value={toItem(option.value)}>
                 {option.label}
               </SelectItem>
             ))}

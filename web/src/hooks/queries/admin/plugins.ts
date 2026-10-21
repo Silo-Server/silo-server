@@ -29,6 +29,7 @@ import { uploadAdminPlugin } from "@/api/v2/adminPluginUpload";
 import type { ChunkedUploadProgress } from "@/api/v2/adminPluginUpload";
 import { adminKeys } from "../keys";
 import { refreshRatingChoice } from "../ratingsSurfaceRefresh";
+import { refreshAuthProviders } from "../authProviders";
 
 const ADMIN_STALE_TIME = 30_000;
 export const CHECK_PLUGIN_UPDATES_TASK_KEY = "check_plugin_updates";
@@ -38,6 +39,7 @@ function invalidatePluginQueries(queryClient: ReturnType<typeof useQueryClient>)
   // the ratings metadata plugins declare, so rating surfaces refresh too.
   refreshRatingChoice(queryClient);
   return Promise.all([
+    refreshAuthProviders(queryClient),
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginRepositories() }),
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalog() }),
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginInstallations() }),
@@ -529,8 +531,11 @@ function captureInstallation(id: number): PluginLifecycleIntent {
   if (!profileContext) throw new StaleApiRequestContextError();
   return { id, profileContext };
 }
+// 422, 409, and 503 carry a reason written for the admin: a refused plugin
+// package, a conflicting state, or an unreachable catalog or download host.
 function lifecycleFailure(error: unknown, fallback: string): string {
-  return error instanceof V2ProblemError && (error.status === 422 || error.status === 409)
+  return error instanceof V2ProblemError &&
+    (error.status === 422 || error.status === 409 || error.status === 503)
     ? error.message
     : fallback;
 }
@@ -977,7 +982,8 @@ export function useSavePluginAuthBinding() {
     retry: false,
     onSuccess: (_result, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.success("Auth binding saved — restart the server to apply it");
+      // Sign-in providers rebuild on every node when a binding changes.
+      toast.success("Sign-in provider saved");
       invalidatePluginQueries(queryClient);
     },
     onError: (error, intent) => {

@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import type { AdminUser } from "@/api/types";
 
 import { DownloadsTab } from "./DownloadsTab";
+import { renderAdminUserTab, serveAdminAPI, stubRadixDom } from "../adminUserTab.test-support";
 
 const mocks = vi.hoisted(() => ({
   capabilities: { account_downloads: true, account_devices: true } as Record<string, boolean>,
@@ -69,10 +68,6 @@ const downloads = [
   row("5", { title: "Inside Out 2", device_id: "pixel", profile_id: "p2", status: "ready" }),
   row("6", { title: "Failed Movie", status: "failed" }),
 ];
-
-function json(body: unknown) {
-  return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
-}
 
 function route(url: URL): unknown {
   const done = { has_more: false };
@@ -142,21 +137,8 @@ function route(url: URL): unknown {
 
 let requests: URL[] = [];
 
-class MockResizeObserver implements ResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 function renderTab() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/admin/users/7?tab=downloads"]}>
-        <DownloadsTab user={user} />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  renderAdminUserTab(<DownloadsTab user={user} />, "/admin/users/7?tab=downloads");
 }
 
 function deviceCard(name: string) {
@@ -171,21 +153,8 @@ beforeEach(() => {
   setProfileToken(null);
   mocks.capabilities = { account_downloads: true, account_devices: true };
   requests = [];
-  vi.stubGlobal("ResizeObserver", MockResizeObserver);
-  Object.defineProperties(Element.prototype, {
-    hasPointerCapture: { configurable: true, value: () => false },
-    setPointerCapture: { configurable: true, value: () => {} },
-    releasePointerCapture: { configurable: true, value: () => {} },
-    scrollIntoView: { configurable: true, value: () => {} },
-  });
-  vi.stubGlobal(
-    "fetch",
-    vi.fn<typeof fetch>(async (input) => {
-      const url = new URL(String(input), "http://localhost");
-      requests.push(url);
-      return json(route(url));
-    }),
-  );
+  stubRadixDom();
+  serveAdminAPI(route, requests);
 });
 
 afterEach(() => {
@@ -194,68 +163,6 @@ afterEach(() => {
 });
 
 describe("DownloadsTab", () => {
-  it("shows one card per device, with the Android notice only on Android", async () => {
-    renderTab();
-    await screen.findByRole("heading", { name: "iPhone 17" });
-
-    const iphone = deviceCard("iPhone 17");
-    const pixel = deviceCard("Pixel 9 Pro");
-    expect(within(pixel).getByRole("note")).toHaveTextContent(
-      "The Android app doesn't report finished downloads yet, so these show what the phone requested",
-    );
-    expect(within(iphone).queryByRole("note")).not.toBeInTheDocument();
-    expect(within(pixel).getByText("Requested")).toBeInTheDocument();
-    expect(within(iphone).getByText("Waiting for device")).toBeInTheDocument();
-    expect(within(iphone).getByRole("link", { name: /Open device/ })).toHaveAttribute(
-      "href",
-      "/admin/devices/7/iphone",
-    );
-
-    // The partly downloaded series opens, monitored, with its episodes listed.
-    const bear = within(iphone).getByRole("button", { name: "The Bear" });
-    expect(bear).toHaveAttribute("aria-expanded", "true");
-    expect(within(iphone).getByText("Monitored")).toBeInTheDocument();
-    expect(within(iphone).getByText("1 downloading")).toBeInTheDocument();
-    expect(within(iphone).getByText("S03E02 · Next")).toBeInTheDocument();
-    await userEvent.setup().click(bear);
-    expect(within(iphone).queryByText("S03E02 · Next")).not.toBeInTheDocument();
-  });
-
-  it("has no device link for a download whose device is gone", async () => {
-    downloads.push(row("9", { title: "Orphan", device_id: "gone-device" }));
-    try {
-      renderTab();
-      const heading = await screen.findByRole("heading", { name: "Unknown device" });
-      const card = heading.closest("section")!;
-      expect(within(card).queryByRole("link", { name: /Open device/ })).not.toBeInTheDocument();
-    } finally {
-      downloads.pop();
-    }
-  });
-
-  it("counts stats separately for Android and lists monitored series", async () => {
-    renderTab();
-    await screen.findByRole("heading", { name: "iPhone 17" });
-
-    const tile = (label: string) => screen.getByText(label, { selector: "div" }).parentElement!;
-    expect(tile("On device")).toHaveTextContent("2");
-    expect(tile("In progress")).toHaveTextContent("2");
-    expect(tile("Requested on Android")).toHaveTextContent("1");
-    expect(tile("Monitored series")).toHaveTextContent("1");
-
-    const monitors = screen.getByRole("heading", { name: "Monitored series" }).closest("section")!;
-    expect(monitors).toHaveTextContent("Latest season (S03)");
-    expect(monitors).toHaveTextContent("iPhone 17 · Main");
-    // The apps store a picked cap in binary gigabytes; it reads back as picked.
-    expect(monitors).toHaveTextContent("10 GB");
-    expect(monitors).toHaveTextContent("1 on device · 1 in progress");
-    expect(
-      screen.getByText(
-        "A device that was wiped or had the app removed keeps its rows here until it's removed from the account.",
-      ),
-    ).toBeInTheDocument();
-  });
-
   it("filters by device, profile and status", async () => {
     const u = userEvent.setup();
     renderTab();

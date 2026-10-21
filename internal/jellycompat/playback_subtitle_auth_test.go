@@ -380,8 +380,12 @@ func TestSubtitleExtractionUsesConfiguredFFmpeg(t *testing.T) {
 		t.Run(fmt.Sprintf("external=%v", external), func(t *testing.T) {
 			file := &models.MediaFile{ID: 42, FilePath: "/synthetic/movie.mkv", SubtitleTracks: []models.SubtitleTrack{{Index: 1, Codec: "subrip"}}}
 			if external {
+				sidecar := filepath.Join(t.TempDir(), "movie.ass")
+				if err := os.WriteFile(sidecar, []byte("[Script Info]\nScriptType: v4.00+\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
 				file.SubtitleTracks = nil
-				file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/synthetic/movie.ass", Format: "ass"}}
+				file.ExternalSubtitles = []models.ExternalSubtitle{{Path: sidecar, Format: "ass"}}
 			}
 			source := PlaybackMediaSource{ID: "source-42", FileID: 42}
 			store := NewPlaybackSessionStore(time.Hour, nil)
@@ -458,5 +462,67 @@ func TestHandleSubtitleStreamAppliesDownloadedSubtitleTiming(t *testing.T) {
 	}
 	if rr := serve("vtt"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "00:00:03.500 --> 00:00:04.500") {
 		t.Fatalf("vtt = %d %q", rr.Code, rr.Body.String())
+	}
+}
+
+type fakeSidecarTimings map[string]*subtitles.ExternalTiming
+
+func (f fakeSidecarTimings) ExternalTiming(_ context.Context, _ int, sha string) (*subtitles.ExternalTiming, error) {
+	return f[sha], nil
+}
+
+// recordedPlays stands in for the sync service and records played subtitles.
+type recordedPlays struct{ targets []subtitles.SyncTarget }
+
+func (p *recordedPlays) SubtitlePlayed(_ context.Context, target subtitles.SyncTarget) {
+	p.targets = append(p.targets, target)
+}
+
+func TestHandleSubtitleStreamAppliesSidecarTiming(t *testing.T) {
+	const onDisk = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+	path := filepath.Join(t.TempDir(), "movie.en.srt")
+	if err := os.WriteFile(path, []byte(onDisk), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := &models.MediaFile{
+		ID:                42,
+		VideoTracks:       []models.VideoTrack{{Codec: "h264"}},
+		AudioTracks:       []models.AudioTrack{{Codec: "aac"}},
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: path, Language: "en", Format: "srt"}},
+	}
+	source := PlaybackMediaSource{ID: "source-42", FileID: file.ID}
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "token-1", RouteItemID: "item-1",
+		MediaSources: []PlaybackMediaSource{source},
+	})
+	handler := &PlaybackHandler{
+		playbackStore:   store,
+		fileResolver:    testCompatFileResolver{file: file},
+		ExternalTimings: fakeSidecarTimings{subtitles.ContentSHA256([]byte(onDisk)): {Timing: subtitles.Timing{OffsetMS: 2500, Scale: 1}, Revision: 2}},
+	}
+	plays := &recordedPlays{}
+	handler.PlaySync = plays
+	index := strconv.Itoa(externalSubtitleRouteIndex(file, 0))
+	for format, want := range map[string]string{"srt": "00:00:03,500 --> 00:00:04,500", "vtt": "00:00:03.500 --> 00:00:04.500"} {
+		request := httptest.NewRequest(http.MethodGet,
+			"/Videos/item-1/source-42/Subtitles/"+index+"/stream."+format+"?PlaySessionId=play-1&api_key=token-1", nil)
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("routeItemId", "item-1")
+		routeCtx.URLParams.Add("routeMediaSourceId", source.ID)
+		routeCtx.URLParams.Add("routeIndex", index)
+		routeCtx.URLParams.Add("routeFormat", format)
+		ctx := context.WithValue(t.Context(), chi.RouteCtxKey, routeCtx)
+		ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 7})
+		rr := httptest.NewRecorder()
+		handler.HandleSubtitleStream(rr, request.WithContext(ctx))
+		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), want) || rr.Header().Get("Cache-Control") != "private, no-cache" {
+			t.Fatalf("%s = %d %q %v", format, rr.Code, rr.Body.String(), rr.Header())
+		}
+	}
+	// Each delivery tells the sync service the sidecar is being played.
+	played := subtitles.SyncTarget{MediaFileID: 42, ExternalPath: path}
+	if len(plays.targets) != 2 || plays.targets[0] != played || plays.targets[1] != played {
+		t.Fatalf("played %+v", plays.targets)
 	}
 }

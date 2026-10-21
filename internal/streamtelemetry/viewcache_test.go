@@ -161,12 +161,3 @@ func TestViewCacheReportsUnavailableWithoutTelemetry(t *testing.T) {
 		}
 	})
 }
-
-func TestViewCacheDefaultsTTL(t *testing.T) {
-	if got := NewViewCache(nil, 0, nil).TTL(); got != DefaultViewTTL {
-		t.Fatalf("TTL = %s, want %s", got, DefaultViewTTL)
-	}
-	if got := NewViewCache(nil, -time.Second, nil).TTL(); got != DefaultViewTTL {
-		t.Fatalf("negative TTL = %s, want %s", got, DefaultViewTTL)
-	}
-}

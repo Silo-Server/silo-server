@@ -34,6 +34,8 @@ type Library struct {
 	ChapterThumbnailsEnabled   bool     `json:"chapter_thumbnails_enabled" example:"false"`
 	ChapterThumbnailsSupported bool     `json:"chapter_thumbnails_supported" doc:"Whether the server can produce chapter thumbnails (public asset storage is configured)" example:"true"`
 	IntroDetectionEnabled      bool     `json:"intro_detection_enabled" example:"false"`
+	TrickplayEnabled           bool     `json:"trickplay_enabled" doc:"Generate seek-bar preview images for the library's video files" example:"false"`
+	TrickplaySupported         bool     `json:"trickplay_supported" doc:"Whether the server can produce seek-bar previews (public asset storage is configured)" example:"true"`
 	TrailerKinds               []string `json:"trailer_kinds" doc:"Remote video kinds fetched during metadata refresh; empty disables them" example:"[\"trailer\"]"`
 	RealtimeMonitoring         bool     `json:"realtime_monitoring" doc:"Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
 	SortOrder                  int      `json:"sort_order" doc:"Position among libraries, lowest first" example:"0"`
@@ -52,6 +54,7 @@ type LibraryCreate struct {
 	MetadataLanguage         string   `json:"metadata_language,omitempty" doc:"ISO 639-1 code; default en" example:"en"`
 	ChapterThumbnailsEnabled bool     `json:"chapter_thumbnails_enabled,omitempty" doc:"Requires public asset storage" example:"false"`
 	IntroDetectionEnabled    bool     `json:"intro_detection_enabled,omitempty" example:"false"`
+	TrickplayEnabled         bool     `json:"trickplay_enabled,omitempty" doc:"Generate seek-bar preview images; requires public asset storage" example:"false"`
 	TrailerKinds             []string `json:"trailer_kinds,omitempty" doc:"Remote video kinds to fetch; omitted applies the default (every provider kind), empty disables them" example:"[\"trailer\"]"`
 	RealtimeMonitoring       *bool    `json:"realtime_monitoring,omitempty" doc:"Scan automatically when files in the library's folders change; omitted means true. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
 }
@@ -67,6 +70,7 @@ type LibraryUpdate struct {
 	AutoTranslateMetadata    *bool     `json:"auto_translate_metadata,omitempty" nullable:"false" example:"false"`
 	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty" nullable:"false" example:"false"`
 	IntroDetectionEnabled    *bool     `json:"intro_detection_enabled,omitempty" nullable:"false" example:"false"`
+	TrickplayEnabled         *bool     `json:"trickplay_enabled,omitempty" nullable:"false" doc:"Generate seek-bar preview images; turning it off deletes the library's previews" example:"false"`
 	TrailerKinds             *[]string `json:"trailer_kinds,omitempty" nullable:"false" doc:"Replaces the allow-list; empty disables remote videos" example:"[\"trailer\"]"`
 	RealtimeMonitoring       *bool     `json:"realtime_monitoring,omitempty" nullable:"false" doc:"Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
 }
@@ -173,6 +177,7 @@ type ProviderChainEntry struct {
 	ProviderSlug         string `json:"provider_slug" example:"tmdb"`
 	Priority             int    `json:"priority" doc:"Lower runs first" example:"0"`
 	Enabled              bool   `json:"enabled" example:"true"`
+	Local                bool   `json:"local" doc:"The built-in local metadata provider, which reads .nfo files and sidecar artwork. It runs before every remote provider at its level, so it is always listed and stored first." example:"false"`
 }
 
 // ProviderChainLevel is the provider chain at one content level.
@@ -353,20 +358,28 @@ type StaleIDRematchInput struct {
 
 // UnmatchedItem is a catalog item awaiting a metadata match.
 type UnmatchedItem struct {
-	ContentID   string `json:"content_id" example:"movie:heat-1995"`
-	Title       string `json:"title" example:"Heat"`
-	Year        int    `json:"year" example:"1995"`
-	ContentType string `json:"content_type" example:"movie"`
-	LibraryID   ID     `json:"library_id" doc:"\"0\" when the item is in no library" example:"1"`
-	LibraryName string `json:"library_name" example:"Movies"`
-	Status      string `json:"status" doc:"unmatched, pending or ambiguous" example:"unmatched"`
+	ContentID   string   `json:"content_id" example:"movie:heat-1995"`
+	Title       string   `json:"title" example:"Heat"`
+	Year        int      `json:"year" example:"1995"`
+	ContentType string   `json:"content_type" example:"movie"`
+	LibraryID   ID       `json:"library_id" doc:"\"0\" when the item is in no library" example:"1"`
+	LibraryName string   `json:"library_name" example:"Movies"`
+	Status      string   `json:"status" doc:"unmatched, pending or ambiguous" example:"unmatched"`
+	IgnoredAt   *Instant `json:"ignored_at,omitempty" doc:"When an admin marked the item as intentionally unmatched; absent unless it is ignored"`
 }
 
 // UnmatchedItemListInput is the listUnmatchedItems query.
 type UnmatchedItemListInput struct {
 	LimitParam
-	Query  string `query:"q" doc:"Case-insensitive substring over title, type, status and library name" example:"heat"`
-	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
+	Query   string `query:"q" doc:"Case-insensitive substring over title, type, status and library name" example:"heat"`
+	Ignored bool   `query:"ignored" default:"false" doc:"List the items an admin marked as intentionally unmatched instead of the ones awaiting a match"`
+	Cursor  string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
+}
+
+// UnmatchedItemIgnoreInput names the item ignoreUnmatchedItem and
+// unignoreUnmatchedItem act on.
+type UnmatchedItemIgnoreInput struct {
+	ContentID string `path:"content_id" minLength:"1" doc:"The catalog item" example:"local-ad5847acdd9590cc9d353da12446"`
 }
 
 // UnmatchedItemCollection is the named envelope the contract carries, with
@@ -565,6 +578,8 @@ const (
 	opRefreshLibraryMetadata   = "refreshLibraryMetadata"
 	opListLibraryRoots         = "listLibraryRoots"
 	opListUnmatchedItems       = "listUnmatchedItems"
+	opIgnoreUnmatchedItem      = "ignoreUnmatchedItem"
+	opUnignoreUnmatchedItem    = "unignoreUnmatchedItem"
 	opListStaleIDs             = "listStaleIds"
 	opListSkippedRoots         = "listSkippedRoots"
 	tiebreakerContentID        = "content_id"
@@ -581,7 +596,7 @@ func registerLibraries(reg *Registry) {
 		case opCreateLibrary, opUpdateLibrary, opRematchStaleId, opSetLibraryProviders,
 			opConfirmEmptyRootCleanup, opRetryMetadataMatchQueue, opCancelMetadataMatchQueue, opDeleteLibraryPoster, opDeleteRootOverride, opSetRootOverride:
 			operation.RetrySafety = RetrySafetyNonRetryable
-		case opDeleteLibrary, opCheckLibraryMount, opReorderLibraries:
+		case opDeleteLibrary, opCheckLibraryMount, opReorderLibraries, opIgnoreUnmatchedItem, opUnignoreUnmatchedItem:
 			operation.RetrySafety = RetrySafetyNaturalIdempotent
 		case opRefreshLibraryMetadata:
 			operation.RetrySafety = RetrySafetyCoalescing
@@ -652,9 +667,21 @@ func registerLibraries(reg *Registry) {
 		"Clear an item's provider identifiers and refresh its metadata in the background.")), reg.rematchStaleID)
 
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/unmatched-items", opListUnmatchedItems, "libraries",
-		"Page the catalog items awaiting a metadata match, in title order.")), func(ctx context.Context, in *UnmatchedItemListInput) (*UnmatchedItemCollectionOutput, error) {
+		"Page the catalog items awaiting a metadata match, in title order. Items an admin marked as intentionally unmatched are left out unless ignored is set, which lists only those.")), func(ctx context.Context, in *UnmatchedItemListInput) (*UnmatchedItemCollectionOutput, error) {
 		return reg.listUnmatchedItems(ctx, cursors, in)
 	})
+
+	ignore := humaOp(http.MethodPut, Prefix+"/libraries/unmatched-items/{content_id}/ignore", opIgnoreUnmatchedItem, "libraries",
+		"Mark an unmatched, pending or ambiguous movie or series as intentionally unmatched: it leaves the unmatched list and the matcher queues and automatic matching leaves it alone, while it stays playable with its local metadata. Match Item still works and clears the mark. Books cannot be ignored.")
+	ignore.DefaultStatus = http.StatusNoContent
+	ignore.Errors = []int{http.StatusNotFound, http.StatusConflict}
+	Register(reg, admin(ignore), reg.ignoreUnmatchedItem)
+
+	unignore := humaOp(http.MethodDelete, Prefix+"/libraries/unmatched-items/{content_id}/ignore", opUnignoreUnmatchedItem, "libraries",
+		"Clear an item's intentionally-unmatched mark so it returns to the unmatched list and automatic matching tries it again; an unmarked item is left as is.")
+	unignore.DefaultStatus = http.StatusNoContent
+	unignore.Errors = []int{http.StatusNotFound}
+	Register(reg, admin(unignore), reg.unignoreUnmatchedItem)
 
 	Register(reg, admin(humaOp(http.MethodPost, Prefix+"/libraries/{id}/confirm-empty-root-cleanup", opConfirmEmptyRootCleanup, "libraries",
 		"Arm the library's next scan to clean up an empty root once instead of treating it as a lost mount.")), reg.confirmEmptyRootCleanup)
@@ -677,7 +704,7 @@ func registerLibraries(reg *Registry) {
 	Register(reg, admin(humaOp(http.MethodGet, Prefix+"/libraries/{id}/providers", "getLibraryProviders", "libraries",
 		"The library's metadata provider chain, per content level. Legacy unlevelled rows (content_level '') that an upgraded database keeps are not exposed; setLibraryProviders preserves them.")), reg.getLibraryProviders)
 	setProviders := humaOp(http.MethodPut, Prefix+"/libraries/{id}/providers", opSetLibraryProviders, "libraries",
-		"Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers.")
+		"Replace the library's whole provider chain and wake the matcher. Legacy unlevelled rows (content_level '') are kept as they are; a level not listed ends up with no providers. The local metadata entry is stored first in its level whatever priority it is sent with.")
 	setProviders.DefaultStatus = http.StatusNoContent
 	Register(reg, admin(setProviders), reg.setLibraryProviders)
 
@@ -1060,6 +1087,7 @@ func (reg *Registry) createLibrary(ctx context.Context, in *LibraryCreateInput) 
 		IntroDetectionEnabled:    in.Body.IntroDetectionEnabled,
 		TrailerKinds:             in.Body.TrailerKinds,
 		RealtimeMonitoring:       in.Body.RealtimeMonitoring,
+		TrickplayEnabled:         in.Body.TrickplayEnabled,
 	})
 	if err != nil {
 		return nil, libraryProblem(err)
@@ -1095,6 +1123,7 @@ func (reg *Registry) updateLibrary(ctx context.Context, in *LibraryUpdateInput) 
 		IntroDetectionEnabled:    in.Body.IntroDetectionEnabled,
 		TrailerKinds:             in.Body.TrailerKinds,
 		RealtimeMonitoring:       in.Body.RealtimeMonitoring,
+		TrickplayEnabled:         in.Body.TrickplayEnabled,
 	})
 	if err != nil {
 		return nil, libraryProblem(err)
@@ -1206,6 +1235,7 @@ func providerChainLevelsOf(byLevel map[string][]handlers.ChainLevelEntryView) []
 				ProviderSlug:         e.ProviderSlug,
 				Priority:             e.Priority,
 				Enabled:              e.Enabled,
+				Local:                e.Local,
 			})
 		}
 		levels = append(levels, ProviderChainLevel{ContentLevel: name, Entries: entries})
@@ -1410,6 +1440,25 @@ func (reg *Registry) rematchStaleID(ctx context.Context, in *StaleIDRematchInput
 	return nil, nil
 }
 
+func (reg *Registry) ignoreUnmatchedItem(ctx context.Context, in *UnmatchedItemIgnoreInput) (*struct{}, error) {
+	return reg.setUnmatchedItemIgnored(ctx, in.ContentID, true)
+}
+
+func (reg *Registry) unignoreUnmatchedItem(ctx context.Context, in *UnmatchedItemIgnoreInput) (*struct{}, error) {
+	return reg.setUnmatchedItemIgnored(ctx, in.ContentID, false)
+}
+
+func (reg *Registry) setUnmatchedItemIgnored(ctx context.Context, contentID string, ignored bool) (*struct{}, error) {
+	svc, p := reg.libraryAdmin()
+	if p != nil {
+		return nil, p
+	}
+	if err := svc.SetUnmatchedItemIgnored(ctx, contentID, ignored); err != nil {
+		return nil, libraryProblem(err)
+	}
+	return nil, nil
+}
+
 func (reg *Registry) listUnmatchedItems(ctx context.Context, cursors *Cursors, in *UnmatchedItemListInput) (*UnmatchedItemCollectionOutput, error) {
 	svc, p := reg.libraryAdmin()
 	if p != nil {
@@ -1420,10 +1469,16 @@ func (reg *Registry) listUnmatchedItems(ctx context.Context, cursors *Cursors, i
 		return nil, p
 	}
 	search := strings.TrimSpace(in.Query)
+	filter := "q=" + search
+	if in.Ignored {
+		// Encoded, so no search text can spell this filter; the default keeps
+		// its original form so cursors issued before ignoring existed still work.
+		filter = url.Values{"q": {search}, "ignored": {strconv.FormatBool(in.Ignored)}}.Encode()
+	}
 	scope := CursorScope{
 		OperationID: opListUnmatchedItems,
 		Security:    strconv.Itoa(userID),
-		Filter:      "q=" + search,
+		Filter:      filter,
 		Sort:        "title",
 		Tiebreaker:  tiebreakerContentID,
 	}
@@ -1431,7 +1486,7 @@ func (reg *Registry) listUnmatchedItems(ctx context.Context, cursors *Cursors, i
 	if p != nil {
 		return nil, p
 	}
-	views, total, err := svc.ListUnmatchedItems(ctx, search, in.Limit+1, offset)
+	views, total, err := svc.ListUnmatchedItems(ctx, search, in.Ignored, in.Limit+1, offset)
 	if err != nil {
 		return nil, libraryProblem(err)
 	}
@@ -1449,6 +1504,7 @@ func (reg *Registry) listUnmatchedItems(ctx context.Context, cursors *Cursors, i
 			LibraryID:   IDFromInt(int64(v.LibraryID)),
 			LibraryName: v.LibraryName,
 			Status:      v.Status,
+			IgnoredAt:   instantPtr(v.IgnoredAt),
 		})
 	}
 	return &UnmatchedItemCollectionOutput{Body: UnmatchedItemCollection{Collection: Paginated(items, next), Total: total}}, nil
@@ -1492,6 +1548,8 @@ func libraryOf(v handlers.LibraryView) Library {
 		ChapterThumbnailsEnabled:   v.ChapterThumbnailsEnabled,
 		ChapterThumbnailsSupported: v.ChapterThumbnailsSupported,
 		IntroDetectionEnabled:      v.IntroDetectionEnabled,
+		TrickplayEnabled:           v.TrickplayEnabled,
+		TrickplaySupported:         v.TrickplaySupported,
 		TrailerKinds:               NonNil(v.TrailerKinds),
 		RealtimeMonitoring:         v.RealtimeMonitoring,
 		SortOrder:                  v.SortOrder,

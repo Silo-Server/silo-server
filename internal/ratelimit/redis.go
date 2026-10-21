@@ -112,11 +112,7 @@ func (rl *RedisLimiter) Allow(ctx context.Context, key string, limit Rate) Allow
 	secTTL := time.Duration(result[5]) * time.Second
 
 	if !allowed {
-		// Determine which limit was hit for RetryAfter
-		retryAfter := secTTL
-		if secCount < secLimit && minCount >= minLimit {
-			retryAfter = time.Duration(60-(now.Unix()%60)) * time.Second
-		}
+		retryAfter := redisRetryAfter(now, minCount, minLimit, secTTL)
 		return AllowResult{
 			Allowed:    false,
 			RetryAfter: retryAfter,
@@ -140,6 +136,17 @@ func (rl *RedisLimiter) Allow(ctx context.Context, key string, limit Rate) Allow
 		Remaining: remaining,
 		ResetAt:   now.Add(time.Second).Truncate(time.Second),
 	}
+}
+
+// redisRetryAfter returns how long a refused request has to wait. Both window
+// keys roll over on wall-clock boundaries, so a full minute window outlasts the
+// second window and its remainder covers both; a client honoring Retry-After
+// is not refused again.
+func redisRetryAfter(now time.Time, minCount, minLimit int, secTTL time.Duration) time.Duration {
+	if minCount >= minLimit {
+		return time.Duration(60-(now.Unix()%60)) * time.Second
+	}
+	return secTTL
 }
 
 func (rl *RedisLimiter) Close() {

@@ -369,6 +369,51 @@ func ClearProgress(db *sql.DB, profileID, mediaItemID string) error {
 	return nil
 }
 
+// ClearResumePosition sets a visible resume position to 0 and reports whether
+// there was one, in one conditional UPDATE. Its timestamps only move forward:
+// event_at becomes the later of at and event_at, and updated_at is raised to
+// at least that because the stamp trigger copies updated_at into an unchanged
+// event_at. The comparisons use julianday() rather than MAX(): the column text
+// mixes whole-second and fractional RFC 3339 values (the Jellyfin path writes
+// fractions), and as text "…:50Z" sorts after the earlier "…:50.220Z". at
+// stays whole-second, as the other native writes are, for the text comparison
+// against hidden_before.
+func ClearResumePosition(db *sql.DB, profileID, mediaItemID string, at time.Time) (bool, error) {
+	atText := at.UTC().Format(time.RFC3339)
+	result, err := db.Exec(`
+		UPDATE watch_progress
+		SET position_seconds = 0,
+			updated_at = CASE
+				WHEN julianday(updated_at) >= julianday(?1)
+				  AND julianday(updated_at) >= julianday(COALESCE(event_at, updated_at)) THEN updated_at
+				WHEN julianday(COALESCE(event_at, updated_at)) >= julianday(?1) THEN COALESCE(event_at, updated_at)
+				ELSE ?1
+			END,
+			event_at = CASE
+				WHEN julianday(COALESCE(event_at, updated_at)) >= julianday(?1) THEN COALESCE(event_at, updated_at)
+				ELSE ?1
+			END
+		WHERE profile_id = ?2 AND media_item_id = ?3
+		  AND position_seconds > 0
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM hidden_history_items hhi
+			WHERE hhi.profile_id = watch_progress.profile_id
+			  AND hhi.media_item_id = watch_progress.media_item_id
+			  AND watch_progress.updated_at <= hhi.hidden_before
+		  )`,
+		atText, profileID, mediaItemID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("clearing resume position: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("clearing resume position: %w", err)
+	}
+	return affected > 0, nil
+}
+
 // MarkProgressBatch marks every (profile, media_item_id) pair as completed in a
 // single SQLite statement.
 func MarkProgressBatch(db *sql.DB, profileID string, mediaItemIDs []string, updatedAt time.Time) error {
@@ -789,6 +834,13 @@ func AddHistoryIfMissing(db *sql.DB, entry WatchHistoryEntry) (bool, error) {
 	}
 	if entry.WatchedAt == "" {
 		entry.WatchedAt = nowUTC()
+	}
+	// Timestamps here are whole-second RFC 3339 text and compare as strings,
+	// so a sub-second time ("…:05.5Z" sorts before "…:05Z") is cut to its
+	// second. A removal's watermark is whole-second too, so an import in the
+	// same second as a removal stays hidden on this store.
+	if watchedAt, err := time.Parse(time.RFC3339Nano, entry.WatchedAt); err == nil {
+		entry.WatchedAt = watchedAt.UTC().Format(time.RFC3339)
 	}
 	if entry.Source == "" {
 		entry.Source = userstore.WatchHistorySourceLegacy

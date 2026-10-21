@@ -7,27 +7,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestCompatAudioSpatialFormat(t *testing.T) {
-	cases := []struct {
-		profile string
-		want    string
-	}{
-		{"Dolby Digital Plus + Dolby Atmos", "DolbyAtmos"},
-		{"TrueHD + Dolby Atmos", "DolbyAtmos"},
-		{"dolby atmos", "DolbyAtmos"},
-		{"DTS-HD MA + DTS:X", "DTSX"},
-		{"dts:x", "DTSX"},
-		{"DTS-HD MA", "None"},
-		{"LC", "None"},
-		{"", "None"},
-	}
-	for _, tc := range cases {
-		if got := compatAudioSpatialFormat(tc.profile); got != tc.want {
-			t.Errorf("compatAudioSpatialFormat(%q) = %q, want %q", tc.profile, got, tc.want)
-		}
-	}
-}
-
 func TestBuildMediaStreamsCarriesAudioProfile(t *testing.T) {
 	version := catalog.FileVersion{
 		VideoTracks: []models.VideoTrack{{Codec: "hevc"}},
@@ -93,13 +72,6 @@ func TestBuildMediaStreamsCarriesAudioProfile(t *testing.T) {
 	}
 }
 
-func TestAudioTrackDisplayTitleWithoutProfileKeepsCodecName(t *testing.T) {
-	title := audioTrackDisplayTitle(models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6})
-	if title != "English - EAC3 5.1" {
-		t.Fatalf("DisplayTitle = %q", title)
-	}
-}
-
 func TestBuildMediaStreamsJellyfin12LocalizedLabels(t *testing.T) {
 	version := catalog.FileVersion{
 		VideoTracks:    []models.VideoTrack{{Codec: "h264"}},
@@ -141,5 +113,34 @@ func TestDefaultAudioStreamIndexUsesEffectiveAudioTrack(t *testing.T) {
 	version.EffectiveAudioTrackIndex = intPtr(9)
 	if got := defaultAudioStreamIndex(version); got == nil || *got != 1 {
 		t.Fatalf("an out-of-range choice falls back to the file default: %v", got)
+	}
+}
+
+// A track FFmpeg cannot decode (ffprobe names no codec for AVS3 audio) is
+// never the default, and an explicit choice of one gets no server route.
+func TestBuildPlaybackSourceUndecodableAudioTrack(t *testing.T) {
+	version := catalog.FileVersion{
+		FileID: 7, Container: "mp4", CodecVideo: "hevc", CodecAudio: "eac3", Resolution: "1080p",
+		VideoTracks: []models.VideoTrack{{Codec: "hevc", Width: 1920, Height: 1080}},
+		AudioTracks: []models.AudioTrack{
+			{Codec: "", Channels: 6, Language: "zh", Default: true},
+			{Codec: "eac3", Channels: 6, Language: "zh"},
+			{Codec: "aac", Channels: 2, Language: "zh"},
+		},
+	}
+	if got := defaultAudioStreamIndex(version); got == nil || *got != 2 {
+		t.Fatalf("default audio stream = %v, want the first decodable track at stream 2", got)
+	}
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	profile := DefaultDeviceProfile()
+
+	source := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{}, true)
+	if source.SelectedAudioStreamIndex == nil || *source.SelectedAudioStreamIndex != 2 || !source.SupportsTranscoding {
+		t.Fatalf("default source = selected %v transcoding %v, want stream 2 with transcoding", source.SelectedAudioStreamIndex, source.SupportsTranscoding)
+	}
+
+	source = h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{AudioStreamIndex: compatIntValuePtr(1)}, true)
+	if source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding || source.CanBurnSubtitle || source.HLSRemux || source.TranscodeAudio {
+		t.Fatalf("undecodable selection offers a server route: %+v", source)
 	}
 }

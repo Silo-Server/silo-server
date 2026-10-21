@@ -67,7 +67,13 @@ field errors that explain the affected source roots.
 
 Direct import runs the existing catalog transaction and returns its committed
 counts. If a response is lost, callers must inspect the catalog before deciding
-whether to submit again. The web explicitly offers background execution or
+whether to submit again.
+
+Import keeps a bundle's embeddings only when they come from this installation's
+embedding model: the model in the recommendations embedding lock, or the
+configured embedding model when nothing is locked yet. `embeddings_skipped`
+counts the others; the embedding backfill embeds those items with the local
+model. Import never writes the embedding lock. The web explicitly offers background execution or
 "Import and wait"; it does not fall back between them after an error. All transfer
 mutations disable automatic mutation and authentication retries.
 
@@ -178,12 +184,19 @@ is checked by the same permission middleware used by the frozen v1 routes.
 | `POST /api/v2/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel` | Empty `204` after a cancellation request |
 
 Enqueue accepts `target_language`, optional `include_children`, and optional
-`force`. Children default to included for item targets; season and episode
-targets never include children. The requesting account is recorded by the
-service. A matching active job can be reused; otherwise the service persists
-and dispatches a job. `Location` identifies the item's recent-job listing.
-Success does not mean translation has completed. The existing metadata AI
-capability endpoint describes whether the translation provider is configured.
+`force`. A job fills only fields with no localized text; `force` also replaces
+text an earlier AI translation wrote. Provider and manual text is never
+replaced, and the repository enforces the same rule on every AI write.
+Children default to included for item targets; season and episode targets
+never include children, and neither do movies. The requesting account is
+recorded by the service. When a pending or running job for the same target
+and language already covers the request (it includes children whenever the
+request does, and is forced whenever the request is), the service returns that
+job, so its `include_children` and `force` can differ from the request;
+otherwise the service persists and dispatches a job. `Location` identifies the
+item's recent-job listing. Success does not mean translation has completed.
+The existing metadata AI capability endpoint describes whether the translation
+provider is configured.
 
 Job IDs use opaque strings and timestamps use UTC millisecond instants. The web
 polls while jobs are pending or running. Cancellation checks that the job belongs
@@ -194,6 +207,36 @@ promise that a running job has already stopped. Existing terminal jobs are a no-
 Enqueue and cancellation have no durable request replay receipt. The web enqueue
 mutation disables both mutation retries and authentication replay. No existing
 web cancel control, native administrator caller, or Jellyfin equivalent exists.
+
+### Library prewarm
+
+A server administrator can fill a whole library's missing translations ahead
+of browsing. These routes require the acting-administrator role, not the
+per-item curation permission.
+
+| Endpoint | Result |
+| --- | --- |
+| `POST /api/v2/admin/libraries/{library_id}/metadata-translation` | `202` with the canonical translation job |
+| `GET /api/v2/admin/libraries/{library_id}/metadata-translation/jobs` | `jobs`: the newest 50 prewarm jobs of the library |
+| `POST /api/v2/admin/libraries/{library_id}/metadata-translation/jobs/{job_id}/cancel` | Empty `204` after a cancellation request |
+
+Enqueue accepts only `target_language`. The job's `target_kind` is `library`
+and its `content_id` is `library:{library_id}`. It walks the library's items that still
+miss an overview, tagline, season overview, or episode overview in that
+language, in title order, and translates each item with its seasons and
+episodes. Items already in that language are skipped. A prewarm never forces:
+provider, manual, and earlier AI text is kept. `fields_done` and `fields_total`
+count items, and `progress_message` names the current one.
+
+One prewarm translates one item at a time on a slot of the shared AI job
+bound, and gives the slot back between items so queued on-view and subtitle
+jobs run in the meantime. An item that fails is skipped and named in the
+server log; three failures in a row stop the job, since then the provider
+itself is failing. Translated items stay. Re-running after a failure, a cancellation, or a
+restart resumes with whatever is still missing. An active prewarm for the same
+library and language is reused. Enqueue and list answer `404` for an unknown
+library; cancel finds the job by `library:{library_id}` alone, so a job of a
+library deleted while it ran can still be stopped.
 
 ## Item metadata edits and refresh
 
@@ -206,9 +249,17 @@ The web waits on that job; it does not equate submission with completion.
 
 `PATCH /api/v2/admin/items/{id}/metadata` retains the existing partial metadata
 fields, including descriptions, dates, ratings, provider IDs, numbering and
-locked fields. Omitted/null fields preserve values; explicit empty strings,
+locked fields. Omitted fields preserve values. Explicit `null` clears the
+nullable fields: `rating_imdb`, `rating_tmdb`, `rating_rt_critic`,
+`rating_rt_audience`, `release_date`, `first_air_date`, `last_air_date`,
+`air_time`, `air_timezone`, and `air_date`. A target without the field ignores
+it. Clearing a rating also deletes the item's stored score for that source
+(`imdb`, `tmdb`, `rt_critic`, `rt_audience`), which title pages would otherwise
+show in its place. Clearing an episode's air date recomputes the series air
+dates. `null` on any other field preserves its value. Explicit empty strings,
 zeroes, and empty arrays remain edits. An air timezone must be empty or a valid
-IANA timezone. The service tries item, season, then episode ownership and returns
+IANA timezone. Frozen v1 treats `null` like omission and clears nothing. The
+service tries item, season, then episode ownership and returns
 canonical catalog detail after the update and existing invalidation events.
 A follow-up detail-read failure can occur after persistence; it does not roll
 back the metadata change.
@@ -289,6 +340,69 @@ notifications.
 The operations are non-retryable. The web re-detection actions disable mutation
 retries and authentication replay. No native administrator caller or matching
 Jellyfin action exists; playback marker reads remain separate.
+
+## Seek preview administration
+
+These operations require acting-administrator authorization: an administrator
+account and, when `X-Profile-Id` is present, its primary household profile.
+Discover the feature through `GET /api/v2/libraries/capabilities`
+(`getLibraryCapabilities`), whose `trickplay: true` covers the library setting
+and these administration operations. Library `trickplay_supported` separately
+reports whether public asset storage is configured.
+
+| Endpoint | Result |
+| --- | --- |
+| `GET /api/v2/admin/items/{id}/trickplay` | `200` with `files`, ordered by file ID |
+| `POST /api/v2/admin/items/{id}/trickplay/regenerate` | `202` with `requeued`, the number of files queued ahead of the backlog |
+| `GET /api/v2/admin/trickplay/libraries` | `200` with `items`, ordered by library ID |
+
+The item ID can name a movie, episode, or series; a series includes all its
+episode files. Each represented episode of a multi-episode file resolves that
+file, including when it is missing. File and library IDs are opaque strings.
+The arrays are complete lists, never null, without pagination.
+
+Each file reports `state`, `servable`, and `failures`, with optional
+`last_error`, `generated_at`, `thumbnail_count`, `thumbnail_width`, `interval_ms`,
+and `sheet_bytes`. `state` is `off` for a disabled library, a library with an
+unsupported type, or one with previews turned off; `unusable` for an ineligible
+file or a permanent sampling failure; otherwise it reflects `pending`,
+`running`, or `ready`. An eligible file with
+no queue row yet reports `pending`. `servable` independently reports whether
+the current store has a published revision matching the file: previous sheets
+can remain available after a failed or unusable regeneration. Turning previews
+off or disabling the library suppresses availability immediately. Published
+timestamps are canonical UTC instants; widths are pixels, intervals are
+milliseconds, and storage sizes are bytes.
+
+Regeneration queues eligible video files in enabled, opted-in libraries and
+clears their failure backoff. Missing, unprobed, zero-duration, and audio-only
+files are skipped. Running files finish their current attempt. A successful
+response may report `requeued: 0` when no eligible file needs queuing; `202`
+acknowledges persisted queue changes rather than completed extraction. Previous
+published sheets keep serving until replacements publish. There is no
+administrator job resource or replay receipt. Repeating the request after work
+finishes queues another generation, so it is non-retryable; clients must disable
+automatic mutation retries and authentication replay.
+
+The library listing includes enabled video libraries with previews turned on.
+Each entry contains `library_id`, `name`, `pending`, `running`, `ready`, `unusable`,
+and `sheet_bytes`. Pending counts include failure backoff and eligible files
+not yet reconciled into the queue. A tracked file that becomes missing,
+unprobed, zero-duration, or audio-only counts as `unusable` regardless of its
+persisted queue state. Ineligible files that have never entered the queue do
+not contribute to these counts. Status reads do not alter queue rows. Storage
+sums the retained published sheets; generation counts do not replace each
+file's `servable` value.
+
+The item operations return `404` `not_found` when no associated media file
+exists. Regeneration returns `409` `capability_disabled` when none belongs to an
+enabled, opted-in video library. All three return `503` `dependency_unavailable`
+when the service is unconfigured, and `500` `internal_error` on an unexpected service
+failure, using the common Problem response. Ordinary profiles receive `403`
+`permission_denied`; authentication failures use the common `401` problems.
+Web administration uses these operations. Apple, Android, and Jellyfin have
+no corresponding administration callers; their playback preview reads are
+separate.
 
 ## Marker edit history
 
@@ -375,6 +489,18 @@ three operations require acting-administrator access. No native or Jellyfin
 administration caller was found; frozen v1 adapters retain their original wire
 shapes and behavior.
 
+Explicit split/merge and match/apply re-check each existing source and destination
+against the current transaction's complete library memberships before identity or
+state movement. Delegated metadata curators must cover every library of each item;
+an existing item with no memberships is refused. A newly inserted split target
+inherits only the authorized selected-file libraries. Concurrent target creation
+is treated as an existing target. V2 split/merge retain acting-administrator access;
+the frozen v1 bridge retains delegated curation under the same library policy.
+A policy refusal returns 403: the v1 bridge uses its legacy `forbidden` error
+envelope, and v2 match/apply a `permission_denied` problem. Each refused
+transaction rolls back; the multi-step match pipeline has no whole-request atomicity
+guarantee. Detached split identification retains the originating curation authority.
+
 ### Match repair
 
 `POST /api/v2/admin/items/{id}/match/search` and `/match/apply` require the
@@ -387,9 +513,15 @@ This bounds the response, not the provider fetch or normalization work, and
 provides no snapshot or continuation guarantee. The web requests 500 candidates
 and displays the refinement notice when needed.
 
-Apply requires nonempty provider IDs and runs the existing synchronous
-identity-preserving metadata pipeline. It returns `content_id` and `updated`;
-it is not a queued job. Neither web mutation automatically retries or refreshes
+Apply requires nonempty provider IDs and runs the synchronous metadata
+pipeline. It returns `content_id` and `updated`; it is not a queued job. The
+returned `content_id` differs from the path ID when the item moved: a `local-`
+item takes its provider-anchored ID, and an item whose match the choice
+corrects moves to the ID its new identity derives (see
+[deterministic content IDs](architecture/deterministic-content-id.md#re-anchor-on-a-corrected-match)).
+Callers holding the old ID should switch to the returned one. Apply records the
+choice on the item: later refreshes keep it when a local `.nfo` names another
+title, instead of re-matching to the file's `<uniqueid>`. Neither web mutation automatically retries or refreshes
 and replays authentication. Frozen v1 responses and parsing order remain
 unchanged. These administration flows have web consumers; Apple, Android and
 Jellyfin have no corresponding caller in the migration inventory.
@@ -408,8 +540,10 @@ array. No current web, native or Jellyfin consumer needs migration for this rout
 
 `GET /api/v2/admin/items/{id}/images` requires acting-admin access and returns
 `items`, `page`, `current`, and optional `provider_errors`. Pages default to 50
-choices and accept `limit` 1–200. Choice metadata determines a stable order;
-continuation binds the content ID, authority, limit and complete choice digest.
+choices and accept `limit` 1–200. On movie and series lists, local sidecar
+choices come first, in discovery order. Provider choices follow by rating,
+highest first; choice metadata breaks ties, so the order is stable.
+Continuation binds the content ID, authority, limit and complete choice digest.
 Expiring display URLs are excluded from that digest. A provider choice change
 returns `invalid_cursor` and requires reloading. Each page fetches and resolves
 the provider list again; pagination bounds response size, not provider work or
@@ -417,11 +551,30 @@ memory, and stores no server-side snapshot. Provider failures expose generic
 messages. The web drains all pages under one captured authority and refuses
 repeated or invalid continuation rather than publishing a partial list.
 
+For a movie or series the list also offers its local sidecar artwork (the
+`poster.jpg`, `fanart.jpg` and similar files a refresh would use), found by
+Silo's own sidecar discovery whether or not the library's metadata chain uses
+the NFO provider. A `file://` URL from any other provider is not offered. These
+choices have `provider_id` `local`, a `file://` `original_url`, and a small
+WebP preview as a `data:` URI in `url`. A file that cannot be read under the
+library-root, symlink and size checks is left out, and `provider_errors`
+reports the failure under `local`. Banner, thumb, clear art and disc art
+sidecars, and image URLs an NFO names, are not offered. When the library's
+provider chain cannot be resolved, the movie or series list still returns `200`
+with its local choices and reports the failure under `chain` in
+`provider_errors`; other lists return `500`. Frozen v1 lists provider choices
+only. See
+[Local NFO metadata](architecture/local-nfo-metadata.md#admin-image-picker).
+
 `POST /api/v2/admin/items/{id}/images/apply` accepts `original_url`, `type`, and
 optional `provider_id`. An HTTP(S) `original_url` may name a public or
 local-network address; link-local, cloud metadata and other blocked addresses
 are refused (see
-[Outbound address guard](architecture/outbound-address-guard.md#artwork-downloads)).
+[Outbound address guard](architecture/outbound-address-guard.md#artwork-downloads)). A `file://`
+`original_url` is accepted for a movie or series only when the item's sidecar
+discovery offers that file for that image type; anything else returns a `422`
+validation problem. A failure to read or cache an offered file returns `500`.
+Frozen v1 does not accept local files.
 It preserves target validation before remote work,
 episode-to-still coercion, parent/season/episode cache identity, immutable upload,
 transactional catalog publication and orphan-GC scheduling after publication

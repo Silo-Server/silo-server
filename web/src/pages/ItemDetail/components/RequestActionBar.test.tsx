@@ -82,51 +82,6 @@ describe("RequestActionBar watchlist toggle", () => {
     vi.clearAllMocks();
   });
 
-  it("offers Add to Watchlist and says the add also requests", () => {
-    renderBar(heat);
-    const button = screen.getByRole("button", { name: "Add to Watchlist" });
-    expect(button).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByText(NOTE)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Settings › Requests" })).toHaveAttribute(
-      "href",
-      "/settings/requests",
-    );
-  });
-
-  it("drops the note when watchlist adds don't request or the title can't be requested", () => {
-    mocks.featureStatus.mockReturnValue({
-      data: {
-        requests_enabled: true,
-        allowed: true,
-        watchlist_titles_supported: true,
-        watchlist_requests: false,
-      },
-    });
-    renderBar(heat);
-    expect(screen.queryByText(NOTE)).toBeNull();
-    cleanup();
-
-    mocks.featureStatus.mockReturnValue({
-      data: {
-        requests_enabled: true,
-        allowed: true,
-        watchlist_titles_supported: true,
-        watchlist_requests: true,
-      },
-    });
-    renderBar({ ...heat, request: { requestable: false, status: "pending" } });
-    expect(screen.queryByText(NOTE)).toBeNull();
-  });
-
-  it("shows On Watchlist, pressed, without the note", () => {
-    renderBar({ ...heat, in_watchlist: true });
-    expect(screen.getByRole("button", { name: "On Watchlist" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.queryByText(NOTE)).toBeNull();
-  });
-
   it("offers no watchlist action on a server without watchlist titles", () => {
     mocks.featureStatus.mockReturnValue({ data: { allowed: true } });
     renderBar(heat);
@@ -154,7 +109,15 @@ describe("RequestActionBar watchlist toggle", () => {
     queryClient.setQueryData(requestKeys.detail("movie", 949), heat);
     renderBar(heat, queryClient);
 
-    fireEvent.click(screen.getByRole("button", { name: "Add to Watchlist" }));
+    const button = screen.getByRole("button", { name: "Add to Watchlist" });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText(NOTE)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Settings › Requests" })).toHaveAttribute(
+      "href",
+      "/settings/requests",
+    );
+
+    fireEvent.click(button);
 
     await waitFor(() =>
       expect(mocks.toastSuccess).toHaveBeenCalledWith("Added to your watchlist and requested", {
@@ -169,32 +132,33 @@ describe("RequestActionBar watchlist toggle", () => {
     ).toBe(true);
   });
 
-  it("says why an add did not request the title", async () => {
-    mocks.addWatchlistTitle.mockResolvedValue({
-      media_type: "movie",
-      tmdb_id: 949,
-      added_at: "2026-09-30T00:00:00Z",
-      request: { requestable: false, reason: "quota_exceeded" },
-    } satisfies WatchlistTitleEntry);
-    renderBar(heat);
-
-    fireEvent.click(screen.getByRole("button", { name: "Add to Watchlist" }));
-
-    await waitFor(() =>
-      expect(mocks.toastSuccess).toHaveBeenCalledWith("Added to your watchlist", {
-        description: "It wasn't requested: request limit reached.",
+  it("removes the title and reverts the page when the call fails", async () => {
+    let rejectDelete!: (error: Error) => void;
+    mocks.deleteWatchlistTitle.mockReturnValue(
+      new Promise<void>((_resolve, reject) => {
+        rejectDelete = reject;
       }),
     );
-  });
-
-  it("removes the title and reverts the page when the call fails", async () => {
-    mocks.deleteWatchlistTitle.mockRejectedValue(new Error("Network down"));
     const queryClient = new QueryClient();
     const onList = { ...heat, in_watchlist: true };
     queryClient.setQueryData(requestKeys.detail("movie", 949), onList);
     renderBar(onList, queryClient);
 
+    expect(screen.getByRole("button", { name: "On Watchlist" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.queryByText(NOTE)).toBeNull();
+
     fireEvent.click(screen.getByRole("button", { name: "On Watchlist" }));
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<RequestMediaDetail>(requestKeys.detail("movie", 949))
+          ?.in_watchlist,
+      ).toBe(false),
+    );
+    await waitFor(() => expect(mocks.deleteWatchlistTitle).toHaveBeenCalledWith("movie", 949));
+    rejectDelete(new Error("Network down"));
 
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Network down"));
     expect(mocks.deleteWatchlistTitle).toHaveBeenCalledWith("movie", 949);

@@ -4,7 +4,6 @@ import {
   fetchAdminBoardOrderSnapshot,
   adminCreateBody,
   adminUpdateBody,
-  fetchAdminCollectionSnapshot,
   prepareAdminCollectionDeletes,
   saveAdminArtwork,
 } from "./adminCollections";
@@ -27,6 +26,7 @@ const collection: components["schemas"]["AdminCollection"] = {
   sort_order: 0,
   featured: false,
   poster_url: "",
+  poster_is_collage: false,
   backdrop_url: "",
   source_url: "",
   query_definition: {},
@@ -94,15 +94,6 @@ describe("admin collection adapter", () => {
       ],
     ]);
   });
-  it("retains the exact canonical validator and refuses missing validators", async () => {
-    request.mockImplementationOnce(async (_operation, options) => {
-      options.onResponse(new Response(null, { headers: { ETag: '"observed"' } }));
-      return collection;
-    });
-    expect((await fetchAdminCollectionSnapshot("saved")).etag).toBe('"observed"');
-    request.mockResolvedValueOnce(collection);
-    await expect(fetchAdminCollectionSnapshot("saved")).rejects.toThrow("version is unavailable");
-  });
   it("prepares bulk confirmation with at most four reads in flight and no mutations", async () => {
     let inFlight = 0,
       maximum = 0;
@@ -117,7 +108,7 @@ describe("admin collection adapter", () => {
     const snapshots = await prepareAdminCollectionDeletes(["1", "2", "3", "4", "5", "1"]);
     expect(maximum).toBe(4);
     expect(snapshots).toHaveLength(5);
-    expect(snapshots[4]).toEqual({ id: "5", etag: '"5"' });
+    expect(snapshots[4]).toMatchObject({ id: "5", etag: '"5"', collection: { id: "5" } });
     expect(
       request.mock.calls.every(([operation]) => operation === "GET /api/v2/admin/collections/{id}"),
     ).toBe(true);

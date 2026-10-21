@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
+
 	"strings"
 	"testing"
 
@@ -61,33 +61,8 @@ func TestNextUpModeCanonicalRowWins(t *testing.T) {
 	}
 	upsertNextUpMode(t, store, "profile-1", NextUpModeSeparate)
 
-	if got := NextUpMode(ctx, store, "profile-1"); got != NextUpModeSeparate {
+	if got := NextUpMode(ctx, store, nil, "profile-1"); got != NextUpModeSeparate {
 		t.Errorf("NextUpMode = %q, want canonical %q", got, NextUpModeSeparate)
-	}
-}
-
-// TestNextUpModeIgnoresLegacySetting: the retired-fallback migration copied
-// the legacy account value onto every profile that existed, so the read no
-// longer consults it. A profile without a canonical row reads the default.
-func TestNextUpModeIgnoresLegacySetting(t *testing.T) {
-	ctx := context.Background()
-	store := newNextUpModeTestStore(t)
-
-	if err := store.SetSetting(ctx, "next_up_mode", "separate"); err != nil {
-		t.Fatalf("seed legacy setting: %v", err)
-	}
-
-	if got := NextUpMode(ctx, store, "profile-1"); got != NextUpModeCombined {
-		t.Errorf("NextUpMode = %q, want default %q; the legacy key is retired", got, NextUpModeCombined)
-	}
-}
-
-// TestNextUpModeDefaultsToCombined pins the historical meaning of absence.
-func TestNextUpModeDefaultsToCombined(t *testing.T) {
-	store := newNextUpModeTestStore(t)
-
-	if got := NextUpMode(context.Background(), store, "profile-1"); got != NextUpModeCombined {
-		t.Errorf("NextUpMode = %q, want default %q", got, NextUpModeCombined)
 	}
 }
 
@@ -102,27 +77,8 @@ func TestNextUpModeProfileIsolation(t *testing.T) {
 
 	upsertNextUpMode(t, store, "profile-1", NextUpModeSeparate)
 
-	if got := NextUpMode(ctx, store, "profile-2"); got != NextUpModeCombined {
+	if got := NextUpMode(ctx, store, nil, "profile-2"); got != NextUpModeCombined {
 		t.Errorf("NextUpMode for the other profile = %q, want %q", got, NextUpModeCombined)
-	}
-}
-
-// failingStore fails every settings read. A read would degrade NextUpMode to
-// combined, so getting "separate" back proves the store was never asked.
-type failingStore struct{ userstore.UserStore }
-
-func (failingStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
-	return nil, errors.New("store read")
-}
-
-// TestNextUpModeReadsTheRequestScope: a request that passed viewer access
-// carries the resolved mode, so section fetchers asking again cost no read.
-func TestNextUpModeReadsTheRequestScope(t *testing.T) {
-	ctx := access.SetScope(context.Background(), access.Scope{
-		UserID: 1, ProfileID: "profile-1", NextUpMode: NextUpModeSeparate,
-	})
-	if got := NextUpMode(ctx, failingStore{}, "profile-1"); got != NextUpModeSeparate {
-		t.Errorf("NextUpMode = %q, want the scope's %q", got, NextUpModeSeparate)
 	}
 }
 
@@ -133,7 +89,44 @@ func TestNextUpModeScopeForAnotherProfileIsNotUsed(t *testing.T) {
 	ctx := access.SetScope(context.Background(), access.Scope{
 		UserID: 1, ProfileID: "profile-2", NextUpMode: NextUpModeSeparate,
 	})
-	if got := NextUpMode(ctx, store, "profile-1"); got != NextUpModeCombined {
+	if got := NextUpMode(ctx, store, nil, "profile-1"); got != NextUpModeCombined {
 		t.Errorf("NextUpMode = %q, want profile-1's stored default %q", got, NextUpModeCombined)
+	}
+}
+
+type adminDefaultsStub map[string]string
+
+func (s adminDefaultsStub) Get(_ context.Context, key string) (string, error) { return s[key], nil }
+
+// A profile without its own Next Up choices follows the administrator's
+// defaults, and a profile that chose, even the built-in values, keeps its own.
+func TestNextUpSettingsFollowAdminDefaultsUntilTheProfileChooses(t *testing.T) {
+	ctx := context.Background()
+	store := newNextUpModeTestStore(t)
+	defaults := adminDefaultsStub{
+		"defaults.ui.next_up_mode":               `"separate"`,
+		"defaults.ui.next_up_new_releases_first": "true",
+	}
+
+	if got := NextUpMode(ctx, store, defaults, "profile-1"); got != NextUpModeSeparate {
+		t.Fatalf("inheriting mode = %q, want separate", got)
+	}
+	if !NextUpNewReleasesFirst(ctx, store, defaults, "profile-1") {
+		t.Fatal("inheriting new-releases-first = false, want the admin's true")
+	}
+
+	upsertNextUpMode(t, store, "profile-1", NextUpModeCombined)
+	if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
+		Key:       settingskeys.UiNextUpNewReleasesFirst,
+		Scope:     settingscontract.ScopeProfile,
+		ProfileID: "profile-1",
+	}, json.RawMessage(`false`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := NextUpMode(ctx, store, defaults, "profile-1"); got != NextUpModeCombined {
+		t.Fatalf("chosen mode = %q, want the profile's combined", got)
+	}
+	if NextUpNewReleasesFirst(ctx, store, defaults, "profile-1") {
+		t.Fatal("chosen new-releases-first = true, want the profile's false")
 	}
 }

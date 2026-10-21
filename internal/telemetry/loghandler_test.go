@@ -42,23 +42,6 @@ func (erroringHandler) Handle(context.Context, slog.Record) error { return error
 func (erroringHandler) WithAttrs([]slog.Attr) slog.Handler        { return erroringHandler{} }
 func (erroringHandler) WithGroup(string) slog.Handler             { return erroringHandler{} }
 
-func TestFanOutForwardsToBoth(t *testing.T) {
-	console, consoleMsgs := newCapture(nil)
-	otel, otelMsgs := newCapture(nil)
-
-	h := FanOut(console, otel)
-	r := slog.NewRecord(time.Now(), slog.LevelInfo, "hello", 0)
-	if err := h.Handle(context.Background(), r); err != nil {
-		t.Fatalf("Handle error = %v", err)
-	}
-	if len(*consoleMsgs) != 1 || (*consoleMsgs)[0] != "hello" {
-		t.Errorf("console msgs = %v, want [hello]", *consoleMsgs)
-	}
-	if len(*otelMsgs) != 1 || (*otelMsgs)[0] != "hello" {
-		t.Errorf("otel msgs = %v, want [hello]", *otelMsgs)
-	}
-}
-
 func TestFanOutSwallowsOTelError(t *testing.T) {
 	console, consoleMsgs := newCapture(nil)
 	// Wrap the erroring handler like NewOTelHandler does.

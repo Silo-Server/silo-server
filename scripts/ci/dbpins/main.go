@@ -1,4 +1,4 @@
-// Command dbpins runs the DB-backed query-budget pins listed in
+// Command dbpins runs the DB-backed pins listed in
 // scripts/ci/db-pins.txt and fails unless every one of them ran and passed.
 //
 // A DB-backed test skips when SILO_TEST_DATABASE_URL is unset or the database

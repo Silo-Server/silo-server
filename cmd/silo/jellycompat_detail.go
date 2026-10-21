@@ -24,6 +24,9 @@ func newCompatDetailService(
 	detailSvc.SetGroupClaimRepository(catalog.NewGroupClaimRepository(deps.DB))
 	detailSvc.SetProbeEnsurer(deps.ProbeEnsurer)
 	detailSvc.SetChapterThumbnailQueuer(deps.ChapterThumbnailQueuer)
+	if deps.TrickplayReader != nil {
+		detailSvc.SetTrickplayAvailability(deps.TrickplayReader)
+	}
 	if deps.ImageResolver != nil {
 		detailSvc.SetImageResolver(deps.ImageResolver)
 	}

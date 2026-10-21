@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { useNavigate } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken } from "@/api/client";
+import { json, problemResponse, renderRoutes } from "./authPage.test-support";
 import InviteClaim from "./InviteClaim";
 import accepted from "../../../contracts/api/v2/fixtures/invitation_accepted.json";
 const auth = vi.hoisted(() => ({ completeLogin: vi.fn() }));
@@ -17,12 +18,14 @@ const invitation = {
   expires_at: "2026-10-01T00:00:00.000Z",
   show_tour: false,
   acceptance_available: true,
+  email_required: false,
+  note: "",
 };
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
+const linkInvitation = { ...invitation, email: "", email_required: true, note: "For Sam" };
+const emailProblem = (type: string, status: number, errors?: unknown[]) =>
+  problemResponse(status, type, { errors });
+function posts() {
+  return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
 }
 function problem(status: number) {
   return new Response(
@@ -38,15 +41,14 @@ function Move() {
   return <button onClick={() => navigate("/invite/second-secret")}>Change invitation</button>;
 }
 function mount() {
-  return render(
-    <MemoryRouter initialEntries={["/invite/first-secret"]}>
-      <Move />
-      <Routes>
-        <Route path="/invite/:token" element={<InviteClaim />} />
-        <Route path="/household-setup" element={<p>Household setup</p>} />
-        <Route path="/login" element={<p>Ordinary login</p>} />
-      </Routes>
-    </MemoryRouter>,
+  return renderRoutes(
+    "/invite/first-secret",
+    {
+      "/invite/:token": <InviteClaim />,
+      "/household-setup": <p>Household setup</p>,
+      "/login": <p>Ordinary login</p>,
+    },
+    <Move />,
   );
 }
 async function fill() {
@@ -81,8 +83,10 @@ afterEach(() => {
 it("installs the nested v2 session and continues household setup", async () => {
   mount();
   await fill();
+  expect(screen.getByLabelText("Email")).toBeDisabled();
   send();
   await screen.findByText("Household setup");
+  expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({ password: "password123" });
   expect(auth.completeLogin).toHaveBeenCalledWith(
     expect.objectContaining({
       access_token: accepted.tokens.access_token,
@@ -116,6 +120,18 @@ it("does not refresh or replay a 401 accept and requires explicit reload before 
   await screen.findByLabelText("Email");
   expect(screen.getByRole("button", { name: "Create account" })).not.toBeDisabled();
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/auth/refresh"))).toBe(false);
+});
+it("explains a refusal because password sign-in is off instead of offering recovery", async () => {
+  submit = async () =>
+    problemResponse(403, "local_login_disabled", { title: "Local password sign-in is turned off" });
+  mount();
+  await fill();
+  send();
+  await screen.findByText(/Password sign-in is turned off on this server/);
+  expect(screen.getByText(/Ask Admin to add you/)).toBeTruthy();
+  expect(screen.queryByText(/We could not confirm the result/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
+  expect(auth.completeLogin).not.toHaveBeenCalled();
 });
 it("does not confuse a storage failure with an unavailable invitation", async () => {
   lookup = async () => problem(500);
@@ -175,5 +191,45 @@ it("rejects a submit when credentials arrived before auth context rerender", asy
   setAccessToken("new-account");
   send();
   expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  expect(auth.completeLogin).not.toHaveBeenCalled();
+});
+it("asks for an address on a link invitation and sends it with the password", async () => {
+  lookup = async () => json(linkInvitation);
+  mount();
+  const email = await screen.findByLabelText("Email");
+  expect(email).not.toBeDisabled();
+  expect(screen.getByText("Note from Admin")).toBeInTheDocument();
+  expect(screen.getByText("For Sam")).toBeInTheDocument();
+  await fill();
+  send();
+  expect(
+    screen.getByText("Enter a valid email address, like name@example.com"),
+  ).toBeInTheDocument();
+  expect(posts()).toHaveLength(0);
+  fireEvent.change(email, { target: { value: "sam@example.test" } });
+  send();
+  await screen.findByText("Household setup");
+  expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({
+    email: "sam@example.test",
+    password: "password123",
+  });
+});
+it("keeps a link invitation usable when the address already has an account", async () => {
+  lookup = async () => json(linkInvitation);
+  submit = async () => emailProblem("conflict", 409);
+  mount();
+  await fill();
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "taken@example.test" } });
+  send();
+  await screen.findByText(/An account already uses this email address/);
+  expect(screen.queryByText(/We could not confirm the result/)).toBeNull();
+  submit = async () =>
+    emailProblem("validation_failed", 422, [
+      { location: "body.email", code: "invalid", detail: "x" },
+    ]);
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "other@example.test" } });
+  send();
+  await screen.findByText("Enter a valid email address, like name@example.com");
+  expect(posts()).toHaveLength(2);
   expect(auth.completeLogin).not.toHaveBeenCalled();
 });

@@ -1,5 +1,6 @@
+import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 const mocks = vi.hoisted(() => ({
@@ -35,6 +36,21 @@ const baseItem = {
   type: "movie" as const,
 };
 
+function searchReturns(candidates: unknown[]) {
+  mocks.useSearchItemMatchCandidates.mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+    isSuccess: true,
+    data: { candidates },
+  });
+}
+
+function dialogMarkup() {
+  return renderToStaticMarkup(
+    <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
+  );
+}
+
 describe("MatchItemDialog", () => {
   beforeEach(() => {
     const mutate = vi.fn();
@@ -55,62 +71,33 @@ describe("MatchItemDialog", () => {
     });
   });
 
-  it("renders title, year, IMDb, TMDB, and TVDB inputs", () => {
-    const markup = renderToStaticMarkup(
-      <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
-    );
-
-    expect(markup).toContain('id="match-title"');
-    expect(markup).toContain('id="match-year"');
-    expect(markup).toContain('id="match-imdb"');
-    expect(markup).toContain('id="match-tmdb"');
-    expect(markup).toContain('id="match-tvdb"');
-  });
-
-  it("renders a search button", () => {
-    const markup = renderToStaticMarkup(
-      <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
-    );
-
-    expect(markup).toContain("Search");
-  });
-
   it("renders candidate list when search returns results", () => {
-    mocks.useSearchItemMatchCandidates.mockReturnValue({
-      mutate: vi.fn(),
-      isPending: false,
-      isSuccess: true,
-      data: {
-        candidates: [
-          {
-            title: "Inception",
-            year: 2010,
-            content_type: "movie",
-            overview: "A thief who steals secrets...",
-            image_url: "https://image.tmdb.org/poster.jpg",
-            provider_ids: { tmdb: "27205", imdb: "tt1375666" },
-            sources: ["tmdb", "tvdb"],
-            agreement_hints: ["agreed_by_tmdb_and_tvdb"],
-            match_score: 87.25,
-            match_reasons: ["title_exact", "provider_id_consensus"],
-          },
-          {
-            title: "Inception (TV)",
-            year: 2012,
-            content_type: "series",
-            overview: "An unrelated series",
-            image_url: "",
-            provider_ids: { tvdb: "999" },
-            sources: ["tvdb"],
-            agreement_hints: [],
-          },
-        ],
+    searchReturns([
+      {
+        title: "Inception",
+        year: 2010,
+        content_type: "movie",
+        overview: "A thief who steals secrets...",
+        image_url: "https://image.tmdb.org/poster.jpg",
+        provider_ids: { tmdb: "27205", imdb: "tt1375666" },
+        sources: ["tmdb", "tvdb"],
+        agreement_hints: ["agreed_by_tmdb_and_tvdb"],
+        match_score: 87.25,
+        match_reasons: ["title_exact", "provider_id_consensus"],
       },
-    });
+      {
+        title: "Inception (TV)",
+        year: 2012,
+        content_type: "series",
+        overview: "An unrelated series",
+        image_url: "",
+        provider_ids: { tvdb: "999" },
+        sources: ["tvdb"],
+        agreement_hints: [],
+      },
+    ]);
 
-    const markup = renderToStaticMarkup(
-      <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
-    );
+    const markup = dialogMarkup();
 
     expect(markup).toContain("Inception");
     expect(markup).toContain("Inception (TV)");
@@ -123,33 +110,24 @@ describe("MatchItemDialog", () => {
   });
 
   it("shows a matched library-language alias before a native fallback title", () => {
-    mocks.useSearchItemMatchCandidates.mockReturnValue({
-      mutate: vi.fn(),
-      isPending: false,
-      isSuccess: true,
-      data: {
-        candidates: [
-          {
-            title: "倒凶十将伝",
-            original_title: "倒凶十将伝",
-            title_language: "ja",
-            title_is_fallback: true,
-            matched_title: "10 Tokyo Warriors",
-            year: 1999,
-            content_type: "series",
-            image_url: "",
-            overview: "",
-            provider_ids: { tvdb: "123" },
-            sources: ["tvdb"],
-            agreement_hints: [],
-          },
-        ],
+    searchReturns([
+      {
+        title: "倒凶十将伝",
+        original_title: "倒凶十将伝",
+        title_language: "ja",
+        title_is_fallback: true,
+        matched_title: "10 Tokyo Warriors",
+        year: 1999,
+        content_type: "series",
+        image_url: "",
+        overview: "",
+        provider_ids: { tvdb: "123" },
+        sources: ["tvdb"],
+        agreement_hints: [],
       },
-    });
+    ]);
 
-    const markup = renderToStaticMarkup(
-      <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
-    );
+    const markup = dialogMarkup();
 
     expect(markup).toContain(">10 Tokyo Warriors</");
     expect(markup).toContain("Native title: 倒凶十将伝");
@@ -157,32 +135,23 @@ describe("MatchItemDialog", () => {
   });
 
   it("keeps a confirmed localized title ahead of a native matched alias", () => {
-    mocks.useSearchItemMatchCandidates.mockReturnValue({
-      mutate: vi.fn(),
-      isPending: false,
-      isSuccess: true,
-      data: {
-        candidates: [
-          {
-            title: "10 Tokyo Warriors",
-            original_title: "倒凶十将伝",
-            title_language: "en",
-            matched_title: "倒凶十将伝",
-            year: 1999,
-            content_type: "series",
-            image_url: "",
-            overview: "",
-            provider_ids: { tvdb: "123" },
-            sources: ["tvdb"],
-            agreement_hints: [],
-          },
-        ],
+    searchReturns([
+      {
+        title: "10 Tokyo Warriors",
+        original_title: "倒凶十将伝",
+        title_language: "en",
+        matched_title: "倒凶十将伝",
+        year: 1999,
+        content_type: "series",
+        image_url: "",
+        overview: "",
+        provider_ids: { tvdb: "123" },
+        sources: ["tvdb"],
+        agreement_hints: [],
       },
-    });
+    ]);
 
-    const markup = renderToStaticMarkup(
-      <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
-    );
+    const markup = dialogMarkup();
 
     expect(markup).toContain(">10 Tokyo Warriors</");
     expect(markup).toContain("Original: 倒凶十将伝");
@@ -191,61 +160,71 @@ describe("MatchItemDialog", () => {
     expect(markup).not.toContain("Matched alias: 倒凶十将伝");
     expect(markup).not.toContain("Native title: 10 Tokyo Warriors");
   });
+});
 
-  it("shows no results message when search returns empty", () => {
-    mocks.useSearchItemMatchCandidates.mockReturnValue({
-      mutate: vi.fn(),
-      isPending: false,
-      isSuccess: true,
-      data: { candidates: [] },
+describe("MatchItemDialog apply", () => {
+  const item = { content_id: "local-abc", title: "The Office", year: 0, type: "series" as const };
+  const applyMutate = vi.fn();
+
+  beforeEach(() => {
+    applyMutate.mockReset();
+    searchReturns([
+      {
+        title: "The Office",
+        year: 2001,
+        content_type: "series",
+        overview: "",
+        image_url: "",
+        provider_ids: { tvdb: "78107" },
+        sources: ["tvdb"],
+        agreement_hints: [],
+      },
+    ]);
+    mocks.useApplyItemMatch.mockReturnValue({ mutate: applyMutate, isPending: false });
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("hands onReplaced to the apply mutation and closes on success", () => {
+    const onOpenChange = vi.fn();
+    const onReplaced = vi.fn();
+    render(
+      <MatchItemDialog item={item} open onOpenChange={onOpenChange} onReplaced={onReplaced} />,
+    );
+    fireEvent.click(screen.getByTestId("match-candidate"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply Match" }));
+
+    const [variables, options] = applyMutate.mock.calls[0] as [
+      {
+        item: typeof item;
+        providerIds: Record<string, string>;
+        onReplaced: (contentID: string) => void;
+      },
+      { onSuccess: () => void },
+    ];
+    expect(variables).toMatchObject({ item, providerIds: { tvdb: "78107" } });
+    options.onSuccess();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  // The page keys the dialog by content ID, so following the new ID unmounts
+  // it before the per-call onSuccess runs; the dialog has to close first.
+  it("closes before following a moved item", () => {
+    const calls: string[] = [];
+    const onOpenChange = vi.fn((open: boolean) => calls.push(`open:${open}`));
+    const onReplaced = vi.fn((contentID: string) => {
+      calls.push(`replaced:${contentID}`);
     });
-
-    const markup = renderToStaticMarkup(
-      <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
+    render(
+      <MatchItemDialog item={item} open onOpenChange={onOpenChange} onReplaced={onReplaced} />,
     );
+    fireEvent.click(screen.getByTestId("match-candidate"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply Match" }));
 
-    expect(markup).toContain("No candidates found");
-  });
-
-  it("displays current item summary with title, year, and type badge", () => {
-    const markup = renderToStaticMarkup(
-      <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
-    );
-
-    expect(markup).toContain("Inception");
-    expect(markup).toContain("(2010)");
-    expect(markup).toContain("movie");
-  });
-
-  it("renders local media rows when file paths are available", () => {
-    const markup = renderToStaticMarkup(
-      <MatchItemDialog
-        item={{
-          ...baseItem,
-          versions: [
-            {
-              file_id: 7,
-              file_path: "/media/Movies/Inception (2010)/Inception.4K.mkv",
-              file_name: "Inception.4K.mkv",
-              resolution: "2160p",
-              codec_video: "hevc",
-              codec_audio: "dts",
-              hdr: true,
-              container: "mkv",
-              file_size: 1,
-              duration: 1,
-              bitrate: 1,
-            },
-          ],
-        }}
-        open={true}
-        onOpenChange={() => {}}
-      />,
-    );
-
-    expect(markup).toContain("Local media");
-    expect(markup).toContain("Inception (2010)/");
-    expect(markup).toContain("Inception.4K.mkv");
-    expect(markup).toContain("2160p");
+    const [variables] = applyMutate.mock.calls[0] as [{ onReplaced: (contentID: string) => void }];
+    variables.onReplaced("series-tvdb-78107");
+    expect(calls).toEqual(["open:false", "replaced:series-tvdb-78107"]);
   });
 });

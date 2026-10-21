@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
+import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
-import { LanguageSelect } from "@/components/settings/LanguageSelect";
-import { MetadataLanguageSetting } from "@/components/settings/MetadataLanguageSetting";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -13,11 +12,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { optionsFor } from "@/lib/settingsDisplay";
-import { namedLanguageOptionsFor } from "@/lib/languageOptions";
-import {
-  normalizeMetadataLanguageOverrides,
-  type MetadataLanguageOverrides,
-} from "@/lib/metadataLanguagePreferences";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { bitrateSelectChoices } from "@/lib/bitrateOptions";
 import {
@@ -29,6 +23,8 @@ import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import type { SeekDirection } from "@/lib/seekIntervals";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
+import { isBrowserDecodingEnabled, setBrowserDecodingEnabled } from "@/player/engine/settings";
+import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
 
 /**
@@ -45,22 +41,19 @@ import { toast } from "sonner";
  * surfaces cannot land on different scopes.
  */
 const BASE_PLAYBACK_KEYS: SettingKey[] = [
-  SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
   SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
-  SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
-  SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
-  SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE,
-  SETTING_KEYS.UI_NEXT_UP_MODE,
 ];
 
-const NEXT_UP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.UI_NEXT_UP_MODE]);
 const INTRO_SKIP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE]);
 
 // Radix Select cannot represent "" as an item value, so the unset entry needs
 // a sentinel that never collides with a stored bitrate.
 const NO_BITRATE_LIMIT = "__no_limit__";
+
+const AUTO_QUALITY_DESCRIPTION =
+  "Plays the original file whenever your device and connection can handle it.";
 
 /**
  * Quality is the same two settings every other surface edits.
@@ -69,8 +62,11 @@ const NO_BITRATE_LIMIT = "__no_limit__";
  * the device screen already presents them as two controls. Offering the same
  * two rows here means a device override reads as an override of something the
  * user can see, rather than of half a compound preset — and combinations no
- * preset covered ("Original but capped at 40 Mbps" for a remote box) become
+ * preset covered ("Auto but capped at 40 Mbps" for a remote box) become
  * expressible instead of rendering as a disabled "custom" entry.
+ *
+ * A stored "original" is shown as Auto: the contract keeps it as a deprecated
+ * value that means the same thing, and no longer offers it.
  */
 function QualitySetting() {
   const { data: effective } = useEffectiveSettings({
@@ -81,8 +77,10 @@ function QualitySetting() {
   const qualityDefinition = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY];
   const bitrateDefinition = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS];
 
-  const resolution = (effective?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]?.value ??
-    qualityDefinition.defaultValue) as string;
+  const resolution = normalizeQualityPreferenceV3(
+    (effective?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]?.value ??
+      qualityDefinition.defaultValue) as string,
+  );
   const bitrate = effective?.[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS]?.value as
     | number
     | null
@@ -94,7 +92,11 @@ function QualitySetting() {
     <>
       <SettingRow
         label="Preferred quality"
-        description="The resolution your profile should request when playback begins. Auto lets Silo pick based on your connection."
+        description={
+          resolution === "auto"
+            ? AUTO_QUALITY_DESCRIPTION
+            : "The resolution your profile should request when playback begins."
+        }
         control={(id) => (
           <Select
             value={resolution}
@@ -411,14 +413,6 @@ export default function PlaybackSettings() {
     capabilities.data,
     SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
   );
-  const supportsThemeMusic = settingsCapabilitiesSupportKey(
-    capabilities.data,
-    SETTING_KEYS.UI_THEME_MUSIC_ENABLED,
-  );
-  const supportsThemeMusicLoop = settingsCapabilitiesSupportKey(
-    capabilities.data,
-    SETTING_KEYS.UI_THEME_MUSIC_LOOP,
-  );
   /**
    * Which intro control this server can honestly show.
    *
@@ -438,24 +432,14 @@ export default function PlaybackSettings() {
   const playbackKeys = useMemo(
     () => [
       ...BASE_PLAYBACK_KEYS,
-      ...(supportsThemeMusic ? [SETTING_KEYS.UI_THEME_MUSIC_ENABLED] : []),
-      ...(supportsThemeMusicLoop ? [SETTING_KEYS.UI_THEME_MUSIC_LOOP] : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
     ],
-    [supportsIntroSkipMode, supportsThemeMusic, supportsThemeMusicLoop],
+    [supportsIntroSkipMode],
   );
-  const {
-    data: effective,
-    isPending: effectivePending,
-    isError: effectiveError,
-  } = useEffectiveSettings({ keys: playbackKeys });
-  const {
-    save: saveProfileDefault,
-    reset: resetProfileDefault,
-    isSaving,
-  } = useProfileDefaultWriter(effective);
+  const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
+  const { save: saveProfileDefault, isSaving } = useProfileDefaultWriter(effective);
 
   // The effective endpoint resolves an unset key to the contract default, so
   // every control below reads its value from the same answer rather than from
@@ -470,141 +454,23 @@ export default function PlaybackSettings() {
     saveProfileDefault(key, value).catch(() => toast.error("Failed to save playback setting"));
   };
 
-  const nextUpMode = read<string>(SETTING_KEYS.UI_NEXT_UP_MODE);
-  const audioLanguage = read<string | null>(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE);
-  const metadataLanguage = read<string | null>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
-  const audioLanguageOptions = namedLanguageOptionsFor(
-    SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
-    audioLanguage,
-    effective?.[SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE]?.suggested_values,
-  );
-  const metadataLanguageOptions = namedLanguageOptionsFor(
-    SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
-    metadataLanguage,
-    effective?.[SETTING_KEYS.CATALOG_METADATA_LANGUAGE]?.suggested_values,
-  );
-  // Whether the profile has actually chosen, which is what gates the reset
-  // affordance: the resolved value is the default until a row exists.
-  const nextUpChosen = effective?.[SETTING_KEYS.UI_NEXT_UP_MODE]?.source === "profile";
   const pending = isSaving;
-
-  const saveMetadataOverrides = (overrides: MetadataLanguageOverrides) => {
-    const request =
-      Object.keys(overrides).length === 0
-        ? resetProfileDefault(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES)
-        : saveProfileDefault(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES, overrides);
-    return request.catch((error) => {
-      toast.error("Failed to save metadata language exceptions");
-      throw error;
-    });
-  };
-
-  async function resetNextUpMode() {
-    // Nothing stored is the state a reset asks for, which the shared reset
-    // already treats as success.
-    await resetProfileDefault(SETTING_KEYS.UI_NEXT_UP_MODE).catch(() =>
-      toast.error("Failed to reset the next up preference"),
-    );
-  }
 
   return (
     <div className="space-y-6">
-      <div className="space-y-4">
-        <div className="space-y-3">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Playback</h2>
-          <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
-            Choose the defaults Silo should use when playback starts.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Playback"
+        subtitle="The defaults this profile starts playback with. A library, a series, or one of your devices can override some of them."
+      />
 
       <SettingsGroup
-        title="Defaults"
-        description="These preferences apply unless a library or item has a more specific playback choice."
+        title="Quality"
+        description="Each of your devices can override these, and a household manager can cap them for this profile."
       >
         <QualitySetting />
-        {supportsThemeMusic ? (
-          <SettingRow
-            label={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_ENABLED].label}
-            description={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_ENABLED].description}
-            control={(id) => (
-              <Switch
-                id={id}
-                checked={read<boolean>(SETTING_KEYS.UI_THEME_MUSIC_ENABLED)}
-                disabled={pending || effectivePending || effectiveError}
-                onCheckedChange={(value) => saveValue(SETTING_KEYS.UI_THEME_MUSIC_ENABLED, value)}
-              />
-            )}
-          />
-        ) : null}
+      </SettingsGroup>
 
-        {supportsThemeMusicLoop ? (
-          <SettingRow
-            label={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_LOOP].label}
-            description={SETTING_DEFINITIONS[SETTING_KEYS.UI_THEME_MUSIC_LOOP].description}
-            control={(id) => (
-              <Switch
-                id={id}
-                checked={read<boolean>(SETTING_KEYS.UI_THEME_MUSIC_LOOP)}
-                disabled={pending || effectivePending || effectiveError}
-                onCheckedChange={(value) => saveValue(SETTING_KEYS.UI_THEME_MUSIC_LOOP, value)}
-              />
-            )}
-          />
-        ) : null}
-
-        <SettingRow
-          label="Spoken language"
-          description="Prefer a spoken language for this profile when multiple tracks are available."
-          control={(id) => (
-            <div className="w-full sm:w-[220px]">
-              <LanguageSelect
-                id={id}
-                value={audioLanguage ?? "none"}
-                options={audioLanguageOptions}
-                disabled={pending}
-                placeholder="No preference"
-                className="w-full"
-                onValueChange={(value) =>
-                  // The contract spells "no preference" as null, where the
-                  // legacy profile column spelled it as the empty string.
-                  saveValue(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, value === "none" ? null : value)
-                }
-              >
-                <SelectItem value="none">No preference</SelectItem>
-              </LanguageSelect>
-            </div>
-          )}
-        />
-
-        <MetadataLanguageSetting
-          fallback={metadataLanguage}
-          overrides={normalizeMetadataLanguageOverrides(
-            read<unknown>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES),
-          )}
-          languageOptions={metadataLanguageOptions}
-          disabled={pending}
-          onFallbackChange={(language) =>
-            saveValue(SETTING_KEYS.CATALOG_METADATA_LANGUAGE, language)
-          }
-          onOverridesChange={saveMetadataOverrides}
-        />
-
-        <SettingRow
-          label="Show advisory age"
-          description="Show a suggested minimum viewer age, such as Common Sense Media's, on item detail. This only shows the age; a household manager can limit a profile by it in the profile's access settings."
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE)}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                saveValue(SETTING_KEYS.CATALOG_SHOW_ADVISORY_AGE, checked)
-              }
-            />
-          )}
-        />
-
+      <SettingsGroup title="Skipping">
         {introSkipControl === "mode" ? (
           <SettingRow
             label="Skip intros"
@@ -668,21 +534,6 @@ export default function PlaybackSettings() {
         )}
 
         <SettingRow
-          label="Auto-skip credits"
-          description="Move through end credits automatically when a skip is available."
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS)}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                saveValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS, checked)
-              }
-            />
-          )}
-        />
-
-        <SettingRow
           label="Auto-skip recaps"
           description="Skip 'previously on…' recaps automatically when Silo can detect them."
           control={(id) => (
@@ -697,6 +548,23 @@ export default function PlaybackSettings() {
           )}
         />
 
+        <SettingRow
+          label="Auto-skip credits"
+          description="Move through end credits automatically when a skip is available."
+          control={(id) => (
+            <Switch
+              id={id}
+              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS)}
+              disabled={pending}
+              onCheckedChange={(checked) =>
+                saveValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS, checked)
+              }
+            />
+          )}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title="Next episode">
         <SettingRow
           label="Start next at preview"
           description="Begin the next episode when the current one reaches its next-episode preview teaser, rather than waiting for the end credits."
@@ -713,45 +581,40 @@ export default function PlaybackSettings() {
         />
 
         <AutoPlayNextSetting />
-
-        <SettingRow
-          label="Next up episodes"
-          description="Choose whether upcoming episodes stay with Continue Watching or get their own row."
-          control={(id) => (
-            <div className="flex items-center gap-2">
-              <Select
-                value={nextUpMode}
-                onValueChange={(value) => saveValue(SETTING_KEYS.UI_NEXT_UP_MODE, value)}
-                disabled={pending}
-              >
-                <SelectTrigger id={id} className="w-full sm:w-[240px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {NEXT_UP_MODES.map((mode) => (
-                    <SelectItem key={mode.value} value={mode.value}>
-                      {mode.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {nextUpChosen ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 rounded-full px-3"
-                  onClick={resetNextUpMode}
-                  disabled={pending}
-                >
-                  Reset
-                </Button>
-              ) : null}
-            </div>
-          )}
-        />
       </SettingsGroup>
 
       <SeekControls />
+
+      <BrowserDecodingSetting />
     </div>
+  );
+}
+
+/**
+ * Stored in this browser only: whether it can decode a file depends on the
+ * browser and the GPU, not on the profile.
+ */
+function BrowserDecodingSetting() {
+  const [enabled, setEnabled] = useState(isBrowserDecodingEnabled);
+  return (
+    <SettingsGroup
+      title="This browser"
+      description="Saved in this browser only. Other browsers and apps keep their own choice."
+    >
+      <SettingRow
+        label="Decode in the browser (beta)"
+        description="Play files this browser cannot play natively, such as Dolby TrueHD or DTS audio and HDR video on SDR screens, by decoding them in the browser instead of converting them on the server. Applies from the next video you start."
+        control={(id) => (
+          <Switch
+            id={id}
+            checked={enabled}
+            onCheckedChange={(checked) => {
+              setBrowserDecodingEnabled(checked);
+              setEnabled(checked);
+            }}
+          />
+        )}
+      />
+    </SettingsGroup>
   );
 }

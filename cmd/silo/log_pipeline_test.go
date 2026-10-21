@@ -20,6 +20,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 )
 
@@ -37,7 +38,7 @@ func TestOperationalLoggingReturnsWhileRedisIsDown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	hub := logstream.NewHub("node-a", cache.NewEventBus("redis://"+refusedAddr(t)))
+	hub := logstream.NewHub("node-a", cache.NewEventBus(config.RedisConfig{URL: "redis://" + refusedAddr(t)}))
 	t.Cleanup(hub.Close)
 	_, _, stop := configureOperationalLogging(ctx, unreachablePool(t), newMemorySettings(), hub,
 		slog.DiscardHandler, "node-a")
@@ -83,7 +84,7 @@ func TestLoggedRequestIssuesNoRedisCommands(t *testing.T) {
 	t.Cleanup(cancel)
 
 	fake := startFakeRedis(t)
-	hub := logstream.NewHub("node-a", cache.NewEventBus("redis://"+fake.addr))
+	hub := logstream.NewHub("node-a", cache.NewEventBus(config.RedisConfig{URL: "redis://" + fake.addr}))
 	t.Cleanup(hub.Close)
 	pool := unreachablePool(t)
 	_, _, stopOperational := configureOperationalLogging(ctx, pool, newMemorySettings(), hub,
@@ -117,25 +118,6 @@ func TestLoggedRequestIssuesNoRedisCommands(t *testing.T) {
 	t.Logf("Redis commands during %d logged requests: %d %v", requests, delta.total(), delta)
 	if delta.total() != 0 {
 		t.Fatalf("%d logged requests issued %d Redis commands (%v), want 0", requests, delta.total(), delta)
-	}
-}
-
-// BenchmarkLoggedInfo measures one captured slog.Info through the production
-// operational log wiring, with Redis configured and healthy on loopback.
-func BenchmarkLoggedInfo(b *testing.B) {
-	restoreDefaultLogger(b)
-	ctx, cancel := context.WithCancel(context.Background())
-	b.Cleanup(cancel)
-
-	fake := startFakeRedis(b)
-	hub := logstream.NewHub("node-a", cache.NewEventBus("redis://"+fake.addr))
-	b.Cleanup(hub.Close)
-	_, _, stop := configureOperationalLogging(ctx, unreachablePool(b), newMemorySettings(), hub,
-		slog.DiscardHandler, "node-a")
-	b.Cleanup(stop)
-
-	for b.Loop() {
-		slog.InfoContext(ctx, "probe: handled request", "component", "probe", "status", 200)
 	}
 }
 

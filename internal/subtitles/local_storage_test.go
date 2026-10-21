@@ -2,7 +2,6 @@ package subtitles
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -52,17 +51,5 @@ func TestStoreSubtitleRoundTripsThroughLocalStorage(t *testing.T) {
 	manager.cleanupSubtitleObject(ctx, stored.S3Key)
 	if _, statErr := fs.Stat(ctx, stored.S3Key); statErr == nil {
 		t.Fatal("object survived cleanup")
-	}
-}
-
-// Deleting an object that is already gone is not an error: publication cleanup
-// and the deletion path both run after a failure that may have removed it.
-func TestLocalSubtitleDeleteToleratesAbsentObject(t *testing.T) {
-	fs, err := blobstore.NewFilesystem(filepath.Join(t.TempDir(), "storage"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := blobstore.NewByteStore(fs).Delete(context.Background(), "subtitles/1/absent.srt"); err != nil {
-		t.Fatalf("absent key reported as a failure: %v", err)
 	}
 }

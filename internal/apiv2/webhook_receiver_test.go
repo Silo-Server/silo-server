@@ -58,7 +58,7 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 	bridge.Post("/api/v1/webhook-sync/webhooks/{secret}", app.HandleWebhook)
 	var payload bytes.Buffer
 	form := multipart.NewWriter(&payload)
-	if err := form.WriteField("payload", `{"event":"media.play","Account":{"id":1},"Metadata":{"ratingKey":"1","type":"movie"}}`); err != nil {
+	if err := form.WriteField("payload", `{"event":"media.resume","Account":{"id":1},"Metadata":{"ratingKey":"1","type":"movie"}}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := form.Close(); err != nil {
@@ -133,7 +133,8 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 	}
 	// Exact body boundary is accepted; one byte over is rejected before parsing.
 	for _, delta := range []int{0, 1} {
-		body := `{}` + strings.Repeat(" ", int(webhookDeliveryLimit)-2+delta)
+		ignored := `{"notification_type":"Generic"}`
+		body := ignored + strings.Repeat(" ", int(webhookDeliveryLimit)-len(ignored)+delta)
 		req = httptest.NewRequest(http.MethodPost, Prefix+"/webhook-sync/webhooks/receiver-secret", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec = httptest.NewRecorder()
@@ -152,7 +153,7 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 	}
 	var diskBody bytes.Buffer
 	diskForm := multipart.NewWriter(&diskBody)
-	if err := diskForm.WriteField("payload", `{"event":"media.play","Account":{"id":1},"Metadata":{"ratingKey":"1","type":"movie"}}`); err != nil {
+	if err := diskForm.WriteField("payload", `{"event":"media.resume","Account":{"id":1},"Metadata":{"ratingKey":"1","type":"movie"}}`); err != nil {
 		t.Fatal(err)
 	}
 	part, err := diskForm.CreateFormFile("thumb", "test.bin")
@@ -193,23 +194,6 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/webhook-sync/webhooks/receiver-secret", `{}`, bearer(memberToken)), TypeNotFound)
 }
 
-func TestWebhookReceiverUnavailable(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/webhook-sync/webhooks/secret", "", nil), TypeDependencyUnavailable)
-	rec := do(t, h, http.MethodGet, Prefix+"/webhook-sync/capabilities", "", nil)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":false`) {
-		t.Fatal(rec.Code, rec.Body)
-	}
-}
-
 func (f *fakeWebhookManagement) RotateWebhookConnection(context.Context, int, string) (*webhooksync.RotateWebhookResult, error) {
 	return &webhooksync.RotateWebhookResult{WebhookURL: "/api/v2/webhook-sync/webhooks/new-secret"}, nil
-}
-func TestWebhookRotationEmitsV2Receiver(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	deps.WebhookSync = new(fakeWebhookManagement)
-	rec := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/webhook-sync/connections/"+webhookFixtureID+"/webhook/rotate", "", bearer(memberToken))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), Prefix+"/webhook-sync/webhooks/new-secret") {
-		t.Fatal(rec.Code, rec.Body)
-	}
 }

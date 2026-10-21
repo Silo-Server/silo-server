@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // resolvePostgresTargets checks an anchor directly, then tries the latest
 // resumable episode, first unwatched episode, and first available episode.
 // Each branch returns at most one ID. COALESCE stops after a winner, so a valid
 // anchor avoids reading the rest of a long-running series entirely.
-func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, args []any, fileConditions, keysByOrd []string, progress string) (map[string]string, error) {
+func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, args []any, fileConditions, keysByOrd []string, progress string) (map[string]PlayableTarget, error) {
 	fileSQL := strings.Join(fileConditions, " AND ")
 	completedSQL := fmt.Sprintf(`AND NOT EXISTS (
 		SELECT 1 FROM %s progress
@@ -36,7 +38,7 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 			WHERE NOT (requested.series_id <> '' AND requested.season_number >= 0
 				AND requested.series_id = season.series_id AND requested.season_number = season.season_number)
 		)
-		SELECT requested.ord, target.play_content_id
+		SELECT requested.ord, target.play_content_id, target_episode.season_number
 		FROM requested
 		CROSS JOIN LATERAL (
 			SELECT COALESCE(
@@ -71,28 +73,27 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 			-- winner subqueries a second time for the SELECT projection.
 			OFFSET 0
 		) target
+		-- One primary-key probe per winner, not per candidate.
+		LEFT JOIN episodes target_episode ON target_episode.content_id = target.play_content_id
 		WHERE target.play_content_id IS NOT NULL
 	`, fileSQL, progress, firstPlayableEpisodeSQL(fileSQL, completedSQL), firstPlayableEpisodeSQL(fileSQL, ""))
 
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("resolving postgres playable targets: %w", err)
-	}
-	defer rows.Close()
-	result := make(map[string]string, len(keysByOrd))
-	for rows.Next() {
+	result := make(map[string]PlayableTarget, len(keysByOrd))
+	err := r.queryPlayableTargets(ctx, query, args, func(rows pgx.Rows) error {
 		var ord int64
 		var contentID string
-		if err := rows.Scan(&ord, &contentID); err != nil {
-			return nil, fmt.Errorf("scanning postgres playable target: %w", err)
+		var season *int
+		if err := rows.Scan(&ord, &contentID, &season); err != nil {
+			return fmt.Errorf("scanning postgres playable target: %w", err)
 		}
 		if ord < 1 || ord > int64(len(keysByOrd)) {
-			return nil, fmt.Errorf("postgres playable target ordinality %d is outside the requested set", ord)
+			return fmt.Errorf("postgres playable target ordinality %d is outside the requested set", ord)
 		}
-		result[keysByOrd[ord-1]] = contentID
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating postgres playable targets: %w", err)
+		result[keysByOrd[ord-1]] = PlayableTarget{ContentID: contentID, SeasonNumber: season}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolving postgres playable targets: %w", err)
 	}
 	return result, nil
 }

@@ -82,11 +82,15 @@ var errNoNode = errors.New("no transcode node available for subtitle sync")
 // ("local" or the node's name). All requests of a file run in one place: a
 // node is reserved once for the whole set. Under prefer_transcode_nodes a
 // node that fails for reasons of its own hands the remaining requests to
-// this server.
-func (s *sampler) run(ctx context.Context, reqs []mediasample.Request) ([]mediasample.Result, string, error) {
+// this server. done, when set, is called with the number of requests
+// finished after each one.
+func (s *sampler) run(ctx context.Context, reqs []mediasample.Request, done func(int)) ([]mediasample.Result, string, error) {
+	if done == nil {
+		done = func(int) {}
+	}
 	mode := s.execution(ctx)
 	if mode == ExecutionLocal {
-		results, err := s.runLocal(ctx, reqs)
+		results, err := s.runLocal(ctx, reqs, nil, done)
 		return results, ExecutionLocal, err
 	}
 	node, release, secret := s.reserve(ctx)
@@ -94,7 +98,7 @@ func (s *sampler) run(ctx context.Context, reqs []mediasample.Request) ([]medias
 		if mode == ExecutionTranscodeOnly {
 			return nil, "", errNoNode
 		}
-		results, err := s.runLocal(ctx, reqs)
+		results, err := s.runLocal(ctx, reqs, nil, done)
 		return results, ExecutionLocal, err
 	}
 	defer release()
@@ -102,17 +106,21 @@ func (s *sampler) run(ctx context.Context, reqs []mediasample.Request) ([]medias
 	endpoint := nodepool.NodeEndpoint(node.URL, mediasample.RemotePath)
 	results := make([]mediasample.Result, 0, len(reqs))
 	for i, req := range reqs {
+		if err := ctx.Err(); err != nil {
+			return nil, nodeLabel(node), err
+		}
 		result, err := s.runRemote(ctx, endpoint, secret, req)
 		if err == nil {
 			results = append(results, result)
+			done(len(results))
 			continue
 		}
 		var remoteErr *mediasample.RemoteError
 		if mode == ExecutionPreferTranscode && errors.As(err, &remoteErr) && remoteErr.Infrastructure() && ctx.Err() == nil {
 			slog.WarnContext(ctx, "subtitle sync node sampling failed; continuing locally", "component", "subsync",
 				"node", node.Name, "error", err)
-			rest, localErr := s.runLocal(ctx, reqs[i:])
-			return append(results, rest...), ExecutionLocal, localErr
+			all, localErr := s.runLocal(ctx, reqs[i:], results, done)
+			return all, ExecutionLocal, localErr
 		}
 		return nil, nodeLabel(node), err
 	}
@@ -128,14 +136,18 @@ func (s *sampler) runRemote(ctx context.Context, endpoint, secret string, req me
 	return s.remote.Run(ctx, endpoint, secret, req)
 }
 
-func (s *sampler) runLocal(ctx context.Context, reqs []mediasample.Request) ([]mediasample.Result, error) {
-	results := make([]mediasample.Result, 0, len(reqs))
+// runLocal runs reqs here, appending their results to those already done.
+func (s *sampler) runLocal(ctx context.Context, reqs []mediasample.Request, results []mediasample.Result, done func(int)) ([]mediasample.Result, error) {
 	for _, req := range reqs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		result, err := s.local(ctx, req)
 		if err != nil {
 			return nil, err
 		}
 		results = append(results, result)
+		done(len(results))
 	}
 	return results, nil
 }

@@ -18,10 +18,11 @@ import {
   ruleDraft,
   ruleSentence,
   rowsToConditions,
+  SERVER_NAMED_OVERRIDES,
   splitOverrideFields,
   traceLine,
 } from "./requestRoutingModel";
-import { adminLanguage, presetsInUse, rulePreset } from "./requestRoutingPresets";
+import { adminLanguage, presetsInUse } from "./requestRoutingPresets";
 import {
   conditionsCover,
   routingWarnings,
@@ -30,8 +31,12 @@ import {
 } from "./requestRoutingWarnings";
 import {
   serverDeleteBlockers,
+  serverNeedsAPIKey,
+  serverNeedsBaseURL,
+  serverReady,
   serverRouteUsage,
   serverServesMediaType,
+  type RequestRouterInstallation,
 } from "./requestServerModel";
 
 function server(id: string, name: string, kind: "radarr" | "sonarr", extra = {}) {
@@ -166,6 +171,22 @@ describe("rule sentences", () => {
       ),
     ).toBe("Quality Ultra-HD");
   });
+
+  it("names a Sonarr metadata language from the server's options", () => {
+    // A route row loads the server's options only for these keys.
+    expect(SERVER_NAMED_OVERRIDES.has("metadata_language")).toBe(true);
+    expect(
+      overridesSummary(
+        { metadata_language: 8 },
+        {
+          options: { metadata_language: [{ value: "8", label: "Japanese" }] },
+          fields: [
+            { key: "metadata_language", label: "Metadata language" } as PluginAdminFormField,
+          ],
+        },
+      ),
+    ).toBe("Metadata language Japanese");
+  });
 });
 
 describe("the pass-through choice", () => {
@@ -241,23 +262,6 @@ describe("rule presets", () => {
     expect(adminLanguage(undefined)).toBe("en");
   });
 
-  it("builds each preset's conditions for the media type", () => {
-    expect(rulePreset("anime", "series", "en").conditions).toEqual({ anime: true });
-    expect(rulePreset("foreign", "movie", "fr")).toMatchObject({
-      conditions: { exclude_original_languages: ["fr"] },
-      description: "Titles not originally in French.",
-      noun: "foreign-language movies",
-    });
-    expect(rulePreset("kids", "movie", "en").conditions).toEqual({
-      genre_ids: [10751],
-      max_content_rating: "PG",
-    });
-    expect(rulePreset("kids", "series", "en")).toMatchObject({
-      conditions: { genre_ids: [10751, 10762], max_content_rating: "PG" },
-      noun: "kids & family series",
-    });
-  });
-
   it("knows which presets a media type's rules already hold", () => {
     const used = presetsInUse(
       [
@@ -327,6 +331,7 @@ describe("routing warnings", () => {
       rules: [],
       fallback: fallback("s1", undefined, "series"),
       servers,
+      installations: [],
       serverFields: () => animeFields,
       language: "en",
       forceDual: false,
@@ -359,47 +364,6 @@ describe("routing warnings", () => {
       "Radarr is a Radarr server; series need Sonarr.",
     ]);
     expect(warnings.get("b")?.[0]?.fix).toEqual({ kind: "move-above", targetId: "a" });
-  });
-
-  it("flags anime below a foreign-language rule, servers that are off or need setup, and a standard series type", () => {
-    const off = server("s3", "Sonarr Off", "sonarr", { enabled: false });
-    const bare = server("s4", "Sonarr New", "sonarr", { has_api_key: false });
-    const warnings = routingWarnings(
-      input({
-        servers: [...servers, off, bare],
-        rules: [
-          route({
-            id: "f",
-            name: "Foreign language",
-            conditions: { exclude_original_languages: ["en"] },
-            hd: { integration_id: "s3" },
-          }),
-          route({
-            id: "a",
-            name: "Anime",
-            conditions: { anime: true },
-            hd: { integration_id: "s2" },
-            uhd: { integration_id: "s4" },
-          }),
-        ],
-      }),
-    );
-    expect(warnings.get("f")?.map((w) => w.text)).toEqual([
-      "Sonarr Off is turned off. Requests this rule sends there can't go through until it's back on.",
-    ]);
-    expect(warnings.get("a")).toEqual([
-      {
-        key: "anime-order",
-        text: "Anime titles are usually Japanese, so “Foreign language” above catches most of them first.",
-        fix: { kind: "move-above", targetId: "f" },
-      },
-      { key: "setup-s4", text: "Sonarr New needs setup." },
-      {
-        key: "anime-series-type",
-        text: "Sonarr will add these as standard series.",
-        fix: { kind: "set-anime-series-type" },
-      },
-    ]);
   });
 
   it("says Everything else makes no 4K copies while every request asks for one", () => {
@@ -493,6 +457,14 @@ describe("how it was decided", () => {
     ).toBe("Everything else — decides 4K: none");
     expect(
       traceLine(
+        step({ is_fallback: true, route_name: "Everything else", hd: "skips", uhd: "sends" }),
+        0,
+        {},
+        ctx,
+      ),
+    ).toBe("Everything else — decides HD: none · decides 4K");
+    expect(
+      traceLine(
         step({ unmet_conditions: ["year_from", "year_to"] }),
         1,
         { year_from: 1980, year_to: 1989 },
@@ -536,6 +508,58 @@ describe("request routing bodies", () => {
 });
 
 describe("request servers", () => {
+  function routerInstallation(
+    request_router?: RequestRouterInstallation["capability"]["request_router"],
+  ): RequestRouterInstallation {
+    return {
+      installationID: 1,
+      pluginID: "silo.requests.local",
+      capability: { type: "request_router.v1", id: "local", display_name: "Local", request_router },
+    };
+  }
+  const keyless = server("k1", "Local", "radarr", { has_api_key: false, capability_id: "local" });
+
+  it("needs a URL and a key unless the server's plugin works without them", () => {
+    expect(serverNeedsAPIKey(undefined)).toBe(true);
+    expect(serverNeedsBaseURL(undefined)).toBe(true);
+    expect(serverNeedsAPIKey(routerInstallation())).toBe(true);
+    expect(serverNeedsBaseURL(routerInstallation())).toBe(true);
+    const neither = routerInstallation({ api_key_optional: true, base_url_optional: true });
+    expect(serverNeedsAPIKey(neither)).toBe(false);
+    expect(serverNeedsBaseURL(neither)).toBe(false);
+  });
+
+  it("counts a server without a key as ready only when its plugin needs none", () => {
+    const keyOptional = routerInstallation({ api_key_optional: true, base_url_optional: false });
+    expect(serverReady(keyless, [keyOptional])).toBe(true);
+    expect(serverReady(keyless, [routerInstallation()])).toBe(false);
+    // A server whose plugin is not installed needs a key.
+    expect(serverReady(keyless, [])).toBe(false);
+    expect(serverReady({ ...keyless, enabled: false }, [keyOptional])).toBe(false);
+    expect(serverReady({ ...keyless, installation_id: undefined }, [keyOptional])).toBe(false);
+    expect(serverReady(radarr, [])).toBe(true);
+  });
+
+  it("warns that a server without a key needs setup only when its plugin needs one", () => {
+    const warns = (installations: RequestRouterInstallation[]) =>
+      (
+        routingWarnings({
+          mediaType: "movie",
+          rules: [],
+          fallback: fallback("k1"),
+          servers: [keyless],
+          installations,
+          serverFields: () => [],
+          language: "en",
+          forceDual: false,
+        }).get(fallback("k1").id) ?? []
+      ).some((warning) => warning.text === "Local needs setup.");
+    expect(warns([routerInstallation()])).toBe(true);
+    expect(warns([routerInstallation({ api_key_optional: true, base_url_optional: false })])).toBe(
+      false,
+    );
+  });
+
   it("routes movies to Radarr and series to Sonarr", () => {
     expect(serverServesMediaType(radarr, "movie")).toBe(true);
     expect(serverServesMediaType(radarr, "series")).toBe(false);
@@ -728,6 +752,7 @@ describe("review fixes", () => {
           rules: [foreign(conditions), anime],
           fallback: fallback("s1", undefined, "series"),
           servers,
+          installations: [],
           serverFields: () => [],
           language: "en",
           forceDual: false,

@@ -12,8 +12,8 @@ import (
 // turns it into ffmpeg arguments.
 //
 // A request names exactly one sampling mode (Window, Samples, or At) and at
-// least one output (Audio, Stats, or both; Samples takes only Stats, and At
-// only Images).
+// least one output (Audio, Stats, or both; Samples takes only Stats or
+// Sheets, and At only Images).
 type Request struct {
 	// Input is the media file to decode.
 	Input string `json:"input"`
@@ -30,6 +30,8 @@ type Request struct {
 	Stats *StatsOutput `json:"stats,omitempty"`
 	// Images asks for the sampled frames as JPEG images.
 	Images *ImageOutput `json:"images,omitempty"`
+	// Sheets asks for the sampled frames tiled into JPEG sprite sheets.
+	Sheets *SheetsOutput `json:"sheets,omitempty"`
 	// Attempts are tried in order until one succeeds. Empty means a single
 	// software attempt bounded only by the caller's context.
 	Attempts []Attempt `json:"attempts,omitempty"`
@@ -46,6 +48,11 @@ type Request struct {
 	// the lowest CPU priority (nice 19) and in the idle I/O class; elsewhere it
 	// runs like any other request.
 	Background bool `json:"background,omitempty"`
+	// skipFrame replaces the keyframe -skip_frame value for a Sheets run
+	// once the input is probed, and lowDelay adds the decoder's low-delay
+	// mode; see keyframeSkipFor and keyframeLowDelayFor.
+	skipFrame string
+	lowDelay  bool
 }
 
 // Window is a contiguous span of the input, in media seconds.
@@ -55,19 +62,30 @@ type Window struct {
 	// KeyframesOnly decodes only video keyframes. It needs a video output
 	// (Stats); audio outputs still read every audio frame.
 	KeyframesOnly bool `json:"keyframes_only,omitempty"`
+	// referencePictures makes a Sheets window decode every reference
+	// picture and keep only the keyframes, so a decoder that drops
+	// keyframes over skipped pictures keeps its state whole. It is set only
+	// by the samples fallback, never sent to another node.
+	referencePictures bool
 }
 
 // Samples decodes, for each time, the video keyframe at or before it, and
 // nothing between. Each frame reports the time it was sampled for rather than
 // its own, which lies up to one keyframe interval earlier. Times count from
 // the start of the file, as window starts do. A keyframe that serves several
-// times is reported once per time. Only Stats may be asked of samples.
-// Containers without a keyframe index, such as MPEG-TS, are read whole over
-// the sampled span, keyframes only (see probe.go).
+// times is reported once per time. Only Stats or Sheets may be asked of
+// samples. Containers without a keyframe index, such as MPEG-TS, are read
+// whole over the sampled span, keyframes only (see probe.go).
 type Samples struct {
 	// Seconds are the media times to sample, finite, non-negative, and
 	// strictly increasing.
 	Seconds []float64 `json:"seconds"`
+	// ReadThrough reads the sampled span as one keyframes-only window, as
+	// containers without a keyframe index always are, instead of seeking to
+	// each sample. It decodes every keyframe in the span but reads the file
+	// once, front to back, which can cost less than a seek per sample when
+	// samples lie closer together than the keyframes do.
+	ReadThrough bool `json:"read_through,omitempty"`
 }
 
 // At decodes the first video frame at or after a media time, decoding from
@@ -119,8 +137,8 @@ type StatsOutput struct {
 // Attempt is one decode attempt.
 type Attempt struct {
 	// Hardware decodes video on the Runner's configured hardware (see
-	// hwdecode.go). It needs a video output (Images or Stats); audio always
-	// decodes in software.
+	// hwdecode.go). It needs a video output (Images, Stats, or Sheets); audio
+	// always decodes in software.
 	Hardware bool `json:"hardware,omitempty"`
 	// TimeoutSeconds bounds the attempt. Zero means only the caller's context
 	// bounds it.
@@ -168,8 +186,8 @@ func (r Request) Validate() error {
 		if err := r.Samples.validate(); err != nil {
 			return err
 		}
-		if r.Audio != nil {
-			return errors.New("samples take no audio output")
+		if r.Audio != nil || r.Images != nil {
+			return errors.New("samples take only a stats or sheets output")
 		}
 		if _, err := concatPath(r.Input); err != nil {
 			return err
@@ -188,6 +206,27 @@ func (r Request) Validate() error {
 			return errors.New("images need a single-frame sampling mode")
 		}
 		if err := r.Images.validate(); err != nil {
+			return err
+		}
+		if r.Images.ToneMap != nil && r.Images.ToneMap.Source != "" {
+			return errors.New("images keep their tone-map chains and take no source signal")
+		}
+	}
+	if r.Sheets != nil {
+		if r.Samples == nil || r.Stats != nil {
+			return errors.New("sheets need samples and no other output")
+		}
+		if err := r.Sheets.validate(); err != nil {
+			return err
+		}
+		run := *r.Sheets
+		if run.UseInputAspect {
+			// The probe sets the tile height, and samples checks the run
+			// again with it before any tile is decoded. Until then, only a
+			// run too large at any height is refused.
+			run.TileHeight = minSheetTile
+		}
+		if err := run.validateRun(len(r.Samples.Seconds)); err != nil {
 			return err
 		}
 	}
@@ -234,7 +273,7 @@ func (r Request) Validate() error {
 		if !finite(attempt.TimeoutSeconds) || attempt.TimeoutSeconds < 0 || attempt.TimeoutSeconds > maxAttemptSeconds {
 			return fmt.Errorf("attempt %d timeout must be between 0 and %d seconds", i+1, maxAttemptSeconds)
 		}
-		if attempt.Hardware && r.Images == nil && r.Stats == nil {
+		if attempt.Hardware && !r.hasVideoOutput() {
 			return fmt.Errorf("attempt %d asks for hardware decode without a video output", i+1)
 		}
 	}
@@ -242,7 +281,13 @@ func (r Request) Validate() error {
 }
 
 func (r Request) hasOutput() bool {
-	return r.hasAudioOutput() || r.Stats != nil || r.Images != nil
+	return r.hasAudioOutput() || r.hasVideoOutput()
+}
+
+// hasVideoOutput reports whether the request decodes video, which hardware
+// attempts need.
+func (r Request) hasVideoOutput() bool {
+	return r.Stats != nil || r.Images != nil || r.Sheets != nil
 }
 
 func (r Request) hasAudioOutput() bool {
@@ -268,7 +313,7 @@ func (r Request) speech() *SpeechParams {
 // parsesStderr reports whether an output is read from ffmpeg's log, which
 // then has to run at info level.
 func (r Request) parsesStderr() bool {
-	return (r.Audio != nil && r.Audio.Silence != nil) || r.Stats != nil
+	return (r.Audio != nil && r.Audio.Silence != nil) || r.Stats != nil || r.Sheets != nil
 }
 
 func (w Window) validate() error {
@@ -351,4 +396,52 @@ func countSet(values ...bool) int {
 
 func finite(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+// keyframeSkip returns skip, or for keyframeSkipFrame the probed codec's
+// own keyframe -skip_frame value (see keyframeSkipFor).
+func (r Request) keyframeSkip(skip string) string {
+	if skip == keyframeSkipFrame && r.skipFrame != "" {
+		return r.skipFrame
+	}
+	return skip
+}
+
+// keyframeInputArgs are the input options a Sheets run decodes with skip
+// under, before -i.
+func (r Request) keyframeInputArgs(skip string) []string {
+	args := []string{skipFrameOption, r.keyframeSkip(skip)}
+	if r.lowDelay {
+		args = append(args, "-flags:v", "+low_delay")
+	}
+	return args
+}
+
+// keyframeSkipFor returns the -skip_frame value that keeps codec's
+// keyframes, or "" for keyframeSkipFrame. Interlaced MPEG-2 often codes a
+// keyframe as an I field paired with a P field, which the decoder reports
+// as a P frame and "nokey" discards (one of 80 samples of a DVD-sourced
+// episode decoded). The MPEG-1/2 decoder honors only "noref" and "nokey"
+// ("nointra" acts as "noref"), so keeping the keyframe's P field means
+// decoding every P picture: about two and a half times the work of "nokey".
+// MPEG-1 has no field pictures, and "nokey" keeps its keyframes.
+func keyframeSkipFor(codec string) string {
+	if codec == "mpeg2video" {
+		return exactSkipFrame
+	}
+	return ""
+}
+
+// keyframeLowDelayFor reports whether codec's keyframes need the decoder's
+// low-delay mode. An MPEG-4 Part 2 decoder (XviD, DivX) holds each picture
+// back for B-frames that a keyframes-only read never sends, and releases it
+// with the next keyframe's time: every sample of a packed-bitstream AVI
+// showed the keyframe a whole GOP before its own, and the first had none.
+// Without B-frames to reorder, low delay hands each keyframe out at once.
+func keyframeLowDelayFor(codec string) bool {
+	switch codec {
+	case "mpeg4", "msmpeg4v1", "msmpeg4v2", "msmpeg4v3", "msmpeg4":
+		return true
+	}
+	return false
 }

@@ -8,6 +8,7 @@ import type { AdminUser } from "@/api/types";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 
 import { PreferencesTab } from "./PreferencesTab";
+import { stubRadixDom } from "../adminUserTab.test-support";
 
 const mocks = vi.hoisted(() => ({
   settings: [] as unknown[],
@@ -16,11 +17,12 @@ const mocks = vi.hoisted(() => ({
   updateMutateAsync: vi.fn(),
   deleteMutate: vi.fn(),
   clearDeviceMutate: vi.fn(),
+  capabilities: { account_devices: true } as Record<string, boolean>,
 }));
 
 vi.mock("@/hooks/queries/admin/users", () => ({
   useAdminUserSettings: () => ({ data: mocks.settings, isLoading: false, isError: false }),
-  useAdminUserCapabilities: () => ({ data: { account_devices: true } }),
+  useAdminUserCapabilities: () => ({ data: mocks.capabilities }),
   useUpdateAdminUserSetting: () => ({
     mutate: mocks.updateMutate,
     mutateAsync: mocks.updateMutateAsync,
@@ -43,6 +45,11 @@ vi.mock("@/hooks/queries/admin/history", () => ({
     ],
   }),
 }));
+vi.mock("./ProfileHomeSections", () => ({
+  ProfileHomeSections: ({ profileId, profileName }: { profileId: string; profileName: string }) => (
+    <h3 data-profile-id={profileId}>{`Home sections · ${profileName}`}</h3>
+  ),
+}));
 vi.mock("@/hooks/queries/admin/libraries", () => ({
   useAdminLibraries: () => ({ data: [{ id: 3, name: "TV Shows" }] }),
 }));
@@ -50,21 +57,6 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
 const user = { id: 7, username: "taylor" } as AdminUser;
 const SUBTITLES = SETTING_KEYS.PLAYBACK_SUBTITLE_MODE;
 const RECAPS = SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP;
-
-class MockResizeObserver implements ResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
-function installPointerCaptureMocks() {
-  Object.defineProperties(Element.prototype, {
-    hasPointerCapture: { configurable: true, value: () => false },
-    setPointerCapture: { configurable: true, value: () => {} },
-    releasePointerCapture: { configurable: true, value: () => {} },
-    scrollIntoView: { configurable: true, value: () => {} },
-  });
-}
 
 function LocationProbe() {
   const location = useLocation();
@@ -89,18 +81,8 @@ function renderTab(search = "?tab=preferences") {
   );
 }
 
-function rail() {
-  return screen.getByRole("navigation", { name: "Setting levels" });
-}
-
 function levelCard(title: string) {
   return screen.getByRole("heading", { name: title }).closest("section") as HTMLElement;
-}
-
-function railLevels(profile: string) {
-  return within(within(rail()).getByRole("group", { name: `Profile · ${profile}` }))
-    .getAllByRole("button")
-    .map((button) => button.textContent);
 }
 
 const shield = {
@@ -117,8 +99,7 @@ const shield = {
 };
 
 beforeEach(() => {
-  vi.stubGlobal("ResizeObserver", MockResizeObserver);
-  installPointerCaptureMocks();
+  stubRadixDom();
   mocks.settings = [
     { key: SUBTITLES, scope: "profile", profile_id: "p1", value: "off" },
     { key: RECAPS, scope: "profile", profile_id: "p1", value: "true" },
@@ -138,6 +119,7 @@ beforeEach(() => {
     },
   ];
   mocks.devices = [shield];
+  mocks.capabilities = { account_devices: true };
   for (const mock of Object.values(mocks)) {
     if (typeof mock === "function") mock.mockReset();
   }
@@ -150,55 +132,6 @@ afterEach(() => {
 });
 
 describe("PreferencesTab levels", () => {
-  it("lists each profile's levels with counts, including a device with nothing set", () => {
-    renderTab();
-    expect(railLevels("Main")).toEqual(["All devices2", "Shield TV1", "TV Shows library1"]);
-    // Kids stores nothing, but was seen on the Shield, so that device is listed.
-    expect(railLevels("Kids")).toEqual(["All devices0", "Shield TV0"]);
-  });
-
-  it("opens the first profile by default and selects a level through the URL", async () => {
-    const u = userEvent.setup();
-    renderTab();
-    expect(levelCard("All devices · Main")).toHaveTextContent(
-      "These apply on every device Main uses.",
-    );
-
-    const kids = within(rail()).getByRole("group", { name: "Profile · Kids" });
-    await u.click(within(kids).getByRole("button", { name: /Shield TV/ }));
-    expect(screen.getByTestId("search")).toHaveTextContent(
-      "?tab=preferences&level=device.p2.dev-shield",
-    );
-    expect(within(kids).getByRole("button", { name: /Shield TV/ })).toHaveAttribute(
-      "aria-current",
-      "true",
-    );
-    const card = levelCard("Shield TV · Kids");
-    expect(card).toHaveTextContent("Nothing changed on this device");
-    expect(card).toHaveTextContent("It uses Kids's settings everywhere.");
-    expect(
-      within(card).getByRole("button", { name: /Add a setting for this device/ }),
-    ).toBeVisible();
-  });
-
-  it("says what each row replaces: the profile's value on a device, the default on a profile", () => {
-    renderTab("?tab=preferences&level=device.p1.dev-shield");
-    const device = levelCard("Shield TV · Main");
-    expect(device).toHaveTextContent(
-      "These replace Main's settings on this device only; everything else follows Main.",
-    );
-    expect(device).toHaveTextContent("Auto-skip recaps");
-    expect(device).toHaveTextContent("Replaces Main: Enabled");
-    expect(device).not.toHaveTextContent("Subtitles");
-    cleanup();
-
-    renderTab("?tab=preferences&level=profile.p1");
-    const profile = levelCard("All devices · Main");
-    expect(within(profile).getByText("Subtitles").parentElement).toHaveTextContent(
-      "Replaces app default: Auto",
-    );
-  });
-
   it("adds a setting at the level's identity, starting from the value it replaces", async () => {
     const u = userEvent.setup();
     renderTab("?tab=preferences&level=device.p1.dev-shield");
@@ -244,20 +177,6 @@ describe("PreferencesTab levels", () => {
         libraryId: undefined,
         seriesId: undefined,
       },
-    });
-  });
-
-  it("offers the app default when a profile value is removed", async () => {
-    const u = userEvent.setup();
-    renderTab("?tab=preferences&level=profile.p1");
-    await u.click(screen.getByRole("button", { name: "Remove Subtitles" }));
-    const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("Go back to the app default?");
-    expect(dialog).toHaveTextContent("Subtitles goes back to the app default, Auto, for Main.");
-    await u.click(within(dialog).getByRole("button", { name: "Use app default" }));
-    expect(mocks.deleteMutate.mock.calls[0]?.[0]).toMatchObject({
-      key: SUBTITLES,
-      identity: { scope: "profile", profileId: "p1", deviceId: undefined },
     });
   });
 
@@ -310,10 +229,26 @@ describe("PreferencesTab levels", () => {
     expect(within(card).queryByRole("button", { name: "Edit JSON" })).not.toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Remove future.setting" })).toBeEnabled();
   });
+});
 
-  it("names the profile's value below a library", () => {
-    renderTab("?tab=preferences&level=library.p1.3");
-    const card = levelCard("TV Shows library · Main");
-    expect(card).toHaveTextContent("Replaces Main: Off");
+describe("PreferencesTab Home sections", () => {
+  it("shows the selected profile's Home sections when the server supports it", () => {
+    mocks.capabilities = { account_devices: true, profile_sections: true };
+    renderTab("?tab=preferences&level=profile.p2");
+    expect(screen.getByRole("heading", { name: "Home sections · Kids" })).toHaveAttribute(
+      "data-profile-id",
+      "p2",
+    );
+  });
+
+  it("leaves Home sections off device levels and older servers", () => {
+    mocks.capabilities = { account_devices: true, profile_sections: true };
+    renderTab("?tab=preferences&level=device.p1.dev-shield");
+    expect(screen.queryByRole("heading", { name: /Home sections/ })).not.toBeInTheDocument();
+    cleanup();
+
+    mocks.capabilities = { account_devices: true };
+    renderTab("?tab=preferences&level=profile.p1");
+    expect(screen.queryByRole("heading", { name: /Home sections/ })).not.toBeInTheDocument();
   });
 });

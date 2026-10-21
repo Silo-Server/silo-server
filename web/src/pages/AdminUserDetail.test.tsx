@@ -13,9 +13,13 @@ import {
 } from "@/api/client";
 import type { AdminUser, UpdateUserRequest } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
-import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
+import { PERMISSION_MARKER_EDIT } from "@/lib/permissions";
 
 import AdminUserDetail from "./AdminUserDetail";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
+import { makeAdminUser, stubRadixDom } from "./adminPage.test-support";
+
+stubRadixDom();
 
 interface UpdateArg {
   editor: { etag: string; user: { id: number } };
@@ -35,50 +39,17 @@ const mocks = vi.hoisted(() => ({
   /** The account the detail page renders, reset per test. */
   user: null as AdminUser | null,
   userError: null as Error | null,
+  /** The account read arrived without a strong ETag (a proxy stripped it). */
+  noEditor: false,
   refetchUser: vi.fn(),
   live: [] as unknown[],
+  setSignIn: vi.fn(),
 }));
 
-const adminUser: AdminUser = {
-  id: 7,
-  username: "taylor",
-  email: "taylor@example.test",
-  role: "user",
-  permissions: [],
-  enabled: true,
-  library_ids: null,
-  access_group_id: null,
-  max_playback_quality: null,
-  max_streams: null,
-  max_transcodes: null,
-  max_remote_stream_bitrate_kbps: null,
-  max_local_stream_bitrate_kbps: null,
-  transcode_allowed: null,
-  audio_transcode_allowed: null,
-  max_profiles: 4,
-  download_allowed: null,
-  download_transcode_allowed: null,
-  requests_allowed: null,
-  password_login: true,
-  password_change_required: false,
-  is_owner: false,
-  effective_policy: {
-    library_ids: null,
-    max_playback_quality: "",
-    max_streams: 0,
-    max_transcodes: 0,
-    max_remote_stream_bitrate_kbps: 0,
-    max_local_stream_bitrate_kbps: 0,
-    transcode_allowed: true,
-    audio_transcode_allowed: true,
-    download_allowed: true,
-    download_transcode_allowed: false,
-    requests_allowed: true,
-    permissions: [],
-  },
-  created_at: "2026-07-01T12:00:00Z",
-  updated_at: "2026-07-01T12:00:00Z",
-};
+const base = makeAdminUser();
+const adminUser = makeAdminUser({
+  effective_policy: { ...base.effective_policy, download_transcode_allowed: false },
+});
 
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/v2/adminUsers")>()),
@@ -89,6 +60,7 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: POLICY_DEFAULTS }),
   useViewerIsOwner: () => mocks.viewerIsOwner,
   useTransferOwnership: () => ({ mutate: mocks.transfer, isPending: false }),
   useAdminUserCapabilities: () => ({
@@ -106,9 +78,10 @@ vi.mock("@/hooks/queries/admin/users", () => ({
   }),
   useAdminUser: () => ({
     data: mocks.user ?? undefined,
-    editor: mocks.user
-      ? { user: mocks.user, etag: '"cached"', profileContext: captureProfileRequestContext() }
-      : undefined,
+    editor:
+      mocks.user && !mocks.noEditor
+        ? { user: mocks.user, etag: '"cached"', profileContext: captureProfileRequestContext() }
+        : undefined,
     isLoading: false,
     isFetching: false,
     error: mocks.userError,
@@ -144,6 +117,7 @@ vi.mock("@/hooks/queries/admin/accessGroups", () => ({
         max_transcodes: 0,
         max_remote_stream_bitrate_kbps: 8000,
         max_local_stream_bitrate_kbps: 0,
+        max_profiles: 5,
         allowed_permissions: [PERMISSION_MARKER_EDIT],
         requests_allowed: false,
         is_default: false,
@@ -181,6 +155,21 @@ vi.mock("@/hooks/queries/admin/requests", () => ({
   }),
   useRequestGroupLimit: () => ({ data: undefined, isError: false, refetch: vi.fn() }),
   useUpdateRequestUserLimit: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+vi.mock("@/hooks/queries/admin/externalSignIn", () => ({
+  useUpdateAdminUserSignIn: () => ({ mutate: mocks.setSignIn, isPending: false }),
+  useExternalSignInCapabilities: () => ({
+    data: { available: true, admin_identities: true, break_glass: true, provider_recheck: true },
+  }),
+  useAdminUserIdentities: () => ({ data: [], isLoading: false, isError: false }),
+  useUnlinkAdminUserIdentity: () => ({ mutate: vi.fn(), isPending: false }),
+  useLinkAdminUserIdentity: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+vi.mock("@/hooks/queries/admin/plugins", () => ({
+  useAdminPluginInstallations: () => ({ data: [], isLoading: false }),
+}));
+vi.mock("@/hooks/queries/admin/settings", () => ({
+  useAdminSettingValue: () => ({ data: "true" }),
 }));
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ beginImpersonation: mocks.beginImpersonation, user: mocks.viewer }),
@@ -238,20 +227,6 @@ beforeEach(() => {
   setAccessToken("account");
   setProfileId("owner");
   setProfileToken(null);
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
-  Object.assign(Element.prototype, {
-    hasPointerCapture: () => false,
-    setPointerCapture: () => {},
-    releasePointerCapture: () => {},
-    scrollIntoView: () => {},
-  });
   mocks.update.mockReset().mockResolvedValue(undefined);
   mocks.reads = 0;
   mocks.impersonate.mockReset();
@@ -262,8 +237,10 @@ beforeEach(() => {
   mocks.viewerIsOwner = false;
   mocks.available = true;
   mocks.userError = null;
+  mocks.noEditor = false;
   mocks.refetchUser.mockReset();
   mocks.live = [];
+  mocks.setSignIn.mockReset();
 });
 
 afterEach(() => {
@@ -281,15 +258,17 @@ function userProblem(status: number) {
   });
 }
 
-describe("page states", () => {
-  it("points a missing account back to the user list", () => {
-    mocks.user = null;
-    mocks.userError = userProblem(404);
-    renderUserDetail();
-    expect(screen.getByRole("heading", { level: 1, name: "User not found" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "All users" })).toHaveAttribute("href", "/admin/users");
+function changedElsewhere() {
+  return new V2ProblemError("updateAdminUser", {
+    type: "https://silo.example/problems/precondition_failed",
+    title: "Changed",
+    status: 412,
+    detail: "Changed",
+    instance: "/api/v2/admin/users/7",
   });
+}
 
+describe("page states", () => {
   it("offers a retry instead of calling a failed account read missing", async () => {
     mocks.user = null;
     mocks.userError = userProblem(500);
@@ -328,6 +307,14 @@ describe("page states", () => {
     expect(screen.getByRole("heading", { level: 1, name: "User not found" })).toBeInTheDocument();
   });
 
+  it("says why the account can't be changed when its read had no strong ETag", () => {
+    mocks.noEditor = true;
+    renderUserDetail("/admin/users/7?tab=access");
+    expect(screen.getByRole("heading", { level: 1, name: "taylor" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("without a strong ETag");
+    expect(screen.getByRole("button", { name: "Edit Playback & streaming" })).toBeDisabled();
+  });
+
   it("disables every action while user administration is unavailable", () => {
     mocks.available = false;
     renderUserDetail("/admin/users/7?tab=access");
@@ -339,47 +326,28 @@ describe("page states", () => {
 });
 
 describe("header", () => {
-  it("shows who the account is", () => {
-    mocks.user = {
-      ...adminUser,
-      access_group_id: 5,
-      password_change_required: true,
-      last_active_at: undefined,
-    };
-    renderUserDetail();
-    expect(screen.getByRole("heading", { level: 1, name: "taylor" })).toBeInTheDocument();
-    expect(screen.getByText("User")).toBeInTheDocument();
-    expect(screen.getByText("Active")).toBeInTheDocument();
-    expect(screen.getByText("Temporary password")).toBeInTheDocument();
-    const meta = screen.getByText("taylor@example.test").parentElement!;
-    expect(meta).toHaveTextContent("Group: Guests");
-    expect(meta).toHaveTextContent("No recorded activity");
-    expect(meta).toHaveTextContent("Password sign-in");
-  });
-
-  it("names the month of an old last activity, like the page's other dates", () => {
-    mocks.user = { ...adminUser, last_active_at: "2020-08-30T12:00:00Z" };
-    renderUserDetail();
-    const meta = screen.getByText(adminUser.email!).parentElement!;
-    expect(meta).toHaveTextContent(/Last active (Aug 30, 2020|30 Aug 2020)/);
-  });
-
-  it("hides password actions for an account an external provider manages", () => {
-    mocks.user = { ...adminUser, password_login: false };
-    renderUserDetail("/admin/users/7?tab=access");
-    expect(screen.queryByRole("button", { name: /reset password/i })).toBeNull();
-    expect(screen.getByText("External sign-in")).toBeInTheDocument();
-    expect(rowValue("Password")).toBe("Managed by an external sign-in provider");
-  });
-
-  it("offers a password reset for an account that signs in with a password", async () => {
+  it("sets a password for an account without password sign-in from its Sign-in tab", async () => {
     const ui = userEvent.setup();
+    mocks.user = { ...adminUser, password_login: false };
     renderUserDetail();
-    await ui.click(screen.getByRole("button", { name: "Reset password" }));
-    expect(
-      await screen.findByRole("dialog", { name: "Reset password for taylor" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Set a temporary password" })).toBeInTheDocument();
+    // A reset link needs password sign-in on; a set password turns it back on.
+    expect(screen.queryByRole("button", { name: /reset password/i })).toBeNull();
+    // The header button opens the Sign-in tab with its Set password dialog.
+    await ui.click(screen.getByRole("button", { name: "Set password" }));
+    let dialog = await screen.findByRole("dialog", { name: "Set a password" });
+    expect(search()).toBe("?tab=sign-in");
+    // Canceling closes it on the Sign-in tab, whose own button opens it again.
+    await ui.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("tab", { name: "Sign-in" })).toHaveAttribute("aria-selected", "true");
+    await ui.click(await screen.findByRole("button", { name: "Set a password" }));
+    dialog = await screen.findByRole("dialog", { name: "Set a password" });
+    await ui.type(within(dialog).getByLabelText("New password"), "recovered-pass");
+    await ui.click(within(dialog).getByRole("button", { name: "Set password" }));
+    expect(mocks.setSignIn).toHaveBeenCalledWith(
+      { userId: 7, body: { password: "recovered-pass", require_password_change: true } },
+      expect.anything(),
+    );
   });
 
   it("shows a disabled account's banner and enables it with a fresh validator", async () => {
@@ -432,35 +400,9 @@ describe("header", () => {
 });
 
 describe("more actions", () => {
-  it("offers disable and delete for a user an admin manages", async () => {
-    const ui = userEvent.setup();
-    renderUserDetail();
-    const menu = await openMenu(ui);
-    expect(menuItems(menu)).toEqual(["Disable accountkeeps data", "Delete account…"]);
-  });
-
-  it("disables an account after confirming", async () => {
-    const ui = userEvent.setup();
-    renderUserDetail();
-    await ui.click(within(await openMenu(ui)).getByRole("menuitem", { name: /Disable account/ }));
-    const confirm = await screen.findByRole("alertdialog", { name: "Disable taylor?" });
-    expect(confirm).toHaveTextContent("Their profiles, history, and downloads are kept.");
-    await ui.click(within(confirm).getByRole("button", { name: "Disable account" }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
-    expect((mocks.update.mock.calls[0]![0] as UpdateArg).body).toEqual({ enabled: false });
-  });
-
   it("reports a changed account instead of disabling it", async () => {
     const ui = userEvent.setup();
-    mocks.update.mockRejectedValue(
-      new V2ProblemError("updateAdminUser", {
-        type: "https://silo.example/problems/precondition_failed",
-        title: "Changed",
-        status: 412,
-        detail: "Changed",
-        instance: "/api/v2/admin/users/7",
-      }),
-    );
+    mocks.update.mockRejectedValue(changedElsewhere());
     renderUserDetail();
     await ui.click(within(await openMenu(ui)).getByRole("menuitem", { name: /Disable account/ }));
     await ui.click(
@@ -479,13 +421,6 @@ describe("more actions", () => {
     expect(dialog).toHaveTextContent("its 2 profiles, watch history, and saved preferences");
     expect(within(dialog).getByRole("button", { name: "Delete account" })).toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "Disable instead" })).toBeInTheDocument();
-  });
-
-  it("offers Enable instead of Disable for a disabled account", async () => {
-    const ui = userEvent.setup();
-    mocks.user = { ...adminUser, enabled: false };
-    renderUserDetail();
-    expect(menuItems(await openMenu(ui))).toEqual(["Enable account", "Delete account…"]);
   });
 });
 
@@ -570,82 +505,6 @@ describe("server owner", () => {
   });
 });
 
-describe("tabs", () => {
-  it("opens the tab the URL names and writes the tab it switches to", async () => {
-    const ui = userEvent.setup();
-    renderUserDetail("/admin/users/7?tab=access");
-    expect(screen.getByRole("tab", { name: /Access & limits/ })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByRole("region", { name: "Playback & streaming" })).toBeInTheDocument();
-    await ui.click(screen.getByRole("tab", { name: /Downloads/ }));
-    expect(search()).toBe("?tab=downloads");
-    expect(screen.getByText("Downloads content")).toBeInTheDocument();
-    await ui.click(screen.getByRole("tab", { name: "Overview" }));
-    expect(search()).toBe("");
-    expect(screen.getByText("Overview content")).toBeInTheDocument();
-  });
-
-  it("opens Overview for a missing or unknown tab", () => {
-    renderUserDetail("/admin/users/7?tab=settings");
-    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Overview content")).toBeInTheDocument();
-  });
-
-  it("counts custom limits and shows a dot while the account watches", () => {
-    mocks.user = { ...adminUser, max_streams: 2, transcode_allowed: true, max_transcodes: 1 };
-    mocks.live = [{ session_id: "s1", profile_id: "p1" }];
-    renderUserDetail();
-    expect(screen.getByRole("tab", { name: /Access & limits/ })).toHaveTextContent(
-      "Access & limits2 custom",
-    );
-    expect(
-      within(screen.getByRole("tab", { name: /Activity/ })).getByRole("img", {
-        name: "Watching now",
-      }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Preferences/ })).toHaveTextContent("Preferences0");
-  });
-});
-
-describe("Access & limits in the page", () => {
-  it("shows the group-intersected permission set, not the account's assigned one", () => {
-    mocks.user = {
-      ...adminUser,
-      permissions: [PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION],
-      effective_policy: { ...adminUser.effective_policy, permissions: [PERMISSION_MARKER_EDIT] },
-    };
-    renderUserDetail("/admin/users/7?tab=access");
-    expect(rowValue("Marker editing")).toBe("Allowed");
-    expect(rowValue("Metadata curation")).toBe("Not allowed");
-  });
-
-  it("reports audio transcoding even when video transcoding is allowed", () => {
-    mocks.user = {
-      ...adminUser,
-      effective_policy: {
-        ...adminUser.effective_policy,
-        transcode_allowed: true,
-        audio_transcode_allowed: false,
-      },
-    };
-    renderUserDetail("/admin/users/7?tab=access");
-    expect(rowValue("Video transcoding")).toBe("UnlimitedDEFAULT");
-    expect(rowValue("Audio-only transcoding")).toBe("Not allowedDEFAULT");
-  });
-
-  it("shows the Requests card with the account's switch", () => {
-    renderUserDetail("/admin/users/7?tab=access");
-    const requests = screen.getByRole("region", { name: "Requests" });
-    expect(within(requests).getByRole("link", { name: /Requests/ })).toHaveAttribute(
-      "href",
-      "/admin/requests?user=7",
-    );
-    expect(rowValue("Can request media")).toBe("YesDEFAULT");
-  });
-});
-
 describe("unsaved changes", () => {
   async function dirtyPlayback(ui: Ui) {
     renderUserDetail("/admin/users/7?tab=access");
@@ -663,17 +522,6 @@ describe("unsaved changes", () => {
     return playback;
   }
 
-  it("disables Delete until the card's changes are saved or cancelled", async () => {
-    const ui = userEvent.setup();
-    await dirtyPlayback(ui);
-    const menu = await openMenu(ui);
-    expect(within(menu).getByRole("menuitem", { name: /Delete account/ })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    expect(menu).toHaveTextContent("save or cancel edits first");
-  });
-
   it("asks before switching tabs, and Keep editing stays", async () => {
     const ui = userEvent.setup();
     const playback = await dirtyPlayback(ui);
@@ -686,18 +534,6 @@ describe("unsaved changes", () => {
     expect(within(playback).getByRole("spinbutton", { name: "Simultaneous streams" })).toHaveValue(
       2,
     );
-  });
-
-  it("discards the draft and moves on", async () => {
-    const ui = userEvent.setup();
-    await dirtyPlayback(ui);
-    await ui.click(screen.getByRole("tab", { name: /Activity/ }));
-    await ui.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Discard" }),
-    );
-    await waitFor(() => expect(search()).toBe("?tab=activity"));
-    expect(screen.getByText("Activity content")).toBeInTheDocument();
-    expect(mocks.update).not.toHaveBeenCalled();
   });
 
   it("saves the draft, then moves on", async () => {
@@ -717,15 +553,7 @@ describe("unsaved changes", () => {
 
   it("stays when the save is refused, with the conflict in the card", async () => {
     const ui = userEvent.setup();
-    mocks.update.mockRejectedValue(
-      new V2ProblemError("updateAdminUser", {
-        type: "https://silo.example/problems/precondition_failed",
-        title: "Changed",
-        status: 412,
-        detail: "Changed",
-        instance: "/api/v2/admin/users/7",
-      }),
-    );
+    mocks.update.mockRejectedValue(changedElsewhere());
     const playback = await dirtyPlayback(ui);
     await ui.click(screen.getByRole("tab", { name: "Overview" }));
     await ui.click(
@@ -738,6 +566,33 @@ describe("unsaved changes", () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(search()).toBe("?tab=access");
+  });
+
+  it("stays when a card's draft can't be saved, with the reason in the card", async () => {
+    const ui = userEvent.setup();
+    mocks.user = { ...adminUser, max_profiles: 6 };
+    renderUserDetail("/admin/users/7?tab=access");
+    await ui.click(screen.getByRole("button", { name: "Edit Sign-in & role" }));
+    const signIn = screen.getByRole("region", { name: "Sign-in & role" });
+    const username = within(signIn).getByRole("textbox", { name: "Username" });
+    await ui.clear(username);
+    await ui.type(username, "jordan");
+    const limit = within(signIn).getByRole("spinbutton", { name: "Profiles allowed" });
+    await ui.clear(limit);
+    await ui.type(limit, "0");
+    await ui.click(screen.getByRole("tab", { name: "Overview" }));
+    await ui.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Save and continue",
+      }),
+    );
+    expect(
+      await within(signIn).findByText("Allow at least 1 profile, or choose Default."),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(search()).toBe("?tab=access");
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(limit).toHaveValue(0);
   });
 
   it("asks before leaving the page too", async () => {

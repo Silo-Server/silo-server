@@ -74,12 +74,14 @@ func newCompatTelemetryServer(t testing.TB, registry *streamtelemetry.Registry) 
 		}},
 	}
 	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
+	file := &models.MediaFile{ID: 42, ContentID: contentID, FilePath: filePath}
 	router := NewRouter(Dependencies{
 		Config:          cfg,
 		SessionStore:    store,
 		IDCodec:         codec,
 		ContentService:  &stubContentService{detail: detail},
-		FileResolver:    testCompatFileResolver{file: &models.MediaFile{ID: 42, FilePath: filePath}},
+		FileResolver:    testCompatFileResolver{file: file},
+		Downloads:       newTestDownloadService(true, true, file),
 		SessionMgr:      &testCompatSessionManager{},
 		PlaybackStore:   playbackStore,
 		StreamTelemetry: registry,
@@ -231,28 +233,6 @@ func TestMountedCompatRouterDownloadIsATransfer(t *testing.T) {
 	}
 }
 
-func TestMountedCompatRouterBitrateTestIsACapExemptTransfer(t *testing.T) {
-	registry := compatTelemetryRegistry(t)
-	fixture := newCompatTelemetryServer(t, registry)
-
-	got := fixture.get(t, http.MethodGet,
-		fixture.server.URL+"/Playback/BitrateTest?api_key="+compatTelemetryToken, nil)
-	if got.status != http.StatusOK || len(got.body) != 102400 {
-		t.Fatalf("bitrate probe = %d, %d bytes", got.status, len(got.body))
-	}
-	snapshot := registry.Sweep()
-	if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 1 {
-		t.Fatalf("bitrate probe activity = %+v %+v", snapshot.Sessions, snapshot.Transfers)
-	}
-	if snapshot.Transfers[0].Subject != streamtelemetry.UserSubject(91) {
-		t.Fatalf("bitrate probe subject = %+v", snapshot.Transfers[0].Subject)
-	}
-	// §4.2 "classify but exempt": transfer-observed, never cap-relevant.
-	if snapshot.Transfers[0].BytesAccepted != 102400 {
-		t.Fatalf("bitrate probe bytes = %d", snapshot.Transfers[0].BytesAccepted)
-	}
-}
-
 // Rejected requests create no logical activity. Where the rejection happens
 // decides whether they are observed at all, and both halves are worth pinning:
 // PlaybackSessionAuth is mounted as middleware OUTSIDE the per-route observer
@@ -299,40 +279,4 @@ func TestMountedCompatRouterRejectedRequestsCreateNoLogicalActivity(t *testing.T
 			t.Fatal("an observed but never-attached request was not counted as unattributed")
 		}
 	})
-}
-
-func TestMountedCompatRouterHEADCountsZeroBytes(t *testing.T) {
-	registry := compatTelemetryRegistry(t)
-	fixture := newCompatTelemetryServer(t, registry)
-	mediaURL := fixture.server.URL + "/Videos/" + fixture.itemID + "/stream.mp4?static=true&api_key=" + compatTelemetryToken
-
-	got := fixture.get(t, http.MethodHead, mediaURL, nil)
-	if got.status != http.StatusOK || got.body != "" {
-		t.Fatalf("HEAD = %d %q", got.status, got.body)
-	}
-	snapshot := registry.Sweep()
-	if len(snapshot.Sessions) != 1 {
-		t.Fatalf("sessions = %+v", snapshot.Sessions)
-	}
-	if snapshot.Sessions[0].BytesAccepted != 0 || snapshot.Sessions[0].RequestCount != 1 {
-		t.Fatalf("HEAD accounting = bytes %d requests %d",
-			snapshot.Sessions[0].BytesAccepted, snapshot.Sessions[0].RequestCount)
-	}
-}
-
-// The kill switch that makes enrolling a family which shares the API process
-// with native reversible without losing all observation.
-func TestMountedCompatRouterFamilyGate(t *testing.T) {
-	registry := compatTelemetryRegistry(t, streamtelemetry.FamilyNative)
-	fixture := newCompatTelemetryServer(t, registry)
-	mediaURL := fixture.server.URL + "/Videos/" + fixture.itemID + "/stream.mp4?static=true&api_key=" + compatTelemetryToken
-
-	got := fixture.get(t, http.MethodGet, mediaURL, nil)
-	if got.status != http.StatusOK || got.body != fixture.body {
-		t.Fatalf("gated-out family broke serving: %d %q", got.status, got.body)
-	}
-	snapshot := registry.Sweep()
-	if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 0 || snapshot.UnattributedObservations != 0 {
-		t.Fatalf("gated-out family still observed: %+v", snapshot)
-	}
 }

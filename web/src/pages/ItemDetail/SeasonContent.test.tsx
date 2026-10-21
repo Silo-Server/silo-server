@@ -1,32 +1,18 @@
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ItemDetail } from "@/api/types";
+import type { CrewMember, ItemDetail } from "@/api/types";
+import { makeItemDetail } from "./itemDetail.test-support";
 import SeasonContent from "./SeasonContent";
 
 const mocks = vi.hoisted(() => {
-  let capturedActionBarProps: Record<string, unknown> | null = null;
-  let capturedDetailHeroProps: Record<string, unknown> | null = null;
+  type Props = Record<string, unknown> | null;
   const capturedMediaMenuProps: Record<string, unknown>[] = [];
-
   return {
-    capturedActionBarProps: {
-      get value() {
-        return capturedActionBarProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedActionBarProps = value;
-      },
-    },
-    capturedDetailHeroProps: {
-      get value() {
-        return capturedDetailHeroProps;
-      },
-      set value(value: Record<string, unknown> | null) {
-        capturedDetailHeroProps = value;
-      },
-    },
+    capturedActionBarProps: { value: null as Props },
+    capturedDetailHeroProps: { value: null as Props },
     capturedMediaMenuProps,
     useItemEpisodes: vi.fn(),
     useRefreshItemMetadata: vi.fn(),
@@ -40,11 +26,23 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+vi.mock("@/hooks/queries/shuffles", () => ({
+  useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
+}));
 vi.mock("@/pages/watchtogether/DetailWatchTogether", () => ({
   useDetailWatchTogether: mocks.useDetailWatchTogether,
 }));
 vi.mock("@/hooks/queries/episodes", () => ({
   useItemEpisodes: mocks.useItemEpisodes,
+}));
+
+const resetProgressMocks = vi.hoisted(() => ({
+  useResetProgressAction: vi.fn((): (() => void) | undefined => undefined),
+}));
+
+vi.mock("@/hooks/queries/progress", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/progress")>()),
+  useResetProgressAction: resetProgressMocks.useResetProgressAction,
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
@@ -71,6 +69,10 @@ vi.mock("@/hooks/useOnViewTranslation", () => ({
   useOnViewTranslation: mocks.useOnViewTranslation,
 }));
 
+vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
+  useEpisodeSpoilerPrefs: () => ({ hideImages: false, hideOverviews: false }),
+}));
+
 vi.mock("@/hooks/useOverlayPrefs", () => ({
   useOverlayPrefs: () => ({ prefs: null }),
 }));
@@ -87,10 +89,6 @@ vi.mock("@/components/MediaItemMenu", () => ({
 }));
 
 vi.mock("@/components/CastCarousel", () => ({
-  default: () => <div />,
-}));
-
-vi.mock("@/components/CrewList", () => ({
   default: () => <div />,
 }));
 
@@ -116,39 +114,11 @@ vi.mock("./components/ActionBar", () => ({
   },
 }));
 
-function makeSeasonItem(
-  overrides: Partial<ItemDetail & { type: "season" }> = {},
-): ItemDetail & { type: "season" } {
-  return {
-    content_id: "season-1",
-    type: "season",
+function makeSeasonItem(overrides: Partial<ItemDetail> = {}) {
+  return makeItemDetail("season", {
     title: "Season 1",
-    year: 2024,
     overview: "Season overview",
-    runtime: 0,
     content_rating: "TV-14",
-    genres: [],
-    rating_imdb: null,
-    rating_tmdb: null,
-    rating_rt_critic: null,
-    rating_rt_audience: null,
-    ratings: [],
-    imdb_id: "",
-    tmdb_id: "",
-    tvdb_id: "",
-    cast: [],
-    crew: [],
-    studios: [],
-    networks: [],
-    countries: [],
-    first_air_date: null,
-    last_air_date: null,
-    poster_url: "",
-    poster_thumbhash: "",
-    backdrop_url: "",
-    backdrop_thumbhash: "",
-    logo_url: "",
-    season_count: null,
     series_id: "series-1",
     series_title: "Example Series",
     season_number: 1,
@@ -156,13 +126,16 @@ function makeSeasonItem(
     air_date: "2024-01-01",
     episode_count: 8,
     is_specials: false,
-    versions: [],
-    subtitles: [],
-    intro: null,
-    credits: null,
     ...overrides,
-    release_date: overrides.release_date ?? null,
-  };
+  });
+}
+
+function renderSeasonMarkup(item = makeSeasonItem()) {
+  return renderToStaticMarkup(
+    <MemoryRouter initialEntries={["/item/season-1"]}>
+      <SeasonContent item={item} />
+    </MemoryRouter>,
+  );
 }
 
 describe("SeasonContent", () => {
@@ -226,27 +199,12 @@ describe("SeasonContent", () => {
       isLoading: false,
       error: null,
     });
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/season-1"]}>
-        <SeasonContent item={makeSeasonItem()} />
-      </MemoryRouter>,
-    );
+    renderSeasonMarkup();
     expect(mocks.useDetailWatchTogether).toHaveBeenCalledWith(
       expect.objectContaining({
         target: hasPlayable ? expect.objectContaining({ content_id: "playable" }) : null,
       }),
     );
-  });
-
-  it("does not pass rating props to ActionBar", () => {
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/season-1"]}>
-        <SeasonContent item={makeSeasonItem()} />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.capturedActionBarProps.value).not.toHaveProperty("rating");
-    expect(mocks.capturedActionBarProps.value).not.toHaveProperty("onRatingChange");
   });
 
   it("passes partial-progress restart eligibility to episode menus", () => {
@@ -273,11 +231,7 @@ describe("SeasonContent", () => {
       error: null,
     });
 
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/season-1"]}>
-        <SeasonContent item={makeSeasonItem()} />
-      </MemoryRouter>,
-    );
+    renderSeasonMarkup();
 
     expect(mocks.capturedMediaMenuProps[0]).toMatchObject({
       contentId: "episode-1",
@@ -286,25 +240,68 @@ describe("SeasonContent", () => {
     });
   });
 
-  it("passes on-view translation controls to the hero", () => {
-    const onTranslate = vi.fn();
-    mocks.useOnViewTranslation.mockReturnValue({
-      translating: true,
-      onTranslate,
-    });
+  it("keeps the series' creators out of the season Crew section", () => {
+    const crew: CrewMember[] = [
+      { name: "Series Creator", job: "Creator", person_id: "creator-1" },
+      { name: "Season Director", job: "Director", person_id: "director-1" },
+    ];
 
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/season-1"]}>
-        <SeasonContent item={makeSeasonItem({ pending_translation_language: "fr" })} />
+    const markup = renderSeasonMarkup(makeSeasonItem({ crew }));
+
+    expect(markup).toContain(">Directors</dt>");
+    expect(markup).toContain("Season Director");
+    expect(markup).not.toContain("Creators");
+    expect(markup).not.toContain("Series Creator");
+  });
+
+  it("offers the season's translation beside the episodes when there is no overview", () => {
+    const translate = vi.fn();
+    mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: translate });
+    render(
+      <MemoryRouter>
+        <SeasonContent item={makeSeasonItem({ overview: "" })} />
       </MemoryRouter>,
     );
+    fireEvent.click(screen.getByRole("button", { name: "Translate episodes" }));
+    expect(translate).toHaveBeenCalledTimes(1);
+  });
 
-    expect(mocks.useOnViewTranslation).toHaveBeenCalledWith(
-      expect.objectContaining({ content_id: "season-1", type: "season" }),
+  it("leaves the action to the overview when the season has one", () => {
+    const translate = vi.fn();
+    mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: translate });
+    render(
+      <MemoryRouter>
+        <SeasonContent item={makeSeasonItem()} />
+      </MemoryRouter>,
     );
+    expect(screen.queryByRole("button", { name: "Translate episodes" })).not.toBeInTheDocument();
+    expect(mocks.capturedDetailHeroProps.value).toMatchObject({ onTranslateOverview: translate });
+  });
+
+  it("moves the action to the episodes when an episode is what is missing", () => {
+    const translate = vi.fn();
+    mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: translate });
+    const listed = mocks.useItemEpisodes();
+    mocks.useItemEpisodes.mockReturnValue({
+      ...listed,
+      data: {
+        ...listed.data,
+        episodes: listed.data.episodes.map((episode: object) => ({
+          ...episode,
+          pending_translation_language: "fr",
+        })),
+      },
+    });
+    render(
+      <MemoryRouter>
+        <SeasonContent item={makeSeasonItem()} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Translate episodes" }));
+    expect(translate).toHaveBeenCalledTimes(1);
     expect(mocks.capturedDetailHeroProps.value).toMatchObject({
-      overviewTranslating: true,
-      onTranslateOverview: onTranslate,
+      overviewTranslating: false,
+      onTranslateOverview: undefined,
     });
   });
 });

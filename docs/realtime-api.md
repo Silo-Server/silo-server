@@ -50,7 +50,11 @@ node; restarting that node invalidates them. This store is distinct from the
 bridge's user/profile-only ticket, which cannot authenticate a v2 connection.
 
 Admission rechecks the current session, enabled account, account role and viewer
-policy/PIN proof. Secondary profiles do not receive administrator channels.
+policy/PIN proof. An admin account receives the administrator channels only while
+it is the acting admin (see [api-contract.md](architecture/api-contract.md)): as
+its primary profile, or with no profile while no profile on the account has a PIN
+or an access limit. Any other profile, and a profile-less session on a household
+that requires a profile, gets the user channels.
 Connections end at access-token expiry or after five minutes, whichever comes
 first. Current session/account/profile policy is rechecked every 15 seconds;
 a failed check closes the connection, with a two-second bound on authority
@@ -69,6 +73,38 @@ connection results and frames after that authority changes.
 Native socket/ticket adoption and independent domain review are required before
 these two migration rows can be ratified. No bridge socket or ticket was removed.
 
+### Personal event recipients
+
+Both event socket versions restrict `user_state` to a positive account ID
+matching the connection and a non-empty profile ID matching its bound profile.
+`user_settings` requires the same account match; a non-empty event profile must
+match the bound profile, while an empty event profile reaches that account's
+connections for account-scoped settings changes. These rules also apply to
+administrator connections. Notifications retain their exact account/profile
+match and require a profile-bound subscription.
+
+One `user_settings` event is addressed to every viewer instead: an
+administrator-default change (`scope: "default"`, see
+[settings-api.md](settings-api.md)) names no account or profile and reaches
+every connection subscribed to `user_settings`, bound or unbound, including a
+remote-playback handoff. Like other settings events it carries the key and
+scope, not the value. The server marks it for every viewer explicitly, so a
+personal event that lacks its account still reaches no one. In a cluster, the
+event reaches every viewer only once all nodes run a server that sets and
+honors that marker.
+
+An unbound socket can still subscribe to `user_state` and `user_settings`, but
+receives only account-scoped and administrator-default settings changes from
+those channels. A `user_state` producer without a profile, including an
+unmanaged download's `download` event, reaches no socket. Settings events name
+the changed key and scope; they do not carry its value. Channel eligibility,
+snapshots and socket authority/lifetime checks are unchanged.
+
+On the bridge socket, only a ticket from `POST /api/v1/events/ws-ticket` binds a
+profile. The handshake's `X-Profile-Id` decides administrator access but binds
+nothing, so a bridge socket opened with that header and no ticket is unbound and
+receives no `user_state`, including its own profile's.
+
 ### Access changes
 
 When the recheck finds that the login session is still valid but the access the
@@ -80,8 +116,9 @@ close frame:
 ```
 
 The close code is `4001` with reason `access_changed`. Access has changed when
-the account role, the effective role (an admin account's profile stopped or
-started being the primary profile), or the fingerprint of the resolved viewer
+the account role, the effective role (an admin account's connection stopped or
+started being the acting admin, for example its profile stopped being the
+primary profile or the household gained a PIN), or the fingerprint of the resolved viewer
 scope differs from the ticket's, or the profile is no longer verified. The
 scope covers the visible libraries, content-rating limits, playback-quality and
 bitrate limits, and `access_policy_revision`, which a group move, a permission,
@@ -95,8 +132,10 @@ On either the frame or the close code, a client refetches the data the viewer's
 access decides (libraries, home sections, search, item details, collections,
 and the account's own permissions) and reconnects at once with a newly minted
 ticket; no backoff is needed. If the ticket mint, or any other request, answers
-`403` `profile_verification_required`, the profile token was invalidated by the
-same change and the client returns to profile selection or PIN entry. Clients
+`403` `profile_verification_required`, the profile token no longer verifies
+the profile and the client returns to profile selection or PIN entry. An access
+change does not cause that by itself: a profile token is bound to the profile's
+own PIN, so only a change to that PIN ends it. Clients
 that ignore unknown frame types and close codes keep today's behavior: they
 reconnect and pick up the new access on their next requests. Playback that
 already started keeps its stream token until the next start.
@@ -108,10 +147,22 @@ refreshes the session, mints the ticket again with the new token, and does not
 sign out. The new ticket carries the new role, so the socket does not close
 again for the same change.
 
-The bridge events socket never sends this frame. It picks its channels from the
-access token's role once, at the handshake, so it rechecks the login session on
-the same interval and closes without a frame once the session ends or the
-account's role differs from the token's.
+The bridge events socket never sends this frame. It picks its channels once, at
+the handshake: an admin account gets the administrator channels only while
+it is the acting admin (see
+[api-contract.md](architecture/api-contract.md)), judged on the handshake's
+`X-Profile-Id` or, without one, on the profile its ticket was minted for. That
+profile's PIN proof must still verify: the ticket keeps the `X-Profile-Token`
+sent when it was minted, server-side, and the socket re-verifies it. Any
+other profile on the account, such as a child profile, connects with the user
+channels. A rejected ticket (expired, reused, or for another account) leaves the
+connection unbound and judged as acting with no profile, so on a household with
+a PIN-protected or limited profile it also gets the user channels until the
+client reconnects with a fresh ticket. The socket rechecks the login session on the same interval and closes
+without a frame once the session ends, the account's role differs from the
+token's, or a connection holding the administrator channels is no longer the
+acting admin (including when its profile's PIN proof stops verifying after a PIN
+change) or that check fails.
 The playback-control and Watch Together sockets share the recheck but still
 close without a frame or dedicated code when it fails.
 
@@ -150,10 +201,17 @@ lane only for the same account, profile and installation: it takes the lane
 over and the superseded connection is closed, so its later ack and result
 frames are never routed. Ack and result frames are applied only while the
 receiving registration still owns the lane, through the existing command
-tracker and stop-completion paths. Login authority and session ownership are
+tracker and stop-completion paths. A `completed` result for `pause` or
+`unpause` sets the session's pause state at once, so the administrator session
+views show it without waiting for the player's next progress report. Replaying
+already accepted progress does not undo a confirmation; progress accepted after
+its receipt supersedes a queued confirmation. A completed stop or terminate ends
+session authority before ordered watch-provider finalization. Login authority and session ownership are
 re-checked every 15 seconds and the connection ends when either is lost, at
 access-token expiry, or after four hours. The frames (`hello`, command, `ack`,
-`result`, event) are unchanged from the bridge socket.
+`result`, event) are unchanged from the bridge socket. A client message larger
+than 64 KiB closes the connection with `1009` (message too big); the bridge
+socket applies the same limit.
 
 `GET /api/v2/playback/sessions/control/capabilities` reports `available`, plus
 `protocol` only when this server serves the handshake. The web player mints
@@ -361,7 +419,7 @@ Connect with `GET /api/v2/watch-together/rooms/{room_id}/ws` (`connectWatchToget
 
 The handler closes the underlying socket at the earlier of five minutes, access expiry, or original room-proof expiry. Every 15 seconds it rechecks current authority and room existence with a two-second validation timeout; errors close the connection rather than extending its deadline. Revocation is therefore bounded by that polling interval and timeout, not instantaneous. Missing Redis prevents runtime socket wiring; Redis errors never use an in-memory fallback.
 
-The post-upgrade loop is shared with v1: Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong use the same service. The readiness validation below applies to both versions. There is no new leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
+The post-upgrade loop is shared with v1: Connect, Disconnect(false), initial snapshots, attach-session/transport/state-report/ready/buffering messages and ping/pong use the same service. On both versions a client message larger than 64 KiB closes the connection with `1009` (message too big) and runs the same disconnect callback. The readiness validation below applies to both versions. There is no new leave message. Membership and readiness are shared through the room coordinator. V2 cancellation closes the transport so a blocked read releases and executes the existing disconnect callback. These raw frame shapes are not the typed HTTP room snapshot schema. No playback/provider operation is implied by obtaining a ticket.
 
 The actual web room/player hook obtains a fresh credential for each reconnect. It captures original room proof and profile authority, sends no authentication retry, uses no URL credentials, checks the negotiated protocol, and suppresses old sockets' messages/results after authority or room replacement. It subscribes to the existing AuthProvider so same-profile PIN replacement rebinds even when room props do not change. A fresh reconnect uses an already-rotated access token only while the original logical authority remains current; it does not replay a refused ticket request. Terminal ticket refusals stop reconnecting; transient failures retain the existing bounded reconnect delay. Existing room-proof expiry ends access; it is not automatically renewed or rebound. Native adoption and exact caller inventories remain separate gates. Ticket consumption handles socket admission; the room coordinator handles membership and playback synchronization.
 
@@ -419,10 +477,14 @@ host's reported position becomes the room anchor before the room resumes. A
 rebuilt stream that lands on a keyframe or segment boundary short of the
 target therefore resumes from where the host really is instead of holding the
 room until the waiting deadline. Position validation uses the same finite,
-nonnegative range as other playback reports. Buffering pause commands can be
-acknowledged at the member's actual position: they do not require rebuilding an
-otherwise usable stream to reach an unbuffered anchor. Playback correction
-still runs when the room resumes.
+nonnegative range as other playback reports. When a guest stalls, the room
+pauses where it is and that guest alone is sent a seek to the room's position.
+An acknowledgement that names that seek's `command_id` is accepted within five
+seconds of the destination either way, because a rebuilt stream often lands
+short and the client closes the rest by rate once the room plays. When the host
+stalls, or nobody else is watching, the room pauses at the stalled member's
+position, and that pause can be acknowledged where the member is. Playback
+correction still runs when the room resumes.
 
 Readiness is level-triggered on the web player. It evaluates the same guards on
 every media event that can indicate playable media (`canplay`,
@@ -442,6 +504,22 @@ the room snapshot marks its own member `is_ready`. It then stops readiness
 acknowledgements and returns to ordinary state reports every 1.5 s, even while
 other members are still waiting. A readiness reset for a new command enables
 retries again. Reports without `is_ready` are still ignored while waiting.
+
+Every `transport_command` carries the room's position at its `execute_at`, and
+the room anchors there too, so a client that runs the command at `execute_at`
+and projects from it at 1x is where the room says it is. A command that arrives
+late is projected forward from `execute_at`.
+
+Outside `waiting`, a `state_report` may carry the `command_id` of the last
+transport command the client applied. The server uses it to tell which reports
+predate a member's latest command: until that command's `execute_at` plus 1.5
+seconds, or for up to 10 seconds while a report names an older command, a report
+is neither corrected nor taken as the host's decision. A report that names the
+latest command ends that window early. Clients that omit the field get the time
+window alone. Reports from a host that has just re-attached are corrected like a
+guest's until one plays as its sync said, within the host band; only then is its
+pause or position a decision for the room. The host band is 10 seconds on the
+v2 socket and 2 seconds on the v1 socket.
 
 A viewer the room stopped waiting for sends `ready` while the room is `playing`
 or `paused`. The v2 snapshot shows this state as `self_ignore_wait: true`, or as
@@ -538,3 +616,21 @@ for the full buffering policy.
 
 See [Watch Party synchronization](architecture/watch-party-synchronization.md)
 for transaction, lease, delivery, and deployment behavior.
+
+### `marker_thumbnail_ready` (native v2, negotiated)
+
+Only playback attempts that opted into `marker_thumbnails_v1` at start receive
+this event. Its payload contains `session_id`, numeric `file_id`, `kind`,
+`start_seconds`, `end_seconds`, `thumbnail_url`, optional `thumbnail_thumbhash`,
+and `thumbnail_capture_seconds` (equal to marker start). It is sent only after
+durable, snapshot-fenced persistence and protected URL resolution.
+
+Consumers match the active session/file and exact kind/range before merging the
+image; they discard events for other versions or edited occurrences. Failed
+event delivery leaves the canonical v2 watch/marker read available. The existing
+`chapter_thumbnail_ready` event and frozen v1 event behavior are unchanged.
+
+Marker thumbnail readiness uses the playback event bus to reach sessions on
+other API replicas. Each serving replica resolves a protected image URL and
+checks the session's negotiated feature before delivery. Subscribers do not
+rebroadcast events; retired image references cannot acquire new URLs.

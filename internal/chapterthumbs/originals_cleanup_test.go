@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,14 +53,20 @@ func TestUploadChapterThumbnailStoresOnlyTheServedVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := &Service{store: store}
+	queue := &fakeBlobQueue{}
+	service := &Service{store: store, blobQueue: queue}
 
-	key, thumbhash, err := service.uploadChapterThumbnail(t.Context(), 42, 3, testFrameJPEG(t, 1920, 1080))
+	key, thumbhash, err := service.uploadChapterThumbnail(t.Context(), 42, 3, testFrameJPEG(t, 1920, 1080), 320)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if key != "chapter-images/42/3/w300.webp" {
-		t.Fatalf("thumbnail_path = %q, want the w300 object", key)
+	if _, valid := imageKeyGroup(key); !valid || !strings.HasPrefix(key, "chapter-images/42/3-") || !strings.HasSuffix(key, "/w320.webp") {
+		t.Fatalf("thumbnail_path = %q, want an immutable w320 object", key)
+	}
+	// An earlier width change may have queued this key for deletion. Defer
+	// collection before reusing it while preserving existing URL protection.
+	if !slices.Equal(queue.scheduled, []string{key}) || queue.delay != displacedImageGrace {
+		t.Fatalf("scheduled %v after %v, want the reused key protected", queue.scheduled, queue.delay)
 	}
 	if thumbhash == "" {
 		t.Fatal("thumbhash is empty")
@@ -81,8 +88,8 @@ func TestUploadChapterThumbnailStoresOnlyTheServedVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if size.Width != 300 {
-		t.Fatalf("stored width = %d, want 300", size.Width)
+	if size.Width != 320 {
+		t.Fatalf("stored width = %d, want 320", size.Width)
 	}
 	if want, _ := imageutil.Thumbhash(data.Bytes()); thumbhash != want {
 		t.Fatal("thumbhash is not derived from the stored image")

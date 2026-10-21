@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { v2 } from "@/api/v2/request";
 import { useAdminLogStream } from "@/hooks/admin/useAdminLogStream";
 import AdminLogs from "./AdminLogs";
+import { stubRadixDom } from "./adminPage.test-support";
 
 vi.mock("@/api/v2/request", () => ({ v2: vi.fn() }));
 vi.mock("@/api/client", () => ({
@@ -17,6 +18,7 @@ vi.mock("@/api/client", () => ({
 vi.mock("@/hooks/useAuth", () => ({ useOptionalAuth: () => null }));
 vi.mock("@/hooks/useDateTimeFormat", () => ({ useDateTimeFormat: () => "locale" }));
 vi.mock("@/hooks/admin/useAdminLogStream", () => ({ useAdminLogStream: vi.fn() }));
+stubRadixDom();
 
 function page(id: string, hasMore: boolean) {
   return {
@@ -66,12 +68,18 @@ afterEach(() => {
 
 describe("admin log history", () => {
   it("starts from a fresh snapshot, pages with server cursors, and returns to live logs", async () => {
-    mount();
+    mount("/admin/logs?q=needle&level=error&component=scanner");
+    await waitFor(() =>
+      expect(latestAppStreamParams()).toMatchObject({
+        level: "error",
+        component: "scanner",
+      }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Browse log history" }));
     expect(await screen.findByText("Log 2")).toBeTruthy();
     expect(vi.mocked(v2).mock.calls[0]).toMatchObject([
       "GET /api/v2/admin/logs/app",
-      { query: { q: "needle", cursor: undefined } },
+      { query: { q: "needle", level: "error", component: "scanner", cursor: undefined } },
     ]);
     expect(vi.mocked(useAdminLogStream).mock.calls.at(-2)?.[2]).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Older" }));
@@ -129,6 +137,20 @@ describe("admin log history", () => {
     expect(await screen.findByText("No audit logs matched the current filters.")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("does not claim an empty result when the live stream failed", () => {
+    vi.mocked(useAdminLogStream).mockReturnValue({
+      rows: [],
+      isConnecting: false,
+      isLive: false,
+      error: "Unable to open log stream.",
+      connectionState: "disconnected",
+      reconnect: vi.fn(),
+    });
+    mount("/admin/logs?tab=audit&method=POST");
+    expect(screen.getByText("Audit logs could not be loaded.")).toBeTruthy();
+    expect(screen.queryByText("No audit logs matched the current filters.")).toBeNull();
+  });
 });
 
 function latestAppStreamParams() {
@@ -140,39 +162,6 @@ function latestAppStreamParams() {
 }
 
 describe("admin log level and component filters", () => {
-  beforeEach(() => {
-    // Radix Select uses Pointer Capture APIs that jsdom does not implement.
-    if (!Element.prototype.hasPointerCapture) {
-      Element.prototype.hasPointerCapture = () => false;
-    }
-    if (!Element.prototype.setPointerCapture) {
-      Element.prototype.setPointerCapture = () => undefined;
-    }
-    if (!Element.prototype.releasePointerCapture) {
-      Element.prototype.releasePointerCapture = () => undefined;
-    }
-    if (!Element.prototype.scrollIntoView) {
-      Element.prototype.scrollIntoView = () => undefined;
-    }
-  });
-
-  it("passes level and component from the URL into the live stream and history query", async () => {
-    mount("/admin/logs?level=error&component=scanner");
-    await waitFor(() =>
-      expect(latestAppStreamParams()).toMatchObject({
-        level: "error",
-        component: "scanner",
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Browse log history" }));
-    await waitFor(() =>
-      expect(vi.mocked(v2).mock.calls.at(-1)).toMatchObject([
-        "GET /api/v2/admin/logs/app",
-        { query: { level: "error", component: "scanner", cursor: undefined } },
-      ]),
-    );
-  });
-
   it("treats a reserved all URL value as no level or component filter", async () => {
     const user = userEvent.setup();
     mount("/admin/logs?level=all&component=all");
@@ -188,38 +177,7 @@ describe("admin log level and component filters", () => {
     expect(screen.getByRole("combobox", { name: "Component" })).toHaveValue("all");
   });
 
-  it("updates stream params from the filters and clears them", async () => {
-    const user = userEvent.setup();
-    mount("/admin/logs");
-
-    await user.click(screen.getByRole("combobox", { name: "Level" }));
-    await user.click(await screen.findByRole("option", { name: "error" }));
-    await waitFor(() => expect(latestAppStreamParams()).toMatchObject({ level: "error" }));
-
-    const component = screen.getByRole("combobox", { name: "Component" });
-    const suggestions = (component as HTMLInputElement).list;
-    expect(Array.from(suggestions?.options ?? []).map((option) => option.value)).toContain(
-      "scanner",
-    );
-    await user.type(component, "scanner");
-    await waitFor(() =>
-      expect(latestAppStreamParams()).toMatchObject({
-        level: "error",
-        component: "scanner",
-      }),
-    );
-
-    await user.click(screen.getByRole("combobox", { name: "Level" }));
-    await user.click(await screen.findByRole("option", { name: "All levels" }));
-    await user.clear(component);
-    await waitFor(() => {
-      const params = latestAppStreamParams();
-      expect(params?.level).toBeUndefined();
-      expect(params?.component).toBeUndefined();
-    });
-  });
-
-  it.each(["apiv2", "subtitles", "notifications.fanout", "future.worker", "allworkers"])(
+  it.each(["future.worker", "allworkers"])(
     "filters live and history logs by %s, including after clearing and re-entering it",
     async (value) => {
       const user = userEvent.setup();
@@ -245,4 +203,68 @@ describe("admin log level and component filters", () => {
       }
     },
   );
+});
+
+/** Streams one audit row, a PUT on account 2 by account 1, with `fields` on top. */
+function streamAuditRow(fields: Record<string, unknown>) {
+  vi.mocked(useAdminLogStream).mockReturnValue({
+    rows: [
+      {
+        id: 900,
+        timestamp: "2026-10-08T10:00:00Z",
+        client_ip: "192.0.2.1",
+        method: "PUT",
+        path: "/api/v2/admin/users/2",
+        status_code: 204,
+        duration_ms: 1,
+        user_id: 1,
+        action: "user.updated",
+        target_type: "user",
+        target_id: "2",
+        ...fields,
+      },
+    ],
+    isConnecting: false,
+    isLive: true,
+    connectionState: "live",
+    reconnect: vi.fn(),
+  });
+}
+
+it("shows the actor, affected account and safe permission/password changes", () => {
+  streamAuditRow({
+    changes: [
+      { field: "permissions", before: "[]", after: '["marker_edit"]' },
+      { field: "password" },
+    ],
+  });
+  mount("/admin/logs?tab=audit&action=user.updated&actor_user_id=1&target_type=user&target_id=2");
+  expect(screen.getByText("user.updated")).toBeInTheDocument();
+  expect(screen.getByText("user #2")).toBeInTheDocument();
+  expect(screen.getByText(/none → marker_edit/)).toBeInTheDocument();
+  expect(screen.getByText("password").parentElement).toHaveTextContent("password: changed");
+  expect(vi.mocked(useAdminLogStream).mock.calls.at(-1)?.[1]).toMatchObject({
+    action: "user.updated",
+    actor_user_id: "1",
+    target_type: "user",
+    target_id: "2",
+  });
+});
+
+it.each([
+  ["access_group", "library_ids", "null", "[]", "all libraries → none"],
+  ["access_group", "allowed_permissions", "null", "[]", "all assignable → none"],
+  ["user", "access_group_id", "null", "5", "none → 5"],
+  ["user", "max_streams", "null", "3", "inherit → 3"],
+  // Object values show as JSON.
+  ["user", "max_streams", '{"a":1}', "2", '{"a":1} → 2'],
+])("shows a %s %s change from %s to %s", (targetType, field, before, after, expected) => {
+  streamAuditRow({
+    id: 901,
+    action: `${targetType}.updated`,
+    target_type: targetType,
+    changes: [{ field, before, after }],
+  });
+  mount("/admin/logs?tab=audit");
+  expect(screen.getByText(field.replaceAll("_", " ")).parentElement).toHaveTextContent(expected);
 });

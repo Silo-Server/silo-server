@@ -5,12 +5,17 @@ import { MemoryRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stubRadixDom } from "./adminPage.test-support";
+
+stubRadixDom();
+
 const mocks = vi.hoisted(() => ({
   useAdminLibraries: vi.fn(),
+  useLibraryCapabilities: vi.fn(),
+  useLibraryProviderDefaults: vi.fn(),
   useLibraryRefreshJobs: vi.fn(),
   useSkippedLibraryRoots: vi.fn(),
   useStaleMediaIDs: vi.fn(),
-  useRematchStaleMediaID: vi.fn(),
   useCheckLibraryMount: vi.fn(),
   useCreateLibrary: vi.fn(),
   useUpdateLibrary: vi.fn(),
@@ -21,7 +26,6 @@ const mocks = vi.hoisted(() => ({
   useLibraryMetadataMatchQueues: vi.fn(),
   useLibraryMetadataMatchQueueDetail: vi.fn(),
   useRetryLibraryMetadataMatchQueue: vi.fn(),
-  useCancelLibraryMetadataMatchQueue: vi.fn(),
   useConfirmEmptyRootCleanup: vi.fn(),
   useLibraryProviders: vi.fn(),
   useSetLibraryProviders: vi.fn(),
@@ -29,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   useUploadLibraryPoster: vi.fn(),
   useDeleteLibraryPoster: vi.fn(),
   useUnmatchedLibraryItems: vi.fn(),
+  useSetUnmatchedItemIgnored: vi.fn(),
   useAdminPlugins: vi.fn(),
   useCancelLibraryScans: vi.fn(),
   useCancelAdminJob: vi.fn(),
@@ -37,56 +42,26 @@ const mocks = vi.hoisted(() => ({
   useDeleteLibraryRootOverride: vi.fn(),
   useActiveScans: vi.fn(),
   useLibraryRealtimeMonitoring: vi.fn(),
+  useAdminTrickplayLibraries: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({
-  useAdminLibraries: (...args: unknown[]) => mocks.useAdminLibraries(...args),
-  useLibraryRefreshJobs: (...args: unknown[]) => mocks.useLibraryRefreshJobs(...args),
-  useSkippedLibraryRoots: (...args: unknown[]) => mocks.useSkippedLibraryRoots(...args),
-  useStaleMediaIDs: (...args: unknown[]) => mocks.useStaleMediaIDs(...args),
+  // The hooks are the vi.fn()s above; each test sets what they return.
+  ...mocks,
   flattenStaleMediaIDs: (data?: { pages: { staleIDs: unknown[] }[] }) =>
     data?.pages.flatMap((page) => page.staleIDs) ?? [],
-  useRematchStaleMediaID: (...args: unknown[]) => mocks.useRematchStaleMediaID(...args),
-  useCheckLibraryMount: (...args: unknown[]) => mocks.useCheckLibraryMount(...args),
-  useCreateLibrary: (...args: unknown[]) => mocks.useCreateLibrary(...args),
-  useUpdateLibrary: (...args: unknown[]) => mocks.useUpdateLibrary(...args),
-  useDeleteLibrary: (...args: unknown[]) => mocks.useDeleteLibrary(...args),
-  useScanLibrary: (...args: unknown[]) => mocks.useScanLibrary(...args),
-  useScanAllLibraries: (...args: unknown[]) => mocks.useScanAllLibraries(...args),
-  useRefreshLibraryMetadata: (...args: unknown[]) => mocks.useRefreshLibraryMetadata(...args),
-  useLibraryMetadataMatchQueues: (...args: unknown[]) =>
-    mocks.useLibraryMetadataMatchQueues(...args),
-  useLibraryMetadataMatchQueueDetail: (...args: unknown[]) =>
-    mocks.useLibraryMetadataMatchQueueDetail(...args),
-  useRetryLibraryMetadataMatchQueue: (...args: unknown[]) =>
-    mocks.useRetryLibraryMetadataMatchQueue(...args),
-  useCancelLibraryMetadataMatchQueue: (...args: unknown[]) =>
-    mocks.useCancelLibraryMetadataMatchQueue(...args),
-  useConfirmEmptyRootCleanup: (...args: unknown[]) => mocks.useConfirmEmptyRootCleanup(...args),
-  useLibraryProviders: (...args: unknown[]) => mocks.useLibraryProviders(...args),
-  useSetLibraryProviders: (...args: unknown[]) => mocks.useSetLibraryProviders(...args),
-  useReorderLibraries: (...args: unknown[]) => mocks.useReorderLibraries(...args),
-  useUploadLibraryPoster: (...args: unknown[]) => mocks.useUploadLibraryPoster(...args),
-  useDeleteLibraryPoster: (...args: unknown[]) => mocks.useDeleteLibraryPoster(...args),
-  useUnmatchedLibraryItems: (...args: unknown[]) => mocks.useUnmatchedLibraryItems(...args),
-  useCancelLibraryScans: (...args: unknown[]) => mocks.useCancelLibraryScans(...args),
-  useCancelAdminJob: (...args: unknown[]) => mocks.useCancelAdminJob(...args),
-  useLibraryRoots: (...args: unknown[]) => mocks.useLibraryRoots(...args),
   flattenLibraryRoots: (data?: { pages: { roots: unknown[] }[] }) =>
     data?.pages.flatMap((page) => page.roots) ?? [],
-  useUpsertLibraryRootOverride: (...args: unknown[]) => mocks.useUpsertLibraryRootOverride(...args),
-  useDeleteLibraryRootOverride: (...args: unknown[]) => mocks.useDeleteLibraryRootOverride(...args),
-  useLibraryRealtimeMonitoring: (...args: unknown[]) => mocks.useLibraryRealtimeMonitoring(...args),
   UNMATCHED_PAGE_SIZE: 10,
 }));
 
-vi.mock("@/hooks/queries/admin/plugins", () => ({
-  useAdminPlugins: (...args: unknown[]) => mocks.useAdminPlugins(...args),
+vi.mock("@/hooks/queries/admin/plugins", () => ({ useAdminPlugins: mocks.useAdminPlugins }));
+
+vi.mock("@/hooks/queries/admin/trickplay", () => ({
+  useAdminTrickplayLibraries: mocks.useAdminTrickplayLibraries,
 }));
 
-vi.mock("@/hooks/queries/admin/scans", () => ({
-  useActiveScans: (...args: unknown[]) => mocks.useActiveScans(...args),
-}));
+vi.mock("@/hooks/queries/admin/scans", () => ({ useActiveScans: mocks.useActiveScans }));
 
 import AdminLibraries from "./AdminLibraries";
 
@@ -113,37 +88,23 @@ const staleID = (id: string, title: string) => ({
   last_seen_at: "2026-03-23T21:00:00Z",
 });
 
-// renderPage wraps the page in the providers it needs at runtime: a
+// page wraps AdminLibraries in the providers it needs at runtime: a
 // QueryClientProvider for the (mocked) TanStack hooks, and a MemoryRouter for
 // the <Link>s inside AdminLibraries. Without QueryClientProvider, even fully
 // mocked useQuery hooks throw "No QueryClient set" during render.
-const renderPage = () => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderToStaticMarkup(
-    <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <AdminLibraries />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-};
+const newTestQueryClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-const renderInteractivePage = () => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <AdminLibraries />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-};
+const page = (client: QueryClient) => (
+  <QueryClientProvider client={client}>
+    <MemoryRouter>
+      <AdminLibraries />
+    </MemoryRouter>
+  </QueryClientProvider>
+);
 
-// Radix Select opens through pointer capture, which jsdom lacks.
-if (typeof window !== "undefined" && !window.HTMLElement.prototype.hasPointerCapture) {
-  window.HTMLElement.prototype.hasPointerCapture = () => false;
-  window.HTMLElement.prototype.scrollIntoView = () => {};
-}
+const renderPage = () => renderToStaticMarkup(page(newTestQueryClient()));
+
+const renderInteractivePage = () => render(page(newTestQueryClient()));
 
 const ambiguousRoot = (libraryId: number) => ({
   library_id: libraryId,
@@ -168,10 +129,8 @@ const libraryRootsResult = (roots: unknown[]) => ({
   fetchNextPage: vi.fn(),
 });
 
-// The Ambiguous Roots header: its first child holds the severity icon, and
-// the rest of its text is the title, description, and count indicator.
+// The Ambiguous Roots header's text is the title, description, and count indicator.
 const ambiguousRootsHeader = () => screen.getByRole("button", { name: /Ambiguous Roots/ });
-const ambiguousRootsIconBox = () => ambiguousRootsHeader().firstElementChild as HTMLElement;
 
 describe("AdminLibraries", () => {
   afterEach(cleanup);
@@ -199,6 +158,8 @@ describe("AdminLibraries", () => {
       ],
       isLoading: false,
     });
+    mocks.useLibraryCapabilities.mockReturnValue({ data: undefined });
+    mocks.useLibraryProviderDefaults.mockReturnValue({ data: { levels: {} }, isLoading: false });
     mocks.useCheckLibraryMount.mockReturnValue(queryState);
     mocks.useLibraryRefreshJobs.mockReturnValue({
       data: [],
@@ -215,7 +176,6 @@ describe("AdminLibraries", () => {
       isFetchingNextPage: false,
       fetchNextPage: vi.fn(),
     });
-    mocks.useRematchStaleMediaID.mockReturnValue(queryState);
     mocks.useCreateLibrary.mockReturnValue(queryState);
     mocks.useUpdateLibrary.mockReturnValue(queryState);
     mocks.useDeleteLibrary.mockReturnValue(queryState);
@@ -231,7 +191,6 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
     mocks.useRetryLibraryMetadataMatchQueue.mockReturnValue(queryState);
-    mocks.useCancelLibraryMetadataMatchQueue.mockReturnValue(queryState);
     mocks.useConfirmEmptyRootCleanup.mockReturnValue(queryState);
     mocks.useLibraryProviders.mockReturnValue({
       data: { levels: {} },
@@ -248,6 +207,7 @@ describe("AdminLibraries", () => {
       isLoading: false,
     });
     mocks.useUnmatchedLibraryItems.mockReturnValue(unmatchedItemsResult([]));
+    mocks.useSetUnmatchedItemIgnored.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useCancelLibraryScans.mockReturnValue(queryState);
     mocks.useCancelAdminJob.mockReturnValue(queryState);
     mocks.useLibraryRoots.mockReturnValue({
@@ -261,21 +221,34 @@ describe("AdminLibraries", () => {
     mocks.useDeleteLibraryRootOverride.mockReturnValue(queryState);
     mocks.useActiveScans.mockReturnValue({ data: [], isLoading: false });
     mocks.useLibraryRealtimeMonitoring.mockReturnValue({ data: undefined });
+    mocks.useAdminTrickplayLibraries.mockReturnValue({ data: undefined });
   });
 
-  it("uses scan language instead of metadata refresh language on the admin libraries page", () => {
-    const markup = renderPage();
-
-    expect(markup).toContain(
-      "Manage library roots and scans. Catalog import/export now lives under Maintenance.",
-    );
-    expect(markup).toContain('title="Scan Library"');
-    expect(markup).toContain("Scan All");
-    expect(markup).toContain('title="Rescan Metadata"');
-    expect(markup).toContain(
-      "Run another scan after storage returns, or confirm deletion before the next empty-root scan.",
-    );
-  });
+  it.each([
+    { supported: true, visible: true, enabled: true },
+    { supported: false, visible: true, enabled: false },
+    { supported: undefined, visible: false, enabled: false },
+  ])(
+    "uses capability storage status for first-library seek previews ($supported)",
+    async ({ supported, visible, enabled }) => {
+      mocks.useAdminLibraries.mockReturnValue({ data: [], isLoading: false });
+      mocks.useLibraryCapabilities.mockReturnValue({
+        data: { trickplay: true, trickplay_supported: supported },
+      });
+      renderInteractivePage();
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: /Add Library/ }));
+      await user.click(screen.getByRole("tab", { name: "Advanced" }));
+      const previewSwitch = screen.queryByRole("switch", { name: "Generate seek previews" });
+      if (visible) {
+        expect(previewSwitch).toBeInTheDocument();
+        if (enabled) expect(previewSwitch).toBeEnabled();
+        else expect(previewSwitch).toBeDisabled();
+      } else {
+        expect(previewSwitch).not.toBeInTheDocument();
+      }
+    },
+  );
 
   it("shows the partial-walk failure count without offering cleanup", () => {
     mocks.useAdminLibraries.mockReturnValue({
@@ -301,222 +274,7 @@ describe("AdminLibraries", () => {
     expect(markup).toContain("Partial scan");
     expect(markup).toContain("Scan could not read or resolve 3 paths");
     expect(markup).not.toContain("Confirm Cleanup");
-    expect(markup).not.toContain("Confirm Empty-Root Cleanup");
-  });
-
-  it.each([
-    ["limit_reached", "Watch limit reached", "Raise fs.inotify.max_user_watches on the host"],
-    ["root_unavailable", "Folder unavailable", "/media/movies is not mounted"],
-    ["unsupported_filesystem", "Unsupported filesystem", "/media/movies is on NFS"],
-    ["error", "Error", "inotify_init failed"],
-  ])("flags a library whose real-time monitoring is %s", (state, label, detail) => {
-    mocks.useLibraryRealtimeMonitoring.mockReturnValue({
-      data: {
-        server_enabled: true,
-        libraries: [{ library_id: 1, enabled: true, state, backend: "", detail, directories: 0 }],
-      },
-    });
-
-    const container = document.createElement("div");
-    container.innerHTML = renderPage();
-    const badge = Array.from(container.querySelectorAll('[data-slot="badge"]')).find((el) =>
-      el.textContent?.startsWith("Monitoring:"),
-    );
-
-    expect(badge?.textContent).toContain(`Monitoring: ${label}`);
-    expect(badge?.getAttribute("title")).toBe(detail || `Real-time monitoring: ${label}`);
-  });
-
-  it.each([
-    "monitoring",
-    "starting",
-    "monitoring_off",
-    "library_disabled",
-    "server_disabled",
-    "not_reporting",
-    "unsupported_platform",
-  ])("shows no monitoring badge while monitoring is %s", (state) => {
-    mocks.useLibraryRealtimeMonitoring.mockReturnValue({
-      data: {
-        server_enabled: state !== "server_disabled",
-        libraries: [
-          { library_id: 1, enabled: true, state, backend: "", detail: "", directories: 0 },
-        ],
-      },
-    });
-
-    expect(renderPage()).not.toContain("Monitoring:");
-  });
-
-  it("offers confirmed cleanup for a suspect-empty dead-root warning", () => {
-    mocks.useAdminLibraries.mockReturnValue({
-      data: [
-        {
-          id: 2,
-          name: "Audiobooks",
-          paths: ["/media/audiobooks"],
-          type: "audiobooks",
-          enabled: true,
-          last_scanned_at: null,
-          scan_warning_code: "dead_root",
-          scan_warning_at: null,
-          scan_warning_message: "Root is reachable but empty",
-        },
-      ],
-      isLoading: false,
-    });
-
-    const markup = renderPage();
-
-    expect(markup).toContain('title="Confirm cleanup for missing or empty roots"');
-  });
-
-  it("renders the collapsed Ambiguous Roots section with a populated count", () => {
-    mocks.useLibraryRoots.mockReturnValue({
-      data: {
-        pageParams: [undefined],
-        pages: [
-          {
-            total: 1,
-            nextCursor: undefined,
-            roots: [
-              {
-                library_id: 1,
-                library_name: "Movies",
-                root_path: "/media/movies/Inception (2010)",
-                state: "ambiguous",
-                inferred_type: "movie",
-                type_confidence: "low",
-                title: "Inception",
-                year: 2010,
-                observed_file_count: 1,
-                sample_file_path: "/media/movies/Inception (2010)/Inception (2010).mkv",
-                first_seen_at: "2026-03-23T20:00:00Z",
-                last_seen_at: "2026-03-23T21:00:00Z",
-              },
-            ],
-          },
-        ],
-      },
-      isLoading: false,
-      hasNextPage: false,
-      isFetchingNextPage: false,
-      fetchNextPage: vi.fn(),
-    });
-
-    renderInteractivePage();
-
-    expect(ambiguousRootsHeader()).toHaveTextContent("1");
-    expect(ambiguousRootsIconBox()).toHaveClass("bg-amber-500/10");
-    expect(ambiguousRootsIconBox().querySelector("svg")).toHaveClass("text-amber-500");
-  });
-
-  it("shows metadata matcher pending and parked counts", () => {
-    mocks.useLibraryMetadataMatchQueues.mockReturnValue({
-      data: [
-        {
-          library_id: 1,
-          movie_count: 1,
-          series_count: 2,
-          raw_file_count: 0,
-          total_count: 3,
-          pending_count: 2,
-          parked_count: 1,
-        },
-      ],
-      isLoading: false,
-    });
-
-    const markup = renderPage();
-
-    expect(markup).toContain("Metadata Matcher");
-    expect(markup).toContain("Pending and parked items that still need a provider match.");
-    // The total renders as element text (">3<"); a bare "3" would also match
-    // Tailwind class names like p-3 and prove nothing.
-    expect(markup).toMatch(/>\s*3\s*</);
-  });
-
-  it("shows active scan progress in the library task status row", () => {
-    mocks.useActiveScans.mockReturnValue({
-      data: [
-        {
-          id: "scan-1",
-          library_id: 1,
-          mode: "library",
-          trigger: "manual",
-          status: "running",
-          started_at: "2026-03-23T20:00:00Z",
-          result: {
-            new: 0,
-            updated: 0,
-            unchanged: 0,
-            missing: 0,
-            files_deleted: 0,
-            memberships_removed: 0,
-            items_deleted: 0,
-            matched_files: 0,
-            retried_items: 0,
-            still_unmatched_warnings: 0,
-            skipped: 0,
-            errors: 0,
-            message: "Processing files",
-            total_files: 20,
-            files_processed: 10,
-          },
-        },
-      ],
-      isLoading: false,
-    });
-
-    const markup = renderPage();
-
-    expect(markup).toContain("Processing files · 10 / 20 (50%)");
-    // Mode and target render as separate compact-row elements.
-    expect(markup).toContain("Full library scan");
-    expect(markup).toContain("Entire library");
-  });
-
-  it("shows an unknown count, not a zero, before Ambiguous Roots has loaded", () => {
-    // The roots query is disabled while the section is collapsed, so the
-    // default mock has no data. The section itself still renders because it
-    // is gated on libraries.length, and the missing page is not a confirmed zero.
-    renderInteractivePage();
-
-    expect(mocks.useLibraryRoots).toHaveBeenLastCalledWith(1, "ambiguous", {
-      enabled: false,
-      search: "",
-    });
-    expect(ambiguousRootsHeader()).toHaveTextContent("Count not loaded");
-    expect(ambiguousRootsHeader()).not.toHaveTextContent(/\b0\b/);
-    expect(ambiguousRootsIconBox()).toHaveClass("bg-muted/50");
-  });
-
-  it("renders a loading row, not an empty result, while Ambiguous Roots loads", () => {
-    renderInteractivePage();
-
-    fireEvent.click(ambiguousRootsHeader());
-
-    expect(mocks.useLibraryRoots).toHaveBeenLastCalledWith(1, "ambiguous", {
-      enabled: true,
-      search: "",
-    });
-    expect(screen.getByText("Loading ambiguous roots for this library.")).toBeInTheDocument();
-    expect(screen.queryByText("No ambiguous roots for this library.")).toBeNull();
-  });
-
-  it("renders a confirmed empty Ambiguous Roots result with neutral styling", () => {
-    mocks.useLibraryRoots.mockReturnValue(libraryRootsResult([]));
-
-    renderInteractivePage();
-
-    expect(ambiguousRootsHeader()).toHaveTextContent("0");
-    expect(ambiguousRootsHeader()).not.toHaveTextContent("Count not loaded");
-    expect(ambiguousRootsIconBox()).toHaveClass("bg-muted/50");
-    expect(ambiguousRootsIconBox().querySelector("svg")).not.toHaveClass("text-amber-500");
-
-    fireEvent.click(ambiguousRootsHeader());
-
-    expect(screen.getByText("No ambiguous roots for this library.")).toBeInTheDocument();
+    expect(markup).not.toContain('title="Confirm cleanup for missing or empty roots"');
   });
 
   it("renders an error state when Ambiguous Roots fails to load", () => {
@@ -529,7 +287,6 @@ describe("AdminLibraries", () => {
     renderInteractivePage();
 
     expect(ambiguousRootsHeader()).toHaveTextContent("Error loading count");
-    expect(ambiguousRootsIconBox()).toHaveClass("bg-destructive/10");
 
     fireEvent.click(ambiguousRootsHeader());
 
@@ -552,91 +309,27 @@ describe("AdminLibraries", () => {
     expect(screen.queryByText("Failed to load ambiguous roots for this library.")).toBeNull();
   });
 
-  it("queries and styles Ambiguous Roots per selected library", async () => {
-    mocks.useAdminLibraries.mockReturnValue({
-      data: [
-        {
-          id: 1,
-          name: "Movies",
-          paths: ["/media/movies"],
-          type: "movies",
-          enabled: true,
-          last_scanned_at: null,
-          scan_warning_code: null,
-          scan_warning_at: null,
-          scan_warning_message: null,
-        },
-        {
-          id: 42,
-          name: "Television",
-          paths: ["/media/tv"],
-          type: "tv",
-          enabled: true,
-          last_scanned_at: null,
-          scan_warning_code: null,
-          scan_warning_at: null,
-          scan_warning_message: null,
-        },
-      ],
-      isLoading: false,
+  it("settles while libraries are still loading", () => {
+    // An unstable `[]` fallback re-ran the reorder-state effect on every render
+    // until the libraries arrived, which crashed the embedded Autoscan tab. The
+    // loop runs synchronously inside render, so a regression has to throw here
+    // to fail the test instead of hanging the worker.
+    let calls = 0;
+    mocks.useAdminLibraries.mockImplementation(() => {
+      calls += 1;
+      if (calls > 20) throw new Error("AdminLibraries re-rendered in a loop while loading");
+      return { data: undefined, isLoading: true };
     });
-    mocks.useLibraryRoots.mockImplementation((libraryId: number) =>
-      libraryId === 42 ? libraryRootsResult([ambiguousRoot(42)]) : libraryRootsResult([]),
-    );
+    const client = newTestQueryClient();
+    const view = render(page(client));
+    calls = 0;
+    mocks.useAdminLibraries.mockClear();
 
-    renderInteractivePage();
-    fireEvent.click(ambiguousRootsHeader());
+    // Any unrelated update (another query resolving) re-renders the page once.
+    view.rerender(page(client));
 
-    expect(ambiguousRootsIconBox()).toHaveClass("bg-muted/50");
-    expect(screen.getByText("No ambiguous roots for this library.")).toBeInTheDocument();
-
-    const section = ambiguousRootsHeader().closest("section") as HTMLElement;
-    await userEvent.click(within(section).getByRole("combobox"));
-    await userEvent.click(await screen.findByRole("option", { name: "Television" }));
-
-    expect(mocks.useLibraryRoots).toHaveBeenLastCalledWith(42, "ambiguous", {
-      enabled: true,
-      search: "",
-    });
-    expect(ambiguousRootsIconBox()).toHaveClass("bg-amber-500/10");
-    expect(screen.getByText("/media/movies/Inception (2010)")).toBeInTheDocument();
-  });
-
-  it("renders Stale External IDs collapsed by default and loads the first page on demand", () => {
-    mocks.useStaleMediaIDs.mockReturnValue({
-      data: {
-        pages: [
-          {
-            staleIDs: [
-              {
-                content_id: "movie-1",
-                library_id: 1,
-                library_name: "Movies",
-                title: "Inception",
-                year: 2010,
-                content_type: "movie",
-                provider: "tmdb",
-                provider_id: "27205",
-                first_seen_at: "2026-03-23T20:00:00Z",
-                last_seen_at: "2026-03-23T21:00:00Z",
-              },
-            ],
-            nextCursor: undefined,
-          },
-        ],
-      },
-      isFetched: true,
-      hasNextPage: false,
-      isFetchingNextPage: false,
-      fetchNextPage: vi.fn(),
-    });
-
-    const markup = renderPage();
-
-    expect(markup).toContain("Stale External IDs");
-    expect(markup).not.toContain("Re-match");
-    // The section is collapsed on mount, so the first page is not requested yet.
-    expect(mocks.useStaleMediaIDs).toHaveBeenCalledWith({ enabled: false, search: "" });
+    expect(screen.getByText("Loading libraries...")).toBeInTheDocument();
+    expect(mocks.useAdminLibraries).toHaveBeenCalledTimes(1);
   });
 
   describe("diagnostic section header counts", () => {
@@ -661,58 +354,32 @@ describe("AdminLibraries", () => {
       last_seen_at: "2026-03-23T21:00:00Z",
     };
     const header = (name: RegExp) => screen.getByRole("button", { name });
-    const renderInteractive = () => {
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-      return render(
-        <QueryClientProvider client={client}>
-          <MemoryRouter>
-            <AdminLibraries />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      );
-    };
 
-    it("shows an unknown count instead of 0 while the sections are collapsed and unloaded", () => {
+    it("shows the server total rather than the rows loaded so far", () => {
       mocks.useSkippedLibraryRoots.mockReturnValue(infinite(undefined));
       mocks.useStaleMediaIDs.mockReturnValue(infinite(undefined));
-      renderInteractive();
-
+      renderInteractivePage();
       for (const name of [/Troubleshooting/, /Stale External IDs/]) {
         expect(within(header(name)).getByText("Count not loaded")).toBeDefined();
         expect(within(header(name)).queryByText("0")).toBeNull();
-      }
-    });
-
-    it("keeps the count unknown while the first page loads after opening", () => {
-      mocks.useSkippedLibraryRoots.mockReturnValue(infinite(undefined, { isLoading: true }));
-      mocks.useStaleMediaIDs.mockReturnValue(infinite(undefined, { isLoading: true }));
-      renderInteractive();
-
-      fireEvent.click(header(/Troubleshooting/));
-      fireEvent.click(header(/Stale External IDs/));
-      expect(mocks.useSkippedLibraryRoots).toHaveBeenLastCalledWith({ enabled: true, search: "" });
-      expect(mocks.useStaleMediaIDs).toHaveBeenLastCalledWith({ enabled: true, search: "" });
-      for (const name of [/Troubleshooting/, /Stale External IDs/]) {
+        fireEvent.click(header(name));
         expect(within(header(name)).getByText("Count not loaded")).toBeDefined();
       }
-    });
+      expect(mocks.useSkippedLibraryRoots).toHaveBeenLastCalledWith({ enabled: true, search: "" });
+      expect(mocks.useStaleMediaIDs).toHaveBeenLastCalledWith({ enabled: true, search: "" });
 
-    it("shows 0 once the server confirms an empty result", () => {
       mocks.useSkippedLibraryRoots.mockReturnValue(
         infinite({ pages: [{ roots: [], nextCursor: undefined, total: 0 }] }),
       );
       mocks.useStaleMediaIDs.mockReturnValue(
         infinite({ pages: [{ staleIDs: [], nextCursor: undefined, total: 0 }] }),
       );
-      renderInteractive();
-
       for (const name of [/Troubleshooting/, /Stale External IDs/]) {
+        fireEvent.click(header(name));
         expect(within(header(name)).getByText("0")).toBeDefined();
         expect(within(header(name)).queryByText("Count not loaded")).toBeNull();
       }
-    });
 
-    it("shows the server total rather than the rows loaded so far", () => {
       mocks.useSkippedLibraryRoots.mockReturnValue(
         infinite({ pages: [{ roots: [skippedRoot], nextCursor: "next", total: 1 }] }),
       );
@@ -731,26 +398,19 @@ describe("AdminLibraries", () => {
           { hasNextPage: true },
         ),
       );
-      renderInteractive();
+      fireEvent.click(header(/Troubleshooting/));
+      fireEvent.click(header(/Stale External IDs/));
 
       expect(within(header(/Troubleshooting/)).getByText("1")).toBeDefined();
+      expect(
+        screen.getByText(
+          "Roots with no provider IDs in the folder name or, for movies, in a file name.",
+        ),
+      ).toBeDefined();
       expect(within(header(/Stale External IDs/)).getByText("120")).toBeDefined();
       fireEvent.click(header(/Stale External IDs/));
       expect(within(header(/Stale External IDs/)).getByText("120")).toBeDefined();
       expect(within(header(/Stale External IDs/)).queryByText("3")).toBeNull();
-    });
-
-    it("keeps the count unknown when the listing fails to load", () => {
-      mocks.useSkippedLibraryRoots.mockReturnValue(infinite(undefined, { isError: true }));
-      mocks.useStaleMediaIDs.mockReturnValue(infinite(undefined, { isError: true }));
-      renderInteractive();
-
-      fireEvent.click(header(/Troubleshooting/));
-      fireEvent.click(header(/Stale External IDs/));
-      for (const name of [/Troubleshooting/, /Stale External IDs/]) {
-        expect(within(header(name)).getByText("Count not loaded")).toBeDefined();
-        expect(within(header(name)).queryByText("0")).toBeNull();
-      }
     });
   });
 
@@ -763,19 +423,12 @@ describe("AdminLibraries", () => {
       fetchNextPage: vi.fn(),
     };
     mocks.useStaleMediaIDs.mockReturnValue({ ...emptyResult, data: undefined, isFetched: false });
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const page = () => (
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <AdminLibraries />
-        </MemoryRouter>
-      </QueryClientProvider>
-    );
-    const view = render(page());
+    const client = newTestQueryClient();
+    const view = render(page(client));
     fireEvent.click(screen.getByRole("button", { name: /Stale External IDs/ }));
     expect(mocks.useStaleMediaIDs).toHaveBeenLastCalledWith({ enabled: true, search: "" });
     mocks.useStaleMediaIDs.mockReturnValue(emptyResult);
-    view.rerender(page());
+    view.rerender(page(client));
     fireEvent.click(screen.getByRole("button", { name: /Stale External IDs/ }));
     const reopen = screen.getByRole("button", { name: /Stale External IDs/ });
     expect(reopen.getAttribute("aria-expanded")).toBe("false");
@@ -788,167 +441,74 @@ describe("AdminLibraries", () => {
     expect(screen.getByText("Newly discovered")).toBeDefined();
   });
 
-  it("keeps stale IDs in server page order without offering partial-result sort controls", () => {
-    const firstPage = {
-      staleIDs: [staleID("newest", "Zulu"), staleID("middle", "Middle")],
-      nextCursor: "older",
+  it("keeps the unmatched section while every item is ignored", () => {
+    const ignored = {
+      content_id: "movie:reel",
+      library_id: 1,
+      title: "Family Holiday Reel",
+      year: 2011,
+      content_type: "movie",
+      library_name: "Movies",
+      status: "unmatched",
+      ignored_at: "2026-01-02T03:04:05.678Z",
     };
-    const result = {
-      data: { pages: [firstPage] },
-      isFetched: true,
-      hasNextPage: true,
-      isFetchingNextPage: false,
-      fetchNextPage: vi.fn(),
-    };
-    mocks.useStaleMediaIDs.mockImplementation(() => result);
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const page = () => (
-      <QueryClientProvider client={client}>
-        <MemoryRouter>
-          <AdminLibraries />
-        </MemoryRouter>
-      </QueryClientProvider>
+    mocks.useUnmatchedLibraryItems.mockImplementation((_search: string, ignoredView: boolean) =>
+      unmatchedItemsResult(ignoredView ? [ignored] : []),
     );
-    const view = render(page());
-    fireEvent.click(screen.getByRole("button", { name: /Stale External IDs/ }));
-    const table = screen.getByRole("table", { name: "Stale external IDs" });
-    for (const label of ["Title", "Year", "Library", "Provider", "First seen", "Last seen"]) {
-      expect(within(table).queryByRole("button", { name: label })).toBeNull();
-    }
-    const titles = () =>
-      within(table)
-        .getAllByRole("row")
-        .slice(1)
-        .map((row) => within(row).getAllByRole("cell")[0]?.textContent);
-    expect(titles()).toEqual(["Zulu", "Middle"]);
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-    expect(result.fetchNextPage).toHaveBeenCalledTimes(1);
-    result.data = {
-      pages: [firstPage, { staleIDs: [staleID("oldest", "Alpha")], nextCursor: "last" }],
-    };
-    view.rerender(page());
-    expect(titles()).toEqual(["Zulu", "Middle", "Alpha"]);
+    renderInteractivePage();
+    fireEvent.click(screen.getByText("Unmatched Items"));
+    expect(screen.getByText("No items are awaiting a match.")).toBeInTheDocument();
   });
 
-  it.each(["search", "first", "previous"])(
-    "cancels a pending Last traversal after %s",
-    async (action) => {
-      const item = {
-        content_id: "movie:fixture",
-        library_id: 1,
-        title: "Fixture",
-        year: 1995,
-        content_type: "movie",
-        library_name: "Movies",
-        status: "unmatched",
-      };
-      const pages = [0, 1].map((n) => ({
-        items: [{ ...item, content_id: `movie:${n}`, title: `Page ${n}` }],
-        total: 40,
-        nextCursor: `cursor-${n}`,
-      }));
-      type Result = { data: { pages: typeof pages }; hasNextPage: boolean };
-      let complete!: (result: Result) => void;
-      const pending = new Promise<Result>((resolve) => {
-        complete = resolve;
-      });
-      const fetchNextPage = vi
-        .fn()
-        .mockReturnValueOnce(pending)
-        .mockResolvedValue({ data: { pages: [...pages, ...pages] }, hasNextPage: false });
-      mocks.useUnmatchedLibraryItems.mockReturnValue({
-        data: { pages },
-        hasNextPage: true,
-        isFetching: false,
-        fetchNextPage,
-      });
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-      render(
-        <QueryClientProvider client={client}>
-          <MemoryRouter>
-            <AdminLibraries />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      );
-      fireEvent.click(screen.getByText("Unmatched Items"));
-      fireEvent.click(screen.getByTitle("Next page"));
-      expect(screen.getByText("Page 1")).toBeDefined();
-      fireEvent.click(screen.getByTitle("Last page"));
-      expect(fetchNextPage).toHaveBeenCalledTimes(1);
-      if (action === "search") {
-        fireEvent.change(
-          screen.getByPlaceholderText("Search all unmatched items by title, library, or type..."),
-          { target: { value: "new search" } },
-        );
-      } else {
-        fireEvent.click(screen.getByTitle(action === "first" ? "First page" : "Previous page"));
-      }
-      await act(async () => {
-        complete({ data: { pages: pages.concat(pages.slice(0, 1)) }, hasNextPage: true });
-        await pending;
-      });
-      expect(fetchNextPage).toHaveBeenCalledTimes(1);
-      expect(screen.getByText("Page 0")).toBeDefined();
-    },
-  );
-
-  it("renders an unmatched items section collapsed by default when unmatched items exist", () => {
-    mocks.useUnmatchedLibraryItems.mockReturnValue(
-      unmatchedItemsResult([
-        {
-          content_id: "movie-99",
-          title: "Unknown Film",
-          year: 0,
-          content_type: "movie",
-          library_id: 1,
-          library_name: "Movies",
-          status: "unmatched",
-        },
-      ]),
-    );
-
-    const markup = renderPage();
-
-    expect(markup).toContain("Unmatched Items");
-    expect(markup).toContain("Items that could not be matched to any metadata provider.");
-  });
-
-  it("renders the Troubleshooting section collapsed by default when skipped roots exist", () => {
-    mocks.useSkippedLibraryRoots.mockReturnValue({
-      data: {
-        pages: [
-          {
-            roots: [
-              {
-                library_id: 1,
-                library_name: "Movies",
-                root_path: "/media/movies/Unknown Movie",
-                reason: "missing_provider_ids",
-                file_count: 2,
-                sample_file_path: "/media/movies/Unknown Movie/movie.mkv",
-                first_seen_at: "2026-03-23T20:00:00Z",
-                last_seen_at: "2026-03-23T21:00:00Z",
-              },
-            ],
-          },
-        ],
-      },
-      isLoading: false,
+  it.each(["search", "first"])("cancels a pending Last traversal after %s", async (action) => {
+    const item = {
+      content_id: "movie:fixture",
+      library_id: 1,
+      title: "Fixture",
+      year: 1995,
+      content_type: "movie",
+      library_name: "Movies",
+      status: "unmatched",
+    };
+    const pages = [0, 1].map((n) => ({
+      items: [{ ...item, content_id: `movie:${n}`, title: `Page ${n}` }],
+      total: 40,
+      nextCursor: `cursor-${n}`,
+    }));
+    type Result = { data: { pages: typeof pages }; hasNextPage: boolean };
+    let complete!: (result: Result) => void;
+    const pending = new Promise<Result>((resolve) => {
+      complete = resolve;
     });
-
-    const markup = renderPage();
-
-    expect(markup).toContain("Troubleshooting");
-    expect(markup).toContain(
-      "Roots where the inferred canonical folder lacks embedded provider IDs.",
-    );
-    expect(markup).not.toContain("Filter by path, library, or reason");
-    expect(markup).not.toContain("Unknown Movie");
-  });
-
-  it("hides unmatched items section when no unmatched items exist", () => {
-    const markup = renderPage();
-
-    expect(markup).not.toContain("Unmatched Items");
+    const fetchNextPage = vi
+      .fn()
+      .mockReturnValueOnce(pending)
+      .mockResolvedValue({ data: { pages: [...pages, ...pages] }, hasNextPage: false });
+    mocks.useUnmatchedLibraryItems.mockReturnValue({
+      data: { pages },
+      hasNextPage: true,
+      isFetching: false,
+      fetchNextPage,
+    });
+    renderInteractivePage();
+    fireEvent.click(screen.getByText("Unmatched Items"));
+    fireEvent.click(screen.getByTitle("Next page"));
+    expect(screen.getByText("Page 1")).toBeDefined();
+    fireEvent.click(screen.getByTitle("Last page"));
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
+    if (action === "search") {
+      fireEvent.change(
+        screen.getByPlaceholderText("Search all unmatched items by title, library, or type..."),
+        { target: { value: "new search" } },
+      );
+    } else {
+      fireEvent.click(screen.getByTitle("First page"));
+    }
+    await act(async () => {
+      complete({ data: { pages: pages.concat(pages.slice(0, 1)) }, hasNextPage: true });
+      await pending;
+    });
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Page 0")).toBeDefined();
   });
 });

@@ -70,10 +70,9 @@ export default function WatchlistTitleCard({
           <MediaCardArtwork
             src={tmdbImageURL(title.poster_path)}
             alt={title.title}
-            fallbackLabel={title.title}
+            mediaType={title.media_type}
             lazy
             dim={status.attention}
-            fallbackOnError
           >
             {downloadPercent !== null ? <RequestDownloadBar percent={downloadPercent} /> : null}
             {overlayPrefs ? (
@@ -114,7 +113,7 @@ export default function WatchlistTitleCard({
             it is the only place the card says where the title stands. */}
         <p
           className={cn(
-            "mt-1.5 truncate text-[12px]",
+            "mt-1.5 truncate text-[0.75rem]",
             status.attention ? "text-amber-300" : "text-muted-foreground",
           )}
           data-testid="watchlist-title-caption"

@@ -2,9 +2,9 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
 import {
   getAdminUser,
+  getAdminUserSnapshot,
   updateAdminUser,
   deleteAdminUser,
-  createAdminUser,
   listAdminUsers,
   impersonateAdminUser,
 } from "./adminUsers";
@@ -63,6 +63,18 @@ beforeEach(() => {
   setProfileToken(null);
 });
 afterEach(() => vi.unstubAllGlobals());
+it("allows inspection without a proxy-stripped ETag while refusing guarded writes", async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValue(response(v2User("7", "Initial")));
+  vi.stubGlobal("fetch", fetch);
+  const snapshot = await getAdminUserSnapshot(7);
+  expect(snapshot.user.username).toBe("Initial");
+  expect(snapshot.etag).toBe("");
+  await expect(updateAdminUser(snapshot, { enabled: false })).rejects.toThrow("strong ETag");
+  await expect(deleteAdminUser(snapshot)).rejects.toThrow("strong ETag");
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
 it.each([
   { name: "unrestricted", wire: null, expected: null },
   { name: "deny all", wire: [], expected: [] },
@@ -107,40 +119,6 @@ it("uses canonical exact tags and explicit policy null/empty/false without readi
   });
   expect(new Headers(fetch.mock.calls[1]![1]?.headers).get("If-Match")).toBe('"old"');
   expect(new Headers(fetch.mock.calls[2]![1]?.headers).get("If-Match")).toBe('"old"');
-});
-it("does not replay any mutation or impersonation on 401", async () => {
-  const fetch = vi
-    .fn<typeof globalThis.fetch>()
-    .mockResolvedValue(response(v2User("7", "Initial"), 200, '"old"'));
-  vi.stubGlobal("fetch", fetch);
-  const editor = await getAdminUser(7);
-  for (const action of [
-    () =>
-      createAdminUser({
-        username: "new",
-        email: "new@example.invalid",
-        password: "test-password",
-        role: "user",
-        create_default_profile: false,
-      }),
-    () => updateAdminUser(editor, { enabled: false }),
-    () => deleteAdminUser(editor),
-    () => impersonateAdminUser(7),
-  ]) {
-    fetch.mockClear();
-    fetch.mockResolvedValue(
-      response(
-        {
-          type: "https://silo.example/problems/authentication_required",
-          title: "Unauthorized",
-          status: 401,
-        },
-        401,
-      ),
-    );
-    await expect(action()).rejects.toMatchObject({ status: 401 });
-    expect(fetch).toHaveBeenCalledTimes(1);
-  }
 });
 it("rejects incomplete cursor pages and authority changes during traversal", async () => {
   const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () =>

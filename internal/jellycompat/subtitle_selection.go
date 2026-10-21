@@ -137,25 +137,29 @@ func compatWithoutForcedSubtitles(candidates []compatSubtitleCandidate) []compat
 }
 
 // compatDefaultSubtitleStreamIndex ports Jellyfin 12.1's
-// MediaStreamSelector.GetDefaultSubtitleStreamIndex. preferred is the user's
-// subtitle language preference (empty matches any language, as upstream);
-// audioLanguage is the language of the audio the client starts with.
+// MediaStreamSelector.GetDefaultSubtitleStreamIndex, except that it prefers
+// embedded tracks over external ones (see the sort below). preferred is the
+// user's subtitle language preference (empty matches any language, as
+// upstream); audioLanguage is the language of the audio the client starts with.
 func compatDefaultSubtitleStreamIndex(candidates []compatSubtitleCandidate, preferred []string, mode, audioLanguage string) *int {
 	if mode == compatSubtitleNone {
 		return nil
 	}
 	matches := func(language string) bool { return compatMatchesPreferredLanguage(language, preferred) }
-	// Sort: external > default > preferred full > preferred forced >
-	// undefined forced > forced. The sort is stable, as LINQ's OrderBy is.
+	// Sort: default > preferred full > preferred forced > undefined forced >
+	// forced > embedded. Upstream ranks external first; Silo prefers a
+	// file's own tracks and only breaks ties with the source, so a full
+	// external track still beats an embedded forced one. The sort is stable,
+	// as LINQ's OrderBy is.
 	sorted := slices.Clone(candidates)
 	slices.SortStableFunc(sorted, func(a, b compatSubtitleCandidate) int {
 		for _, key := range []func(compatSubtitleCandidate) bool{
-			func(c compatSubtitleCandidate) bool { return c.External },
 			func(c compatSubtitleCandidate) bool { return c.Default },
 			func(c compatSubtitleCandidate) bool { return !c.Forced && matches(c.Language) },
 			func(c compatSubtitleCandidate) bool { return c.Forced && matches(c.Language) },
 			func(c compatSubtitleCandidate) bool { return c.Forced && compatLanguageUndefined(c.Language) },
 			func(c compatSubtitleCandidate) bool { return c.Forced },
+			func(c compatSubtitleCandidate) bool { return !c.External },
 		} {
 			if ka, kb := key(a), key(b); ka != kb {
 				if ka {

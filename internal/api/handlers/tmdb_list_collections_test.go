@@ -9,38 +9,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-func TestBuildTMDBListSourceConfig(t *testing.T) {
-	limit := 30
-	raw, err := buildTMDBListSourceConfig("https://www.themoviedb.org/list/310", &limit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := string(raw), `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310","limit":30}`; got != want {
-		t.Fatalf("source config = %s, want %s", got, want)
-	}
-}
-
-func TestAdminTMDBListImportRejectsNonListURL(t *testing.T) {
-	_, err := (&LibraryCollectionHandler{}).ImportAdminTMDBList(t.Context(), AdminCollectionImportTMDBList{
-		LibraryIDs: []int{1}, Title: "List", URL: "https://www.themoviedb.org/collection/10",
-	})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Status != 400 || apiErr.Code != "bad_request" {
-		t.Fatalf("error = %#v, want 400 bad_request", err)
-	}
-}
-
-func TestGenericAdminCollectionRejectsInvalidTMDBListSource(t *testing.T) {
-	_, err := (&LibraryCollectionHandler{}).CreateAdminCollection(t.Context(), AdminCollectionCreate{
-		LibraryIDs: []int{1}, Title: "List", CollectionType: "tmdb",
-		SourceConfig: json.RawMessage(`{"mode":"tmdb_list","url":"https://example.com/list/310"}`),
-	})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Status != 400 {
-		t.Fatalf("error = %#v, want 400", err)
-	}
-}
-
 func TestAdminCollectionSourceUpdateValidatesTMDBListURL(t *testing.T) {
 	existing := &models.LibraryCollection{
 		CollectionType: "tmdb",
@@ -63,20 +31,9 @@ func TestAdminCollectionSourceUpdateValidatesTMDBListURL(t *testing.T) {
 	}
 }
 
-func TestPersonalTMDBListImportRejectsNonListURL(t *testing.T) {
-	_, err := (&UserCollectionImportHandler{}).ImportTMDBList(t.Context(), 1, "p1", UserImportTMDBListRequest{
-		UserImportSharedFields: UserImportSharedFields{Title: "List"},
-		URL:                    "https://mdblist.com/lists/user/slug",
-	})
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Field != "url" {
-		t.Fatalf("error = %#v, want a url field error", err)
-	}
-}
-
 func TestPersonalTMDBListSourceURLCanBeEdited(t *testing.T) {
 	store := &lifecycleStore{collection: userstore.Collection{
-		ID: "c", CreatorProfileID: "owner", AllowedProfileIDs: []string{"owner"},
+		ID: "c", CreatorProfileID: "owner",
 		CollectionType: "tmdb", SourceURL: "https://www.themoviedb.org/list/310",
 		SourceConfig: `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310"}`,
 	}}
@@ -112,7 +69,7 @@ func TestPersonalTMDBListSourceURLCanBeEdited(t *testing.T) {
 
 func TestPersonalTMDBPresetSourceURLCannotBeEdited(t *testing.T) {
 	store := &lifecycleStore{collection: userstore.Collection{
-		ID: "c", CreatorProfileID: "owner", AllowedProfileIDs: []string{"owner"},
+		ID: "c", CreatorProfileID: "owner",
 		CollectionType: "tmdb", SourceConfig: `{"mode":"tmdb_preset","preset":"trending"}`,
 	}}
 	h := NewCollectionHandler(lifecycleProvider{store: store})

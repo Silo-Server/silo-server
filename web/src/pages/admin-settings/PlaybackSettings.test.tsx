@@ -1,10 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import PlaybackSettings from "./PlaybackSettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 
 class ResizeObserverStub {
   observe() {}
@@ -22,6 +23,11 @@ if (!window.HTMLElement.prototype.scrollIntoView) {
 const useSettingsFormMock = vi.fn();
 const useHWAccelDetectionMock = vi.fn();
 const useAdminNodesMock = vi.fn();
+const useAdminTrickplayLibrariesMock = vi.fn();
+const useLibraryCapabilitiesMock = vi.fn();
+const markerCapabilitiesMock = vi.fn<() => { data?: Record<string, boolean> }>(() => ({
+  data: { detection_kind_settings: true },
+}));
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -39,26 +45,47 @@ vi.mock("@/hooks/queries/admin/nodes", () => ({
   useAdminNodes: () => useAdminNodesMock(),
 }));
 
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useLibraryCapabilities: () => useLibraryCapabilitiesMock(),
+}));
+
+vi.mock("@/hooks/queries/admin/trickplay", () => ({
+  useAdminTrickplayLibraries: () => useAdminTrickplayLibrariesMock(),
+}));
+
+vi.mock("@/hooks/queries/admin/markers", () => ({
+  useAdminMarkerCapabilities: () => markerCapabilitiesMock(),
+}));
+
+vi.mock("@/hooks/queries/admin/tasks", () => ({
+  useTasks: () => ({ data: [] }),
+  useRunTask: () => ({ mutateAsync: vi.fn() }),
+}));
+
+vi.mock("@/components/realtimeEventsContext", () => ({
+  useEventChannel: () => undefined,
+}));
+
+// Preview images links to Libraries and Skip markers to its providers, so the
+// page renders in a router.
+function Page() {
+  return (
+    <MemoryRouter>
+      <PlaybackSettings />
+    </MemoryRouter>
+  );
+}
+
 /** A transcode node the chapter-thumbnail extractor could reserve. */
 function transcodeNode(overrides: Record<string, unknown> = {}) {
   return { id: 1, name: "node-1", type: "transcode", enabled: true, healthy: true, ...overrides };
 }
 
-function makeForm(values: Record<string, string>, dirty: string[] = []) {
-  const dirtyKeys = new Set(dirty);
-  return {
-    isLoading: false,
-    getValue: (key: string) => values[key] ?? "",
-    setValue: vi.fn(),
-    isDirty: (key: string) => dirtyKeys.has(key),
-    dirtyCount: dirtyKeys.size,
-    dirtyKeys: [...dirtyKeys],
-    save: vi.fn(),
-    discard: vi.fn(),
-    isSaving: false,
-    restartRequired: false,
-  };
-}
+const makeForm = (
+  values: Record<string, string>,
+  dirty: string[] = [],
+  persisted: Record<string, string> = {},
+) => fakeSettingsForm(values, { dirty, persisted, save: vi.fn().mockResolvedValue(undefined) });
 
 function parse(markup: string): HTMLElement {
   const container = document.createElement("div");
@@ -75,212 +102,70 @@ function labelled(container: HTMLElement, text: string): Element {
   return control;
 }
 
-/** Opens the page's advanced disclosure via its persisted state. */
+/** The static-markup group whose heading reads `name`. */
+function groupNamed(container: HTMLElement, name: string): HTMLElement {
+  const group = Array.from(container.querySelectorAll<HTMLElement>("[role=group]")).find(
+    (candidate) => candidate.querySelector("h3")?.textContent === name,
+  );
+  if (!group) throw new Error(`no group rendered with heading: ${name}`);
+  return group;
+}
+
+/** Opens the Transcoding group's advanced disclosure via its persisted state. */
 function expandAdvanced() {
   localStorage.setItem("silo.admin.advanced.playback.transcoding", "true");
+}
+
+/** Opens the Preview images group's disclosure via its persisted state. */
+function expandPreviewImages() {
+  localStorage.setItem("silo.admin.advanced.playback.preview_images", "true");
 }
 
 const TONE_MAP_LABEL = "Software HDR tone mapping";
 
 beforeEach(() => {
   localStorage.clear();
+  useLibraryCapabilitiesMock.mockReturnValue({ data: { trickplay: true } });
   useSettingsFormMock.mockReset();
   useHWAccelDetectionMock.mockReset();
   useHWAccelDetectionMock.mockReturnValue({ data: undefined, isLoading: false });
   useAdminNodesMock.mockReset();
   useAdminNodesMock.mockReturnValue({ data: [transcodeNode()], isSuccess: true });
+  useAdminTrickplayLibrariesMock.mockReset();
+  useAdminTrickplayLibrariesMock.mockReturnValue({ data: undefined, isSuccess: false });
+  markerCapabilitiesMock.mockReturnValue({ data: { detection_kind_settings: true } });
 });
 
-describe("PlaybackSettings layout", () => {
-  it("renders every field group heading", () => {
+describe("PlaybackSettings preview images tiering", () => {
+  it("shows where previews are made only while a transcode node can take the work", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
 
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-    const headings = Array.from(container.querySelectorAll("[role=group]")).map((group) => {
-      const labelId = group.getAttribute("aria-labelledby");
-      return labelId ? (container.querySelector(`[id="${labelId}"]`)?.textContent ?? "") : "";
-    });
+    const view = render(<Page />);
+    let group = within(screen.getByRole("group", { name: "Preview images" }));
+    expect(group.getByText("Generate chapter thumbnails on")).toBeInTheDocument();
+    expect(group.getByText("Generate seek previews on")).toBeInTheDocument();
+    view.unmount();
 
-    expect(headings).toEqual(["Transcoding", "Node routing", "Watch behavior"]);
-  });
-
-  it("opens with the title alone: no breadcrumb, lede, or status strip", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none", "playback.transcode_enabled": "true" }),
-    );
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(container.querySelector("h1")?.textContent).toBe("Playback");
-    expect(container.textContent).not.toContain("Settings ›");
-    expect(container.textContent).not.toContain("Transcoding on");
-    expect(container.textContent).not.toContain("Restart pending");
-  });
-
-  it("puts the percent unit beside the control instead of in the label", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.watched_threshold": "90" }));
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(labelled(container, "Mark watched at")).toHaveAttribute("value", "90");
-    expect(container.textContent).not.toContain("Mark watched at (%)");
-  });
-
-  it("manages the playback key family and leaves downloads to their own page", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
-
-    renderToStaticMarkup(<PlaybackSettings />);
-    const keys: string[] = useSettingsFormMock.mock.calls[0]?.[0]?.keys ?? [];
-
-    expect(keys).toContain("playback.transcode_enabled");
-    expect(keys).toContain("playback.allow_hevc_encoding");
-    expect(keys).toContain("playback.routing.video_transcode_egress");
-    expect(keys).toContain("playback.watched_threshold");
-    expect(keys.some((key) => key.startsWith("download."))).toBe(false);
-    // Hidden tier: still saved and readable through the API, no UI.
-    expect(keys).not.toContain("playback.chapter_thumbnail_node_capacity");
-  });
-
-  it("keeps advanced settings collapsed until they are opened", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(container.textContent).toContain("Transcoding");
-    expect(container.textContent).not.toContain("FFmpeg path");
-  });
-
-  it("force-opens an advanced section holding a dirty field", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none" }, ["playback.ffmpeg_path"]),
-    );
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(container.textContent).toContain("FFmpeg path");
-  });
-
-  it("marks restart-required fields from the restart key list", () => {
-    expandAdvanced();
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-    const badges = container.querySelectorAll("[aria-label='Takes effect after a server restart']");
-
-    expect(badges).toHaveLength(1);
-  });
-});
-
-describe("PlaybackSettings node routing", () => {
-  const defaultRouting = {
-    "playback.routing.direct_play_egress": "prefer_proxy",
-    "playback.routing.remux_execution": "prefer_transcode",
-    "playback.routing.remux_egress": "prefer_proxy",
-    "playback.routing.video_transcode_execution": "prefer_transcode",
-    "playback.routing.video_transcode_egress": "prefer_proxy",
-  };
-
-  it("stages every primitive setting when a preset is selected", async () => {
-    const form = makeForm({ "playback.hw_accel": "none", ...defaultRouting });
-    useSettingsFormMock.mockReturnValue(form);
-
-    render(<PlaybackSettings />);
-    await userEvent.click(screen.getByRole("button", { name: "GPU offload" }));
-
-    expect(form.setValue.mock.calls).toEqual([
-      ["playback.routing.direct_play_egress", "prefer_api"],
-      ["playback.routing.remux_execution", "prefer_api"],
-      ["playback.routing.remux_egress", "prefer_api"],
-      ["playback.routing.video_transcode_execution", "prefer_worker"],
-      ["playback.routing.video_transcode_egress", "prefer_proxy"],
-    ]);
-    expect(form.save).not.toHaveBeenCalled();
-  });
-
-  it("labels the built-in routing policy as Silo Defaults", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none", ...defaultRouting }),
-    );
-
-    render(<PlaybackSettings />);
-
-    expect(screen.getByRole("button", { name: "Silo Defaults" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Standard cluster" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Custom")).not.toBeInTheDocument();
-  });
-
-  it("offers a transcode-node preference and explains what a worker is", async () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({
-        "playback.hw_accel": "none",
-        ...defaultRouting,
-      }),
-    );
-
-    render(<PlaybackSettings />);
-
-    const remuxExecution = screen.getByRole("combobox", { name: "Remux execution" });
-    expect(remuxExecution).toHaveTextContent("Prefer transcode node");
-    await userEvent.click(remuxExecution);
-    expect(await screen.findByRole("option", { name: "Prefer any worker" })).toBeVisible();
-    expect(screen.getByRole("option", { name: "Prefer transcode node" })).toBeVisible();
-    expect(screen.getByText(/A worker can be a proxy/)).toBeVisible();
-    expect(screen.getByText(/Transcode node → any worker → API/)).toBeVisible();
-    expect(screen.getByText(/Video transcode workers are transcode nodes/)).toBeVisible();
-  });
-
-  it("warns when hard routes lack nodes or universal client-origin support", () => {
-    useAdminNodesMock.mockReturnValue({
-      data: [transcodeNode({ healthy: false })],
-      isSuccess: true,
-    });
-    useSettingsFormMock.mockReturnValue(
-      makeForm({
-        "playback.hw_accel": "none",
-        ...defaultRouting,
-        "playback.routing.direct_play_egress": "proxy_only",
-        "playback.routing.remux_execution": "worker_only",
-      }),
-    );
-
-    const text = parse(renderToStaticMarkup(<PlaybackSettings />)).textContent ?? "";
-
-    expect(text).toContain("no healthy supporting node");
-    expect(text).toContain("requires every native client to support authorized media origins");
+    for (const nodes of [
+      { data: [], isSuccess: true },
+      { data: [transcodeNode({ healthy: false })], isSuccess: true },
+      { data: undefined, isSuccess: false },
+    ]) {
+      useAdminNodesMock.mockReturnValue(nodes);
+      const collapsed = render(<Page />);
+      group = within(screen.getByRole("group", { name: "Preview images" }));
+      expect(group.queryByText("Generate chapter thumbnails on")).toBeNull();
+      expect(group.queryByText("Generate seek previews on")).toBeNull();
+      // Both selects join the seek preview worker count and the two HDR fields.
+      expect(group.getByRole("button", { name: "Advanced · 5 settings" })).toBeInTheDocument();
+      collapsed.unmount();
+    }
   });
 });
 
 describe("PlaybackSettings CPU tone mapping", () => {
-  it("includes the setting and renders it off by default", () => {
-    expandAdvanced();
-    useSettingsFormMock.mockReturnValue(
-      makeForm({
-        "playback.hw_accel": "none",
-        "playback.chapter_thumbnail_hdr_policy": "best_effort",
-      }),
-    );
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toContain(
-      "playback.chapter_thumbnail_software_tone_map_enabled",
-    );
-    const toggle = labelled(container, TONE_MAP_LABEL);
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(toggle).not.toHaveAttribute("disabled");
-  });
-
-  it("offers VideoToolbox hardware acceleration", async () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "auto" }));
-
-    render(<PlaybackSettings />);
-    await userEvent.click(screen.getByRole("combobox", { name: "Hardware acceleration" }));
-
-    expect(screen.getByRole("option", { name: "VideoToolbox (macOS)" })).toBeInTheDocument();
-  });
-
   it("disables the toggle while HDR chapter thumbnails are disabled", () => {
-    expandAdvanced();
+    expandPreviewImages();
     useSettingsFormMock.mockReturnValue(
       makeForm({
         "playback.hw_accel": "none",
@@ -289,8 +174,8 @@ describe("PlaybackSettings CPU tone mapping", () => {
       }),
     );
 
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-    const toggle = labelled(container, TONE_MAP_LABEL);
+    const container = parse(renderToStaticMarkup(<Page />));
+    const toggle = labelled(groupNamed(container, "Preview images"), TONE_MAP_LABEL);
 
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(toggle).toHaveAttribute("disabled");
@@ -298,47 +183,6 @@ describe("PlaybackSettings CPU tone mapping", () => {
 });
 
 describe("PlaybackSettings transcode tone mapping", () => {
-  beforeEach(expandAdvanced);
-
-  it("registers independent hardware and software settings disabled by default", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "auto" }));
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-    const keys = useSettingsFormMock.mock.calls[0]?.[0]?.keys as string[];
-
-    expect(keys).toContain("playback.transcode_hardware_tone_map_enabled");
-    expect(keys).toContain("playback.transcode_software_tone_map_enabled");
-    expect(labelled(container, "Enable Hardware HDR Tone Mapping")).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-    expect(labelled(container, "Enable Software HDR Tone Mapping")).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-  });
-
-  it("keeps the two policies independent", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({
-        "playback.hw_accel": "qsv",
-        "playback.transcode_hardware_tone_map_enabled": "true",
-        "playback.transcode_software_tone_map_enabled": "false",
-      }),
-    );
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(labelled(container, "Enable Hardware HDR Tone Mapping")).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    expect(labelled(container, "Enable Software HDR Tone Mapping")).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-  });
-
   it("keeps hardware tone mapping configurable for remote executors when local acceleration is off", () => {
     useSettingsFormMock.mockReturnValue(
       makeForm({
@@ -348,7 +192,7 @@ describe("PlaybackSettings transcode tone mapping", () => {
     );
 
     const toggle = labelled(
-      parse(renderToStaticMarkup(<PlaybackSettings />)),
+      parse(renderToStaticMarkup(<Page />)),
       "Enable Hardware HDR Tone Mapping",
     );
 
@@ -375,7 +219,7 @@ describe("PlaybackSettings transcode tone mapping", () => {
     );
 
     const toggle = labelled(
-      parse(renderToStaticMarkup(<PlaybackSettings />)),
+      parse(renderToStaticMarkup(<Page />)),
       "Enable Hardware HDR Tone Mapping",
     );
 
@@ -389,70 +233,23 @@ describe("PlaybackSettings path defaults", () => {
 
   const RESET_TRANSCODE_DIR = { name: "Reset Transcode directory to default" };
 
-  it("shows the effective default of each path field as its placeholder", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(labelled(container, "Transcode directory")).toHaveAttribute(
-      "placeholder",
-      "/tmp/silo-transcode",
-    );
-    expect(labelled(container, "FFmpeg path")).toHaveAttribute(
-      "placeholder",
-      "/usr/lib/jellyfin-ffmpeg/ffmpeg",
-    );
-  });
-
-  it("says in words what leaving each path blank does", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
-
-    const text = parse(renderToStaticMarkup(<PlaybackSettings />)).textContent ?? "";
-
-    expect(text).toContain("Leave blank to use /tmp/silo-transcode.");
-    expect(text).toContain(
-      "Leave blank to use the FFmpeg that ships with the server, at /usr/lib/jellyfin-ffmpeg/ffmpeg.",
-    );
-  });
-
-  it("offers no reset while a path field already runs the default", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none", "playback.transcode_dir": "/tmp/silo-transcode" }),
-    );
-    render(<PlaybackSettings />);
-
-    expect(screen.queryByRole("button", RESET_TRANSCODE_DIR)).not.toBeInTheDocument();
-  });
-
   it("stages an empty value when an overridden path is reset", () => {
     const form = makeForm({
       "playback.hw_accel": "none",
       "playback.transcode_dir": "/mnt/fast/transcode",
     });
     useSettingsFormMock.mockReturnValue(form);
-    render(<PlaybackSettings />);
+    render(<Page />);
 
     fireEvent.click(screen.getByRole("button", RESET_TRANSCODE_DIR));
 
     expect(form.setValue).toHaveBeenCalledWith("playback.transcode_dir", "");
     expect(form.save).not.toHaveBeenCalled();
   });
-
-  it("counts the reset as one unsaved change and falls back to the placeholder", () => {
-    // The staged empty string, as the form would report it on the next render.
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.hw_accel": "none" }, ["playback.transcode_dir"]),
-    );
-    render(<PlaybackSettings />);
-
-    expect(screen.getByLabelText("Transcode directory")).toHaveValue("");
-    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
-    expect(screen.queryByRole("button", RESET_TRANSCODE_DIR)).not.toBeInTheDocument();
-  });
 });
 
 describe("PlaybackSettings chapter thumbnail execution", () => {
-  beforeEach(expandAdvanced);
+  beforeEach(expandPreviewImages);
 
   it("warns when no transcode node can take an extraction", () => {
     useAdminNodesMock.mockReturnValue({
@@ -461,89 +258,326 @@ describe("PlaybackSettings chapter thumbnail execution", () => {
     });
     useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
 
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
+    const container = parse(renderToStaticMarkup(<Page />));
 
-    expect(container.textContent).toContain("No transcode nodes are connected");
-  });
-
-  it("stays quiet while a healthy transcode node is connected", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
-
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
-
-    expect(container.textContent).not.toContain("No transcode nodes are connected");
+    expect(groupNamed(container, "Preview images").textContent).toContain(
+      "No transcode nodes are connected",
+    );
   });
 
   it("does not warn before the node list has loaded", () => {
     useAdminNodesMock.mockReturnValue({ data: undefined, isSuccess: false });
     useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
 
-    const container = parse(renderToStaticMarkup(<PlaybackSettings />));
+    const container = parse(renderToStaticMarkup(<Page />));
 
     expect(container.textContent).not.toContain("No transcode nodes are connected");
   });
 });
 
-describe("PlaybackSettings divergent node inventories", () => {
-  // The device picker lives behind the advanced disclosure this page grew.
-  beforeEach(expandAdvanced);
+describe("PlaybackSettings seek-preview node capability", () => {
+  beforeEach(expandPreviewImages);
 
-  it("points at the per-node overrides on the Nodes page", () => {
-    useHWAccelDetectionMock.mockReturnValue({
-      data: {
-        resolved: "qsv",
-        render_device_details: [{ path: "/dev/dri/renderD128", description: "Intel GPU" }],
-        nodes: [
-          { node_url: "http://node-a", render_devices: ["/dev/dri/renderD128"] },
-          { node_url: "http://node-b", render_devices: ["/dev/dri/renderD129"] },
-        ],
+  it.each([
+    [{ capabilities: undefined }, true],
+    [{ capabilities: { transport_features: ["chapter_extract_v1"] } }, true],
+    [{ capabilities: { transport_features: ["trickplay_extract_v1"] } }, true],
+    [
+      { capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] } },
+      false,
+    ],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
+        advertised_capabilities_hash: "",
+        capabilities_hash: "snapshot",
       },
-      isLoading: false,
-    });
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "qsv" }));
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <PlaybackSettings />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Nodes report different devices");
-    expect(markup).toContain("set per-node overrides on the");
-    expect(markup).toContain('href="/admin/nodes"');
+      true,
+    ],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
+        advertised_capabilities_hash: "new-snapshot",
+        capabilities_hash: "old-snapshot",
+      },
+      true,
+    ],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
+        advertised_capabilities_hash: "snapshot",
+      },
+      true,
+    ],
+    [
+      {
+        capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
+        advertised_capabilities_hash: "snapshot",
+        capabilities_hash: "snapshot",
+      },
+      false,
+    ],
+  ])("gates node execution for node snapshot %o", async (overrides, disabled) => {
+    useAdminNodesMock.mockReturnValue({ data: [transcodeNode(overrides)], isSuccess: true });
+    useSettingsFormMock.mockReturnValue(makeForm({ "playback.trickplay_execution": "local" }));
+    render(<Page />);
+    await userEvent.click(screen.getByRole("combobox", { name: "Generate seek previews on" }));
+    const option = screen.getByRole("option", { name: "Transcode nodes only" });
+    expect(option.getAttribute("aria-disabled") === "true").toBe(disabled);
   });
 
-  it("stays quiet while every node reports the same devices", () => {
-    useHWAccelDetectionMock.mockReturnValue({
-      data: {
-        resolved: "qsv",
-        render_device_details: [{ path: "/dev/dri/renderD128", description: "Intel GPU" }],
-        nodes: [
-          { node_url: "http://node-a", render_devices: ["/dev/dri/renderD128"] },
-          { node_url: "http://node-b", render_devices: ["/dev/dri/renderD128"] },
-        ],
-      },
-      isLoading: false,
+  it.each([
+    ["prefer_transcode_nodes", "Transcode nodes when available", "Transcode nodes only"],
+    ["transcode_nodes_only", "Transcode nodes only", "Transcode nodes when available"],
+  ])("keeps saved %s editable while the node snapshot is stale", async (mode, saved, other) => {
+    useAdminNodesMock.mockReturnValue({
+      data: [
+        transcodeNode({
+          capabilities: { transport_features: ["trickplay_extract_v1", "trickplay_extract_v2"] },
+          advertised_capabilities_hash: "new-snapshot",
+          capabilities_hash: "old-snapshot",
+        }),
+      ],
+      isSuccess: true,
     });
-    useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "qsv" }));
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <PlaybackSettings />
-      </MemoryRouter>,
+    useSettingsFormMock.mockReturnValue(makeForm({ "playback.trickplay_execution": mode }));
+    render(<Page />);
+    await userEvent.click(screen.getByRole("combobox", { name: "Generate seek previews on" }));
+    expect(screen.getByRole("option", { name: saved })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
     );
-
-    expect(markup).not.toContain("set per-node overrides on the");
-    expect(markup).not.toContain('href="/admin/nodes"');
+    expect(screen.getByRole("option", { name: other })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("option", { name: "This server" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 });
 
-describe("HEVC encoding policy", () => {
-  it("saves the HEVC switch through the playback settings form", () => {
-    const form = makeForm({ "playback.hw_accel": "none", "playback.allow_hevc_encoding": "false" });
-    useSettingsFormMock.mockReturnValue(form);
-    render(<PlaybackSettings />);
-    fireEvent.click(screen.getByRole("switch", { name: "Allow HEVC encoding" }));
-    expect(form.setValue).toHaveBeenCalledWith("playback.allow_hevc_encoding", "true");
+describe("PlaybackSettings skip markers", () => {
+  function markersGroup(values: Record<string, string>, dirty: string[] = []): HTMLElement {
+    useSettingsFormMock.mockReturnValue(
+      makeForm({ "playback.hw_accel": "none", ...values }, dirty),
+    );
+    return groupNamed(parse(renderToStaticMarkup(<Page />)), "Skip markers");
+  }
+
+  it("shows the settings that apply to each marker source, without a disclosure", () => {
+    const cases: Array<[string, string[], string[]]> = [
+      [
+        "both",
+        [
+          "Detect intros",
+          "Detect credits",
+          "Save online markers",
+          "Find markers on playback",
+          "Detection workers",
+        ],
+        [],
+      ],
+      [
+        "local",
+        ["Detect intros", "Detect credits", "Find markers on playback", "Detection workers"],
+        ["Save online markers"],
+      ],
+      [
+        "online",
+        ["Save online markers", "Find markers on playback"],
+        ["Detect intros", "Detect credits", "Detection workers"],
+      ],
+      [
+        "off",
+        [],
+        [
+          "Detect intros",
+          "Detect credits",
+          "Save online markers",
+          "Find markers on playback",
+          "Detection workers",
+        ],
+      ],
+    ];
+    for (const [mode, shown, hidden] of cases) {
+      const group = markersGroup({ "markers.mode": mode });
+      expect(group.textContent).toContain("Marker source");
+      for (const label of shown) expect(group.textContent).toContain(label);
+      for (const label of hidden) expect(group.textContent).not.toContain(label);
+      expect(group.querySelector("button[aria-label^=Advanced]")).toBeNull();
+    }
   });
+
+  it("leaves out playback lookups while online markers are fetched when needed", () => {
+    const group = markersGroup({ "markers.mode": "online", "markers.online_storage": "on_demand" });
+
+    expect(group.textContent).toContain("Save online markers");
+    expect(group.textContent).not.toContain("Find markers on playback");
+  });
+
+  it("hides the detection switches unless the server honors them", () => {
+    const cases: Array<{ data?: Record<string, boolean> }> = [
+      {},
+      { data: { redetect_markers: true } },
+      { data: { detection_kind_settings: false } },
+    ];
+    for (const capabilities of cases) {
+      markerCapabilitiesMock.mockReturnValue(capabilities);
+      const group = markersGroup({ "markers.mode": "local" });
+      expect(group.textContent).not.toContain("Detect intros");
+      expect(group.textContent).not.toContain("Detect credits");
+      expect(group.textContent).toContain("Detection workers");
+    }
+  });
+});
+
+describe("seek preview settings", () => {
+  const library = (ready: number, running = 0) => ({
+    library_id: "1",
+    name: "Movies",
+    pending: 0,
+    running,
+    ready,
+    unusable: 0,
+    sheet_bytes: 0,
+  });
+
+  it.each([false, true])("handles confirmed preview saves (failure=%s)", async (failure) => {
+    const form = makeForm(
+      { "playback.hw_accel": "none", "playback.trickplay_interval_seconds": "20" },
+      ["playback.trickplay_interval_seconds"],
+      { "playback.trickplay_interval_seconds": "10" },
+    );
+    if (failure) form.save.mockRejectedValue(new Error("412 precondition failed"));
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({
+      data: [{ ...library(0), pending: 3, sheet_bytes: 1000 }],
+      isSuccess: true,
+    });
+    render(<Page />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(form.save).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    await userEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
+    );
+    expect(form.save).toHaveBeenCalledOnce();
+    expect(form.dirtyCount).toBe(1);
+  });
+
+  it("asks before a new width remakes chapter thumbnails and published previews", async () => {
+    const form = makeForm(
+      { "playback.hw_accel": "none", "playback.preview_image_width": "320" },
+      ["playback.preview_image_width"],
+      { "playback.preview_image_width": "" },
+    );
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({
+      data: [library(40, 1), library(2)],
+      isSuccess: true,
+    });
+
+    render(<Page />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        /^Every chapter thumbnail and 43 files' seek previews are made again at the new width\./,
+      ),
+    ).toBeTruthy();
+    await userEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Save" }),
+    );
+    expect(form.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks before a new width even with no seek previews, for chapter thumbnails", async () => {
+    const form = makeForm(
+      { "playback.hw_accel": "none", "playback.preview_image_width": "320" },
+      ["playback.preview_image_width"],
+      { "playback.preview_image_width": "300" },
+    );
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({ data: [], isSuccess: true });
+
+    render(<Page />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/^Every chapter thumbnail is made again at the new width\./),
+    ).toBeTruthy();
+  });
+
+  it.each([
+    [
+      "the interval returns to the default",
+      { "playback.trickplay_interval_seconds": "10" },
+      ["playback.trickplay_interval_seconds"],
+      [library(5)],
+    ],
+    [
+      "a new interval has no published previews to remake",
+      { "playback.trickplay_interval_seconds": "20" },
+      ["playback.trickplay_interval_seconds"],
+      [],
+    ],
+    [
+      "only the worker count changes",
+      { "playback.trickplay_workers": "4" },
+      ["playback.trickplay_workers"],
+      [library(5)],
+    ],
+  ])("saves without asking when %s", async (_, values, dirty, libraries) => {
+    const form = makeForm({ "playback.hw_accel": "none", ...values }, dirty, {
+      "playback.trickplay_interval_seconds": "",
+      "playback.preview_image_width": "300",
+      "playback.trickplay_workers": "1",
+    });
+    useSettingsFormMock.mockReturnValue(form);
+    useAdminTrickplayLibrariesMock.mockReturnValue({ data: libraries, isSuccess: true });
+
+    render(<Page />);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(form.save).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+});
+
+it("hides unsupported seek preview settings and leaves their keys out", () => {
+  expandPreviewImages();
+  useLibraryCapabilitiesMock.mockReturnValue({ data: { trickplay: false } });
+  useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
+  render(<Page />);
+  expect(screen.queryByLabelText("Seek preview interval")).toBeNull();
+  expect(screen.queryByLabelText("Preview image width")).toBeNull();
+  expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).not.toContain("playback.trickplay_workers");
+  // The chapter thumbnail half of the group stays, and the count follows it:
+  // the two HDR fields, with workers shown and placement outside beside a node.
+  const group = within(screen.getByRole("group", { name: "Preview images" }));
+  expect(group.getByRole("button", { name: "Advanced · 2 settings" })).toBeInTheDocument();
+  expect(group.getByText("Chapter thumbnail workers")).toBeInTheDocument();
+  expect(group.getByText("Generate chapter thumbnails on")).toBeInTheDocument();
+  expect(group.queryByText("Generate seek previews on")).toBeNull();
+  expect(group.queryByText("Seek preview workers")).toBeNull();
+  expect(
+    group.getByText("Chapter thumbnails are turned on for each library in Libraries."),
+  ).toBeTruthy();
+});
+
+it("asks before changing the interval when preview status is unavailable", async () => {
+  useAdminTrickplayLibrariesMock.mockReturnValue({ data: undefined, isSuccess: false });
+  const form = makeForm(
+    { "playback.trickplay_interval_seconds": "20" },
+    ["playback.trickplay_interval_seconds"],
+    { "playback.trickplay_interval_seconds": "10" },
+  );
+  useSettingsFormMock.mockReturnValue(form);
+  render(<Page />);
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(form.save).not.toHaveBeenCalled();
+  expect(screen.getByRole("alertdialog")).toHaveTextContent(
+    "Existing seek previews are made again",
+  );
 });

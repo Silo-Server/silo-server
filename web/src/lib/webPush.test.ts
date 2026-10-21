@@ -1,5 +1,10 @@
+import {
+  StaleApiRequestContextError,
+  setAccessToken,
+  setProfileId,
+  setProfileToken,
+} from "@/api/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { disableWebPush, enableWebPush } from "./webPush";
 
 beforeEach(() => {
@@ -148,11 +153,16 @@ it("fences registration after permission, service worker and subscription waits"
     if (stage === "subscribe")
       browser.subscribe.mockImplementation(async () => {
         setProfileToken("new-pin");
-        return { toJSON: () => ({}) };
+        return {
+          toJSON: () => ({
+            endpoint: "https://push.example.test/opaque",
+            keys: { p256dh: "synthetic-key", auth: "synthetic-auth" },
+          }),
+        };
       });
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
-    await expect(enableWebPush("AQID")).rejects.toThrow();
+    await expect(enableWebPush("AQID")).rejects.toThrow(StaleApiRequestContextError);
     expect(fetch).not.toHaveBeenCalled();
     if (stage === "permission") expect(browser.register).not.toHaveBeenCalled();
     if (stage !== "subscribe") expect(browser.subscribe).not.toHaveBeenCalled();

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -74,158 +76,175 @@ func init() {
 type Dependencies struct {
 	ThemeSongs        ThemeSongService
 	ObserveThemeAudio func(string, http.Handler) http.Handler
+	// ObserveDownloadDelivery wraps the managed-download file and subtitle
+	// routes, given method and full path pattern, so their bytes count as
+	// viewer transfer egress like the v1 routes they mirror.
+	ObserveDownloadDelivery func(method, pattern string, handler http.Handler) http.Handler
+	// ObserveBandwidthProbe wraps the bandwidth probe so its bytes count as
+	// viewer transfer egress, like the Jellyfin-compat bitrate test.
+	ObserveBandwidthProbe func(http.Handler) http.Handler
 	// ObserveRoutes receives detached method/path values after this actual router
 	// is fully registered. It cannot mutate or recover the sealed router.
 	ObserveRoutes func([]streamtelemetry.WalkedRoute)
 
-	DirectDownloads                 *DirectDownloadHandlers
-	ViewerSubtitleDelete            ViewerSubtitleDeleteService
-	OrderedApplePush                OrderedApplePushService
-	NotificationEmailVerification   NotificationEmailVerificationService
-	AdminAutoscanSourceDeletes      AdminAutoscanSourceDeleteService
-	AdminAutoscanSourceWrites       AdminAutoscanSourceWriteService
-	WatchTogetherSocket             WatchTogetherSocketService
-	WatchTogetherCreate             WatchTogetherCreateService
-	AdminAutoscanEvents             AdminAutoscanEventsService
-	AdminAutoscanScans              AdminAutoscanScansService
-	WatchTogetherSuggestionPromote  WatchTogetherSuggestionPromoteService
-	WatchTogetherSuggestionCreate   WatchTogetherSuggestionCreateService
-	AdminAutoscanConnectionDeletes  AdminAutoscanConnectionDeleteService
-	AdminAutoscanConnectionUpdate   AdminAutoscanConnectionUpdateService
-	AdminAutoscanConnectionCreation AdminAutoscanConnectionCreationService
-	AdminAutoscanRewrites           AdminAutoscanRewritesService
-	AdminAutoscanAvailableSources   AdminAutoscanAvailableSourcesService
-	AdminAuditLogs                  AdminAuditLogsService
-	AdminOperationalLogs            AdminOperationalLogsService
-	AdminJellyfinCompatSettings     AdminJellyfinCompatSettingsService
-	OrderedAndroidPush              OrderedAndroidPushService
-	WatchTogetherSuggestionDelete   WatchTogetherSuggestionDeleteService
-	WatchTogetherClose              WatchTogetherCloseService
-	WatchTogetherRoomRead           WatchTogetherRoomReadService
-	WatchTogetherPolicy             WatchTogetherPolicyService
-	WatchTogetherJoin               WatchTogetherJoinService
-	WatchTogetherSelection          WatchTogetherSelectionService
-	WatchTogetherSourceFallback     WatchTogetherSourceFallbackService
-	WatchTogetherStage              WatchTogetherStageService
-	WatchTogetherStart              WatchTogetherStartService
-	WatchTogetherStop               WatchTogetherStopService
-	WatchTogetherSelectionMode      WatchTogetherSelectionModeService
-	WatchTogetherMemberState        WatchTogetherMemberStateService
-	WatchTogetherPicker             WatchTogetherPickerService
-	WatchTogetherCapability         WatchTogetherCapabilityService
-	WatchTogetherSuggestions        WatchTogetherSuggestionService
-	AdminSectionSettingsWrite       AdminSectionSettingsWriteService
-	AdminDashboardStats             AdminDashboardStatsService
-	AdminHardwareAcceleration       AdminHardwareAccelerationService
-	AdminDashboardLayout            AdminDashboardLayoutService
-	AdminDashboardLayoutResets      AdminDashboardLayoutResetService
-	AdminDashboardLayoutSaves       AdminDashboardLayoutSaveService
-	ScanControls                    ScanControlService
-	AuthProviderIconPublic          AuthProviderIconPublic
-	AdminPlaybackSessions           AdminPlaybackSessionService
-	AdminNodeSessions               AdminNodeSessionService
-	AdminPlaybackCommands           AdminPlaybackCommandService
-	AdminPlaybackTerminate          AdminPlaybackTerminateService
-	AdminAutoscanConnections        AdminAutoscanConnectionsService
-	AdminAutoscanInspection         AdminAutoscanInspectionService
-	AdminAutoscanSources            AdminAutoscanSourcesService
-	AutoscanDelivery                AutoscanDeliveryService
-	Onboarding                      OnboardingService
-	DownloadCreation                DownloadCreationService
-	AdminJellyfinCompatStatus       AdminJellyfinCompatStatusService
-	AdminSettingRead                AdminSettingReadService
-	AdminJellyfinCompatWeb          AdminJellyfinCompatWebService
-	AdminRateLimitsWrite            AdminRateLimitWriteService
-	AdminRateLimits                 AdminRateLimitReadService
-	DownloadSubscriptionMutations   DownloadSubscriptionMutationService
-	DownloadSubscriptionSync        DownloadSubscriptionSyncService
-	DiagnosticsChunks               DiagnosticsChunksService
-	DiagnosticsIngress              DiagnosticsIngressService
-	EventsSocket                    EventsSocketService
-	AdminLogsSocket                 AdminLogsSocketService
-	PlaybackControlSocket           PlaybackControlSocketService
-	EventsCapability                EventsCapabilityService
-	NetworkAccess                   NetworkAccessService
-	ServerIdentity                  ServerIdentityService
-	ServerConnections               ServerConnections
-	NotificationDestinationCreate   NotificationDestinationCreateService
-	AdminUnmatchedFiles             AdminUnmatchedFilesService
-	AdminCatalogImages              AdminCatalogImagesService
-	AdminCatalogMatch               AdminCatalogMatchService
-	AdminCatalogSplit               AdminCatalogSplitService
-	AdminMarkerContributions        AdminMarkerContributionsService
-	AdminMarkerProviders            AdminMarkerProvidersService
-	AdminMarkerHistory              AdminMarkerHistoryService
-	AdminEpisodeMarkers             AdminEpisodeMarkersService
-	DownloadSubscriptions           DownloadSubscriptionService
-	DownloadManifests               DownloadManifestService
-	DownloadDelivery                DownloadDeliveryService
-	Downloads                       DownloadRegistryService
-	DownloadProxyDelivery           func() bool
-	WebhookReceiver                 WebhookReceiverService
-	SubtitleAIReads                 SubtitleAIReadService
-	NotificationDiscordLinks        NotificationDiscordLinkService
-	NotificationEmailLinks          NotificationEmailLinkService
-	NotificationDestinationTests    NotificationDestinationTestService
-	AdminDevices                    AdminDeviceService
-	UserLibraries                   UserLibraryService
-	EbookAnnotations                EbookAnnotationService
-	AdminNotificationDiscord        AdminNotificationDiscordService
-	NotificationDestinations        NotificationDestinationService
-	EbookFiles                      EbookFileService
-	EbookConfig                     EbookConfigService
-	EbookProgress                   EbookProgressService
-	AdminItemMetadata               AdminItemMetadataService
-	AdminMetadataTranslation        AdminMetadataTranslationService
-	AdminPeople                     AdminPeopleService
-	AdminDiagnosticDownloads        AdminDiagnosticDownloadService
-	AdminJobArtifacts               AdminJobArtifactService
-	AdminJobArtifactSigner          *artworkurl.Signer
-	AdminDiagnosticReads            AdminDiagnosticReadsService
-	AdminDashboardInsights          AdminDashboardInsightsService
-	AdminNodesRead                  AdminNodesReadService
-	AdminNodeCommands               AdminNodeCommandsService
-	AdminNodeReload                 AdminNodeReloadService
-	AdminNodeConfiguration          AdminNodeConfigurationService
-	AdminServerStatus               AdminServerStatusService
-	AdminServerRestart              AdminServerRestartService
-	AdminBrandingAssets             AdminBrandingAssetService
-	AdminEmailTests                 AdminEmailTestService
-	AdminSourceWebhookLifecycle     AdminAutoscanWebhookLifecycleService
-	AdminAutoscanSettingsUpdates    AdminAutoscanSettingsUpdateService
-	AdminDiagnosticDeletes          AdminDiagnosticDeleteService
-	AdminAutoscanConnectionTests    AdminAutoscanConnectionTestService
-	AdminPluginRepositoryCreation   AdminPluginRepositoryCreationService
-	AdminPluginRepositoryUpdates    AdminPluginRepositoryUpdateService
-	AdminPluginRepositoryDeletes    AdminPluginRepositoryDeleteService
-	AdminPluginInventory            AdminPluginInventoryService
-	AdminPluginConfiguration        AdminPluginConfigurationService
-	AdminPluginLifecycle            AdminPluginLifecycleService
-	AdminPluginUploads              AdminPluginUploadService
-	AdminTelemetryParity            AdminTelemetryParityService
-	AdminPluginRepositories         AdminPluginRepositoriesService
-	AdminPluginCatalogSettings      AdminPluginCatalogSettingsService
-	AdminRecommendations            AdminRecommendationsService
-	AdminLiteraryWorks              AdminLiteraryWorkService
-	NotificationChannels            NotificationChannelService
-	NotificationRelay               NotificationRelayService
-	AdminNotificationPush           AdminNotificationPushService
-	NotificationInbox               NotificationInboxService
-	CompatConnectInfo               CompatConnectInfoService
-	AdminCatalogTransfer            AdminCatalogTransferService
-	AdminCatalogSearch              AdminCatalogSearchService
-	AdminSettingsChecks             AdminSettingsCheckService
-	AdminSettingsInspection         AdminSettingsInspectionService
-	AdminResourceSampler            AdminResourceSampler
-	AdminTaskJobs                   AdminTaskJobsService
-	AdminStorageTransition          AdminStorageTransitionService
-	AdminCatalogSources             AdminCatalogSourcesService
-	AdminFilesystem                 AdminFilesystemService
-	AdminTaskMetrics                AdminTaskMetricsService
-	AdminTasks                      AdminTaskService
-	AdminTaskHistory                AdminTaskHistoryService
-	Devices                         DeviceLoginService
-	Sessions                        SessionService
+	DirectDownloads                  *DirectDownloadHandlers
+	DirectDownloadLinks              DirectDownloadLinkService
+	ViewerSubtitleDelete             ViewerSubtitleDeleteService
+	OrderedApplePush                 OrderedApplePushService
+	NotificationEmailVerification    NotificationEmailVerificationService
+	AdminAutoscanSourceDeletes       AdminAutoscanSourceDeleteService
+	AdminAutoscanSourceWrites        AdminAutoscanSourceWriteService
+	WatchTogetherSocket              WatchTogetherSocketService
+	WatchTogetherCreate              WatchTogetherCreateService
+	AdminAutoscanEvents              AdminAutoscanEventsService
+	AdminAutoscanScans               AdminAutoscanScansService
+	WatchTogetherSuggestionPromote   WatchTogetherSuggestionPromoteService
+	WatchTogetherSuggestionCreate    WatchTogetherSuggestionCreateService
+	AdminAutoscanConnectionDeletes   AdminAutoscanConnectionDeleteService
+	AdminAutoscanConnectionUpdate    AdminAutoscanConnectionUpdateService
+	AdminAutoscanConnectionCreation  AdminAutoscanConnectionCreationService
+	AdminAutoscanRewrites            AdminAutoscanRewritesService
+	AdminAutoscanAvailableSources    AdminAutoscanAvailableSourcesService
+	AdminAuditLogs                   AdminAuditLogsService
+	ExternalSignIn                   ExternalSignInService
+	AdminOperationalLogs             AdminOperationalLogsService
+	AdminJellyfinCompatSettings      AdminJellyfinCompatSettingsService
+	OrderedAndroidPush               OrderedAndroidPushService
+	WatchTogetherSuggestionDelete    WatchTogetherSuggestionDeleteService
+	WatchTogetherClose               WatchTogetherCloseService
+	WatchTogetherRoomRead            WatchTogetherRoomReadService
+	WatchTogetherPolicy              WatchTogetherPolicyService
+	WatchTogetherJoin                WatchTogetherJoinService
+	WatchTogetherSelection           WatchTogetherSelectionService
+	WatchTogetherSourceFallback      WatchTogetherSourceFallbackService
+	WatchTogetherStage               WatchTogetherStageService
+	WatchTogetherStart               WatchTogetherStartService
+	WatchTogetherStop                WatchTogetherStopService
+	WatchTogetherSelectionMode       WatchTogetherSelectionModeService
+	WatchTogetherMemberState         WatchTogetherMemberStateService
+	WatchTogetherPicker              WatchTogetherPickerService
+	WatchTogetherCapability          WatchTogetherCapabilityService
+	WatchTogetherSuggestions         WatchTogetherSuggestionService
+	AdminDashboardStats              AdminDashboardStatsService
+	AdminHardwareAcceleration        AdminHardwareAccelerationService
+	AdminDashboardLayout             AdminDashboardLayoutService
+	AdminDashboardLayoutResets       AdminDashboardLayoutResetService
+	AdminDashboardLayoutSaves        AdminDashboardLayoutSaveService
+	ScanControls                     ScanControlService
+	AuthProviderIconPublic           AuthProviderIconPublic
+	AdminPlaybackSessions            AdminPlaybackSessionService
+	AdminDownloadPreparations        AdminDownloadPreparationService
+	AdminDownloadPreparationControls AdminDownloadPreparationControlService
+	AdminDownloadStorage             AdminDownloadStorageService
+	AdminDownloadDevices             AdminDownloadDeviceService
+	// DownloadPrepareAgain prepares a finished download's expired file again.
+	DownloadPrepareAgain          DownloadPrepareAgainService
+	AdminNodeSessions             AdminNodeSessionService
+	AdminPlaybackCommands         AdminPlaybackCommandService
+	AdminPlaybackTerminate        AdminPlaybackTerminateService
+	AdminAutoscanConnections      AdminAutoscanConnectionsService
+	AdminAutoscanInspection       AdminAutoscanInspectionService
+	AdminAutoscanSources          AdminAutoscanSourcesService
+	AutoscanDelivery              AutoscanDeliveryService
+	Onboarding                    OnboardingService
+	DownloadCreation              DownloadCreationService
+	AdminJellyfinCompatStatus     AdminJellyfinCompatStatusService
+	AdminSettingRead              AdminSettingReadService
+	AdminJellyfinCompatWeb        AdminJellyfinCompatWebService
+	AdminRateLimitsWrite          AdminRateLimitWriteService
+	AdminRateLimits               AdminRateLimitReadService
+	DownloadSubscriptionMutations DownloadSubscriptionMutationService
+	DownloadSubscriptionSync      DownloadSubscriptionSyncService
+	DiagnosticsChunks             DiagnosticsChunksService
+	DiagnosticsIngress            DiagnosticsIngressService
+	EventsSocket                  EventsSocketService
+	AdminLogsSocket               AdminLogsSocketService
+	PlaybackControlSocket         PlaybackControlSocketService
+	EventsCapability              EventsCapabilityService
+	NetworkAccess                 NetworkAccessService
+	ServerIdentity                ServerIdentityService
+	ServerConnections             ServerConnections
+	NotificationDestinationCreate NotificationDestinationCreateService
+	AdminUnmatchedFiles           AdminUnmatchedFilesService
+	AdminCatalogImages            AdminCatalogImagesService
+	AdminCatalogMatch             AdminCatalogMatchService
+	AdminCatalogSplit             AdminCatalogSplitService
+	AdminMarkerContributions      AdminMarkerContributionsService
+	AdminMarkerProviders          AdminMarkerProvidersService
+	AdminMarkerHistory            AdminMarkerHistoryService
+	AdminEpisodeMarkers           AdminEpisodeMarkersService
+	DownloadSubscriptions         DownloadSubscriptionService
+	DownloadManifests             DownloadManifestService
+	DownloadDelivery              DownloadDeliveryService
+	Downloads                     DownloadRegistryService
+	DownloadProxyDelivery         func() bool
+	WebhookReceiver               WebhookReceiverService
+	SubtitleAIReads               SubtitleAIReadService
+	NotificationDiscordLinks      NotificationDiscordLinkService
+	NotificationEmailLinks        NotificationEmailLinkService
+	NotificationDestinationTests  NotificationDestinationTestService
+	AdminDevices                  AdminDeviceService
+	UserLibraries                 UserLibraryService
+	EbookAnnotations              EbookAnnotationService
+	AdminNotificationDiscord      AdminNotificationDiscordService
+	NotificationDestinations      NotificationDestinationService
+	EbookFiles                    EbookFileService
+	EbookConfig                   EbookConfigService
+	EbookProgress                 EbookProgressService
+	AdminItemMetadata             AdminItemMetadataService
+	AdminMetadataTranslation      AdminMetadataTranslationService
+	AdminPeople                   AdminPeopleService
+	AdminDiagnosticDownloads      AdminDiagnosticDownloadService
+	AdminJobArtifacts             AdminJobArtifactService
+	AdminJobArtifactSigner        *artworkurl.Signer
+	AdminDiagnosticReads          AdminDiagnosticReadsService
+	AdminDashboardInsights        AdminDashboardInsightsService
+	AdminNodesRead                AdminNodesReadService
+	AdminNodeCommands             AdminNodeCommandsService
+	AdminNodeDrain                AdminNodeDrainService
+	AdminNodeReload               AdminNodeReloadService
+	AdminNodeConfiguration        AdminNodeConfigurationService
+	AdminServerStatus             AdminServerStatusService
+	AdminServerRestart            AdminServerRestartService
+	AdminBrandingAssets           AdminBrandingAssetService
+	AdminEmailTests               AdminEmailTestService
+	AdminSourceWebhookLifecycle   AdminAutoscanWebhookLifecycleService
+	AdminAutoscanSettingsUpdates  AdminAutoscanSettingsUpdateService
+	AdminDiagnosticDeletes        AdminDiagnosticDeleteService
+	AdminAutoscanConnectionTests  AdminAutoscanConnectionTestService
+	AdminPluginRepositoryCreation AdminPluginRepositoryCreationService
+	AdminPluginRepositoryUpdates  AdminPluginRepositoryUpdateService
+	AdminPluginRepositoryDeletes  AdminPluginRepositoryDeleteService
+	AdminPluginInventory          AdminPluginInventoryService
+	AdminPluginConfiguration      AdminPluginConfigurationService
+	AdminPluginLifecycle          AdminPluginLifecycleService
+	AdminPluginUploads            AdminPluginUploadService
+	AdminTelemetryParity          AdminTelemetryParityService
+	AdminPluginRepositories       AdminPluginRepositoriesService
+	AdminPluginCatalogSettings    AdminPluginCatalogSettingsService
+	AdminRecommendations          AdminRecommendationsService
+	AdminLiteraryWorks            AdminLiteraryWorkService
+	NotificationChannels          NotificationChannelService
+	NotificationDiscordManagement NotificationDiscordManagementService
+	NotificationRelay             NotificationRelayService
+	AdminNotificationPush         AdminNotificationPushService
+	NotificationInbox             NotificationInboxService
+	CompatConnectInfo             CompatConnectInfoService
+	AdminCatalogTransfer          AdminCatalogTransferService
+	AdminCatalogSearch            AdminCatalogSearchService
+	AdminSettingsChecks           AdminSettingsCheckService
+	ChatGPT                       ChatGPTService
+	AdminSettingsInspection       AdminSettingsInspectionService
+	AdminResourceSampler          AdminResourceSampler
+	AdminTaskJobs                 AdminTaskJobsService
+	AdminStorageTransition        AdminStorageTransitionService
+	AdminCatalogSources           AdminCatalogSourcesService
+	AdminFilesystem               AdminFilesystemService
+	AdminTaskMetrics              AdminTaskMetricsService
+	AdminTasks                    AdminTaskService
+	AdminTaskHistory              AdminTaskHistoryService
+	Devices                       DeviceLoginService
+	Sessions                      SessionService
 	// PluginLaunch mints the plugin access cookie token (*handlers.AuthHandler).
 	PluginLaunch          PluginLaunchService
 	OAuth                 OAuthService
@@ -252,8 +271,16 @@ type Dependencies struct {
 	Auth *apimw.AuthMiddleware
 	// ViewerAccess resolves the declared profile into a viewer scope.
 	ViewerAccess *apimw.ViewerAccessMiddleware
-	// ActingAdmin is the admin-through-primary-profile gate.
-	ActingAdmin func(http.Handler) http.Handler
+	// HouseholdProfile refuses a request without X-Profile-Id when the
+	// account has a PIN-protected or access-restricted profile
+	// (apimw.HouseholdProfileGate). Operations declaring
+	// HouseholdProfileGate run it after viewer access and fail closed when
+	// it is not wired.
+	HouseholdProfile func(http.Handler) http.Handler
+	// ActingAdmin decides admin-through-primary-profile. The acting_admin
+	// class gate enforces it, and operations outside that class that widen
+	// what an admin sees read it through apimw.ActingAdmin.
+	ActingAdmin apimw.ActingAdminDecider
 	// PermissionGates maps a permission name (policy.Permission* constants)
 	// to the gate that enforces it.
 	PermissionGates map[string]func(http.Handler) http.Handler
@@ -290,6 +317,11 @@ type Dependencies struct {
 	// Watch answers watch detail and marks items watched
 	// (*handlers.ItemsHandler).
 	Watch WatchService
+	// Trickplay reads published seek-bar previews (*trickplay.Reader).
+	Trickplay TrickplayService
+	// AdminTrickplay reports and regenerates seek-bar previews
+	// (*trickplay.Admin).
+	AdminTrickplay AdminTrickplayService
 	// Profiles applies profile updates (*handlers.ProfileHandler).
 	Profiles ProfileService
 	// Libraries answers which library identifiers exist
@@ -299,6 +331,7 @@ type Dependencies struct {
 	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
 	AdminUsers           AdminUserService
 	AdminAccounts        AdminAccountService
+	AdminLoginSessions   AdminLoginSessionService
 	AdminAccountActivity AdminAccountActivityService
 	AdminAccountSettings AdminAccountSettingsService
 	AdminAccessGroups    AdminAccessGroupService
@@ -358,9 +391,16 @@ type Dependencies struct {
 	HomeSections HomeSectionService
 	// Recipes answers the section recipe gallery (*handlers.RecipeHandler).
 	Recipes RecipeService
+	// SeasonalThemes is the holiday catalog listSeasonalThemes serves; nil
+	// serves recipes.SeasonalThemes. Contract fixtures pass their own so the
+	// committed bodies name no real list hosts.
+	SeasonalThemes []recipes.SeasonalTheme
 	// PersonalLists reads and edits a profile's favorites
 	// (*handlers.PersonalDataHandler).
 	PersonalLists PersonalListService
+	// NotInterested reads and edits a profile's Not interested marks
+	// (*handlers.PersonalDataHandler).
+	NotInterested NotInterestedService
 	// WatchlistTitles keeps a profile's watchlist entries for titles the
 	// library doesn't have (*handlers.PersonalDataHandler).
 	WatchlistTitles WatchlistTitleService
@@ -375,9 +415,9 @@ type Dependencies struct {
 	// ProfileSections reads and writes a profile's home-row overrides
 	// (*handlers.SectionHandler).
 	ProfileSections ProfileSectionService
-	// SectionFlags reads the profile-facing sections settings
-	// (*handlers.SectionSettingsHandler).
-	SectionFlags SectionFlagService
+	// AdminProfileSections reads and writes any account's profile page
+	// layouts for an administrator (*handlers.SectionHandler).
+	AdminProfileSections AdminProfileSectionService
 	// Requests serves media requests and the discovery surface
 	// (*requests.Service, the value *handlers.RequestsHandler wraps).
 	AdminSubtitleInspection            AdminSubtitleInspectionService
@@ -399,7 +439,6 @@ type Dependencies struct {
 	ArtworkBackend                     string
 	ArtworkSigner                      *artworkurl.Signer
 	ArtworkRepair                      ArtworkRepairService
-	ThemeOverrides                     ThemeOverrideService
 	AdminInviteCodes                   AdminInviteCodeService
 	Invitations                        InvitationService
 	PasswordResets                     PasswordResetService
@@ -410,6 +449,9 @@ type Dependencies struct {
 	// CollectionImports creates synced collections from external lists and
 	// searches MDBList (*handlers.UserCollectionImportHandler).
 	CollectionImports CollectionImportService
+	// ScheduleZone reports the time zone cron collection schedules run in on
+	// this node; nil reads the process's local zone. Fixtures pin it.
+	ScheduleZone func() CollectionScheduleTimeZone
 	// CatalogAccess resolves a viewer's access filter (*handlers.ItemsHandler);
 	// every catalog read needs it alongside its own seam.
 	CatalogAccess CatalogAccessService
@@ -421,6 +463,8 @@ type Dependencies struct {
 	// CatalogTrailers answers the trailer capability and refresh action
 	// (*handlers.ItemsHandler).
 	CatalogTrailers CatalogTrailerService
+	// Shuffles starts and advances shuffles (*shuffle.Service).
+	Shuffles ShuffleAPI
 	// MetadataAI answers the metadata AI capability and the on-view
 	// translation action (*handlers.MetadataAIHandler).
 	MetadataAI MetadataAIService
@@ -467,6 +511,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(joinPreconditionFields)
 	r.Use(rejectMalformedDeviceHeader)
 	r.Use(withRequest)
+	if deps.ActingAdmin != nil {
+		r.Use(apimw.ProvideActingAdmin(deps.ActingAdmin))
+	}
 	r.NotFound(notFound)
 
 	api := humachi.New(r, humaConfig())
@@ -645,8 +692,10 @@ func dropDelegationPattern(next http.Handler) http.Handler {
 //   - a panic anywhere, including Huma's own marshal failure after the status
 //     would already have been sent, becomes the internal_error problem with no
 //     detail leakage;
-//   - a success body is never written once the client has gone away (net/http
-//     cancels the request context on disconnect);
+//   - the operation's own status and body are written even once the request
+//     context is canceled, because net/http cancels it for a client that only
+//     half-closed as well as one that left; writing nothing would reach a
+//     reading client as net/http's empty 200;
 //   - a problem — including the 408 for a body-read timeout, which net/http
 //     also reports as a canceled context — is still delivered.
 //
@@ -663,7 +712,7 @@ func bufferStructuredResponse(ctx huma.Context, next func(huma.Context)) {
 
 func bufferResponse(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		bw := &bufferedWriter{w: w, ctx: r.Context(), retirement: make(http.Header)}
+		bw := &bufferedWriter{w: w, retirement: make(http.Header)}
 		r = r.WithContext(context.WithValue(r.Context(), retirementHeadersKey{}, bw.retirement))
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -686,7 +735,6 @@ func bufferResponse(next http.Handler) http.Handler {
 
 type bufferedWriter struct {
 	w          http.ResponseWriter
-	ctx        context.Context
 	status     int
 	body       bytes.Buffer
 	flushed    bool
@@ -726,6 +774,9 @@ func (b *bufferedWriter) discard() {
 	maps.Copy(h, b.retirement)
 }
 
+// flush writes the buffered response whether or not the request context has
+// ended (see bufferResponse). A client that has really gone never reads the
+// bounded body, and observe records the request by what was written.
 func (b *bufferedWriter) flush() {
 	if b.flushed {
 		return
@@ -733,10 +784,6 @@ func (b *bufferedWriter) flush() {
 	b.flushed = true
 	if b.status == 0 {
 		b.status = http.StatusOK
-	}
-	if b.ctx.Err() != nil && b.status < 400 {
-		// The client is gone; a success body has nobody to read it.
-		return
 	}
 	if b.status == http.StatusNotModified || b.status == http.StatusNoContent {
 		// No body travels with these statuses, so no representation header
@@ -784,6 +831,7 @@ type AccountService interface {
 	NeedsSetup(ctx context.Context) (bool, error)
 	SetupWizardCompleted(ctx context.Context) (bool, error)
 	CurrentUser(ctx context.Context, claims *auth.Claims) (handlers.UserView, error)
+	OAuthUserView(ctx context.Context, user *models.User) handlers.UserView
 }
 
 // ProgressService is the slice of *handlers.ProgressHandler the progress
@@ -813,12 +861,6 @@ type ProfileSectionService interface {
 	SaveProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery, writes []handlers.SectionOverrideWrite) error
 	ResetProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) error
 	ResolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error)
-}
-
-// SectionFlagService is the slice of *handlers.SectionSettingsHandler
-// getProfileSectionFlags uses.
-type SectionFlagService interface {
-	AllowProfileCustomSections(ctx context.Context) bool
 }
 
 // LibraryService is the slice of *catalog.FolderRepository updateProfile
@@ -912,7 +954,8 @@ type LibraryAdminService interface {
 	ListSkippedRoots(ctx context.Context, search string, limit, offset int) ([]handlers.SkippedRootView, int, error)
 	ListStaleIDs(ctx context.Context, search string, limit, offset int) ([]handlers.StaleMediaIDView, int, error)
 	RematchStaleID(ctx context.Context, contentID string) error
-	ListUnmatchedItems(ctx context.Context, search string, limit, offset int) ([]handlers.UnmatchedItemView, int, error)
+	ListUnmatchedItems(ctx context.Context, search string, ignored bool, limit, offset int) ([]handlers.UnmatchedItemView, int, error)
+	SetUnmatchedItemIgnored(ctx context.Context, contentID string, ignored bool) error
 	GetMetadataMatchQueue(ctx context.Context, id, limit, offset int) (handlers.MetadataMatchQueueDetailView, error)
 	RetryMetadataMatchQueue(ctx context.Context, id int) (handlers.MetadataMatchQueueActionView, error)
 	CancelMetadataMatchQueue(ctx context.Context, id int) (handlers.MetadataMatchQueueActionView, error)
@@ -953,7 +996,7 @@ type HomeDismissalService interface {
 // HomeSectionService is the slice of *handlers.SectionHandler the
 // viewer-facing home reads use.
 type HomeSectionService interface {
-	HomeLayout(ctx context.Context) (handlers.SectionLayoutView, error)
+	HomeLayoutWithItems(ctx context.Context, viewer handlers.SectionViewer, includeItems int) (handlers.HomeLayoutView, error)
 	HomeSections(ctx context.Context, viewer handlers.SectionViewer) (handlers.SectionsView, error)
 	HomeSectionItems(ctx context.Context, sectionID string, viewer handlers.SectionViewer) (handlers.SectionView, error)
 }
@@ -989,6 +1032,12 @@ type PersonalListService interface {
 	GetWatchlistEntry(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) (entry userstore.WatchlistEntry, found bool, err error)
 	AddToWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
 	RemoveFromWatchlist(ctx context.Context, viewer handlers.PersonalListViewer, itemID string) error
+	// VisibleItemIDs reports which of the given catalog items the viewer
+	// may see, in one query.
+	VisibleItemIDs(ctx context.Context, viewer handlers.PersonalListViewer, ids []string) (map[string]bool, error)
+	// ResolveCards answers the cards of the given catalog items the viewer
+	// may see, in the order given.
+	ResolveCards(ctx context.Context, viewer handlers.PersonalListViewer, ids []string) ([]handlers.CollectionItemView, error)
 }
 
 // RatingService is the slice of *handlers.RatingsHandler the ratings
@@ -1025,7 +1074,7 @@ type RecommendationService interface {
 	TasteSeedItems(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, limit, offset int) (items []handlers.SectionItemView, candidates int, err error)
 	SubmitTasteSeed(ctx context.Context, userID int, profileID string, itemIDs []string, filter mediacatalog.AccessFilter) (int, error)
 	WatchTonight(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, limit int) (handlers.WatchTonightView, error)
-	WatchTonightCards(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) handlers.WatchTonightCardsView
+	WatchTonightCards(ctx context.Context, userID int, profileID string, filter mediacatalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) (handlers.WatchTonightCardsView, error)
 }
 
 // MediaRequestService is the slice of *requests.Service (the v1
@@ -1065,8 +1114,9 @@ type CatalogAccessService interface {
 type CatalogBrowseService interface {
 	Browse(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, groupedByWork bool) (handlers.CatalogBrowseView, error)
 	Filters(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, includeTechnical bool) (handlers.CatalogFiltersView, error)
-	SearchFacet(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, facet, prefix string, limit int) (handlers.CatalogFacetSearchView, error)
+	SearchFacet(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, facet, q string, limit int) (handlers.CatalogFacetSearchView, error)
 	AudiobookGroups(ctx context.Context, v handlers.ItemViewer, query mediacatalog.AudiobookGroupsQuery) (handlers.AudiobookGroupsView, error)
+	LetterIndex(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest) (mediacatalog.LetterIndex, error)
 }
 
 // CatalogItemService is the slice of *handlers.CatalogResourceHandler the
@@ -1091,7 +1141,7 @@ type CatalogTrailerService interface {
 // MetadataAIService is the slice of *handlers.MetadataAIHandler the
 // capability and on-view translation use.
 type MetadataAIService interface {
-	Status() handlers.MetadataAIStatusView
+	Status(context.Context) handlers.MetadataAIStatusView
 	TranslateOnView(ctx context.Context, filter mediacatalog.AccessFilter, contentID, targetLanguage string, requestedBy *int) (*translation.Job, error)
 }
 
@@ -1099,8 +1149,8 @@ type MetadataAIService interface {
 // operations use.
 type PeopleService interface {
 	SearchPeopleScoped(ctx context.Context, query string, limit int, mediaScope string, filter mediacatalog.AccessFilter) ([]handlers.PersonView, error)
-	Person(ctx context.Context, id int64, queueRefresh bool) (handlers.PersonView, error)
-	RefreshPerson(ctx context.Context, userID int, id int64) error
+	Person(ctx context.Context, id int64, queueRefresh bool, filter mediacatalog.AccessFilter) (handlers.PersonView, error)
+	RefreshPerson(ctx context.Context, userID int, id int64, filter mediacatalog.AccessFilter) error
 }
 
 // LiteraryWorkService is the slice of *handlers.LiteraryWorkHandler the work
@@ -1128,7 +1178,11 @@ func serviceProblem(err error) *Problem {
 		if apiErr.Status >= 500 && apiErr.Status != http.StatusServiceUnavailable {
 			return NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
-		p := NewProblem(TypeForStatus(apiErr.Status), apiErr.Message)
+		kind := TypeForStatus(apiErr.Status)
+		if t, ok := externalSignInProblemTypes[apiErr.Code]; ok && t.Status == apiErr.Status {
+			kind = t
+		}
+		p := NewProblem(kind, apiErr.Message)
 		if apiErr.RetryAfter > 0 {
 			p = p.WithRetryAfter(apiErr.RetryAfter)
 		}
@@ -1137,12 +1191,42 @@ func serviceProblem(err error) *Problem {
 	return NewProblem(TypeInternalError, "An unexpected error occurred.")
 }
 
-// OAuthService is the slice of *auth.OAuthHandler completeOAuthLogin uses.
+// externalSignInProblemTypes keeps the external sign-in codes a shared
+// handler reports (handlers.APIError.Code) as their own problem types.
+var externalSignInProblemTypes = map[string]ProblemType{
+	TypeNotPermitted.ID:            TypeNotPermitted,
+	TypeLocalLoginDisabled.ID:      TypeLocalLoginDisabled,
+	TypeProviderPasswordExpired.ID: TypeProviderPasswordExpired,
+	TypeEmailInUse.ID:              TypeEmailInUse,
+	TypeIdentityLinkedElsewhere.ID: TypeIdentityLinkedElsewhere,
+	TypeProviderAlreadyEnabled.ID:  TypeProviderAlreadyEnabled,
+	TypeBreakGlassRequired.ID:      TypeBreakGlassRequired,
+	TypeLastSignInMethod.ID:        TypeLastSignInMethod,
+	TypeProviderUnavailable.ID:     TypeProviderUnavailable,
+	TypeAlreadyLinked.ID:           TypeAlreadyLinked,
+	TypeNetworkIdentityRequired.ID: TypeNetworkIdentityRequired,
+}
+
+// OAuthService is the slice of *auth.OAuthHandler the OAuth operations use:
+// the flow starts and callback (raw redirects), code redemption, link
+// tickets and provider logout.
 type OAuthService interface {
-	Complete(ctx context.Context, code string) (auth.OAuthCompletion, error)
+	Complete(ctx context.Context, code, verifier, browser string) (auth.OAuthCompletion, error)
 	CallbackURL(prefix string, installID int) string
-	Init(ctx context.Context, installID int, next, redirectURI string) (string, error)
-	Callback(ctx context.Context, in auth.OAuthCallbackInput) string
+	PublicURL(path string, query url.Values) string
+	NativeSignInAvailable() bool
+	ServeStart(w http.ResponseWriter, r *http.Request, req auth.OAuthStartRequest, bounceURL string, bounceStatus int)
+	ServeCallback(w http.ResponseWriter, r *http.Request, prefix string, installID int)
+	LinkingAvailable() bool
+	IssueLinkTicket(ctx context.Context, userID, installationID int, password string) (auth.OAuthLinkTicket, error)
+	OnPublicOrigin(r *http.Request) bool
+	StartLink(ctx context.Context, userID int, prefix, ticket, next string) (auth.OAuthStartResult, error)
+	CompleteLink(ctx context.Context, userID int, code, verifier string) error
+	ProviderLogoutAvailable() bool
+	ProviderLogoutURL(ctx context.Context, userID int) (string, error)
+	// PostLogoutRedirectURL is the post-logout redirect URI on the public
+	// URL; empty when none is configured.
+	PostLogoutRedirectURL() string
 }
 
 // SessionService is the slice of *handlers.AuthHandler the login-session
@@ -1151,13 +1235,21 @@ type SessionService interface {
 	Login(ctx context.Context, in handlers.LoginInput) (handlers.TokenPairView, error)
 	Logout(ctx context.Context, claims *auth.Claims) error
 	EndImpersonation(ctx context.Context, claims *auth.Claims) error
-	ListProviders() []auth.LoginProviderInfo
+	// DiscoverProviders lists the providers a client may offer and whether
+	// any of them takes a password.
+	DiscoverProviders(ctx context.Context) (auth.ProviderDiscovery, error)
 	Refresh(ctx context.Context, refreshToken string) (handlers.RefreshedTokensView, error)
 	ListSessionsPage(ctx context.Context, userID int, after *auth.SessionKey, limit int) ([]*models.AuthSession, bool, error)
+	// CurrentLoginSession returns nil, not an error, when the session is no
+	// longer live.
+	CurrentLoginSession(ctx context.Context, userID int, sessionID string) (*models.AuthSession, error)
 	RevokeSession(ctx context.Context, sessionID string, userID int) error
 	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
 	SignupEnabled(ctx context.Context) (bool, error)
 	Signup(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
+	// NetworkSignIn signs in the overlay peer of the request through a
+	// network identity provider.
+	NetworkSignIn(ctx context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error)
 }
 
 // DeviceLoginService is the slice of *handlers.AuthHandler the device-pairing
@@ -1170,6 +1262,7 @@ type DeviceLoginService interface {
 	ApproveDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
 	ApproveDeviceHandoff(ctx context.Context, input auth.DeviceLoginLookupInput, userID int, profileID string) (handlers.DeviceLoginDecision, error)
 	DenyDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
+	CancelDeviceLogin(ctx context.Context, deviceCode string) (string, error)
 }
 
 // Record only after the actual adapter has mounted the handler. The observer

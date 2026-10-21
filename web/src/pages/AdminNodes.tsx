@@ -11,8 +11,10 @@ import {
   useDeleteNode,
   useCheckNodeHealth,
   useReprobeNode,
+  useSetNodeDrain,
   useToggleNode,
 } from "@/hooks/queries/admin/nodes";
+import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +28,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, RefreshCw, ScanSearch, Info, AlertTriangle } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  RefreshCw,
+  ScanSearch,
+  Info,
+  AlertTriangle,
+  CirclePause,
+  CirclePlay,
+} from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { formatDateTime } from "@/lib/datetime";
 import { formatRelativeTime } from "@/lib/date";
@@ -46,6 +58,7 @@ import {
   describeCapabilityDrift,
   describeEffectiveAcceleration,
   describeNodeAccelerationOverride,
+  describeNodeDrain,
   describeNodeEgress,
   describeNodeGPU,
   describeNodeGroups,
@@ -60,6 +73,7 @@ import {
   nodeUsesCUDADevices,
   parseHWDeviceOverride,
 } from "./adminNodesPresentation";
+import { NodeRoutingSettings } from "@/pages/admin-settings/NodeRoutingSettings";
 
 type NodeType = "proxy" | "transcode";
 
@@ -69,19 +83,25 @@ type NodeType = "proxy" | "transcode";
  * Enabled and healthy are two separate facts, but an operator reading the rack
  * asks one question — can this node take work — so they resolve to one state.
  * Disabled wins over unhealthy: a node somebody switched off is not a node
- * that is failing, however its last health check went.
+ * that is failing, however its last health check went. A healthy node that is
+ * draining is out of the rotation for new work while it finishes what it has.
  */
-type NodeState = "healthy" | "unhealthy" | "disabled";
+type NodeState = "healthy" | "draining" | "drained" | "unhealthy" | "disabled";
 
 function nodeState(node: StreamNode): NodeState {
   if (!node.enabled) {
     return "disabled";
   }
-  return node.healthy ? "healthy" : "unhealthy";
+  if (!node.healthy) {
+    return "unhealthy";
+  }
+  return describeNodeDrain(node)?.phase ?? "healthy";
 }
 
 const NODE_STATE_LABEL: Record<NodeState, string> = {
   healthy: "Healthy",
+  draining: "Draining",
+  drained: "Drained",
   unhealthy: "Unhealthy",
   disabled: "Disabled",
 };
@@ -92,12 +112,16 @@ const NODE_STATE_LABEL: Record<NodeState, string> = {
  */
 const NODE_STATE_RAIL: Record<NodeState, string> = {
   healthy: "bg-success/70",
+  draining: "bg-warning",
+  drained: "bg-info",
   unhealthy: "bg-destructive",
   disabled: "bg-muted-foreground/30",
 };
 
 const NODE_STATE_DOT: Record<NodeState, string> = {
   healthy: "bg-success",
+  draining: "bg-warning",
+  drained: "bg-info",
   unhealthy: "bg-destructive",
   disabled: "bg-muted-foreground",
 };
@@ -521,6 +545,9 @@ interface NodeUnitProps {
   isChecking: boolean;
   onReprobe: (node: StreamNode) => void;
   isReprobing: boolean;
+  /** Drain (true) or resume (false) a transcode node. */
+  onSetDrain: (node: StreamNode, requested: boolean) => void;
+  isSettingDrain: boolean;
 }
 
 /**
@@ -543,8 +570,15 @@ function NodeUnit({
   isChecking,
   onReprobe,
   isReprobing,
+  onSetDrain,
+  isSettingDrain,
 }: NodeUnitProps) {
   const state = nodeState(node);
+  const drain = describeNodeDrain(node);
+  const drainRequested = node.drain_requested === true;
+  // Only transcode nodes drain. A disabled node already takes no work, so it
+  // offers only Resume, for a request it still carries.
+  const canDrain = node.type === "transcode" && (node.enabled || drainRequested);
   // See nodeReportsAcceleration: a proxy reports no hardware, so it has neither
   // an acceleration block to draw nor hardware to re-probe.
   const showsAcceleration = nodeReportsAcceleration(node);
@@ -618,6 +652,27 @@ function NodeUnit({
               aria-hidden="true"
             />
           </Button>
+          {canDrain && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={isSettingDrain}
+              aria-label={drainRequested ? `Resume ${node.name}` : `Drain ${node.name}`}
+              title={
+                drainRequested
+                  ? "Resume: let this node take new work again."
+                  : "Drain: stop sending new work to this node while its sessions finish, so it can be stopped or upgraded without cutting a stream."
+              }
+              onClick={() => onSetDrain(node, !drainRequested)}
+            >
+              {drainRequested ? (
+                <CirclePlay className="h-3 w-3" aria-hidden="true" />
+              ) : (
+                <CirclePause className="h-3 w-3" aria-hidden="true" />
+              )}
+            </Button>
+          )}
           {showsAcceleration && (
             <Button
               variant="ghost"
@@ -662,6 +717,17 @@ function NodeUnit({
         </p>
       )}
 
+      {drain && (
+        <p className="mt-3 text-xs" title={drain.detail}>
+          <span
+            className={cn("font-medium", drain.phase === "drained" ? "text-info" : "text-warning")}
+          >
+            {drain.label}
+          </span>
+          <span className="text-muted-foreground"> — {drain.detail}</span>
+        </p>
+      )}
+
       {/* Two blocks on a proxy, three on a transcode node. The track list is
           picked to match, so the survivors fill the row rather than leaving a
           column-shaped hole where acceleration used to be. */}
@@ -698,6 +764,8 @@ interface NodeSectionProps {
   checkingHealthId: StreamNode["id"] | null;
   onReprobe: (node: StreamNode) => void;
   reprobingId: StreamNode["id"] | null;
+  onSetDrain: (node: StreamNode, requested: boolean) => void;
+  settingDrainId: StreamNode["id"] | null;
 }
 
 function NodeSection({
@@ -715,6 +783,8 @@ function NodeSection({
   checkingHealthId,
   onReprobe,
   reprobingId,
+  onSetDrain,
+  settingDrainId,
 }: NodeSectionProps) {
   const label = type === "proxy" ? "Proxy" : "Transcode";
 
@@ -775,6 +845,8 @@ function NodeSection({
               isChecking={checkingHealthId === node.id}
               onReprobe={onReprobe}
               isReprobing={reprobingId === node.id}
+              onSetDrain={onSetDrain}
+              isSettingDrain={settingDrainId === node.id}
             />
           ))}
         </div>
@@ -1176,6 +1248,7 @@ export default function AdminNodes() {
   const deleteMutation = useDeleteNode();
   const checkHealthMutation = useCheckNodeHealth();
   const reprobeMutation = useReprobeNode();
+  const drainMutation = useSetNodeDrain();
   const toggleMutation = useToggleNode();
 
   const groupOptions = describeNodeGroups(nodes);
@@ -1201,6 +1274,9 @@ export default function AdminNodes() {
 
   const reprobingId =
     reprobeMutation.isPending && reprobeMutation.variables ? reprobeMutation.variables.id : null;
+
+  const settingDrainId =
+    drainMutation.isPending && drainMutation.variables ? drainMutation.variables.id : null;
 
   const resolvedNodeType: NodeType = editingNode
     ? (editingNode.type as NodeType)
@@ -1232,19 +1308,14 @@ export default function AdminNodes() {
     }
   }
 
-  if (isLoading) return <div className="page-shell py-8">Loading nodes...</div>;
+  if (isLoading) return <div className="pb-8">Loading nodes...</div>;
 
   return (
-    <div className="page-shell space-y-8 py-4 sm:py-6">
-      <div className="page-header gap-5">
-        <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Stream Nodes</h1>
-          <p className="page-subtitle text-sm sm:text-base">
-            Manage proxy and transcode workers that distribute playback load across your
-            infrastructure.
-          </p>
-        </div>
-      </div>
+    <div className="space-y-8 pb-4 sm:pb-6">
+      <PageHeader
+        title="Stream Nodes"
+        subtitle="Manage proxy and transcode workers that distribute playback load across your infrastructure."
+      />
 
       <NodeGroupFilter
         options={groupOptions}
@@ -1282,6 +1353,8 @@ export default function AdminNodes() {
         checkingHealthId={checkingHealthId}
         onReprobe={(node) => reprobeMutation.mutate(node)}
         reprobingId={reprobingId}
+        onSetDrain={(node, requested) => drainMutation.mutate(node, requested)}
+        settingDrainId={settingDrainId}
         infoBanner={
           <div className="surface-panel-subtle text-info flex items-start gap-2 rounded-xl p-3 text-sm">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1304,6 +1377,8 @@ export default function AdminNodes() {
         checkingHealthId={checkingHealthId}
         onReprobe={(node) => reprobeMutation.mutate(node)}
         reprobingId={reprobingId}
+        onSetDrain={(node, requested) => drainMutation.mutate(node, requested)}
+        settingDrainId={settingDrainId}
         infoBanner={
           <div className="surface-panel-subtle text-warning flex items-start gap-2 rounded-xl p-3 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1315,6 +1390,13 @@ export default function AdminNodes() {
           </div>
         }
       />
+
+      <section aria-labelledby="node-routing-heading" className="max-w-3xl space-y-3">
+        <h2 id="node-routing-heading" className="text-lg font-semibold">
+          Routing
+        </h2>
+        <NodeRoutingSettings />
+      </section>
 
       <Dialog open={dialogOpen} onOpenChange={handleDialogChange}>
         <DialogContent>

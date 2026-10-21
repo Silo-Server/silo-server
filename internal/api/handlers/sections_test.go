@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"sort"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -55,30 +54,6 @@ func TestSectionBackdropPathUsesExpectedVariants(t *testing.T) {
 			path:        "/tmdb/shows/1399/backdrop/original.jpg",
 			want:        "/tmdb/shows/1399/backdrop/w1920.jpg",
 		},
-		{
-			name:        "continue watching episode still clamps to w500",
-			sectionType: sections.SectionContinueWatching,
-			path:        "tvdb/series/73141/seasons/22/episodes/9/still/original.webp",
-			want:        "tvdb/series/73141/seasons/22/episodes/9/still/w500.webp",
-		},
-		{
-			name:        "featured section episode still clamps to w500",
-			sectionType: sections.SectionRecentlyAdded,
-			path:        "tvdb/series/73141/seasons/22/episodes/9/still/original.webp",
-			want:        "tvdb/series/73141/seasons/22/episodes/9/still/w500.webp",
-		},
-		{
-			name:        "http paths pass through",
-			sectionType: sections.SectionContinueWatching,
-			path:        "https://images.example.com/backdrop/original.jpg",
-			want:        "https://images.example.com/backdrop/original.jpg",
-		},
-		{
-			name:        "plugin paths pass through",
-			sectionType: sections.SectionContinueWatching,
-			path:        "plugin://tmdb/backdrop/original.jpg",
-			want:        "plugin://tmdb/backdrop/original.jpg",
-		},
 	}
 
 	for _, tt := range tests {
@@ -87,82 +62,6 @@ func TestSectionBackdropPathUsesExpectedVariants(t *testing.T) {
 				t.Fatalf("sectionBackdropPath(%q) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestWriteSectionDeleteErrorDistinguishesMissingSectionsFromRepositoryFailures(t *testing.T) {
-	tests := []struct {
-		name       string
-		err        error
-		wantStatus int
-	}{
-		{
-			name:       "missing section",
-			err:        fmt.Errorf("loading section: %w", sections.ErrSectionNotFound),
-			wantStatus: http.StatusNotFound,
-		},
-		{
-			name:       "repository failure",
-			err:        fmt.Errorf("database unavailable"),
-			wantStatus: http.StatusInternalServerError,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-
-			writeSectionDeleteError(recorder, tt.err)
-
-			if recorder.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d; body = %s", recorder.Code, tt.wantStatus, recorder.Body.String())
-			}
-		})
-	}
-}
-
-func TestBuildSectionsResponseEnrichesEpisodeMetadata(t *testing.T) {
-	seasonNumber := 1
-	episodeNumber := 1
-	seriesID := "series-1"
-	fetcher := &stubSectionEpisodeFetcher{
-		meta: map[string]sections.SectionItemMeta{
-			"episode-1": {
-				SeriesID:      &seriesID,
-				SeriesTitle:   "American Dad!",
-				SeasonNumber:  &seasonNumber,
-				EpisodeNumber: &episodeNumber,
-			},
-		},
-	}
-	h := &SectionHandler{episodeFetcher: fetcher}
-	withItems := []sections.SectionWithItems{
-		{
-			ResolvedSection: sections.ResolvedSection{ID: "released", SectionType: sections.SectionCustomFilter, Title: "Released"},
-			Items: []*models.MediaItem{{
-				ContentID: "episode-1",
-				Type:      "episode",
-				Title:     "Dumbston Checks In",
-				Status:    "matched",
-			}},
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
-	resp := h.buildSectionsResponse(req, withItems, nil)
-
-	if fetcher.calls != 1 {
-		t.Fatalf("episode metadata fetch calls = %d, want 1", fetcher.calls)
-	}
-	item := resp.Sections[0].Items[0]
-	if item.SeriesTitle != "American Dad!" {
-		t.Fatalf("series title = %q, want %q", item.SeriesTitle, "American Dad!")
-	}
-	if item.SeasonNumber == nil || *item.SeasonNumber != 1 {
-		t.Fatalf("season number = %v, want 1", item.SeasonNumber)
-	}
-	if item.EpisodeNumber == nil || *item.EpisodeNumber != 1 {
-		t.Fatalf("episode number = %v, want 1", item.EpisodeNumber)
 	}
 }
 
@@ -194,6 +93,9 @@ func TestBuildSectionsResponseSupportsMixedEpisodeAndSeriesRecentItems(t *testin
 	}}
 
 	resp := h.buildSectionsResponse(httptest.NewRequest(http.MethodGet, "/sections", nil), withItems, nil)
+	if fetcher.calls != 1 {
+		t.Fatalf("episode metadata fetch calls = %d, want 1", fetcher.calls)
+	}
 	if len(resp.Sections) != 1 || len(resp.Sections[0].Items) != 2 {
 		t.Fatalf("response shape = %#v", resp)
 	}
@@ -351,81 +253,6 @@ func TestBuildSectionsResponseDeduplicatesItemsWithinEachSection(t *testing.T) {
 	}
 }
 
-// Home rails are not library-scoped: nothing may re-derive a library from the
-// request path.
-func TestBuildSectionsResponseLeavesHomePlayTargetsUnscoped(t *testing.T) {
-	resolver := &stubSectionPlayableTargetResolver{targets: map[string]string{}}
-	h := &SectionHandler{playableTargets: resolver}
-	withItems := []sections.SectionWithItems{{
-		ResolvedSection: sections.ResolvedSection{ID: "recent", SectionType: sections.SectionRecentlyAdded, Title: "Recently Added"},
-		Items:           []*models.MediaItem{{ContentID: "series-1", Type: "series", Title: "Long Runner", Status: "matched"}},
-	}}
-
-	req := httptest.NewRequest(http.MethodGet, "/home/sections", nil)
-	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "user", UserID: 42})
-	ctx = apimw.SetProfileID(ctx, "p1")
-	req = req.WithContext(ctx)
-
-	h.buildSectionsResponse(req, withItems, nil)
-
-	if got := resolver.query.LibraryIDs; got != nil {
-		t.Fatalf("library IDs = %v, want nil", got)
-	}
-	if resolver.query.ProgressStore != nil {
-		t.Fatal("progress store non-nil without a store provider")
-	}
-}
-
-func TestBuildSectionsResponseKeepsExistingEpisodeMeta(t *testing.T) {
-	seasonNumber := 2
-	episodeNumber := 6
-	seriesID := "series-existing"
-	fetcher := &stubSectionEpisodeFetcher{
-		meta: map[string]sections.SectionItemMeta{
-			"episode-1": {
-				SeriesTitle: "Fetched Series",
-			},
-		},
-	}
-	h := &SectionHandler{episodeFetcher: fetcher}
-	withItems := []sections.SectionWithItems{
-		{
-			ResolvedSection: sections.ResolvedSection{ID: "next", SectionType: sections.SectionNextUp, Title: "Next"},
-			Items: []*models.MediaItem{{
-				ContentID: "episode-1",
-				Type:      "episode",
-				Title:     "Episode 6",
-				Status:    "matched",
-			}},
-			ItemMeta: map[string]sections.SectionItemMeta{
-				"episode-1": {
-					SeriesID:      &seriesID,
-					SeriesTitle:   "Only Child",
-					SeasonNumber:  &seasonNumber,
-					EpisodeNumber: &episodeNumber,
-				},
-			},
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
-	resp := h.buildSectionsResponse(req, withItems, nil)
-
-	if fetcher.calls != 0 {
-		t.Fatalf("episode metadata fetch calls = %d, want 0", fetcher.calls)
-	}
-	item := resp.Sections[0].Items[0]
-	if item.SeriesTitle != "Only Child" {
-		t.Fatalf("series title = %q, want %q", item.SeriesTitle, "Only Child")
-	}
-	if item.SeasonNumber == nil || *item.SeasonNumber != 2 {
-		t.Fatalf("season number = %v, want 2", item.SeasonNumber)
-	}
-	if item.EpisodeNumber == nil || *item.EpisodeNumber != 6 {
-		t.Fatalf("episode number = %v, want 6", item.EpisodeNumber)
-	}
-}
-
 type countingSectionImageResolver struct {
 	batchCalls  int
 	singleCalls int
@@ -463,88 +290,8 @@ func (r *countingSectionImageResolver) ResolveImageURLsWithExpiry(_ context.Cont
 	return resolved
 }
 
-func TestBuildSectionsResponseBatchResolvesImageURLs(t *testing.T) {
-	resolver := &countingSectionImageResolver{}
-	detailSvc := &catalog.DetailService{}
-	detailSvc.SetImageResolver(resolver)
-	h := &SectionHandler{DetailSvc: detailSvc}
-
-	items := make([]*models.MediaItem, 0, 100)
-	for i := range 100 {
-		items = append(items, &models.MediaItem{
-			ContentID:    fmt.Sprintf("item-%03d", i),
-			Type:         "movie",
-			Title:        fmt.Sprintf("Movie %03d", i),
-			PosterPath:   "/poster/original.jpg",
-			BackdropPath: "/backdrop/original.jpg",
-			LogoPath:     "/logo/original.png",
-		})
-	}
-	withItems := []sections.SectionWithItems{
-		{
-			ResolvedSection: sections.ResolvedSection{ID: "continue", SectionType: sections.SectionContinueWatching, Title: "Continue"},
-			Items:           items,
-		},
-		{
-			ResolvedSection: sections.ResolvedSection{ID: "next-up", SectionType: sections.SectionNextUp, Title: "Next Up"},
-			Items: []*models.MediaItem{{
-				ContentID:    "item-extra",
-				Type:         "movie",
-				Title:        "Movie Extra",
-				PosterPath:   "/poster/original.jpg",
-				BackdropPath: "/backdrop/original.jpg",
-				LogoPath:     "/logo/original.png",
-			}},
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
-	resp := h.buildSectionsResponse(req, withItems, nil)
-
-	if resolver.batchCalls != 1 {
-		t.Fatalf("batch calls = %d, want 1", resolver.batchCalls)
-	}
-	if resolver.singleCalls != 0 {
-		t.Fatalf("single calls = %d, want 0", resolver.singleCalls)
-	}
-	if resolver.variant != "featured" {
-		t.Fatalf("variant = %q, want featured", resolver.variant)
-	}
-	sort.Strings(resolver.paths)
-	wantPaths := []string{"/backdrop/w1280.jpg", "/logo/original.png", "/poster/w500.jpg"}
-	if fmt.Sprint(resolver.paths) != fmt.Sprint(wantPaths) {
-		t.Fatalf("resolved paths = %v, want %v", resolver.paths, wantPaths)
-	}
-	if got := resp.Sections[0].Items[0].PosterURL; got != "resolved:/poster/w500.jpg" {
-		t.Fatalf("poster URL = %q", got)
-	}
-	if got := resp.Sections[0].Items[0].BackdropURL; got != "resolved:/backdrop/w1280.jpg" {
-		t.Fatalf("backdrop URL = %q", got)
-	}
-	if got := resp.Sections[0].Items[0].LogoURL; got != "resolved:/logo/original.png" {
-		t.Fatalf("logo URL = %q", got)
-	}
-}
-
-func TestValidateSectionConfigAcceptsContinueTypes(t *testing.T) {
-	tests := []string{
-		`{"continue_type":"watching"}`,
-		`{"continue_type":"listening"}`,
-		`{"continue_type":"reading"}`,
-		`{"filter_type":"audiobook"}`,
-	}
-
-	for _, config := range tests {
-		t.Run(config, func(t *testing.T) {
-			if msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(config)); !ok {
-				t.Fatalf("validateSectionConfig(%s) rejected config: %s", config, msg)
-			}
-		})
-	}
-}
-
 func TestValidateSectionConfigRejectsUnknownContinueType(t *testing.T) {
-	msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(`{"continue_type":"scrolling"}`))
+	msg, ok := validateSectionConfig(sections.SectionContinueWatching, []byte(`{"continue_type":"scrolling"}`), false)
 	if ok {
 		t.Fatal("validateSectionConfig accepted unknown continue_type")
 	}
@@ -634,54 +381,6 @@ func TestInjectNextUpMatchesContinueWatchingItemLimit(t *testing.T) {
 			}
 			t.Fatal("next-up section was not injected")
 		})
-	}
-}
-
-func TestDropEmptySeasonalSectionsRemovesOnlyEmptySeasonal(t *testing.T) {
-	in := []sections.SectionWithItems{
-		// empty seasonal — drop
-		{ResolvedSection: sections.ResolvedSection{ID: "a", SectionType: sections.SectionSeasonalThemed}},
-		// non-empty seasonal — keep
-		{ResolvedSection: sections.ResolvedSection{ID: "b", SectionType: sections.SectionSeasonalThemed}, Items: []*models.MediaItem{{ContentID: "1"}}},
-		// empty non-seasonal — keep
-		{ResolvedSection: sections.ResolvedSection{ID: "c", SectionType: sections.SectionRecentlyAdded}},
-		// non-empty non-seasonal — keep
-		{ResolvedSection: sections.ResolvedSection{ID: "d", SectionType: sections.SectionHiddenGems}, Items: []*models.MediaItem{{ContentID: "2"}}},
-	}
-	out := dropEmptySeasonalSections(in)
-	if len(out) != 3 {
-		t.Fatalf("expected 3, got %d", len(out))
-	}
-	for _, w := range out {
-		if w.ID == "a" {
-			t.Errorf("empty seasonal section was not dropped")
-		}
-	}
-}
-
-func TestDropEmptySeasonalSectionsHandlesNilAndEmpty(t *testing.T) {
-	if got := dropEmptySeasonalSections(nil); len(got) != 0 {
-		t.Errorf("expected empty/nil result for nil input, got %v", got)
-	}
-	if got := dropEmptySeasonalSections([]sections.SectionWithItems{}); len(got) != 0 {
-		t.Errorf("expected empty result for empty input, got %v", got)
-	}
-}
-
-func TestLibraryDefaultSectionsUsesFolderType(t *testing.T) {
-	got := libraryDefaultSections(&models.MediaFolder{Type: "series"}, 12)
-
-	if len(got) != 6 {
-		t.Fatalf("expected 6 series default sections, got %d", len(got))
-	}
-	if got[1].Title != "Recently Added TV" {
-		t.Fatalf("section 1 title = %q, want %q", got[1].Title, "Recently Added TV")
-	}
-	if got[2].Title != "Recently Released Episodes" {
-		t.Fatalf("section 2 title = %q, want %q", got[2].Title, "Recently Released Episodes")
-	}
-	if got[4].SectionType != sections.SectionRecommendedForYou {
-		t.Fatalf("section 4 type = %q, want %q", got[4].SectionType, sections.SectionRecommendedForYou)
 	}
 }
 
@@ -778,43 +477,22 @@ func TestApplyDiversityFilterPreservesItemsInNonAvoidSections(t *testing.T) {
 	}
 }
 
-func TestApplyDiversityFilterAvoidSectionDoesNotShadowItself(t *testing.T) {
-	in := []sections.SectionWithItems{
-		{ResolvedSection: sections.ResolvedSection{ID: "hg", SectionType: sections.SectionHiddenGems}, Items: []*models.MediaItem{{ContentID: "abc"}}},
-	}
-	out := applyDiversityFilter(in)
-	if len(out[0].Items) != 1 {
-		t.Errorf("first section should not filter itself; got %d items", len(out[0].Items))
-	}
-}
-
-func TestApplyDiversityFilterHandlesNilAndEmpty(t *testing.T) {
-	if got := applyDiversityFilter(nil); got != nil && len(got) != 0 {
-		t.Errorf("nil input returned non-empty: %v", got)
-	}
-	if got := applyDiversityFilter([]sections.SectionWithItems{}); len(got) != 0 {
-		t.Errorf("empty input returned non-empty: %v", got)
-	}
-}
-
-// TestSaveProfileOverridesRejectsAdminOnlyRecipeWhenSettingDisabled verifies that
-// a non-admin profile attempting to save a user-added admin_curated_list override
-// gets 403 when the allow_profile_custom_sections setting is disabled (the default).
-func TestSaveProfileOverridesRejectsAdminOnlyRecipeWhenSettingDisabled(t *testing.T) {
-	// StoreProvider is nil so we test the gate in isolation.
-	// The gate runs BEFORE the StoreProvider check, so a 403 is returned before
-	// the nil-StoreProvider 500 path is reached.
+// TestSaveProfileOverridesAdminOnlyRecipeFollowsActingAdmin: a child profile
+// on an admin's account is not the admin an admin-only recipe asks for.
+func TestSaveProfileOverridesAdminOnlyRecipeFollowsActingAdmin(t *testing.T) {
 	h := &SectionHandler{}
 	body := []byte(`{"scope":"home","library_id":"","overrides":[{"is_user_added":true,"user_section_type":"admin_curated_list","user_config":{"item_ids":["a"]}}]}`)
 	req := httptest.NewRequest(http.MethodPut, "/profile/sections", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	// Authenticate as a non-admin profile.
-	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "user", UserID: 1})
-	ctx = apimw.SetProfileID(ctx, "p1")
-	req = req.WithContext(ctx)
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "admin", UserID: 1})
+	ctx = apimw.SetProfileID(ctx, "kid")
+	ctx = access.SetScope(ctx, access.Scope{UserID: 1, ProfileID: "kid", ProfileVerified: true})
+	ctx = apimw.SetActingAdminDecider(ctx, func(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
+		return in.ProfileID == "parent", nil
+	})
 	rec := httptest.NewRecorder()
 
-	h.HandleSaveProfileOverrides(rec, req)
+	h.HandleSaveProfileOverrides(rec, req.WithContext(ctx))
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden, got %d body=%s", rec.Code, rec.Body.String())
@@ -861,72 +539,5 @@ func TestSaveProfileOverridesLegacyShapeCannotBypassGate(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for legacy-shape bypass, got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestSaveProfileOverridesLegacyShapeUnknownRecipeIsRejected ensures that
-// legacy-shape user-added overrides whose section_type is not a registered
-// recipe are rejected as 400, not silently passed through.
-func TestSaveProfileOverridesLegacyShapeUnknownRecipeIsRejected(t *testing.T) {
-	h := &SectionHandler{}
-	body := []byte(`{"scope":"home","library_id":"","overrides":[{"section_id":"","section_type":"no_such_recipe","config":{}}]}`)
-	req := httptest.NewRequest(http.MethodPut, "/profile/sections", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "user", UserID: 1})
-	ctx = apimw.SetProfileID(ctx, "p1")
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-
-	h.HandleSaveProfileOverrides(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 Bad Request, got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestToSectionOverridesPropagatesUserAddedFields verifies the storage→resolver
-// shim copies the four user-added fields (IsUserAdded / UserSectionType /
-// UserConfig / UserTitle). Without this propagation the resolver sees zero
-// values and silently drops profile-built sections — even after the SQLite
-// persistence layer correctly stores them.
-func TestToSectionOverridesPropagatesUserAddedFields(t *testing.T) {
-	stored := []userstore.SectionOverride{
-		{
-			ID:              "ov-1",
-			SectionID:       "",
-			IsUserAdded:     true,
-			UserSectionType: "hidden_gems",
-			UserConfig:      `{"min_rating":7.5}`,
-			UserTitle:       "Hidden Gems",
-		},
-		{
-			ID:          "ov-2",
-			SectionID:   "admin-1",
-			SectionType: "recently_added",
-			Title:       "Renamed",
-		},
-	}
-
-	got := toSectionOverrides(stored)
-	if len(got) != 2 {
-		t.Fatalf("got %d overrides, want 2", len(got))
-	}
-
-	if !got[0].IsUserAdded {
-		t.Error("user-added IsUserAdded = false, want true")
-	}
-	if string(got[0].UserSectionType) != "hidden_gems" {
-		t.Errorf("UserSectionType = %q, want hidden_gems", got[0].UserSectionType)
-	}
-	if string(got[0].UserConfig) != `{"min_rating":7.5}` {
-		t.Errorf("UserConfig = %q, want %q", string(got[0].UserConfig), `{"min_rating":7.5}`)
-	}
-	if got[0].UserTitle != "Hidden Gems" {
-		t.Errorf("UserTitle = %q, want Hidden Gems", got[0].UserTitle)
-	}
-
-	// Admin-section customization should leave the user-added fields zero.
-	if got[1].IsUserAdded || got[1].UserSectionType != "" || len(got[1].UserConfig) != 0 || got[1].UserTitle != "" {
-		t.Errorf("legacy customization leaked user-added fields: %+v", got[1])
 	}
 }

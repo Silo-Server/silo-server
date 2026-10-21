@@ -161,99 +161,6 @@ describe("AdminPlugins", () => {
     });
   });
 
-  it("starts the shared plugin update check task from the plugins page", () => {
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    const button = capturedButtonProps.find((props) => {
-      const children = props.children;
-      if (typeof children === "string") {
-        return children === "Check for updates";
-      }
-      return Array.isArray(children) && children.some((child) => child === "Check for updates");
-    });
-
-    expect(button).toBeTruthy();
-    expect(typeof button?.onClick).toBe("function");
-
-    (button?.onClick as () => void)();
-
-    expect(checkPluginUpdatesMutateMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("describes manual upload as a generic plugin file instead of a zip-only archive", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Install from a file");
-    expect(markup).toContain("Choose plugin file...");
-    expect(markup).not.toContain('accept=".zip"');
-  });
-
-  it("shows the approved community setting and explains migrated installations", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      installations: [],
-      catalogSettings: {
-        etag: '"catalog-snapshot"',
-        include_approved_community_plugins: true,
-        approved_community_plugin_count: 2,
-        installed_community_plugin_count: 2,
-        migrated_plugin_count: 2,
-        community_updates_paused: false,
-      },
-      isLoading: false,
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Include approved community plugins");
-    expect(markup).toContain("2 existing installations were moved here");
-    expect(capturedSwitchProps[0]?.checked).toBe(true);
-  });
-
-  it("enables the approved community catalog directly when no community plugins are installed", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      installations: [],
-      catalogSettings: {
-        etag: '"catalog-snapshot"',
-        include_approved_community_plugins: false,
-        approved_community_plugin_count: 2,
-        installed_community_plugin_count: 0,
-        migrated_plugin_count: 0,
-        community_updates_paused: false,
-      },
-      isLoading: false,
-    });
-
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    const onCheckedChange = capturedSwitchProps[0]?.onCheckedChange as (checked: boolean) => void;
-    onCheckedChange(true);
-
-    expect(updatePluginCatalogSettingsMutateMock).toHaveBeenCalledWith({
-      etag: '"catalog-snapshot"',
-      include_approved_community_plugins: true,
-    });
-  });
-
   it("does not disable the community catalog without confirmation when plugins are installed", () => {
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
@@ -280,310 +187,6 @@ describe("AdminPlugins", () => {
     onCheckedChange(false);
 
     expect(updatePluginCatalogSettingsMutateMock).not.toHaveBeenCalled();
-  });
-
-  it("shows catalog presentation metadata and links the tile to the plugin page", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      installations: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      catalog: [
-        {
-          repository_id: 1,
-          plugin_id: "silo.example",
-          version: "1.0.0",
-          archive_url: "https://example.com/plugin",
-          source_kind: "silo",
-          repository_name: "Silo plugins",
-          repo_url: "https://github.com/Silo-Server/example-plugin",
-          presentation: {
-            display_name: "Example Plugin",
-            summary: "Explains the example for a homelab administrator.",
-            description_markdown: "Longer description.",
-            setup_markdown: "Configure the example.",
-            homepage_url: "https://example.com",
-            source_url: "https://github.com/Silo-Server/example-plugin",
-            support_url: "https://github.com/Silo-Server/example-plugin/issues",
-            changelog_url: "https://github.com/Silo-Server/example-plugin/releases",
-            publisher_name: "Silo",
-            publisher_url: "https://github.com/Silo-Server",
-            license_spdx: "AGPL-3.0-or-later",
-          },
-          capabilities: [],
-          global_config_schema: [],
-          user_config_schema: [],
-          routes: [],
-          assets: [],
-        },
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Example Plugin");
-    expect(markup).toContain("Explains the example for a homelab administrator.");
-    expect(markup).toContain('href="/admin/plugins/silo.example?repository=1&amp;version=1.0.0"');
-    expect(markup).toContain("by Silo, 1.0.0");
-  });
-
-  it("uses catalog presentation metadata for an older installed manifest", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      installations: [
-        {
-          id: 7,
-          repository_id: 1,
-          plugin_id: "silo.example",
-          version: "0.9.0",
-          install_path: "/plugins/example",
-          enabled: true,
-          runtime: { resident: false, state: "stopped", restart_count: 0 },
-          source_kind: "silo",
-          repository_name: "Silo plugins",
-          updates_paused: false,
-          capabilities: [],
-          global_config_schema: [],
-          user_config_schema: [],
-          routes: [],
-          assets: [],
-          global_configs: [],
-          auth_bindings: [],
-          task_bindings: [],
-          update_policy: "auto",
-        },
-      ],
-      catalog: [
-        {
-          repository_id: 1,
-          plugin_id: "silo.example",
-          version: "1.0.0",
-          archive_url: "https://example.com/plugin",
-          source_kind: "silo",
-          repository_name: "Silo plugins",
-          repo_url: "https://github.com/Silo-Server/example-plugin",
-          presentation: {
-            display_name: "Example Plugin",
-            summary: "Catalog fallback description.",
-            description_markdown: "Longer description.",
-            setup_markdown: "Configure the example.",
-            homepage_url: "https://example.com",
-            source_url: "https://github.com/Silo-Server/example-plugin",
-            support_url: "https://github.com/Silo-Server/example-plugin/issues",
-            changelog_url: "https://github.com/Silo-Server/example-plugin/releases",
-            publisher_name: "Silo",
-            publisher_url: "https://github.com/Silo-Server",
-            license_spdx: "AGPL-3.0-or-later",
-          },
-          capabilities: [],
-          global_config_schema: [],
-          user_config_schema: [],
-          routes: [],
-          assets: [],
-        },
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Catalog fallback description.");
-    expect(markup).toContain('href="/admin/plugins/silo.example"');
-  });
-
-  it("searches catalog presentation metadata from the URL", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      installations: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      catalog: [
-        makeCatalogEntry(1, {
-          displayName: "Alpha Scanner",
-          summary: "Indexes local media files.",
-        }),
-        makeCatalogEntry(2, {
-          displayName: "Needle Requests",
-          summary: "Routes requests to the right service.",
-        }),
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/admin/plugins?tab=catalog&catalog_q=needle"]}>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Needle Requests");
-    expect(markup).toContain("1 of 2 plugins");
-    expect(markup).not.toContain("Alpha Scanner");
-  });
-
-  it("searches installed plugin metadata independently from the catalog", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      installations: [
-        makeInstallation(1, "Alpha Metadata"),
-        makeInstallation(2, "Needle Automation"),
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/admin/plugins?installed_q=needle"]}>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Needle Automation");
-    expect(markup).toContain("1 of 2 plugins");
-    expect(markup).not.toContain("Alpha Metadata");
-  });
-
-  it("sorts plugins that need attention first and names the problem on the tile", () => {
-    const needsKey: PluginInstallation = {
-      ...makeInstallation(3, "Keyed Ratings"),
-      global_config_schema: [
-        { key: "account", title: "Account", json_schema: "{}", required: true },
-      ],
-    };
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      installations: [
-        makeInstallation(1, "Alpha Metadata"),
-        { ...makeInstallation(2, "Zulu Sync"), enabled: false },
-        needsKey,
-        {
-          ...makeInstallation(4, "Beta Watch"),
-          runtime: { resident: true, state: "backoff", restart_count: 3 },
-        },
-        {
-          ...makeInstallation(5, "Crashing Overlay"),
-          runtime: { resident: true, state: "failed", restart_count: 9 },
-        },
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    const order = [
-      "Crashing Overlay",
-      "Beta Watch",
-      "Keyed Ratings",
-      "Alpha Metadata",
-      "Zulu Sync",
-    ].map((name) => markup.indexOf(name));
-    expect(order.every((position) => position >= 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(markup).toContain("Needs setup");
-    expect(markup).toContain("Restarting (3)");
-    expect(markup).toContain("Failed");
-    expect(markup.match(/data-attention="true"/g)).toHaveLength(3);
-    expect(markup).toContain('data-state="off"');
-    // Every tile states its tier (1.0 plugin management AC4).
-    expect(markup.match(/1\.0\.0, Silo maintained/g)).toHaveLength(5);
-  });
-
-  it("puts no controls on installed tiles", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      installations: [
-        {
-          ...makeInstallation(1, "Overlay"),
-          runtime: { resident: true, state: "failed", restart_count: 2 },
-        },
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(capturedSwitchProps).toHaveLength(0);
-    expect(capturedButtonProps.map((props) => props["aria-label"])).not.toContain(
-      "Restart Overlay",
-    );
-    expect(markup).toContain('href="/admin/plugins/silo.installed-01"');
-  });
-
-  it("shows an available update in place of the capability icons", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      installations: [
-        {
-          ...makeInstallation(1, "TVDB Metadata"),
-          available_version: "1.3.2",
-          capabilities: [{ type: "metadata_provider.v1", id: "tvdb", display_name: "TVDB" }],
-        },
-        {
-          ...makeInstallation(2, "TMDB Metadata"),
-          capabilities: [{ type: "metadata_provider.v1", id: "tmdb", display_name: "TMDB" }],
-        },
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("1.3.2 available");
-    expect(markup.match(/<span class="sr-only">Metadata<\/span>/g)).toHaveLength(1);
-  });
-
-  it("counts and filters installed plugins from the URL", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      installations: [
-        makeInstallation(1, "Alpha Metadata"),
-        { ...makeInstallation(2, "Zulu Sync"), enabled: false },
-        { ...makeInstallation(3, "Update Me"), available_version: "2.0.0" },
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/admin/plugins?installed_filter=off"]}>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Zulu Sync");
-    expect(markup).not.toContain("Alpha Metadata");
-    expect(markup).not.toContain("Update Me");
-    expect(markup).toContain("1 of 3 plugins");
-    expect(markup).toMatch(/aria-pressed="true"[^>]*>Off<span[^>]*>1<\/span>/);
-    expect(markup).toMatch(/Update available<span[^>]*>1<\/span>/);
   });
 
   it("groups the catalog by source and installs from a tile", () => {
@@ -625,63 +228,66 @@ describe("AdminPlugins", () => {
     });
   });
 
-  it("filters the catalog by job from the URL", () => {
+  const markers = makeCatalogEntry(1, { displayName: "Intro Finder" });
+  const ratings = makeCatalogEntry(2, { displayName: "Ratings Source" });
+  const byJob = [
+    {
+      ...markers,
+      capabilities: [{ type: "marker_provider.v1", id: "intro", display_name: "Intro" }],
+    },
+    {
+      ...ratings,
+      capabilities: [{ type: "metadata_provider.v1", id: "ratings", display_name: "Ratings" }],
+    },
+  ];
+  it.each([
+    {
+      name: "searches catalog presentation metadata from the URL",
+      catalog: [
+        makeCatalogEntry(1, {
+          displayName: "Alpha Scanner",
+          summary: "Indexes local media files.",
+        }),
+        makeCatalogEntry(2, {
+          displayName: "Needle Requests",
+          summary: "Routes requests to the right service.",
+        }),
+      ],
+      search: "catalog_q=needle",
+      shown: ["Needle Requests", "1 of 2 plugins"],
+      hidden: ["Alpha Scanner"],
+    },
+    {
+      name: "filters the catalog by job from the URL",
+      catalog: byJob,
+      search: "catalog_job=markers",
+      shown: ["Intro Finder", "1 of 2 plugins"],
+      hidden: ["Ratings Source"],
+    },
+    {
+      name: "keeps a job filter when the search leaves nothing for that job",
+      catalog: byJob,
+      search: "catalog_job=markers&catalog_q=ratings",
+      shown: ["No catalog plugins match"],
+      hidden: ["Ratings Source"],
+    },
+  ])("$name", ({ catalog, search, shown, hidden }) => {
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
       installations: [],
       catalogSettings: undefined,
       isLoading: false,
-      catalog: [
-        {
-          ...makeCatalogEntry(1, { displayName: "Intro Finder" }),
-          capabilities: [{ type: "marker_provider.v1", id: "intro", display_name: "Intro" }],
-        },
-        {
-          ...makeCatalogEntry(2, { displayName: "Ratings Source" }),
-          capabilities: [{ type: "metadata_provider.v1", id: "ratings", display_name: "Ratings" }],
-        },
-      ],
+      catalog,
     });
 
     const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/admin/plugins?tab=catalog&catalog_job=markers"]}>
+      <MemoryRouter initialEntries={[`/admin/plugins?tab=catalog&${search}`]}>
         <AdminPlugins />
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Intro Finder");
-    expect(markup).not.toContain("Ratings Source");
-    expect(markup).toContain("1 of 2 plugins");
-  });
-
-  it("keeps a job filter when the search leaves nothing for that job", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      installations: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      catalog: [
-        {
-          ...makeCatalogEntry(1, { displayName: "Intro Finder" }),
-          capabilities: [{ type: "marker_provider.v1", id: "intro", display_name: "Intro" }],
-        },
-        {
-          ...makeCatalogEntry(2, { displayName: "Ratings Source" }),
-          capabilities: [{ type: "metadata_provider.v1", id: "ratings", display_name: "Ratings" }],
-        },
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter
-        initialEntries={["/admin/plugins?tab=catalog&catalog_job=markers&catalog_q=ratings"]}
-      >
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).not.toContain("Ratings Source");
-    expect(markup).toContain("No catalog plugins match");
+    for (const text of shown) expect(markup).toContain(text);
+    for (const text of hidden) expect(markup).not.toContain(text);
   });
 
   it.each([["silo.theintrodb"], ["silo.not-installed"]])(

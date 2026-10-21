@@ -31,9 +31,11 @@ func ProtocolDirectPlayback() []workerprotocol.Operation {
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		binary := &huma.MediaType{Schema: &huma.Schema{Type: huma.TypeString, Format: binaryFormat}}
 		media := map[string]*huma.MediaType{}
-		for _, extension := range []string{".mp4", ".mkv", ".webm", ".avi", ".mov", ".ts", ".flv", ".wmv", ".m4a", ".mp3", ".flac", ".ogg", ".wav", ".aac", ".unknown"} {
-			media[playback.MimeFromExtension(extension)] = binary
+		for _, mime := range playback.MediaMIMETypes() {
+			media[mime] = binary
 		}
+		// Files with an unknown extension are served as application/octet-stream.
+		media[playback.MimeFromExtension(".unknown")] = binary
 		rangeMedia := maps.Clone(media)
 		rangeMedia[multipartRanges] = binary
 		op := workerprotocol.Operation{

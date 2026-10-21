@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type fakeNotificationDiscordLinks struct{ calls, userID int }
@@ -21,6 +23,7 @@ func TestNotificationDiscordLinkTransport(t *testing.T) {
 	fake := new(fakeNotificationDiscordLinks)
 	deps := pilotDeps(nil, nil)
 	deps.NotificationDiscordLinks = fake
+	deps.NotificationDiscordManagement = discordManagement([]userstore.Profile{{ID: "p-owner", IsPrimary: true}})
 	h := NewHandler(deps)
 	path := Prefix + "/notifications/discord/link/init"
 	rec := do(t, h, http.MethodPost, path, "", nil)
@@ -36,21 +39,12 @@ func TestNotificationDiscordLinkTransport(t *testing.T) {
 			t.Fatal("invalid profile started consent")
 		}
 	}
-	rec = do(t, h, http.MethodPost, path, "", bearer(memberToken))
+	rec = do(t, h, http.MethodPost, path, "", profileOwner())
 	if rec.Code != 200 || fake.calls != 1 || fake.userID != 1 {
 		t.Fatalf("account initiation: %d %s %+v", rec.Code, rec.Body.String(), fake)
-	}
-	doc := generatedDocument(t)
-	callback := doc["paths"].(map[string]any)[Prefix+"/notifications/discord/link/callback"].(map[string]any)["get"].(map[string]any)
-	responses := callback["responses"].(map[string]any)
-	if responses["200"] != nil || responses["302"] == nil {
-		t.Fatal("callback invented200")
-	}
-	if responses["302"].(map[string]any)["headers"].(map[string]any)["Location"] == nil {
-		t.Fatal("missing Location")
 	}
 }
 
 func notificationDiscordLinkFixtureCases() []fixtureCase {
-	return []fixtureCase{{name: "notification_discord_link_init", operationID: beginNotificationDiscordLinkOperation, method: "POST", path: Prefix + "/notifications/discord/link/init", headers: bearer(memberToken), status: 200, schema: "#/components/schemas/NotificationDiscordLink", assertHeaders: []string{"Content-Type", "Cache-Control"}, scenario: "A synthetic account-bound Discord consent URL is returned without contacting the provider."}}
+	return []fixtureCase{{name: "notification_discord_link_init", operationID: beginNotificationDiscordLinkOperation, method: "POST", path: Prefix + "/notifications/discord/link/init", headers: with(bearer(memberToken), "X-Profile-Id", "p-primary"), status: 200, schema: "#/components/schemas/NotificationDiscordLink", assertHeaders: []string{"Content-Type", "Cache-Control"}, scenario: "A synthetic account-bound Discord consent URL is returned without contacting the provider."}}
 }

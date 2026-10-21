@@ -111,6 +111,9 @@ services:
       REDIS_URL: redis://redis:6379
       SILO_PLUGIN_CACHE_DIR: /var/lib/silo/plugins
       POSTGRES_TUNE: "off"
+      # air restarts on every rebuild and kills the process 500 ms after
+      # interrupting it; a single dev server has no traffic to route away.
+      SILO_SHUTDOWN_DELAY: "0"
     ports:
       - "${BACKEND_PORT:-18080}:8080"
       - "${JF_PORT:-8096}:8096"
@@ -124,6 +127,7 @@ services:
       - silo-dev-artwork:/var/lib/silo/artwork
       - silo-dev-compat:/var/lib/silo/compat
       - silo-dev-transcode:/tmp/silo-transcode
+      - silo-dev-download-artifacts:/tmp/silo-download-artifacts
       - ${MEDIA_ROOT:-/tmp/silo-dev-media}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
     depends_on:
       postgres:
@@ -170,6 +174,7 @@ services:
 volumes:
   silo-dev-air-tmp:
   silo-dev-compat:
+  silo-dev-download-artifacts:
   silo-dev-go-build:
   silo-dev-go-mod:
   silo-dev-plugins:

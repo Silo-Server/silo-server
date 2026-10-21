@@ -5,12 +5,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 func TestArtworkUpstreamFailuresAreRetryableAndOmitTheURL(t *testing.T) {
@@ -41,8 +48,8 @@ func TestArtworkUpstreamFailuresAreRetryableAndOmitTheURL(t *testing.T) {
 		}
 	}
 
-	// A server-relative URL (local artwork storage signs these) or a hostless
-	// one is broken, not the store: not worth a retry.
+	// A server-relative URL this service can't read from the store, or a
+	// hostless one, is broken, not the store: not worth a retry.
 	for _, broken := range []string{"/api/v2/artwork/p.jpg?sig=secret", "http:///poster.jpg"} {
 		if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, broken); err == nil ||
 			errors.Is(err, ErrAssetUnavailable) || strings.Contains(err.Error(), "secret") {
@@ -97,21 +104,27 @@ func TestOfflineDepsKeepTheArtworkTimeout(t *testing.T) {
 	}
 	// A deadline over the whole exchange would also count time spent writing
 	// to a slow client; only the store's own waits are bounded.
-	if artworkClient.Timeout != 0 || artworkClient.Transport.(*http.Transport).ResponseHeaderTimeout == 0 {
-		t.Fatal("artwork client timeouts changed")
+	if artworkClient.Timeout != 0 {
+		t.Fatal("artwork client has a whole-exchange deadline")
 	}
-}
 
-func TestArtworkStoreStoppingMidBodyIsRetryable(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// Promise bytes, then end the response without sending them.
-		w.Header().Set("Content-Length", "10")
-		w.WriteHeader(http.StatusOK)
-	}))
+	// The store must start answering within artworkStallTimeout.
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
 	defer upstream.Close()
-	s := &Service{httpClient: upstream.Client()}
-	if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, upstream.URL+"/poster.jpg"); !errors.Is(err, ErrAssetUnavailable) {
-		t.Fatalf("err = %v", err)
+	defer close(release)
+	defer func(old time.Duration) { artworkStallTimeout = old }(artworkStallTimeout)
+	artworkStallTimeout = 50 * time.Millisecond
+	client := &http.Client{Transport: artworkTransport()}
+	req, err := http.NewRequestWithContext(netguard.WithPrivateAccess(t.Context()), http.MethodGet, upstream.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := client.Do(req); err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("artwork fetch waited past the header timeout")
+	} else if !strings.Contains(err.Error(), "timeout awaiting response headers") {
+		t.Fatalf("artwork fetch error = %v, want a response header timeout", err)
 	}
 }
 
@@ -154,7 +167,8 @@ func TestArtworkSlowClientDoesNotTimeOutTheStore(t *testing.T) {
 		_, _ = w.Write(image)
 	}))
 	defer upstream.Close()
-	s := &Service{} // the production client
+	// The production client, reading an artwork store on loopback.
+	s := &Service{artworkStore: blobstoretest.NewDirect(upstream.URL)}
 	out := slowClientWriter{httptest.NewRecorder()}
 	if err := s.streamArtwork(context.Background(), out, nil, upstream.URL+"/backdrop.jpg"); err != nil || out.Body.Len() != len(image) {
 		t.Fatalf("err = %v, wrote %d of %d bytes", err, out.Body.Len(), len(image))
@@ -199,5 +213,113 @@ func TestArtworkStallBeforeFirstByteDropsImageHeaders(t *testing.T) {
 	err := s.streamArtwork(context.Background(), rec, nil, upstream.URL+"/poster.jpg")
 	if !errors.Is(err, ErrAssetUnavailable) || rec.Header().Get("Content-Length") != "" || rec.Header().Get("Cache-Control") != "" {
 		t.Fatalf("err = %v, headers %v", err, rec.Header())
+	}
+}
+
+// Artwork that is not on the artwork store, such as a metadata provider's URL
+// kept when caching it failed, may not reach the server's own network.
+func TestArtworkOffTheStoreStaysOffTheLocalNetwork(t *testing.T) {
+	var hits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("internal response"))
+	}))
+	defer upstream.Close()
+	store := blobstoretest.NewDirect("http://storage.invalid")
+	s := &Service{artworkStore: store} // the production client
+
+	rec := httptest.NewRecorder()
+	err := s.streamArtwork(context.Background(), rec, nil, upstream.URL+"/poster.jpg")
+	// The refusal is permanent, so it is not reported as worth a retry.
+	if !errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetUnavailable) || !errors.Is(err, netguard.ErrPrivateDestination) {
+		t.Fatalf("err = %v, want ErrAssetNotFound from netguard.ErrPrivateDestination", err)
+	}
+	if hits.Load() != 0 || rec.Body.Len() != 0 {
+		t.Fatalf("upstream hits = %d, body %q; want no request", hits.Load(), rec.Body.String())
+	}
+}
+
+// recordingRepair records the keys queued for artwork repair.
+type recordingRepair struct{ keys []string }
+
+func (r *recordingRepair) EnqueueArtworkRepair(_ context.Context, keys []string, _ int) (int, error) {
+	r.keys = append(r.keys, keys...)
+	return len(keys), nil
+}
+
+// failingStore is a store whose reads fail, as an unmounted artwork root does.
+type failingStore struct{ *blobstoretest.Memory }
+
+func (failingStore) Get(context.Context, string) (io.ReadCloser, blobstore.ObjectInfo, error) {
+	return nil, blobstore.ObjectInfo{}, errors.New("permission denied")
+}
+
+func TestLocalArtworkIsReadFromTheStore(t *testing.T) {
+	store := blobstoretest.New()
+	const key = "tmdb/series/1/poster/w500.r1.webp"
+	if err := store.Put(context.Background(), key, []byte("poster bytes")); err != nil {
+		t.Fatal(err)
+	}
+	signer := artworkurl.NewSigner("secret", time.Hour)
+	repair := &recordingRepair{}
+	s := &Service{}
+	s.SetArtworkStore(store, signer, repair)
+	signed, _ := signer.Sign(key, time.Now())
+
+	rec := httptest.NewRecorder()
+	if err := s.streamArtwork(context.Background(), rec, nil, signed); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if rec.Body.String() != "poster bytes" ||
+		rec.Header().Get("Content-Type") != "image/webp" ||
+		rec.Header().Get("Content-Length") != "12" ||
+		rec.Header().Get("Cache-Control") != "private, max-age=31536000, immutable" {
+		t.Fatalf("response = %v %q", rec.Header(), rec.Body.String())
+	}
+
+	// An object missing from the store won't appear on a retry. A missing
+	// revisioned variant queues its original for repair, as the signed route
+	// does; a legacy key has nothing to regenerate from.
+	for _, tc := range []struct{ key, repaired string }{
+		{"tmdb/series/1/poster/w300.r2.webp", "tmdb/series/1/poster/original.r2.webp"},
+		{"tmdb/series/1/poster/missing.webp", ""},
+	} {
+		repair.keys = nil
+		missing, _ := signer.Sign(tc.key, time.Now())
+		if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, missing); !errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetUnavailable) {
+			t.Fatalf("missing %s: err = %v", tc.key, err)
+		}
+		if got := strings.Join(repair.keys, ","); got != tc.repaired {
+			t.Fatalf("missing %s: repaired %q, want %q", tc.key, got, tc.repaired)
+		}
+	}
+
+	// A URL the signer didn't mint is never read from the store.
+	forged, _ := artworkurl.NewSigner("other", time.Hour).Sign(key, time.Now())
+	calls := len(store.Calls)
+	if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, forged); err == nil || errors.Is(err, ErrAssetUnavailable) {
+		t.Fatalf("forged URL: err = %v", err)
+	}
+	if len(store.Calls) != calls {
+		t.Fatal("forged URL read the store")
+	}
+
+	// A store that can't be read is worth a retry.
+	s.SetArtworkStore(failingStore{store}, signer, nil)
+	if err := s.streamArtwork(context.Background(), httptest.NewRecorder(), nil, signed); !errors.Is(err, ErrAssetUnavailable) {
+		t.Fatalf("failing store: err = %v", err)
+	}
+}
+
+func TestAbsoluteArtworkURLsStillUseHTTPWithAStore(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("s3 bytes"))
+	}))
+	defer upstream.Close()
+	s := &Service{httpClient: upstream.Client()}
+	s.SetArtworkStore(blobstoretest.New(), artworkurl.NewSigner("secret", time.Hour), nil)
+	rec := httptest.NewRecorder()
+	if err := s.streamArtwork(context.Background(), rec, nil, upstream.URL+"/poster.jpg"); err != nil || rec.Body.String() != "s3 bytes" {
+		t.Fatalf("err = %v, body = %q", err, rec.Body.String())
 	}
 }

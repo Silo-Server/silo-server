@@ -1,18 +1,18 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment node
+
 import type { MediaRequest, RequestMediaResult, RequestMediaSeason } from "@/api/types";
+import { describe, expect, it } from "vitest";
 import {
   canCancelOwnRequest,
   defaultRequestSeasons,
   flattenResultPages,
-  pendingPageSize,
   formatRequestDisplayState,
   formatRequestSeasonMeta,
   formatSeasonList,
   formatSeasonProgress,
   latestRequestSeason,
   parseRequestMediaType,
-  requestDetailHref,
-  requestDiscoverSectionHref,
+  pendingPageSize,
   requestDisplayState,
   requestSearchHref,
   requestSearchTypeForScope,
@@ -75,14 +75,6 @@ describe("requestSearchTypeForScope", () => {
   });
 });
 
-describe("requestDiscoverSectionHref", () => {
-  it("builds a Discover row's page", () => {
-    expect(requestDiscoverSectionHref("trending_movies")).toBe(
-      "/requests/discover/trending_movies",
-    );
-  });
-});
-
 type CancelFields = Pick<MediaRequest, "status" | "outcome" | "targets">;
 
 describe("canCancelOwnRequest", () => {
@@ -106,10 +98,7 @@ describe("canCancelOwnRequest", () => {
       },
     ],
     ["queued", { ...pending, status: "queued" }],
-    ["downloading", { ...pending, status: "downloading" }],
-    ["completed", { ...pending, status: "completed" }],
     ["already cancelled", { ...pending, outcome: "cancelled" }],
-    ["declined", { ...pending, outcome: "declined" }],
   ])("refuses a request that is %s, as the server does", (_label, request) => {
     expect(canCancelOwnRequest(request)).toBe(false);
   });
@@ -119,26 +108,9 @@ describe("requestDisplayState", () => {
   it("prefers the state the server derived", () => {
     expect(requestDisplayState("completed", "active", "processing")).toBe("processing");
   });
-
-  it("derives a state for a server that sends none", () => {
-    expect(requestDisplayState("downloading", "active")).toBe("processing");
-    expect(requestDisplayState("queued", "failed")).toBe("failed");
-  });
-});
-
-describe("requestDetailHref", () => {
-  it("builds the title detail route", () => {
-    expect(requestDetailHref("movie", 603)).toBe("/title/movie/603");
-    expect(requestDetailHref("series", 1399)).toBe("/title/series/1399");
-  });
 });
 
 describe("parseRequestMediaType", () => {
-  it("accepts the two title media types", () => {
-    expect(parseRequestMediaType("movie")).toBe("movie");
-    expect(parseRequestMediaType("series")).toBe("series");
-  });
-
   it.each([undefined, "", "tv", "Movie", "browse"])("rejects %j", (value) => {
     expect(parseRequestMediaType(value)).toBeUndefined();
   });

@@ -15,7 +15,7 @@ import { getLanguageName } from "@/player/utils/languageNames";
 import { normalizeSubtitleMode } from "@/player/utils/subtitleMode";
 import { resolveSubtitleAutoSelect } from "@/player/utils/subtitleSort";
 import { getSubtitleFormatLabel } from "@/player/utils/subtitleCodecs";
-import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
+import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
 import {
   buildVersionSubtitleInventory,
   type VersionSubtitleInventoryRow,
@@ -50,12 +50,6 @@ function normalizeDownloadedLabel(subtitle: DownloadedSubtitle): string {
     return `${releaseName} (${provider})`;
   }
   return releaseName || provider || getLanguageName(subtitle.language?.trim() || "unknown");
-}
-
-export function formatSubtitleCandidateSummary(
-  row: Pick<VersionSubtitleInventoryRow, "languageLabel" | "forced" | "hearingImpaired">,
-): string {
-  return row.languageLabel;
 }
 
 export function inferSubtitleFlagsFromTitle(title: string | undefined): {
@@ -148,7 +142,7 @@ export function formatAudioTrackSummary(track: VersionAudioTrack | undefined): s
   }
 
   const language = getLanguageName(track.language ?? "") || "Unknown";
-  const codec = track.codec ? mapAudioLabel(track.codec) : "";
+  const codec = audioTrackLabel(track);
   const channels = formatChannels(track.channels);
   return [language, codec, channels].filter(Boolean).join(" · ");
 }
@@ -210,7 +204,7 @@ export function buildPrePlaySubtitleCandidates(
           hearing_impaired: row.hearingImpaired,
           track_index: row.index,
         },
-        summary: formatSubtitleCandidateSummary(row),
+        summary: row.languageLabel,
       };
       all.push(candidate);
       return candidate;
@@ -232,7 +226,7 @@ export function buildPrePlaySubtitleCandidates(
         hearing_impaired: row.hearingImpaired,
         downloaded_subtitle_id: row.downloadedSubtitleId,
       },
-      summary: formatSubtitleCandidateSummary(row),
+      summary: row.languageLabel,
     };
     all.push(candidate);
     return candidate;

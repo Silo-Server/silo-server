@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,30 +10,26 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 )
 
-func TestCollectionTemplateHandlerReturnsBuiltinCatalog(t *testing.T) {
-	h := NewCollectionTemplateHandler(nil)
+// TestV1TemplateListKeepsEveryTemplate pins /api/v1 to the full built-in
+// catalog. The /api/v2 admin list leaves out templates no import route accepts;
+// the frozen v1 body still carries TMDB Discover and franchise templates.
+func TestV1TemplateListKeepsEveryTemplate(t *testing.T) {
+	full := templates.CatalogDefault()
+	var want bytes.Buffer
+	if err := json.NewEncoder(&want).Encode(full); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(want.Bytes(), []byte(`"source":"tmdb_discover"`)) || !bytes.Contains(want.Bytes(), []byte(`"source":"tmdb_collection"`)) {
+		t.Fatal("built-in catalog must contain Discover and franchise templates")
+	}
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/collections/templates", nil)
 	rec := httptest.NewRecorder()
-	h.HandleListTemplates(rec, req)
-
+	NewCollectionTemplateHandler(nil).HandleListTemplates(rec, httptest.NewRequest(http.MethodGet, "/admin/collections/templates", nil))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
+		t.Fatalf("status %d", rec.Code)
 	}
-
-	var body templates.Catalog
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(body.Categories) == 0 {
-		t.Fatal("expected at least one category in response")
-	}
-	totalTemplates := 0
-	for _, group := range body.Categories {
-		totalTemplates += len(group.Templates)
-	}
-	if totalTemplates < 5 {
-		t.Errorf("expected several templates, got %d", totalTemplates)
+	if !bytes.Equal(rec.Body.Bytes(), want.Bytes()) {
+		t.Fatalf("v1 template list changed:\n got %.300s\nwant %.300s", rec.Body.String(), want.String())
 	}
 }
 
@@ -49,33 +46,6 @@ func TestBuiltinTemplateTitleSlugsAreUnique(t *testing.T) {
 			continue
 		}
 		bySlug[slug] = tmpl.ID
-	}
-}
-
-func TestCollectionTemplateHandlerHonoursInjectedRegistry(t *testing.T) {
-	registry := templates.NewRegistry()
-	registry.Register(templates.Template{
-		ID:        "test_only",
-		Title:     "Test only",
-		Category:  templates.CategoryTrending,
-		Source:    templates.SourceTMDB,
-		MediaKind: templates.MediaMovie,
-		TMDB:      &templates.TMDBSpec{Preset: "popular", MediaType: "movie"},
-	})
-
-	h := NewCollectionTemplateHandler(registry)
-	rec := httptest.NewRecorder()
-	h.HandleListTemplates(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-
-	var body templates.Catalog
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(body.Categories) != 1 || len(body.Categories[0].Templates) != 1 {
-		t.Fatalf("unexpected catalog shape: %+v", body)
-	}
-	if body.Categories[0].Templates[0].ID != "test_only" {
-		t.Errorf("got %q, want test_only", body.Categories[0].Templates[0].ID)
 	}
 }
 

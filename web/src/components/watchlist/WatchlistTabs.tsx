@@ -54,7 +54,7 @@ export default function WatchlistTabs({
           <span className="sm:hidden">Not in library</span>
           <span className="hidden sm:inline">Not in your library yet</span>
           {count !== undefined && count > 0 ? (
-            <span className="bg-muted/80 text-muted-foreground ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums">
+            <span className="bg-muted/80 text-muted-foreground ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[0.625rem] font-semibold tabular-nums">
               {count}
             </span>
           ) : null}

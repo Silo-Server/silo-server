@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
@@ -44,7 +46,13 @@ type RecommendationRowCollectionOutput struct {
 	Body RecommendationRowCollection
 }
 
+// DiscoverInput is the getDiscover request.
+type DiscoverInput struct {
+	ArtworkQuery
+}
+
 // RecommendationLimitParam is the page size of a recommendation list.
+
 type RecommendationLimitParam struct {
 	Limit int `query:"limit" minimum:"1" maximum:"50" default:"20" doc:"Cards to answer; default 20, maximum 50" example:"20"`
 }
@@ -53,23 +61,27 @@ type RecommendationLimitParam struct {
 type BecauseWatchedInput struct {
 	ItemID string `path:"item_id" minLength:"1" doc:"The watched item recommendations are drawn from" example:"movie:heat-1995"`
 	RecommendationLimitParam
+	ArtworkQuery
 }
 
 // ForYouInput is the getForYouMain and listForYouRows query.
 type ForYouInput struct {
 	RecommendationLimitParam
+	ArtworkQuery
 }
 
 // PopularInput is the listPopular query.
 type PopularInput struct {
 	Days int `query:"days" minimum:"1" default:"30" doc:"Window in days; default 30" example:"30"`
 	RecommendationLimitParam
+	ArtworkQuery
 }
 
 // RecentlyAddedInput is the listRecentlyAdded query.
 type RecentlyAddedInput struct {
 	Days int `query:"days" minimum:"1" default:"14" doc:"Window in days; default 14" example:"14"`
 	RecommendationLimitParam
+	ArtworkQuery
 }
 
 // RecommendationSectionInput is the getRecommendationSection request.
@@ -77,17 +89,20 @@ type RecommendationSectionInput struct {
 	Kind  string `path:"kind" enum:"for-you-main,cluster,similar-users,popular,recently-added,top-rated,genre" doc:"Section kind, as a discover row's kind names it" example:"genre"`
 	Key   string `query:"key" doc:"Section key: the cluster index of a cluster section or the genre name of a genre section" example:"Crime"`
 	Limit int    `query:"limit" minimum:"1" maximum:"60" default:"60" doc:"Cards to answer; default and maximum 60" example:"60"`
+	ArtworkQuery
 }
 
 // SimilarInput is the listSimilar request.
 type SimilarInput struct {
 	ItemID string `path:"item_id" minLength:"1" doc:"The item similar items are drawn from" example:"movie:heat-1995"`
 	RecommendationLimitParam
+	ArtworkQuery
 }
 
 // SimilarUsersInput is the listSimilarUsersLiked query.
 type SimilarUsersInput struct {
 	RecommendationLimitParam
+	ArtworkQuery
 }
 
 // TasteProfile is the acting profile's taste summary; empty members, not
@@ -108,6 +123,7 @@ type TasteProfileOutput struct {
 type TasteSeedItemsInput struct {
 	Limit  int    `query:"limit" minimum:"1" maximum:"60" default:"30" doc:"Cards per page; default 30, maximum 60" example:"30"`
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjozMH0"`
+	ArtworkQuery
 }
 
 // TasteSeedSubmission is the createTasteSeed body: the items the profile
@@ -134,6 +150,7 @@ type TasteSeedResultOutput struct {
 // WatchTonightInput is the getWatchTonight query.
 type WatchTonightInput struct {
 	Limit int `query:"limit" minimum:"1" maximum:"20" default:"5" doc:"Cards to answer; default 5, maximum 20" example:"5"`
+	ArtworkQuery
 }
 
 // WatchTonightItem is one Watch Tonight card: the shared card plus where
@@ -160,6 +177,7 @@ type WatchTonightCardsInput struct {
 	Genres     []string `query:"genres,explode" maxItems:"18" doc:"Discover-mode genre filter, repeated (genres=Crime&genres=Thriller); each must be a known genre" example:"Crime"`
 	ExcludeIDs []string `query:"exclude_ids,explode" maxItems:"200" doc:"Catalog identifiers already swiped, repeated (exclude_ids=a&exclude_ids=b)" example:"movie:heat-1995"`
 	Limit      int      `query:"limit" minimum:"1" maximum:"20" default:"12" doc:"Cards per page; default 12, maximum 20" example:"12"`
+	ArtworkQuery
 }
 
 // WatchTonightCastMember is one cast member on a swipe card.
@@ -200,7 +218,7 @@ const (
 func registerRecommendations(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/because-watched/{item_id}", "listBecauseWatched", "recommendations",
-		"Cards recommended because the acting profile watched the item, minus what it has watched or rated low.")), reg.listBecauseWatched)
+		"Cards recommended because the acting profile watched the item, minus what it has watched or rated.")), reg.listBecauseWatched)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/discover", "getDiscover", "recommendations",
 		"The Discover page: the acting profile's recommendation rows with their cards, blended with upcoming airings.")), reg.getDiscover)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/for-you/main", "getForYouMain", "recommendations",
@@ -208,13 +226,13 @@ func registerRecommendations(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/for-you/rows", "listForYouRows", "recommendations",
 		"The acting profile's For You rows, one per taste cluster.")), reg.listForYouRows)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/popular", "listPopular", "recommendations",
-		"The server's most played items over the window, minus what the acting profile has watched.")), reg.listPopular)
+		"The server's most played items over the window, minus what the acting profile has watched or marked Not interested.")), reg.listPopular)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/recently-added", "listRecentlyAdded", "recommendations",
-		"Items added over the window, minus what the acting profile has watched.")), reg.listRecentlyAdded)
+		"Items added over the window, minus what the acting profile has watched or marked Not interested.")), reg.listRecentlyAdded)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/section/{kind}", "getRecommendationSection", "recommendations",
 		"One recommendation row in full, for a dedicated see-all page; empty when the profile has no such row.")), reg.getRecommendationSection)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/similar/{item_id}", "listSimilar", "recommendations",
-		"Cards similar to the item by content; not personalised beyond the acting profile's access.")), reg.listSimilar)
+		"Cards similar to the item by content; personalised only by the acting profile's access and by leaving out the titles it marked Not interested.")), reg.listSimilar)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/similar-users", "listSimilarUsersLiked", "recommendations",
 		"Cards profiles with similar taste liked.")), reg.listSimilarUsersLiked)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/recommendations/taste-profile", "getTasteProfile", "recommendations",
@@ -278,19 +296,19 @@ func (reg *Registry) recommendationCards(ctx context.Context, fetch func(svc Rec
 
 func (reg *Registry) listBecauseWatched(ctx context.Context, in *BecauseWatchedInput) (*CatalogItemCollectionOutput, error) {
 	return reg.recommendationCards(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.SectionItemView, error) {
-		return svc.BecauseWatchedCards(ctx, userID, profileID, in.ItemID, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
+		return svc.BecauseWatchedCards(ctx, userID, profileID, in.ItemID, in.Limit, recommendationFilter(ctx, in.ArtworkQuery))
 	})
 }
 
 func (reg *Registry) listPopular(ctx context.Context, in *PopularInput) (*CatalogItemCollectionOutput, error) {
 	return reg.recommendationCards(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.SectionItemView, error) {
-		return svc.PopularCards(ctx, userID, profileID, in.Days, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
+		return svc.PopularCards(ctx, userID, profileID, in.Days, in.Limit, recommendationFilter(ctx, in.ArtworkQuery))
 	})
 }
 
 func (reg *Registry) listRecentlyAdded(ctx context.Context, in *RecentlyAddedInput) (*CatalogItemCollectionOutput, error) {
 	return reg.recommendationCards(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.SectionItemView, error) {
-		return svc.RecentlyAddedCards(ctx, userID, profileID, in.Days, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
+		return svc.RecentlyAddedCards(ctx, userID, profileID, in.Days, in.Limit, recommendationFilter(ctx, in.ArtworkQuery))
 	})
 }
 
@@ -303,7 +321,7 @@ func (reg *Registry) getForYouMain(ctx context.Context, in *ForYouInput) (*Recom
 	if p != nil {
 		return nil, p
 	}
-	row, err := svc.ForYouMainCards(ctx, userID, profileID, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
+	row, err := svc.ForYouMainCards(ctx, userID, profileID, in.Limit, recommendationFilter(ctx, in.ArtworkQuery))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -333,13 +351,13 @@ func (reg *Registry) recommendationRows(ctx context.Context, fetch func(svc Reco
 
 func (reg *Registry) listForYouRows(ctx context.Context, in *ForYouInput) (*RecommendationRowCollectionOutput, error) {
 	return reg.recommendationRows(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.DiscoverRowView, error) {
-		return svc.ForYouRowCards(ctx, userID, profileID, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
+		return svc.ForYouRowCards(ctx, userID, profileID, in.Limit, recommendationFilter(ctx, in.ArtworkQuery))
 	})
 }
 
-func (reg *Registry) getDiscover(ctx context.Context, _ *struct{}) (*RecommendationRowCollectionOutput, error) {
+func (reg *Registry) getDiscover(ctx context.Context, in *DiscoverInput) (*RecommendationRowCollectionOutput, error) {
 	return reg.recommendationRows(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.DiscoverRowView, error) {
-		view, err := svc.Discover(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""))
+		view, err := svc.Discover(ctx, userID, profileID, recommendationFilter(ctx, in.ArtworkQuery))
 		if err != nil {
 			return nil, err
 		}
@@ -360,22 +378,43 @@ func (reg *Registry) getRecommendationSection(ctx context.Context, in *Recommend
 		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: "query.key", Code: codeRequired, Detail: "a " + in.Kind + " section needs a key"})
 	}
-	view, err := svc.Section(ctx, userID, profileID, in.Kind, in.Key, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
+	if detail := invalidSectionKey(in.Kind, in.Key); detail != "" {
+		return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: "query.key", Code: codeInvalid, Detail: detail})
+	}
+	view, err := svc.Section(ctx, userID, profileID, in.Kind, in.Key, in.Limit, recommendationFilter(ctx, in.ArtworkQuery))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
 	return &RecommendationRowOutput{Body: RecommendationRow{Type: view.Type, Title: view.Label, Kind: view.Kind, Key: view.Key, Items: catalogItemsOfSection(view.Items, reg.ratingSelection(ctx))}}, nil
 }
 
+// invalidSectionKey explains why key cannot name a section of kind, or is
+// empty when it can: a cluster section's key is its index, and a genre
+// section's key is the genre's name as text.
+func invalidSectionKey(kind, key string) string {
+	switch kind {
+	case recommendations.SectionKindCluster:
+		if idx, err := strconv.Atoi(key); err != nil || idx < 0 {
+			return "a cluster section's key is its index, a whole number from 0"
+		}
+	case recommendations.SectionKindGenre:
+		if !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
+			return "a genre section's key is the genre's name"
+		}
+	}
+	return ""
+}
+
 func (reg *Registry) listSimilar(ctx context.Context, in *SimilarInput) (*CatalogItemCollectionOutput, error) {
 	return reg.recommendationCards(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.SectionItemView, error) {
-		return svc.SimilarCards(ctx, userID, profileID, in.ItemID, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
+		return svc.SimilarCards(ctx, userID, profileID, in.ItemID, in.Limit, recommendationFilter(ctx, in.ArtworkQuery))
 	})
 }
 
 func (reg *Registry) listSimilarUsersLiked(ctx context.Context, in *SimilarUsersInput) (*CatalogItemCollectionOutput, error) {
 	return reg.recommendationCards(ctx, func(svc RecommendationService, userID int, profileID string) ([]handlers.SectionItemView, error) {
-		return svc.SimilarUsersCards(ctx, userID, profileID, in.Limit, handlers.AccessFilterFromContext(ctx, ""))
+		return svc.SimilarUsersCards(ctx, userID, profileID, in.Limit, recommendationFilter(ctx, in.ArtworkQuery))
 	})
 }
 
@@ -420,7 +459,7 @@ func (reg *Registry) listTasteSeedItems(ctx context.Context, cursors *Cursors, i
 	if p != nil {
 		return nil, p
 	}
-	views, candidates, err := svc.TasteSeedItems(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Limit, offset)
+	views, candidates, err := svc.TasteSeedItems(ctx, userID, profileID, recommendationFilter(ctx, in.ArtworkQuery), in.Limit, offset)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -473,7 +512,7 @@ func (reg *Registry) getWatchTonight(ctx context.Context, in *WatchTonightInput)
 	if p != nil {
 		return nil, p
 	}
-	view, err := svc.WatchTonight(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Limit)
+	view, err := svc.WatchTonight(ctx, userID, profileID, recommendationFilter(ctx, in.ArtworkQuery), in.Limit)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -507,7 +546,10 @@ func (reg *Registry) listWatchTonightCards(ctx context.Context, in *WatchTonight
 			excludeIDs[id] = struct{}{}
 		}
 	}
-	view := svc.WatchTonightCards(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Mode, genres, excludeIDs, in.Limit)
+	view, err := svc.WatchTonightCards(ctx, userID, profileID, recommendationFilter(ctx, in.ArtworkQuery), in.Mode, genres, excludeIDs, in.Limit)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
 	remaining := max(0, watchTonightExclusionLimit-len(excludeIDs))
 	if len(view.Cards) > remaining {
 		view.Cards = view.Cards[:remaining]
@@ -552,4 +594,13 @@ func watchTonightGenres(raw []string) ([]string, *Problem) {
 		genres = append(genres, g)
 	}
 	return genres, nil
+}
+
+// recommendationFilter is the viewer filter a recommendation read resolves
+// under, carrying the request's artwork sizes.
+func recommendationFilter(ctx context.Context, q ArtworkQuery) catalogsvc.AccessFilter {
+	filter := handlers.AccessFilterFromContext(ctx, "")
+	art := q.Artwork()
+	filter.ImageSize, filter.ImageWidths = art.Size, art.Widths
+	return filter
 }

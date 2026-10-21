@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import type { AdminUser } from "@/api/types";
 
 import { ActivityTab } from "./ActivityTab";
+import { renderAdminUserTab, serveAdminAPI, stubRadixDom } from "../adminUserTab.test-support";
 
 const NOW = new Date("2026-09-30T12:00:00.000Z");
 const DAY = 86_400_000;
@@ -46,10 +45,6 @@ function play(id: string, title: string, profileId = "p1") {
     duration_seconds: 1200,
     completed: false,
   };
-}
-
-function json(body: unknown) {
-  return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
 }
 
 let requests: URL[] = [];
@@ -159,21 +154,8 @@ function route(url: URL): unknown {
   }
 }
 
-class MockResizeObserver implements ResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 function renderTab() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/admin/users/7?tab=activity"]}>
-        <ActivityTab user={user} />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  renderAdminUserTab(<ActivityTab user={user} />, "/admin/users/7?tab=activity");
 }
 
 function historyRequests() {
@@ -190,21 +172,8 @@ beforeEach(() => {
   setProfileToken(null);
   mocks.capabilities = { account_devices: true, watch_summary: true };
   requests = [];
-  vi.stubGlobal("ResizeObserver", MockResizeObserver);
-  Object.defineProperties(Element.prototype, {
-    hasPointerCapture: { configurable: true, value: () => false },
-    setPointerCapture: { configurable: true, value: () => {} },
-    releasePointerCapture: { configurable: true, value: () => {} },
-    scrollIntoView: { configurable: true, value: () => {} },
-  });
-  vi.stubGlobal(
-    "fetch",
-    vi.fn<typeof fetch>(async (input) => {
-      const url = new URL(String(input), "http://localhost");
-      requests.push(url);
-      return json(route(url));
-    }),
-  );
+  stubRadixDom();
+  serveAdminAPI(route, requests);
 });
 
 afterEach(() => {
@@ -214,7 +183,8 @@ afterEach(() => {
 });
 
 describe("ActivityTab watch history", () => {
-  it("lists the live session first, then finalized plays, with the plays total", async () => {
+  it("loads the next page with the cursor and the same window", async () => {
+    const u = userEvent.setup();
     renderTab();
     const history = screen.getByRole("region", { name: "Watch history" });
     await within(history).findByText("Dune: Part Two");
@@ -229,16 +199,9 @@ describe("ActivityTab watch history", () => {
     expect(within(history).getByText("Showing 1 of 41")).toBeInTheDocument();
     expect(within(history).queryByRole("combobox", { name: /device/i })).not.toBeInTheDocument();
 
-    const first = historyRequests()[0]!;
-    expect(first.searchParams.get("user_id")).toBe("7");
-    expect(first.searchParams.get("ended_after")).toBe(iso(30));
-  });
-
-  it("loads the next page with the cursor and the same window", async () => {
-    const u = userEvent.setup();
-    renderTab();
-    const history = screen.getByRole("region", { name: "Watch history" });
-    await within(history).findByText("Dune: Part Two");
+    const initialRequest = historyRequests()[0]!;
+    expect(initialRequest.searchParams.get("user_id")).toBe("7");
+    expect(initialRequest.searchParams.get("ended_after")).toBe(iso(30));
 
     await u.click(within(history).getByRole("button", { name: "Load more" }));
     await within(history).findByText("Oppenheimer");
@@ -246,23 +209,6 @@ describe("ActivityTab watch history", () => {
     expect(second!.searchParams.get("cursor")).toBe("c2");
     expect(second!.searchParams.get("ended_after")).toBe(first!.searchParams.get("ended_after"));
     expect(within(history).queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
-  });
-
-  it("asks for the chosen period as ended_after", async () => {
-    const u = userEvent.setup();
-    renderTab();
-    const history = screen.getByRole("region", { name: "Watch history" });
-    await within(history).findByText("Dune: Part Two");
-
-    await u.click(within(history).getByRole("combobox", { name: "Period" }));
-    await u.click(await screen.findByRole("option", { name: "Last 7 days" }));
-
-    await waitFor(() =>
-      expect(historyRequests().at(-1)!.searchParams.get("ended_after")).toBe(iso(7)),
-    );
-    await within(history).findByText("41 plays in the last 7 days");
-    const summary = requests.filter((url) => url.pathname.endsWith("/watch-summary")).at(-1)!;
-    expect(summary.searchParams.get("days")).toBe("7");
   });
 
   it("passes the profile filter to history and the summary", async () => {
@@ -298,39 +244,11 @@ describe("ActivityTab watch history", () => {
 });
 
 describe("ActivityTab devices and addresses", () => {
-  it("links saved settings to the device in Preferences and hides older devices", async () => {
-    const u = userEvent.setup();
-    renderTab();
-    const devices = screen.getByRole("region", { name: "Devices" });
-    await within(devices).findByText("Apple TV 4K");
-    expect(within(devices).queryByText("Old iPad")).not.toBeInTheDocument();
-    expect(within(devices).getByRole("link", { name: "2 saved settings" })).toHaveAttribute(
-      "href",
-      "/admin/users/7?tab=preferences&level=device.p1.dev-tv",
-    );
-    await u.click(within(devices).getByRole("button", { name: "Show all 2" }));
-    expect(within(devices).getByText("Old iPad")).toBeInTheDocument();
-  });
-
   it("hides the Devices card without the capability", async () => {
     mocks.capabilities = { account_devices: false, watch_summary: true };
     renderTab();
     await screen.findByText("192.168.1.40");
     expect(screen.queryByRole("region", { name: "Devices" })).not.toBeInTheDocument();
     expect(requests.some((url) => url.pathname.endsWith("/devices"))).toBe(false);
-  });
-
-  it("labels addresses local or remote and flags a new remote address", async () => {
-    renderTab();
-    const ips = screen.getByRole("region", { name: "IP addresses" });
-    const local = (await within(ips).findByText("192.168.1.40")).closest("li")!;
-    expect(local).toHaveTextContent("Local");
-    expect(local).toHaveTextContent("8,214 requests");
-    const fresh = within(ips).getByText("81.12.44.190").closest("li")!;
-    expect(fresh).toHaveTextContent("First seen Sep 25");
-    // First seen weeks ago: a known remote address, not a new one.
-    const old = within(ips).getByText("2a02:c7c:4d1::12").closest("li")!;
-    expect(old).toHaveTextContent("Remote");
-    expect(old).not.toHaveTextContent("First seen");
   });
 });

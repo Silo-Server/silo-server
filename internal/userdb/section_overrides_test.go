@@ -1,7 +1,6 @@
 package userdb
 
 import (
-	"database/sql"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -16,15 +15,7 @@ import (
 // columns, so the resolver later saw IsUserAdded=false on every load and
 // dropped the section.
 func TestSectionOverrideUserAddedFieldsRoundTrip(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer db.Close()
-
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSchemaDB(t)
 
 	in := []userstore.SectionOverride{
 		{

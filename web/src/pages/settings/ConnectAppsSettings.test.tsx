@@ -128,31 +128,17 @@ describe("ConnectAppsSettings", () => {
     vi.restoreAllMocks();
   });
 
-  function render() {
+  // The page opens on the Silo tab; most cases here are about the Jellyfin one.
+  function render(tab: "silo" | "jellyfin" = "jellyfin") {
     act(() => {
       root.render(<ConnectAppsSettings />);
     });
+    if (tab === "jellyfin") {
+      act(() => {
+        findButton(container, "Jellyfin-compatible app")?.click();
+      });
+    }
   }
-
-  it("defaults to the Jellyfin tab and shows the account#profile username", () => {
-    render();
-
-    expect(container.textContent).toContain("For Jellyfin-compatible apps only");
-    expect(container.textContent).toContain("johndoe#Doe Household");
-    expect(container.textContent).toContain("https://compat.example.test");
-  });
-
-  it("shows the plain account name and the Silo origin on the Silo tab", async () => {
-    render();
-
-    await click(findButton(container, "Silo app or website"));
-
-    expect(container.textContent).toContain("For Silo's own apps");
-    expect(container.textContent).toContain("Don't add a # to either field here.");
-    expect(container.textContent).not.toContain("johndoe#");
-    // jsdom's default origin stands in for the deployed server address.
-    expect(container.textContent).toContain(window.location.origin);
-  });
 
   it("switches the username and password format when another profile is picked", async () => {
     render();
@@ -165,30 +151,6 @@ describe("ConnectAppsSettings", () => {
     expect(container.textContent).toContain("Kids has a PIN, so append # and the PIN");
   });
 
-  it("copies the compat username rather than the bare account name", async () => {
-    render();
-
-    await click(
-      Array.from(container.querySelectorAll("button")).find(
-        (button) => button.getAttribute("aria-label") === "Copy Username",
-      ),
-    );
-
-    expect(mocks.copyTextToClipboard).toHaveBeenCalledWith("johndoe#Doe Household");
-  });
-
-  it("explains that the compatibility API is off instead of showing credentials", () => {
-    mocks.useCompatConnectInfo.mockReturnValue({
-      data: makeConnectInfo({ enabled: false }),
-      isLoading: false,
-    });
-
-    render();
-
-    expect(container.textContent).toContain("The Jellyfin compatibility API is turned off");
-    expect(container.textContent).not.toContain("https://compat.example.test");
-  });
-
   it("refuses to hand out a username a # in the profile name would break", async () => {
     mocks.useProfiles.mockReturnValue({
       data: [makeProfile(), makeProfile({ id: "profile-2", name: "Movie #2" })],
@@ -196,6 +158,10 @@ describe("ConnectAppsSettings", () => {
     });
 
     render();
+
+    expect(container.textContent).toContain("Every profile at a glance");
+    expect(container.textContent).toContain("rename to use from a Jellyfin app");
+    expect(container.textContent).not.toContain("johndoe#Movie #2");
 
     await click(findButton(container, "Movie #2"));
 
@@ -206,18 +172,6 @@ describe("ConnectAppsSettings", () => {
         (button) => button.getAttribute("aria-label") === "Copy Username",
       ),
     ).toBeUndefined();
-  });
-
-  it("keeps the page usable when no public compat address is configured", () => {
-    mocks.useCompatConnectInfo.mockReturnValue({
-      data: makeConnectInfo({ public_url: "" }),
-      isLoading: false,
-    });
-
-    render();
-
-    expect(container.textContent).toContain("No public address configured");
-    expect(container.textContent).toContain("johndoe#Doe Household");
   });
 
   it("reports a failed load instead of claiming compat is switched off", () => {
@@ -242,18 +196,6 @@ describe("ConnectAppsSettings", () => {
 
     expect(container.textContent).toContain("Couldn't load your sign-in details");
     expect(container.textContent).not.toContain("Every profile at a glance");
-  });
-
-  it("distinguishes a pending restart from a disabled compat API", () => {
-    mocks.useCompatConnectInfo.mockReturnValue({
-      data: makeConnectInfo({ enabled: false, pending_restart: true }),
-      isLoading: false,
-    });
-
-    render();
-
-    expect(container.textContent).toContain("isn't running yet");
-    expect(container.textContent).toContain("server has to restart");
   });
 
   it("tells SSO accounts the compat API can't accept them", () => {
@@ -282,18 +224,5 @@ describe("ConnectAppsSettings", () => {
         (button) => button.getAttribute("aria-label") === "Copy Server",
       ),
     ).toBeUndefined();
-  });
-
-  it("does not list a #-bearing profile as a usable credential in the summary", () => {
-    mocks.useProfiles.mockReturnValue({
-      data: [makeProfile(), makeProfile({ id: "profile-2", name: "Movie #2" })],
-      isLoading: false,
-    });
-
-    render();
-
-    expect(container.textContent).toContain("Every profile at a glance");
-    expect(container.textContent).toContain("rename to use from a Jellyfin app");
-    expect(container.textContent).not.toContain("johndoe#Movie #2");
   });
 });

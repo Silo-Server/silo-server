@@ -78,3 +78,42 @@ func TestRequestSchemeTrustBoundary(t *testing.T) {
 		t.Fatal("invalid peer trusted")
 	}
 }
+
+func TestRequestHostTrustBoundary(t *testing.T) {
+	cidrs, err := ParseCIDRs("127.0.0.0/8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewResolver(cidrs)
+	for _, tc := range []struct {
+		name, peer string
+		values     []string
+		want       string
+	}{
+		{"trusted", "127.0.0.1:80", []string{"silo.example.com"}, "silo.example.com"},
+		{"trusted with port", "127.0.0.1:80", []string{" silo.example.com:8443 "}, "silo.example.com:8443"},
+		{"untrusted", "192.0.2.1:80", []string{"hostile.example"}, "example.test:8080"},
+		{"no header", "127.0.0.1:80", nil, "example.test:8080"},
+		{"repeated", "127.0.0.1:80", []string{"a.example", "b.example"}, "example.test:8080"},
+		{"list", "127.0.0.1:80", []string{"a.example, b.example"}, "example.test:8080"},
+		{"empty", "127.0.0.1:80", []string{""}, "example.test:8080"},
+		{"path", "127.0.0.1:80", []string{"a.example/x"}, "example.test:8080"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "http://example.test:8080/", nil)
+			req.RemoteAddr = tc.peer
+			req.Header["X-Forwarded-Host"] = tc.values
+			Middleware(resolver)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				if got := RequestHost(r); got != tc.want {
+					t.Fatalf("host=%q want %q", got, tc.want)
+				}
+			})).ServeHTTP(httptest.NewRecorder(), req)
+		})
+	}
+	// Without the middleware, forwarding headers are never consulted.
+	req := httptest.NewRequest("GET", "http://example.test:8080/", nil)
+	req.Header.Set("X-Forwarded-Host", "hostile.example")
+	if got := RequestHost(req); got != "example.test:8080" {
+		t.Fatalf("without middleware host=%q", got)
+	}
+}

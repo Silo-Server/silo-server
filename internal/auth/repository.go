@@ -34,7 +34,7 @@ func IsDuplicate(err error) bool {
 // CheckPassword verifies a plaintext password against the user's bcrypt hash.
 // This is a standalone function, not a repository method.
 func CheckPassword(user *models.User, password string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
+	err := comparePasswordHash([]byte(user.PasswordHash), []byte(password))
 	return err == nil
 }
 
@@ -53,7 +53,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 const allColumns = `id, email, username, password_hash, local_password_login_enabled, password_change_required, role, permissions, enabled,
 	library_ids, max_playback_quality, access_policy_revision,
 	max_streams, max_transcodes, max_remote_stream_bitrate_kbps, max_local_stream_bitrate_kbps, transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed,
-	download_transcode_allowed, requests_allowed, access_group_id, is_owner, created_at, updated_at`
+	download_transcode_allowed, requests_allowed, access_group_id, is_owner, break_glass, created_at, updated_at`
 
 // scanUser scans a single row into a *models.User.
 func scanUser(row pgx.Row) (*models.User, error) {
@@ -83,6 +83,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.RequestsAllowed,
 		&u.AccessGroupID,
 		&u.IsOwner,
+		&u.BreakGlass,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
@@ -125,6 +126,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.RequestsAllowed,
 			&u.AccessGroupID,
 			&u.IsOwner,
+			&u.BreakGlass,
 			&u.CreatedAt,
 			&u.UpdatedAt,
 		)
@@ -147,7 +149,7 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 func createUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, input models.CreateUserInput) (*models.User, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), passwordHashCost)
 	if err != nil {
 		return nil, fmt.Errorf("hashing password: %w", err)
 	}
@@ -172,7 +174,7 @@ func createUser(ctx context.Context, db interface {
 	cols := []string{
 		"email", "username", "password_hash", "local_password_login_enabled", "password_change_required", "role", "permissions",
 		"library_ids", "max_playback_quality", "max_streams", "max_transcodes", "max_remote_stream_bitrate_kbps", "max_local_stream_bitrate_kbps",
-		"transcode_allowed", "audio_transcode_allowed", "download_allowed", "download_transcode_allowed",
+		"transcode_allowed", "audio_transcode_allowed", "max_profiles", "download_allowed", "download_transcode_allowed",
 		"requests_allowed",
 	}
 	args := []any{
@@ -191,16 +193,12 @@ func createUser(ctx context.Context, db interface {
 		input.MaxLocalStreamBitrateKbps,
 		input.TranscodeAllowed,
 		input.AudioTranscodeAllowed,
+		input.MaxProfiles,
 		input.DownloadAllowed,
 		input.DownloadTranscodeAllowed,
 		input.RequestsAllowed,
 	}
 
-	// Optional columns: nil means use DB default.
-	if input.MaxProfiles != nil {
-		cols = append(cols, "max_profiles")
-		args = append(args, *input.MaxProfiles)
-	}
 	accessGroupID := input.AccessGroupID
 	if input.Role == models.RoleAdmin {
 		accessGroupID = nil
@@ -211,9 +209,9 @@ func createUser(ctx context.Context, db interface {
 	}
 
 	// Build placeholders: $1, $2, ..., $N
-	placeholders := make([]string, len(args))
+	placeholders := make([]string, 0, len(args)+1)
 	for i := range args {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
 	}
 	// Admins stay ungrouped: scope/action decisions are role-blind, so the
 	// default group's ceilings would cap the server owner (mirrors the
@@ -375,7 +373,7 @@ func updateUser(ctx context.Context, db interface {
 	}
 	var passwordHash *string
 	if input.Password != nil {
-		hash, err := bcrypt.GenerateFromPassword([]byte(*input.Password), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(*input.Password), passwordHashCost)
 		if err != nil {
 			return fmt.Errorf("hashing password: %w", err)
 		}
@@ -416,10 +414,11 @@ func updateUser(ctx context.Context, db interface {
 		{column: "max_local_stream_bitrate_kbps", set: input.MaxLocalStreamBitrateKbps.Set, value: input.MaxLocalStreamBitrateKbps.Value},
 		{column: "transcode_allowed", set: input.TranscodeAllowed.Set, value: input.TranscodeAllowed.Value},
 		{column: "audio_transcode_allowed", set: input.AudioTranscodeAllowed.Set, value: input.AudioTranscodeAllowed.Value},
-		{column: "max_profiles", set: input.MaxProfiles != nil, value: input.MaxProfiles},
+		{column: "max_profiles", set: input.MaxProfiles.Set, value: input.MaxProfiles.Value},
 		{column: "download_allowed", set: input.DownloadAllowed.Set, value: input.DownloadAllowed.Value},
 		{column: "download_transcode_allowed", set: input.DownloadTranscodeAllowed.Set, value: input.DownloadTranscodeAllowed.Value},
 		{column: "requests_allowed", set: input.RequestsAllowed.Set, value: input.RequestsAllowed.Value},
+		breakGlassUpdateColumn(input),
 	}
 
 	setClauses := []string{}
@@ -502,6 +501,22 @@ func updateUser(ctx context.Context, db interface {
 	return nil
 }
 
+// breakGlassUpdateColumn writes the break-glass flag when the update names
+// it, and clears it when the update moves the account off the admin role,
+// which users_break_glass_admin would otherwise refuse.
+func breakGlassUpdateColumn(input models.UpdateUserInput) userUpdateColumn {
+	demoting := input.Role != nil && *input.Role != models.RoleAdmin
+	switch {
+	case demoting:
+		return userUpdateColumn{column: columnBreakGlass, set: true, value: false}
+	case input.BreakGlass != nil:
+		return userUpdateColumn{column: columnBreakGlass, set: true, value: *input.BreakGlass}
+	}
+	return userUpdateColumn{column: columnBreakGlass}
+}
+
+const columnBreakGlass = "break_glass"
+
 // updateCurrentRole returns account id's role before an update that sets
 // one, and "" for an update that leaves the role alone.
 func updateCurrentRole(ctx context.Context, db interface {
@@ -570,7 +585,7 @@ func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, e
 }
 
 func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, keepSessionID *string) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), passwordHashCost)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
 	}
@@ -746,6 +761,9 @@ func (r *UserRepository) CreateInvited(ctx context.Context, input models.CreateU
 		return nil, fmt.Errorf("beginning invited account: %w", err)
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	if err := EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx); err != nil {
+		return nil, err
+	}
 	if err := redeemCode(ctx, tx, code); err != nil {
 		return nil, err
 	}

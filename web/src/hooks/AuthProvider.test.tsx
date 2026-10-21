@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { LoginResponse, Profile } from "@/api/types";
 import { v2Fixture } from "@/api/v2/testing";
-import listAuthProvidersOk from "../../../contracts/api/v2/fixtures/list_auth_providers_ok.json";
 import { storage } from "@/utils/storage";
+import { queryClient } from "@/lib/query-client";
+import { wasSignedOut } from "@/lib/externalSignIn";
 import { AuthProvider, useAuth } from "./useAuth";
 
 const apiMock = vi.hoisted(() => vi.fn());
@@ -21,6 +22,7 @@ const setRefreshTokenMock = vi.hoisted(() => vi.fn());
 const queryClientClearMock = vi.hoisted(() => vi.fn());
 const refreshAuthenticationMock = vi.hoisted(() => vi.fn());
 const v2Mock = vi.hoisted(() => vi.fn());
+const endSessionWithProviderMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock("@/api/client", async () => {
   const actual = await vi.importActual<typeof import("@/api/client")>("@/api/client");
@@ -50,11 +52,19 @@ vi.mock("@/api/v2/request", async () => {
   return { ...actual, v2: v2Mock };
 });
 
-vi.mock("@/lib/query-client", () => ({
-  queryClient: {
-    clear: queryClientClearMock,
-  },
+vi.mock("@/api/v2/providerLogout", () => ({
+  endSessionWithProvider: endSessionWithProviderMock,
 }));
+
+vi.mock("@/lib/query-client", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/query-client")>("@/lib/query-client");
+  const clear = actual.queryClient.clear.bind(actual.queryClient);
+  actual.queryClient.clear = () => {
+    queryClientClearMock();
+    clear();
+  };
+  return actual;
+});
 
 function makeProfile(id: string, name: string): Profile {
   return {
@@ -82,16 +92,6 @@ function makeProfile(id: string, name: string): Profile {
 
 function renderWithAuthProvider(children: ReactNode) {
   return render(<AuthProvider>{children}</AuthProvider>);
-}
-
-function ProviderProbe() {
-  const { providers, setupLoading } = useAuth();
-
-  return (
-    <div data-testid="providers">
-      {setupLoading ? "loading" : providers.map((entry) => `${entry.id}:${entry.mode}`).join(",")}
-    </div>
-  );
 }
 
 function ProfileSelectionProbe() {
@@ -139,6 +139,18 @@ function AccountProbe() {
   );
 }
 
+function SignOutProbe() {
+  const { user, loading, completeLogin, logout, logoutOfSiloOnly } = useAuth();
+  return (
+    <div>
+      <div data-testid="signed-in-user">{loading ? "loading" : (user?.username ?? "none")}</div>
+      <button onClick={() => completeLogin(makeSession(1, "laura"))}>Sign in as laura</button>
+      <button onClick={logout}>Sign out</button>
+      <button onClick={logoutOfSiloOnly}>Switch account</button>
+    </div>
+  );
+}
+
 function TemporaryPasswordProbe() {
   const { user, pendingPasswordChange, loading, completeLogin, settleTemporaryPassword } =
     useAuth();
@@ -169,6 +181,8 @@ function AccountRefreshProbe() {
 
 describe("AuthProvider", () => {
   beforeEach(() => {
+    queryClientClearMock.mockReset();
+    queryClient.clear();
     vi.clearAllMocks();
     Object.values(storage.KEYS).forEach((key) => storage.remove(key));
 
@@ -182,33 +196,11 @@ describe("AuthProvider", () => {
         );
       }
       if (key === "GET /api/v2/auth/providers") {
-        return Promise.resolve(v2Fixture<"GET /api/v2/auth/providers">({ items: [] }));
-      }
-      return Promise.reject(new Error(`unexpected v2 call: ${key}`));
-    });
-  });
-
-  it("preserves OAuth login providers returned by the auth providers endpoint", async () => {
-    v2Mock.mockImplementation((key: string) => {
-      if (key === "GET /api/v2/system/setup") {
         return Promise.resolve(
-          v2Fixture<"GET /api/v2/system/setup">({ needs_setup: false, wizard_completed: false }),
+          v2Fixture<"GET /api/v2/auth/providers">({ items: [], password_login: true }),
         );
       }
-      if (key === "GET /api/v2/auth/providers") {
-        return Promise.resolve(v2Fixture<"GET /api/v2/auth/providers">(listAuthProvidersOk));
-      }
       return Promise.reject(new Error(`unexpected v2 call: ${key}`));
-    });
-    apiMock.mockImplementation((path: string) =>
-      Promise.reject(new Error(`unexpected API call: ${path}`)),
-    );
-
-    renderWithAuthProvider(<ProviderProbe />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("providers")).toHaveTextContent("local:credentials");
-      expect(screen.getByTestId("providers")).toHaveTextContent("plugin-3:oauth");
     });
   });
 
@@ -431,5 +423,39 @@ describe("AuthProvider", () => {
     expect(screen.getByTestId("signed-in-user")).toHaveTextContent("sam");
     // Cleared while laura was still rendered: none of sam's reads had started.
     expect(shownAtClear).toEqual(["laura"]);
+  });
+
+  it("signs out of the provider too, except when switching account, and marks the tab", async () => {
+    window.sessionStorage.clear();
+    getAccessTokenMock.mockReturnValue("access-1");
+    renderWithAuthProvider(<SignOutProbe />);
+    await waitFor(() => expect(screen.getByTestId("signed-in-user")).toHaveTextContent("none"));
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign in as laura" }).click();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign out" }).click();
+    });
+    expect(screen.getByTestId("signed-in-user")).toHaveTextContent("none");
+    expect(endSessionWithProviderMock).toHaveBeenLastCalledWith("access-1", undefined, {
+      withProvider: true,
+    });
+    // The login page must not send this tab straight back to the provider.
+    expect(wasSignedOut()).toBe(true);
+
+    // The next sign-in clears the mark.
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign in as laura" }).click();
+    });
+    expect(wasSignedOut()).toBe(false);
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Switch account" }).click();
+    });
+    expect(endSessionWithProviderMock).toHaveBeenLastCalledWith("access-1", undefined, {
+      withProvider: false,
+    });
+    expect(wasSignedOut()).toBe(true);
   });
 });

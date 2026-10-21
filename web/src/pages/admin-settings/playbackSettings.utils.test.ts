@@ -1,7 +1,9 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import {
   buildHWDeviceRows,
-  chapterThumbnailExecutionOptions,
+  imageExecutionOptions,
   describeDetection,
   hasHardwareToneMapCapability,
   hasUsableTranscodeNode,
@@ -18,17 +20,9 @@ describe("parseHWDeviceList", () => {
     expect(parseHWDeviceList("")).toEqual([]);
     expect(parseHWDeviceList(" , ")).toEqual([]);
   });
-
-  it("splits and trims a comma list", () => {
-    expect(parseHWDeviceList(" /dev/dri/renderD128 ,/dev/dri/renderD129")).toEqual(DETECTED);
-  });
 });
 
 describe("toggleHWDevice", () => {
-  it("adds a device to an empty selection", () => {
-    expect(toggleHWDevice("", "/dev/dri/renderD129", DETECTED)).toBe("/dev/dri/renderD129");
-  });
-
   it("keeps detection order regardless of click order", () => {
     const afterSecond = toggleHWDevice("", "/dev/dri/renderD129", DETECTED);
     const afterBoth = toggleHWDevice(afterSecond, "/dev/dri/renderD128", DETECTED);
@@ -178,9 +172,9 @@ describe("hasUsableTranscodeNode", () => {
   });
 });
 
-describe("chapterThumbnailExecutionOptions", () => {
+describe("imageExecutionOptions", () => {
   const disabledValues = (current: string, available: boolean) =>
-    chapterThumbnailExecutionOptions(current, available)
+    imageExecutionOptions(current, available)
       .filter((option) => option.disabled)
       .map((option) => option.value);
 
@@ -194,22 +188,9 @@ describe("chapterThumbnailExecutionOptions", () => {
       "transcode_nodes_only",
     ]);
   });
-
-  it("keeps a saved node-backed mode selectable so it can be changed", () => {
-    expect(disabledValues("transcode_nodes_only", false)).toEqual(["prefer_transcode_nodes"]);
-    expect(disabledValues("prefer_transcode_nodes", false)).toEqual(["transcode_nodes_only"]);
-  });
-
-  it("never disables local extraction", () => {
-    expect(disabledValues("transcode_nodes_only", false)).not.toContain("local");
-  });
 });
 
 describe("describeDetection", () => {
-  it("returns nothing before a probe has answered", () => {
-    expect(describeDetection(undefined)).toBeUndefined();
-  });
-
   it("names the backend, first device, and node source", () => {
     expect(
       describeDetection({

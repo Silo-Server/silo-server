@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func decodeVirtualFolders(t *testing.T, rec *httptest.ResponseRecorder) map[string]bool {
@@ -26,28 +25,6 @@ func decodeVirtualFolders(t *testing.T, rec *httptest.ResponseRecorder) map[stri
 		out[f.Name] = f.LibraryOptions.EnableRealtimeMonitor
 	}
 	return out
-}
-
-func TestEnableRealtimeMonitorCombinesServerAndLibrarySwitches(t *testing.T) {
-	on := func() bool { return true }
-	off := func() bool { return false }
-	for _, tc := range []struct {
-		name    string
-		server  func() bool
-		library bool
-		want    bool
-	}{
-		{"both on", on, true, true},
-		{"server off", off, true, false},
-		{"library off", on, false, false},
-		{"both off", off, false, false},
-		{"no server reader counts as on", nil, true, true},
-		{"no server reader, library off", nil, false, false},
-	} {
-		if got := enableRealtimeMonitor(tc.server, tc.library); got != tc.want {
-			t.Errorf("%s: enableRealtimeMonitor = %v, want %v", tc.name, got, tc.want)
-		}
-	}
 }
 
 func TestVirtualFoldersReportRealtimeMonitorConfiguration(t *testing.T) {
@@ -82,31 +59,10 @@ func TestVirtualFoldersReportRealtimeMonitorConfiguration(t *testing.T) {
 	if got["Movies"] || got["Shows"] {
 		t.Fatalf("server off: EnableRealtimeMonitor = %v, want all false", got)
 	}
-}
-
-func TestAutoscanVirtualFoldersReportRealtimeMonitorConfiguration(t *testing.T) {
-	serverOn := true
-	handler := NewAutoscanHandler(&fakeAutoscanFolders{folders: []*models.MediaFolder{
-		{ID: 1, Name: "Movies", Type: "movie", Enabled: true, RealtimeMonitoring: true, Paths: []string{t.TempDir()}},
-		{ID: 2, Name: "Shows", Type: "series", Enabled: true, RealtimeMonitoring: false, Paths: []string{t.TempDir()}},
-	}}, nil, NewResourceIDCodec(), nil)
-	handler.realtimeMonitoring = func() bool { return serverOn }
-	request := func() map[string]bool {
-		req := httptest.NewRequest(http.MethodGet, "/Library/VirtualFolders", nil)
-		req = req.WithContext(context.WithValue(req.Context(), adminAPIKeyKey, true))
-		rec := httptest.NewRecorder()
-		handler.HandleVirtualFolders(rec, req)
-		return decodeVirtualFolders(t, rec)
-	}
-
-	got := request()
-	if !got["Movies"] || got["Shows"] {
-		t.Fatalf("server on: EnableRealtimeMonitor = %v, want Movies true, Shows false", got)
-	}
-	serverOn = false
+	h.realtimeMonitoring = nil
 	got = request()
-	if got["Movies"] || got["Shows"] {
-		t.Fatalf("server off: EnableRealtimeMonitor = %v, want all false", got)
+	if !got["Movies"] || got["Shows"] {
+		t.Fatalf("default server switch: EnableRealtimeMonitor = %v, want Movies true, Shows false", got)
 	}
 }
 

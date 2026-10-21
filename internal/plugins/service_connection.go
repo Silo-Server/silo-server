@@ -9,13 +9,22 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 var ErrConnectionTestUnsupported = errors.New("plugin connection test unsupported")
+
+// Capability types a connection check can probe.
+const (
+	metadataProviderCapability = "metadata_provider.v1"
+	markerProviderCapability   = "marker_provider.v1"
+)
 
 type ConnectionTestError struct {
 	Message string
@@ -36,16 +45,19 @@ func (e *ConnectionTestError) Unwrap() error {
 	return e.Cause
 }
 
-var runPluginConnectionCheck = func(
+func runPluginConnectionCheck(
 	ctx context.Context,
 	client pluginClient,
 	manifest *pluginv1.PluginManifest,
 ) error {
-	capabilityID, err := metadataProviderConnectionCheckCapabilityID(manifest)
+	capability, err := connectionCheckCapability(manifest)
 	if err != nil {
 		return err
 	}
-	capability := metadataProviderConnectionCheckCapability(manifest, capabilityID)
+	capabilityID := capability.GetId()
+	if capability.GetType() == markerProviderCapability {
+		return runMarkerProviderConnectionCheck(ctx, client, capabilityID)
+	}
 	if !metadataProviderSupportsConnectionProbe(capability, "movie") {
 		slog.DebugContext(ctx,
 			"skipping metadata provider connection check for unsupported probe type", "component", "plugins",
@@ -113,37 +125,13 @@ func (s *Service) TestGlobalConfigWithClears(
 		return err
 	}
 
-	if value == nil {
-		value = map[string]any{}
-	}
-	submitted := value
-	secretFields := GlobalConfigSecretFields(manifest, key)
-	secretPaths := GlobalConfigSecretPaths(manifest, key)
-	clearSet, err := validatedSecretClearSet(key, secretFields, clearSecrets)
-	if err != nil {
+	value, err = s.prepareStagedGlobalConfig(ctx, installationID, manifest, key, value, clearSecrets, func(err error) error {
 		return &ConnectionTestError{Message: err.Error(), Cause: err}
-	}
-	value, err = s.preserveStoredSecrets(
-		ctx,
-		installationID,
-		key,
-		value,
-		secretPaths,
-	)
+	})
 	if err != nil {
 		return err
 	}
-	for field := range clearSet {
-		delete(value, field)
-	}
-	projection := globalConfigValidationProjection(manifest, key, value, submitted)
-	if err := ValidateGlobalConfigValue(manifest, key, projection); err != nil {
-		return &ConnectionTestError{
-			Message: err.Error(),
-			Cause:   err,
-		}
-	}
-	if _, err := metadataProviderConnectionCheckCapabilityID(manifest); err != nil {
+	if _, err := connectionCheckCapability(manifest); err != nil {
 		return err
 	}
 
@@ -180,27 +168,66 @@ func (s *Service) TestGlobalConfigWithClears(
 	return runPluginConnectionCheck(ctx, client, manifest)
 }
 
+// prepareStagedGlobalConfig applies one staged global config entry the way
+// a save would, without saving it: blank secret fields keep the stored
+// secret, clearSecrets drops stored ones, emptied declared fields are
+// cleared, and the result must validate.
+// invalid wraps a rejected entry in the caller's error type.
+func (s *Service) prepareStagedGlobalConfig(
+	ctx context.Context,
+	installationID int,
+	manifest *pluginv1.PluginManifest,
+	key string,
+	value map[string]any,
+	clearSecrets []string,
+	invalid func(error) error,
+) (map[string]any, error) {
+	if value == nil {
+		value = map[string]any{}
+	}
+	clearSet, err := validatedSecretClearSet(key, GlobalConfigSecretFields(manifest, key), clearSecrets)
+	if err != nil {
+		return nil, invalid(err)
+	}
+	merged, err := s.preserveStoredSecrets(ctx, installationID, key, value, GlobalConfigSecretPaths(manifest, key))
+	if err != nil {
+		return nil, err
+	}
+	if err := applyGlobalConfigClears(manifest, key, merged, value, clearSet); err != nil {
+		return nil, invalid(err)
+	}
+	return merged, nil
+}
+
+// storedGlobalConfigs returns copies of an installation's saved global
+// config entries by key.
+func (s *Service) storedGlobalConfigs(ctx context.Context, installationID int) (map[string]map[string]any, error) {
+	configsByKey := make(map[string]map[string]any)
+	if s.configs == nil {
+		return configsByKey, nil
+	}
+	configs, err := s.configs.ListGlobalConfigs(ctx, installationID)
+	if err != nil {
+		return nil, fmt.Errorf("list plugin runtime configs for installation %d: %w", installationID, err)
+	}
+	for _, config := range configs {
+		if config != nil {
+			configsByKey[config.Key] = cloneConfigMap(config.Value)
+		}
+	}
+	return configsByKey, nil
+}
+
 func (s *Service) mergedGlobalConfigEntries(
 	ctx context.Context,
 	installationID int,
 	key string,
 	value map[string]any,
 ) ([]*pluginv1.ConfigEntry, error) {
-	configsByKey := make(map[string]map[string]any)
-
-	if s.configs != nil {
-		configs, err := s.configs.ListGlobalConfigs(ctx, installationID)
-		if err != nil {
-			return nil, fmt.Errorf("list plugin runtime configs for installation %d: %w", installationID, err)
-		}
-		for _, config := range configs {
-			if config == nil {
-				continue
-			}
-			configsByKey[config.Key] = cloneConfigMap(config.Value)
-		}
+	configsByKey, err := s.storedGlobalConfigs(ctx, installationID)
+	if err != nil {
+		return nil, err
 	}
-
 	configsByKey[key] = cloneConfigMap(value)
 	return configEntriesFromValues(configsByKey, installationID)
 }
@@ -256,26 +283,47 @@ func cloneConfigMap(value map[string]any) map[string]any {
 	return cloned
 }
 
-func metadataProviderConnectionCheckCapabilityID(manifest *pluginv1.PluginManifest) (string, error) {
-	for _, capability := range manifest.GetCapabilities() {
-		if capability.GetType() != "metadata_provider.v1" {
-			continue
+// connectionCheckCapability picks the capability a connection check probes: the
+// plugin's first metadata provider, or else its first marker provider.
+func connectionCheckCapability(manifest *pluginv1.PluginManifest) (*pluginv1.CapabilityDescriptor, error) {
+	for _, capabilityType := range []string{metadataProviderCapability, markerProviderCapability} {
+		for _, capability := range manifest.GetCapabilities() {
+			if capability.GetType() == capabilityType {
+				return capability, nil
+			}
 		}
-		return capability.GetId(), nil
 	}
-	return "", &ConnectionTestError{
-		Message: "Connection checks are not supported for this plugin yet.",
+	return nil, &ConnectionTestError{
+		Message: connectionCheckUnsupportedMessage,
 		Cause:   ErrConnectionTestUnsupported,
 	}
 }
 
-func metadataProviderConnectionCheckCapability(
-	manifest *pluginv1.PluginManifest,
-	capabilityID string,
-) *pluginv1.CapabilityDescriptor {
-	for _, capability := range manifest.GetCapabilities() {
-		if capability.GetType() == "metadata_provider.v1" && capability.GetId() == capabilityID {
-			return capability
+const connectionCheckUnsupportedMessage = "Connection checks are not supported for this plugin yet."
+
+// runMarkerProviderConnectionCheck asks a marker provider for its account
+// statistics, which need the provider's credentials, so a success shows that
+// the staged settings authenticate. A provider without statistics has no
+// check to run.
+func runMarkerProviderConnectionCheck(ctx context.Context, client pluginClient, capabilityID string) error {
+	markerClient, err := client.MarkerProvider(capabilityID)
+	if err != nil {
+		return &ConnectionTestError{
+			Message: fmt.Sprintf("Failed to initialize the marker provider: %v", err),
+			Cause:   err,
+		}
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	if _, err := markerClient.GetMarkerProviderStats(probeCtx, &pluginv1.GetMarkerProviderStatsRequest{}); err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return &ConnectionTestError{Message: connectionCheckUnsupportedMessage, Cause: ErrConnectionTestUnsupported}
+		}
+		return &ConnectionTestError{
+			Message: "Connection check failed: " + status.Convert(err).Message(),
+			Cause:   err,
 		}
 	}
 	return nil

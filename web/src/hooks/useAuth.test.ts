@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiClientError } from "../api/client";
 import type { Profile, User } from "../api/types";
-import { V2ProblemError } from "../api/v2/request";
+import { V2ProblemError, V2TimeoutError } from "../api/v2/request";
 import {
   endImpersonationWithRecovery,
   getBootstrapProfile,
@@ -34,75 +34,21 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
 }
 
 describe("initializeAuthSession", () => {
-  it("bootstraps the access token before fetching the current user", async () => {
+  it.each([
+    ["a stale v1 session", new ApiClientError(401, "unauthorized", "expired")],
+    [
+      "a v2 401",
+      new V2ProblemError("getCurrentUser", {
+        type: "https://siloserver.org/docs/api/v2/problems/authentication_required",
+        title: "Authentication required",
+        status: 401,
+        detail: "expired",
+        instance: "/api/v2/account/me",
+      }),
+    ],
+  ])("recovers the preserved admin session when init meets %s", async (_kind, error) => {
     const bootstrapAccessToken = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
-    const fetchCurrentUser = vi.fn<() => Promise<User>>().mockResolvedValue({
-      id: 1,
-      username: "admin",
-      email: "admin@example.com",
-      role: "admin",
-      permissions: [],
-      download_allowed: true,
-      impersonation: null,
-    });
-    const applyCurrentUser = vi.fn();
-    const restoreProfile = vi.fn();
-    const recoverPreservedAdminSession = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
-    const clearTokens = vi.fn();
-    const clearActiveAuthState = vi.fn();
-
-    await initializeAuthSession({
-      refreshToken: "refresh-token",
-      hasStoredImpersonationAdminSession: false,
-      bootstrapAccessToken,
-      fetchCurrentUser,
-      applyCurrentUser,
-      restoreProfile,
-      recoverPreservedAdminSession,
-      clearTokens,
-      clearActiveAuthState,
-    });
-
-    expect(bootstrapAccessToken).toHaveBeenCalledTimes(1);
-    expect(fetchCurrentUser).toHaveBeenCalledTimes(1);
-    const bootstrapCallOrder = bootstrapAccessToken.mock.invocationCallOrder[0];
-    const fetchUserCallOrder = fetchCurrentUser.mock.invocationCallOrder[0];
-
-    expect(bootstrapCallOrder).toBeDefined();
-    expect(fetchUserCallOrder).toBeDefined();
-    expect(bootstrapCallOrder!).toBeLessThan(fetchUserCallOrder!);
-  });
-
-  it("clears stale tokens when bootstrap refresh fails", async () => {
-    const bootstrapAccessToken = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
-    const fetchCurrentUser = vi.fn<() => Promise<User>>();
-    const applyCurrentUser = vi.fn();
-    const restoreProfile = vi.fn();
-    const recoverPreservedAdminSession = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
-    const clearTokens = vi.fn();
-    const clearActiveAuthState = vi.fn();
-
-    await initializeAuthSession({
-      refreshToken: "refresh-token",
-      hasStoredImpersonationAdminSession: false,
-      bootstrapAccessToken,
-      fetchCurrentUser,
-      applyCurrentUser,
-      restoreProfile,
-      recoverPreservedAdminSession,
-      clearTokens,
-      clearActiveAuthState,
-    });
-
-    expect(fetchCurrentUser).not.toHaveBeenCalled();
-    expect(clearTokens).toHaveBeenCalledTimes(1);
-  });
-
-  it("recovers the preserved admin session when impersonated auth is stale during init", async () => {
-    const bootstrapAccessToken = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
-    const fetchCurrentUser = vi
-      .fn<() => Promise<User>>()
-      .mockRejectedValue(new ApiClientError(401, "unauthorized", "expired"));
+    const fetchCurrentUser = vi.fn<() => Promise<User>>().mockRejectedValue(error);
     const applyCurrentUser = vi.fn();
     const restoreProfile = vi.fn();
     const recoverPreservedAdminSession = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
@@ -158,40 +104,6 @@ describe("initializeAuthSession", () => {
     expect(clearActiveAuthState).not.toHaveBeenCalled();
   });
 
-  it("recovers the preserved admin session when the v2 current-user fetch answers 401", async () => {
-    const bootstrapAccessToken = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
-    const fetchCurrentUser = vi.fn<() => Promise<User>>().mockRejectedValue(
-      new V2ProblemError("getCurrentUser", {
-        type: "https://siloserver.org/docs/api/v2/problems/authentication_required",
-        title: "Authentication required",
-        status: 401,
-        detail: "expired",
-        instance: "/api/v2/account/me",
-      }),
-    );
-    const applyCurrentUser = vi.fn();
-    const restoreProfile = vi.fn();
-    const recoverPreservedAdminSession = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
-    const clearTokens = vi.fn();
-    const clearActiveAuthState = vi.fn();
-
-    await initializeAuthSession({
-      refreshToken: "impersonated-refresh",
-      hasStoredImpersonationAdminSession: true,
-      bootstrapAccessToken,
-      fetchCurrentUser,
-      applyCurrentUser,
-      restoreProfile,
-      recoverPreservedAdminSession,
-      clearTokens,
-      clearActiveAuthState,
-    });
-
-    expect(recoverPreservedAdminSession).toHaveBeenCalledTimes(1);
-    expect(restoreProfile).toHaveBeenCalledTimes(1);
-    expect(clearTokens).not.toHaveBeenCalled();
-  });
-
   it("does not treat a v2 validation problem as recoverable impersonation auth", async () => {
     const bootstrapAccessToken = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
     const fetchCurrentUser = vi.fn<() => Promise<User>>().mockRejectedValue(
@@ -223,6 +135,66 @@ describe("initializeAuthSession", () => {
   });
 });
 
+describe("initializeAuthSession when the account read fails", () => {
+  async function run(
+    fetchCurrentUser: () => Promise<User>,
+    hasStoredImpersonationAdminSession = false,
+  ) {
+    const calls = {
+      clearTokens: vi.fn(),
+      clearActiveAuthState: vi.fn(),
+      markRestoreUnavailable: vi.fn(),
+      recoverPreservedAdminSession: vi.fn<() => Promise<boolean>>().mockResolvedValue(false),
+      applyCurrentUser: vi.fn(),
+    };
+    await initializeAuthSession({
+      refreshToken: "refresh-token",
+      hasStoredImpersonationAdminSession,
+      bootstrapAccessToken: () => Promise.resolve(true),
+      fetchCurrentUser,
+      applyCurrentUser: calls.applyCurrentUser,
+      restoreProfile: vi.fn(),
+      recoverPreservedAdminSession: calls.recoverPreservedAdminSession,
+      clearTokens: calls.clearTokens,
+      clearActiveAuthState: calls.clearActiveAuthState,
+      markRestoreUnavailable: calls.markRestoreUnavailable,
+    });
+    return calls;
+  }
+
+  it.each([
+    ["a timeout", new V2TimeoutError("getCurrentUser", 30_000)],
+    ["a network error", new TypeError("Failed to fetch")],
+    [
+      "a 503",
+      new V2ProblemError("getCurrentUser", {
+        type: "https://siloserver.org/docs/api/v2/problems/dependency_unavailable",
+        title: "Unavailable",
+        status: 503,
+        detail: "Try later.",
+        instance: "/api/v2/account/me",
+      }),
+    ],
+  ])("keeps the restored session when the read fails with %s", async (_kind, error) => {
+    const calls = await run(vi.fn<() => Promise<User>>().mockRejectedValue(error), true);
+    expect(calls.markRestoreUnavailable).toHaveBeenCalledTimes(1);
+    expect(calls.clearTokens).not.toHaveBeenCalled();
+    expect(calls.clearActiveAuthState).not.toHaveBeenCalled();
+    expect(calls.recoverPreservedAdminSession).not.toHaveBeenCalled();
+    expect(calls.applyCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it("signs out when the server refuses the restored session", async () => {
+    const calls = await run(
+      vi
+        .fn<() => Promise<User>>()
+        .mockRejectedValue(new ApiClientError(401, "unauthorized", "expired")),
+    );
+    expect(calls.clearTokens).toHaveBeenCalledTimes(1);
+    expect(calls.markRestoreUnavailable).not.toHaveBeenCalled();
+  });
+});
+
 describe("getBootstrapProfile", () => {
   it("returns the only profile when it is not PIN protected", () => {
     expect(getBootstrapProfile([makeProfile()])?.id).toBe("profile-1");
@@ -238,70 +210,14 @@ describe("getBootstrapProfile", () => {
 });
 
 describe("endImpersonationWithRecovery", () => {
-  it("restores the preserved admin session when ending impersonation fails with stale auth", async () => {
-    const endImpersonationRequest = vi
-      .fn<() => Promise<void>>()
-      .mockRejectedValue(new ApiClientError(401, "unauthorized", "expired"));
-    const loadStoredImpersonationAdminSession = vi.fn().mockReturnValue({
-      accessToken: "admin-access",
-      refreshToken: "admin-refresh",
-      returnPath: "/admin/users/42",
-    });
-    const restoreAdminUser = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-    const clearAuthState = vi.fn();
-    const clearActiveAuthState = vi.fn();
-
-    await endImpersonationWithRecovery({
-      endImpersonationRequest,
-      loadStoredImpersonationAdminSession,
-      restoreAdminUser,
-      clearAuthState,
-      clearActiveAuthState,
-    });
-
-    expect(endImpersonationRequest).toHaveBeenCalledTimes(1);
-    expect(loadStoredImpersonationAdminSession).toHaveBeenCalledTimes(1);
-    expect(restoreAdminUser).toHaveBeenCalledWith({
-      accessToken: "admin-access",
-      refreshToken: "admin-refresh",
-      returnPath: "/admin/users/42",
-    });
-    expect(clearAuthState).not.toHaveBeenCalled();
-    expect(clearActiveAuthState).not.toHaveBeenCalled();
-  });
-
-  it("restores the preserved admin session when the server no longer considers the session impersonating", async () => {
-    const endImpersonationRequest = vi
-      .fn<() => Promise<void>>()
-      .mockRejectedValue(new ApiClientError(400, "not_impersonating", "already ended"));
-    const loadStoredImpersonationAdminSession = vi.fn().mockReturnValue({
-      accessToken: "admin-access",
-      refreshToken: "admin-refresh",
-      returnPath: "/admin/users/42",
-    });
-    const restoreAdminUser = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-    const clearAuthState = vi.fn();
-    const clearActiveAuthState = vi.fn();
-
-    await endImpersonationWithRecovery({
-      endImpersonationRequest,
-      loadStoredImpersonationAdminSession,
-      restoreAdminUser,
-      clearAuthState,
-      clearActiveAuthState,
-    });
-
-    expect(restoreAdminUser).toHaveBeenCalledWith({
-      accessToken: "admin-access",
-      refreshToken: "admin-refresh",
-      returnPath: "/admin/users/42",
-    });
-    expect(clearAuthState).not.toHaveBeenCalled();
-    expect(clearActiveAuthState).not.toHaveBeenCalled();
-  });
-
-  it("restores the preserved admin session when the v2 endImpersonation answers 409 conflict", async () => {
-    const endImpersonationRequest = vi.fn<() => Promise<void>>().mockRejectedValue(
+  it.each([
+    ["stale auth", new ApiClientError(401, "unauthorized", "expired")],
+    [
+      "the server no longer considering the session impersonating",
+      new ApiClientError(400, "not_impersonating", "already ended"),
+    ],
+    [
+      "a v2 409 conflict",
       new V2ProblemError("endImpersonation", {
         type: "https://siloserver.org/docs/api/v2/problems/conflict",
         title: "Conflict",
@@ -309,27 +225,39 @@ describe("endImpersonationWithRecovery", () => {
         detail: "No active impersonation session.",
         instance: "urn:silo:request:000000000000000000000027",
       }),
-    );
-    const loadStoredImpersonationAdminSession = vi.fn().mockReturnValue({
-      accessToken: "admin-access",
-      refreshToken: "admin-refresh",
-      returnPath: "/admin/users/42",
-    });
-    const restoreAdminUser = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-    const clearAuthState = vi.fn();
-    const clearActiveAuthState = vi.fn();
+    ],
+  ])(
+    "restores the preserved admin session when ending impersonation fails with %s",
+    async (_kind, error) => {
+      const endImpersonationRequest = vi.fn<() => Promise<void>>().mockRejectedValue(error);
+      const loadStoredImpersonationAdminSession = vi.fn().mockReturnValue({
+        accessToken: "admin-access",
+        refreshToken: "admin-refresh",
+        returnPath: "/admin/users/42",
+      });
+      const restoreAdminUser = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+      const clearAuthState = vi.fn();
+      const clearActiveAuthState = vi.fn();
 
-    await endImpersonationWithRecovery({
-      endImpersonationRequest,
-      loadStoredImpersonationAdminSession,
-      restoreAdminUser,
-      clearAuthState,
-      clearActiveAuthState,
-    });
+      await endImpersonationWithRecovery({
+        endImpersonationRequest,
+        loadStoredImpersonationAdminSession,
+        restoreAdminUser,
+        clearAuthState,
+        clearActiveAuthState,
+      });
 
-    expect(restoreAdminUser).toHaveBeenCalledTimes(1);
-    expect(clearAuthState).not.toHaveBeenCalled();
-  });
+      expect(endImpersonationRequest).toHaveBeenCalledTimes(1);
+      expect(loadStoredImpersonationAdminSession).toHaveBeenCalledTimes(1);
+      expect(restoreAdminUser).toHaveBeenCalledWith({
+        accessToken: "admin-access",
+        refreshToken: "admin-refresh",
+        returnPath: "/admin/users/42",
+      });
+      expect(clearAuthState).not.toHaveBeenCalled();
+      expect(clearActiveAuthState).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps non-auth failures surfaced instead of restoring the admin session", async () => {
     const error = new ApiClientError(500, "server_error", "boom");

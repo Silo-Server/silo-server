@@ -57,13 +57,17 @@ type AdminAccountCapabilitiesOutputBody struct {
 	DefaultProfile       bool `json:"default_profile"`
 	ExactIdentityFilter  bool `json:"exact_identity_filter"`
 	AccessGroups         bool `json:"access_groups"`
+	ProfileLimits        bool `json:"profile_limits" doc:"Whether access groups and account policy overrides take max_profiles, the household profile limit; null on an account inherits its group's limit"`
 	PasswordResetLink    bool `json:"password_reset_link" doc:"Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL"`
 	PasswordResetEmail   bool `json:"password_reset_email" doc:"Whether createAdminUserPasswordReset can email the link; needs the public URL and a configured mail server"`
 	OwnershipTransfer    bool `json:"ownership_transfer" doc:"Whether transferAdminUserOwnership can make another enabled admin the server Owner"`
 	AccountDevices       bool `json:"account_devices" doc:"Whether listAdminUserDevices can list an account's registered devices"`
+	LoginSessions        bool `json:"login_sessions" doc:"Whether administrators can inspect and revoke a user's login sessions; separate from playback sessions and device registrations"`
 	WatchSummary         bool `json:"watch_summary" doc:"Whether getAdminUserWatchSummary can total an account's finalized plays"`
 	AccountDownloads     bool `json:"account_downloads" doc:"Whether listAdminUserDownloads, getAdminUserDownloadSummary and listAdminUserDownloadSubscriptions are available"`
 	RequestUsage         bool `json:"request_usage" doc:"Whether getAdminRequestUserUsage can report an account's request quota use"`
+	PolicyDefaults       bool `json:"policy_defaults" doc:"Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override"`
+	ProfileSections      bool `json:"profile_sections" doc:"Whether listAdminUserProfileSectionOverrides, getAdminUserProfileSectionSettings, replaceAdminUserProfileSectionOverrides and resetAdminUserProfileSectionOverrides can read and change one profile's page layout"`
 }
 
 type AdminAccountPolicyInput struct {
@@ -73,6 +77,7 @@ type AdminAccountPolicyInput struct {
 	MaxTranscodes              *int    `json:"max_transcodes,omitempty" nullable:"true" minimum:"0"`
 	MaxRemoteStreamBitrateKbps *int    `json:"max_remote_stream_bitrate_kbps,omitempty" nullable:"true" minimum:"0"`
 	MaxLocalStreamBitrateKbps  *int    `json:"max_local_stream_bitrate_kbps,omitempty" nullable:"true" minimum:"0"`
+	MaxProfiles                *int    `json:"max_profiles,omitempty" nullable:"true" minimum:"1" doc:"Household profile limit override; null inherits the access group's limit"`
 	TranscodeAllowed           *bool   `json:"transcode_allowed,omitempty" nullable:"true"`
 	AudioTranscodeAllowed      *bool   `json:"audio_transcode_allowed,omitempty" nullable:"true"`
 	DownloadAllowed            *bool   `json:"download_allowed,omitempty" nullable:"true"`
@@ -88,7 +93,6 @@ type AdminAccountCreateBody struct {
 	RequirePasswordChange bool         `json:"require_password_change,omitempty" doc:"Make password temporary: the account must choose a new one at its first sign-in before it can do anything else"`
 	Role                  string       `json:"role" enum:"admin,user"`
 	Permissions           []Permission `json:"permissions,omitempty"`
-	MaxProfiles           *int         `json:"max_profiles,omitempty" minimum:"1"`
 	CreateDefaultProfile  bool         `json:"create_default_profile"`
 	DefaultProfileName    string       `json:"default_profile_name,omitempty" maxLength:"100"`
 }
@@ -96,12 +100,12 @@ type AdminAccountUpdateBody struct {
 	AdminAccountPolicyInput
 	Username              *string      `json:"username,omitempty" minLength:"1" maxLength:"255"`
 	Email                 *string      `json:"email,omitempty" minLength:"1" maxLength:"320"`
-	Password              *string      `json:"password,omitempty" minLength:"8" maxLength:"72"`
+	Password              *string      `json:"password,omitempty" minLength:"8" maxLength:"72" doc:"New local password. Setting one also turns the account's local password sign-in back on (password_login), for example to recover an account whose external sign-in provider is gone. Only the server Owner may set its own account's password while password_login is false for it (403 permission_denied otherwise)"`
 	RequirePasswordChange *bool        `json:"require_password_change,omitempty" doc:"Only with password: make it temporary, so the account must choose a new one at its next sign-in before it can do anything else. A password sent without it is not temporary"`
 	Role                  *string      `json:"role,omitempty" enum:"admin,user"`
 	Permissions           []Permission `json:"permissions,omitempty"`
-	MaxProfiles           *int         `json:"max_profiles,omitempty" minimum:"1"`
 	Enabled               *bool        `json:"enabled,omitempty"`
+	BreakGlass            *bool        `json:"break_glass,omitempty" doc:"Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required"`
 }
 type AdminAccountCreateInput struct {
 	Body    AdminAccountCreateBody
@@ -130,7 +134,7 @@ type AdminAccountProfilesOutput struct {
 	Body Collection[AdminAccountProfile]
 }
 
-var adminAccountNullable = map[string]bool{groupLibraryIDsField: true, "max_playback_quality": true, "max_streams": true, "max_transcodes": true, "max_remote_stream_bitrate_kbps": true, "max_local_stream_bitrate_kbps": true, "transcode_allowed": true, "audio_transcode_allowed": true, "download_allowed": true, "download_transcode_allowed": true, "requests_allowed": true, "access_group_id": true}
+var adminAccountNullable = map[string]bool{groupLibraryIDsField: true, "max_playback_quality": true, "max_streams": true, "max_transcodes": true, "max_remote_stream_bitrate_kbps": true, "max_local_stream_bitrate_kbps": true, "max_profiles": true, "transcode_allowed": true, "audio_transcode_allowed": true, "download_allowed": true, "download_transcode_allowed": true, "requests_allowed": true, "access_group_id": true}
 
 func adminAccountID(id ID) (int, *Problem) {
 	n, err := strconv.Atoi(string(id))
@@ -152,6 +156,8 @@ func adminAccountError(err error) *Problem {
 		return NewProblem(TypeConflict, "Username or email already exists.")
 	case errors.Is(err, auth.ErrAdminUserRevision):
 		return NewProblem(TypePreconditionFailed, "The account changed. Reload before saving.")
+	case errors.Is(err, auth.ErrSessionRevoked):
+		return NewProblem(TypeAuthenticationRequired, "Login session is no longer valid.")
 	case errors.Is(err, auth.ErrAlreadyImpersonating):
 		return NewProblem(TypeConflict, "Already impersonating an account.")
 	case errors.Is(err, auth.ErrImpersonationNotAllowed):
@@ -225,6 +231,7 @@ func (b AdminAccountPolicyInput) model(raw []byte) (models.UpdateUserInput, *Pro
 		MaxTranscodes:              models.Optional[int]{Set: present("max_transcodes"), Value: b.MaxTranscodes},
 		MaxRemoteStreamBitrateKbps: models.Optional[int]{Set: present("max_remote_stream_bitrate_kbps"), Value: b.MaxRemoteStreamBitrateKbps},
 		MaxLocalStreamBitrateKbps:  models.Optional[int]{Set: present("max_local_stream_bitrate_kbps"), Value: b.MaxLocalStreamBitrateKbps},
+		MaxProfiles:                models.Optional[int]{Set: present("max_profiles"), Value: b.MaxProfiles},
 		TranscodeAllowed:           models.Optional[bool]{Set: present("transcode_allowed"), Value: b.TranscodeAllowed},
 		AudioTranscodeAllowed:      models.Optional[bool]{Set: present("audio_transcode_allowed"), Value: b.AudioTranscodeAllowed},
 		DownloadAllowed:            models.Optional[bool]{Set: present("download_allowed"), Value: b.DownloadAllowed},
@@ -242,11 +249,15 @@ func registerAdminAccounts(reg *Registry) {
 			out.Body.OwnershipTransfer = out.Body.Available
 		}
 		out.Body.AccessGroups = reg.deps.AdminAccessGroups != nil
+		out.Body.ProfileLimits = out.Body.AccessGroups
 		out.Body.ExactIdentityFilter = reg.deps.AdminUsers != nil
 		out.Body.AccountDevices = reg.deps.AdminAccountDevices != nil
+		out.Body.LoginSessions = reg.deps.AdminLoginSessions != nil && reg.deps.AdminLoginSessions.AdminLoginSessionsAvailable()
 		out.Body.WatchSummary = reg.deps.AdminWatchSummary != nil
 		out.Body.AccountDownloads = reg.deps.AdminAccountDownloads != nil
 		out.Body.RequestUsage = reg.deps.AdminRequestUsage != nil
+		out.Body.PolicyDefaults = true
+		out.Body.ProfileSections = reg.deps.AdminAccounts != nil && reg.deps.AdminProfileSections != nil
 		if resets := reg.deps.PasswordResets; resets != nil {
 			caps := resets.PasswordResetCapabilities(ctx)
 			out.Body.PasswordResetLink, out.Body.PasswordResetEmail = caps.Link, caps.Email
@@ -282,12 +293,15 @@ func registerAdminAccounts(reg *Registry) {
 	Register(reg, create, reg.createAdminAccount)
 	update := adminAccountOperation(http.MethodPut, "/{id}", "updateAdminUser", true)
 	update.DefaultStatus = 204
-	// A taken username or email, or a temporary password for an account
-	// without local password sign-in, is 409 conflict.
+	// A taken username or email is 409 conflict; demoting, disabling or
+	// clearing the last usable break-glass admin while local password
+	// sign-in is off is 409 break_glass_required.
 	update.Errors = append(update.Errors, http.StatusConflict)
 	Register(reg, update, reg.updateAdminAccount)
 	del := adminAccountOperation(http.MethodDelete, "/{id}", "deleteAdminUser", true)
 	del.DefaultStatus = 204
+	del.Description = "Deleting the last usable break-glass admin while local password sign-in is off (auth.local_password_login) is 409 break_glass_required."
+	del.Errors = append(del.Errors, http.StatusConflict)
 	Register(reg, del, func(ctx context.Context, in *AdminAccountInput) (*struct{}, error) {
 		id, rev, groupRev, p := reg.adminAccountGuard(ctx, *in)
 		if p != nil {
@@ -367,7 +381,7 @@ func (reg *Registry) createAdminAccount(ctx context.Context, in *AdminAccountCre
 	if p != nil {
 		return nil, p
 	}
-	if p = reg.rejectUnknownLibraries(ctx, policy.LibraryIDs.Value); p != nil {
+	if p = reg.rejectUnknownLibraries(ctx, policy.LibraryIDs.Value, locationLibraryIDs); p != nil {
 		return nil, p
 	}
 	b := in.Body
@@ -405,7 +419,7 @@ func (reg *Registry) updateAdminAccount(ctx context.Context, in *AdminAccountUpd
 	if p != nil {
 		return nil, p
 	}
-	if p = reg.rejectUnknownLibraries(ctx, input.LibraryIDs.Value); p != nil {
+	if p = reg.rejectUnknownLibraries(ctx, input.LibraryIDs.Value, locationLibraryIDs); p != nil {
 		return nil, p
 	}
 	b := in.Body
@@ -424,7 +438,7 @@ func (reg *Registry) updateAdminAccount(ctx context.Context, in *AdminAccountUpd
 	input.PasswordChangeRequired = b.RequirePasswordChange != nil && *b.RequirePasswordChange
 	input.Role = b.Role
 	input.Enabled = b.Enabled
-	input.MaxProfiles = b.MaxProfiles
+	input.BreakGlass = b.BreakGlass
 	var members map[string]json.RawMessage
 	_ = json.Unmarshal(in.RawBody, &members)
 	if _, ok := members["permissions"]; ok {

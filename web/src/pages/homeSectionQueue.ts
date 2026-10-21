@@ -1,6 +1,6 @@
 import type { ResolvedSectionLayout } from "@/api/types";
 
-export function planNextHomeSectionRequests(input: {
+function planNextHomeSectionRequests(input: {
   prioritizedIds: string[];
   loadedIds: Set<string>;
   inFlightIds: Set<string>;
@@ -11,7 +11,7 @@ export function planNextHomeSectionRequests(input: {
     .slice(0, input.limit);
 }
 
-export function getPrioritizedHomeSectionIds(layout: ResolvedSectionLayout[]): string[] {
+function getPrioritizedHomeSectionIds(layout: ResolvedSectionLayout[]): string[] {
   const featured = layout.find((section) => section.featured);
   if (!featured) {
     return layout.map((section) => section.id);

@@ -1,6 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { StaleApiRequestContextError } from "@/api/client";
 import type { FileVersion } from "@/api/types";
 import DownloadVersionPicker from "./DownloadVersionPicker";
 const mocks = vi.hoisted(() => ({ launch: vi.fn(), error: vi.fn() }));
@@ -46,17 +45,6 @@ it("retires a pending selection on replacement and rejects duplicate clicks", as
   );
   expect(current()).toBe(false);
   await act(async () => resolve());
-  expect(close).not.toHaveBeenCalled();
-  expect(mocks.error).not.toHaveBeenCalled();
-});
-
-it("keeps an authority refusal from closing or reporting into the replacement profile", async () => {
-  mocks.launch.mockRejectedValue(new StaleApiRequestContextError());
-  const close = vi.fn();
-  render(<DownloadVersionPicker open onOpenChange={close} versions={versions} />);
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: /1080p/ }));
-  });
   expect(close).not.toHaveBeenCalled();
   expect(mocks.error).not.toHaveBeenCalled();
 });

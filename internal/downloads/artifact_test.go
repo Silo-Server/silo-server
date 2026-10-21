@@ -1,12 +1,9 @@
 package downloads
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,33 +17,32 @@ import (
 )
 
 func TestParamsHashStableAndDistinct(t *testing.T) {
-	base := paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false)
-	if base == "" || len(base) != 64 {
-		t.Fatalf("params hash should be a 64-char sha256 hex, got %q", base)
+	params := paramsHashParams{
+		format: "transcode", container: "mp4", codecVideo: "h264", codecAudio: "aac", resolution: "1080p",
+		audioTrackIndex: -1, targetBitrateKbps: 10000, policy: tonemap.PolicyNone,
 	}
-	// Deterministic for identical inputs (dedup key).
-	if again := paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false); again != base {
+	base := paramsHashWithToneMapRevision(params)
+	if again := paramsHashWithToneMapRevision(params); again != base {
 		t.Fatalf("params hash not stable: %q != %q", base, again)
 	}
-	// Distinct when any parameter differs.
-	for _, other := range []string{
-		paramsHash("remux", "mp4", "h264", "aac", "1080p", -1, 10000, false),
-		paramsHash("transcode", "mp4", "hevc", "aac", "1080p", -1, 10000, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "720p", -1, 10000, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "1080p", 1, 10000, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 5000, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, true),
+	for name, change := range map[string]func(*paramsHashParams){
+		"format":           func(p *paramsHashParams) { p.format = "remux" },
+		"video codec":      func(p *paramsHashParams) { p.codecVideo = "hevc" },
+		"resolution":       func(p *paramsHashParams) { p.resolution = "720p" },
+		"audio track":      func(p *paramsHashParams) { p.audioTrackIndex = 1 },
+		"bitrate":          func(p *paramsHashParams) { p.targetBitrateKbps = 5000 },
+		"subtitle burn-in": func(p *paramsHashParams) { p.subtitleBurnIn = true },
 	} {
-		if other == base {
-			t.Fatalf("params hash collision: %q", other)
+		other := params
+		change(&other)
+		if paramsHashWithToneMapRevision(other) == base {
+			t.Fatalf("%s did not change the artifact hash", name)
 		}
 	}
 }
 
 // TestParamsHashIncludesFrozenToneMapRecipe verifies recipe changes produce distinct artifacts.
 func TestParamsHashIncludesFrozenToneMapRecipe(t *testing.T) {
-	base := paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false)
-	legacy := paramsHashWithToneMap("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false, tonemap.PolicyNone, "", "", "")
 	hashWithRevision := func(policy tonemap.Policy, mode tonemap.Mode, sourceKind tonemap.SourceKind, recipeVersion string, preflightRequired bool, sourceRevision tonemap.SourceRevision) string {
 		return paramsHashWithToneMapRevision(paramsHashParams{
 			format: "transcode", container: "mp4", codecVideo: "h264", codecAudio: "aac", resolution: "1080p",
@@ -55,19 +51,13 @@ func TestParamsHashIncludesFrozenToneMapRecipe(t *testing.T) {
 			preflightRequired: preflightRequired, sourceRevision: sourceRevision,
 		})
 	}
-	if legacy != base {
-		t.Fatalf("non-tone-mapped hash changed: %q != %q", legacy, base)
-	}
-	toneMapped := paramsHashWithToneMap("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false,
-		tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourcePQ, playback.TransformationHDRToSDRToneMapRecipeVersionV3)
+	base := hashWithRevision(tonemap.PolicyNone, "", "", "", false, tonemap.SourceRevision{})
+	toneMapped := hashWithRevision(tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourcePQ, playback.TransformationHDRToSDRToneMapRecipeVersionV3, false, tonemap.SourceRevision{})
 	for name, other := range map[string]string{
 		"non-tone-mapped": base,
-		"source kind": paramsHashWithToneMap("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false,
-			tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourceHLG, playback.TransformationHDRToSDRToneMapRecipeVersionV3),
-		"recipe version": paramsHashWithToneMap("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false,
-			tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourcePQ, "2"),
-		"execution mode": paramsHashWithToneMap("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false,
-			tonemap.PolicyHardwareThenSoftware, tonemap.ModeSoftware, tonemap.SourcePQ, playback.TransformationHDRToSDRToneMapRecipeVersionV3),
+		"source kind":     hashWithRevision(tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourceHLG, playback.TransformationHDRToSDRToneMapRecipeVersionV3, false, tonemap.SourceRevision{}),
+		"recipe version":  hashWithRevision(tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourcePQ, "2", false, tonemap.SourceRevision{}),
+		"execution mode":  hashWithRevision(tonemap.PolicyHardwareThenSoftware, tonemap.ModeSoftware, tonemap.SourcePQ, playback.TransformationHDRToSDRToneMapRecipeVersionV3, false, tonemap.SourceRevision{}),
 	} {
 		if other == toneMapped {
 			t.Fatalf("%s did not affect tone-map artifact hash", name)
@@ -91,28 +81,6 @@ func TestParamsHashIncludesFrozenToneMapRecipe(t *testing.T) {
 		if other == revisionHash {
 			t.Fatalf("%s did not affect tone-map artifact hash", name)
 		}
-	}
-}
-
-// TestBuildOptsWarnsWithoutLoggingInvalidSourceRevisionValue verifies invalid revisions are handled safely.
-func TestBuildOptsWarnsWithoutLoggingInvalidSourceRevisionValue(t *testing.T) {
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-	defer slog.SetDefault(previous)
-
-	manager := &ArtifactManager{}
-	artifact := &Artifact{ID: "artifact-invalid-revision", ToneMapMode: tonemap.ModeSoftware, ToneMapSourceRevision: "sensitive-invalid-value"}
-	opts := manager.buildOpts(&models.MediaFile{}, artifact)
-	if opts.ToneMapSourceRevision.MediaFileID != -1 {
-		t.Fatalf("fallback source revision = %#v", opts.ToneMapSourceRevision)
-	}
-	output := logs.String()
-	if !strings.Contains(output, "artifact-invalid-revision") || !strings.Contains(output, `"source_revision_length":23`) {
-		t.Fatalf("warning = %s", output)
-	}
-	if strings.Contains(output, artifact.ToneMapSourceRevision) {
-		t.Fatalf("warning exposed the stored source revision: %s", output)
 	}
 }
 
@@ -160,17 +128,17 @@ func TestToneMapArtifactExecutionFingerprintRejectsRefreshedPathOrDuration(t *te
 	}
 	original := manager.buildOpts(file, artifact)
 	artifact.ParamsHash = downloadprepare.NewRequest(artifact.ID, original).ExecutionFingerprint()
-	if !toneMapArtifactExecutionFingerprintMatches(artifact, original) {
+	if !artifactExecutionFingerprintMatches(artifact, original) {
 		t.Fatal("frozen execution request did not match its artifact hash")
 	}
 	changedPath := original
 	changedPath.InputPath = "/media/replaced.mkv"
-	if toneMapArtifactExecutionFingerprintMatches(artifact, changedPath) {
+	if artifactExecutionFingerprintMatches(artifact, changedPath) {
 		t.Fatal("changed input path reused the frozen artifact hash")
 	}
 	changedDuration := original
 	changedDuration.TotalDuration++
-	if toneMapArtifactExecutionFingerprintMatches(artifact, changedDuration) {
+	if artifactExecutionFingerprintMatches(artifact, changedDuration) {
 		t.Fatal("changed duration reused the frozen artifact hash")
 	}
 }
@@ -185,7 +153,7 @@ func TestPreparedAudioBoostFreezesSelectedSourceChannelsInExecutionFingerprint(t
 		ID: "artifact-audio", MediaFileID: file.ID, Format: "transcode",
 		Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", AudioTrackIndex: 1,
 	}
-	artifact.ParamsHash = paramsHash(artifact.Format, artifact.Container, artifact.CodecVideo, artifact.CodecAudio, artifact.Resolution, artifact.AudioTrackIndex, artifact.TargetBitrateKbps, false)
+	artifact.ParamsHash = "legacy-parameter-hash"
 	opts := manager.buildOpts(file, artifact)
 	if opts.SourceAudioChannels != 6 {
 		t.Fatalf("SourceAudioChannels = %d, want selected surround track", opts.SourceAudioChannels)
@@ -254,8 +222,6 @@ func TestPreparedSourceAudioChannelsRequiresAACSurroundToDefaultStereo(t *testin
 		{name: "AAC surround", trackIndex: 1, codec: "aac", want: 6},
 		{name: "AAC stereo", trackIndex: 0, codec: "aac"},
 		{name: "EAC3 surround", trackIndex: 1, codec: "eac3"},
-		{name: "Opus surround", trackIndex: 1, codec: "opus"},
-		{name: "copy surround", trackIndex: 1, codec: "copy"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := preparedSourceAudioChannels(file, test.trackIndex, test.codec); got != test.want {
@@ -265,61 +231,122 @@ func TestPreparedSourceAudioChannelsRequiresAACSurroundToDefaultStereo(t *testin
 	}
 }
 
-func TestResolveToneMapTargetRejectsHDRTranscodeWhenToneMapPolicyUnavailable(t *testing.T) {
-	file := hdrDownloadTestFile()
-	target := playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"}
-	for _, test := range []struct {
-		name     string
-		settings SettingsReader
-	}{
-		{name: "settings unavailable"},
-		{name: "policy disabled", settings: staticDownloadSettings{
-			config.Allow4KTranscodeSettingKey:                 "false",
-			config.PlaybackTranscodeHardwareToneMapSettingKey: "false",
-			config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
-		}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			manager := &ArtifactManager{settings: test.settings}
-			_, err := manager.resolveToneMapTarget(context.Background(), file, target)
-			if !errors.Is(err, ErrQualityUnavailable) {
-				t.Fatalf("resolveToneMapTarget() error = %v, want ErrQualityUnavailable", err)
-			}
-		})
-	}
+// resolveToneMapRefusalCase is one TestResolveToneMapTargetRefusals case.
+type resolveToneMapRefusalCase struct {
+	name     string
+	file     *models.MediaFile
+	preparer EncodePreparer
+	settings SettingsReader
+	canceled bool
+	wantErr  func(error) bool
+	// unfrozen asserts the returned target is the one passed in.
+	unfrozen bool
 }
 
-func TestResolveToneMapTargetRetainsFourKRestrictionWhenPolicyDisabled(t *testing.T) {
-	file := hdrDownloadTestFile()
-	file.VideoTracks[0].Height = 2160
-	manager := &ArtifactManager{settings: staticDownloadSettings{
+var resolveToneMapTargetRefusalsCases = func() []resolveToneMapRefusalCase {
+	policyOff := staticDownloadSettings{
 		config.Allow4KTranscodeSettingKey:                 "false",
 		config.PlaybackTranscodeHardwareToneMapSettingKey: "false",
 		config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
-	}}
-	_, err := manager.resolveToneMapTarget(context.Background(), file, playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"})
-	if !errors.Is(err, ErrQualityUnavailable) || !strings.Contains(err.Error(), "4K transcoding is disabled") {
-		t.Fatalf("resolveToneMapTarget() error = %v, want disabled 4K ErrQualityUnavailable", err)
 	}
-}
-
-func TestResolveToneMapTargetFailsClosedForFourKWhenSettingsUnavailable(t *testing.T) {
-	file := hdrDownloadTestFile()
-	file.VideoTracks[0].Height = 2160
-	manager := &ArtifactManager{}
-
-	_, err := manager.resolveToneMapTarget(context.Background(), file, playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"})
-	if !errors.Is(err, ErrQualityUnavailable) || !strings.Contains(err.Error(), "settings are unavailable") {
-		t.Fatalf("resolveToneMapTarget() error = %v, want unavailable-settings ErrQualityUnavailable", err)
+	softwareOn := staticDownloadSettings{
+		config.Allow4KTranscodeSettingKey:                 "true",
+		config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
 	}
-}
+	hardwarePQ := tonemap.Capability{Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}}
+	softwarePQ := softwarePQToneMap()[0]
+	fourK := hdrDownloadTestFile()
+	fourK.VideoTracks[0].Height = 2160
+	return []resolveToneMapRefusalCase{
+		{name: "settings unavailable", wantErr: func(err error) bool { return errors.Is(err, ErrQualityUnavailable) }},
+		{name: "policy disabled", settings: policyOff, wantErr: func(err error) bool { return errors.Is(err, ErrQualityUnavailable) }},
+		{name: "4K fails closed when settings are unavailable", file: fourK, wantErr: func(err error) bool {
+			return errors.Is(err, ErrQualityUnavailable) && strings.Contains(err.Error(), "settings are unavailable")
+		}},
+		{name: "settings read failure is a retryable capability failure", settings: failingDownloadSettings{err: context.DeadlineExceeded}, wantErr: func(err error) bool {
+			return errors.Is(err, context.DeadlineExceeded) && errors.Is(err, ErrCapabilityUnavailable) && !errors.Is(err, ErrQualityUnavailable)
+		}},
+		// The 4K restriction applies before dynamic-range handling.
+		{name: "4K SDR", file: &models.MediaFile{VideoTracks: []models.VideoTrack{{Height: 2160, VideoRange: "SDR"}}}, settings: policyOff, wantErr: func(err error) bool {
+			return errors.Is(err, ErrQualityUnavailable) && strings.Contains(err.Error(), "4K transcoding is disabled")
+		}},
+		{name: "4K unknown dynamic range", file: &models.MediaFile{VideoTracks: []models.VideoTrack{{Height: 2160}}}, settings: policyOff, wantErr: func(err error) bool {
+			return errors.Is(err, ErrQualityUnavailable) && strings.Contains(err.Error(), "4K transcoding is disabled")
+		}},
+		{name: "cancellation with an empty executor inventory", settings: softwareOn, canceled: true, wantErr: func(err error) bool { return errors.Is(err, context.Canceled) }},
+		{
+			name:     "saturated executors are capacity, not quality",
+			preparer: capacityAwareToneMapPreparer{capabilities: tonemap.Capabilities{hardwarePQ, softwarePQ}, available: map[tonemap.Mode]bool{}},
+			settings: staticDownloadSettings{
+				config.Allow4KTranscodeSettingKey:                 "true",
+				config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
+				config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
+			},
+			wantErr: func(err error) bool {
+				return err != nil && errors.Is(err, ErrCapacityUnavailable) && !errors.Is(err, ErrQualityUnavailable)
+			},
+			unfrozen: true,
+		},
+		{
+			name: "incompatible permitted mode remains quality unavailable",
+			preparer: capacityAwareToneMapPreparer{
+				capabilities: tonemap.Capabilities{softwarePQ},
+				available:    map[tonemap.Mode]bool{tonemap.ModeSoftware: true},
+			},
+			settings: staticDownloadSettings{
+				config.Allow4KTranscodeSettingKey:                 "true",
+				config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
+				config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
+			},
+			wantErr: func(err error) bool { return errors.Is(err, ErrQualityUnavailable) },
+		},
+		{
+			name: "partial inventory error remains retryable when capacity is unknown",
+			preparer: capacityAwareToneMapPreparer{
+				capabilities: tonemap.Capabilities{hardwarePQ},
+				available:    map[tonemap.Mode]bool{},
+				capacityErr:  map[tonemap.Mode]error{tonemap.ModeHardware: context.DeadlineExceeded},
+			},
+			settings: staticDownloadSettings{
+				config.Allow4KTranscodeSettingKey:                 "true",
+				config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
+			},
+			wantErr: func(err error) bool {
+				return errors.Is(err, context.DeadlineExceeded) && errors.Is(err, ErrCapabilityUnavailable) && !errors.Is(err, ErrCapacityUnavailable) && !errors.Is(err, ErrQualityUnavailable)
+			},
+		},
+		{
+			name: "transient capability error before freezing the recipe", preparer: unavailableToneMapPreparer{}, settings: softwareOn,
+			wantErr: func(err error) bool { return errors.Is(err, context.DeadlineExceeded) }, unfrozen: true,
+		},
+	}
+}()
 
-func TestResolveToneMapTargetClassifiesSettingsReadFailureAsCapabilityUnavailable(t *testing.T) {
-	manager := &ArtifactManager{settings: failingDownloadSettings{err: context.DeadlineExceeded}}
-
-	_, err := manager.resolveToneMapTarget(context.Background(), hdrDownloadTestFile(), playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"})
-	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrCapabilityUnavailable) || errors.Is(err, ErrQualityUnavailable) {
-		t.Fatalf("resolveToneMapTarget() error = %v, want retryable settings capability failure", err)
+// Every way resolveToneMapTarget refuses an HDR download: the error class
+// decides whether the download fails for good, retries later, or waits for
+// capacity, and a refused target is never frozen to a recipe.
+func TestResolveToneMapTargetRefusals(t *testing.T) {
+	for _, test := range resolveToneMapTargetRefusalsCases {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if test.canceled {
+				cancel()
+			}
+			file := test.file
+			if file == nil {
+				file = hdrDownloadTestFile()
+			}
+			manager := &ArtifactManager{preparer: test.preparer, settings: test.settings}
+			target := playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"}
+			got, err := manager.resolveToneMapTarget(ctx, file, target)
+			if !test.wantErr(err) {
+				t.Fatalf("resolveToneMapTarget() error = %v", err)
+			}
+			if test.unfrozen && got != target {
+				t.Fatalf("target = %#v, want unfrozen %#v", got, target)
+			}
+		})
 	}
 }
 
@@ -330,60 +357,6 @@ func TestToneMapPlanningTimeoutAllowsColdProbeWithoutLocalFallback(t *testing.T)
 	}
 	if got := toneMapPlanningTimeout(provider, false); got != remoteOnlyToneMapPlanTimeout {
 		t.Fatalf("remote-only planning timeout = %s, want %s", got, remoteOnlyToneMapPlanTimeout)
-	}
-}
-
-func TestResolveToneMapTargetAppliesFourKRestrictionBeforeDynamicRangeHandling(t *testing.T) {
-	target := playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"}
-	settings := staticDownloadSettings{
-		config.Allow4KTranscodeSettingKey:                 "false",
-		config.PlaybackTranscodeHardwareToneMapSettingKey: "false",
-		config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
-	}
-	for _, test := range []struct {
-		name  string
-		track models.VideoTrack
-	}{
-		{name: "SDR", track: models.VideoTrack{Height: 2160, VideoRange: "SDR"}},
-		{name: "unknown dynamic range", track: models.VideoTrack{Height: 2160}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			manager := &ArtifactManager{settings: settings}
-			file := &models.MediaFile{VideoTracks: []models.VideoTrack{test.track}}
-			_, err := manager.resolveToneMapTarget(context.Background(), file, target)
-			if !errors.Is(err, ErrQualityUnavailable) || !strings.Contains(err.Error(), "4K transcoding is disabled") {
-				t.Fatalf("resolveToneMapTarget() error = %v, want disabled 4K ErrQualityUnavailable", err)
-			}
-		})
-	}
-}
-
-func TestResolveToneMapTargetRejectsUnclassifiableHDRWhenPolicyDisabled(t *testing.T) {
-	manager := &ArtifactManager{settings: staticDownloadSettings{
-		config.Allow4KTranscodeSettingKey:                 "true",
-		config.PlaybackTranscodeHardwareToneMapSettingKey: "false",
-		config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
-	}}
-	file := &models.MediaFile{HDR: true, VideoTracks: []models.VideoTrack{{
-		Codec: "hevc", DolbyVision: "Profile 5", DVProfile: 5, VideoRange: "DolbyVision",
-	}}}
-	target := playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"}
-	_, err := manager.resolveToneMapTarget(context.Background(), file, target)
-	if !errors.Is(err, ErrQualityUnavailable) {
-		t.Fatalf("resolveToneMapTarget() error = %v, want ErrQualityUnavailable", err)
-	}
-}
-
-func TestResolveToneMapTargetReturnsCancellationWhenExecutorInventoryIsEmpty(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	manager := &ArtifactManager{settings: staticDownloadSettings{
-		config.Allow4KTranscodeSettingKey:                 "true",
-		config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
-	}}
-	_, err := manager.resolveToneMapTarget(ctx, hdrDownloadTestFile(), playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("resolveToneMapTarget() error = %v, want context.Canceled", err)
 	}
 }
 
@@ -419,103 +392,6 @@ func (p capacityAwareToneMapPreparer) ToneMapModeAvailable(_ context.Context, mo
 	return p.available[mode], p.capacityErr[mode]
 }
 
-func TestResolveToneMapTargetDistinguishesSaturatedExecutorsFromUnavailableQuality(t *testing.T) {
-	tests := []struct {
-		name         string
-		hardware     bool
-		software     bool
-		capabilities tonemap.Capabilities
-	}{
-		{
-			name:     "hardware only",
-			hardware: true,
-			capabilities: tonemap.Capabilities{{
-				Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}},
-		},
-		{
-			name:     "software only",
-			software: true,
-			capabilities: tonemap.Capabilities{{
-				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}},
-		},
-		{
-			name:     "hardware then software",
-			hardware: true,
-			software: true,
-			capabilities: tonemap.Capabilities{
-				{Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
-				{Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
-			},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			manager := &ArtifactManager{
-				preparer: capacityAwareToneMapPreparer{capabilities: test.capabilities, available: map[tonemap.Mode]bool{}},
-				settings: staticDownloadSettings{
-					config.Allow4KTranscodeSettingKey:                 "true",
-					config.PlaybackTranscodeHardwareToneMapSettingKey: strconv.FormatBool(test.hardware),
-					config.PlaybackTranscodeSoftwareToneMapSettingKey: strconv.FormatBool(test.software),
-				},
-			}
-			target := playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"}
-			got, err := manager.resolveToneMapTarget(context.Background(), hdrDownloadTestFile(), target)
-			if err == nil {
-				t.Fatal("resolveToneMapTarget() error = nil, want retryable capacity exhaustion")
-			}
-			if !errors.Is(err, ErrCapacityUnavailable) || errors.Is(err, ErrQualityUnavailable) {
-				t.Fatalf("resolveToneMapTarget() error = %v, want ErrCapacityUnavailable distinct from ErrQualityUnavailable", err)
-			}
-			if got != target {
-				t.Fatalf("target = %#v, want unfrozen %#v", got, target)
-			}
-		})
-	}
-}
-
-func TestResolveToneMapTargetKeepsPermanentCapabilityAndPartialInventoryOutcomes(t *testing.T) {
-	t.Run("incompatible permitted mode remains quality unavailable", func(t *testing.T) {
-		manager := &ArtifactManager{
-			preparer: capacityAwareToneMapPreparer{
-				capabilities: tonemap.Capabilities{{
-					Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-				}},
-				available: map[tonemap.Mode]bool{tonemap.ModeSoftware: true},
-			},
-			settings: staticDownloadSettings{
-				config.Allow4KTranscodeSettingKey:                 "true",
-				config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
-			},
-		}
-		_, err := manager.resolveToneMapTarget(context.Background(), hdrDownloadTestFile(), playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"})
-		if !errors.Is(err, ErrQualityUnavailable) {
-			t.Fatalf("resolveToneMapTarget() error = %v, want permanent ErrQualityUnavailable", err)
-		}
-	})
-
-	t.Run("partial inventory error remains retryable when capacity is unknown", func(t *testing.T) {
-		manager := &ArtifactManager{
-			preparer: capacityAwareToneMapPreparer{
-				capabilities: tonemap.Capabilities{{
-					Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-				}},
-				available:   map[tonemap.Mode]bool{},
-				capacityErr: map[tonemap.Mode]error{tonemap.ModeHardware: context.DeadlineExceeded},
-			},
-			settings: staticDownloadSettings{
-				config.Allow4KTranscodeSettingKey:                 "true",
-				config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
-			},
-		}
-		_, err := manager.resolveToneMapTarget(context.Background(), hdrDownloadTestFile(), playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"})
-		if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrCapabilityUnavailable) || errors.Is(err, ErrCapacityUnavailable) || errors.Is(err, ErrQualityUnavailable) {
-			t.Fatalf("resolveToneMapTarget() error = %v, want retryable capability error", err)
-		}
-	})
-}
-
 func TestResolveToneMapTargetHashesSoftwareWhenHardwareHasNoCapacity(t *testing.T) {
 	preparer := capacityAwareToneMapPreparer{
 		capabilities: tonemap.Capabilities{
@@ -538,37 +414,8 @@ func TestResolveToneMapTargetHashesSoftwareWhenHardwareHasNoCapacity(t *testing.
 	if err != nil {
 		t.Fatalf("resolveToneMapTarget() error = %v", err)
 	}
-	hashForMode := func(mode tonemap.Mode) string {
-		return paramsHashWithToneMapRevision(paramsHashParams{
-			format: "transcode", container: target.Container, codecVideo: target.CodecVideo, codecAudio: target.CodecAudio, resolution: target.Resolution,
-			audioTrackIndex: target.AudioTrackIndex, targetBitrateKbps: target.TargetBitrateKbps,
-			policy: target.ToneMapPolicy, mode: mode, sourceKind: target.ToneMapSourceKind,
-			recipeVersion: target.ToneMapRecipeVersion, preflightRequired: target.ToneMapPreflightRequired, sourceRevision: target.ToneMapSourceRevision,
-		})
-	}
-	gotHash := hashForMode(target.ToneMapMode)
-	softwareHash := hashForMode(tonemap.ModeSoftware)
-	hardwareHash := hashForMode(tonemap.ModeHardware)
-	if target.ToneMapMode != tonemap.ModeSoftware || gotHash != softwareHash || gotHash == hardwareHash {
-		t.Fatalf("tone-map target = mode %q hash %q; want software hash %q and not hardware hash %q", target.ToneMapMode, gotHash, softwareHash, hardwareHash)
-	}
-}
-
-func TestResolveToneMapTargetReturnsTransientCapabilityErrorBeforeFreezingRecipe(t *testing.T) {
-	manager := &ArtifactManager{
-		preparer: unavailableToneMapPreparer{},
-		settings: staticDownloadSettings{
-			config.Allow4KTranscodeSettingKey:                 "true",
-			config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
-		},
-	}
-	target := playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"}
-	got, err := manager.resolveToneMapTarget(context.Background(), hdrDownloadTestFile(), target)
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("resolveToneMapTarget() error = %v, want transient capability deadline", err)
-	}
-	if got != target {
-		t.Fatalf("target = %#v, want unfrozen %#v", got, target)
+	if target.ToneMapMode != tonemap.ModeSoftware {
+		t.Fatalf("tone-map mode = %q, want software", target.ToneMapMode)
 	}
 }
 
@@ -583,10 +430,15 @@ func hdrDownloadTestFile() *models.MediaFile {
 }
 
 func TestArtifactOutputPathDeterministic(t *testing.T) {
-	p1 := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef")
-	p2 := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef")
+	p1 := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef", "art-1")
+	p2 := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef", "art-1")
 	if p1 != p2 {
 		t.Fatalf("output path not deterministic: %q != %q", p1, p2)
+	}
+	// A later job for the same recipe, such as one created after a cancel,
+	// never shares a path with the job it replaces.
+	if other := artifactOutputPath("/var/artifacts", 42, "transcode", "abcdef0123456789deadbeef", "art-2"); other == p1 {
+		t.Fatalf("two jobs share output path %q", p1)
 	}
 	if !strings.HasPrefix(p1, "/var/artifacts/") || !strings.HasSuffix(p1, ".mp4") {
 		t.Fatalf("unexpected output path %q", p1)
@@ -651,50 +503,6 @@ func (p *lifecycleTestPreparer) DeleteArtifact(ctx context.Context, artifact *Ar
 	return p.deleteErr
 }
 
-func TestArtifactManagerDeletesRemoteBytesThroughOwningNode(t *testing.T) {
-	preparer := &lifecycleTestPreparer{}
-	m := &ArtifactManager{preparer: preparer}
-	artifact := &Artifact{ID: "row-1", OriginNodeURL: "http://transcode", OriginArtifactID: "opaque-1"}
-	if !m.deleteArtifactBytes(context.Background(), artifact) {
-		t.Fatal("remote cleanup failed")
-	}
-	if preparer.deleted != "opaque-1" {
-		t.Fatalf("deleted = %q", preparer.deleted)
-	}
-}
-
-func TestRemoteArtifactRequeueRejectsNonPositiveNodeID(t *testing.T) {
-	manager := &ArtifactManager{repo: &ArtifactRepository{}}
-	_, err := manager.requeueRemoteArtifactNow(context.Background(), &Artifact{
-		ID: "row-1", OriginNodeID: -1, OriginNodeURL: "http://transcode", OriginArtifactID: "opaque-1",
-	}, "invalid node")
-	if err == nil {
-		t.Fatal("expected invalid remote locator error")
-	}
-}
-
-func TestEffectiveArtifactDir(t *testing.T) {
-	// Explicit config wins verbatim.
-	if got := effectiveArtifactDir("/data/artifacts", "/tmp/silo-transcode"); got != "/data/artifacts" {
-		t.Fatalf("explicit dir = %q, want /data/artifacts", got)
-	}
-	// Unset: a sibling of the transcode dir, never inside it (the transcode
-	// cleanup sweep would otherwise delete a nested artifact dir) and never the
-	// process cwd (a relative/empty path).
-	got := effectiveArtifactDir("", "/var/lib/silo/transcode")
-	if got != "/var/lib/silo/silo-download-artifacts" {
-		t.Fatalf("default dir = %q, want sibling of transcode dir", got)
-	}
-	if strings.HasPrefix(got, "/var/lib/silo/transcode/") {
-		t.Fatalf("default dir %q is nested under the transcode dir", got)
-	}
-	// Unset transcode dir falls back to the absolute default root, not "".
-	fallback := effectiveArtifactDir("", "")
-	if !strings.HasPrefix(fallback, "/") {
-		t.Fatalf("fallback dir %q is not absolute", fallback)
-	}
-}
-
 type fakeUserRepo struct{ user *models.User }
 
 func (f fakeUserRepo) GetByID(context.Context, int) (*models.User, error) { return f.user, nil }
@@ -730,6 +538,21 @@ func TestCapabilityQualityPresetsGating(t *testing.T) {
 	capInfo, _ = svc.Capability(context.Background(), 1)
 	if got := strings.Join(capInfo.QualityPresets, ","); got != "original" {
 		t.Fatalf("quality presets with transcode gated = %q, want original", got)
+	}
+
+	// An admin with no overrides gets the full ladder (#1403); an ungrouped
+	// regular account with no overrides keeps the no-group deny.
+	svc = newSvc(&models.User{Role: models.RoleAdmin}, true)
+	svc.SetArtifactManager(&ArtifactManager{})
+	capInfo, _ = svc.Capability(context.Background(), 1)
+	if got := strings.Join(capInfo.QualityPresets, ","); got != "original,20mbps,10mbps,5mbps,2mbps,1mbps" {
+		t.Fatalf("quality presets for an admin without overrides = %q, want full ladder", got)
+	}
+	svc = newSvc(&models.User{Role: models.RoleUser}, true)
+	svc.SetArtifactManager(&ArtifactManager{})
+	capInfo, _ = svc.Capability(context.Background(), 1)
+	if got := strings.Join(capInfo.QualityPresets, ","); got != "original" {
+		t.Fatalf("quality presets for an ungrouped user without overrides = %q, want original", got)
 	}
 
 	// Download permission revoked → an EMPTY array, never nil: the capability

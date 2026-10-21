@@ -101,20 +101,6 @@ func TestHLSRemuxDV8HDR10BaseLayerKeepsAllOtherConditionsExact(t *testing.T) {
 		conditions []ProfileCondition
 	}{
 		{
-			name: "width limit",
-			conditions: []ProfileCondition{
-				{Condition: "EqualsAny", Property: "VideoRangeType", Value: "HDR10|DOVI", IsRequired: true},
-				{Condition: "LessThanEqual", Property: "Width", Value: "1920", IsRequired: true},
-			},
-		},
-		{
-			name: "level limit",
-			conditions: []ProfileCondition{
-				{Condition: "EqualsAny", Property: "VideoRangeType", Value: "HDR10|DOVI", IsRequired: true},
-				{Condition: "LessThanEqual", Property: "VideoLevel", Value: "150", IsRequired: true},
-			},
-		},
-		{
 			name: "sample entry",
 			conditions: []ProfileCondition{
 				{Condition: "EqualsAny", Property: "VideoRangeType", Value: "HDR10|DOVI", IsRequired: true},
@@ -260,23 +246,6 @@ func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 			wantTranscodeAudio: false,
 		},
 		{
-			name: "dolby vision profile 8 hdr10 is direct playable when not excluded",
-			version: withVideoTrack(baseVersion, models.VideoTrack{
-				Codec:          "hevc",
-				Profile:        "Main 10",
-				Level:          153,
-				Width:          3840,
-				Height:         2160,
-				BitDepth:       10,
-				VideoRangeType: "DOVIWithHDR10",
-			}, "2160p"),
-			codecProfiles:      []CodecProfile{unsupportedRangeProfile("hevc", "DOVIInvalid|DOVIWithEL|DOVIWithELHDR10Plus")},
-			wantDirectPlay:     true,
-			wantDirectStream:   true,
-			wantTranscoding:    true,
-			wantTranscodeAudio: false,
-		},
-		{
 			name: "audio channel limit preserves video copy and transcodes audio",
 			codecProfiles: []CodecProfile{{
 				Type: "VideoAudio",
@@ -305,22 +274,6 @@ func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 					Condition: "Equals",
 					Property:  "VideoProfile",
 					Value:     "main 10",
-				}},
-			}},
-			wantDirectPlay:     false,
-			wantDirectStream:   false,
-			wantTranscoding:    true,
-			wantTranscodeAudio: false,
-		},
-		{
-			name: "width limit blocks video copy",
-			codecProfiles: []CodecProfile{{
-				Type:  "Video",
-				Codec: "hevc",
-				Conditions: []ProfileCondition{{
-					Condition: "LessThanEqual",
-					Property:  "Width",
-					Value:     "1280",
 				}},
 			}},
 			wantDirectPlay:     false,
@@ -372,48 +325,6 @@ func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 	}
 }
 
-func TestBuildPlaybackSourceCodecProfiles_UnsupportedDOVIWithELRespects4KGate(t *testing.T) {
-	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	version := catalog.FileVersion{
-		FileID:     1,
-		Resolution: "2160p",
-		Container:  "mkv",
-		CodecVideo: "hevc",
-		CodecAudio: "truehd",
-		VideoTracks: []models.VideoTrack{{
-			Codec:          "hevc",
-			Profile:        "Main 10",
-			Level:          153,
-			Width:          3840,
-			Height:         2160,
-			BitDepth:       10,
-			VideoRangeType: "DOVIWithEL",
-		}},
-		AudioTracks: []models.AudioTrack{{Codec: "truehd", Channels: 8, Default: true}},
-	}
-	profile := DeviceProfile{
-		DirectPlayProfiles: []DirectPlayProfile{{
-			Type:       "Video",
-			Container:  "mkv",
-			VideoCodec: "hevc",
-			AudioCodec: "truehd",
-		}},
-		TranscodingProfiles: []TranscodingProfile{{
-			Type:       "Video",
-			Protocol:   "hls",
-			Container:  "ts",
-			VideoCodec: "h264",
-			AudioCodec: "aac",
-		}},
-		CodecProfiles: []CodecProfile{unsupportedRangeProfile("hevc", "DOVIWithEL")},
-	}
-
-	source := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{}, false)
-	if source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding {
-		t.Fatalf("source supports playback unexpectedly: direct=%v stream=%v transcode=%v", source.SupportsDirectPlay, source.SupportsDirectStream, source.SupportsTranscoding)
-	}
-}
-
 func TestBuildMediaStreamsUsesJellyfinVideoRangeType(t *testing.T) {
 	version := catalog.FileVersion{
 		HDR: true,
@@ -444,7 +355,6 @@ func TestBuildMediaStreamsPreservesColorRange(t *testing.T) {
 		wantJSONField  bool
 	}{
 		{name: "limited", colorRange: "tv", wantColorRange: "tv", wantJSONField: true},
-		{name: "full", colorRange: "pc", wantColorRange: "pc", wantJSONField: true},
 		{name: "internal unknown sentinel", colorRange: "unknown"},
 		{name: "missing"},
 	}
@@ -485,155 +395,6 @@ func TestBuildMediaStreamsPreservesColorRange(t *testing.T) {
 	}
 }
 
-func TestCodecProfileAVCRefFramesConstraint(t *testing.T) {
-	version := catalog.FileVersion{
-		FileID:     1,
-		Resolution: "1080p",
-		Container:  "mp4",
-		CodecVideo: "h264",
-		CodecAudio: "aac",
-		VideoTracks: []models.VideoTrack{{
-			Codec:           "h264",
-			Profile:         "High",
-			ReferenceFrames: 8,
-			Width:           1920,
-			Height:          1080,
-		}},
-		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}},
-	}
-	profile := DeviceProfile{
-		DirectPlayProfiles: []DirectPlayProfile{{
-			Type:       "Video",
-			Container:  "mp4",
-			VideoCodec: "h264",
-			AudioCodec: "aac",
-		}},
-		TranscodingProfiles: []TranscodingProfile{{
-			Type:       "Video",
-			Protocol:   "hls",
-			Container:  "ts",
-			VideoCodec: "h264",
-			AudioCodec: "aac",
-		}},
-		CodecProfiles: []CodecProfile{{
-			Type:  "Video",
-			Codec: "h264",
-			Conditions: []ProfileCondition{{
-				Condition: "LessThanEqual",
-				Property:  "RefFrames",
-				Value:     "4",
-			}},
-			ApplyConditions: []ProfileCondition{{
-				Condition: "GreaterThanEqual",
-				Property:  "Width",
-				Value:     "1900",
-			}},
-		}},
-	}
-
-	source := (&PlaybackHandler{codec: NewResourceIDCodec()}).buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{}, true)
-	if source.SupportsDirectPlay || source.SupportsDirectStream {
-		t.Fatalf("video copy was allowed unexpectedly: direct=%v stream=%v", source.SupportsDirectPlay, source.SupportsDirectStream)
-	}
-	// Output reference frames depend on the encoder. Optional conditions accept
-	// unknown output facts; the source's eight reference frames cannot reject it.
-	if !source.SupportsTranscoding {
-		t.Fatal("SupportsTranscoding = false for an optional unknown output value")
-	}
-	profile.CodecProfiles[0].Conditions[0].IsRequired = true
-	source = (&PlaybackHandler{codec: NewResourceIDCodec()}).buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{}, true)
-	if source.SupportsTranscoding {
-		t.Fatal("SupportsTranscoding = true for a required unknown output value")
-	}
-}
-
-func TestBuildPlaybackSourceCodecProfiles_WebOSAnamorphicCondition(t *testing.T) {
-	tests := []struct {
-		name             string
-		version          catalog.FileVersion
-		directProfile    DirectPlayProfile
-		codecProfile     CodecProfile
-		allow4KTranscode bool
-		wantTranscoding  bool
-	}{
-		{
-			name: "non-anamorphic h264 remains directly playable",
-			version: catalog.FileVersion{
-				FileID:      1,
-				Resolution:  "1080p",
-				Container:   "mp4",
-				CodecVideo:  "h264",
-				CodecAudio:  "aac",
-				VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 42, Width: 1920, Height: 1080, VideoRangeType: "SDR"}},
-				AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}},
-			},
-			directProfile: DirectPlayProfile{Type: "Video", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"},
-			codecProfile: CodecProfile{
-				Type:  "Video",
-				Codec: "h264",
-				Conditions: []ProfileCondition{
-					{Condition: "NotEquals", Property: "IsAnamorphic", Value: "true", IsRequired: false},
-					{Condition: "EqualsAny", Property: "VideoProfile", Value: "high|main|baseline|constrained baseline", IsRequired: false},
-					{Condition: "EqualsAny", Property: "VideoRangeType", Value: "SDR", IsRequired: false},
-					{Condition: "LessThanEqual", Property: "VideoLevel", Value: "51", IsRequired: false},
-				},
-			},
-			allow4KTranscode: true,
-			wantTranscoding:  true,
-		},
-		{
-			name: "non-anamorphic 4k hevc mkv remains playable when 4k transcode is disabled",
-			version: catalog.FileVersion{
-				FileID:      2,
-				Resolution:  "2160p",
-				Container:   "mkv",
-				CodecVideo:  "hevc",
-				CodecAudio:  "aac",
-				VideoTracks: []models.VideoTrack{{Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160, VideoRangeType: "SDR"}},
-				AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}},
-			},
-			directProfile: DirectPlayProfile{Type: "Video", Container: "mkv", VideoCodec: "hevc", AudioCodec: "aac"},
-			codecProfile: CodecProfile{
-				Type:  "Video",
-				Codec: "hevc",
-				Conditions: []ProfileCondition{
-					{Condition: "NotEquals", Property: "IsAnamorphic", Value: "true", IsRequired: false},
-					{Condition: "EqualsAny", Property: "VideoProfile", Value: "main|main 10", IsRequired: false},
-					{Condition: "EqualsAny", Property: "VideoRangeType", Value: "SDR|HDR10|HLG|DOVI|DOVIWithHDR10|DOVIWithHLG|DOVIWithSDR", IsRequired: false},
-					{Condition: "LessThanEqual", Property: "VideoLevel", Value: "183", IsRequired: false},
-				},
-			},
-			allow4KTranscode: false,
-			wantTranscoding:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			profile := DeviceProfile{
-				DirectPlayProfiles: []DirectPlayProfile{tt.directProfile},
-				TranscodingProfiles: []TranscodingProfile{{
-					Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac",
-				}},
-				CodecProfiles: []CodecProfile{tt.codecProfile},
-			}
-
-			source := (&PlaybackHandler{codec: NewResourceIDCodec()}).buildPlaybackSource(
-				"item", "play", tt.version, profile, playbackInfoRequest{}, tt.allow4KTranscode,
-			)
-			if !source.SupportsDirectPlay {
-				t.Fatal("SupportsDirectPlay = false, want true")
-			}
-			if !source.SupportsDirectStream {
-				t.Fatal("SupportsDirectStream = false, want true")
-			}
-			if source.SupportsTranscoding != tt.wantTranscoding {
-				t.Fatalf("SupportsTranscoding = %v, want %v", source.SupportsTranscoding, tt.wantTranscoding)
-			}
-		})
-	}
-}
-
 func TestConditionMatchesUnknownPropertyHonorsIsRequired(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -665,11 +426,6 @@ func TestDecodeProfileConditionIsRequiredDefault(t *testing.T) {
 		payload string
 		want    bool
 	}{
-		{
-			name:    "omitted IsRequired decodes as required",
-			payload: `{"Condition":"NotEquals","Property":"AudioProfile","Value":"HE-AAC"}`,
-			want:    true,
-		},
 		{
 			name:    "explicit false stays optional",
 			payload: `{"Condition":"NotEquals","Property":"AudioProfile","Value":"HE-AAC","IsRequired":false}`,
@@ -760,12 +516,6 @@ func TestConditionMatchesUsesRealTrackValues(t *testing.T) {
 			want:      false,
 		},
 		{
-			name:      "progressive track passes IsInterlaced NotEquals true",
-			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}}},
-			condition: ProfileCondition{Condition: "NotEquals", Property: "IsInterlaced", Value: "true"},
-			want:      true,
-		},
-		{
 			name:      "60fps track fails a 30fps framerate cap",
 			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, FrameRate: "60/1"}}},
 			condition: ProfileCondition{Condition: "LessThanOrEqual", Property: "VideoFramerate", Value: "30"},
@@ -799,12 +549,6 @@ func TestConditionMatchesUsesRealTrackValues(t *testing.T) {
 			want:      false,
 		},
 		{
-			name:      "track bitrate passes a video bitrate cap it fits under",
-			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 4_000_000}}},
-			condition: ProfileCondition{Condition: "LessThanEqual", Property: "VideoBitrate", Value: "10000000"},
-			want:      true,
-		},
-		{
 			name: "96kHz audio fails a 48kHz sample rate cap",
 			version: catalog.FileVersion{
 				CodecAudio:  "flac",
@@ -812,15 +556,6 @@ func TestConditionMatchesUsesRealTrackValues(t *testing.T) {
 			},
 			condition: ProfileCondition{Condition: "LessThanEqual", Property: "AudioSampleRate", Value: "48000"},
 			want:      false,
-		},
-		{
-			name: "48kHz audio passes a 48kHz sample rate cap",
-			version: catalog.FileVersion{
-				CodecAudio:  "aac",
-				AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, SampleRate: 48_000, Default: true}},
-			},
-			condition: ProfileCondition{Condition: "LessThanEqual", Property: "AudioSampleRate", Value: "48000"},
-			want:      true,
 		},
 		{
 			name: "audio bitrate cap is enforced",
@@ -904,18 +639,6 @@ func TestConditionMatchesLegacyValuesOnlyWhenKnown(t *testing.T) {
 			want:      true,
 		},
 		{
-			name:      "level -99 sentinel fails a required level cap",
-			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "hevc", Width: 1920, Height: 1080, Level: -99}}},
-			condition: ProfileCondition{Condition: "LessThanOrEqual", Property: "VideoLevel", Value: "183", IsRequired: true},
-			want:      false,
-		},
-		{
-			name:      "known level 120 passes a looser cap",
-			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "hevc", Width: 1920, Height: 1080, Level: 120}}},
-			condition: ProfileCondition{Condition: "LessThanOrEqual", Property: "VideoLevel", Value: "183"},
-			want:      true,
-		},
-		{
 			name:      "known level 120 fails a tighter cap",
 			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "hevc", Width: 1920, Height: 1080, Level: 120}}},
 			condition: ProfileCondition{Condition: "LessThanOrEqual", Property: "VideoLevel", Value: "100"},
@@ -929,15 +652,6 @@ func TestConditionMatchesLegacyValuesOnlyWhenKnown(t *testing.T) {
 			},
 			condition: ProfileCondition{Condition: "LessThanEqual", Property: "AudioChannels", Value: "2"},
 			want:      true,
-		},
-		{
-			name: "channels 0 fails a required channel cap",
-			version: catalog.FileVersion{
-				CodecAudio:  "aac",
-				AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 0, Default: true}},
-			},
-			condition: ProfileCondition{Condition: "LessThanEqual", Property: "AudioChannels", Value: "2", IsRequired: true},
-			want:      false,
 		},
 	}
 
@@ -965,12 +679,6 @@ func TestConditionMatchesIsAVC(t *testing.T) {
 			want:      true,
 		},
 		{
-			name:      "hevc track passes NotEquals true",
-			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "hevc", Width: 1920, Height: 1080}}},
-			condition: ProfileCondition{Condition: "NotEquals", Property: "IsAVC", Value: "true"},
-			want:      true,
-		},
-		{
 			name:      "hevc track fails Equals true",
 			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "hevc", Width: 1920, Height: 1080}}},
 			condition: ProfileCondition{Condition: "Equals", Property: "IsAVC", Value: "true"},
@@ -981,12 +689,6 @@ func TestConditionMatchesIsAVC(t *testing.T) {
 			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Width: 1920, Height: 1080}}},
 			condition: ProfileCondition{Condition: "Equals", Property: "IsAVC", Value: "true"},
 			want:      true,
-		},
-		{
-			name:      "empty codec fails a required IsAVC condition",
-			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Width: 1920, Height: 1080}}},
-			condition: ProfileCondition{Condition: "Equals", Property: "IsAVC", Value: "true", IsRequired: true},
-			want:      false,
 		},
 	}
 

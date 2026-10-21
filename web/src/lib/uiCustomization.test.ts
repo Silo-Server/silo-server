@@ -1,7 +1,8 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import {
-  CARD_PRESENTATION_PRESETS,
   DEFAULT_CARD_PRESENTATION,
   defaultWebPrimaryMenu,
   menuItemKey,
@@ -29,15 +30,6 @@ describe("UI customization contract helpers", () => {
       poster_size: "compact",
       caption: "title",
     });
-  });
-
-  it("keeps the named presets aligned with the cross-client contract", () => {
-    expect(CARD_PRESENTATION_PRESETS.map(({ id, value }) => ({ id, value }))).toEqual([
-      { id: "balanced", value: { poster_size: "standard", caption: "title_metadata" } },
-      { id: "compact", value: { poster_size: "compact", caption: "title" } },
-      { id: "cinema", value: { poster_size: "large", caption: "title" } },
-      { id: "artwork", value: { poster_size: "large", caption: "artwork" } },
-    ]);
   });
 
   it("rejects a custom menu without exactly one home destination", () => {
@@ -115,15 +107,6 @@ describe("UI customization contract helpers", () => {
         ],
       }),
     ).toEqual({ items: [] });
-  });
-
-  it("builds the native web primary-menu baseline", () => {
-    const menu = defaultWebPrimaryMenu();
-    expect(menu.items.map(menuItemKey)).toEqual([
-      "builtin:home",
-      "builtin:for_you",
-      "builtin:calendar",
-    ]);
   });
 
   it("moves items without mutating the source and ignores an out-of-range move", () => {

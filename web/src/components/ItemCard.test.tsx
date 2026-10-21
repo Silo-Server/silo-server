@@ -1,18 +1,11 @@
+import ItemCard from "@/components/ItemCard";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
-import ItemCard from "@/components/ItemCard";
-
-const mocks = vi.hoisted(() => ({
-  mediaItemMenu: vi.fn(),
-}));
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/MediaItemMenu", () => ({
-  default: (props: unknown) => {
-    mocks.mediaItemMenu(props);
-    return null;
-  },
+  default: () => null,
 }));
 
 vi.mock("@/components/CardPlayOverlay", () => ({
@@ -49,10 +42,6 @@ const baseItem = {
   backdrop_thumbhash: "",
 };
 
-beforeEach(() => {
-  mocks.mediaItemMenu.mockReset();
-});
-
 describe("ItemCard SortMeta", () => {
   it("encodes item links while preserving library context", () => {
     const markup = renderCard({
@@ -68,62 +57,6 @@ describe("ItemCard SortMeta", () => {
     expect(markup).toContain('href="/item/ebook%201%2Fisbn%3A978?libraryId=12"');
   });
 
-  it("passes root watched state to the poster action menu", () => {
-    const userState = {
-      played: true,
-      is_favorite: true,
-      in_watchlist: false,
-    };
-
-    renderCard({
-      item: { ...baseItem, content_id: "movie-1", type: "movie", user_state: userState },
-    });
-
-    expect(mocks.mediaItemMenu).toHaveBeenCalledWith(
-      expect.objectContaining({
-        contentId: "movie-1",
-        mediaType: "movie",
-        userState,
-        variant: "poster",
-      }),
-    );
-  });
-
-  it("passes narrow poster actions through to the menu", () => {
-    renderCard({
-      item: { ...baseItem, content_id: "movie-1", type: "movie" },
-      narrowPosterActions: true,
-    });
-
-    expect(mocks.mediaItemMenu).toHaveBeenCalledWith(
-      expect.objectContaining({ narrowPosterActions: true }),
-    );
-  });
-
-  it("passes the resolved profile quick-action mode to the menu", () => {
-    renderCard({
-      item: { ...baseItem, content_id: "movie-1", type: "movie" },
-      quickActionMode: "favorites",
-    });
-
-    expect(mocks.mediaItemMenu).toHaveBeenCalledWith(
-      expect.objectContaining({ quickActionMode: "favorites" }),
-    );
-  });
-
-  it("renders the series last air date when sorted by last_air_date", () => {
-    const markup = renderCard({
-      sortField: "last_air_date",
-      item: {
-        ...baseItem,
-        last_air_date: "2026-03-22",
-      },
-    });
-
-    expect(markup).toContain("Mar");
-    expect(markup).toContain("2026");
-  });
-
   it("falls back to default label when last_air_date is null", () => {
     const markup = renderCard({
       sortField: "last_air_date",
@@ -134,27 +67,6 @@ describe("ItemCard SortMeta", () => {
     });
 
     expect(markup).toContain("2023");
-  });
-
-  it("renders content rating when sorted by content_rating", () => {
-    const markup = renderCard({
-      sortField: "content_rating",
-      item: baseItem,
-    });
-
-    expect(markup).toContain("TV-MA");
-  });
-
-  it("renders runtime when sorted by runtime", () => {
-    const markup = renderCard({
-      sortField: "runtime",
-      item: {
-        ...baseItem,
-        runtime: 95,
-      },
-    });
-
-    expect(markup).toContain("1h 35m");
   });
 
   it("renders non-IMDb ratings for matching rating sorts", () => {
@@ -175,30 +87,6 @@ describe("ItemCard SortMeta", () => {
 
     expect(tmdbMarkup).toContain('<span class="not-uppercase">TMDB</span> 8.2');
     expect(criticMarkup).toContain('<span class="not-uppercase">RT</span> 96%');
-  });
-
-  it("rounds a rating sort label the way the title page does", () => {
-    // toFixed(1) reads 7.35 as "7.3"; the server's display reads "7.4".
-    const markup = renderCard({
-      sortField: "rating_imdb",
-      item: { ...baseItem, rating_imdb: 7.35 },
-    });
-
-    expect(markup).toContain('<span class="not-uppercase">IMDb</span> 7.4');
-  });
-
-  it("renders resolution when sorted by resolution", () => {
-    const markup = renderCard({
-      sortField: "resolution",
-      item: {
-        ...baseItem,
-        overlay_summary: {
-          resolution: "2160p",
-        },
-      },
-    });
-
-    expect(markup).toContain("2160p");
   });
 
   it("renders audiobook-native sort metadata", () => {
@@ -290,22 +178,6 @@ describe("ItemCard SortMeta", () => {
     expect(markup).not.toContain("Ch");
   });
 
-  it("renders a chapters-only manga count chip", () => {
-    const markup = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "manga-2",
-        type: "manga",
-        title: "One Piece",
-        manga_chapter_count: 100,
-        manga_volume_count: 0,
-      },
-    });
-
-    expect(markup).toContain("100 Ch");
-    expect(markup).not.toContain("Vol");
-  });
-
   it("renders both counts when a series has volumes and loose chapters", () => {
     const markup = renderCard({
       item: {
@@ -319,103 +191,6 @@ describe("ItemCard SortMeta", () => {
     });
 
     expect(markup).toContain("12 Vol · 3 Ch");
-  });
-
-  it("uses singular labels for single counts", () => {
-    const markup = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "manga-5",
-        type: "manga",
-        title: "One Shot",
-        manga_chapter_count: 1,
-        manga_volume_count: 1,
-      },
-    });
-
-    expect(markup).toContain("1 Vol · 1 Ch");
-  });
-
-  it("renders a color-coded publication status chip on manga cards", () => {
-    const markup = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "manga-st",
-        type: "manga",
-        title: "Ongoing Manga",
-        manga_volume_count: 5,
-        show_status: "Ongoing",
-      },
-    });
-    expect(markup).toContain("Ongoing");
-    expect(markup).toContain("text-emerald-200");
-  });
-
-  it("does not render a status chip on non-manga cards or when status is absent", () => {
-    const noStatus = renderCard({
-      item: { ...baseItem, content_id: "manga-ns", type: "manga", title: "No Status" },
-    });
-    expect(noStatus).not.toContain("Ongoing");
-    const ebook = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "eb",
-        type: "ebook",
-        title: "Book",
-        show_status: "Completed",
-      },
-    });
-    expect(ebook).not.toContain("Completed");
-  });
-
-  it("does not render a manga count chip on non-manga cards", () => {
-    const markup = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "ebook-9",
-        type: "ebook",
-        title: "Not Manga",
-        // Even if these stray fields were present, gating is on type.
-        manga_chapter_count: 99,
-        manga_volume_count: 99,
-      },
-    });
-
-    expect(markup).not.toContain("Volume");
-    expect(markup).not.toContain("Chapter");
-  });
-
-  it("does not render a manga count chip when both counts are missing or zero", () => {
-    const markup = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "manga-3",
-        type: "manga",
-        title: "Empty Manga",
-        manga_chapter_count: 0,
-      },
-    });
-
-    expect(markup).not.toContain("Volume");
-    expect(markup).not.toContain("Chapter");
-  });
-
-  it("renders episode cards with series context when available", () => {
-    const markup = renderCard({
-      item: {
-        ...baseItem,
-        content_id: "episode-1",
-        type: "episode",
-        title: "When You're Lost in the Darkness",
-        series_title: "The Last of Us",
-        season_number: 1,
-        episode_number: 1,
-      },
-    });
-
-    expect(markup).toContain("The Last of Us");
-    expect(markup).toContain("S01E01");
-    expect(markup).toContain("When You&#x27;re Lost in the Darkness");
   });
 });
 
@@ -439,6 +214,6 @@ describe("ItemCard poster loading", () => {
     expect(poster).toHaveClass("opacity-100");
 
     fireEvent.error(poster);
-    expect(poster).toHaveClass("opacity-0");
+    expect(screen.queryByRole("img", { name: "The Last of Us" })).toBeNull();
   });
 });

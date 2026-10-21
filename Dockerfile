@@ -5,7 +5,7 @@
 FROM node:24-slim AS jellyfin_web_node
 
 # Stage 1: Build frontend
-FROM node:22-slim AS frontend
+FROM node:24-slim AS frontend
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app/web
 COPY web/package.json web/pnpm-lock.yaml ./
@@ -13,7 +13,7 @@ COPY web/vendor/foliate-js ./vendor/foliate-js
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY web/ .
-# The v2 contract fixtures are imported by web tests, which `tsc -b` type-checks
+# The v2 contract fixtures are imported by web tests, which `tsrs -b` type-checks
 # as part of the build; they live outside web/ so copy them explicitly.
 COPY contracts/api/v2/fixtures/ /app/contracts/api/v2/fixtures/
 RUN pnpm run build
@@ -24,6 +24,7 @@ FROM scratch AS frontend_dist
 COPY --from=frontend /app/web/dist/. /
 
 # Stage 2: Build Go binary
+# The floating 1.26 tag is deliberate so images get Go patch releases without a manual bump.
 FROM golang:1.26 AS build
 ENV CGO_ENABLED=1
 ENV GOPROXY=https://proxy.golang.org,direct
@@ -33,25 +34,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends libvips-dev && 
 WORKDIR /app
 COPY go.mod go.sum ./
 COPY internal/compat/zishang520-webtransport-go/ internal/compat/zishang520-webtransport-go/
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    go mod download
-COPY web/embed.go web/embed.go
-COPY --from=frontend_dist / web/dist
-COPY cmd/ cmd/
+RUN go mod download
 COPY internal/ internal/
 COPY migrations/ migrations/
 # The settings contract is a Go package (contracts/settings/v1) that embeds the
 # manifest, so the binary carries the exact bytes it was built from. It lives
 # outside internal/ because clients vendor these files.
 COPY contracts/ contracts/
+RUN --network=none go build ./internal/... ./migrations/... ./contracts/...
+COPY cmd/ cmd/
+COPY web/embed.go web/embed.go
+COPY --from=frontend_dist / web/dist
+RUN --network=none go build -o /silo ./cmd/silo/
 ARG BUILD_REVISION
 ARG BUILD_DIRTY=false
 ARG BUILD_NUMBER
 ARG BUILD_DATE
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    go build \
+RUN --network=none go build \
     -ldflags "-X github.com/Silo-Server/silo-server/internal/buildinfo.revisionOverride=${BUILD_REVISION} -X github.com/Silo-Server/silo-server/internal/buildinfo.dirtyOverride=${BUILD_DIRTY} -X github.com/Silo-Server/silo-server/internal/buildinfo.buildNumberOverride=${BUILD_NUMBER} -X github.com/Silo-Server/silo-server/internal/buildinfo.builtAtOverride=${BUILD_DATE}" \
     -o /silo ./cmd/silo/
 
@@ -94,8 +93,18 @@ COPY --from=jellyfin_web_node /usr/local/bin/node /usr/local/bin/node
 COPY --from=jellyfin_web_node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+# Node.js verifies TLS against its own bundled CA list, which Debian's
+# ca-certificates updates do not reach. Use the system store instead, so a CA
+# that Debian removes stops being trusted by npm as well.
+ENV NODE_OPTIONS=--use-openssl-ca
 COPY --from=build /silo /usr/local/bin/silo
 EXPOSE 8080 8096 13378
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+# Silo runs database migrations before its HTTP listener starts, and an
+# upgrade on a large library can migrate for many minutes. The start period
+# covers the default 20-minute migration budget (SILO_MIGRATE_TIMEOUT) so a
+# migrating server is not reported unhealthy and restarted mid-migration; the
+# first passing check still marks it healthy at once. A deployment that raises
+# SILO_MIGRATE_TIMEOUT should raise the start period to match.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20m --retries=3 \
     CMD curl -f http://localhost:${PORT:-8080}/api/v1/health || exit 1
 ENTRYPOINT ["silo"]

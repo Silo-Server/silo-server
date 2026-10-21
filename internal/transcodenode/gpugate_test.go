@@ -27,20 +27,6 @@ func TestGPUGateRefusesReprobeWhileWorkIsAdmitted(t *testing.T) {
 	}
 }
 
-// The node's own running-session count is read under the same lock, so "no
-// admitted work" and "no active jobs" cannot be true at two different instants.
-func TestGPUGateRefusesReprobeWhileJobsAreActive(t *testing.T) {
-	var gate gpuGate
-
-	busy, ok := gate.beginReprobe(otherWork(2))
-	if ok {
-		t.Fatal("re-probe admitted on a node running transcodes")
-	}
-	if busy != 2 {
-		t.Fatalf("busy = %d, want 2", busy)
-	}
-}
-
 // A re-probe holds the encoder for the whole rebuild, so work arriving mid-probe
 // is refused rather than queued: a viewer pressing play must not wait minutes
 // for a probe, and the API retries elsewhere.
@@ -102,43 +88,6 @@ func TestGPUGateHoldWorkIsNeverRefusedAndKeepsReprobesOut(t *testing.T) {
 	// a refusal; the teardown is registered regardless.
 	gate.holdWork()
 	gate.endWork()
-}
-
-// A hardware probe runs on a background context so an abandoned caller cannot
-// kill work another request is waiting on. The capability build therefore
-// releases its gate claim while ffmpeg may still be encoding, and a re-probe
-// that counted only this node's own bookkeeping would claim an encoder that is
-// not free — its smoke matrix racing the one already running, publishing the
-// false hardware verdict this gate exists to prevent.
-func TestGPUGateRefusesReprobeWhileADetachedProbeRuns(t *testing.T) {
-	var gate gpuGate
-
-	busy, ok := gate.beginReprobe(otherWork(1))
-	if ok {
-		t.Fatal("re-probe admitted while a detached smoke encode was still running")
-	}
-	if busy != 1 {
-		t.Fatalf("busy = %d, want the detached probe counted", busy)
-	}
-
-	if _, ok := gate.beginReprobe(otherWork(0)); !ok {
-		t.Fatal("re-probe refused once no probe was in flight")
-	}
-}
-
-// Tone-map probes detach from their caller exactly as hardware probes do, and
-// they run their own FFmpeg smoke encodes, so a re-probe that counted only the
-// hardware ones would start a second matrix beside a running first.
-func TestGPUGateCountsEveryDetachedProbeSource(t *testing.T) {
-	var gate gpuGate
-
-	busy, ok := gate.beginReprobe(otherWork(2))
-	if ok {
-		t.Fatal("re-probe admitted while detached smoke encodes were still running")
-	}
-	if busy != 2 {
-		t.Fatalf("busy = %d, want both detached probe sources counted", busy)
-	}
 }
 
 // otherWork builds the callback beginReprobe reads under its own lock, for

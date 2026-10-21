@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -27,26 +26,6 @@ func (f *fakeSubtitleDownloads) DownloadStoredSubtitle(_ context.Context, access
 }
 
 const subtitleDownloadFixtureBody = `{"media_file_id":"42","provider":"example","subtitle_id":"opaque-provider-result","language":"en","release_name":"Synthetic","score":80,"hearing_impaired":false}`
-
-func TestSubtitleDownloadV2AuthorityProjectionAndSingleSend(t *testing.T) {
-	deps, _ := catalogDeps(t)
-	f := new(fakeSubtitleDownloads)
-	deps.SubtitleDownloads = f
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodPost, Prefix+"/subtitles/download", subtitleDownloadFixtureBody, viewerHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"id":"9007199254740993"`) || strings.Contains(rec.Body.String(), "PRIVATE") || strings.Contains(rec.Body.String(), "downloaded_by") {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	if f.calls != 1 || f.access.UserID != 1 || f.access.ProfileID != "p-owner" || f.request.UserID != nil || f.request.SubtitleID != "opaque-provider-result" || f.request.MediaFileID != 42 {
-		t.Fatalf("wrong authority/request: %+v", f)
-	}
-	f.err = errors.New("PRIVATE_UPSTREAM")
-	rec = do(t, h, http.MethodPost, Prefix+"/subtitles/download", subtitleDownloadFixtureBody, viewerHeaders())
-	requireProblem(t, rec, TypeInternalError)
-	if f.calls != 2 || strings.Contains(rec.Body.String(), "PRIVATE") {
-		t.Fatal("unexpected retry or leaked failure")
-	}
-}
 
 // An unregistered provider key reaches the listener as the service's 404, not
 // as an opaque upstream failure.

@@ -66,8 +66,8 @@ const (
 // repository is the persistence surface Service needs (satisfied by
 // *Repository; an interface so tests can fake it).
 type repository interface {
-	Issue(ctx context.Context, userID int, tokenHash string, issuedBy *int, expiresAt time.Time) error
-	IssueUnlessRecent(ctx context.Context, userID int, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error)
+	Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuedBy *int, expiresAt time.Time) error
+	IssueUnlessRecent(ctx context.Context, userID int, expectedEmail, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error)
 	Withdraw(ctx context.Context, userID int, tokenHash string) error
 	Lookup(ctx context.Context, tokenHash string) (*Link, error)
 	Complete(ctx context.Context, tokenHash, newPassword string) (*models.User, error)
@@ -92,6 +92,7 @@ type Service struct {
 	sessions  sessionStarter
 	mail      mail.Sender
 	settings  mail.SettingReader
+	brand     *mail.BrandLoader
 	publicURL string
 	ttl       time.Duration
 	now       func() time.Time
@@ -105,13 +106,15 @@ type Service struct {
 }
 
 // NewService wires the reset link service. publicURL is the link-base
-// fallback when server.public_url is unset; may be empty.
+// fallback when server.public_url is unset; may be empty. brand styles the
+// email; nil sends Silo's default branding.
 func NewService(
 	repo *Repository,
 	users userDirectory,
 	sessions sessionStarter,
 	mailSender mail.Sender,
 	settings mail.SettingReader,
+	brand *mail.BrandLoader,
 	publicURL string,
 ) *Service {
 	return &Service{
@@ -120,6 +123,7 @@ func NewService(
 		sessions:  sessions,
 		mail:      mailSender,
 		settings:  settings,
+		brand:     brand,
 		publicURL: publicURL,
 		ttl:       DefaultTTL,
 		now:       time.Now,
@@ -205,7 +209,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 		issuedBy = &in.IssuedBy
 	}
 	expiresAt := s.now().Add(s.ttl)
-	if err := s.repo.Issue(ctx, user.ID, tokenHash, issuedBy, expiresAt); err != nil {
+	if err := s.repo.Issue(ctx, user.ID, user.Email, tokenHash, issuedBy, expiresAt); err != nil {
 		return nil, err
 	}
 
@@ -215,12 +219,14 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 		result.URL = resetURL
 		return result, nil
 	}
-	content := composeResetEmail(false, user.Username, s.serverName(ctx), resetURL, expiresAt, s.now())
+	brand := s.brand.Load(ctx)
+	content := composeResetEmail(brand, false, user.Username, s.serverName(ctx), resetURL, expiresAt, s.now())
 	err = s.mail.Send(ctx, mail.Message{
 		To:       []string{user.Email},
 		Subject:  content.Subject,
 		TextBody: content.Text,
 		HTMLBody: content.HTML,
+		Inline:   brand.InlineImages(),
 	})
 	if err != nil {
 		return result, fmt.Errorf("reset link stored; email delivery failed or is uncertain: %w", err)
@@ -306,16 +312,18 @@ func (s *Service) sendRequested(ctx context.Context, login string) error {
 		return fmt.Errorf("generate password reset token: %w", err)
 	}
 	expiresAt := s.now().Add(SelfServiceTTL)
-	stored, err := s.repo.IssueUnlessRecent(ctx, user.ID, tokenHash, expiresAt, selfServiceCooldown)
+	stored, err := s.repo.IssueUnlessRecent(ctx, user.ID, user.Email, tokenHash, expiresAt, selfServiceCooldown)
 	if err != nil || !stored {
 		return err
 	}
-	content := composeResetEmail(true, user.Username, s.serverName(ctx), linkBase+"/reset-password/"+token, expiresAt, s.now())
+	brand := s.brand.Load(ctx)
+	content := composeResetEmail(brand, true, user.Username, s.serverName(ctx), linkBase+"/reset-password/"+token, expiresAt, s.now())
 	if err := s.mail.Send(ctx, mail.Message{
 		To:       []string{user.Email},
 		Subject:  content.Subject,
 		TextBody: content.Text,
 		HTMLBody: content.HTML,
+		Inline:   brand.InlineImages(),
 	}); err != nil {
 		// A link that certainly was not sent is withdrawn, so the requester
 		// can ask again now rather than after the cooldown. When delivery is

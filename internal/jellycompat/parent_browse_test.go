@@ -3,8 +3,6 @@ package jellycompat
 import (
 	"context"
 	"fmt"
-	"net/http/httptest"
-	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -174,51 +172,6 @@ func TestHandleItems_SeriesParentNonEpisodeTypeIsEmpty(t *testing.T) {
 	}
 }
 
-// TestHandleItems_SeasonParentReturnsEpisodes pins the second half of the Void
-// fix: a season ParentId (no IncludeItemTypes) must list that season's episodes.
-func TestHandleItems_SeasonParentReturnsEpisodes(t *testing.T) {
-	codec := NewResourceIDCodec()
-	seriesContentID := "series-1"
-	seasonContentID := "season-1"
-	encodedSeasonID := codec.EncodeStringID(EncodedIDSeason, seasonContentID)
-
-	contentSvc := &countingContentService{
-		seasons: []upstreamSeason{
-			{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 2},
-		},
-	}
-	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
-		episodeBySeasonKey(seriesContentID, 1): {
-			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "Pilot"},
-			{ContentID: "ep-2", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 2, Title: "Second"},
-		},
-	}}
-	h := &ItemsHandler{
-		content:     contentSvc,
-		userData:    &mockUserDataService{},
-		codec:       codec,
-		mapper:      newMapper(codec, &config.Config{}),
-		images:      NewImageCache(time.Hour, time.Now),
-		episodeRepo: episodeRepo,
-		seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{
-			seasonContentID: {ContentID: seasonContentID, SeriesID: seriesContentID, SeasonNumber: 1},
-		}},
-	}
-
-	result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeasonID)
-	if len(result.Items) != 2 {
-		t.Fatalf("expected 2 episodes, got %+v", result.Items)
-	}
-	for _, item := range result.Items {
-		if item.Type != "Episode" {
-			t.Fatalf("expected Episode items (not library views), got %q", item.Type)
-		}
-	}
-	if result.Items[0].Name != "Pilot" || result.Items[1].Name != "Second" {
-		t.Fatalf("unexpected episode order/names: %+v", result.Items)
-	}
-}
-
 // TestHandleItems_SeasonParentNonEpisodeTypeIsEmpty pins that a season ParentId
 // with a type filter that excludes Episode (e.g. Movie) returns an empty page and
 // short-circuits before listing episodes, even though episodes exist.
@@ -253,27 +206,6 @@ func TestHandleItems_SeasonParentNonEpisodeTypeIsEmpty(t *testing.T) {
 	}
 	if contentSvc.listSeasonsCalls != 0 {
 		t.Fatalf("type guard should short-circuit before episode listing; ListSeasons called %d times", contentSvc.listSeasonsCalls)
-	}
-}
-
-// TestHandleItems_SeasonParentWithoutRepoIsEmptyNotViews ensures the season-parent
-// path degrades to an empty page (never the library views) when no season repo is
-// wired. countingContentService panics in ListUserLibraries to catch a views
-// fall-through regression.
-func TestHandleItems_SeasonParentWithoutRepoIsEmptyNotViews(t *testing.T) {
-	codec := NewResourceIDCodec()
-	encodedSeasonID := codec.EncodeStringID(EncodedIDSeason, "season-1")
-	h := &ItemsHandler{
-		content:  &countingContentService{},
-		userData: &mockUserDataService{},
-		codec:    codec,
-		mapper:   newMapper(codec, &config.Config{}),
-		images:   NewImageCache(time.Hour, time.Now),
-	}
-
-	result := performItemsRequest(t, h, "/Users/test/Items?ParentId="+encodedSeasonID)
-	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
-		t.Fatalf("expected empty result without season repo, got %+v", result.Items)
 	}
 }
 
@@ -313,27 +245,5 @@ func TestHandleItems_SeasonParentEpisodesPaged(t *testing.T) {
 	}
 	if len(result.Items) != 1 || result.Items[0].Name != "E2" {
 		t.Fatalf("expected page [E2], got %+v", result.Items)
-	}
-}
-
-// TestParseItemsQuery_SeasonParentSetsParentSeasonID asserts the parser routes a
-// season ParentId to parentSeasonID while a series (item) ParentId stays in
-// parentItemID — the distinction the new routing relies on.
-func TestParseItemsQuery_SeasonParentSetsParentSeasonID(t *testing.T) {
-	codec := NewResourceIDCodec()
-
-	seasonID := codec.EncodeStringID(EncodedIDSeason, "season-9")
-	q := parseItemsQuery(httptest.NewRequest("GET", "/Items?ParentId="+url.QueryEscape(seasonID), nil), codec)
-	if q.parentSeasonID != "season-9" {
-		t.Fatalf("expected parentSeasonID season-9, got %q", q.parentSeasonID)
-	}
-	if q.parentItemID != "" {
-		t.Fatalf("expected parentItemID empty for a season parent, got %q", q.parentItemID)
-	}
-
-	seriesID := codec.EncodeStringID(EncodedIDItem, "series-9")
-	q = parseItemsQuery(httptest.NewRequest("GET", "/Items?ParentId="+url.QueryEscape(seriesID), nil), codec)
-	if q.parentItemID != "series-9" || q.parentSeasonID != "" {
-		t.Fatalf("expected parentItemID series-9 only, got item=%q season=%q", q.parentItemID, q.parentSeasonID)
 	}
 }

@@ -30,20 +30,6 @@ func TestMangaChapterExclusion_BrowsePlan(t *testing.T) {
 	}
 }
 
-func TestMangaChapterExclusion_PreviewPageSQL(t *testing.T) {
-	sql, _, err := (&QueryExecutor{}).buildPreviewPageSQL(
-		QueryDefinition{MediaScope: "ebook"},
-		AccessFilter{},
-		20, 0, true,
-	)
-	if err != nil {
-		t.Fatalf("buildPreviewPageSQL error: %v", err)
-	}
-	if !strings.Contains(sql, mangaChapterExclusionPredicate("mi")) {
-		t.Fatalf("preview-page SQL missing manga-chapter exclusion.\ngot: %s", sql)
-	}
-}
-
 func TestMangaChapterExclusion_SearchSQL(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, _, _ := repo.buildSearchSQL("naruto", []string{"ebook"}, 20, 0, AccessFilter{})

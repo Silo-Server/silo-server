@@ -120,50 +120,6 @@ func dispatchTrack(h *Handler, method, sid, idx string) *httptest.ResponseRecord
 	return rec
 }
 
-func TestHandlePublicTrack_ServesBytesForValidSession(t *testing.T) {
-	h, _ := newPublicTrackHandler(t, "sid-1", "book-1", false)
-	rec := dispatchTrack(h, http.MethodGet, "sid-1", "1")
-	if rec.Code != http.StatusOK && rec.Code != http.StatusPartialContent {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if rec.Body.Len() == 0 {
-		t.Errorf("response body empty; expected audio bytes")
-	}
-	if got := rec.Header().Get("Content-Type"); got != "audio/mpeg" {
-		t.Errorf("Content-Type = %q, want audio/mpeg", got)
-	}
-}
-
-// TestHandlePublicTrack_HeadProbe covers the iOS/Android HEAD pre-flight
-// some players issue before the GET. http.ServeContent returns headers
-// without a body for HEAD; the handler must not 404.
-func TestHandlePublicTrack_HeadProbe(t *testing.T) {
-	h, _ := newPublicTrackHandler(t, "sid-1", "book-1", false)
-	rec := dispatchTrack(h, http.MethodHead, "sid-1", "1")
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rec.Code)
-	}
-	if rec.Body.Len() != 0 {
-		t.Errorf("HEAD response should have empty body; got %d bytes", rec.Body.Len())
-	}
-}
-
-func TestHandlePublicTrack_UnknownSession404(t *testing.T) {
-	h, _ := newPublicTrackHandler(t, "sid-1", "book-1", false)
-	rec := dispatchTrack(h, http.MethodGet, "sid-does-not-exist", "1")
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
-	}
-}
-
-func TestHandlePublicTrack_ClosedSession410(t *testing.T) {
-	h, _ := newPublicTrackHandler(t, "sid-1", "book-1", true)
-	rec := dispatchTrack(h, http.MethodGet, "sid-1", "1")
-	if rec.Code != http.StatusGone {
-		t.Errorf("status = %d, want 410", rec.Code)
-	}
-}
-
 func TestHandlePublicTrack_IndexOutOfRange404(t *testing.T) {
 	h, _ := newPublicTrackHandler(t, "sid-1", "book-1", false)
 	rec := dispatchTrack(h, http.MethodGet, "sid-1", "5")

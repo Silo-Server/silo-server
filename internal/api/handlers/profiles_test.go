@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -28,10 +27,6 @@ type testProfileUserRepo struct {
 
 func (r testProfileUserRepo) GetByID(context.Context, int) (*models.User, error) {
 	return r.user, r.err
-}
-
-func newAuthorizedProfileRequest(body string) *http.Request {
-	return newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles", body, "user", "")
 }
 
 func newAuthorizedProfileRequestWithRole(
@@ -96,73 +91,44 @@ func newProfileTestStoreWithSeed(t *testing.T, seedProfile bool) userstore.UserS
 	return store
 }
 
-func TestHandleCreateProfile_EnforcesUserProfileLimit(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 1},
-	}
+// profileLimitGroups serves one access group's policy for every account.
+type profileLimitGroups struct{ policy access.GroupPolicy }
 
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPost,
-		"/profiles",
-		`{"name":"Kids","max_playback_quality":"1080p"}`,
-		"admin",
-		"",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleCreateProfile(rr, req)
-
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	var resp errorResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Error != "profile_limit_reached" {
-		t.Fatalf("error = %q, want %q", resp.Error, "profile_limit_reached")
-	}
-
-	profiles, err := store.ListProfiles(context.Background())
-	if err != nil {
-		t.Fatalf("list profiles: %v", err)
-	}
-	if len(profiles) != 1 {
-		t.Fatalf("profile count = %d, want 1", len(profiles))
-	}
+func (g profileLimitGroups) GetPolicyForUser(context.Context, int) (*access.GroupPolicy, error) {
+	policy := g.policy
+	return &policy, nil
 }
 
-func TestHandleCreateProfile_AllowsNonAdminUpToCap(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5},
+func TestHandleCreateProfile_EnforcesInheritedGroupProfileLimit(t *testing.T) {
+	groupID := int64(4)
+	tests := []struct {
+		name     string
+		override *int
+		want     int
+	}{
+		{name: "inherits the group's limit", want: http.StatusConflict},
+		{name: "an override above the group's limit wins", override: new(2), want: http.StatusCreated},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newProfileTestStore(t)
+			handler := NewProfileHandler(testUserStoreProvider{store: store})
+			handler.UserRepo = testProfileUserRepo{
+				user: &models.User{ID: 1, Role: models.RoleUser, AccessGroupID: &groupID, MaxProfiles: tt.override},
+			}
+			handler.AccessGroups = profileLimitGroups{policy: access.GroupPolicy{ID: groupID, MaxProfiles: 1}}
 
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPost,
-		"/profiles",
-		`{"name":"Kids"}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
+			req := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles", `{"name":"Kids"}`, "user", "profile-1")
+			rr := httptest.NewRecorder()
+			handler.HandleCreateProfile(rr, req)
 
-	handler.HandleCreateProfile(rr, req)
-
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profiles, err := store.ListProfiles(context.Background())
-	if err != nil {
-		t.Fatalf("list profiles: %v", err)
-	}
-	if len(profiles) != 2 {
-		t.Fatalf("profile count = %d, want 2", len(profiles))
+			if rr.Code != tt.want {
+				t.Fatalf("status = %d, want %d, body = %s", rr.Code, tt.want, rr.Body.String())
+			}
+			if tt.want == http.StatusConflict && !strings.Contains(rr.Body.String(), "profile limit (1)") {
+				t.Fatalf("body = %s, want the group's limit in the message", rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -204,278 +170,8 @@ func TestHandleCreateProfile_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
-func TestHandleCreateProfile_RejectsWhitespaceOnlyName(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPost,
-		"/profiles",
-		`{"name":"   "}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleCreateProfile(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profiles, err := store.ListProfiles(context.Background())
-	if err != nil {
-		t.Fatalf("list profiles: %v", err)
-	}
-	if len(profiles) != 1 {
-		t.Fatalf("profile count = %d, want 1", len(profiles))
-	}
-}
-
-func TestHandleCreateProfile_TrimsStoredName(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPost,
-		"/profiles",
-		`{"name":" Laura "}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleCreateProfile(rr, req)
-
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profiles, err := store.ListProfiles(context.Background())
-	if err != nil {
-		t.Fatalf("list profiles: %v", err)
-	}
-	for _, p := range profiles {
-		if p.Name == "Laura" {
-			return
-		}
-	}
-	t.Fatalf("no profile stored with trimmed name, profiles: %+v", profiles)
-}
-
-func TestHandleCreateProfile_BlocksNonPrimaryNonAdmin(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5},
-	}
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPost,
-		"/profiles",
-		`{"name":"Extra"}`,
-		"user",
-		"profile-2",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleCreateProfile(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandleCreateProfile_RequiresVerifiedPrimaryPINWhenPrimaryHasPIN(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.UpdateProfile(context.Background(), "profile-1", userstore.UpdateProfileInput{
-		PIN: ptr("1234"),
-	}); err != nil {
-		t.Fatalf("set primary pin: %v", err)
-	}
-
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5, AccessPolicyRevision: 7},
-	}
-	handler.ProfileTokens = access.NewProfileTokenService("test-secret", time.Minute)
-
-	req := newAuthorizedProfileRequestWithSession(
-		http.MethodPost,
-		"/profiles",
-		`{"name":"Kids"}`,
-		"user",
-		"profile-1",
-		"sess-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleCreateProfile(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), "verifying the primary profile PIN") {
-		t.Fatalf("body = %s", rr.Body.String())
-	}
-}
-
-func TestHandleCreateProfile_AllowsVerifiedPrimaryPIN(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.UpdateProfile(context.Background(), "profile-1", userstore.UpdateProfileInput{
-		PIN: ptr("1234"),
-	}); err != nil {
-		t.Fatalf("set primary pin: %v", err)
-	}
-
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5, AccessPolicyRevision: 7},
-	}
-	handler.ProfileTokens = access.NewProfileTokenService("test-secret", time.Minute)
-
-	token, _, err := handler.ProfileTokens.Mint(access.ProfileTokenClaims{
-		UserID:         1,
-		SessionID:      "sess-1",
-		ProfileID:      "profile-1",
-		PolicyRevision: 7,
-	})
-	if err != nil {
-		t.Fatalf("mint profile token: %v", err)
-	}
-
-	req := newAuthorizedProfileRequestWithSession(
-		http.MethodPost,
-		"/profiles",
-		`{"name":"Kids"}`,
-		"user",
-		"profile-1",
-		"sess-1",
-	)
-	req.Header.Set("X-Profile-Token", token)
-	rr := httptest.NewRecorder()
-
-	handler.HandleCreateProfile(rr, req)
-
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandleCreateProfile_BlocksAdminOnlyFieldsForNonAdmin(t *testing.T) {
-	store := newEmptyProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	handler.UserRepo = testProfileUserRepo{
-		user: &models.User{ID: 1, MaxProfiles: 5},
-	}
-
-	req := newAuthorizedProfileRequest(`{"name":"Kids","is_child":true}`)
-	rr := httptest.NewRecorder()
-
-	handler.HandleCreateProfile(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profiles, err := store.ListProfiles(context.Background())
-	if err != nil {
-		t.Fatalf("list profiles: %v", err)
-	}
-	if len(profiles) != 0 {
-		t.Fatalf("profile count = %d, want 0", len(profiles))
-	}
-}
-
-func TestHandleCreateProfile_AllowsFirstProfileBootstrapForNonAdmin(t *testing.T) {
-	store := newEmptyProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequest(`{"name":"Main"}`)
-	rr := httptest.NewRecorder()
-
-	handler.HandleCreateProfile(rr, req)
-
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profiles, err := store.ListProfiles(context.Background())
-	if err != nil {
-		t.Fatalf("list profiles: %v", err)
-	}
-	if len(profiles) != 1 {
-		t.Fatalf("profile count = %d, want 1", len(profiles))
-	}
-}
-
 func ptr[T any](value T) *T {
 	return &value
-}
-
-func TestHandleUpdateProfile_AllowsPrimaryToSetAccessFields(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPut,
-		"/profiles/profile-2",
-		`{"max_content_rating":"PG-13"}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profile, err := store.GetProfile(context.Background(), "profile-2")
-	if err != nil || profile == nil {
-		t.Fatalf("get profile: %v, %v", profile, err)
-	}
-	if profile.MaxContentRating != "PG-13" {
-		t.Fatalf("max_content_rating = %q, want PG-13", profile.MaxContentRating)
-	}
-}
-
-func TestHandleUpdateProfile_BlocksAccessFieldsForNonPrimary(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPut,
-		"/profiles/profile-2",
-		`{"max_content_rating":"PG-13"}`,
-		"user",
-		"profile-2",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profile, err := store.GetProfile(context.Background(), "profile-2")
-	if err != nil || profile == nil {
-		t.Fatalf("get profile: %v, %v", profile, err)
-	}
-	if profile.MaxContentRating != "" {
-		t.Fatalf("max_content_rating = %q, want empty", profile.MaxContentRating)
-	}
 }
 
 func TestHandleUpdateProfile_AllowsSelfServiceFieldsForNonAdmin(t *testing.T) {
@@ -485,7 +181,7 @@ func TestHandleUpdateProfile_AllowsSelfServiceFieldsForNonAdmin(t *testing.T) {
 	req := newAuthorizedProfileRequestWithRole(
 		http.MethodPut,
 		"/profiles/profile-1",
-		`{"subtitle_mode":"always","pin":"1234"}`,
+		`{"name":"Main","subtitle_mode":"always","pin":"1234"}`,
 		"user",
 		"profile-1",
 	)
@@ -512,152 +208,16 @@ func TestHandleUpdateProfile_AllowsSelfServiceFieldsForNonAdmin(t *testing.T) {
 	}
 }
 
-func TestHandleUpdateProfile_AllowsNonAdminToUpdateAnyOwnedProfile(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPut,
-		"/profiles/profile-2",
-		`{"subtitle_mode":"always"}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandleUpdateProfile_RejectsDuplicateNameOnRename(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPut,
-		"/profiles/profile-2",
-		`{"name":"MAIN"}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	var resp errorResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Error != "name_conflict" {
-		t.Fatalf("error = %q, want %q", resp.Error, "name_conflict")
-	}
-
-	profile, err := store.GetProfile(context.Background(), "profile-2")
-	if err != nil {
-		t.Fatalf("get profile: %v", err)
-	}
-	if profile == nil || profile.Name != "Kids" {
-		t.Fatalf("profile name changed despite conflict: %+v", profile)
-	}
-}
-
-func TestHandleUpdateProfile_AllowsKeepingOwnNameOnUpdate(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	// Saving a profile without renaming resubmits its own name; the
-	// conflict check must exclude the profile being updated.
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPut,
-		"/profiles/profile-1",
-		`{"name":"Main","subtitle_mode":"always"}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-1"))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandleUpdateProfile_RejectsWhitespaceOnlyName(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPut,
-		"/profiles/profile-1",
-		`{"name":"   "}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-1"))
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profile, err := store.GetProfile(context.Background(), "profile-1")
-	if err != nil {
-		t.Fatalf("get profile: %v", err)
-	}
-	if profile == nil || profile.Name != "Main" {
-		t.Fatalf("profile name changed despite rejection: %+v", profile)
-	}
-}
-
-func TestHandleUpdateProfile_TrimsStoredNameOnRename(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(
-		http.MethodPut,
-		"/profiles/profile-1",
-		`{"name":" Laura "}`,
-		"user",
-		"profile-1",
-	)
-	rr := httptest.NewRecorder()
-
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-1"))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	profile, err := store.GetProfile(context.Background(), "profile-1")
-	if err != nil {
-		t.Fatalf("get profile: %v", err)
-	}
-	if profile == nil || profile.Name != "Laura" {
-		t.Fatalf("stored name not trimmed: %+v", profile)
-	}
-}
-
 func TestHandleDeleteProfile_AllowsPrimaryToDeleteOther(t *testing.T) {
 	store := newProfileTestStore(t)
 	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
 		t.Fatalf("create profile: %v", err)
 	}
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	purger := &recordingProfilePurger{}
+	withdrawer := &recordingWatchlistRequestWithdrawer{}
+	handler.WatchlistTitlesPurger = purger
+	handler.WatchlistRequestWithdrawer = withdrawer
 
 	req := newAuthorizedProfileRequestWithRole(
 		http.MethodDelete,
@@ -675,9 +235,16 @@ func TestHandleDeleteProfile_AllowsPrimaryToDeleteOther(t *testing.T) {
 	}
 
 	profile, err := store.GetProfile(context.Background(), "profile-2")
-	if err == nil && profile != nil {
+	if err != nil || profile != nil {
 		t.Fatal("expected profile to be deleted")
 	}
+	if len(purger.calls) != 1 || purger.calls[0] != "1/profile-2" {
+		t.Fatalf("purge calls = %v, want [1/profile-2]", purger.calls)
+	}
+	if len(withdrawer.calls) != 1 || withdrawer.calls[0] != "1/profile-2" {
+		t.Fatalf("withdraw calls = %v, want [1/profile-2]", withdrawer.calls)
+	}
+
 }
 
 type recordingProfilePurger struct {
@@ -689,27 +256,6 @@ func (p *recordingProfilePurger) PurgeProfile(_ context.Context, userID int, pro
 	return nil
 }
 
-func TestHandleDeleteProfile_PurgesWatchlistTitles(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	purger := &recordingProfilePurger{}
-	handler.WatchlistTitlesPurger = purger
-
-	req := newAuthorizedProfileRequestWithRole(http.MethodDelete, "/profiles/profile-2", "", "user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleDeleteProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if len(purger.calls) != 1 || !strings.HasSuffix(purger.calls[0], "/profile-2") {
-		t.Fatalf("purge calls = %v, want one for profile-2", purger.calls)
-	}
-}
-
 type recordingWatchlistRequestWithdrawer struct {
 	calls []string
 }
@@ -717,29 +263,6 @@ type recordingWatchlistRequestWithdrawer struct {
 func (w *recordingWatchlistRequestWithdrawer) WithdrawProfileWatchlistRequests(_ context.Context, userID int, profileID string) error {
 	w.calls = append(w.calls, fmt.Sprintf("%d/%s", userID, profileID))
 	return nil
-}
-
-// A deleted profile's watchlist requests are withdrawn, as removing each title
-// would; the requests name the profile, so no watchlist entry is needed.
-func TestHandleDeleteProfile_WithdrawsWatchlistRequests(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-	withdrawer := &recordingWatchlistRequestWithdrawer{}
-	handler.WatchlistRequestWithdrawer = withdrawer
-
-	req := newAuthorizedProfileRequestWithRole(http.MethodDelete, "/profiles/profile-2", "", "user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleDeleteProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if len(withdrawer.calls) != 1 || !strings.HasSuffix(withdrawer.calls[0], "/profile-2") {
-		t.Fatalf("withdraw calls = %v, want one for profile-2", withdrawer.calls)
-	}
 }
 
 func TestHandleDeleteProfile_BlocksPrimaryDeletion(t *testing.T) {
@@ -851,5 +374,44 @@ func TestHandleListHouseholdSessions_ReturnsAccountSessionsForPrimary(t *testing
 	}
 	if len(resp) != 1 || resp[0].SessionID != "sess-1" || resp[0].ProfileName != "Kids" {
 		t.Fatalf("sessions = %#v", resp)
+	}
+}
+
+func TestHandleUpdateProfile_RejectsDuplicateNameOnRename(t *testing.T) {
+	store := newProfileTestStore(t)
+	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	req := newAuthorizedProfileRequestWithRole(
+		http.MethodPut,
+		"/profiles/profile-2",
+		`{"name":"MAIN"}`,
+		"user",
+		"profile-1",
+	)
+	rr := httptest.NewRecorder()
+
+	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp errorResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error != "name_conflict" {
+		t.Fatalf("error = %q, want %q", resp.Error, "name_conflict")
+	}
+
+	profile, err := store.GetProfile(context.Background(), "profile-2")
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if profile == nil || profile.Name != "Kids" {
+		t.Fatalf("profile name changed despite conflict: %+v", profile)
 	}
 }

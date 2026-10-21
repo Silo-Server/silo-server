@@ -17,6 +17,7 @@ import {
   getDefaultQuerySortOrder,
   getQuerySortOptions,
   normalizeQuerySortForScope,
+  querySortScopeForMediaScope,
   type QuerySortRelevanceScope,
 } from "@/lib/querySortOptions";
 
@@ -36,7 +37,7 @@ interface CatalogFilterBarProps {
 
 export const CATALOG_SOURCE_ORDER_SORT_FIELD = "__source_order";
 
-export const CATALOG_MEDIA_SCOPE_OPTIONS = [
+const CATALOG_MEDIA_SCOPE_OPTIONS = [
   { value: "all", label: "All Media" },
   { value: "video", label: "Movies & Series" },
   { value: "movie", label: "Movies" },
@@ -89,14 +90,6 @@ export default function CatalogFilterBar({
         <Select
           value={state.mediaScope}
           onValueChange={(v) => {
-            // "video" spans movie+series, so sorts valid for "all" stay valid.
-            // Manga reuses the ebook sort universe (no dedicated sort scope).
-            const nextRelevanceScope: QuerySortRelevanceScope =
-              v === "all" || v === "video"
-                ? "all"
-                : v === "manga"
-                  ? "ebook"
-                  : (v as QuerySortRelevanceScope);
             if (usesSourceOrder) {
               onUpdate({ mediaScope: v as GuidedFormState["mediaScope"] });
               return;
@@ -105,7 +98,7 @@ export default function CatalogFilterBar({
               { field: state.sortField, order: state.sortOrder },
               {
                 includePersonalized: allowPersonalizedSorts,
-                relevanceScope: nextRelevanceScope,
+                relevanceScope: querySortScopeForMediaScope(v),
               },
             );
             onUpdate({
@@ -206,7 +199,7 @@ export default function CatalogFilterBar({
         <SlidersHorizontal className="h-4 w-4" />
         Filters
         {activeFilterCount > 0 && (
-          <Badge variant="default" className="ml-1 px-1.5 py-0 text-[10px]">
+          <Badge variant="default" className="ml-1 px-1.5 py-0 text-[0.625rem]">
             {activeFilterCount}
           </Badge>
         )}

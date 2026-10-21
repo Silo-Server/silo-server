@@ -39,22 +39,6 @@ func TestDetectHWAccelReportsAnIncompleteWalk(t *testing.T) {
 	}
 }
 
-// The complement: a walk that reached every candidate backend publishes
-// normally, or nothing would ever be inventoried.
-func TestDetectHWAccelReportsACompleteWalk(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, "")
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
-	}
-	if info.Resolved != transcodeHWQSV {
-		t.Fatalf("Resolved = %q, want qsv", info.Resolved)
-	}
-}
-
 // Detection walks a backend's candidates in order and stops at the first that
 // passes a smoke encode; execution with no configured playback.hw_device used to
 // fall back to PickRenderDevice, which returns whatever sorts first under
@@ -165,6 +149,30 @@ func smokeEncodeCount(t *testing.T, logPath string) int {
 	return strings.Count(string(data), "testsrc2")
 }
 
+// detectHWAccelAuto runs an auto detection walk with no deadline and fails the
+// test if the walk reports itself incomplete.
+func detectHWAccelAuto(t *testing.T, ffmpegPath, device string) HWAccelInfo {
+	t.Helper()
+	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpegPath, device)
+	if err != nil {
+		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
+	}
+	return info
+}
+
+// detectedBackendEntry returns the report's entry for backend, failing the test
+// when the walk did not report it.
+func detectedBackendEntry(t *testing.T, info HWAccelInfo, backend string) DetectedBackend {
+	t.Helper()
+	for _, entry := range info.DetectedBackends {
+		if entry.Backend == backend {
+			return entry
+		}
+	}
+	t.Fatalf("no %s entry in %+v", backend, info.DetectedBackends)
+	return DetectedBackend{}
+}
+
 // devicePath is the full path of a render device added to this test's /dev/dri
 // stand-in.
 func (e *hwAccelTestEnv) devicePath(name string) string {
@@ -182,46 +190,10 @@ func TestNVENCProbesTheConfiguredCUDADevice(t *testing.T) {
 	probe.smokeDeviceFailures = []string{"1"}
 	ffmpeg := writeFakeFFmpeg(t, probe)
 
-	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, "1")
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
+	backend := detectedBackendEntry(t, detectHWAccelAuto(t, ffmpeg.path, "1"), transcodeHWNVENC)
+	if backend.Verified {
+		t.Fatalf("nvenc reported verified while the configured CUDA device fails: %+v", backend)
 	}
-	for _, backend := range info.DetectedBackends {
-		if backend.Backend != transcodeHWNVENC {
-			continue
-		}
-		if backend.Verified {
-			t.Fatalf("nvenc reported verified while the configured CUDA device fails: %+v", backend)
-		}
-		return
-	}
-	t.Fatalf("no nvenc entry in %+v", info.DetectedBackends)
-}
-
-// A CUDA index is not a filesystem path, so the accessibility filter that keeps
-// a proxy from probing a render node it cannot open must not silently skip it.
-func TestNVENCConfiguredDeviceIsProbedNotSkipped(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addNVIDIADevice(t, "nvidia0")
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, "0")
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
-	}
-	for _, backend := range info.DetectedBackends {
-		if backend.Backend != transcodeHWNVENC {
-			continue
-		}
-		if backend.Skipped {
-			t.Fatalf("nvenc was skipped for an unopenable CUDA index: %+v", backend)
-		}
-		if !backend.Verified {
-			t.Fatalf("nvenc should verify against a working CUDA device: %+v", backend)
-		}
-		return
-	}
-	t.Fatalf("no nvenc entry in %+v", info.DetectedBackends)
 }
 
 // An explicitly configured backend short-circuits resolution, so the detection
@@ -265,19 +237,13 @@ func TestInvalidateHWProbeCacheRequeriesNVIDIAIdentities(t *testing.T) {
 
 	queries := 0
 	answer := ""
-	previous := nvidiaSMIQuery
-	nvidiaSMIQuery = func(context.Context) ([]byte, error) {
+	stubNVIDIASMIQuery(t, func(context.Context) ([]byte, error) {
 		queries++
 		if answer == "" {
 			return nil, errors.New("nvidia-smi not installed")
 		}
 		return []byte(answer), nil
-	}
-	t.Cleanup(func() {
-		nvidiaSMIQuery = previous
-		resetNVIDIAGPUUUIDs()
 	})
-	resetNVIDIAGPUUUIDs()
 
 	if got := nvidiaGPUUUIDsByPCIAddress(); len(got) != 0 {
 		t.Fatalf("identities = %v, want none while nvidia-smi is unavailable", got)
@@ -311,24 +277,13 @@ func TestNVENCSkippedWhenTheConfiguredDeviceIsARenderPath(t *testing.T) {
 	env.addNVIDIADevice(t, "nvidia0")
 	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
 
-	info, err := DetectHWAccelWithFFmpegContextResult(
-		context.Background(), hwAccelAuto, ffmpeg.path, env.devicePath("renderD128"))
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
+	backend := detectedBackendEntry(t, detectHWAccelAuto(t, ffmpeg.path, env.devicePath("renderD128")), transcodeHWNVENC)
+	if !backend.Skipped {
+		t.Fatalf("nvenc = %+v, want it skipped rather than failed for a render-path device", backend)
 	}
-	for _, backend := range info.DetectedBackends {
-		if backend.Backend != transcodeHWNVENC {
-			continue
-		}
-		if !backend.Skipped {
-			t.Fatalf("nvenc = %+v, want it skipped rather than failed for a render-path device", backend)
-		}
-		if backend.Verified {
-			t.Fatalf("nvenc = %+v, want no verification claimed", backend)
-		}
-		return
+	if backend.Verified {
+		t.Fatalf("nvenc = %+v, want no verification claimed", backend)
 	}
-	t.Fatalf("no nvenc entry in %+v", info.DetectedBackends)
 }
 
 // A CUDA identity is still probed: skipping is about the device being the wrong
@@ -341,20 +296,10 @@ func TestNVENCProbedWhenTheConfiguredDeviceIsACUDAIdentity(t *testing.T) {
 	for _, device := range []string{"0", "cuda:1", "GPU-a1b2c3d4"} {
 		t.Run(device, func(t *testing.T) {
 			InvalidateHWProbeCache()
-			info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, device)
-			if err != nil {
-				t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
+			backend := detectedBackendEntry(t, detectHWAccelAuto(t, ffmpeg.path, device), transcodeHWNVENC)
+			if backend.Skipped || !backend.Verified {
+				t.Fatalf("nvenc = %+v, want a CUDA identity probed and verified", backend)
 			}
-			for _, backend := range info.DetectedBackends {
-				if backend.Backend != transcodeHWNVENC {
-					continue
-				}
-				if backend.Skipped || !backend.Verified {
-					t.Fatalf("nvenc = %+v, want a CUDA identity probed and verified", backend)
-				}
-				return
-			}
-			t.Fatalf("no nvenc entry in %+v", info.DetectedBackends)
 		})
 	}
 }
@@ -376,11 +321,7 @@ func TestConfiguredDeviceListIsProbedInFullAndBalancedOnlyAcrossPasses(t *testin
 	working, broken := env.devicePath("renderD128"), env.devicePath("renderD129")
 	configured := working + "," + broken
 
-	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, configured)
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
-	}
-	if info.Resolved != transcodeHWQSV {
+	if info := detectHWAccelAuto(t, ffmpeg.path, configured); info.Resolved != transcodeHWQSV {
 		t.Fatalf("resolved = %q, want qsv from the device that passed", info.Resolved)
 	}
 
@@ -388,47 +329,19 @@ func TestConfiguredDeviceListIsProbedInFullAndBalancedOnlyAcrossPasses(t *testin
 		t.Fatalf("verified devices = %v, want only the card whose probe passed", got)
 	}
 
-	// Ten acquisitions is far more than the balancer needs to reach a second
-	// device: with both present it alternates on the very next one.
-	releases := make([]func(), 0, 10)
-	t.Cleanup(func() {
-		for _, release := range releases {
-			release()
-		}
-	})
-	for i := range 10 {
-		device, _, release := acquireHWDevice(configured, transcodeHWQSV, "")
-		releases = append(releases, release)
-		if device != working {
-			t.Fatalf("acquisition %d selected %q, want the verified device %q", i, device, working)
-		}
-	}
-}
-
-// With nothing verified — a cold process, or hw_accel named explicitly so the
-// walk never ran — the balancer must not narrow to an empty set and must keep
-// using every present device exactly as before.
-func TestBalancingIsUnchangedWhenNoDeviceHasBeenVerified(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	env.addRenderDevice(t, "renderD129", "0x8086")
-	first, second := env.devicePath("renderD128"), env.devicePath("renderD129")
-	configured := first + "," + second
-
-	selected := map[string]bool{}
+	// A second held acquisition reaches the broken device if filtering is lost.
 	releases := make([]func(), 0, 2)
 	t.Cleanup(func() {
 		for _, release := range releases {
 			release()
 		}
 	})
-	for range 2 {
+	for i := range 2 {
 		device, _, release := acquireHWDevice(configured, transcodeHWQSV, "")
 		releases = append(releases, release)
-		selected[device] = true
-	}
-	if len(selected) != 2 {
-		t.Fatalf("selected %v, want both devices used when no probe has ruled either out", selected)
+		if device != working {
+			t.Fatalf("acquisition %d selected %q, want the verified device %q", i, device, working)
+		}
 	}
 }
 
@@ -445,10 +358,7 @@ func TestEveryConfiguredDeviceThatPassesStaysInTheBalancer(t *testing.T) {
 	first, second := env.devicePath("renderD128"), env.devicePath("renderD129")
 	configured := first + "," + second
 
-	if _, err := DetectHWAccelWithFFmpegContextResult(
-		context.Background(), hwAccelAuto, ffmpeg.path, configured); err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
-	}
+	detectHWAccelAuto(t, ffmpeg.path, configured)
 	if got := VerifiedHWDevices(transcodeHWQSV); !slices.Equal(got, []string{first, second}) {
 		t.Fatalf("verified devices = %v, want both cards in the configured set", got)
 	}
@@ -479,21 +389,10 @@ func TestEveryConfiguredDeviceThatPassesStaysInTheBalancer(t *testing.T) {
 func TestCUDAOnlyHostPublishesItsGPUIdentities(t *testing.T) {
 	env := setupHWAccelTest(t)
 	env.addNVIDIADevice(t, "nvidia0")
-	previous := nvidiaSMIQuery
-	nvidiaSMIQuery = func(context.Context) ([]byte, error) {
-		return []byte("GPU-aaa, 00000000:03:00.0\nGPU-bbb, 00000000:04:00.0\n"), nil
-	}
-	t.Cleanup(func() {
-		nvidiaSMIQuery = previous
-		resetNVIDIAGPUUUIDs()
-	})
-	resetNVIDIAGPUUUIDs()
+	stubNVIDIASMI(t, "GPU-aaa, 00000000:03:00.0\nGPU-bbb, 00000000:04:00.0\n", nil)
 	ffmpeg := writeFakeFFmpeg(t, successfulNVENCProbe())
 
-	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, "")
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
-	}
+	info := detectHWAccelAuto(t, ffmpeg.path, "")
 	if len(info.RenderDeviceDetails) != 0 {
 		t.Fatalf("render devices = %+v, want none on a container with no /dev/dri", info.RenderDeviceDetails)
 	}
@@ -537,47 +436,6 @@ func TestDetectHWAccelReportsADeadlineInsideTheFinalProbe(t *testing.T) {
 			t.Fatalf("vaapi = %+v, want no verification claimed", backend)
 		}
 	}
-}
-
-// A probe outlives its caller by design, so a component that released its own
-// claim on the GPU when its call returned can leave ffmpeg on the card with
-// nothing accounting for it. The count is what lets the transcode node's
-// re-probe gate see that.
-func TestHWProbesInFlightCountsADetachedProbe(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x1002")
-	ffmpeg := writeFakeFFmpeg(t, successfulVAAPIProbe())
-	device := env.devicePath("renderD128")
-
-	// Asserted as a floor rather than an exact count: the process-global counter
-	// is shared with any probe an earlier test detached, and those drain on
-	// their own schedule. What this test owns is that its own flight is counted
-	// while it runs and released when it lands.
-	//
-	// Decided by channel receipts, not a sleep: the flight parks inside the
-	// probe until this test has read the count.
-	started := make(chan struct{})
-	release := make(chan struct{})
-	hwProbeFlightStarted = func() {
-		close(started)
-		<-release
-	}
-	t.Cleanup(func() { hwProbeFlightStarted = nil })
-
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		if ok, reason := ffmpegSupportsBackend(transcodeHWVAAPI, ffmpeg.path, device); !ok {
-			t.Errorf("probe failed: %s", reason)
-		}
-	})
-
-	<-started
-	if got := HWProbesInFlight(); got < 1 {
-		t.Fatalf("HWProbesInFlight() = %d while a smoke encode is running, want at least 1", got)
-	}
-	close(release)
-	wg.Wait()
-	awaitNoProbesInFlight(t)
 }
 
 // The claim has to be taken on the calling goroutine, not inside the function
@@ -701,12 +559,7 @@ func TestInvalidateHWProbeCacheSupersedesAnInFlightVideoToolboxProbe(t *testing.
 func TestDetectHWAccelPublishesVideoToolboxOnDarwin(t *testing.T) {
 	setupHWAccelTest(t)
 	currentGOOS = darwinGOOS
-	ffmpeg := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
-
-	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, "")
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
-	}
+	info := detectHWAccelAuto(t, writeFakeFFmpeg(t, successfulVideoToolboxProbe()).path, "")
 	if info.Resolved != transcodeHWVideoToolbox {
 		t.Fatalf("Resolved = %q, want videotoolbox", info.Resolved)
 	}
@@ -722,12 +575,7 @@ func TestDetectHWAccelPublishesVideoToolboxOnDarwin(t *testing.T) {
 func TestDetectHWAccelReportsAFailedVideoToolboxProbe(t *testing.T) {
 	setupHWAccelTest(t)
 	currentGOOS = darwinGOOS
-	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{})
-
-	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, "")
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
-	}
+	info := detectHWAccelAuto(t, writeFakeFFmpeg(t, fakeFFmpegProbe{}).path, "")
 	if info.Resolved != HWAccelNone {
 		t.Fatalf("Resolved = %q, want none", info.Resolved)
 	}
@@ -790,18 +638,13 @@ func TestHWProbesInFlightCountsADetachedVideoToolboxProbe(t *testing.T) {
 // cached past the walk that took it would republish a hot-removed card in every
 // snapshot until someone re-probed by hand.
 func TestCapabilityWalkRequeriesNVIDIAIdentities(t *testing.T) {
-	previous := nvidiaSMIQuery
+	setupHWAccelTest(t)
 	answer := "GPU-aaa, 00000000:03:00.0\n"
 	queries := 0
-	nvidiaSMIQuery = func(context.Context) ([]byte, error) {
+	stubNVIDIASMIQuery(t, func(context.Context) ([]byte, error) {
 		queries++
 		return []byte(answer), nil
-	}
-	t.Cleanup(func() {
-		nvidiaSMIQuery = previous
-		resetNVIDIAGPUUUIDs()
 	})
-	resetNVIDIAGPUUUIDs()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

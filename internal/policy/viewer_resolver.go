@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -19,6 +20,7 @@ type ViewerResolver struct {
 	pdp          *PDP
 	groups       access.GroupPolicyProvider
 	unrated      access.UnratedContentPolicy
+	defaults     settingsresolve.ServerSettings
 }
 
 // WithUnratedContentPolicy installs the reader for access.unrated_content and
@@ -28,6 +30,24 @@ func (r *ViewerResolver) WithUnratedContentPolicy(policy access.UnratedContentPo
 		r.unrated = policy
 	}
 	return r
+}
+
+// WithAdminDefaults installs the administrator's setting defaults and returns
+// the resolver. See access.Resolver.WithAdminDefaults.
+func (r *ViewerResolver) WithAdminDefaults(defaults settingsresolve.ServerSettings) *ViewerResolver {
+	if r != nil {
+		r.defaults = defaults
+	}
+	return r
+}
+
+// ViewerPreferencesStrict resolves the profile's viewer preferences from
+// reader, such as one database snapshot, with this resolver's administrator
+// defaults, so a scope built through ResolveFacts matches one built by Resolve.
+func (r *ViewerResolver) ViewerPreferencesStrict(
+	ctx context.Context, reader access.ViewerPreferenceReader, profileID string,
+) (access.ViewerPreferences, error) {
+	return access.ResolveViewerPreferencesStrict(ctx, reader, r.defaults, profileID)
 }
 
 // NewViewerResolver creates a PDP-backed viewer scope resolver.
@@ -77,7 +97,7 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 			return access.Scope{}, access.ErrProfileNotFound
 		}
 	}
-	preferences := access.ResolveViewerPreferences(ctx, store, input.ProfileID)
+	preferences := access.ResolveViewerPreferences(ctx, store, r.defaults, input.ProfileID)
 	return r.ResolveFacts(ctx, input, user, profile, effective, preferences)
 }
 
@@ -93,12 +113,16 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 			return access.Scope{}, access.ErrProfileNotFound
 		}
 		var err error
-		profileVerified, err = access.VerifyProfileForRequest(profile, input, user.ID, user.AccessPolicyRevision, r.tokens)
+		profileVerified, err = access.VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
 			return access.Scope{}, err
 		}
 	}
 
+	disabledPreference := preferences.DisabledLibraryIDs
+	if input.ContentAccessOnly {
+		disabledPreference = nil
+	}
 	policyInput := ScopeInput{
 		SchemaVersion:        1,
 		UserID:               user.ID,
@@ -108,7 +132,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		AccountRestricted:    effective.LibraryIDs != nil,
 		AccountMaxQuality:    effective.MaxPlaybackQuality,
 		AccessPolicyRevision: user.AccessPolicyRevision,
-		DisabledLibraryIDs:   preferences.DisabledLibraryIDs,
+		DisabledLibraryIDs:   disabledPreference,
 		ProfileVerified:      profileVerified,
 		RequestTime:          time.Now().UTC().Format(time.RFC3339),
 		// ResolveInput cannot distinguish API keys from compat callers that
@@ -157,6 +181,10 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 	if len(disabled) == 0 {
 		disabled = nil
 	}
+	hidden := slices.Clone(decision.HiddenLibraryIDs)
+	if len(hidden) == 0 {
+		hidden = nil
+	}
 
 	allowUnrated := false
 	if r.unrated != nil {
@@ -174,6 +202,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		AllowedLibraryIDs:   allowed,
 		DisabledLibraryIDs:  disabled,
 		LibrariesRestricted: decision.LibrariesRestricted,
+		HiddenLibraryIDs:    hidden,
 		MaturityLimits: access.MaturityLimits{
 			MaxContentRating:    access.StricterCeiling(decision.MaxContentRating, decision.MaxContentRatingOverride),
 			AllowUnratedContent: allowUnrated,
@@ -186,6 +215,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		PreferredMetadataLanguage:  decision.PreferredMetadataLanguage,
 		MetadataLanguageOverrides:  preferences.MetadataLanguageOverrides,
 		NextUpMode:                 preferences.NextUpMode,
+		NextUpNewReleasesFirst:     preferences.NextUpNewReleasesFirst,
 		PreferencesDegraded:        preferences.Degraded,
 		PolicyRevision:             user.AccessPolicyRevision,
 		// The policy output is tighten-only (merged_profile_verified), so a

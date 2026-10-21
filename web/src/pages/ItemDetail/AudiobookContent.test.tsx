@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import type { ItemDetail } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   controller: null as null | {
@@ -42,40 +41,13 @@ vi.mock("@/pages/ItemDetail/components/MetadataBadges", () => ({
   default: () => null,
 }));
 
+import { makeItemDetail } from "./itemDetail.test-support";
 import AudiobookContent from "./AudiobookContent";
 
-function bookWithProgress(seconds: number): ItemDetail & { type: "audiobook" } {
-  return {
+function bookWithProgress(seconds: number) {
+  return makeItemDetail("audiobook", {
     content_id: "book-1",
-    type: "audiobook",
     title: "Test Book",
-    year: 2024,
-    overview: "",
-    runtime: 0,
-    content_rating: "",
-    genres: [],
-    rating_imdb: null,
-    rating_tmdb: null,
-    rating_rt_critic: null,
-    rating_rt_audience: null,
-    ratings: [],
-    imdb_id: "",
-    tmdb_id: "",
-    tvdb_id: "",
-    cast: [],
-    crew: [],
-    studios: [],
-    networks: [],
-    countries: [],
-    release_date: null,
-    first_air_date: null,
-    last_air_date: null,
-    season_count: null,
-    poster_url: "",
-    poster_thumbhash: "",
-    backdrop_url: "",
-    backdrop_thumbhash: "",
-    logo_url: "",
     versions: [
       {
         file_id: 1,
@@ -91,9 +63,6 @@ function bookWithProgress(seconds: number): ItemDetail & { type: "audiobook" } {
         chapters: [],
       },
     ],
-    subtitles: [],
-    intro: null,
-    credits: null,
     user_data: {
       played: false,
       is_in_progress: true,
@@ -107,7 +76,7 @@ function bookWithProgress(seconds: number): ItemDetail & { type: "audiobook" } {
       other_narrations: [],
       related: { also_by_author: [], similar: [] },
     },
-  };
+  });
 }
 
 describe("AudiobookContent playback actions", () => {
@@ -124,7 +93,7 @@ describe("AudiobookContent playback actions", () => {
     };
   });
 
-  it("sends every Play-from-Start click to the shared audiobook player", async () => {
+  it("sends resume and Listen-from-Start with the correct start positions", async () => {
     render(
       <MemoryRouter>
         <AudiobookContent item={bookWithProgress(5000)} />
@@ -132,29 +101,6 @@ describe("AudiobookContent playback actions", () => {
     );
 
     expect(mocks.startPlayback).not.toHaveBeenCalled();
-
-    await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
-    expect(mocks.startPlayback).toHaveBeenCalledTimes(1);
-    expect(mocks.startPlayback.mock.calls[0]?.[0]).toMatchObject({
-      contentId: "book-1",
-      title: "Test Book",
-      initialPositionSeconds: 0,
-    });
-
-    await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
-    expect(mocks.startPlayback).toHaveBeenCalledTimes(2);
-    expect(mocks.startPlayback.mock.calls[1]?.[0]).toMatchObject({
-      contentId: "book-1",
-      initialPositionSeconds: 0,
-    });
-  });
-
-  it("sends resume and Listen-from-Start with the correct start positions", async () => {
-    render(
-      <MemoryRouter>
-        <AudiobookContent item={bookWithProgress(5000)} />
-      </MemoryRouter>,
-    );
 
     await userEvent.click(screen.getByRole("button", { name: /^resume/i }));
     expect(mocks.startPlayback).toHaveBeenCalledTimes(1);
@@ -166,6 +112,15 @@ describe("AudiobookContent playback actions", () => {
     await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
     expect(mocks.startPlayback).toHaveBeenCalledTimes(2);
     expect(mocks.startPlayback.mock.calls[1]?.[0]).toMatchObject({
+      contentId: "book-1",
+      title: "Test Book",
+      initialPositionSeconds: 0,
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
+    expect(mocks.startPlayback).toHaveBeenCalledTimes(3);
+    expect(mocks.startPlayback.mock.calls[2]?.[0]).toMatchObject({
+      contentId: "book-1",
       initialPositionSeconds: 0,
     });
   });

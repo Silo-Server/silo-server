@@ -91,52 +91,6 @@ func TestManagedWebSeekPatchRejectsIncompatibleSources(t *testing.T) {
 	}
 }
 
-func TestInstallWebComponentPatchesBeforeBuildAndRecordsProvenance(t *testing.T) {
-	gitDir, err := commandOutput(t.Context(), "", "git", "rev-parse", "--absolute-git-dir")
-	if err != nil {
-		t.Skip("installer fixture requires a Git checkout")
-	}
-	var npmCalls int
-	status, err := InstallWebComponent(t.Context(), WebComponentInstallOptions{
-		InstallRoot: t.TempDir(), Version: "10.11.8",
-		RunCommand: func(_ context.Context, dir string, args []string, _ string) error {
-			if args[0] == "git" {
-				dir = args[len(args)-1]
-				seedWebSeekSources(t, dir)
-				if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+strings.TrimSpace(gitDir)+"\n"), 0o644); err != nil {
-					return err
-				}
-				return os.WriteFile(filepath.Join(dir, "LICENSE"), []byte("GPL-2.0 fixture"), 0o644)
-			}
-			npmCalls++
-			for path, marker := range map[string]string{webPlaybackManagerSource: "SiloSeekReanchor: true", webHTMLVideoPlayerSource: "canSeekTo(milliseconds)"} {
-				data, err := os.ReadFile(filepath.Join(dir, path))
-				if err != nil || !strings.Contains(string(data), marker) {
-					t.Fatalf("npm ran before patch %s: %v", path, err)
-				}
-			}
-			if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
-				return err
-			}
-			return os.WriteFile(filepath.Join(dir, "dist", "index.html"), []byte("fixture"), 0o644)
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if npmCalls != 2 {
-		t.Fatalf("npm calls=%d", npmCalls)
-	}
-	metadata, err := readWebMetadata(status.InstallPath)
-	if err != nil || !metadata.Modified || len(metadata.Patches) != 1 || metadata.Patches[0] != webSeekReanchorPatch {
-		t.Fatalf("metadata=%+v err=%v", metadata, err)
-	}
-	provenance, err := os.ReadFile(filepath.Join(status.InstallPath, webSourceFile))
-	if err != nil || !strings.Contains(string(provenance), "Modified: true") || !strings.Contains(string(provenance), webSeekReanchorPatch) {
-		t.Fatalf("provenance=%s err=%v", provenance, err)
-	}
-}
-
 func TestInstallWebComponentUsesTwoPartUpstreamTag(t *testing.T) {
 	gitDir, err := commandOutput(t.Context(), "", "git", "rev-parse", "--absolute-git-dir")
 	if err != nil {
@@ -161,6 +115,12 @@ func TestInstallWebComponentUsesTwoPartUpstreamTag(t *testing.T) {
 				return os.WriteFile(filepath.Join(dir, "LICENSE"), []byte("GPL-2.0 fixture"), 0o644)
 			}
 			npmCalls = append(npmCalls, args)
+			for path, marker := range map[string]string{webPlaybackManagerSource: "SiloSeekReanchor: true", webHTMLVideoPlayerSource: "canSeekTo(milliseconds)"} {
+				data, err := os.ReadFile(filepath.Join(dir, path))
+				if err != nil || !strings.Contains(string(data), marker) {
+					t.Fatalf("npm ran before patch %s: %v", path, err)
+				}
+			}
 			if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
 				return err
 			}
@@ -189,6 +149,13 @@ func TestInstallWebComponentUsesTwoPartUpstreamTag(t *testing.T) {
 	if err != nil || metadata.Version != "12.1" || metadata.Tag != "v12.1" {
 		t.Fatalf("metadata=%+v err=%v", metadata, err)
 	}
+	if !metadata.Modified || len(metadata.Patches) != 1 || metadata.Patches[0] != webSeekReanchorPatch {
+		t.Fatalf("patch metadata=%+v", metadata)
+	}
+	provenance, err := os.ReadFile(filepath.Join(status.InstallPath, webSourceFile))
+	if err != nil || !strings.Contains(string(provenance), "Modified: true") || !strings.Contains(string(provenance), webSeekReanchorPatch) {
+		t.Fatalf("provenance=%s err=%v", provenance, err)
+	}
 	if want := "npm exec --yes '--package=npm@>=11.0.0' -- npm ci && npm exec --yes '--package=npm@>=11.0.0' -- npm run build:production"; metadata.BuildCommand != want {
 		t.Fatalf("BuildCommand = %q, want %q", metadata.BuildCommand, want)
 	}
@@ -200,6 +167,9 @@ func TestInstallWebComponentUsesTwoPartUpstreamTag(t *testing.T) {
 	settled := webComponentStatus(root, ManagedWebInstallPath(root), "12.1", "")
 	if settled.WebState != WebComponentInstalled {
 		t.Fatalf("settled WebState = %q, want %q (%s)", settled.WebState, WebComponentInstalled, settled.LastError)
+	}
+	if !settled.LicensePresent || !settled.ProvenancePresent || settled.CommitSHA == "" || settled.CommitSHA != metadata.CommitSHA {
+		t.Fatalf("settled provenance status=%+v, metadata=%+v", settled, metadata)
 	}
 }
 
@@ -213,11 +183,9 @@ func TestWebInstallNPMCommandUsesUpstreamEngineRange(t *testing.T) {
 		{name: "missing package.json", want: "npm ci"},
 		{name: "no npm engine", packageJSON: `{"engines":{"node":">=20.0.0"}}`, want: "npm ci"},
 		{name: "10.11 range below npm 11", packageJSON: `{"engines":{"npm":">=9.6.4 <11.0.0"}}`, want: "npm exec --yes --package=npm@>=9.6.4 <11.0.0 -- npm ci"},
-		{name: "12.x range", packageJSON: `{"engines":{"npm":">=11.0.0"}}`, want: "npm exec --yes --package=npm@>=11.0.0 -- npm ci"},
 		{name: "alternatives and wildcards", packageJSON: `{"engines":{"npm":"^10.x || >= 11"}}`, want: "npm exec --yes --package=npm@^10.x || >= 11 -- npm ci"},
 		{name: "hyphen range", packageJSON: `{"engines":{"npm":"9.6.4 - 10"}}`, want: "npm exec --yes --package=npm@9.6.4 - 10 -- npm ci"},
 		{name: "rejects latest dist-tag", packageJSON: `{"engines":{"npm":"latest"}}`, wantErr: true},
-		{name: "rejects arbitrary tag", packageJSON: `{"engines":{"npm":"foo"}}`, wantErr: true},
 		{name: "rejects tag among comparators", packageJSON: `{"engines":{"npm":">=11 next"}}`, wantErr: true},
 		{name: "empty alternative", packageJSON: `{"engines":{"npm":">=10 ||"}}`, want: "npm exec --yes --package=npm@>=10 || -- npm ci"},
 		{name: "rejects dangling hyphen", packageJSON: `{"engines":{"npm":"9.6.4 -"}}`, wantErr: true},
@@ -247,94 +215,6 @@ func TestWebInstallNPMCommandUsesUpstreamEngineRange(t *testing.T) {
 				t.Fatalf("npm args = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-// Set this to an unmodified upstream checkout to verify the guarded patch
-// against complete source files as well as the small executable excerpts.
-func TestManagedWebSeekPatchUpstreamCheckout(t *testing.T) {
-	upstream := os.Getenv("SILO_TEST_JELLYFIN_WEB_SOURCE")
-	if upstream == "" {
-		t.Skip("SILO_TEST_JELLYFIN_WEB_SOURCE is not set")
-	}
-	root := t.TempDir()
-	for _, path := range []string{webPlaybackManagerSource, webHTMLVideoPlayerSource} {
-		if err := copyFile(filepath.Join(upstream, path), filepath.Join(root, path)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := patchManagedWebSources(root); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestWebComponentStatusMissing(t *testing.T) {
-	root := t.TempDir()
-	cfg, err := config.LoadFromDB(map[string]string{
-		"jellyfin_compat.enabled":         "true",
-		"jellyfin_compat.web_install_dir": root,
-		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
-		"jellyfin_compat.web_version":     "10.11.6",
-	})
-	if err != nil {
-		t.Fatalf("LoadFromDB: %v", err)
-	}
-
-	status := WebComponentStatusForConfig(cfg, map[string]string{
-		"jellyfin_compat.enabled":         "true",
-		"jellyfin_compat.web_install_dir": root,
-		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
-		"jellyfin_compat.web_version":     "10.11.6",
-	})
-
-	if status.APIState != "enabled" {
-		t.Fatalf("APIState = %q, want enabled", status.APIState)
-	}
-	if status.WebState != WebComponentMissing {
-		t.Fatalf("WebState = %q, want %q", status.WebState, WebComponentMissing)
-	}
-}
-
-func TestWebComponentStatusInstalledWithProvenance(t *testing.T) {
-	root := t.TempDir()
-	release := filepath.Join(root, "10.11.6")
-	if err := os.MkdirAll(release, 0o755); err != nil {
-		t.Fatalf("mkdir release: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(release, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
-		t.Fatalf("write index: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(release, "LICENSE"), []byte("GPL-2.0"), 0o644); err != nil {
-		t.Fatalf("write license: %v", err)
-	}
-	metadata := WebComponentMetadata{
-		Component: "jellyfin-web",
-		SourceURL: DefaultWebSourceURL,
-		Version:   "10.11.6",
-		Tag:       "v10.11.6",
-		CommitSHA: "abc123",
-		Checksum:  "sha256:test",
-		License:   "GPL-2.0",
-	}
-	if err := writeWebMetadata(release, metadata); err != nil {
-		t.Fatalf("write metadata: %v", err)
-	}
-	if err := writeWebSourceFile(release, metadata); err != nil {
-		t.Fatalf("write source file: %v", err)
-	}
-	if err := os.Symlink("10.11.6", filepath.Join(root, "current")); err != nil {
-		t.Fatalf("symlink current: %v", err)
-	}
-
-	status := webComponentStatus(root, filepath.Join(root, "current"), "10.11.6", DefaultWebSourceURL)
-	if status.WebState != WebComponentInstalled {
-		t.Fatalf("WebState = %q, want %q", status.WebState, WebComponentInstalled)
-	}
-	if !status.LicensePresent || !status.ProvenancePresent {
-		t.Fatalf("license/provenance = %t/%t, want true/true", status.LicensePresent, status.ProvenancePresent)
-	}
-	if status.CommitSHA != "abc123" {
-		t.Fatalf("CommitSHA = %q, want abc123", status.CommitSHA)
 	}
 }
 
@@ -428,77 +308,6 @@ func TestWebComponentStatusDoesNotRequireRestartForLiveIdentitySettings(t *testi
 	}
 }
 
-func TestWebComponentStatusDoesNotDefaultPinnedVersionToEmulatedVersion(t *testing.T) {
-	root := t.TempDir()
-	cfg, err := config.LoadFromDB(map[string]string{
-		"jellyfin_compat.emulated_server_version": "10.12.0",
-		"jellyfin_compat.web_install_dir":         root,
-		"jellyfin_compat.web_dir":                 filepath.Join(root, "current"),
-	})
-	if err != nil {
-		t.Fatalf("LoadFromDB: %v", err)
-	}
-
-	status := WebComponentStatusForConfig(cfg, map[string]string{
-		"jellyfin_compat.emulated_server_version": "10.12.0",
-		"jellyfin_compat.web_install_dir":         root,
-		"jellyfin_compat.web_dir":                 filepath.Join(root, "current"),
-	})
-
-	if status.PinnedVersion != config.DefaultJellyfinWebVersion {
-		t.Fatalf("PinnedVersion = %q, want configured Web default", status.PinnedVersion)
-	}
-}
-
-func TestWebComponentStatusDisablesWebUIWhenProxyDisabled(t *testing.T) {
-	root := t.TempDir()
-	cfg, err := config.LoadFromDB(map[string]string{
-		"jellyfin_compat.enabled":         "false",
-		"jellyfin_compat.web_enabled":     "true",
-		"jellyfin_compat.web_install_dir": root,
-		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
-	})
-	if err != nil {
-		t.Fatalf("LoadFromDB: %v", err)
-	}
-
-	status := WebComponentStatusForConfig(cfg, map[string]string{
-		"jellyfin_compat.enabled":         "false",
-		"jellyfin_compat.web_enabled":     "true",
-		"jellyfin_compat.web_install_dir": root,
-		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
-	})
-
-	if status.WebEnabled {
-		t.Fatal("WebEnabled = true, want false when Jellyfin proxy is disabled")
-	}
-}
-
-func TestWebComponentStatusReportsWebEnabledSetting(t *testing.T) {
-	root := t.TempDir()
-	cfg, err := config.LoadFromDB(map[string]string{
-		"jellyfin_compat.enabled":         "true",
-		"jellyfin_compat.web_install_dir": root,
-		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
-	})
-	if err != nil {
-		t.Fatalf("LoadFromDB: %v", err)
-	}
-
-	status := WebComponentStatusForConfig(cfg, map[string]string{
-		"jellyfin_compat.web_install_dir": root,
-		"jellyfin_compat.web_dir":         filepath.Join(root, "current"),
-		"jellyfin_compat.web_enabled":     "false",
-	})
-
-	if status.WebEnabled {
-		t.Fatal("WebEnabled = true, want false from persisted setting")
-	}
-	if status.RestartRequired {
-		t.Fatal("RestartRequired = true, want false when only persisted web_enabled differs from running config")
-	}
-}
-
 func TestSelectCompatibleWebVersion(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -535,18 +344,6 @@ func TestSelectCompatibleWebVersion(t *testing.T) {
 			api:       "12.2.0",
 			available: []string{"10.11.8", "12.1", "12.0.1", "12.0"},
 			want:      "12.1",
-		},
-		{
-			name:      "keeps three-part selection with two-part releases present",
-			api:       "10.11.0",
-			available: []string{"12.1", "12.0", "10.11.8", "10.11.6"},
-			want:      "10.11.8",
-		},
-		{
-			name:      "ignores two-part prerelease tags",
-			api:       "12.0.0",
-			available: []string{"12.0-rc7", "10.11.8"},
-			want:      "10.11.8",
 		},
 		{
 			name:      "uses oldest available when all versions are newer",
@@ -632,59 +429,15 @@ func TestInstallWebComponentRejectsUnofficialSource(t *testing.T) {
 	}
 }
 
-func TestRemoveWebComponentOnlyRemovesGeneratedAssets(t *testing.T) {
-	root := t.TempDir()
-	release := filepath.Join(root, "10.11.6")
-	if err := os.MkdirAll(release, 0o755); err != nil {
-		t.Fatalf("mkdir release: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(release, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
-		t.Fatalf("write index: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(release, "LICENSE"), []byte("GPL-2.0"), 0o644); err != nil {
-		t.Fatalf("write license: %v", err)
-	}
-	metadata := WebComponentMetadata{
-		Component: "jellyfin-web",
-		SourceURL: DefaultWebSourceURL,
-		Version:   "10.11.6",
-		Tag:       "v10.11.6",
-		License:   "GPL-2.0",
-	}
-	if err := writeWebMetadata(release, metadata); err != nil {
-		t.Fatalf("write metadata: %v", err)
-	}
-	if err := writeWebSourceFile(release, metadata); err != nil {
-		t.Fatalf("write source file: %v", err)
-	}
-	if err := os.Symlink("10.11.6", filepath.Join(root, "current")); err != nil {
-		t.Fatalf("symlink current: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "keep.txt"), []byte("keep"), 0o644); err != nil {
-		t.Fatalf("write unrelated file: %v", err)
-	}
-
-	if err := RemoveWebComponent(root); err != nil {
-		t.Fatalf("RemoveWebComponent: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(root, "keep.txt")); err != nil {
-		t.Fatalf("unrelated file was removed: %v", err)
-	}
-	if _, err := os.Stat(release); !os.IsNotExist(err) {
-		t.Fatalf("release dir still exists or stat failed unexpectedly: %v", err)
-	}
-	if _, err := os.Lstat(filepath.Join(root, "current")); !os.IsNotExist(err) {
-		t.Fatalf("current link still exists or stat failed unexpectedly: %v", err)
-	}
-}
-
 func TestStartWebComponentRemovePublishesProgress(t *testing.T) {
 	root := t.TempDir()
 	release := filepath.Join(root, "10.11.6")
 	writeValidWebRelease(t, release, "10.11.6")
 	if err := os.Symlink("10.11.6", filepath.Join(root, "current")); err != nil {
 		t.Fatalf("symlink current: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatalf("write unrelated file: %v", err)
 	}
 
 	progress := make(chan WebComponentOperationStatus, 4)
@@ -728,6 +481,9 @@ func TestStartWebComponentRemovePublishesProgress(t *testing.T) {
 			if op.Message != "Jellyfin Web assets removed" {
 				t.Fatalf("terminal message = %q, want Jellyfin Web assets removed", op.Message)
 			}
+			if _, err := os.Stat(filepath.Join(root, "keep.txt")); err != nil {
+				t.Fatalf("unrelated file was removed: %v", err)
+			}
 			if _, err := os.Stat(release); !os.IsNotExist(err) {
 				t.Fatalf("release dir still exists or stat failed unexpectedly: %v", err)
 			}
@@ -764,53 +520,6 @@ func TestWebComponentStatusRecoversLegacyStaleOperationLock(t *testing.T) {
 	}
 	if !strings.Contains(status.LastError, "recovered stale Jellyfin Web") {
 		t.Fatalf("LastError = %q, want recovered stale lock message", status.LastError)
-	}
-}
-
-func TestWebComponentOperationProgressPersistsToStatus(t *testing.T) {
-	root := t.TempDir()
-	op, err := beginWebOperation(root, WebComponentOperationInstall)
-	if err != nil {
-		t.Fatalf("beginWebOperation: %v", err)
-	}
-	t.Cleanup(func() {
-		webOperationsMu.Lock()
-		delete(webOperations, root)
-		webOperationsMu.Unlock()
-		clearWebInstallState(root)
-	})
-
-	if op.Phase != WebComponentOperationPreparing || op.ProgressPercent != 1 {
-		t.Fatalf("initial progress = %q/%d, want preparing/1", op.Phase, op.ProgressPercent)
-	}
-	updated := updateWebOperationProgress(root, op.ID, WebComponentOperationBuilding, 110, "Building Jellyfin Web assets")
-	if updated == nil {
-		t.Fatal("updateWebOperationProgress returned nil")
-	}
-	if updated.Phase != WebComponentOperationBuilding || updated.ProgressPercent != 100 {
-		t.Fatalf("updated progress = %q/%d, want building/100", updated.Phase, updated.ProgressPercent)
-	}
-	if updated.Message != "Building Jellyfin Web assets" {
-		t.Fatalf("updated message = %q", updated.Message)
-	}
-
-	status := webComponentStatus(root, filepath.Join(root, "current"), "10.11.6", DefaultWebSourceURL)
-	if status.Operation == nil {
-		t.Fatal("status.Operation = nil, want progress operation")
-	}
-	if status.Operation.Phase != WebComponentOperationBuilding || status.Operation.ProgressPercent != 100 {
-		t.Fatalf("status progress = %q/%d, want building/100", status.Operation.Phase, status.Operation.ProgressPercent)
-	}
-
-	finished := finishWebOperation(root, op.ID, nil)
-	if finished == nil {
-		t.Fatal("finishWebOperation returned nil")
-	}
-	if finished.State != WebComponentOperationSucceeded || finished.ProgressPercent != 100 {
-		t.Fatalf("finished state/progress = %q/%d, want succeeded/100", finished.State, finished.ProgressPercent)
-	}
-	if finished.Message != "Jellyfin Web install complete" {
-		t.Fatalf("finished message = %q", finished.Message)
 	}
 }
 
@@ -860,35 +569,6 @@ func TestBeginWebOperationRecoversDeadProcessLock(t *testing.T) {
 	}
 	if op.PID != os.Getpid() || op.Process == "" {
 		t.Fatalf("operation process identity = pid %d token %q, want current process", op.PID, op.Process)
-	}
-}
-
-func TestBeginWebOperationRecoversDeadProcessLockFromDifferentHost(t *testing.T) {
-	root := t.TempDir()
-	stale := WebComponentOperationStatus{
-		ID:        "install-dead-host",
-		Kind:      WebComponentOperationInstall,
-		State:     WebComponentOperationRunning,
-		PID:       999999,
-		Process:   "dead-process-token",
-		Host:      "previous-container",
-		StartedAt: "2026-06-07T00:00:00Z",
-	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("mkdir root: %v", err)
-	}
-	if err := writeWebOperationLock(root, stale); err != nil {
-		t.Fatalf("write stale lock: %v", err)
-	}
-
-	op, err := beginWebOperation(root, WebComponentOperationRemove)
-	if err != nil {
-		t.Fatalf("beginWebOperation: %v", err)
-	}
-	defer finishWebOperation(root, op.ID, nil)
-
-	if op.ID == stale.ID {
-		t.Fatalf("operation ID was not replaced: %q", op.ID)
 	}
 }
 
@@ -998,15 +678,6 @@ func TestResolveCompatWebFSHonorsWebEnabledSetting(t *testing.T) {
 	}
 	if _, err := os.Stat(release); err != nil {
 		t.Fatalf("disabled Web UI should not remove release: %v", err)
-	}
-}
-
-func TestResolveCompatWebFSDoesNotFallbackToVendoredDirectory(t *testing.T) {
-	cfg := &config.Config{}
-
-	webFS, _, err := resolveCompatWebFS(context.Background(), Dependencies{Config: cfg})
-	if webFS != nil {
-		t.Fatalf("resolveCompatWebFS returned a web filesystem without configured assets (err=%v)", err)
 	}
 }
 

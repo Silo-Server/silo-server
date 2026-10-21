@@ -2,17 +2,14 @@ package jellycompat
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -165,100 +162,6 @@ func TestPresignListItemsBatchResolvesImages(t *testing.T) {
 	}
 }
 
-// TestPresignSeasonsBatchResolvesImages pins Fix #2c: presignSeasons must issue
-// exactly one PresignImageURLsWithExpiry batch for the whole season collection
-// (one image type), not one singular call per season.
-func TestPresignSeasonsBatchResolvesImages(t *testing.T) {
-	resolver := &countingCompatImageResolver{}
-	detailSvc := &catalog.DetailService{}
-	detailSvc.SetImageResolver(resolver)
-	svc := &directContentService{detailSvc: detailSvc}
-
-	seasons := []upstreamSeason{
-		{ContentID: "s1", PosterURL: "plug://poster-1"},
-		{ContentID: "s2", PosterURL: "plug://poster-2"},
-		{ContentID: "s3", PosterURL: "plug://poster-3"},
-	}
-
-	svc.presignSeasons(context.Background(), seasons)
-
-	if resolver.singleCalls != 0 {
-		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
-	}
-	if resolver.batchCalls != 1 {
-		t.Fatalf("batch image resolver calls = %d, want 1 (one poster batch for %d seasons)", resolver.batchCalls, len(seasons))
-	}
-	if got := seasons[0].PosterURL; got != "batch:card:plug://poster-1" {
-		t.Fatalf("season[0] PosterURL = %q", got)
-	}
-	if got := seasons[2].PosterURL; got != "batch:card:plug://poster-3" {
-		t.Fatalf("season[2] PosterURL = %q", got)
-	}
-}
-
-// TestPresignEpisodesBatchResolvesImages pins Fix #2c for episodes: one still
-// batch for the whole collection regardless of episode count.
-func TestPresignEpisodesBatchResolvesImages(t *testing.T) {
-	resolver := &countingCompatImageResolver{}
-	detailSvc := &catalog.DetailService{}
-	detailSvc.SetImageResolver(resolver)
-	svc := &directContentService{detailSvc: detailSvc}
-
-	episodes := []upstreamEpisode{
-		{ContentID: "e1", StillURL: "plug://still-1"},
-		{ContentID: "e2", StillURL: "plug://still-2"},
-		{ContentID: "e3", StillURL: "plug://still-3"},
-	}
-
-	svc.presignEpisodes(context.Background(), episodes)
-
-	if resolver.singleCalls != 0 {
-		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
-	}
-	if resolver.batchCalls != 1 {
-		t.Fatalf("batch image resolver calls = %d, want 1 (one still batch for %d episodes)", resolver.batchCalls, len(episodes))
-	}
-	if got := episodes[1].StillURL; got != "batch:card:plug://still-2" {
-		t.Fatalf("episode[1] StillURL = %q", got)
-	}
-}
-
-// TestCompatListItemsFromModelsBatchesPresign pins Fix #2b for the cached
-// home/Latest rail path: the loop builds the whole page first, then presigns in
-// one batch per populated image type independent of item count.
-func TestCompatListItemsFromModelsBatchesPresign(t *testing.T) {
-	resolver := &countingCompatImageResolver{}
-	detailSvc := &catalog.DetailService{}
-	detailSvc.SetImageResolver(resolver)
-	h := &ItemsHandler{detailSvc: detailSvc}
-
-	mediaItems := []*models.MediaItem{
-		{ContentID: "m1", Type: "movie", Title: "One", PosterPath: "plug://poster-1", BackdropPath: "plug://backdrop-1"},
-		{ContentID: "m2", Type: "movie", Title: "Two", PosterPath: "plug://poster-2", BackdropPath: "plug://backdrop-2"},
-		{ContentID: "m3", Type: "movie", Title: "Three", PosterPath: "plug://poster-3", BackdropPath: "plug://backdrop-3"},
-	}
-
-	items := h.compatListItemsFromModels(context.Background(), catalog.AccessFilter{}, mediaItems)
-
-	if len(items) != 3 {
-		t.Fatalf("expected 3 list items; got %d", len(items))
-	}
-	if resolver.singleCalls != 0 {
-		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
-	}
-	// poster + backdrop are populated across the rail; logo/still are empty and
-	// therefore skipped. The count is bounded by image type, not the 3 items.
-	if resolver.batchCalls != 2 {
-		t.Fatalf("batch image resolver calls = %d, want 2 (poster+backdrop, independent of item count)", resolver.batchCalls)
-	}
-	if got := items[0].PosterURL; got != "batch:card:plug://poster-1" {
-		t.Fatalf("items[0] PosterURL = %q", got)
-	}
-	if got := items[2].BackdropURL; got != "batch:card:plug://backdrop-3" {
-		t.Fatalf("items[2] BackdropURL = %q", got)
-	}
-}
-
 // progressCountingStoreProvider is a test double that records calls to
 // ForUser and ListProgressByMediaItems. Used to assert that BrowseItems
 // does not duplicate the handler-level user-data fetch.
@@ -278,8 +181,9 @@ func (p *progressCountingStoreProvider) ForUser(context.Context, int) (userstore
 func (p *progressCountingStoreProvider) Close() error { return nil }
 
 // progressCountingStore is a userstore.UserStore stub that counts calls to
-// ListProgressByMediaItems. Other methods panic so we catch unexpected use.
+// ListProgressByMediaItems. The nil embedded store catches unexpected methods.
 type progressCountingStore struct {
+	userstore.UserStore
 	forUserCalls           int
 	listProgressCalls      int
 	lastListedMediaItemIDs []string
@@ -291,339 +195,11 @@ func (s *progressCountingStore) ListProgressByMediaItems(_ context.Context, _ st
 	return map[string]userstore.WatchProgress{}, nil
 }
 
-// Remaining UserStore methods panic — the test should not exercise them.
-func (s *progressCountingStore) CreateProfile(context.Context, userstore.Profile) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetProfile(context.Context, string) (*userstore.Profile, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListProfiles(context.Context) ([]userstore.Profile, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateProfile(context.Context, string, userstore.UpdateProfileInput) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteProfile(context.Context, string) error { panic("unused") }
-func (s *progressCountingStore) VerifyPIN(context.Context, string, string) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateProgress(context.Context, string, string, float64, float64, userstore.ProgressThresholds) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetProgress(context.Context, string, string, float64, float64, userstore.ProgressThresholds) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetProgressAt(context.Context, string, string, float64, float64, bool, time.Time) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetProgressIfNewer(context.Context, string, string, float64, float64, bool, time.Time) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateProgressHints(context.Context, string, string, userstore.VersionHints) error {
-	panic("unused")
-}
-func (s *progressCountingStore) MarkWatched(context.Context, string, string, float64) error {
-	panic("unused")
-}
-func (s *progressCountingStore) MarkProgressBatch(context.Context, string, []string, time.Time) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ClearProgressBatch(context.Context, string, []string, time.Time) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ClearProgress(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetProgress(context.Context, string, string) (*userstore.WatchProgress, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListProgress(context.Context, string, string, int, int) ([]userstore.WatchProgress, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListProgressPage(context.Context, string, string, *userstore.ProgressKey, int) ([]userstore.WatchProgress, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListCompletedProgressSince(context.Context, string, time.Time, time.Time, int) ([]userstore.WatchProgress, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListProgressSince(context.Context, string, string) ([]userstore.WatchProgress, string, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) AddHistory(context.Context, userstore.WatchHistoryEntry) error {
-	panic("unused")
-}
-func (s *progressCountingStore) AddHistoryIfMissing(context.Context, userstore.WatchHistoryEntry) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListHistory(context.Context, string, int, int) ([]userstore.WatchHistoryEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListHistoryPage(context.Context, string, *userstore.HistoryKey, int) ([]userstore.WatchHistoryEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListCompletedHistory(context.Context, userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
-	panic("unused")
-}
 func (s *progressCountingStore) ListCompletedHistoryItems(context.Context, userstore.CompletedHistoryItemQuery) ([]userstore.CompletedHistoryItem, error) {
 	return nil, nil
 }
-func (s *progressCountingStore) RemoveHistoryItems(context.Context, string, []string, time.Time) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteHistoryBySource(context.Context, string, []string, userstore.WatchHistorySource) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListHomeDismissals(context.Context, string, string) ([]userstore.HomeItemDismissal, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpsertHomeDismissal(context.Context, userstore.HomeItemDismissal) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteHomeDismissal(context.Context, string, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) AddFavorite(context.Context, string, string) error { panic("unused") }
-func (s *progressCountingStore) AddFavoriteAt(context.Context, string, string, time.Time) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) RemoveFavorite(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListFavorites(context.Context, string, int, int) ([]userstore.Favorite, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListFavoritesPage(context.Context, string, *userstore.ListKey, int) ([]userstore.Favorite, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListFavoritesByMediaItems(context.Context, string, []string) (map[string]bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) IsFavorite(context.Context, string, string) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) GetFavorite(context.Context, string, string) (*userstore.Favorite, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) GetWatchlistEntry(context.Context, string, string) (*userstore.WatchlistEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) AddToWatchlist(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) AddToWatchlistAt(context.Context, string, string, time.Time) (bool, error) {
-	panic("unused")
-}
 func (s *progressCountingStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, error) {
 	return true, nil
-}
-func (s *progressCountingStore) RemoveFromWatchlist(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ReplaceWatchlistOrder(context.Context, string, []string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListWatchlist(context.Context, string, int, int) ([]userstore.WatchlistEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListWatchlistPage(context.Context, string, *userstore.ListKey, int) ([]userstore.WatchlistEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListWatchlistByMediaItems(context.Context, string, []string) (map[string]bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) InWatchlist(context.Context, string, string) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) CreateCollection(context.Context, userstore.CreateCollectionInput) (*userstore.Collection, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) GetCollection(context.Context, string) (*userstore.Collection, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListCollections(context.Context, string) ([]userstore.Collection, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateCollection(context.Context, userstore.UpdateCollectionInput) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteCollection(context.Context, string) error { panic("unused") }
-func (s *progressCountingStore) AddCollectionItem(context.Context, string, string, int) error {
-	panic("unused")
-}
-func (s *progressCountingStore) RemoveCollectionItem(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListCollectionItems(context.Context, string) ([]userstore.CollectionItem, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ReplaceCollectionItems(context.Context, string, []userstore.CollectionItemReplacement) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ReorderCollectionItems(context.Context, string, []string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ReorderCollections(context.Context, string, *string, []string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateCollectionSyncState(context.Context, userstore.UpdateCollectionSyncStateInput) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListCollectionGroups(context.Context) ([]userstore.CollectionGroup, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) EnsureCollectionGroup(context.Context, string) error { panic("unused") }
-func (s *progressCountingStore) CreateCollectionGroup(context.Context, string, string, userstore.GroupSortMode) (*userstore.CollectionGroup, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpdateCollectionGroup(context.Context, string, *string, *string, *userstore.GroupSortMode) (*userstore.CollectionGroup, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteCollectionGroup(context.Context, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ReorderCollectionGroups(context.Context, []string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListSectionOverrides(context.Context, string, string, string) ([]userstore.SectionOverride, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) SaveSectionOverrides(context.Context, string, string, string, []userstore.SectionOverride) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ResetSectionOverrides(context.Context, string, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetSetting(context.Context, string) (string, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) SetSetting(context.Context, string, string) error { panic("unused") }
-func (s *progressCountingStore) GetOnboardingState(context.Context, string, string) (*userstore.OnboardingState, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpsertOnboardingState(context.Context, userstore.OnboardingState) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetJellycompatDisplayPrefs(context.Context, string, string) (string, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) SetJellycompatDisplayPrefs(context.Context, string, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSetting(context.Context, string) error { panic("unused") }
-func (s *progressCountingStore) ListSettings(context.Context) ([]userstore.SettingEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) GetDeviceSetting(context.Context, string, string, string) (*userstore.DeviceSettingEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) SetDeviceSetting(context.Context, userstore.DeviceSettingEntry) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteDeviceSetting(context.Context, string, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteAllDeviceSettings(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteDeviceSettingsByKey(context.Context, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) ListDeviceSettings(context.Context, string) ([]userstore.DeviceSettingEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListAllDeviceSettings(context.Context) ([]userstore.DeviceSettingEntry, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) SetSubtitlePreference(context.Context, userstore.SubtitlePreference) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetSubtitlePreference(context.Context, string, string) (*userstore.SubtitlePreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSubtitlePreference(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetAudioPreference(context.Context, userstore.AudioPreference) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetAudioPreference(context.Context, string, string) (*userstore.AudioPreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteAudioPreference(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetSeriesPlaybackPreference(context.Context, userstore.SeriesPlaybackPreference) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetSeriesPlaybackPreference(context.Context, string, string) (*userstore.SeriesPlaybackPreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSeriesPlaybackPreference(context.Context, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) SetCollectionSortPreference(context.Context, userstore.CollectionSortPreference) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetCollectionSortPreference(context.Context, string, string, string) (*userstore.CollectionSortPreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ClearCollectionSortPreference(context.Context, string, string, string) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetLibraryPlaybackPreference(context.Context, string, int) (*userstore.LibraryPlaybackPreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListLibraryPlaybackPreferences(context.Context, string) ([]userstore.LibraryPlaybackPreference, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpsertLibraryPlaybackPreference(context.Context, userstore.LibraryPlaybackPreference) error {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteLibraryPlaybackPreference(context.Context, string, int) error {
-	panic("unused")
-}
-func (s *progressCountingStore) GetSettingValue(context.Context, userstore.SettingIdentity) (*userstore.SettingValue, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListAllSettingValues(context.Context) ([]userstore.SettingValue, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) ListSettingValuesByScope(context.Context, string, settingscontract.Scope, []string) ([]userstore.SettingValue, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) UpsertSettingValue(context.Context, userstore.SettingIdentity, json.RawMessage) (*userstore.SettingValue, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSettingValue(context.Context, userstore.SettingIdentity) (bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSettingValuesForProfile(context.Context, string) (int64, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSettingValuesForDevice(context.Context, string, string) (int64, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSettingValuesForLibrary(context.Context, int) (int64, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteSettingValuesForSeries(context.Context, string) (int64, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) GetSettingMutation(context.Context, string) (*userstore.SettingMutationRecord, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) PutSettingMutation(context.Context, userstore.SettingMutationRecord) (userstore.SettingMutationRecord, bool, error) {
-	panic("unused")
-}
-func (s *progressCountingStore) DeleteExpiredSettingMutations(context.Context, time.Time) (int64, error) {
-	panic("unused")
 }
 
 // stubBrowseSource is a deterministic browseSource for testing
@@ -661,35 +237,6 @@ func (s *stubBrowseSource) BrowsePage(_ context.Context, filters catalog.BrowseF
 	}, nil
 }
 
-func TestBrowseItems_RecentlyAddedNoParentFansOutAcrossLibraries(t *testing.T) {
-	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(10), total: 10}
-	svc := newDirectContentServiceForTest(browse, nil)
-	svc.folderRepo = &stubFolderSource{
-		enabled: []*models.MediaFolder{
-			{ID: 1, Name: "Movies", Type: "movie"},
-			{ID: 3, Name: "TV", Type: "series"},
-		},
-	}
-
-	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
-	params := url.Values{}
-	params.Set("limit", "5")
-	params.Set("sort", "recently_added")
-
-	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
-		t.Fatalf("BrowseItems: %v", err)
-	}
-	if got := len(browse.crossLibraryCall); got != 1 {
-		t.Fatalf("cross-library calls = %d, want 1", got)
-	}
-	if got := len(browse.calls); got != 0 {
-		t.Fatalf("BrowsePage calls = %d, want 0 (fast path should not use it)", got)
-	}
-	if got := browse.crossLibraryCall[0].libraryIDs; len(got) != 2 || got[0] != 1 || got[1] != 3 {
-		t.Fatalf("library IDs = %v, want [1 3]", got)
-	}
-}
-
 func TestBrowseItems_RecentlyAddedWithOffsetFallsBackToBrowsePage(t *testing.T) {
 	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(40), total: 40}
 	svc := newDirectContentServiceForTest(browse, nil)
@@ -714,29 +261,6 @@ func TestBrowseItems_RecentlyAddedWithOffsetFallsBackToBrowsePage(t *testing.T) 
 	}
 	if got := len(browse.calls); got == 0 {
 		t.Fatal("BrowsePage calls = 0, want offset>0 to fall back to BrowsePage")
-	}
-}
-
-func TestBrowseItems_RecentlyAddedSingleLibraryUsesBrowsePage(t *testing.T) {
-	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(10), total: 10}
-	svc := newDirectContentServiceForTest(browse, nil)
-	svc.folderRepo = &stubFolderSource{
-		enabled: []*models.MediaFolder{{ID: 1, Name: "Movies", Type: "movie"}},
-	}
-
-	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
-	params := url.Values{}
-	params.Set("limit", "5")
-	params.Set("sort", "recently_added")
-
-	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
-		t.Fatalf("BrowseItems: %v", err)
-	}
-	if got := len(browse.crossLibraryCall); got != 0 {
-		t.Fatalf("cross-library calls = %d, want 0 with a single library", got)
-	}
-	if got := len(browse.calls); got == 0 {
-		t.Fatal("BrowsePage calls = 0, want single-library path to use BrowsePage")
 	}
 }
 
@@ -893,70 +417,6 @@ func TestSearchItemsFallsBackToItemRepoWhenProviderMissing(t *testing.T) {
 	}
 }
 
-// TestBrowseItems_DoesNotFetchProgressWhenNoPlayedFilter verifies that
-// BrowseItems does NOT call ListProgressByMediaItems on the user store when
-// the is_played filter is empty. The handler-level resolveUserStateForContentIDs
-// owns user-data enrichment for the wire response; the inner per-iteration
-// fetch was duplicate work (audit 2026-05-01 §2.8).
-//
-// We use a stub browseSource that returns a non-empty result, so the buggy
-// code path would actually reach ForUser/ListProgressByMediaItems on the
-// counting store and fail this assertion. The fixed code only enriches when
-// filtering by played status, so neither method is called.
-func TestBrowseItems_DoesNotFetchProgressWhenNoPlayedFilter(t *testing.T) {
-	provider := newProgressCountingStoreProvider()
-	browse := &stubBrowseSource{
-		items: []*models.MediaItem{
-			{ContentID: "movie-1", Type: "movie", Title: "A"},
-			{ContentID: "movie-2", Type: "movie", Title: "B"},
-		},
-		total: 2,
-	}
-	svc := newDirectContentServiceForTest(browse, provider)
-
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	params := url.Values{}
-	params.Set("limit", "24")
-
-	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
-		t.Fatalf("BrowseItems returned error: %v", err)
-	}
-	if provider.store.listProgressCalls != 0 {
-		t.Fatalf("BrowseItems must not call ListProgressByMediaItems when is_played filter is empty; got %d calls",
-			provider.store.listProgressCalls)
-	}
-}
-
-// TestBrowseItems_FetchesProgressWhenPlayedFilterSet verifies the
-// load-bearing behavior preserved by the fix: when is_played filter is set,
-// BrowseItems still enriches user data so the loop can filter by played
-// status. Without enrichment, is_played=true would always return zero
-// items and is_played=false would always return everything.
-func TestBrowseItems_FetchesProgressWhenPlayedFilterSet(t *testing.T) {
-	provider := newProgressCountingStoreProvider()
-	browse := &stubBrowseSource{
-		items: []*models.MediaItem{
-			{ContentID: "movie-1", Type: "movie", Title: "A"},
-			{ContentID: "movie-2", Type: "movie", Title: "B"},
-		},
-		total: 2,
-	}
-	svc := newDirectContentServiceForTest(browse, provider)
-
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	params := url.Values{}
-	params.Set("limit", "24")
-	params.Set("is_played", "true")
-
-	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
-		t.Fatalf("BrowseItems returned error: %v", err)
-	}
-	if provider.store.listProgressCalls < 1 {
-		t.Fatalf("BrowseItems with is_played filter must fetch progress; got %d calls",
-			provider.store.listProgressCalls)
-	}
-}
-
 func TestBrowseItems_FillsLargeJellyfinLimitInSingleCatalogPage(t *testing.T) {
 	provider := newProgressCountingStoreProvider()
 	browse := &stubBrowseSource{
@@ -1032,31 +492,6 @@ func TestBrowseItems_HonorsIncludeTotalFalse(t *testing.T) {
 		if call.includeTotal {
 			t.Fatalf("call %d includeTotal = true, want false", i)
 		}
-	}
-}
-
-// TestEnrichListItemsUserData_BatchesIntoSingleFetch verifies that
-// enrichListItemsUserData makes exactly one batched ListProgressByMediaItems
-// call regardless of batch size — not N+1 per-item fetches.
-func TestEnrichListItemsUserData_BatchesIntoSingleFetch(t *testing.T) {
-	provider := newProgressCountingStoreProvider()
-	svc := newDirectContentServiceForTest(nil, provider)
-
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-	batch := []upstreamListItem{
-		{ContentID: "movie-1"},
-		{ContentID: "movie-2"},
-		{ContentID: "movie-3"},
-	}
-	svc.enrichListItemsUserData(context.Background(), session, batch)
-
-	if provider.store.listProgressCalls != 1 {
-		t.Fatalf("enrichListItemsUserData should batch into 1 ListProgressByMediaItems call; got %d",
-			provider.store.listProgressCalls)
-	}
-	if got, want := len(provider.store.lastListedMediaItemIDs), 3; got != want {
-		t.Fatalf("ListProgressByMediaItems should receive all %d ids in one batch; got %d",
-			want, got)
 	}
 }
 

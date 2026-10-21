@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -34,6 +35,7 @@ type Resolver struct {
 	tokens       ProfileTokenValidator
 	groups       GroupPolicyProvider
 	unrated      UnratedContentPolicy
+	defaults     settingsresolve.ServerSettings
 }
 
 // WithUnratedContentPolicy installs the reader for access.unrated_content and
@@ -43,6 +45,17 @@ type Resolver struct {
 func (r *Resolver) WithUnratedContentPolicy(policy UnratedContentPolicy) *Resolver {
 	if r != nil {
 		r.unrated = policy
+	}
+	return r
+}
+
+// WithAdminDefaults installs the administrator's setting defaults (the node's
+// shared *config.AdminDefaults) and returns the resolver. Without it a profile
+// with no Next Up choice of its own gets the contract default instead of the
+// administrator's.
+func (r *Resolver) WithAdminDefaults(defaults settingsresolve.ServerSettings) *Resolver {
+	if r != nil {
+		r.defaults = defaults
 	}
 	return r
 }
@@ -92,7 +105,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		return Scope{}, fmt.Errorf("opening user store for %d: %w", input.UserID, err)
 	}
 
-	preferences := ResolveViewerPreferences(ctx, store, input.ProfileID)
+	preferences := ResolveViewerPreferences(ctx, store, r.defaults, input.ProfileID)
 	if input.ProfileID != "" {
 		profile, err := store.GetProfile(ctx, input.ProfileID)
 		if err != nil {
@@ -109,8 +122,9 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.PreferredMetadataLanguage = preferences.PreferredMetadataLanguage
 		scope.MetadataLanguageOverrides = preferences.MetadataLanguageOverrides
 		scope.NextUpMode = preferences.NextUpMode
+		scope.NextUpNewReleasesFirst = preferences.NextUpNewReleasesFirst
 		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(effective.LibraryIDs, profile)
-		verified, err := VerifyProfileForRequest(profile, input, user.ID, user.AccessPolicyRevision, r.tokens)
+		verified, err := VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
 			return Scope{}, err
 		}
@@ -122,9 +136,13 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 
 	// Apply the profile's disabled library IDs setting.
 	disabled := preferences.DisabledLibraryIDs
-	if len(disabled) > 0 {
+	if len(disabled) > 0 && !input.ContentAccessOnly {
 		if scope.AllowedLibraryIDs != nil {
-			// Restricted user: subtract disabled IDs from the allowed set.
+			// Restricted user: subtract disabled IDs from the allowed set,
+			// remembering which allowed ones the profile hid.
+			if hidden := intersectInts(scope.AllowedLibraryIDs, disabled); len(hidden) > 0 {
+				scope.HiddenLibraryIDs = hidden
+			}
 			scope.AllowedLibraryIDs = subtractInts(scope.AllowedLibraryIDs, disabled)
 		} else {
 			// Unrestricted user: pass disabled IDs through so query layer
@@ -143,7 +161,6 @@ func VerifyProfileForRequest(
 	profile *userstore.Profile,
 	input ResolveInput,
 	userID int,
-	policyRevision int64,
 	tokens ProfileTokenValidator,
 ) (bool, error) {
 	if profile == nil {
@@ -152,19 +169,42 @@ func VerifyProfileForRequest(
 
 	profileVerified := profile.PINHash == "" || input.SkipPINVerification
 	if profile.PINHash != "" && !input.SkipPINVerification {
-		if tokens == nil {
-			return false, ErrProfileUnverified
-		}
-		claims, err := tokens.Validate(input.ProfileToken)
-		if err != nil {
+		if err := CheckProfileToken(tokens, input.ProfileToken, userID, input.SessionID, profile); err != nil {
 			return false, err
-		}
-		if claims.UserID != userID || claims.SessionID != input.SessionID || claims.ProfileID != profile.ID || claims.PolicyRevision != policyRevision {
-			return false, ErrProfileUnverified
 		}
 		profileVerified = true
 	}
 	return profileVerified, nil
+}
+
+// CheckProfileToken reports whether token proves the caller entered profile's
+// current PIN in this login session. The proof is bound to the account, the
+// login session, the profile and the profile's PIN revision: revoking the
+// session, deleting the profile or changing its PIN ends it. Edits to the
+// profile's limits, to other profiles and to the account's access policy do
+// not, because every request re-resolves those limits; the token proves only
+// knowledge of the PIN. A nil validator never verifies.
+func CheckProfileToken(
+	tokens ProfileTokenValidator,
+	token string,
+	userID int,
+	sessionID string,
+	profile *userstore.Profile,
+) error {
+	if tokens == nil || profile == nil {
+		return ErrProfileUnverified
+	}
+	claims, err := tokens.Validate(token)
+	if err != nil {
+		return err
+	}
+	if claims.UserID != userID ||
+		claims.SessionID != sessionID ||
+		claims.ProfileID != profile.ID ||
+		claims.PINRevision != profile.PINRevision {
+		return ErrProfileUnverified
+	}
+	return nil
 }
 
 // DisabledLibraryIDs resolves the libraries the acting profile has hidden from
@@ -177,7 +217,8 @@ func VerifyProfileForRequest(
 // pre-cutover snapshot runs both the backfill and that migration before it
 // serves a request.
 func DisabledLibraryIDs(ctx context.Context, store userstore.UserStore, profileID string) []int {
-	return ResolveViewerPreferences(ctx, store, profileID).DisabledLibraryIDs
+	// ui.disabled_library_ids declares no admin_default.
+	return ResolveViewerPreferences(ctx, store, nil, profileID).DisabledLibraryIDs
 }
 
 // parseLibraryIDList decodes a JSON library-id array, dropping anything that

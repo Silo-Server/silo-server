@@ -11,6 +11,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type fakeStore struct {
@@ -18,7 +20,11 @@ type fakeStore struct {
 	sources        []Source
 	connection     Connection
 	advanced       map[string]string // source ID -> marker
+	advances       []MarkerAdvance   // every advance attempt, stored or not
+	staleAdvance   bool              // reject advances as if an admin reset the marker
 	recorded       map[string]string // source ID -> error message
+	failures       []PollFailure     // every error write, with the rows the poll read
+	getConnErr     error
 	createdEvents  []EventCreate
 	events         []EventFinish
 	createEventErr error
@@ -41,21 +47,29 @@ func (f *fakeStore) GetSource(_ context.Context, id string) (Source, error) {
 	return Source{}, ErrNotFound
 }
 func (f *fakeStore) GetConnection(context.Context, string) (Connection, error) {
+	if f.getConnErr != nil {
+		return Connection{}, f.getConnErr
+	}
 	return f.connection, nil
 }
-func (f *fakeStore) AdvanceMarker(_ context.Context, sourceID, marker string) error {
+func (f *fakeStore) AdvanceMarker(_ context.Context, adv MarkerAdvance) (bool, error) {
+	f.advances = append(f.advances, adv)
+	if f.staleAdvance {
+		return false, nil
+	}
 	if f.advanced == nil {
 		f.advanced = map[string]string{}
 	}
-	f.advanced[sourceID] = marker
-	return nil
+	f.advanced[adv.Source.ID] = adv.NextMarker
+	return true, nil
 }
-func (f *fakeStore) RecordError(_ context.Context, sourceID, msg string) error {
+func (f *fakeStore) RecordError(_ context.Context, failure PollFailure) (bool, error) {
+	f.failures = append(f.failures, failure)
 	if f.recorded == nil {
 		f.recorded = map[string]string{}
 	}
-	f.recorded[sourceID] = msg
-	return nil
+	f.recorded[failure.Source.ID] = failure.Message
+	return true, nil
 }
 func (f *fakeStore) CreateEvent(_ context.Context, event EventCreate) (int64, error) {
 	if f.createEventErr != nil {
@@ -128,13 +142,13 @@ type fakeProvider struct {
 	nextMarker string
 	err        error
 	errByCap   map[string]error
-	lastConfig map[string]string
+	lastMarker string
 	calls      int
 }
 
-func (f *fakeProvider) PollChanges(_ context.Context, _ string, capabilityID, _ string, _ ResolvedConnection, sourceConfig map[string]string) ([]Change, string, error) {
+func (f *fakeProvider) PollChanges(_ context.Context, _ string, capabilityID, marker string, _ ResolvedConnection, _ map[string]string) ([]Change, string, error) {
 	f.calls++
-	f.lastConfig = sourceConfig
+	f.lastMarker = marker
 	if f.err != nil {
 		return nil, "", f.err
 	}
@@ -151,21 +165,27 @@ func (f *fakeProvider) PollChanges(_ context.Context, _ string, capabilityID, _ 
 	return changes, f.nextMarker, nil
 }
 
-func TestPollOncePassesSourceConfigToProvider(t *testing.T) {
+func TestPollOnceRunsSourcePastItsInterval(t *testing.T) {
+	old := time.Now().Add(-20 * time.Minute)
+	interval := 600 // 10 min; last run was 20 min ago => eligible
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
-			SourceConfig: map[string]string{"exclusions": ".downloads\n.recyclebin"},
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			PollIntervalSeconds: &interval, LastRunAt: &old,
 		}},
 	}
-	prov := &fakeProvider{nextMarker: "m1"}
-	svc := newService(store, prov, &recordingQueuer{}, allowSuppressor{})
+	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
-	if got := prov.lastConfig["exclusions"]; got != ".downloads\n.recyclebin" {
-		t.Fatalf("source config = %#v", prov.lastConfig)
+	if len(q.enqueued) != 1 {
+		t.Fatalf("a source past its interval must poll, got %d enqueued", len(q.enqueued))
+	}
+	if _, ok := store.advanced["s1"]; !ok {
+		t.Fatalf("expected marker advanced for s1")
 	}
 }
 
@@ -332,17 +352,16 @@ func (transientFailureResolver) ResolveVanishedPath(context.Context, string, str
 // recently-scanned / debounced target (resolved but suppressed).
 type denySuppressor struct{}
 
-func (denySuppressor) ShouldScan(context.Context, string, time.Duration) (bool, error) {
+func (denySuppressor) ShouldScan(context.Context, string, string, time.Duration) (bool, error) {
 	return false, nil
 }
-func (denySuppressor) Release(context.Context, string) error { return nil }
+func (denySuppressor) Release(context.Context, string, string) error { return nil }
 
 type recordingQueuer struct {
 	enqueued       []scantrigger.Target
 	batches        [][]scantrigger.Target
 	autoscanEvents []int64
 	createdCount   *int
-	reusedCount    int
 }
 
 func (q *recordingQueuer) EnqueueScans(_ context.Context, targets []scantrigger.Target) error {
@@ -350,33 +369,43 @@ func (q *recordingQueuer) EnqueueScans(_ context.Context, targets []scantrigger.
 	q.enqueued = append(q.enqueued, targets...)
 	return nil
 }
-func (q *recordingQueuer) EnqueueAutoscanScans(_ context.Context, targets []scantrigger.Target, eventID int64) (int, int, error) {
+
+// EnqueueAutoscanScans reports the first createdCount targets (all, when
+// unset) as created runs and the rest as reused, naming each run after the
+// target's position across every call ("run-0", "run-1", ...).
+func (q *recordingQueuer) EnqueueAutoscanScans(_ context.Context, targets []scantrigger.Target, eventID int64) ([]scantrigger.EnqueueOutcome, error) {
+	offset := len(q.enqueued)
 	q.batches = append(q.batches, append([]scantrigger.Target(nil), targets...))
 	q.enqueued = append(q.enqueued, targets...)
 	q.autoscanEvents = append(q.autoscanEvents, eventID)
+	created := len(targets)
 	if q.createdCount != nil {
-		return *q.createdCount, q.reusedCount, nil
+		created = *q.createdCount
 	}
-	return len(targets), q.reusedCount, nil
+	outcomes := make([]scantrigger.EnqueueOutcome, len(targets))
+	for i := range targets {
+		outcomes[i] = scantrigger.EnqueueOutcome{RunID: "run-" + strconv.Itoa(offset+i), Created: i < created}
+	}
+	return outcomes, nil
 }
 
 type allowSuppressor struct{}
 
-func (allowSuppressor) ShouldScan(context.Context, string, time.Duration) (bool, error) {
+func (allowSuppressor) ShouldScan(context.Context, string, string, time.Duration) (bool, error) {
 	return true, nil
 }
-func (allowSuppressor) Release(context.Context, string) error { return nil }
+func (allowSuppressor) Release(context.Context, string, string) error { return nil }
 
 type recordingSuppressor struct {
 	claimed  []string
 	released []string
 }
 
-func (s *recordingSuppressor) ShouldScan(_ context.Context, key string, _ time.Duration) (bool, error) {
+func (s *recordingSuppressor) ShouldScan(_ context.Context, key, _ string, _ time.Duration) (bool, error) {
 	s.claimed = append(s.claimed, key)
 	return true, nil
 }
-func (s *recordingSuppressor) Release(_ context.Context, key string) error {
+func (s *recordingSuppressor) Release(_ context.Context, key, _ string) error {
 	s.released = append(s.released, key)
 	return nil
 }
@@ -386,13 +415,19 @@ type failingQueuer struct{}
 func (failingQueuer) EnqueueScans(context.Context, []scantrigger.Target) error {
 	return context.DeadlineExceeded
 }
-func (failingQueuer) EnqueueAutoscanScans(context.Context, []scantrigger.Target, int64) (int, int, error) {
-	return 0, 0, context.DeadlineExceeded
+func (failingQueuer) EnqueueAutoscanScans(context.Context, []scantrigger.Target, int64) ([]scantrigger.EnqueueOutcome, error) {
+	return nil, context.DeadlineExceeded
 }
 
 func newService(store Store, provider ScanSourceProvider, queue Queuer, suppress Suppressor) *Service {
-	return NewService(store, provider, passthroughConnRes{}, fakeResolver{}, queue, suppress, nil)
+	svc := NewService(store, provider, passthroughConnRes{}, fakeResolver{}, queue, suppress, nil)
+	svc.observe = observeUnchangedFile
+	return svc
 }
+
+// observeUnchangedFile reports every path as the same regular file, so poll
+// tests claim deterministically without reading the host filesystem.
+func observeUnchangedFile(string) (string, bool) { return "file:1:1", true }
 
 // strptr is a tiny helper for the *string ConnectionID field in tests.
 func strptr(s string) *string { return &s }
@@ -425,6 +460,168 @@ func TestPollOnceEnqueuesDedupedFolders(t *testing.T) {
 	if _, ok := store.advanced["s1"]; !ok {
 		t.Fatalf("expected marker advanced for s1")
 	}
+}
+
+// The poll's marker advance carries the state it read from, so the repository
+// can refuse it when an admin reset the marker mid-poll.
+func TestPollOnceAdvanceCarriesPollSnapshot(t *testing.T) {
+	marker := "m0"
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			Marker: &marker, SourceConfig: map[string]string{"scope": "all"},
+		}},
+		connection: Connection{ID: "c1", Kind: "sonarr", BaseURL: "http://sonarr.invalid"},
+	}
+	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
+	svc := newService(store, prov, &recordingQueuer{}, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(store.advances) != 1 {
+		t.Fatalf("advances = %+v, want one", store.advances)
+	}
+	adv := store.advances[0]
+	if adv.Source.ID != "s1" || adv.Source.Marker == nil || *adv.Source.Marker != "m0" || adv.NextMarker != "m1" {
+		t.Fatalf("advance markers = %+v", adv)
+	}
+	if adv.Source.ConnectionID == nil || *adv.Source.ConnectionID != "c1" || adv.Source.SourceConfig["scope"] != "all" {
+		t.Fatalf("advance source snapshot = %+v", adv)
+	}
+	if adv.Connection == nil || adv.Connection.Kind != "sonarr" || adv.Connection.BaseURL != "http://sonarr.invalid" {
+		t.Fatalf("advance connection snapshot = %+v", adv.Connection)
+	}
+}
+
+// A poll whose marker advance lost to an admin reset still consumed its
+// window: the event succeeds and no error is recorded on the source.
+func TestPollOnceStaleMarkerAdvanceIsNotAnError(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+		}},
+		staleAdvance: true,
+	}
+	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("enqueued = %+v, want the window's scan", q.enqueued)
+	}
+	if _, ok := store.advanced["s1"]; ok {
+		t.Fatal("stale advance must not store a marker")
+	}
+	if msg, ok := store.recorded["s1"]; ok {
+		t.Fatalf("recorded error %q, want none", msg)
+	}
+	if len(store.events) != 1 || store.events[0].Status != EventStatusSuccess {
+		t.Fatalf("events = %+v, want one successful event", store.events)
+	}
+	// The event must not claim an advance the source never stored.
+	if got := store.events[0]; got.MarkerAfter != "" || got.ErrorMessage != markerNotStoredMessage {
+		t.Fatalf("event marker_after = %q, message = %q; want the starting marker and a not-stored note", got.MarkerAfter, got.ErrorMessage)
+	}
+}
+
+// A source edited after the cycle listed it is polled from its current row,
+// so a marker an admin reset is not sent to the new upstream.
+func TestPollOncePollsFromCurrentSourceRow(t *testing.T) {
+	stale := "m-old-upstream"
+	listed := Source{
+		ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+		Marker: &stale,
+	}
+	current := listed
+	current.Marker = nil // reset by a connection edit after the list was read
+	store := &rereadStore{
+		fakeStore: &fakeStore{
+			settings:   Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+			sources:    []Source{listed},
+			connection: Connection{ID: "c1", Kind: "sonarr", BaseURL: "http://sonarr-b.invalid"},
+		},
+		current: map[string]Source{"s1": current},
+	}
+	prov := &fakeProvider{nextMarker: "m1"}
+	if err := newService(store, prov, &recordingQueuer{}, allowSuppressor{}).PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if prov.calls != 1 || prov.lastMarker != "" {
+		t.Fatalf("provider calls = %d with marker %q, want one call from the reset marker", prov.calls, prov.lastMarker)
+	}
+	if len(store.createdEvents) != 1 || store.createdEvents[0].MarkerBefore != "" {
+		t.Fatalf("created events = %+v, want marker_before from the current row", store.createdEvents)
+	}
+}
+
+// A source disabled or removed after the cycle listed it is not polled.
+func TestPollOnceSkipsSourceDisabledOrRemovedSinceListing(t *testing.T) {
+	listed := []Source{
+		{ID: "disabled", PluginID: "silo.autoscan.arr", CapabilityID: "arr", Enabled: true},
+		{ID: "removed", PluginID: "silo.autoscan.arr", CapabilityID: "arr", Enabled: true},
+	}
+	disabled := listed[0]
+	disabled.Enabled = false
+	store := &rereadStore{
+		fakeStore: &fakeStore{
+			settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+			sources:  listed,
+		},
+		current: map[string]Source{"disabled": disabled},
+	}
+	prov := &fakeProvider{nextMarker: "m1"}
+	if err := newService(store, prov, &recordingQueuer{}, allowSuppressor{}).PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if prov.calls != 0 || len(store.createdEvents) != 0 {
+		t.Fatalf("provider calls = %d, events = %d; want none", prov.calls, len(store.createdEvents))
+	}
+}
+
+// A source whose current row cannot be read is skipped for the cycle rather
+// than polled with a listed marker that may belong to a replaced upstream.
+func TestPollOnceSkipsSourceWhenRereadFails(t *testing.T) {
+	stale := "m-old-upstream"
+	store := &rereadStore{
+		fakeStore: &fakeStore{
+			settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+			sources: []Source{{
+				ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+				Marker: &stale,
+			}},
+		},
+		err: errors.New("connection reset"),
+	}
+	prov := &fakeProvider{nextMarker: "m1"}
+	if err := newService(store, prov, &recordingQueuer{}, allowSuppressor{}).PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if prov.calls != 0 || len(store.createdEvents) != 0 {
+		t.Fatalf("provider calls = %d, events = %d; want none", prov.calls, len(store.createdEvents))
+	}
+}
+
+// rereadStore serves the cycle's source list from fakeStore but answers
+// GetSource from current, as if the rows changed after the list was read.
+type rereadStore struct {
+	*fakeStore
+	current map[string]Source
+	err     error
+}
+
+func (r *rereadStore) GetSource(_ context.Context, id string) (Source, error) {
+	if r.err != nil {
+		return Source{}, r.err
+	}
+	src, ok := r.current[id]
+	if !ok {
+		return Source{}, ErrNotFound
+	}
+	return src, nil
 }
 
 func TestPollOnceRecordsSuccessfulEvent(t *testing.T) {
@@ -470,100 +667,71 @@ func TestPollOnceRecordsSuccessfulEvent(t *testing.T) {
 	}
 }
 
-func TestPollOnceRecordsReusedScanCounts(t *testing.T) {
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
-		}},
-	}
-	prov := &fakeProvider{paths: map[string][]string{
-		"arr": {
-			"/mnt/media/ShowA/S01/E01.mkv",
-			"/mnt/media/ShowB/S01/E01.mkv",
-		},
-	}, nextMarker: "m1"}
-	created := 1
-	q := &recordingQueuer{createdCount: &created, reusedCount: 1}
-	svc := newService(store, prov, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(store.events) != 1 {
-		t.Fatalf("expected one finished event, got %d", len(store.events))
-	}
-	event := store.events[0]
-	if event.ScansCreated != 1 || event.ScansReused != 1 {
-		t.Fatalf("event scan counts = %+v", event)
-	}
-	if event.TargetsClaimed != 2 {
-		t.Fatalf("targets_claimed = %d, want 2", event.TargetsClaimed)
-	}
-}
-
-func TestPollOnceAppliesSourceRewritesBeforeEnqueue(t *testing.T) {
-	// The provider returns RAW source-namespace paths (/data/tv/...). The source's
-	// rewrite /data/tv -> /mnt/media/tv must be applied host-side so the resolved
-	// target uses the rewritten, Silo-native path. fakeResolver only resolves
-	// paths under /mnt/media/, so a missing rewrite would resolve to nothing.
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
-			PathRewrites: []PathRewrite{{From: "/data/tv", To: "/mnt/media/tv"}},
-		}},
-	}
-	prov := &fakeProvider{paths: map[string][]string{
-		"arr": {"/data/tv/Show/S01/E01.mkv"},
-	}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := newService(store, prov, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(q.enqueued) != 1 {
-		t.Fatalf("expected 1 enqueued target, got %d: %+v", len(q.enqueued), q.enqueued)
-	}
-	// uniqueParentDirs collapses E01.mkv to its parent dir; the rewritten target
-	// must be the Silo-native /mnt/media/tv/Show/S01.
-	if got := q.enqueued[0].Path; got != "/mnt/media/tv/Show/S01" {
-		t.Fatalf("expected rewritten target path /mnt/media/tv/Show/S01, got %q", got)
-	}
-	if _, ok := store.advanced["s1"]; !ok {
-		t.Fatalf("expected marker advanced for s1")
-	}
-}
-
-func TestPollOnceStructuredFileChangeAcceptsDirectoryTarget(t *testing.T) {
-	// The real resolver widens a video file change to its directory. The
-	// service must enqueue that subtree target rather than dropping the change
-	// as "not a file".
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
-			PathRewrites: []PathRewrite{{From: "/ceph/tv", To: "/mnt/media/tv"}},
-		}},
-	}
-	prov := &fakeProvider{changes: map[string][]Change{
-		"cephfs": {{
-			SourcePath: "/ceph/tv/Show/S01/E01.mkv",
-			Scope:      ChangeScopeFile,
-		}},
-	}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := NewService(store, prov, passthroughConnRes{}, directoryWideningResolver{}, q, allowSuppressor{}, nil)
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(q.enqueued) != 1 {
-		t.Fatalf("expected 1 scan, got %d: %+v", len(q.enqueued), q.enqueued)
-	}
-	if got := q.enqueued[0].Mode; got != scantrigger.ModeSubtree {
-		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeSubtree)
-	}
-	if got := q.enqueued[0].Path; got != "/mnt/media/tv/Show/S01" {
-		t.Fatalf("path = %q", got)
+// TestPollOnceStructuredChangeTargets checks the scan each provider change
+// enqueues once its path is rewritten into the library.
+func TestPollOnceStructuredChangeTargets(t *testing.T) {
+	tv := PathRewrite{From: "/ceph/tv", To: "/mnt/media/tv"}
+	movies := PathRewrite{From: "/ceph/movies", To: "/mnt/media/movies"}
+	for _, tc := range []struct {
+		name         string
+		widen        bool
+		rewrite      PathRewrite
+		change       Change
+		wantMode     string
+		wantPath     string
+		wantAdvanced bool
+	}{
+		// The real resolver widens a video file change to its directory. The
+		// service must enqueue that subtree target rather than dropping the
+		// change as "not a file".
+		{name: "file change widened to its directory", widen: true, rewrite: tv,
+			change:   Change{SourcePath: "/ceph/tv/Show/S01/E01.mkv", Scope: ChangeScopeFile},
+			wantMode: scantrigger.ModeSubtree, wantPath: "/mnt/media/tv/Show/S01"},
+		{name: "file change enqueues the exact file", rewrite: tv,
+			change:   Change{SourcePath: "/ceph/tv/Show/S01/E01.mkv", Scope: ChangeScopeFile},
+			wantMode: scantrigger.ModeFile, wantPath: "/mnt/media/tv/Show/S01/E01.mkv", wantAdvanced: true},
+		{name: "subtree change enqueues the exact subtree", rewrite: movies,
+			change:   Change{SourcePath: "/ceph/movies/Movie (2026)", Scope: ChangeScopeSubtree},
+			wantMode: scantrigger.ModeSubtree, wantPath: "/mnt/media/movies/Movie (2026)", wantAdvanced: true},
+		{name: "file change for a deleted path falls back to a subtree scan", rewrite: movies,
+			change:   Change{SourcePath: "/ceph/movies/Movie-vanished (2026)/Movie-vanished (2026).mkv", Scope: ChangeScopeFile},
+			wantMode: scantrigger.ModeSubtree, wantPath: "/mnt/media/movies/Movie-vanished (2026)", wantAdvanced: true},
+		// Legacy/auto changes collapse to the parent dir before resolving; a
+		// removed movie folder makes that dir vanish too.
+		{name: "legacy change for a deleted dir falls back to a subtree scan", rewrite: movies,
+			change:   Change{SourcePath: "/ceph/movies/Movie-vanished (2026)/Movie-vanished (2026).mkv", Scope: ChangeScopeAuto},
+			wantMode: scantrigger.ModeSubtree, wantPath: "/mnt/media/movies/Movie-vanished (2026)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeStore{
+				settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+				sources: []Source{{
+					ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+					PathRewrites: []PathRewrite{tc.rewrite},
+				}},
+			}
+			prov := &fakeProvider{changes: map[string][]Change{"cephfs": {tc.change}}, nextMarker: "m1"}
+			q := &recordingQueuer{}
+			svc := newService(store, prov, q, allowSuppressor{})
+			if tc.widen {
+				svc = NewService(store, prov, passthroughConnRes{}, directoryWideningResolver{}, q, allowSuppressor{}, nil)
+			}
+			if err := svc.PollOnce(context.Background()); err != nil {
+				t.Fatalf("PollOnce: %v", err)
+			}
+			if len(q.enqueued) != 1 {
+				t.Fatalf("expected 1 scan, got %d: %+v", len(q.enqueued), q.enqueued)
+			}
+			if got := q.enqueued[0].Mode; got != tc.wantMode {
+				t.Fatalf("mode = %q, want %q", got, tc.wantMode)
+			}
+			if got := q.enqueued[0].Path; got != tc.wantPath {
+				t.Fatalf("path = %q", got)
+			}
+			if _, ok := store.advanced["s1"]; tc.wantAdvanced && !ok {
+				t.Fatalf("expected marker advanced for s1")
+			}
+		})
 	}
 }
 
@@ -588,6 +756,7 @@ func TestPollOnceDebouncesFileChangesOnReportedPathNotWidenedTarget(t *testing.T
 	q := &recordingQueuer{}
 	sup := &recordingSuppressor{}
 	svc := NewService(store, prov, passthroughConnRes{}, directoryWideningResolver{}, q, sup, nil)
+	svc.observe = observeUnchangedFile
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
@@ -619,137 +788,6 @@ func (directoryWideningResolver) Resolve(_ context.Context, req scantrigger.Requ
 		path = filepath.Dir(path)
 	}
 	return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: path, Trigger: req.Trigger}, nil
-}
-
-func TestPollOnceStructuredFileChangeEnqueuesExactFile(t *testing.T) {
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
-			PathRewrites: []PathRewrite{{From: "/ceph/tv", To: "/mnt/media/tv"}},
-		}},
-	}
-	prov := &fakeProvider{changes: map[string][]Change{
-		"cephfs": {{
-			SourcePath: "/ceph/tv/Show/S01/E01.mkv",
-			Scope:      ChangeScopeFile,
-		}},
-	}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := newService(store, prov, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(q.enqueued) != 1 {
-		t.Fatalf("expected 1 file scan, got %d: %+v", len(q.enqueued), q.enqueued)
-	}
-	if got := q.enqueued[0].Mode; got != scantrigger.ModeFile {
-		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeFile)
-	}
-	if got := q.enqueued[0].Path; got != "/mnt/media/tv/Show/S01/E01.mkv" {
-		t.Fatalf("file path = %q", got)
-	}
-	if _, ok := store.advanced["s1"]; !ok {
-		t.Fatalf("expected marker advanced for s1")
-	}
-}
-
-func TestPollOnceStructuredSubtreeChangeEnqueuesExactSubtree(t *testing.T) {
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
-			PathRewrites: []PathRewrite{{From: "/ceph/movies", To: "/mnt/media/movies"}},
-		}},
-	}
-	prov := &fakeProvider{changes: map[string][]Change{
-		"cephfs": {{
-			SourcePath: "/ceph/movies/Movie (2026)",
-			Scope:      ChangeScopeSubtree,
-		}},
-	}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := newService(store, prov, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(q.enqueued) != 1 {
-		t.Fatalf("expected 1 subtree scan, got %d: %+v", len(q.enqueued), q.enqueued)
-	}
-	if got := q.enqueued[0].Mode; got != scantrigger.ModeSubtree {
-		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeSubtree)
-	}
-	if got := q.enqueued[0].Path; got != "/mnt/media/movies/Movie (2026)" {
-		t.Fatalf("subtree path = %q", got)
-	}
-	if _, ok := store.advanced["s1"]; !ok {
-		t.Fatalf("expected marker advanced for s1")
-	}
-}
-
-func TestPollOnceFileChangeForDeletedPathFallsBackToSubtreeScan(t *testing.T) {
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
-			PathRewrites: []PathRewrite{{From: "/ceph/movies", To: "/mnt/media/movies"}},
-		}},
-	}
-	prov := &fakeProvider{changes: map[string][]Change{
-		"cephfs": {{
-			SourcePath: "/ceph/movies/Movie-vanished (2026)/Movie-vanished (2026).mkv",
-			Scope:      ChangeScopeFile,
-		}},
-	}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := newService(store, prov, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(q.enqueued) != 1 {
-		t.Fatalf("expected 1 fallback subtree scan, got %d: %+v", len(q.enqueued), q.enqueued)
-	}
-	if got := q.enqueued[0].Mode; got != scantrigger.ModeSubtree {
-		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeSubtree)
-	}
-	if got := q.enqueued[0].Path; got != "/mnt/media/movies/Movie-vanished (2026)" {
-		t.Fatalf("subtree path = %q", got)
-	}
-	if _, ok := store.advanced["s1"]; !ok {
-		t.Fatalf("expected marker advanced for s1")
-	}
-}
-
-func TestPollOnceLegacyChangeForDeletedDirFallsBackToSubtreeScan(t *testing.T) {
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
-			PathRewrites: []PathRewrite{{From: "/ceph/movies", To: "/mnt/media/movies"}},
-		}},
-	}
-	// Legacy/auto changes collapse to the parent dir before resolving; a
-	// removed movie folder makes that dir vanish too.
-	prov := &fakeProvider{changes: map[string][]Change{
-		"cephfs": {{
-			SourcePath: "/ceph/movies/Movie-vanished (2026)/Movie-vanished (2026).mkv",
-			Scope:      ChangeScopeAuto,
-		}},
-	}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := newService(store, prov, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(q.enqueued) != 1 {
-		t.Fatalf("expected 1 fallback subtree scan, got %d: %+v", len(q.enqueued), q.enqueued)
-	}
-	if got := q.enqueued[0].Mode; got != scantrigger.ModeSubtree {
-		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeSubtree)
-	}
-	if got := q.enqueued[0].Path; got != "/mnt/media/movies/Movie-vanished (2026)" {
-		t.Fatalf("subtree path = %q", got)
-	}
 }
 
 func TestPollOnceCollapsesLargeTargetBatchToLibraryScans(t *testing.T) {
@@ -866,26 +904,6 @@ func TestPollOnceScansDistinctPathsUnderSameFolder(t *testing.T) {
 	}
 }
 
-func TestPollOnceStoresOpaqueMarkerVerbatim(t *testing.T) {
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
-		}},
-	}
-	const opaque = "eyJjdXJzb3IiOiJhYmMxMjMifQ==|2026-06-02T14:10:00Z"
-	prov := &fakeProvider{paths: map[string][]string{
-		"arr": {"/mnt/media/Show/S01/E01.mkv"},
-	}, nextMarker: opaque}
-	svc := newService(store, prov, &recordingQueuer{}, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if got := store.advanced["s1"]; got != opaque {
-		t.Fatalf("marker not stored verbatim: got %q want %q", got, opaque)
-	}
-}
-
 func TestPollOnceAdvancesMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 	// A filesystem watcher (e.g. CephFS) may return paths from folders that are
 	// not registered as Silo libraries. The marker must ADVANCE so autoscan does
@@ -937,91 +955,135 @@ func TestPollOnceAdvancesMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 	}
 }
 
-func TestPollOnceHoldsMarkerOnTransientResolveFailure(t *testing.T) {
-	// Nothing resolved because the resolver failed INTERNALLY (e.g. a database
-	// fault), not because the paths are outside Silo's libraries. Advancing
-	// would silently skip real imports, so the marker must HOLD and an error be
-	// recorded; the window is retried once the fault clears.
+// A failed poll's error is written against the rows the poll read, so the
+// store can drop it when an admin reset the source while the poll ran.
+func TestPollOnceRecordsAFailureAgainstTheRowsThePollRead(t *testing.T) {
 	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600},
 		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"),
+			Marker: strptr("m0"), SourceConfig: map[string]string{"scope": "all"}, Enabled: true,
 		}},
+		connection: Connection{ID: "c1", Kind: "sonarr", BaseURL: "http://sonarr.invalid"},
 	}
-	prov := &fakeProvider{paths: map[string][]string{
-		"arr": {
-			"/mnt/media/Show/S01/E01.mkv",
-			"/mnt/media/Show/S01/E02.mkv",
-		},
-	}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := NewService(store, prov, passthroughConnRes{}, transientFailureResolver{}, q, allowSuppressor{}, nil)
+	prov := &fakeProvider{err: errors.New("dial tcp: i/o timeout")}
+	svc := NewService(store, prov, passthroughConnRes{}, nil, &recordingQueuer{}, allowSuppressor{}, nil)
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
-	if len(q.enqueued) != 0 {
-		t.Fatalf("nothing should enqueue when no path resolves, got %d", len(q.enqueued))
+	if len(store.failures) != 1 {
+		t.Fatalf("error writes = %d, want 1", len(store.failures))
 	}
-	if got, ok := store.advanced["s1"]; ok {
-		t.Fatalf("marker must NOT advance on transient resolve failure, advanced to %q", got)
+	failure := store.failures[0]
+	if failure.Source.Marker == nil || *failure.Source.Marker != "m0" || failure.Source.SourceConfig["scope"] != "all" {
+		t.Fatalf("failure source = %+v, want the row the poll read", failure.Source)
 	}
-	msg, ok := store.recorded["s1"]
-	if !ok || !strings.Contains(msg, "failed internally") {
-		t.Fatalf("expected recorded transient-failure error, got %q ok=%v", msg, ok)
+	if failure.Connection == nil || failure.Connection.ID != "c1" || failure.Connection.BaseURL != "http://sonarr.invalid" {
+		t.Fatalf("failure connection = %+v, want the row the poll resolved", failure.Connection)
 	}
-	if len(store.events) != 1 {
-		t.Fatalf("expected one finished event, got %d", len(store.events))
-	}
-	event := store.events[0]
-	if event.Status != EventStatusError {
-		t.Fatalf("event status = %q, want %q", event.Status, EventStatusError)
-	}
-	if event.ChangesReturned != 2 || event.ChangesResolved != 0 {
-		t.Fatalf("event counts = %+v", event)
+	if len(store.events) != 1 || store.events[0].Status != EventStatusError || store.events[0].ErrorMessage != failure.Message {
+		t.Fatalf("events = %+v, want the error on the poll's event", store.events)
 	}
 }
 
-func TestPollOnceHoldsMarkerWhenSomeResolveAndOthersFailTransiently(t *testing.T) {
-	// One path resolves and enqueues, another fails with an internal
-	// (non-RequestError) resolver fault. The resolved target's scan must still
-	// be enqueued, but the marker must HOLD and an error be recorded so the
-	// failed path is retried next poll instead of being skipped.
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
-		}},
+type failingConnRes struct{}
+
+func (failingConnRes) Resolve(context.Context, Connection) (ResolvedConnection, error) {
+	return ResolvedConnection{}, errors.New("linked Requests integration is unavailable")
+}
+
+// A poll that fails resolving its connection compares the connection row when
+// it read one, and only the source's own columns when the lookup itself failed.
+func TestPollOnceResolveFailureCarriesTheRowItRead(t *testing.T) {
+	for name, tc := range map[string]struct {
+		getConnErr error
+		wantRow    bool
+	}{
+		"credentials failed after the row was read": {wantRow: true},
+		"the row lookup failed":                     {getConnErr: errors.New("connection refused")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := &fakeStore{
+				settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600},
+				sources: []Source{{
+					ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+				}},
+				connection: Connection{ID: "c1", Kind: "sonarr", BaseURL: "http://sonarr.invalid"},
+				getConnErr: tc.getConnErr,
+			}
+			prov := &fakeProvider{}
+			svc := NewService(store, prov, failingConnRes{}, nil, &recordingQueuer{}, allowSuppressor{}, nil)
+			if err := svc.PollOnce(context.Background()); err != nil {
+				t.Fatalf("PollOnce: %v", err)
+			}
+			if prov.calls != 0 {
+				t.Fatalf("plugin polled %d times after the connection failed", prov.calls)
+			}
+			if len(store.failures) != 1 {
+				t.Fatalf("error writes = %d, want 1", len(store.failures))
+			}
+			got := store.failures[0].Connection
+			if tc.wantRow && (got == nil || got.ID != "c1") {
+				t.Fatalf("failure connection = %+v, want the row the poll read", got)
+			}
+			if !tc.wantRow && got != nil {
+				t.Fatalf("failure connection = %+v, want none after the lookup failed", got)
+			}
+		})
 	}
-	prov := &fakeProvider{paths: map[string][]string{
-		"arr": {
-			"/mnt/media/Show/S01/E01.mkv",
-			"/data/other/Movie/movie.mkv",
-		},
-	}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := NewService(store, prov, passthroughConnRes{}, mixedTransientResolver{}, q, allowSuppressor{}, nil)
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(q.enqueued) != 1 {
-		t.Fatalf("the resolved target should still enqueue, got %d", len(q.enqueued))
-	}
-	if got, ok := store.advanced["s1"]; ok {
-		t.Fatalf("marker must NOT advance when any resolve attempt failed transiently, advanced to %q", got)
-	}
-	msg, ok := store.recorded["s1"]
-	if !ok || !strings.Contains(msg, "failed internally") {
-		t.Fatalf("expected recorded transient-failure error, got %q ok=%v", msg, ok)
-	}
-	if len(store.events) != 1 {
-		t.Fatalf("expected one finished event, got %d", len(store.events))
-	}
-	event := store.events[0]
-	if event.Status != EventStatusError {
-		t.Fatalf("event status = %q, want %q", event.Status, EventStatusError)
-	}
-	if event.ChangesReturned != 2 || event.ChangesResolved != 1 {
-		t.Fatalf("event counts = %+v", event)
+}
+
+// TestPollOnceHoldsMarkerOnTransientResolveFailures covers paths the resolver
+// fails on INTERNALLY (e.g. a database fault), not because they are outside
+// Silo's libraries. Advancing would silently skip real imports, so the marker
+// must HOLD and an error be recorded; the window is retried once the fault
+// clears. Paths that did resolve still enqueue.
+func TestPollOnceHoldsMarkerOnTransientResolveFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		resolver     Resolver
+		paths        []string
+		wantEnqueued int
+	}{
+		{name: "every path fails", resolver: transientFailureResolver{},
+			paths: []string{"/mnt/media/Show/S01/E01.mkv", "/mnt/media/Show/S01/E02.mkv"}},
+		{name: "one path resolves", resolver: mixedTransientResolver{},
+			paths: []string{"/mnt/media/Show/S01/E01.mkv", "/data/other/Movie/movie.mkv"}, wantEnqueued: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeStore{
+				settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+				sources: []Source{{
+					ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+				}},
+			}
+			prov := &fakeProvider{paths: map[string][]string{"arr": tc.paths}, nextMarker: "m1"}
+			q := &recordingQueuer{}
+			svc := NewService(store, prov, passthroughConnRes{}, tc.resolver, q, allowSuppressor{}, nil)
+			if err := svc.PollOnce(context.Background()); err != nil {
+				t.Fatalf("PollOnce: %v", err)
+			}
+			if len(q.enqueued) != tc.wantEnqueued {
+				t.Fatalf("enqueued %d scans, want %d", len(q.enqueued), tc.wantEnqueued)
+			}
+			if got, ok := store.advanced["s1"]; ok {
+				t.Fatalf("marker must NOT advance when any resolve attempt failed transiently, advanced to %q", got)
+			}
+			msg, ok := store.recorded["s1"]
+			if !ok || !strings.Contains(msg, "failed internally") {
+				t.Fatalf("expected recorded transient-failure error, got %q ok=%v", msg, ok)
+			}
+			if len(store.events) != 1 {
+				t.Fatalf("expected one finished event, got %d", len(store.events))
+			}
+			event := store.events[0]
+			if event.Status != EventStatusError {
+				t.Fatalf("event status = %q, want %q", event.Status, EventStatusError)
+			}
+			if event.ChangesReturned != 2 || event.ChangesResolved != tc.wantEnqueued {
+				t.Fatalf("event counts = %+v", event)
+			}
+		})
 	}
 }
 
@@ -1058,41 +1120,6 @@ func TestPollOnceAdvancesMarkerWhenResolvedButAllSuppressed(t *testing.T) {
 	}
 	if _, ok := store.recorded["s1"]; ok {
 		t.Fatalf("no error should be recorded when targets merely suppressed (work is debounced, not misconfigured)")
-	}
-}
-
-func TestPollOnceAdvancesMarkerWhenZeroPathsReturned(t *testing.T) {
-	// The "nothing to do" case: provider returns no paths at all. The marker must
-	// advance normally and no error is recorded.
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
-		}},
-	}
-	prov := &fakeProvider{paths: map[string][]string{"arr": {}}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := newService(store, prov, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if got, ok := store.advanced["s1"]; !ok || got != "m1" {
-		t.Fatalf("marker must advance to %q when zero paths returned, got %q ok=%v", "m1", got, ok)
-	}
-	if _, ok := store.recorded["s1"]; ok {
-		t.Fatalf("no error should be recorded when there's simply nothing to do")
-	}
-}
-
-func TestPollOnceDisabledNoop(t *testing.T) {
-	store := &fakeStore{settings: Settings{Enabled: false}}
-	q := &recordingQueuer{}
-	svc := newService(store, &fakeProvider{}, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(q.enqueued) != 0 {
-		t.Fatalf("disabled autoscan should enqueue nothing, got %d", len(q.enqueued))
 	}
 }
 
@@ -1144,78 +1171,71 @@ func TestPollOnceReleasesClaimOnEnqueueFailure(t *testing.T) {
 	}
 }
 
-func TestPollOncePollsConnectionlessSource(t *testing.T) {
-	// A connection is OPTIONAL: a source with no bound connection is still polled
-	// (the provider gets an empty connection it may ignore — e.g. a filesystem
-	// watcher). Whether the plugin needs credentials is the plugin's concern.
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: nil, Enabled: true,
-		}},
-	}
-	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := newService(store, prov, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(q.enqueued) != 1 {
-		t.Fatalf("a connection-less source must still poll + enqueue, got %d enqueued", len(q.enqueued))
-	}
-	if _, ok := store.recorded["s1"]; ok {
-		t.Fatalf("a connection-less source must not record a 'no connection' error")
-	}
-	if _, ok := store.advanced["s1"]; !ok {
-		t.Fatalf("marker must advance after a successful connection-less poll")
-	}
-}
-
-func TestPollOnceSkipsSourcePolledTooRecently(t *testing.T) {
+func TestPollNowPollsSourceWithinItsInterval(t *testing.T) {
 	recent := time.Now().Add(-30 * time.Second)
 	interval := 600
-	store := &fakeStore{
-		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
-		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
-			PollIntervalSeconds: &interval, LastRunAt: &recent,
-		}},
+	newStore := func() *fakeStore {
+		return &fakeStore{
+			settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+			sources: []Source{
+				{
+					ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+					PollIntervalSeconds: &interval, LastRunAt: &recent,
+				},
+				{
+					// No per-source interval: the default applies to scheduled polls.
+					ID: "s2", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+					LastRunAt: &recent,
+				},
+			},
+		}
 	}
 	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := newService(store, prov, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
+
+	scheduled := newStore()
+	if err := newService(scheduled, prov, &recordingQueuer{}, allowSuppressor{}).PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
-	if len(q.enqueued) != 0 {
-		t.Fatalf("a source within its poll interval must be skipped, got %d enqueued", len(q.enqueued))
+	if len(scheduled.createdEvents) != 0 || len(scheduled.advanced) != 0 {
+		t.Fatalf("a scheduled poll must skip sources within their interval, got events=%d advanced=%v", len(scheduled.createdEvents), scheduled.advanced)
 	}
-	if _, ok := store.advanced["s1"]; ok {
-		t.Fatalf("marker must NOT advance for a skipped (too-recent) source")
+
+	manual := newStore()
+	if err := newService(manual, prov, &recordingQueuer{}, allowSuppressor{}).PollNow(context.Background()); err != nil {
+		t.Fatalf("PollNow: %v", err)
+	}
+	for _, id := range []string{"s1", "s2"} {
+		if got := manual.advanced[id]; got != "m1" {
+			t.Fatalf("PollNow must poll %s despite its interval, marker = %q", id, got)
+		}
 	}
 }
 
-func TestPollOnceRunsSourcePastItsInterval(t *testing.T) {
-	old := time.Now().Add(-20 * time.Minute)
-	interval := 600 // 10 min; last run was 20 min ago => eligible
-	store := &fakeStore{
+func TestPollNowStillSkipsWhenDisabledAndWebhookSources(t *testing.T) {
+	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
+
+	off := &fakeStore{
+		settings: Settings{Enabled: false, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources:  []Source{{ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", Enabled: true}},
+	}
+	if err := newService(off, prov, &recordingQueuer{}, allowSuppressor{}).PollNow(context.Background()); err != nil {
+		t.Fatalf("PollNow: %v", err)
+	}
+	if len(off.createdEvents) != 0 || len(off.advanced) != 0 {
+		t.Fatalf("PollNow must not poll while autoscan is disabled")
+	}
+
+	webhook := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
-			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
-			PollIntervalSeconds: &interval, LastRunAt: &old,
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", Enabled: true, DeliveryMode: DeliveryModeWebhook,
 		}},
 	}
-	prov := &fakeProvider{paths: map[string][]string{"arr": {"/mnt/media/Show/S01/E01.mkv"}}, nextMarker: "m1"}
-	q := &recordingQueuer{}
-	svc := newService(store, prov, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
+	if err := newService(webhook, prov, &recordingQueuer{}, allowSuppressor{}).PollNow(context.Background()); err != nil {
+		t.Fatalf("PollNow: %v", err)
 	}
-	if len(q.enqueued) != 1 {
-		t.Fatalf("a source past its interval must poll, got %d enqueued", len(q.enqueued))
-	}
-	if _, ok := store.advanced["s1"]; !ok {
-		t.Fatalf("expected marker advanced for s1")
+	if len(webhook.createdEvents) != 0 || len(webhook.advanced) != 0 {
+		t.Fatalf("PollNow must not poll webhook sources")
 	}
 }
 
@@ -1257,5 +1277,139 @@ func TestPollOnceRecordsScanSourceResolutionFailure(t *testing.T) {
 	}
 	if store.events[1].Status != EventStatusError || !strings.Contains(store.events[1].ErrorMessage, "not installed") {
 		t.Fatalf("failed source event = %+v", store.events[1])
+	}
+}
+
+func arrSourceWithoutConnection() Source {
+	return Source{ID: "s1", PluginID: arrPluginID, CapabilityID: arrCapabilityID, Enabled: true}
+}
+
+func arrLister(connection ConnectionRequirement) fakeLister {
+	return fakeLister{sources: []DiscoveredSource{{
+		PluginID:     arrPluginID,
+		CapabilityID: arrCapabilityID,
+		Descriptor:   ScanSourceDescriptor{DeliveryModes: []string{DeliveryModePoll}, Connection: connection},
+	}}}
+}
+
+// A source whose descriptor requires a server must not reach the plugin with
+// none bound: the poll can only fail, and the operator needs to be told what to
+// change rather than shown a transport error.
+func TestPollOnceSkipsPluginWhenRequiredConnectionMissing(t *testing.T) {
+	marker := "m0"
+	src := arrSourceWithoutConnection()
+	src.Marker = &marker
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources:  []Source{src},
+	}
+	prov := &fakeProvider{nextMarker: "m1"}
+	svc := NewService(store, prov, passthroughConnRes{}, fakeResolver{}, &recordingQueuer{}, allowSuppressor{}, arrLister(ConnectionRequired))
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if prov.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0", prov.calls)
+	}
+	if got := store.recorded["s1"]; got != missingConnectionMessage {
+		t.Fatalf("recorded error = %q, want %q", got, missingConnectionMessage)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("finished events = %+v, want one", store.events)
+	}
+	event := store.events[0]
+	if event.Status != EventStatusError || event.ErrorMessage != missingConnectionMessage || event.MarkerAfter != marker {
+		t.Fatalf("event = %+v, want error holding marker %q", event, marker)
+	}
+	if _, ok := store.advanced["s1"]; ok {
+		t.Fatal("marker must not advance when the poll was skipped")
+	}
+}
+
+func TestPollOnceCallsPluginWhenConnectionOptional(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources:  []Source{arrSourceWithoutConnection()},
+	}
+	prov := &fakeProvider{nextMarker: "m1"}
+	svc := NewService(store, prov, passthroughConnRes{}, fakeResolver{}, &recordingQueuer{}, allowSuppressor{}, arrLister(ConnectionOptional))
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if prov.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", prov.calls)
+	}
+}
+
+func TestPollOnceRecordsPluginErrorWithoutTransportFraming(t *testing.T) {
+	src := arrSourceWithoutConnection()
+	src.ConnectionID = strptr("c1")
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources:  []Source{src},
+	}
+	prov := &fakeProvider{err: status.Error(codes.Unknown, "arr: history request failed: 401 Unauthorized")}
+	svc := newService(store, prov, &recordingQueuer{}, allowSuppressor{})
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	const want = "arr: history request failed: 401 Unauthorized"
+	if got := store.recorded["s1"]; got != want {
+		t.Fatalf("recorded error = %q, want %q", got, want)
+	}
+	if len(store.events) != 1 || store.events[0].ErrorMessage != want {
+		t.Fatalf("events = %+v, want error message %q", store.events, want)
+	}
+}
+
+// A listing failure must not stop sources from polling; the plugin still gets
+// to report its own error.
+func TestPollOnceCallsPluginWhenDescriptorsUnavailable(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources:  []Source{arrSourceWithoutConnection()},
+	}
+	prov := &fakeProvider{nextMarker: "m1"}
+	svc := NewService(store, prov, passthroughConnRes{}, fakeResolver{}, &recordingQueuer{}, allowSuppressor{}, fakeLister{err: errors.New("installation store unavailable")})
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if prov.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", prov.calls)
+	}
+}
+
+// sidecarFolderResolver maps an .nfo change to its folder only when the
+// request asks for it, as the real resolver does.
+type sidecarFolderResolver struct{ fakeResolver }
+
+func (sidecarFolderResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
+	if filepath.Ext(req.Path) != ".nfo" || !req.SidecarFolder {
+		return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Reason: scantrigger.ReasonUnsupportedExtension}
+	}
+	return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: filepath.Dir(req.Path), Trigger: req.Trigger}, nil
+}
+
+func TestPollOnceFileChangeToAnNFOScansItsFolder(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{changes: map[string][]Change{
+		"cephfs": {{SourcePath: "/mnt/media/movies/Film (2020)/movie.nfo", Scope: ChangeScopeFile}},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := NewService(store, prov, passthroughConnRes{}, sidecarFolderResolver{}, q, allowSuppressor{}, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 || q.enqueued[0].Mode != scantrigger.ModeSubtree || q.enqueued[0].Path != "/mnt/media/movies/Film (2020)" {
+		t.Fatalf("enqueued %+v, want a subtree scan of the NFO's folder", q.enqueued)
 	}
 }

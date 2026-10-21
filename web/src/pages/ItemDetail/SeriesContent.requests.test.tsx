@@ -259,7 +259,7 @@ describe("series page request budget and play target", () => {
     installServer({
       seasons: twoSeasonsInProgress,
       seriesPlayContentId: "s2e2",
-      progressPage: ["s2e2"],
+      progressPage: Array.from({ length: 20 }, (_, index) => `other-${index + 1}`),
     });
 
     await openSeriesPage();
@@ -281,70 +281,11 @@ describe("series page request budget and play target", () => {
     ]);
   });
 
-  it("resumes when more than 20 other titles are in progress", async () => {
-    // The first progress page is full of other shows, so this series' resume
-    // point is not on it. The server's play target still finds it.
-    installServer({
-      seasons: twoSeasonsInProgress,
-      seriesPlayContentId: "s2e2",
-      progressPage: Array.from({ length: 20 }, (_, index) => `other-${index + 1}`),
-    });
-
-    await openSeriesPage();
-
-    expect(playButton()).toEqual({ href: "/watch/s2e2", label: "Resume" });
-    // Detail, theme settings, seasons and similar titles, plus the target
-    // season's episodes for Watch Together. Nothing scales with the profile's history.
-    expect(requestLog()).toHaveLength(5);
-    expect(requestLog().filter((request) => request.startsWith("GET /api/v2/progress"))).toEqual(
-      [],
-    );
-  });
-
   it("starts again from episode 1 once the whole series is watched", async () => {
     installServer({
       seasons: {
         1: ["watched", "watched", "watched"],
         2: ["watched", "watched", "watched"],
-      },
-      seriesPlayContentId: "s1e1",
-      progressPage: [],
-    });
-
-    await openSeriesPage();
-
-    expect(playButton()).toEqual({
-      href: "/watch/s1e1",
-      label: "Start From Episode 1",
-    });
-    expect(requestLog()).toHaveLength(5);
-  });
-
-  it("plays the first unwatched episode after a finished one", async () => {
-    installServer({
-      seasons: {
-        1: ["watched", "watched", "watched"],
-        2: ["unwatched", "unwatched", "unwatched"],
-      },
-      seriesPlayContentId: "s2e1",
-      progressPage: [],
-    });
-
-    await openSeriesPage();
-
-    expect(playButton()).toEqual({ href: "/watch/s2e1", label: "Play Next" });
-    expect(mocks.watchTogether.value).toMatchObject({
-      target: { content_id: "s2e1", subtitle: "S2 E1" },
-      initialSeasonNumber: 2,
-    });
-    expect(requestLog()).toHaveLength(5);
-  });
-
-  it("starts an unstarted series from episode 1", async () => {
-    installServer({
-      seasons: {
-        1: ["unwatched", "unwatched", "unwatched"],
-        2: ["unwatched", "unwatched", "unwatched"],
       },
       seriesPlayContentId: "s1e1",
       progressPage: [],

@@ -13,6 +13,7 @@ import {
 } from "@/components/AppSidebar.logic";
 import { SiloBrand } from "@/components/SiloBrand";
 import { useAuth } from "@/hooks/useAuth";
+import { useSidebarEntrance, type SidebarSwap } from "@/hooks/useSidebarSwap";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
@@ -20,6 +21,7 @@ import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useUnreadNotificationCount } from "@/hooks/queries/notifications";
 import { useNotificationCapability } from "@/hooks/queries/notificationWebhooks";
 import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
+import { useCriticalContentLoaded } from "@/lib/startupPriority";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { useSidebarPins, useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
@@ -119,7 +121,8 @@ function SidebarSectionHeader({
   expanded?: boolean;
   onToggle?: () => void;
 }) {
-  const textClass = "text-muted-foreground text-[10px] font-semibold tracking-[0.22em] uppercase";
+  const textClass =
+    "text-muted-foreground text-[0.625rem] font-semibold tracking-[0.22em] uppercase";
 
   // Centred on the 64px rail, not on the 260px surface. `-left-3` cancels the
   // nav's own `px-3`, so this box starts at the sidebar's left edge and spans
@@ -176,6 +179,19 @@ function SidebarSectionHeader({
 interface AppSidebarProps {
   onNavigate?: () => void;
   collapsed?: boolean;
+  /** Set when this sidebar just replaced the settings sidebar; see useSidebarSwap. */
+  swap?: SidebarSwap | null;
+}
+
+/**
+ * The menu's Settings item opens the settings shell on its first page. Loading
+ * their code when the menu opens means the click lands on a drawn page rather
+ * than a blank frame while the chunks arrive.
+ */
+function preloadSettings() {
+  void import("@/pages/SettingsLayout");
+  void import("@/components/settings/UserSettingsSidebar");
+  void import("@/pages/settings/PlaybackSettings");
 }
 
 interface ResolvedPrimaryMenuLink {
@@ -185,7 +201,8 @@ interface ResolvedPrimaryMenuLink {
   icon: ReactNode;
 }
 
-export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebarProps) {
+export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppSidebarProps) {
+  const entrance = useSidebarEntrance(swap);
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
   const params = useParams<{ libraryId: string }>();
@@ -206,8 +223,10 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const showNotificationsNav = notificationCapability.isError
     ? false
     : (notificationCapability.data?.in_app.enabled ?? true);
+  // The badge waits for the page's first content (see startupPriority).
+  const criticalContentLoaded = useCriticalContentLoaded();
   const { data: unreadNotifications } = useUnreadNotificationCount(
-    Boolean(profile) && showNotificationsNav,
+    Boolean(profile) && showNotificationsNav && criticalContentLoaded,
   );
   const pluginNavLinks = useMemo(() => {
     const installations = pluginSettings?.installations ?? [];
@@ -327,6 +346,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
       }
     });
   }, [libraries, primaryMenu]);
+  const showDiscoverNav = primaryMenuLinks === null || showRequestsNav || showNotificationsNav;
 
   const catalogState = useMemo(
     () =>
@@ -426,7 +446,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
     navLinkClassForState(isActive(href, exact));
 
   const navLinkClassForState = (active: boolean) =>
-    `relative flex items-center gap-2.5 rounded-xl px-3 py-3 text-[13px] font-medium transition-all duration-200 ${
+    `relative flex items-center gap-2.5 rounded-xl px-3 py-3 text-[0.8125rem] font-medium transition-all duration-200 ${
       active
         ? "text-sidebar-accent-foreground bg-sidebar-accent/90 shadow-[0_16px_30px_-24px_rgba(0,0,0,0.7)]"
         : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
@@ -470,7 +490,10 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
           across it. The blur lives here rather than on the frame precisely
           because this layer never moves relative to the viewport — its 40px
           backdrop is sampled from a region that never changes. */}
-      <div className="bg-sidebar/88 sidebar-inner flex h-full w-[260px] flex-col backdrop-blur-2xl">
+      <div
+        data-sidebar-entrance={entrance}
+        className="bg-sidebar/88 sidebar-inner flex h-full w-[260px] flex-col backdrop-blur-2xl"
+      >
         {/* Logo — the wordmark and the mark cross-fade in place. Swapping the
           variant outright would pop at the very start of the collapse. */}
         <ViewTransitionLink
@@ -498,12 +521,13 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
           aria-label="Main navigation"
           className="sidebar-nav sidebar-scroll flex-1 space-y-7 overflow-y-auto px-3 pb-5"
         >
-          {/* A customized primary menu is an ordered shortcut rail. Search and
-              profile controls remain fixed elsewhere, and the full library
-              tree remains available below as a safe browsing fallback. */}
-          {primaryMenuLinks ? (
-            <ul className="list-none space-y-0.5">
-              {primaryMenuLinks.map((link) => {
+          {/* Home and Search open the sidebar. A customized primary menu replaces
+              Home with an ordered shortcut rail, Search stays fixed after it,
+              and the full library tree remains available below as a safe
+              browsing fallback. */}
+          <ul className="mb-4 list-none space-y-0.5">
+            {primaryMenuLinks ? (
+              primaryMenuLinks.map((link) => {
                 const [targetPath, targetQuery] = link.href.split("?", 2);
                 const active =
                   targetPath === "/"
@@ -536,10 +560,8 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                     </ViewTransitionLink>
                   </li>
                 );
-              })}
-            </ul>
-          ) : (
-            <ul className="list-none space-y-0.5">
+              })
+            ) : (
               <li>
                 <ViewTransitionLink
                   to="/"
@@ -557,8 +579,33 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                   <SidebarLabel show={showLabels}>Home</SidebarLabel>
                 </ViewTransitionLink>
               </li>
-            </ul>
-          )}
+            )}
+            <li>
+              <ViewTransitionLink
+                to={buildQueryCatalogHref()}
+                onClick={onNavigate}
+                className={navLinkClassForState(isCatalogSourceActive("query"))}
+                aria-current={isCatalogSourceActive("query") ? "page" : undefined}
+              >
+                {isCatalogSourceActive("query") && (
+                  <span
+                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                    style={{ background: "var(--primary)" }}
+                  />
+                )}
+                <Search className="h-[18px] w-[18px] shrink-0" />
+                <SidebarLabel show={showLabels}>Search</SidebarLabel>
+                <kbd
+                  aria-hidden={!showLabels}
+                  className={`bg-muted text-muted-foreground sidebar-fade pointer-events-none ml-auto hidden rounded border px-1.5 py-0.5 text-[0.625rem] font-medium select-none lg:inline-flex ${
+                    showLabels ? "opacity-100" : "opacity-0"
+                  }`}
+                >
+                  {SEARCH_SHORTCUT_LABEL}
+                </kbd>
+              </ViewTransitionLink>
+            </li>
+          </ul>
 
           {/* Libraries */}
           {libraries && libraries.length > 0 && (
@@ -588,7 +635,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                       <li key={lib.id}>
                         {/* Library row: chevron (if pins) + icon + name link */}
                         <div
-                          className={`relative flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150 ${
+                          className={`relative flex items-center rounded-lg text-[0.8125rem] font-medium transition-colors duration-150 ${
                             active
                               ? "text-sidebar-accent-foreground bg-sidebar-accent"
                               : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent"
@@ -671,7 +718,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                                   <ViewTransitionLink
                                     to={pinHref}
                                     onClick={onNavigate}
-                                    className={`flex flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[12.5px] font-medium transition-colors duration-150 ${
+                                    className={`flex flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[0.78125rem] font-medium transition-colors duration-150 ${
                                       pinActive
                                         ? "text-sidebar-accent-foreground bg-sidebar-accent/90"
                                         : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
@@ -713,134 +760,115 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
             </div>
           )}
 
-          {/* Discover */}
-          <div>
-            <SidebarSectionHeader show={showLabels}>Discover</SidebarSectionHeader>
-            <ul className="list-none space-y-0.5">
-              <li>
-                <ViewTransitionLink
-                  to={buildQueryCatalogHref()}
-                  onClick={onNavigate}
-                  className={navLinkClassForState(isCatalogSourceActive("query"))}
-                  aria-current={isCatalogSourceActive("query") ? "page" : undefined}
-                >
-                  {isCatalogSourceActive("query") && (
-                    <span
-                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                      style={{ background: "var(--primary)" }}
-                    />
-                  )}
-                  <Search className="h-[18px] w-[18px] shrink-0" />
-                  <SidebarLabel show={showLabels}>Search</SidebarLabel>
-                  <kbd
-                    aria-hidden={!showLabels}
-                    className={`bg-muted text-muted-foreground sidebar-fade pointer-events-none ml-auto hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none lg:inline-flex ${
-                      showLabels ? "opacity-100" : "opacity-0"
-                    }`}
-                  >
-                    {SEARCH_SHORTCUT_LABEL}
-                  </kbd>
-                </ViewTransitionLink>
-              </li>
-              {primaryMenuLinks === null ? (
-                <li>
-                  <ViewTransitionLink
-                    to="/recommendations"
-                    onClick={onNavigate}
-                    className={navLinkClass("/recommendations")}
-                    aria-current={isActive("/recommendations") ? "page" : undefined}
-                  >
-                    {isActive("/recommendations") && (
-                      <span
-                        className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                        style={{ background: "var(--primary)" }}
-                      />
-                    )}
-                    <Sparkles className="h-[18px] w-[18px] shrink-0" />
-                    <SidebarLabel show={showLabels}>For You</SidebarLabel>
-                  </ViewTransitionLink>
-                </li>
-              ) : null}
-              {showRequestsNav && (
-                <li>
-                  <ViewTransitionLink
-                    to="/requests"
-                    onClick={onNavigate}
-                    className={navLinkClass("/requests")}
-                    aria-current={isActive("/requests") ? "page" : undefined}
-                  >
-                    {isActive("/requests") && (
-                      <span
-                        className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                        style={{ background: "var(--primary)" }}
-                      />
-                    )}
-                    <Send className="h-[18px] w-[18px] shrink-0" />
-                    <SidebarLabel show={showLabels}>Requests</SidebarLabel>
-                  </ViewTransitionLink>
-                </li>
-              )}
-              {primaryMenuLinks === null ? (
-                <li>
-                  <ViewTransitionLink
-                    to="/calendar"
-                    onClick={onNavigate}
-                    className={navLinkClass("/calendar")}
-                    aria-current={isActive("/calendar") ? "page" : undefined}
-                  >
-                    {isActive("/calendar") && (
-                      <span
-                        className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                        style={{ background: "var(--primary)" }}
-                      />
-                    )}
-                    <CalendarDays className="h-[18px] w-[18px] shrink-0" />
-                    <SidebarLabel show={showLabels}>Calendar</SidebarLabel>
-                  </ViewTransitionLink>
-                </li>
-              ) : null}
-              {showNotificationsNav && (
-                <li>
-                  <ViewTransitionLink
-                    to="/notifications"
-                    onClick={onNavigate}
-                    className={navLinkClass("/notifications")}
-                    aria-current={isActive("/notifications") ? "page" : undefined}
-                  >
-                    {isActive("/notifications") && (
-                      <span
-                        className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                        style={{ background: "var(--primary)" }}
-                      />
-                    )}
-                    <span className="relative shrink-0">
-                      <Bell className="h-[18px] w-[18px] shrink-0" />
-                      {(unreadNotifications ?? 0) > 0 && (
+          {/* Discover. A customized primary menu drops For You and Calendar, so
+              the section can be left with nothing to show. */}
+          {showDiscoverNav && (
+            <div>
+              <SidebarSectionHeader show={showLabels}>Discover</SidebarSectionHeader>
+              <ul className="list-none space-y-0.5">
+                {primaryMenuLinks === null ? (
+                  <li>
+                    <ViewTransitionLink
+                      to="/recommendations"
+                      onClick={onNavigate}
+                      className={navLinkClass("/recommendations")}
+                      aria-current={isActive("/recommendations") ? "page" : undefined}
+                    >
+                      {isActive("/recommendations") && (
                         <span
-                          aria-hidden="true"
-                          className={`sidebar-fade absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${
-                            showLabels ? "opacity-0" : "opacity-100"
-                          }`}
+                          className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
                           style={{ background: "var(--primary)" }}
                         />
                       )}
-                    </span>
-                    <SidebarLabel show={showLabels}>Notifications</SidebarLabel>
-                    {(unreadNotifications ?? 0) > 0 && (
-                      <span
-                        className={`sidebar-fade ml-auto rounded-full px-1.5 py-0.5 text-[10px] leading-none font-semibold ${
-                          showLabels ? "opacity-100" : "opacity-0"
-                        }`}
-                        style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
-                      >
-                        {(unreadNotifications ?? 0) > 99 ? "99+" : unreadNotifications}
+                      <Sparkles className="h-[18px] w-[18px] shrink-0" />
+                      <SidebarLabel show={showLabels}>For You</SidebarLabel>
+                    </ViewTransitionLink>
+                  </li>
+                ) : null}
+                {showRequestsNav && (
+                  <li>
+                    <ViewTransitionLink
+                      to="/requests"
+                      onClick={onNavigate}
+                      className={navLinkClass("/requests")}
+                      aria-current={isActive("/requests") ? "page" : undefined}
+                    >
+                      {isActive("/requests") && (
+                        <span
+                          className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                          style={{ background: "var(--primary)" }}
+                        />
+                      )}
+                      <Send className="h-[18px] w-[18px] shrink-0" />
+                      <SidebarLabel show={showLabels}>Requests</SidebarLabel>
+                    </ViewTransitionLink>
+                  </li>
+                )}
+                {primaryMenuLinks === null ? (
+                  <li>
+                    <ViewTransitionLink
+                      to="/calendar"
+                      onClick={onNavigate}
+                      className={navLinkClass("/calendar")}
+                      aria-current={isActive("/calendar") ? "page" : undefined}
+                    >
+                      {isActive("/calendar") && (
+                        <span
+                          className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                          style={{ background: "var(--primary)" }}
+                        />
+                      )}
+                      <CalendarDays className="h-[18px] w-[18px] shrink-0" />
+                      <SidebarLabel show={showLabels}>Calendar</SidebarLabel>
+                    </ViewTransitionLink>
+                  </li>
+                ) : null}
+                {showNotificationsNav && (
+                  <li>
+                    <ViewTransitionLink
+                      to="/notifications"
+                      onClick={onNavigate}
+                      className={navLinkClass("/notifications")}
+                      aria-current={isActive("/notifications") ? "page" : undefined}
+                    >
+                      {isActive("/notifications") && (
+                        <span
+                          className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                          style={{ background: "var(--primary)" }}
+                        />
+                      )}
+                      <span className="relative shrink-0">
+                        <Bell className="h-[18px] w-[18px] shrink-0" />
+                        {(unreadNotifications ?? 0) > 0 && (
+                          <span
+                            aria-hidden="true"
+                            className={`sidebar-fade absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${
+                              showLabels ? "opacity-0" : "opacity-100"
+                            }`}
+                            style={{ background: "var(--primary)" }}
+                          />
+                        )}
                       </span>
-                    )}
-                  </ViewTransitionLink>
-                </li>
-              )}
-            </ul>
-          </div>
+                      <SidebarLabel show={showLabels}>Notifications</SidebarLabel>
+                      {(unreadNotifications ?? 0) > 0 && (
+                        <span
+                          className={`sidebar-fade ml-auto rounded-full px-1.5 py-0.5 text-[0.625rem] leading-none font-semibold ${
+                            showLabels ? "opacity-100" : "opacity-0"
+                          }`}
+                          style={{
+                            background: "var(--primary)",
+                            color: "var(--primary-foreground)",
+                          }}
+                        >
+                          {(unreadNotifications ?? 0) > 99 ? "99+" : unreadNotifications}
+                        </span>
+                      )}
+                    </ViewTransitionLink>
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
 
           {/* Your Stuff */}
           <div className="sidebar-personal">
@@ -978,6 +1006,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
               if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
               hoverTimerRef.current = null;
               setProfileMenuOpen(open);
+              if (open) preloadSettings();
               if (!open && !collapsed) return;
               setHovered(open);
             }}
@@ -1009,7 +1038,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                   </Avatar>
                 </span>
                 <span
-                  className={`text-sidebar-foreground sidebar-fade max-w-[180px] truncate text-[13px] font-medium ${
+                  className={`text-sidebar-foreground sidebar-fade max-w-[180px] truncate text-[0.8125rem] font-medium ${
                     showLabels ? "opacity-100" : "opacity-0"
                   }`}
                 >
@@ -1032,11 +1061,11 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-[14px] font-semibold">
+                  <span className="truncate text-[0.875rem] font-semibold">
                     {profile?.name ?? user?.username ?? "User"}
                   </span>
                   {profile && user?.username && user.username !== profile.name && (
-                    <span className="text-muted-foreground truncate text-[11px] font-normal">
+                    <span className="text-muted-foreground truncate text-[0.6875rem] font-normal">
                       {user.username}
                     </span>
                   )}
@@ -1049,7 +1078,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                 onClick={() => {
                   navigate("/settings");
                 }}
-                className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
+                className="gap-2.5 rounded-lg px-2.5 py-2 text-[0.8125rem]"
               >
                 <Settings className="h-[18px] w-[18px]" />
                 Settings
@@ -1064,7 +1093,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                       clearProfile();
                       navigate("/profiles");
                     }}
-                    className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[13px] font-semibold"
+                    className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[0.8125rem] font-semibold"
                   >
                     <UserCircle className="h-[18px] w-[18px]" />
                     Switch Profile
@@ -1072,7 +1101,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                 )}
                 <DropdownMenuItem
                   onClick={logout}
-                  className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[13px] font-semibold"
+                  className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[0.8125rem] font-semibold"
                 >
                   <LogOut className="h-[18px] w-[18px]" />
                   Logout

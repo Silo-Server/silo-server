@@ -13,9 +13,3 @@ type RealClock struct{}
 
 // Now returns the system time.
 func (RealClock) Now() time.Time { return time.Now() }
-
-// FixedClock returns a fixed time. Used in tests for deterministic resolution.
-type FixedClock time.Time
-
-// Now returns the fixed instant.
-func (f FixedClock) Now() time.Time { return time.Time(f) }

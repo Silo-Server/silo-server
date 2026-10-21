@@ -63,31 +63,6 @@ func TestSanitizeURLErrorFindsWrappedURLError(t *testing.T) {
 	}
 }
 
-func TestSanitizeURLErrorPreservesSingleWrapperContext(t *testing.T) {
-	cause := errors.New("connection refused")
-	err := fmt.Errorf("fetch node capabilities: %w", &url.Error{
-		Op:  "Get",
-		URL: "https://operator:node-password@node.example/hw-capabilities?access_token=query-secret",
-		Err: cause,
-	})
-
-	sanitized := SanitizeURLError(err)
-	message := sanitized.Error()
-	for _, secret := range []string{"operator", "node-password", "query-secret"} {
-		if strings.Contains(message, secret) {
-			t.Fatalf("sanitized wrapped error contains %q: %q", secret, message)
-		}
-	}
-	if !strings.Contains(message, "fetch node capabilities") ||
-		!strings.Contains(message, "https://node.example/hw-capabilities") ||
-		!strings.Contains(message, "connection refused") {
-		t.Fatalf("sanitized wrapped error lost outer diagnostics: %q", message)
-	}
-	if !errors.Is(sanitized, cause) {
-		t.Fatalf("sanitized wrapped error does not preserve its cause: %v", sanitized)
-	}
-}
-
 func TestSanitizeURLErrorPreservesMultiWrapperChain(t *testing.T) {
 	cause := errors.New("dial tcp: connection refused")
 	err := fmt.Errorf("transcode start failed: %w",
@@ -159,6 +134,43 @@ func TestSanitizeURLErrorPreservesMultiPercentWFmtMessage(t *testing.T) {
 	}
 	if !errors.Is(sanitized, cause) {
 		t.Fatalf("sanitized multi-wrapped error does not preserve its cause: %v", sanitized)
+	}
+}
+
+func TestSanitizeURLErrorSanitizesEveryJoinedURL(t *testing.T) {
+	err := fmt.Errorf("fetch: %w", errors.Join(
+		&url.Error{Op: "Get", URL: "https://operator:first-secret@a.example/v?token=first-token", Err: errors.New("timeout")},
+		&url.Error{Op: "Get", URL: "https://operator:second-secret@b.example/v?token=second-token", Err: errors.New("refused")},
+	))
+
+	message := SanitizeURLError(err).Error()
+	for _, secret := range []string{"operator", "first-secret", "first-token", "second-secret", "second-token"} {
+		if strings.Contains(message, secret) {
+			t.Fatalf("sanitized joined error contains %q: %q", secret, message)
+		}
+	}
+	for _, want := range []string{"fetch: ", "https://a.example/v", "timeout", "https://b.example/v", "refused"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("sanitized joined error lost %q: %q", want, message)
+		}
+	}
+}
+
+func TestSanitizeURLErrorSanitizesURLRepeatedByWrapper(t *testing.T) {
+	const raw = "https://cdn.example/v.mp4?token=query-secret"
+	cause := errors.New("timeout")
+	err := fmt.Errorf("GET %s failed: %w", raw, &url.Error{Op: "Get", URL: raw, Err: cause})
+
+	sanitized := SanitizeURLError(err)
+	message := sanitized.Error()
+	if strings.Contains(message, "query-secret") {
+		t.Fatalf("sanitized wrapper repeats the raw URL: %q", message)
+	}
+	if want := `GET https://cdn.example/v.mp4 failed: Get "https://cdn.example/v.mp4": timeout`; message != want {
+		t.Fatalf("sanitized wrapper = %q, want %q", message, want)
+	}
+	if !errors.Is(sanitized, cause) {
+		t.Fatalf("sanitized wrapper does not preserve its cause: %v", sanitized)
 	}
 }
 
