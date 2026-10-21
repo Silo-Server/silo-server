@@ -14,9 +14,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-function setup() {
+function setup({
+  paused = false,
+  playIntent,
+}: { paused?: boolean; playIntent?: () => boolean } = {}) {
   const video = document.createElement("video");
-  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  Object.defineProperty(video, "paused", { value: paused, configurable: true });
   const options = {
     videoRef: { current: video },
     enabled: true,
@@ -25,6 +28,7 @@ function setup() {
     planRevision: 1,
     mode: "always" as const,
     obscured: false,
+    playIntent,
     transportTrouble: vi.fn(() => false),
     onReplan: vi.fn(),
     onNotice: vi.fn(),
@@ -39,8 +43,10 @@ function setup() {
       video.dispatchEvent(new Event(name));
     });
   const advance = (ms: number) => act(() => vi.advanceTimersByTime(ms));
-  send("playing");
-  advance(20_000);
+  if (!paused) {
+    send("playing");
+    advance(20_000);
+  }
   return { ...hook, options, send, advance };
 }
 
@@ -197,31 +203,14 @@ it("does not count a wait that begins with media buffered until the buffer runs 
 });
 
 it("times a plan's slow start as a wait, from adoption", () => {
-  const video = document.createElement("video");
   // A new plan's element starts paused and plays once enough data arrives.
-  Object.defineProperty(video, "paused", { value: true, configurable: true });
-  const onReplan = vi.fn();
-  renderHook((props) => useAutoQualityDownshift(props), {
-    initialProps: {
-      videoRef: { current: video },
-      enabled: true,
-      sessionId: "title",
-      plan,
-      planRevision: 1,
-      mode: "always" as const,
-      obscured: false,
-      playIntent: () => true,
-      onReplan,
-      onNotice: vi.fn(),
-    },
-  });
+  const h = setup({ paused: true, playIntent: () => true });
+  const onReplan = h.options.onReplan;
   // The transport empties the element as it attaches; the start still counts.
-  act(() => {
-    video.dispatchEvent(new Event("emptied"));
-  });
-  act(() => vi.advanceTimersByTime(15_900));
+  h.send("emptied");
+  h.advance(15_900);
   expect(onReplan).not.toHaveBeenCalled();
-  act(() => vi.advanceTimersByTime(200));
+  h.advance(200);
   expect(onReplan).toHaveBeenCalledTimes(1);
   expect(onReplan.mock.calls[0]![0]).toMatchObject({
     bandwidth_estimate_kbps: 44100,
@@ -344,25 +333,9 @@ it("counts the wait after a seek made before a paused plan first played", () => 
 });
 
 it("does not time a start the player will not play", () => {
-  const video = document.createElement("video");
-  Object.defineProperty(video, "paused", { value: true, configurable: true });
-  const onReplan = vi.fn();
-  renderHook((props) => useAutoQualityDownshift(props), {
-    initialProps: {
-      videoRef: { current: video },
-      enabled: true,
-      sessionId: "title",
-      plan,
-      planRevision: 1,
-      mode: "always" as const,
-      obscured: false,
-      playIntent: () => false,
-      onReplan,
-      onNotice: vi.fn(),
-    },
-  });
-  act(() => vi.advanceTimersByTime(30_000));
-  expect(onReplan).not.toHaveBeenCalled();
+  const h = setup({ paused: true, playIntent: () => false });
+  h.advance(30_000);
+  expect(h.options.onReplan).not.toHaveBeenCalled();
 });
 
 it("reports the playing plan when the page closes", () => {
