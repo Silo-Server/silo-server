@@ -124,9 +124,6 @@ func (w *FanoutWorker) Run(ctx context.Context) {
 		case <-ticker.C:
 		case <-w.nudge:
 		}
-		if !w.settings.FanoutEnabled(ctx) {
-			continue
-		}
 		for {
 			processed, err := w.processBatch(ctx)
 			if err != nil {
@@ -177,10 +174,9 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	}
 
 	// Suppress events that aged past the staleness horizon before fanout
-	// could run (fanout disabled for a stretch, extended downtime): users
-	// should not receive a backlog of long-stale "new episode" notifications
-	// when the worker comes back.
-	staleCutoff := time.Now().Add(-w.settings.MaxEventAge(ctx))
+	// could run (extended downtime): users should not receive a backlog of
+	// long-stale "new episode" notifications when the worker comes back.
+	staleCutoff := time.Now().Add(-maxReleaseEventAge)
 	fresh := make([]ReleaseEvent, 0, len(events))
 	stale := make([]ReleaseEvent, 0)
 	for _, event := range events {

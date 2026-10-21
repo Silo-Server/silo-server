@@ -26,7 +26,7 @@ whose metadata lands a few days after the file.
 
 The detector also stores that decision on the availability row: an episode's
 `episode_availability.released_at` is set when it was recorded as a release
-(seeded library, inside the window), even while release events are turned off,
+(seeded library, inside the window),
 and stays empty for back catalog and late matches. A profile that turns on
 `ui.next_up_new_releases_first` (off by default) gets Next Up ranked by the
 later of when it finished a series' previous episode and the `released_at` of
@@ -44,9 +44,9 @@ Event kinds:
 
 Events can be suppressed instead of fanned out, with the reason recorded on
 the row: `stale` when the event aged past the fanout staleness horizon
-(extended downtime, fanout disabled for a stretch) — delivering it long after
-the fact would be noise. Older rows may carry `series_burst` from the removed
-per-series burst cap.
+(72 hours; extended downtime) — delivering it long after the fact would be
+noise. Older rows may carry `series_burst` from the removed per-series burst
+cap.
 
 Fanout claims events as soon as they are recorded and runs each series'
 events in ascending episode-key order, so the notified cursor never skips a
@@ -191,6 +191,10 @@ out the per-episode checks (Next Up's expected episode and the
 already-notified cursor), which depend on the episode that arrives.
 
 ## Release-event retention
+
+Retention runs daily with fixed windows: read deliveries are kept 90 days,
+unread ones 180 days, processed release events 30 days, and unprocessed
+events past the 72-hour staleness horizon are deleted.
 
 Release events and inbox deliveries have independent lifetimes. Pruning an old
 release event clears `notification_deliveries.release_event_id` through its
