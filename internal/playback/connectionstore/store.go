@@ -201,24 +201,6 @@ func (s *Store) ReportProbe(ctx context.Context, user int, device, key string, r
 	return err
 }
 
-// Probe returns the latest speed test a device reported on a connection.
-func (s *Store) Probe(ctx context.Context, user int, device, key string) (*Probe, error) {
-	if s == nil || device == "" || key == "" {
-		return nil, nil
-	}
-	var p Probe
-	err := s.Pool.QueryRow(ctx, `
-		SELECT probe_kbps, probe_lower_bound, measured_at, probe_transport
-		FROM playback_connections
-		WHERE user_id = $1 AND device_id = $2 AND connection_key = $3
-		  AND measured_at IS NOT NULL AND updated_at > now() - $4::interval`,
-		user, device, key, Retention).Scan(&p.Kbps, &p.LowerBound, &p.MeasuredAt, &p.Transport)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	return &p, err
-}
-
 // ReportSample keeps the best playback throughput on a connection: kbps
 // replaces the kept sample when it is at least as high, or when the kept one
 // is older than lifetime, the reading lifetime.
@@ -238,24 +220,6 @@ func (s *Store) ReportSample(ctx context.Context, user int, device, key string, 
 	return err
 }
 
-// Sample returns the kept playback throughput for a device on a connection.
-func (s *Store) Sample(ctx context.Context, user int, device, key string) (*Sample, error) {
-	if s == nil || device == "" || key == "" {
-		return nil, nil
-	}
-	var sample Sample
-	err := s.Pool.QueryRow(ctx, `
-		SELECT sample_kbps, sample_at
-		FROM playback_connections
-		WHERE user_id = $1 AND device_id = $2 AND connection_key = $3
-		  AND sample_at IS NOT NULL AND updated_at > now() - $4::interval`,
-		user, device, key, Retention).Scan(&sample.Kbps, &sample.MeasuredAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	return &sample, err
-}
-
 // AdminConnection is one connection a device used, as the admin device page
 // shows it. ID is the opaque connection key the admin reset addresses.
 type AdminConnection struct {
@@ -269,6 +233,24 @@ type AdminConnection struct {
 
 // List returns a device's retained connections, most recently updated first.
 func (s *Store) List(ctx context.Context, user int, device string) ([]AdminConnection, error) {
+	return s.list(ctx, user, device, "")
+}
+
+// Connection returns a device's retained row for one connection, or nil: its
+// readings whatever their age, and its learned limit while unexpired.
+func (s *Store) Connection(ctx context.Context, user int, device, key string) (*AdminConnection, error) {
+	if s == nil || device == "" || key == "" {
+		return nil, nil
+	}
+	rows, err := s.list(ctx, user, device, key)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return &rows[0], nil
+}
+
+// list reads a device's retained rows, only key's row when key is set.
+func (s *Store) list(ctx context.Context, user int, device, key string) ([]AdminConnection, error) {
 	result := []AdminConnection{}
 	if s == nil {
 		return result, nil
@@ -281,8 +263,9 @@ func (s *Store) List(ctx context.Context, user int, device string) ([]AdminConne
 		       plan_summary
 		FROM playback_connections
 		WHERE user_id = $1 AND device_id = $2 AND updated_at > now() - $4::interval
+		  AND ($5::text = '' OR connection_key = $5)
 		ORDER BY updated_at DESC`,
-		user, device, TTL, Retention)
+		user, device, TTL, Retention, key)
 	if err != nil {
 		return nil, err
 	}

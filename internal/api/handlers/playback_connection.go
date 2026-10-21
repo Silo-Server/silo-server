@@ -31,17 +31,11 @@ func (h *PlaybackHandler) PlaybackConnection(ctx context.Context, device string,
 	if reset {
 		return state, h.Connections.Clear(ctx, apimw.GetUserID(ctx), device, key)
 	}
-	limit, err := h.Connections.Get(ctx, apimw.GetUserID(ctx), device, key)
-	state.LearnedLimit = limit
-	if err != nil {
+	c, err := h.Connections.Connection(ctx, apimw.GetUserID(ctx), device, key)
+	if err != nil || c == nil {
 		return state, err
 	}
-	if state.Probe, err = h.Connections.Probe(ctx, apimw.GetUserID(ctx), device, key); err != nil {
-		return state, err
-	}
-	if state.PlaybackSample, err = h.Connections.Sample(ctx, apimw.GetUserID(ctx), device, key); err != nil {
-		return state, err
-	}
+	state.Probe, state.PlaybackSample, state.LearnedLimit = c.Probe, c.PlaybackSample, c.LearnedLimit
 	// Both readings are returned for display whatever their age; only those
 	// within the reading lifetime count toward the budget.
 	maxAge := h.playbackConfig().BandwidthProbeMaxAge()
@@ -52,7 +46,7 @@ func (h *PlaybackHandler) PlaybackConnection(ctx context.Context, device string,
 	if sample != nil && time.Since(sample.MeasuredAt) > maxAge {
 		sample = nil
 	}
-	state.AutoBudgetKbps = connectionstore.Budget(probe, sample, limit, requestBitrateCapV3(ctx))
+	state.AutoBudgetKbps = connectionstore.Budget(probe, sample, state.LearnedLimit, requestBitrateCapV3(ctx))
 	return state, nil
 }
 

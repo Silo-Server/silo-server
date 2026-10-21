@@ -198,8 +198,11 @@ func TestReadingsDB(t *testing.T) {
 	if err := s.ReportProbe(ctx, user, "device", "local", ProbeResult{Kbps: 115000, Bytes: 7187500, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {
 		t.Fatal(err)
 	}
-	if probe, err := s.Probe(ctx, user, "device", "local"); err != nil || probe == nil || probe.Kbps != 115000 || !probe.LowerBound {
-		t.Fatalf("lower-bound probe read back as %+v (%v)", probe, err)
+	if c, err := s.Connection(ctx, user, "device", "local"); err != nil || c == nil || c.Probe == nil || c.Probe.Kbps != 115000 || !c.Probe.LowerBound {
+		t.Fatalf("lower-bound probe read back as %+v (%v)", c, err)
+	}
+	if c, err := s.Connection(ctx, user, "device", "remote:other"); err != nil || c != nil {
+		t.Fatalf("another connection's row read back as %+v (%v)", c, err)
 	}
 	for _, step := range []struct {
 		report, want int
@@ -218,8 +221,8 @@ func TestReadingsDB(t *testing.T) {
 		if err := s.ReportSample(ctx, user, "device", "local", step.report, lifetime); err != nil {
 			t.Fatal(err)
 		}
-		if sample, err := s.Sample(ctx, user, "device", "local"); err != nil || sample == nil || sample.Kbps != step.want {
-			t.Fatalf("after a %d sample (kept one aged %q): %+v (%v), want %d", step.report, step.age, sample, err, step.want)
+		if c, err := s.Connection(ctx, user, "device", "local"); err != nil || c == nil || c.PlaybackSample == nil || c.PlaybackSample.Kbps != step.want {
+			t.Fatalf("after a %d sample (kept one aged %q): %+v (%v), want %d", step.report, step.age, c, err, step.want)
 		}
 	}
 	rows, err := s.List(ctx, user, "device")
