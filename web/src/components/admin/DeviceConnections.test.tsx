@@ -1,9 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { AdminDeviceDetail } from "@/api/types";
 import { DeviceConnections } from "./DeviceConnections";
 
-vi.mock("@/api/v2/request", () => ({ v2: vi.fn() }));
+const resetLimit = vi.hoisted(() => ({ isPending: false, mutate: vi.fn() }));
+vi.mock("@/hooks/queries/admin/users", () => ({
+  useResetAdminDeviceLearnedLimit: () => resetLimit,
+}));
 
 it("marks a lower-bound test and shows the best playback throughput", () => {
   const measured = new Date().toISOString();
@@ -19,7 +22,7 @@ it("marks a lower-bound test and shows the best playback throughput", () => {
       },
     ],
   } as unknown as AdminDeviceDetail;
-  render(<DeviceConnections device={device} refresh={() => undefined} />);
+  render(<DeviceConnections device={device} />);
   expect(screen.getByText(/^Faster than 115 Mbps on Ethernet/)).toBeInTheDocument();
   // Rounded down, as every client shows a rate.
   expect(screen.getByText(/^Faster than 51 Mbps · seen during playback/)).toBeInTheDocument();
@@ -27,6 +30,8 @@ it("marks a lower-bound test and shows the best playback throughput", () => {
 
 it("shows a learned limit rounded down", () => {
   const device = {
+    user_id: 7,
+    device_id: "tv-1",
     connections: [
       {
         id: "remote:abc",
@@ -42,6 +47,12 @@ it("shows a learned limit rounded down", () => {
       },
     ],
   } as unknown as AdminDeviceDetail;
-  render(<DeviceConnections device={device} refresh={() => undefined} />);
+  render(<DeviceConnections device={device} />);
   expect(screen.getByText(/^Limited to 44 Mbps after buffering/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Clear limit" }));
+  expect(resetLimit.mutate).toHaveBeenCalledWith({
+    userId: 7,
+    deviceId: "tv-1",
+    connectionId: "remote:abc",
+  });
 });

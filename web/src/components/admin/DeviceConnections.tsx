@@ -1,11 +1,9 @@
-import { useState } from "react";
-import { v2 } from "@/api/v2/request";
 import type { AdminDeviceDetail } from "@/api/types";
 import { formatRelative } from "@/components/admin/deviceOverrides";
 import { Button } from "@/components/ui/button";
 import { formatConnectionRateKbps } from "@/lib/bitrateOptions";
 import { formatDate } from "@/lib/datetime";
-import { toast } from "sonner";
+import { useResetAdminDeviceLearnedLimit } from "@/hooks/queries/admin/users";
 
 type DeviceConnection = NonNullable<AdminDeviceDetail["connections"]>[number];
 
@@ -51,14 +49,8 @@ function planSummaryText(summary: NonNullable<DeviceConnection["plan_summary"]>)
  * Each connection this device played on: its latest speed test, the limit
  * the server learned after buffering, and how the latest plan played.
  */
-export function DeviceConnections({
-  device,
-  refresh,
-}: {
-  device: AdminDeviceDetail;
-  refresh: () => void;
-}) {
-  const [resetting, setResetting] = useState<string>();
+export function DeviceConnections({ device }: { device: AdminDeviceDetail }) {
+  const resetLimit = useResetAdminDeviceLearnedLimit();
   if (!device.connections?.length) return null;
   return (
     <section
@@ -99,23 +91,14 @@ export function DeviceConnections({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={!!resetting}
-                onClick={() => {
-                  setResetting(connection.id);
-                  void v2(
-                    "DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit",
-                    {
-                      path: {
-                        user_id: String(device.user_id),
-                        device_id: device.device_id,
-                        connection_id: connection.id,
-                      },
-                    },
-                  )
-                    .then(refresh)
-                    .catch(() => toast.error("Failed to clear learned limit"))
-                    .finally(() => setResetting(undefined));
-                }}
+                disabled={resetLimit.isPending}
+                onClick={() =>
+                  resetLimit.mutate({
+                    userId: device.user_id,
+                    deviceId: device.device_id,
+                    connectionId: connection.id,
+                  })
+                }
               >
                 Clear limit
               </Button>

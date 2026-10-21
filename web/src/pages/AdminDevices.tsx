@@ -1378,7 +1378,7 @@ function DeviceDetailPanel({
   // canonical equivalent. The overrides themselves come from the canonical
   // values API, because the detail endpoint's `settings` array still reports
   // the legacy device-settings table that nothing writes to any more.
-  const { data, isLoading, refetch } = useAdminDeviceDetail(userId, deviceId);
+  const { data, isLoading } = useAdminDeviceDetail(userId, deviceId);
   const {
     data: overrides,
     isLoading: overridesLoading,
@@ -1690,12 +1690,7 @@ function DeviceDetailPanel({
         </div>
       </header>
 
-      <DeviceConnections
-        device={data}
-        refresh={() => {
-          void refetch();
-        }}
-      />
+      <DeviceConnections device={data} />
 
       {/* instrument readout */}
       <div className="border-border/60 grid grid-cols-2 gap-x-6 gap-y-3 border-b px-5 py-4 sm:grid-cols-4 sm:px-6">
