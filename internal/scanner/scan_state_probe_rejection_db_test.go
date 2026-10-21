@@ -124,8 +124,8 @@ func TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB(t *testing.T) {
 // library that ffprobe reads as audio only, such as a soundtrack saved as
 // .mkv. It is not cataloged, and a row written while the file still held video
 // leaves through the missing-file path, so its title is hidden at once and
-// deleted after the removal grace, and a later scan whose probe cannot run
-// does not bring it back. Only a container whose header lists every stream is
+// deleted after the removal grace, and a later scan whose probe fails or
+// rejects the file does not bring it back. Only a container whose header lists every stream is
 // judged: an MPEG program stream can hold video past the part ffprobe reads.
 func TestScanSkipsVideoLibraryFilesWithoutVideoDB(t *testing.T) {
 	pool := newScannerTestPool(t)
@@ -192,12 +192,13 @@ func TestScanSkipsVideoLibraryFilesWithoutVideoDB(t *testing.T) {
 				t.Fatalf("audio-only .mpg: GetByPath = %v, %v; want a present row", stored, err)
 			}
 
-			missingFFprobe := filepath.Join(t.TempDir(), "ffprobe")
-			if err := tc.scan(ctx, NewScanner(repo, missingFFprobe, nil, 1, false, time.Hour), folder, []string{legacyPath}); err != nil {
-				t.Fatalf("scan without a working ffprobe: %v", err)
-			}
-			if stored, err := repo.GetByPath(ctx, legacyPath); err != nil || stored.MissingSince == nil || stored.CodecAudio != "aac" {
-				t.Fatalf("legacy audio-only row after a failed probe: %s (err %v), want still missing with its facts", rowState(stored), err)
+			for _, failing := range []string{filepath.Join(t.TempDir(), "ffprobe"), writeRejectingFFprobe(t)} {
+				if err := tc.scan(ctx, NewScanner(repo, failing, nil, 1, false, time.Hour), folder, []string{legacyPath}); err != nil {
+					t.Fatalf("scan with a failing ffprobe: %v", err)
+				}
+				if stored, err := repo.GetByPath(ctx, legacyPath); err != nil || stored.MissingSince == nil || stored.CodecAudio != "aac" {
+					t.Fatalf("legacy audio-only row after a failed probe: %s (err %v), want still missing with its facts", rowState(stored), err)
+				}
 			}
 		})
 	}
