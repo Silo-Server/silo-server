@@ -8,6 +8,7 @@ import listAuthProvidersOk from "../../../contracts/api/v2/fixtures/list_auth_pr
 import { storage } from "@/utils/storage";
 import { queryClient } from "@/lib/query-client";
 import { wasSignedOut } from "@/lib/externalSignIn";
+import { keepOwnResult, keptReadingCurrent } from "@/player/bandwidth-readings";
 import { AuthProvider, useAuth } from "./useAuth";
 
 const apiMock = vi.hoisted(() => vi.fn());
@@ -445,14 +446,14 @@ describe("AuthProvider", () => {
     await act(async () => {
       screen.getByRole("button", { name: "Sign in as laura" }).click();
     });
-    storage.set(storage.KEYS.BANDWIDTH_ESTIMATE, "laura's reading");
+    keepOwnResult(48_000, 86_400_000);
     await act(async () => {
       screen.getByRole("button", { name: "Sign in as laura" }).click();
     });
     expect(screen.getByTestId("signed-in-user")).toHaveTextContent("laura");
     // Signing in from signed out, or again as the same account, keeps the cache.
     expect(shownAtClear).toEqual([]);
-    expect(storage.get(storage.KEYS.BANDWIDTH_ESTIMATE)).toBe("laura's reading");
+    expect(keptReadingCurrent()).toBe(true);
 
     await act(async () => {
       screen.getByRole("button", { name: "Sign in as sam" }).click();
@@ -460,8 +461,10 @@ describe("AuthProvider", () => {
     expect(screen.getByTestId("signed-in-user")).toHaveTextContent("sam");
     // Cleared while laura was still rendered: none of sam's reads had started.
     expect(shownAtClear).toEqual(["laura"]);
-    // The connection speed kept for laura's account is not sam's.
+    // The connection speed kept for laura's account is not sam's, in storage
+    // or in the page's own copy.
     expect(storage.get(storage.KEYS.BANDWIDTH_ESTIMATE)).toBeNull();
+    expect(keptReadingCurrent()).toBe(false);
   });
 
   it("signs out of the provider too, except when switching account, and marks the tab", async () => {
