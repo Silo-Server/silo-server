@@ -77,7 +77,10 @@ func ignoredDir(name string) bool {
 //
 // Pattern rules inside .ignore and .siloignore are not applied: watching a
 // pattern-ignored folder only costs a watch; a change there resolves to a
-// scan the scanner then filters.
+// scan the scanner then filters. An ignore file that cannot be read does not
+// skip dir either: the watch stays, and the scan records a walk failure there
+// instead of importing what the file excludes.
 func dirSkipped(dir string, entries []fs.DirEntry) bool {
-	return scanner.DirSkipped(dir, entries)
+	skipped, err := scanner.DirSkipped(dir, entries)
+	return err == nil && skipped
 }

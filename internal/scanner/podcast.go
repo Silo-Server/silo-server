@@ -90,7 +90,10 @@ func listPodcastShowAudioFiles(folderPath string, inheritedRules []ignoreRules) 
 	// basePath is folderPath itself: show-local patterns match episode
 	// filenames relative to the show folder, and inherited root rules match
 	// nested paths such as Show/file.mp3.
-	rules, skip := dirIgnoreRules(inheritedRules, folderPath, folderPath, entries)
+	rules, skip, err := dirIgnoreRules(inheritedRules, folderPath, folderPath, entries)
+	if err != nil {
+		return nil, fmt.Errorf("podcast folder %s: %w", folderPath, err)
+	}
 	if skip {
 		// A skipped show folder (and its contents) is ignored; treat it as an
 		// empty show so the caller skips instead of failing.

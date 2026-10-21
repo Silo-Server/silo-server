@@ -263,7 +263,11 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 	childRules := ignoreRulesStack
 	if honorIgnores {
 		var skip bool
-		childRules, skip = dirIgnoreRules(ignoreRulesStack, path, path, entries)
+		childRules, skip, err = dirIgnoreRules(ignoreRulesStack, path, path, entries)
+		if err != nil {
+			recordFailure(err)
+			return nil
+		}
 		if skip {
 			return nil
 		}
