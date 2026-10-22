@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Check, Settings } from "lucide-react";
 import { plainResolutionLabel, resolveActiveQualityOptionId } from "../playback-info";
 import type { QualityOption } from "../types";
@@ -20,7 +20,10 @@ interface QualityMenuProps {
   activeQuality?: string;
   /** The trigger's label while Auto is lit, naming what Auto delivers. */
   autoLabel?: string;
-  /** Why the plan delivers its quality, shown under the checked row. */
+  /**
+   * Why the plan delivers its quality: under the checked row, or above the
+   * rows when none is checked.
+   */
   reasonLine?: string | null;
   isTranscoding: boolean;
   error: string | null;
@@ -79,6 +82,8 @@ export function QualityMenu({
   }, [open]);
 
   const menuItemsRef = useRef<(HTMLButtonElement | null)[]>([]);
+  const qualityHeadingId = useId();
+  const reasonId = useId();
 
   const handleMenuKeyDown = useCallback((e: React.KeyboardEvent) => {
     const items = menuItemsRef.current.filter(Boolean) as HTMLButtonElement[];
@@ -122,6 +127,9 @@ export function QualityMenu({
 
   const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, activeQuality);
   const activeOption = options.find((option) => option.id === resolvedActiveId);
+  // A switch in flight still has the old plan's reason; the trigger shows
+  // "…" until the new plan arrives, and the line waits for it too.
+  const shownReason = isTranscoding ? null : reasonLine;
   let sourceLabel: string | null = null;
   if (showQuality) {
     // The Auto row keeps its own wording; the trigger names what Auto plays.
@@ -236,43 +244,69 @@ export function QualityMenu({
           {showQuality && (
             <>
               {showVersions && <div className="my-1 border-t border-white/10" />}
-              <div className="px-3 py-1 text-xs tracking-wider text-white/40 uppercase">
+              <div
+                id={qualityHeadingId}
+                className="px-3 py-1 text-xs tracking-wider text-white/40 uppercase"
+              >
                 Quality
               </div>
-              {options.map((opt) => {
-                const idx = menuItemIndex++;
-                return (
-                  <button
-                    key={opt.id}
-                    ref={(el) => {
-                      menuItemsRef.current[idx] = el;
-                    }}
-                    role="menuitem"
-                    type="button"
-                    className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
-                      opt.id === resolvedActiveId ? "text-white" : "text-white/70"
-                    }`}
-                    aria-current={opt.id === resolvedActiveId ? "true" : undefined}
-                    onClick={() => handleSelect(opt.id)}
-                  >
-                    <span className="flex min-w-0 flex-col">
-                      <span>{opt.label}</span>
-                      {opt.id === resolvedActiveId && reasonLine && (
-                        <span className="max-w-56 text-xs text-white/50">{reasonLine}</span>
-                      )}
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <span className="text-xs text-white/40">{opt.sublabel}</span>
-                      {opt.id === resolvedActiveId && (
-                        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-white text-black">
-                          <Check className="size-3" strokeWidth={3} aria-hidden="true" />
-                          <span className="sr-only">Selected</span>
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
+              <div
+                role="group"
+                aria-labelledby={qualityHeadingId}
+                aria-describedby={shownReason && !activeOption ? reasonId : undefined}
+              >
+                {/* With no checked row, the reason explains the menu as a whole. */}
+                {shownReason && !activeOption && (
+                  <p id={reasonId} className="max-w-64 px-3 pb-1 text-xs text-white/50">
+                    {shownReason}
+                  </p>
+                )}
+                {options.map((opt) => {
+                  const idx = menuItemIndex++;
+                  const checked = opt.id === resolvedActiveId;
+                  // The reason is the checked row's description, not part of
+                  // its name.
+                  const describedReason = checked ? shownReason : null;
+                  return (
+                    <button
+                      key={opt.id}
+                      ref={(el) => {
+                        menuItemsRef.current[idx] = el;
+                      }}
+                      role="menuitem"
+                      type="button"
+                      className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                        checked ? "text-white" : "text-white/70"
+                      }`}
+                      aria-current={checked ? "true" : undefined}
+                      aria-describedby={describedReason ? reasonId : undefined}
+                      onClick={() => handleSelect(opt.id)}
+                    >
+                      <span className="flex min-w-0 flex-col">
+                        <span>{opt.label}</span>
+                        {describedReason && (
+                          <span
+                            id={reasonId}
+                            aria-hidden="true"
+                            className="max-w-56 text-xs text-white/50"
+                          >
+                            {describedReason}
+                          </span>
+                        )}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className="text-xs text-white/40">{opt.sublabel}</span>
+                        {opt.id === resolvedActiveId && (
+                          <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-white text-black">
+                            <Check className="size-3" strokeWidth={3} aria-hidden="true" />
+                            <span className="sr-only">Selected</span>
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </>
           )}
         </PlayerMenuSurface>
