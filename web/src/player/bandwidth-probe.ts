@@ -173,7 +173,12 @@ async function collectProbe(
     throw new ProbeNotSaved();
   }
   // The server kept the result; if reading it back fails, the next look does.
-  await readServerReading(schedule).catch(() => undefined);
+  // Test speed's result replaced the server's playback sample, so until then
+  // starts send nothing rather than an older, higher kept sample; the server
+  // plans with its own reading.
+  await readServerReading(schedule).catch(() => {
+    if (mode === "accurate") forgetServerReadings();
+  });
   return result;
 }
 

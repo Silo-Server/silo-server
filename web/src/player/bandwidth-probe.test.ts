@@ -133,9 +133,13 @@ describe("Test speed", () => {
     }
   });
 
-  // The server kept the result, so it is the viewer's even if reading it back fails.
-  it("reports a saved result whose read-back fails", async () => {
-    server({});
+  // The server kept the result, so it is the viewer's even if reading it back
+  // fails. The result replaced the server's playback sample, so the next start
+  // must not send the higher sample kept before the test.
+  it("reports a saved result whose read-back fails, and drops the kept sample", async () => {
+    server({ reading: { sample: { kbps: 900_000, ageMs: 0 } } });
+    scheduleBandwidthProbe();
+    await vi.waitFor(() => expect(readMeasuredBandwidthKbps()).toBe(900_000));
     const answer = serverAnswer();
     vi.mocked(v2).mockImplementation((async (operation: string, init?: unknown) => {
       if (operation === "GET /api/v2/playback/connection") throw new Error("offline");
@@ -149,6 +153,8 @@ describe("Test speed", () => {
     } finally {
       clock.mockRestore();
     }
+    expect(readMeasuredBandwidthKbps()).toBeUndefined();
+    stopBandwidthProbes();
   });
 
   it("rejects a test that ran and measured nothing", async () => {
