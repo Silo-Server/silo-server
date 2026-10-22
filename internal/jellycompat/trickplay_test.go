@@ -268,6 +268,11 @@ func TestTrickplayPlaylistGrantsSheetsByPlaySession(t *testing.T) {
 	if rec := get(base+"0.jpg?PlaySessionId=play-1", ""); rec.Code != http.StatusOK || len(sheets.opened) != 1 || sheets.opened[0] != 42 {
 		t.Fatalf("sheet by grant without source: %d opened %v", rec.Code, sheets.opened)
 	}
+	// A token-authenticated request that names an older play follows it too.
+	sheets.opened = nil
+	if rec := get(base+"0.jpg?PlaySessionId=play-1", "trickplay-grant-token"); rec.Code != http.StatusOK || len(sheets.opened) != 1 || sheets.opened[0] != 42 {
+		t.Fatalf("token request naming a play: %d opened %v", rec.Code, sheets.opened)
+	}
 	// The grant decides, not a listing of the caller's plays: when that
 	// listing fails, a grant for the narrow version is not served the default.
 	deps.PlaybackStore = listFailingPlayStore{plays}
