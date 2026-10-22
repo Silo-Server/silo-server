@@ -3,9 +3,9 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { useNavigate } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken } from "@/api/client";
-import { json, problemResponse, renderRoutes } from "./authPage.test-support";
+import { json, problemResponse, renderBrowserRoutes, renderRoutes } from "./authPage.test-support";
 import InviteClaim from "./InviteClaim";
-import accepted from "../../../contracts/api/v2/fixtures/invitation_accepted.json";
+import accepted from "../../../contracts/api/v2/fixtures/invitation_link_accepted.json";
 const auth = vi.hoisted(() => ({ completeLogin: vi.fn() }));
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: null, loading: false, completeLogin: auth.completeLogin }),
@@ -25,7 +25,7 @@ const linkInvitation = { ...invitation, email: "", email_required: true, note: "
 const emailProblem = (type: string, status: number, errors?: unknown[]) =>
   problemResponse(status, type, { errors });
 function posts() {
-  return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+  return fetchMock.mock.calls.filter(([url]) => String(url).includes("/invitations/accept"));
 }
 function problem(status: number) {
   return new Response(
@@ -38,12 +38,13 @@ let lookup: () => Promise<Response>;
 const fetchMock = vi.fn<typeof fetch>();
 function Move() {
   const navigate = useNavigate();
-  return <button onClick={() => navigate("/invite/second-secret")}>Change invitation</button>;
+  return <button onClick={() => navigate("/invite#second-secret")}>Change invitation</button>;
 }
 function mount() {
   return renderRoutes(
-    "/invite/first-secret",
+    "/invite#first-secret",
     {
+      "/invite": <InviteClaim />,
       "/invite/:token": <InviteClaim />,
       "/household-setup": <p>Household setup</p>,
       "/login": <p>Ordinary login</p>,
@@ -67,10 +68,11 @@ beforeEach(() => {
   submit = async () => json(accepted, 201);
   lookup = async () => json(invitation);
   fetchMock.mockImplementation(async (url, options) => {
-    if (options?.method === "POST") return submit();
+    if (String(url).includes("/invitations/accept")) return submit();
+    if (String(url).includes("/invitations/lookup")) return lookup();
     if (String(url).endsWith("/capabilities"))
       return json({ revision: "1", state: "available", default_profile: true, profileless: true });
-    return lookup();
+    throw new Error(`unexpected request ${options?.method} ${String(url)}`);
   });
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -79,6 +81,7 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   setRefreshToken(null);
+  window.history.replaceState(null, "", "/");
 });
 it("installs the nested v2 session and continues household setup", async () => {
   mount();
@@ -86,13 +89,32 @@ it("installs the nested v2 session and continues household setup", async () => {
   expect(screen.getByLabelText("Email")).toBeDisabled();
   send();
   await screen.findByText("Household setup");
-  expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({ password: "password123" });
+  expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({
+    token: "first-secret",
+    password: "password123",
+  });
+  for (const [url] of fetchMock.mock.calls) expect(String(url)).not.toContain("first-secret");
   expect(auth.completeLogin).toHaveBeenCalledWith(
     expect.objectContaining({
       access_token: accepted.tokens.access_token,
       user: expect.objectContaining({ id: Number(accepted.tokens.user.id) }),
     }),
   );
+});
+it.each([
+  ["the fragment", "/invite#first-secret"],
+  ["the path of an older link", "/invite/first-secret"],
+])("takes the token from %s out of the address bar", async (_, entry) => {
+  renderBrowserRoutes(entry, { "/invite": <InviteClaim />, "/invite/:token": <InviteClaim /> });
+  await screen.findByLabelText("Email");
+  expect(window.location.pathname).toBe("/invite");
+  expect(window.location.hash).toBe("");
+  const lookups = fetchMock.mock.calls.filter(([url]) =>
+    String(url).includes("/invitations/lookup"),
+  );
+  expect(lookups.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+    { token: "first-secret" },
+  ]);
 });
 it("treats sign-in-required as committed, clears passwords, and offers ordinary login", async () => {
   submit = async () =>
@@ -103,7 +125,7 @@ it("treats sign-in-required as committed, clears passwords, and offers ordinary 
   await screen.findByText(/Your account was created/);
   expect(screen.queryByLabelText("Password", { exact: true })).toBeNull();
   expect(auth.completeLogin).not.toHaveBeenCalled();
-  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  expect(posts()).toHaveLength(1);
   fireEvent.click(screen.getAllByRole("link", { name: "Sign in" })[0]!);
   await screen.findByText("Ordinary login");
 });
@@ -114,7 +136,7 @@ it("does not refresh or replay a 401 accept and requires explicit reload before 
   send();
   await screen.findByText(/We could not confirm the result/);
   send();
-  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  expect(posts()).toHaveLength(1);
   expect(screen.getByLabelText("Password", { exact: true })).toHaveValue("password123");
   fireEvent.click(screen.getByRole("button", { name: "Reload invitation" }));
   await screen.findByLabelText("Email");
@@ -147,7 +169,7 @@ it("blocks unsupported per-invitation profile creation", async () => {
   mount();
   await fill();
   send();
-  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  expect(posts()).toHaveLength(0);
 });
 it.each(["account", "route"])(
   "rejects delayed installation after a %s change and blocks double submit",
@@ -162,9 +184,7 @@ it.each(["account", "route"])(
     const form = screen.getByRole("button", { name: "Create account" }).closest("form")!;
     fireEvent.submit(form);
     fireEvent.submit(form);
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1),
-    );
+    await waitFor(() => expect(posts()).toHaveLength(1));
     if (change === "account") {
       setAccessToken("other-account");
       setAccessToken(null);
@@ -190,7 +210,7 @@ it("rejects a submit when credentials arrived before auth context rerender", asy
   await fill();
   setAccessToken("new-account");
   send();
-  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  expect(posts()).toHaveLength(0);
   expect(auth.completeLogin).not.toHaveBeenCalled();
 });
 it("asks for an address on a link invitation and sends it with the password", async () => {
@@ -210,6 +230,7 @@ it("asks for an address on a link invitation and sends it with the password", as
   send();
   await screen.findByText("Household setup");
   expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({
+    token: "first-secret",
     email: "sam@example.test",
     password: "password123",
   });

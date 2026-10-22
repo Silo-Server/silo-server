@@ -582,8 +582,11 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   sets `Deprecation: @<unix-seconds>`, `Link: <link>; rel="deprecation"` (appended to any
   existing `Link`), and `Sunset: <IMF-fixdate>` only when a sunset is declared, in the API
   middleware chain ahead of the class gate, so a gate denial or validation problem carries them
-  as a 200 does. No v1 route and no v2 operation is deprecated yet; the only deprecated
-  operations are test probes, recorded in the `deprecated_ok` and `deprecated_problem` fixtures.
+  as a 200 does. No v1 route is deprecated. The deprecated v2 operations are the
+  invitation path forms `lookupInvitation` and `acceptInvitation`, which put the claim token
+  in the URL; they leave `/api/v2` before the lock once a shipped Android build uses
+  `lookupInvitationLink` and `acceptInvitationLink`. The test probes are recorded in the
+  `deprecated_ok` and `deprecated_problem` fixtures.
 - **Accepted library jobs.** Library refresh and deletion use the durable admin-job runner
   with canonical `/api/v2/library-jobs/{job_id}` monitors, safe named results/failures,
   conditional polling, and durable refresh cancellation. Worker progress and terminal writes

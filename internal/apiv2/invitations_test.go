@@ -29,6 +29,7 @@ type fakeInvitations struct {
 	acceptEmail                       string
 	emailDelivery                     bool
 	resendDelivery                    *invitations.Delivery
+	token                             string
 }
 
 func fixtureInvitations() *fakeInvitations {
@@ -39,6 +40,7 @@ func (f *fakeInvitations) EmailDeliveryAvailable(context.Context) bool {
 	return f.emailDelivery
 }
 func (f *fakeInvitations) Lookup(_ context.Context, token string) (*invitations.LookupResult, error) {
+	f.token = token
 	if token == "expired" || token == "revoked" || token == "consumed" {
 		return nil, invitations.ErrNotFound
 	}
@@ -47,6 +49,7 @@ func (f *fakeInvitations) Lookup(_ context.Context, token string) (*invitations.
 func (f *fakeInvitations) AcceptInvitation(_ context.Context, token, email, _, _, _ string) (handlers.InvitationAcceptanceView, error) {
 	f.writes++
 	f.acceptEmail = email
+	f.token = token
 	v := handlers.InvitationAcceptanceView{Username: f.row.Email, Tokens: &handlers.TokenPairView{AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresIn: 3600, User: handlers.UserView{ID: 3, Username: f.row.Email, Role: models.RoleUser}}}
 	if token == "sign-in-required" {
 		return v, invitations.ErrSessionStart
@@ -83,7 +86,7 @@ func (f *fakeInvitations) Send(_ context.Context, in invitations.SendInput) (*in
 	if emailed {
 		r.Delivery = models.InvitationDeliveryEmailSent
 	}
-	result := &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite/synthetic-token", EmailSent: emailed, Delivery: in.Delivery}
+	result := &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite#synthetic-token", EmailSent: emailed, Delivery: in.Delivery}
 	if in.Note == "smtp-failed" {
 		return result, errors.New("private SMTP credential")
 	}
@@ -97,7 +100,7 @@ func (f *fakeInvitations) Resend(_ context.Context, _, _ int64, delivery invitat
 	f.writes++
 	r := f.row
 	r.ID = 8
-	return &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite/replacement-token", Delivery: delivery}, f.errorSend
+	return &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite#replacement-token", Delivery: delivery}, f.errorSend
 }
 func (f *fakeInvitations) Revoke(context.Context, int64) error { f.writes++; return nil }
 func invitationTestHandler(f *fakeInvitations) http.Handler {
@@ -128,7 +131,7 @@ func TestInvitationValidationAndCapability(t *testing.T) {
 	f.profile = false
 	before := f.writes
 	caps := do(t, h, http.MethodGet, Prefix+"/invitations/capabilities", "", nil)
-	if caps.Code != 200 || !strings.Contains(caps.Body.String(), `"default_profile":false`) {
+	if caps.Code != 200 || !strings.Contains(caps.Body.String(), `"default_profile":false`) || !strings.Contains(caps.Body.String(), `"token_in_body":true`) {
 		t.Fatal(caps.Code, caps.Body.String())
 	}
 	requireProblem(t, do(t, h, http.MethodPost, path, `{"email":"a@example.invalid"}`, actingRequestAdmin), TypeCapabilityUnsupported)
@@ -136,21 +139,21 @@ func TestInvitationValidationAndCapability(t *testing.T) {
 	if f.writes != before {
 		t.Fatal("unsupported profile reached effects")
 	}
-	lookup := do(t, h, http.MethodGet, Prefix+"/invitations/pending", "", nil)
+	lookup := do(t, h, http.MethodPost, Prefix+"/invitations/lookup", `{"token":"pending"}`, nil)
 	if lookup.Code != 200 || !strings.Contains(lookup.Body.String(), `"acceptance_available":false`) {
 		t.Fatal(lookup.Code, lookup.Body.String())
 	}
 	f.errorAccept = auth.ErrTransactionalProfileUnavailable
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/pending/accept", `{"password":"password123"}`, nil), TypeCapabilityUnsupported)
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/accept", `{"token":"pending","password":"password123"}`, nil), TypeCapabilityUnsupported)
 }
 func TestInvitationLookupAndCursor(t *testing.T) {
 	f := fixtureInvitations()
 	h := invitationTestHandler(f)
 	for _, token := range []string{"expired", "revoked", "consumed"} {
-		requireProblem(t, do(t, h, http.MethodGet, Prefix+"/invitations/"+token, "", nil), TypeNotFound)
+		requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/lookup", `{"token":"`+token+`"}`, nil), TypeNotFound)
 	}
 	f.lookupErr = errors.New("private DB connection")
-	r := do(t, h, http.MethodGet, Prefix+"/invitations/pending", "", nil)
+	r := do(t, h, http.MethodPost, Prefix+"/invitations/lookup", `{"token":"pending"}`, nil)
 	requireProblem(t, r, TypeInternalError)
 	if strings.Contains(r.Body.String(), "private") {
 		t.Fatal(r.Body.String())
@@ -181,6 +184,42 @@ func TestInvitationLookupAndCursor(t *testing.T) {
 	}
 }
 
+// The claim token travels in the body. The path forms stay, deprecated, for
+// released Android builds and answer identically.
+func TestInvitationTokenTransport(t *testing.T) {
+	f := fixtureInvitations()
+	h := invitationTestHandler(f)
+	for _, c := range []struct {
+		method, path, body string
+		status             int
+		deprecated         bool
+	}{
+		{http.MethodPost, "/invitations/lookup", `{"token":"body-token"}`, http.StatusOK, false},
+		{http.MethodPost, "/invitations/accept", `{"token":"body-token","password":"password123"}`, http.StatusCreated, false},
+		{http.MethodGet, "/invitations/path-token", "", http.StatusOK, true},
+		{http.MethodPost, "/invitations/path-token/accept", `{"password":"password123"}`, http.StatusCreated, true},
+	} {
+		f.token = ""
+		r := do(t, h, c.method, Prefix+c.path, c.body, nil)
+		if r.Code != c.status {
+			t.Fatal(c.method, c.path, r.Code, r.Body.String())
+		}
+		want := "body-token"
+		if c.deprecated {
+			want = "path-token"
+		}
+		if f.token != want {
+			t.Fatalf("%s %s reached the service with token %q, want %q", c.method, c.path, f.token, want)
+		}
+		link := r.Header().Get(LinkHeader)
+		if got := r.Header().Get(DeprecationHeader) != "" && strings.Contains(link, `rel="deprecation"`); got != c.deprecated {
+			t.Fatalf("%s %s deprecated=%v (Deprecation %q, Link %q)", c.method, c.path, got, r.Header().Get(DeprecationHeader), link)
+		}
+	}
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/lookup", `{}`, nil), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/accept", `{"password":"password123"}`, nil), TypeValidationFailed)
+}
+
 func TestInvitationActualRateGate(t *testing.T) {
 	f := fixtureInvitations()
 	deps := requestDeps(fixtureRequests())
@@ -198,7 +237,7 @@ func TestInvitationActualRateGate(t *testing.T) {
 	h := NewHandler(deps)
 	limited := false
 	for range 5 {
-		req := httptest.NewRequest(http.MethodPost, Prefix+"/invitations/pending/accept", strings.NewReader(`{"password":"password123"}`))
+		req := httptest.NewRequest(http.MethodPost, Prefix+"/invitations/accept", strings.NewReader(`{"token":"pending","password":"password123"}`))
 		req.Header.Set("Content-Type", "application/json")
 		req = req.WithContext(clientip.SetContext(req.Context(), "203.0.113.9"))
 		rec := httptest.NewRecorder()
@@ -224,12 +263,12 @@ func TestInvitationUnconfiguredAndPasswordBounds(t *testing.T) {
 	if caps.Code != 200 || !strings.Contains(caps.Body.String(), `"state":"not_configured"`) || !strings.Contains(caps.Body.String(), `"profileless":false`) {
 		t.Fatal(caps.Code, caps.Body.String())
 	}
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/invitations/token", "", nil), TypeCapabilityNotConfigured)
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/lookup", `{"token":"token"}`, nil), TypeCapabilityNotConfigured)
 	f := fixtureInvitations()
 	h = invitationTestHandler(f)
 	for _, password := range []string{"short", strings.Repeat("界", 25)} {
-		body, _ := json.Marshal(map[string]string{"password": password})
-		requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/token/accept", string(body), nil), TypeValidationFailed)
+		body, _ := json.Marshal(map[string]string{"token": "pending", "password": password})
+		requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/accept", string(body), nil), TypeValidationFailed)
 	}
 	if f.writes != 0 {
 		t.Fatal("invalid password reached acceptance")
@@ -268,7 +307,7 @@ func TestLinkInvitationDelivery(t *testing.T) {
 	}
 
 	f.row.Email, f.row.Note, f.row.Delivery = "", "For Sam", models.InvitationDeliveryLink
-	lookup := do(t, h, http.MethodGet, Prefix+"/invitations/pending", "", nil)
+	lookup := do(t, h, http.MethodPost, Prefix+"/invitations/lookup", `{"token":"pending"}`, nil)
 	if lookup.Code != 200 || !strings.Contains(lookup.Body.String(), `"email_required":true`) || !strings.Contains(lookup.Body.String(), `"note":"For Sam"`) {
 		t.Fatal(lookup.Code, lookup.Body.String())
 	}
@@ -277,14 +316,14 @@ func TestLinkInvitationDelivery(t *testing.T) {
 		t.Fatal(listed.Code, listed.Body.String())
 	}
 
-	accepted := do(t, h, http.MethodPost, Prefix+"/invitations/pending/accept", `{"email":"sam@example.invalid","password":"password123"}`, nil)
+	accepted := do(t, h, http.MethodPost, Prefix+"/invitations/accept", `{"token":"pending","email":"sam@example.invalid","password":"password123"}`, nil)
 	if accepted.Code != 201 || f.acceptEmail != "sam@example.invalid" {
 		t.Fatal(accepted.Code, accepted.Body.String(), f.acceptEmail)
 	}
 	f.errorAccept = invitations.ErrEmailTaken
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/pending/accept", `{"email":"taken@example.invalid","password":"password123"}`, nil), TypeConflict)
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/accept", `{"token":"pending","email":"taken@example.invalid","password":"password123"}`, nil), TypeConflict)
 	f.errorAccept = invitations.ErrEmailRequired
-	missing := do(t, h, http.MethodPost, Prefix+"/invitations/pending/accept", `{"password":"password123"}`, nil)
+	missing := do(t, h, http.MethodPost, Prefix+"/invitations/accept", `{"token":"pending","password":"password123"}`, nil)
 	requireProblem(t, missing, TypeValidationFailed)
 	if !strings.Contains(missing.Body.String(), `"location":"body.email"`) {
 		t.Fatal(missing.Body.String())
