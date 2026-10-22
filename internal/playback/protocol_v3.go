@@ -1011,6 +1011,8 @@ const (
 	QualityRung720pHighV3    = "720p-high"
 	QualityRung720pMediumV3  = "720p-medium"
 	QualityRung720pLowV3     = "720p-low"
+	QualityRung480pLowV3     = "480p-low"
+	QualityRung360pV3        = "360p"
 )
 
 // AvailableQualityV3 is one server-ladder rung valid for this source and

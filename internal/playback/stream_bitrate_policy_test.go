@@ -102,3 +102,36 @@ func TestServerBitrateCapAudioOnlyUnknownTotalConvertsAAC(t *testing.T) {
 		t.Fatalf("AAC target %d must fit under 256 kbps cap", result.TargetAudioBitrateKbps)
 	}
 }
+
+// A client lowering Auto because of buffering sends 70% of the delivered
+// bitrate, and only while the menu has an entry below what plays. Every plan
+// along the way fits video and audio within the estimate's budget, and the
+// steps reach a stream a 500 kbps link carries.
+func TestAutoLowersUntilTheStreamFitsA500KbpsLink(t *testing.T) {
+	input := bitratePolicyFixtureV3()
+	estimate := 8_000
+	for range 8 {
+		input.Request.BandwidthEstimateKbps = &estimate
+		result := PlanPlaybackV3(input)
+		if result.Plan == nil || result.PlayMethod != PlayTranscode {
+			t.Fatalf("estimate %d: %s", estimate, ExplainPlannerResultV3(result))
+		}
+		total := result.TargetBitrateKbps + result.TargetAudioBitrateKbps
+		if total > StreamBudgetKbpsV3(estimate) {
+			t.Fatalf("estimate %d: %d + %d kbps exceeds its budget", estimate, result.TargetBitrateKbps, result.TargetAudioBitrateKbps)
+		}
+		if total <= 400 {
+			return
+		}
+		delivered := *result.Plan.EffectiveRecipe.BitrateKbps
+		lower := false
+		for _, quality := range result.Plan.AvailableQualities {
+			lower = lower || quality.BitrateKbps < delivered
+		}
+		if !lower {
+			t.Fatalf("lowering stops at %d kbps: no menu entry below it", delivered)
+		}
+		estimate = delivered * 7 / 10
+	}
+	t.Fatalf("still above 400 kbps at estimate %d", estimate)
+}

@@ -2741,7 +2741,7 @@ func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
 		QualityRung2160pHighV3, QualityRung2160pMediumV3, QualityRung2160pLowV3,
 		QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
 		QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
-		"480p",
+		"480p", QualityRung480pLowV3, QualityRung360pV3,
 	}
 	if !reflect.DeepEqual(labels, want) {
 		t.Fatalf("labels = %v, want %v", labels, want)
@@ -2851,7 +2851,7 @@ func TestAvailableQualitiesV3LowerVersionServes4KWithout4KTranscode(t *testing.T
 			QualityOriginalV3, "1080p",
 			QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
 			QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
-			"480p",
+			"480p", QualityRung480pLowV3, QualityRung360pV3,
 		}
 		if !reflect.DeepEqual(labels(got), want) {
 			t.Fatalf("labels = %v, want %v", labels(got), want)
@@ -2948,7 +2948,7 @@ func TestAvailableQualitiesV3KeepsDirectHDRPlanningCapabilityLazy(t *testing.T) 
 		},
 	}
 	source := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 80_000, DynamicRange: DynamicRangeHDR10V3}
-	if got := availableQualitiesV3(input, source); len(got) != 11 || got[0].Label != QualityOriginalV3 || got[1].Label != QualityRung2160pHighV3 {
+	if got := availableQualitiesV3(input, source); len(got) != 13 || got[0].Label != QualityOriginalV3 || got[1].Label != QualityRung2160pHighV3 {
 		t.Fatalf("direct HDR qualities = %#v, want original plus compound ladder", got)
 	}
 	if capabilityCalls != 0 {
@@ -2980,7 +2980,7 @@ func TestAvailableQualitiesV3Cropped4KPublishesOnlyUsefulSameClassRungs(t *testi
 		QualityRung2160pMediumV3, QualityRung2160pLowV3,
 		QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
 		QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
-		"480p",
+		"480p", QualityRung480pLowV3, QualityRung360pV3,
 	}
 	if !reflect.DeepEqual(labels, want) {
 		t.Fatalf("cropped 4K labels = %v, want %v", labels, want)

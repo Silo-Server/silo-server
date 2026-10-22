@@ -1216,18 +1216,26 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if hlsRegistry == nil || !hlsRegistry.Available(TransformationVideoToH264V3) || !hlsRegistry.Available(TransformationAudioToAACV3) {
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
-	// A server bitrate cap reserves the AAC and mux share before either video
-	// codec is sized, so the HEVC decoder check below sees the real target.
+	// A server bitrate cap, and the estimate budget of an automatic encode,
+	// reserve the AAC and mux share before either video codec is sized, so
+	// the stream fits as a whole and the HEVC decoder check below sees the
+	// real target.
+	_, defaultAudioBitrateKbps := ResolveAACOutputV3(aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, true), 0)
+	audioShareKbps := func(budget int) int { return min(defaultAudioBitrateKbps, max(64, budget/4)) }
 	targetAudioBitrateKbps := 0
+	budget := quality.BudgetKbps * 95 / 100
 	if input.ServerBitrateCapKbps > 0 {
-		channels := aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, true)
-		_, defaultAudioBitrateKbps := ResolveAACOutputV3(channels, 0)
-		budget := optionalValueV3(input.Request.BandwidthCapKbps) * 95 / 100
-		targetAudioBitrateKbps = min(defaultAudioBitrateKbps, max(64, budget/4))
-		if budget-targetAudioBitrateKbps < 64 {
+		capBudget := optionalValueV3(input.Request.BandwidthCapKbps) * 95 / 100
+		if capBudget-audioShareKbps(capBudget) < 64 {
 			return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable video stream.", false)
 		}
-		quality.BitrateKbps = min(quality.BitrateKbps, budget-targetAudioBitrateKbps)
+		budget = minPositiveV3(budget, capBudget)
+	}
+	if budget > 0 {
+		targetAudioBitrateKbps = audioShareKbps(budget)
+		// An estimate never refuses playback: under the smallest budget the
+		// video still gets 64 kbps.
+		quality.BitrateKbps = min(quality.BitrateKbps, max(budget-targetAudioBitrateKbps, 64))
 	}
 	// Encodes stop at the ladder's top class. A taller source (8K, a square
 	// VR frame) that keeps its own frame on the original route is fitted into
@@ -2219,6 +2227,11 @@ var ladderRungsV3 = []ladderRungV3{
 	{Label: QualityRung720pMediumV3, DisplayName: "720p Medium", Height: 720, BitrateKbps: 2_000},
 	{Label: QualityRung720pLowV3, DisplayName: "720p Low", Height: 720, BitrateKbps: 1_500},
 	{Label: "480p", DisplayName: "480p", Height: 480, BitrateKbps: 1_500},
+	// The rungs below 1.5 Mbps let a client that lowers quality on Auto, which
+	// needs a lower menu entry before it asks, keep going until the stream fits
+	// a link of about 500 kbps.
+	{Label: QualityRung480pLowV3, DisplayName: "480p Low", Height: 480, BitrateKbps: 800},
+	{Label: QualityRung360pV3, DisplayName: "360p", Height: 360, BitrateKbps: 300},
 }
 
 func ladderRungForLabelV3(label string) (ladderRungV3, bool) {
