@@ -140,8 +140,12 @@ function meteredNote(): string | undefined {
   return undefined;
 }
 
-/** The Connection group: this connection's speed, a speed test and Auto's budget. */
-export function PlaybackConnection() {
+/**
+ * The Connection group: this connection's speed, a speed test and Auto's
+ * budget. `ignoresLearnedLimit` is Never mode, whose playback ignores the
+ * learned limit that the server's budget includes.
+ */
+export function PlaybackConnection({ ignoresLearnedLimit = false }) {
   const { connection, speedAvailable } = usePlaybackConnection();
   const [testing, setTesting] = useState(false);
   // A message shown for `forMs` hides itself then.
@@ -165,7 +169,10 @@ export function PlaybackConnection() {
     return () => clearTimeout(timer);
   }, [message]);
   if (!speedAvailable) return null;
-  const budget = connection.data?.auto_budget_kbps;
+  const budget =
+    ignoresLearnedLimit && connection.data?.learned_limit
+      ? undefined
+      : connection.data?.auto_budget_kbps;
   const description = note ?? speedDescription(connection.data, now) ?? "Not measured yet";
   const say = (text: string, forMs?: number) => setMessage({ text, forMs });
   return (

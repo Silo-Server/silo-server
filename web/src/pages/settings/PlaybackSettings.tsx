@@ -453,6 +453,8 @@ export default function PlaybackSettings() {
   // a local literal that could disagree with the server about "unset".
   const read = <T,>(key: SettingKey) =>
     (effective?.[key]?.value ?? SETTING_DEFINITIONS[key].defaultValue) as T;
+  const ignoresLearnedLimit =
+    read<string>(SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE) === "never";
 
   // Saves at profile scope and clears any device override shadowing it —
   // several of these keys are device-overridable, and without the clear the
@@ -502,12 +504,9 @@ export default function PlaybackSettings() {
           />
         )}
         {/* Never sends learned_limit: "ignore" on every start, so no limit applies. */}
-        {supportsBuffering &&
-          read<string>(SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE) !== "never" && (
-            <LearnedLimitRow />
-          )}
+        {supportsBuffering && !ignoresLearnedLimit && <LearnedLimitRow />}
       </SettingsGroup>
-      {supportsBuffering && <PlaybackConnection />}
+      {supportsBuffering && <PlaybackConnection ignoresLearnedLimit={ignoresLearnedLimit} />}
 
       <SettingsGroup title="Skipping">
         {introSkipControl === "mode" ? (
