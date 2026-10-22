@@ -138,9 +138,9 @@ func trickplayPlaylist(grid catalog.TrickplayGrid, query string) string {
 // trickplayVersion resolves the file whose previews a request names, among
 // the item's versions this account can see, and answers the request itself
 // when there is none. The file is the mediaSourceId query's, else the route's
-// when it names a media source, else the one the authorizing PlaySessionId's
-// negotiation selected, else the one this token is playing for the item
-// (Swiftfin and Findroid send no mediaSourceId), else the item's default
+// when it names a media source, else the one selected by the play the
+// request's PlaySessionId names, else the one this token is playing for the
+// item (Swiftfin and Findroid send no mediaSourceId), else the item's default
 // version. A request a PlaySessionId authorized gets only a version that
 // negotiation offered.
 func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Request, session *Session) (catalog.FileVersion, bool) {
@@ -171,10 +171,12 @@ func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Reques
 		return catalog.FileVersion{}, false
 	}
 	grant := playbackGrantFromContext(r.Context())
-	if fileID == 0 && grant != nil {
-		fileID = int64(negotiatedFile(grant))
-	} else if fileID == 0 {
-		fileID = int64(h.playingFile(r.Context(), session, contentID))
+	if fileID == 0 {
+		if play := h.requestedPlay(r, session, contentID, grant); play != nil {
+			fileID = int64(negotiatedFile(play))
+		} else {
+			fileID = int64(h.playingFile(r.Context(), session, contentID))
+		}
 	}
 	for _, version := range detail.Versions {
 		if (fileID == 0 || int64(version.FileID) == fileID) && (grant == nil || negotiationOffersFile(grant, version.FileID)) {
@@ -219,6 +221,24 @@ func (h *PlaybackHandler) trickplayGrant(ctx context.Context, session *Session, 
 		}
 	}
 	return grant.ID
+}
+
+// requestedPlay is the negotiation a trickplay request names: the one whose
+// PlaySessionId authorized it, else this token's live play of contentID that
+// the request's PlaySessionId names, else nil.
+func (h *PlaybackHandler) requestedPlay(r *http.Request, session *Session, contentID string, grant *PlaybackSession) *PlaybackSession {
+	if grant != nil {
+		return grant
+	}
+	playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
+	if playSessionID == "" || h.playbackStore == nil {
+		return nil
+	}
+	play, ok := h.playbackStore.Get(playSessionID)
+	if !ok || play.CompatToken != session.Token || play.ItemID != contentID {
+		return nil
+	}
+	return play
 }
 
 // negotiatedFile is the file a negotiation selected, either during playback or
