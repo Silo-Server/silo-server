@@ -240,6 +240,35 @@ describe("SeasonContent", () => {
     expect(mocks.capturedActionBarProps.value?.playHref).toBe("/watch/episode-1");
   });
 
+  it("keeps Shuffle while the season's unscoped list is still loading", () => {
+    const episode = (n: number, files: object[]) => ({
+      content_id: `episode-${n}`,
+      title: `Episode ${n}`,
+      episode_number: n,
+      season_number: 1,
+      still_url: "",
+      files,
+      user_data: { played: false },
+    });
+    // Scoped to library 4 only episode 1 has a file; the unscoped read has not answered.
+    mocks.useItemEpisodes.mockImplementation((_id?: string, libraryId?: number) =>
+      libraryId === 4
+        ? {
+            data: { episodes: [episode(1, [{ file_id: 1 }]), episode(2, [])] },
+            isLoading: false,
+            error: null,
+          }
+        : { data: undefined, isLoading: true, error: null },
+    );
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1?libraryId=4"]}>
+        <SeasonContent item={makeSeasonItem()} libraryId={4} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value?.onShuffle).toBeTypeOf("function");
+  });
+
   it("picks the watch party target from every library when the opened one lacks an episode", () => {
     const episode = (n: number, files: object[], played: boolean) => ({
       content_id: `episode-${n}`,

@@ -83,6 +83,11 @@ export default function SeasonContent({
   const playbackEpisodes =
     (needsUnscopedFiles ? unscopedEpisodesData?.episodes : undefined) ?? episodes;
   const playableEpisodes = playbackEpisodes.filter((episode) => (episode.files?.length ?? 0) > 0);
+  // Until that list arrives (or if it fails), an episode with no file here may
+  // still play from another library, so the season's episode count stands in.
+  const canShuffle =
+    playableEpisodes.length > 1 ||
+    (needsUnscopedFiles && !unscopedEpisodesData && episodes.length > 1);
   const firstUnwatched =
     playableEpisodes.find((episode) => !episode.user_data?.played) ?? playableEpisodes[0];
   const watchTogether = useDetailWatchTogether({
@@ -184,9 +189,7 @@ export default function SeasonContent({
               canCurateMetadata={canCurateMetadata}
               onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
               onShuffle={
-                playableEpisodes.length > 1
-                  ? () => startShuffle({ kind: "season", id: item.content_id })
-                  : undefined
+                canShuffle ? () => startShuffle({ kind: "season", id: item.content_id }) : undefined
               }
             />
           }
