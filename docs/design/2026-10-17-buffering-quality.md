@@ -1,7 +1,7 @@
 # Lowering quality when playback keeps buffering
 
 Status: Proposed
-Date: 2026-10-17
+Date: 2026-10-17, revised 2026-10-22 after device testing (see *Decisions*)
 Repos affected: `silo-server` (contract, planner, store, web), `silo-android`, `silo-apple`
 
 ## Summary
@@ -19,8 +19,9 @@ This design defines:
    **Restore quality** undo. A new setting switches it to asking first or turns
    it off. A quality the viewer picked is never lowered without asking.
 3. A server-side learned limit. When Auto is lowered because of buffering, the
-   server keeps that limit for the device on that network for 7 days and plans
-   Auto under it. Viewers can see and reset it in Settings.
+   server keeps that limit for the device on that network for 24 hours and
+   plans Auto under it. Viewers can see and reset it in Settings, and a
+   **Test speed** faster than the limit lifts it.
 4. One connection speed test on every client, with the server's existing 80%
    margin and results reported to the server. A quick automatic test stops once
    it proves the fastest rate the server would send, and runs only when the
@@ -35,7 +36,7 @@ Settled on 2026-10-17:
 | Question | Decision |
 | --- | --- |
 | Lower automatically, or ask? | Lower automatically on Auto, from the first release. Viewers who find it unreliable can switch the setting to **Ask first** or **Never**, reset a learned limit, or cap quality with **Maximum bitrate**. |
-| How long a learned limit lasts | Longer than the web's 30 minutes: 7 days from the last observation (proposed below). |
+| How long a learned limit lasts | Longer than the web's 30 minutes: 7 days from the last observation. Changed to 24 hours on 2026-10-22. |
 | Margin on a probe estimate | Keep the server's 80%. |
 | Report probe results to the server? | Yes. Admins can see per-device connection speeds. |
 | What do later replans send after a lowering? | The lowering's step-down estimate, without a source, until **Restore quality**, a quality change or a new start (see *Later replans after a lowering*). |
@@ -51,6 +52,23 @@ Settled on 2026-10-18, for the connection speed test:
 | How many tests at once? | 4 per server, refused beyond that with `429` and `Retry-After`. |
 | Can an admin turn automatic tests off? | Yes, with a server setting that also sets the reading lifetime. |
 | Does playback count as a measurement? | Yes: the throughput a plan saw is a lower bound the server keeps like a test result. |
+
+Settled on 2026-10-22, after testing the first implementation on an Apple TV,
+an Android TV emulator, a Pixel phone and the web. These replace the earlier
+answers where they differ:
+
+| Question | Decision |
+| --- | --- |
+| When is playback in an outage? | When a media request fails or cannot connect, the device is offline, or the player waits while no media request has received data for `OUTAGE_NO_DATA_MS = 4000` on progressive delivery, or `OUTAGE_NO_DATA_SEGMENTED_MS = 15000` on segmented (HLS) delivery, where the server holds a segment request silent while it produces the segment. A request that keeps receiving data never fails, however slow. A client's player or engine timeouts no longer decide it. |
+| When is a wait with media buffered a stall? | A renderer wait whose buffer stays under the player's own resume amount becomes a stall after `RENDERER_WAIT_MAX_MS = 3000`. A wait with more than `RENDERER_WAIT_AMPLE_MS = 5000` buffered is a renderer wait from that moment: the device, not the network, is behind. |
+| What does a lowering send? | The step-down estimate, as before, plus `observed_throughput_kbps`, the throughput the plan that kept buffering measured. The server plans with, and learns, the lower figure. |
+| How low can Auto go? | Until a stream fits a 500 kbps link. The menu gains 480p Low (800 kbps) and 360p (300 kbps), and an Auto encode fits video and audio together within its budget. |
+| What if a start or replan sends no estimate? | On Auto, the server uses the connection's current reading in its place. It replaces "the server plans only from the estimate a request carries". |
+| When does Auto try a lower version? | Under any Auto budget, not only after buffering. |
+| What does an Auto encode target? | Its budget, up to the bitrate of its class's highest menu rung, and never more than that rung even without an estimate. |
+| How long a learned limit lasts | 24 hours from the latest observation, not 7 days. A **Test speed** result above the limit clears it. |
+| A plan that never shows a frame? | On Auto in `always` mode, a plan whose start deadline passes, a first plan or a replacement, lowers as a long stall would, instead of failing at the same quality. An outage, a renderer wait, a pending change or nothing lower keeps the failure path. |
+| Can an outage end playback? | No. The client waits for media data or the network, sends no failure recovery during it, and resends a replan that got no response. |
 
 ## Motivation
 
@@ -94,10 +112,12 @@ Two server gaps make a client-side fix incomplete:
 
 Two signals feed Auto, and they get different weight:
 
-- **A probe estimate is a hint.** It is used only when playback starts, and
-  only to rule out a source the link clearly cannot carry: the server's existing
-  rule, source bitrate above 80% of the estimate. It never raises quality in the
-  middle of a title.
+- **A probe estimate is a hint.** It is used when playback starts, and on an
+  Auto replan that carries no estimate, where the server puts in the reading it
+  holds. It only rules out a source the link clearly cannot carry: the server's
+  existing rule, source bitrate above 80% of the estimate. It never raises
+  quality after a lowering, because the client's later replans carry the
+  lowering's estimate.
 - **Repeated rebuffering is the evidence.** It catches whatever the probe
   missed: a probe that overstated the link, scenes that peak well above the
   file's average bitrate, and congestion that starts mid-film.
@@ -133,16 +153,34 @@ measured and where it came from, and never do Auto's arithmetic.
     platform stops or tears down playback then, a stall in progress ends
     uncounted, as for a pause. If playback continues in the background, its
     stalls count as usual.
-  - buffering while media requests are failing, or while the device is offline.
-    That is an outage, and the reconnect path owns it. Media requests are the
-    plan's playlist, segment and range requests; a failed API request is not a
-    media failure. Subtitle requests are not media requests: a subtitle
-    failure doesn't start an outage, and a subtitle success doesn't end one. A
-    media request is failing when it errors, cannot connect, or receives no
-    data for the client's idle or first-byte timeout. A request that is still
-    receiving data is not failing, even when it runs past a whole-request time
-    limit: a slow link is what the controller exists to catch. An outage
-    ends when the plan's media data arrives again (a segment or range request
+  - buffering in an outage, which the reconnect path owns. Playback is in an
+    outage while a media request is failing, while the device is offline, and
+    while the player is waiting and none of the plan's media requests has
+    received data for the plan's silence limit, counted from the last byte any
+    of them received. The limit is `OUTAGE_NO_DATA_MS = 4000` for progressive
+    delivery, where the server sends byte ranges as fast as the link allows,
+    and `OUTAGE_NO_DATA_SEGMENTED_MS = 15000` for segmented delivery (HLS
+    transcode or remux segments). The server holds a segment request silent
+    while it produces the segment, up to 12 seconds for a transcode segment,
+    so a shorter limit would treat a transcode running slower than real time
+    as an outage, and lowering is what fixes that. The cost is accepted: a
+    dropout shorter than 15 seconds during an HLS plan can still count as
+    stalls and be learned as a limit, which the 24-hour lifetime and a manual
+    **Test speed** undo. A wait that begins on an already silent link is an
+    outage at once. Media requests are the plan's playlist, segment and range
+    requests; a failed API request is not a media failure. Subtitle requests
+    are not media requests: a subtitle failure doesn't start an outage, and a
+    subtitle success doesn't end one. A media request is failing when it
+    errors or cannot connect. A request that keeps receiving data is never
+    failing, however slowly or long it runs: a slow link is what the
+    controller exists to catch. A client's idle, first-byte and whole-request
+    timeouts do not decide an outage, so every client tells a dropout from a
+    slow link the same way. For a client that plays through a local server or
+    engine (Apple's Aether), the media requests are its upstream reads from
+    the Silo origin. The player's requests to the local server are not media
+    requests, and their errors (such as AVPlayer's -12889 on the loopback hop)
+    are not media failures unless the upstream read failed. An outage ends
+    when the plan's media data arrives again (a segment or range request
     receives data, or the buffered position advances) or when playback runs.
     A playlist, subtitle or API request that succeeds does not end it on its
     own. No time limit ends an outage, nor does the network coming back. An
@@ -151,9 +189,22 @@ measured and where it came from, and never do Auto's arithmetic.
   - a renderer wait: one that begins with more than
     `RENDERER_WAIT_BUFFER_MS = 1000` of media buffered past the playhead. The
     decoder or renderer is behind, as when a weak device drops frames to the
-    next keyframe, and the network is not. If the media buffered past the
-    playhead falls to `RENDERER_WAIT_BUFFER_MS` or less before playback
-    resumes, the stall begins at that moment.
+    next keyframe, and the network is not. Before playback resumes, a renderer
+    wait becomes a stall, counted from that moment, when either of these
+    happens first:
+    - the media buffered past the playhead falls to `RENDERER_WAIT_BUFFER_MS`
+      or less;
+    - the wait has lasted `RENDERER_WAIT_MAX_MS = 3000` while the media
+      buffered past the playhead is less than the player's own resume amount,
+      the buffer it waits for before it plays again after a rebuffer (Media3's
+      `bufferForPlaybackAfterRebufferMs`). A player without an explicit resume
+      amount (AVPlayer, browsers) has only the first rule.
+  - a wait with ample media buffered. Any wait, a start's included, becomes a
+    renderer wait once the media buffered past the playhead exceeds
+    `RENDERER_WAIT_AMPLE_MS = 5000`: a player that holds that much and still
+    does not play is behind, not starved. The stall so far ends uncounted, it
+    cannot trigger, and the wait stays a renderer wait until playback runs.
+    The player's own start and decoder failure handling owns it.
   - stall time inside the startup grace: the first `STARTUP_GRACE_MS = 10000` of
     a plan, counted from whichever comes first after adoption: when its playback
     first runs, or a wait before that. A plan opened paused starts its grace when
@@ -253,7 +304,8 @@ a higher-priority notice holds the slot.
 
 | Event | Outcome |
 | --- | --- |
-| Trigger fires on Auto | Send a `quality_change` replan with `quality_preference: "auto"`, `bandwidth_estimate_kbps` set to the step-down estimate, and `bandwidth_estimate_source: "observed_rebuffer"`. Nothing shows yet. |
+| Trigger fires on Auto | Send a `quality_change` replan with `quality_preference: "auto"`, `bandwidth_estimate_kbps` set to the step-down estimate, and `bandwidth_estimate_source: "observed_rebuffer"`. Add `observed_throughput_kbps`, the throughput the plan has received so far, measured as `plan_summary` `throughput_kbps` (see *Playback samples*), and omit it when the plan has not measured one or the network changed while it played. Nothing shows yet. |
+| A plan fails before its first frame because the client's own start deadline passed, whether it is the attempt's first plan or an adopted replacement still loading | On Auto in `always` mode, send the replan of the row above instead of a `failure_recovery` replan at the same quality. A replacement's load is still a source reload: its buffering never counts as a stall, and only this deadline lowers it. The plan keeps the platform's failure path when the mode is `ask` or `never`; the title is answered (**Keep quality** or **Restore quality**); the viewer picked the quality; the player is in a Watch Party room; an outage is in progress, or ended less than `LONG_STALL_MS` before the deadline, so the plan never had a fair run on a working network; the wait is a renderer wait; there is no lower rung; the no-lower cooldown runs; a lowering or a pick is pending; or a lowering was refused or never adopted. |
 | The adopted plan is lower | Show the undo pill: the caption **"Quality lowered to stop buffering"** over the action **"Restore quality"**, with its timer running. Focus-driven platforms move focus to **Restore quality**, unless the viewer is mid-scrub or has a menu open (the intro-skip rule). A plan is lower when its delivered bitrate is below the delivered bitrate of the plan the lowering left. A plan with no delivered bitrate counts as lower unless it carries `quality_reduction_unavailable`. |
 | **Restore quality** | Send a `quality_change` replan with `quality_preference: "auto"`, no estimate, and `learned_limit: "clear"`. The title is answered at the restored quality. |
 | The undo timer runs out, or Back | The pill hides, and the lower plan keeps playing. Back is consumed, so a second Back behaves normally. |
@@ -282,6 +334,8 @@ The prompt has a title, **"Playback keeps buffering"**, a primary action,
 | The viewer changes quality (see *Quality change*), or a replan the controller did not send is adopted | Any pill hides and stall history clears. An adoption the controller did not request also drops a pending lowering, with no notice. A quality change also clears the answer and ends the re-offer wait. |
 | The plan adopted after a lowering is no lower, or carries `quality_reduction_unavailable` | Show **"Can't lower quality for this video"**. Leave this plan alone for `NO_LOWER_COOLDOWN_MS = 300000`. |
 | The replan fails, or its plan is never adopted | Keep playing the current plan. Watch it again after `REARM_AFTER_UNADOPTED_MS = 60000`. Rearming starts fresh stall history without startup grace; an in-progress stall is timed from the rearm. If the player cannot send the replan now, because another replan is in flight, the replan fails: the client does not queue it. |
+| A replan gets no response (a timeout or a dropped connection) | Resend it with its original body, `replan_request_id` included, so the server replays its decision. It stays the replan in flight until it is answered; it never leaves the session refusing later replans. |
+| An outage | It never ends playback by itself. While it lasts, the client sends no `failure_recovery` replan: it waits for media data or the network to return, then reopens the source or replans. |
 
 Presentation rules:
 
@@ -304,6 +358,8 @@ Presentation rules:
   takes Back first.
 - The pills use the platform's notice position. A caption and its action, or
   two actions, are separate elements, never one phrase.
+- Errors the viewer sees are plain language. They never show a request URL or
+  a library's exception text.
 
 ### Later replans after a lowering
 
@@ -330,14 +386,15 @@ A lowering refused before it is sent is not kept.
   advertises `buffering_quality_v1`. A **Restore quality** that cannot be sent
   at once, because another replan is in flight, is sent after it, or its
   `learned_limit: "clear"` rides on the request that replaces it.
-- A retry of the lowering request itself resends its original body, source
-  included, so the server can replay its decision.
+- A retry of any replan, the lowering included, resends its original body,
+  source and `observed_throughput_kbps` included, so the server can replay its
+  decision.
 - The kept estimate is never written to storage, and it does not replace the
   server's learned limit.
 - Replans never send the speed-test reading (see *When to test*). Without a
   kept estimate, a replan the client sends for its own reasons carries no
-  estimate, so after a start the reading limited, such a replan can return Auto
-  to the source; repeated rebuffering then lowers it.
+  estimate, and the server plans it under the connection's current reading, as
+  it would a start without one.
 
 ### The setting
 
@@ -377,16 +434,20 @@ A limit is recorded when a start or replan carries
 
   Clients need no network identity, so no Wi-Fi name and no location
   permission. A request without a device ID records and applies no limit.
-- **Value**: the estimate from that request. A later lowering on the same key
-  replaces it, and it is lower by construction, because Auto was already
-  planning under the old limit.
-- **Lifetime**: `LEARNED_LIMIT_TTL = 7 days` from the most recent observation. A
-  changed home IP address simply starts a new key. That fails toward the source,
-  and a new lowering follows. Only a request that carries `observed_rebuffer` is
-  an observation. A replan that repeats the kept estimate without a source, and
-  any seek replan, records nothing and does not extend the 7 days.
+- **Value**: the lower of that request's estimate and its
+  `observed_throughput_kbps`, which is also what the request plans with. A
+  later lowering on the same key replaces it, and it is lower by
+  construction, because Auto was already planning under the old limit.
+- **Lifetime**: `LEARNED_LIMIT_TTL = 24 hours` from the most recent
+  observation, so one bad evening does not cap a week. A changed home IP
+  address simply starts a new key. That fails toward the source, and a new
+  lowering follows. Only a request that carries `observed_rebuffer` is an
+  observation. A replan that repeats the kept estimate without a source, and
+  any seek replan, records nothing and does not extend the 24 hours.
 - **Use**: Auto on a matching key plans with `min(request estimate, limit)`, or
-  with the limit alone when the request has no estimate. Fixed rungs ignore it,
+  with the limit alone when the request has no estimate. A request without an
+  estimate first takes the connection's current reading in its place (see
+  *When to test*), so the limit then applies to that. Fixed rungs ignore it,
   as they ignore estimates today. The admin bitrate cap and
   `bandwidth_cap_kbps` still apply on top.
 - **Request control**: start and replan gain an optional `learned_limit` field.
@@ -400,25 +461,47 @@ A limit is recorded when a start or replan carries
   `playback_plan.bandwidth_limit = {kbps, source: "observed_rebuffer", expires_at}`.
   The quality menu labels Auto as **"Auto · limited after buffering"**. The
   limit also appears in Settings, with a reset action (see below).
-- **Cleared by**: Settings → Reset, **Restore quality**, the admin, or expiry.
+- **Cleared by**: Settings → Reset, **Restore quality**, the admin, expiry, or
+  a **Test speed** result above the limit (see *Probe results*). The automatic
+  quick test never clears it.
 
 The web's 30-minute browser-local observed limit is retired once the web sends
 `observed_rebuffer`, so all clients share one store.
 
 ### Auto under a budget must go lower or say so
 
-When an `observed_rebuffer` estimate or a learned limit puts the source over
-budget, Auto tries these in order:
+When any Auto budget puts the source over it, Auto tries these in order. The
+budget is 80% of an estimate: a speed test's, the connection's reading the
+server put in for a missing one, an `observed_rebuffer` estimate, a kept
+estimate a client repeats, or a learned limit.
 
 1. a lower-bitrate version of the same edition that fits and plays without
    video encoding, using the media-version fallback order the menu already uses;
-2. a transcode that fits;
+2. a transcode that fits. Video and audio fit together within 95% of the
+   budget, leaving the rest for the container: the AAC track takes a quarter
+   of it, at least 64 kbps and at most its usual bitrate, and the video the
+   rest, never under 64 kbps. The video targets that share up to the bitrate
+   of its class's highest menu rung (4K High 40 Mbps, 1080p High 10 Mbps,
+   720p High 4 Mbps, 480p 1.5 Mbps, and 1.8 Mbps at 540p, which has no rung),
+   and never more than the source's own bits;
 3. the current route with `quality_reduction_unavailable`. This is the existing
    warning, and it now means "nothing lower exists", which the client reports.
 
-A version comes first because it is an original encode and costs the server
-nothing. A limit that only returned the source again would make every later
-title on that connection stall and lower again.
+A version comes first because it is an original encode, costs the server
+nothing and keeps the picture's dynamic range. A limit that only returned the
+source again would make every later title on that connection stall and lower
+again. The source still plays as it is only when it fits 80% of the estimate.
+
+Any Auto encode, with an estimate or without one, targets no more than its
+class's highest menu rung, even a conversion at the source's own size that
+would otherwise take the source's bitrate.
+
+The menu reaches below 1.5 Mbps with 480p Low (800 kbps) and 360p (300
+kbps). A client lowers Auto only while the menu has an entry below what plays,
+and each lowering fits video and audio together within about 53% of the
+delivered bitrate that stalled. A link that keeps stalling therefore keeps
+lowering until the whole stream is at most about 400 kbps, which a 500 kbps
+link carries.
 
 Under this rule, the incident replans at a 44 Mbps estimate, a budget of about
 35 Mbps, and plays the item's 31.6 Mbps 1080p version.
@@ -455,11 +538,14 @@ the lower of the administrator bitrate cap for the caller's network, when one
 applies, and the 99.9th percentile of the source bitrates of the video files
 this profile can play. It is a percentile because one file with a bogus bitrate
 would otherwise set the target. The server caches the percentile for each set
-of libraries.
+of libraries. Reading it can take many seconds on a large catalog, so a
+capability read never waits for it: the server sends the target it last read,
+or none until its first read finishes, and reads a stale one again in the
+background, every 6 hours and 10 minutes after a failed read.
 
 Two server settings control the schedule: `playback.bandwidth_probe_automatic`
 (default `true`) and `playback.bandwidth_probe_max_age_days` (1 to 30, default
-7, the lifetime of a learned limit).
+7). The reading lifetime is not the learned limit's.
 
 ### Measuring
 
@@ -588,9 +674,17 @@ return to connectivity after none. A client that cannot observe network changes
   test without a target against `/api/v2/playback/bandwidth-probe`, and keep
   the result on the device for 7 days per network.
 
-The server plans only from the estimate a request carries. It does not put its
-stored reading in place of a missing one: only the client knows whether its link
-is metered, and the kept-estimate rules stay with the client.
+A client can start before its connection read has finished, so the server
+fills in a missing estimate. An Auto start or replan from a
+`buffering_quality_v1` client on `/api/v2` that carries no
+`bandwidth_estimate_kbps` plans with the connection's current reading in its
+place, as a `probe` estimate: the reading `GET /api/v2/playback/connection`
+reports, the higher of the probe and the playback sample within their
+lifetime. It records nothing, and a seek replan that replays the stored request
+is unchanged. A request with `learned_limit: "ignore"` gets none: a Cast start
+sends `ignore` and no estimate, and the sender's reading is not the receiver's
+link. Clients run no tests on a metered link, so the server usually holds no
+reading there; a playback sample from that link still applies.
 
 ### Media path and limits
 
@@ -657,11 +751,17 @@ bound.
 ### Probe results
 
 `POST /api/v2/playback/bandwidth-probe/results` takes
-`{kbps, bytes, duration_ms, transport, lower_bound}`, where `transport` is
-`wifi`, `ethernet`, `cellular` or `other`, and returns 204. `kbps` is 100 to
+`{kbps, bytes, duration_ms, transport, lower_bound, manual}`, where `transport`
+is `wifi`, `ethernet`, `cellular` or `other`, and returns 204. `kbps` is 100 to
 1,000,000, the bounds of `bandwidth_estimate_kbps`, so a kept reading is always
 one a client can send. `lower_bound` is optional and `false` by default. The
 server keeps the latest result per learned-limit key.
+
+`manual` is optional and `false` by default. A client sets it only on a test
+the viewer started with **Test speed**, never on the automatic quick test. A
+manual result whose `kbps` is above the stored learned limit for that device
+and connection clears the limit, as Settings → Reset does, and the client's
+read of the connection after the test shows it gone.
 
 ### `GET /api/v2/playback/connection`
 
@@ -688,9 +788,11 @@ and the learned limit, then capped by the admin bitrate cap. The reading is the
 higher of the current probe and the current playback sample. Clients display
 the budget and never compute it.
 
-`DELETE /api/v2/playback/connection/learned-limit` resets the limit. Missing
-probe, sample and budget fields mean that no measurement is available; an
-administrator cap alone is not a speed measurement.
+`DELETE /api/v2/playback/connection/learned-limit` resets the limit. It
+requires `X-Silo-Device-Id`, the device whose limit it resets; without one it
+is a `422` validation problem. Missing probe, sample and budget fields mean
+that no measurement is available; an administrator cap alone is not a speed
+measurement.
 
 ### Settings
 
@@ -698,7 +800,8 @@ Phase 1 adds to every client's Playback settings:
 
 - **Lower quality when buffering**: Never, Ask first or Automatically.
 - When a limit exists on this connection: "Limited to 44 Mbps after buffering
-  on Oct 17", with a **Reset** action.
+  on Oct 17", with a **Reset** action. Not in `never` mode, which ignores the
+  limit.
 
 Phase 2 adds a Connection group:
 
@@ -707,7 +810,7 @@ Phase 2 adds a Connection group:
   with a **Test speed** action. Without a probe, the row shows a playback sample
   as a lower bound: "Faster than 51 Mbps · seen during playback 2 hours ago".
   **Test speed** runs the accurate test in the foreground, which takes up to 10
-  seconds, reports the result and refreshes the row. A `429` shows "Try again in
+  seconds, reports the result with `manual: true` and refreshes the row. A `429` shows "Try again in
   N seconds" ("1 second" at one) until N seconds have passed. If the report
   fails, the row says the test could not be saved and keeps showing the
   server's reading.
@@ -810,13 +913,15 @@ in parallel:
 | --- | --- |
 | Feature | The server advertises `buffering_quality_v1` in the `/api/v2` capability `features` and native v2 start/replan response `server_features`. A client that sees it adds `buffering_quality_v1` to `client_features` on start and replan, and only then sends the fields below, because the server rejects unknown fields. The server records and applies learned limits only on requests that carry the feature. Against a server without it, clients still run the controller and send the same replans without the new fields; nothing is learned, and the limit row in Settings stays hidden. |
 | `bandwidth_estimate_source` | Start and replan, optional: `probe` or `observed_rebuffer`. Valid only alongside `bandwidth_estimate_kbps`; otherwise the request is a `400`. |
+| `observed_throughput_kbps` | Start and replan, optional integer, 100 to 1,000,000. Valid only with `bandwidth_estimate_source: "observed_rebuffer"`; otherwise the request is a `422`, as for the other buffering-quality validation. The throughput the plan that kept buffering has received so far, measured as `plan_summary` `throughput_kbps`. The server plans with, and learns, `min(bandwidth_estimate_kbps, observed_throughput_kbps)`. |
 | `learned_limit` | Start and replan, optional: `ignore` or `clear`. |
 | `playback_plan.bandwidth_limit` | Optional object: `kbps` (integer), `source` (`"observed_rebuffer"`), `expires_at` (RFC 3339). Present only when the learned limit lowered the plan. |
-| Connection endpoints | `GET /api/v2/playback/connection`, and `DELETE /api/v2/playback/connection/learned-limit` returning 204. Both exist when the feature is advertised. They use normal authenticated profile-scoped headers and `X-Silo-Device-Id`; no installation ID or body is required. |
+| Connection endpoints | `GET /api/v2/playback/connection`, and `DELETE /api/v2/playback/connection/learned-limit` returning 204. Both exist when the feature is advertised. They use normal authenticated profile-scoped headers and `X-Silo-Device-Id`; no installation ID or body is required. The reset without `X-Silo-Device-Id` is a `422`. |
+| Menu | `available_qualities` can list `480p-low` ("480p Low", 800 kbps) and `360p` ("360p", 300 kbps) below the earlier 1.5 Mbps floor. Clients treat them like any other rung. |
 | Setting | `playback.buffering_quality_mode`, introduced in manifest revision 23. The revision is informational: native clients detect the setting by the key's presence in the server's settings manifest or resolved settings, not by comparing revision numbers. |
 | Telemetry | Feature `playback_plan_summary_v1`, route event `plan_summary`, and the allowlist keys under *Telemetry*. |
 | Phase 2 | The server advertises `connection_speed_v1` and adds `bandwidth_probe_url` to the capability response: the probe on the path this client's media takes. With it, clients probe that URL, report to `POST /api/v2/playback/bandwidth-probe/results`, and read `probe` and `auto_budget_kbps` from the connection endpoint. |
-| Speed test | With `connection_speed_v1`, the capability response also carries `bandwidth_probe_target_kbps` (optional integer), `bandwidth_probe_automatic` (boolean) and `bandwidth_probe_max_age_seconds` (integer). Probe results accept optional `lower_bound` (boolean), and `bytes` up to 1,000,000,000. The connection endpoint's `probe` gains `lower_bound`, and the endpoint gains optional `playback_sample: {kbps, measured_at}`; the admin device `connections` gain the same. `plan_summary` may carry `throughput_kbps`. Tests run as *Connection speed test* says, and `probe_cases` pins the measurement. |
+| Speed test | With `connection_speed_v1`, the capability response also carries `bandwidth_probe_target_kbps` (optional integer), `bandwidth_probe_automatic` (boolean) and `bandwidth_probe_max_age_seconds` (integer). Probe results accept optional `lower_bound` (boolean), optional `manual` (boolean, **Test speed** only; a manual result above the learned limit clears it), and `bytes` up to 1,000,000,000. The connection endpoint's `probe` gains `lower_bound`, and the endpoint gains optional `playback_sample: {kbps, measured_at}`; the admin device `connections` gain the same. `plan_summary` may carry `throughput_kbps`. Tests run as *Connection speed test* says, and `probe_cases` pins the measurement. |
 
 ## Conformance
 
@@ -834,7 +939,15 @@ events are:
 - `playing`, `waiting` (optionally with a `seek`, `pause`, `reload` or
   `renderer` cause), `pause`, `seek`, `transport_error_start`,
   `transport_error_end` and `replan_failed`. A plain `waiting` during a
-  renderer wait means its buffer fell to the threshold.
+  renderer wait means it became a stall: its buffer fell to
+  `RENDERER_WAIT_BUFFER_MS`, or it outlasted `RENDERER_WAIT_MAX_MS` under the
+  player's resume amount. A `waiting` with the `renderer` cause during a stall
+  means its buffer passed `RENDERER_WAIT_AMPLE_MS`, which ends the stall
+  uncounted. `transport_error_start` is the moment the adapter finds an outage
+  (a failed media request, the device offline, or the plan's silence limit,
+  `OUTAGE_NO_DATA_MS` or `OUTAGE_NO_DATA_SEGMENTED_MS`, passing while it
+  waits), and `transport_error_end` the moment it ends. These
+  are adapter rules: the 2026-10-22 changes left the vectors unchanged.
 - The pill answers `select_lower`, `select_keep`, `select_restore` and `back`.
 - `pick_sent` and `pick_refused`: the viewer's quality pick is sent, or the
   player refuses it. An adopted pick arrives as `quality_changed`, then its
@@ -848,7 +961,8 @@ events are:
   sends a replan for its own reasons. It outputs a `replan` whose body holds
   that operation, the adopted plan's quality as `quality_preference` and, on
   Auto with a kept estimate, `bandwidth_estimate_kbps`. The client's other
-  request fields are outside the vectors.
+  request fields, `observed_throughput_kbps` included, are outside the
+  vectors.
 - `quality_changed`: a quality change the controller did not send, such as the
   viewer's pick. It has no fields; the new quality arrives with the next
   `plan_adopted`.
@@ -987,8 +1101,9 @@ Phase 1 alone fixes the incident.
   peak far higher. Storing the highest 30-second average at scan time, and
   fitting Auto against it, would prevent many of these stalls before they
   happen. The cost to the scan is unmeasured.
-- **Self-clearing limits.** Should a plan that delivers above the learned limit
-  and plays 20 minutes without a counted stall clear the limit? That plan would
+- **Self-clearing limits.** A **Test speed** above the limit clears it, and a
+  limit now lasts 24 hours. Should a plan that delivers above the learned limit
+  and plays 20 minutes without a counted stall clear it too? That plan would
   be a fixed rung the viewer picked. It needs `plan_summary` data first.
 - **Viewers who keep lowering a picked quality.** After several accepted prompts
   on a fixed quality, should Settings suggest Auto?

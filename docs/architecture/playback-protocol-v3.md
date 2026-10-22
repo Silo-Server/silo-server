@@ -1668,6 +1668,8 @@ refusal under any other policy is not one the fallback acts on.
 | `720p-medium` | 720p Medium | 720 | 2000 |
 | `720p-low` | 720p Low | 720 | 1500 |
 | `480p` | 480p | 480 | 1500 |
+| `480p-low` | 480p Low | 480 | 800 |
+| `360p` | 360p | 360 | 300 |
 
 A rung below the source resolution class is always useful. At the source's own
 class, a rung is published only when it undercuts the source bitrate; a 25.2
@@ -1708,14 +1710,23 @@ size, even when it is wider than the 16:9 box (a 2560x1080 film at the 1080p
 class). Otherwise automatic and plain-label targets fit the source into that
 class's 16:9 box, so a 3840x1600 film at the 1080p class streams at 1920x800,
 and encode at the class bitrate: 20000 kbps for 2160p, 6000 for 1080p, 2000 for
-720p, 1800 for 540p and 1500 for 480p, never above the estimate's 80% budget or
-the cap. A transcode also never targets more than the source's own bitrate,
-counted in the output codec (H.264 for a scaled encode, or HEVC for any encode
-when the planner chooses HEVC).
+720p, 1800 for 540p and 1500 for 480p, never above the cap. Under an estimate,
+`auto` instead uses its 80% budget, up to the bitrate of the class's highest
+menu rung (40000 for 2160p, 10000 for 1080p, 4000 for 720p, 1500 for 480p, and
+the class bitrate for 540p), and fits the AAC track and container inside that
+budget too: 95% of it for both tracks, a quarter of that for AAC (at least 64
+and at most its usual bitrate) and the rest, at least 64, for video. Every
+automatic encode, with an estimate or without, stays within its class's highest
+menu rung, a conversion at the source's own size included. A transcode also
+never targets more than the source's own bitrate, counted in the output codec
+(H.264 for a scaled encode, or HEVC for any encode when the planner chooses
+HEVC).
 
 `bandwidth_estimate_kbps` is optional and is the client's belief about its
-link, not a promise. An absent estimate removes the bandwidth term entirely, so
-`auto` plans from the device and the source alone; a client should omit the
+link, not a promise. An absent estimate removes the bandwidth term, so `auto`
+plans from the device and the source alone, except that on `/api/v2` the
+server puts the connection's stored reading in for a `buffering_quality_v1`
+client (see [Buffering quality](#buffering-quality-native-v2)); a client should omit the
 field rather than send a hint it knows is clamped, such as a browser's
 `navigator.connection.downlink`, which Chromium caps at 10 Mbps. Clients that
 can measure use the `/api/v2` bandwidth probe ([playback-api.md](../playback-api.md#bandwidth-probe)).
@@ -1732,14 +1743,17 @@ when every client does this: after two stalls of at least a second within two
 minutes, or one stall of six seconds. Stall time in the first ten seconds of a
 plan does not count, and buffering caused by a seek, pause or source reload is
 not a stall. Clients send 70% of the delivered bitrate, so the next stream
-targets about 56% of the one that stalled, and repeat that estimate on their own
-later Auto replans for the rest of the playback attempt. When the plan that
+targets about 56% of the one that stalled, with the throughput the stalled plan
+measured as `observed_throughput_kbps` when they have it (the server takes the
+lower figure), and repeat that estimate on their own later Auto replans for the
+rest of the playback attempt. When the plan that
 follows is no lower, they leave that plan alone for five minutes rather than
 replan in a loop. Buffering while media requests fail or while the device is
 offline is an outage for the reconnect path and never counts toward a
-downshift. A media request is failing when it errors, cannot connect, or
-receives no data for the client's idle or first-byte timeout; a request that is
-still receiving data is not failing, even past a whole-request time limit.
+downshift, and so does a wait in which no media request has received data for
+4 seconds on progressive delivery, or 15 seconds on HLS, where the server holds
+a segment request silent while it produces the segment. A media request is failing when it errors or cannot connect; a
+request that keeps receiving data is never failing, however slow.
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
@@ -1752,7 +1766,7 @@ Audio-only sources publish no rungs on `/api/v2` (a single `original` entry on
 `quality_preference` accepts `auto`, the legacy `original` (aliases `source`,
 `max`), which means `auto`, the
 plain `2160p` / `1080p` / `720p` / `480p` values with their obvious aliases
-(`4k`, `uhd`, `fhd`, `hd`, `sd`), and the compound labels in the table above.
+(`4k`, `uhd`, `fhd`, `hd`, `sd`), and the labels in the table above.
 An unrecognized value normalizes to `auto` and the response carries the
 `quality_preference_normalized` warning rather than an error.
 
