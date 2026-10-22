@@ -581,10 +581,29 @@ func (r *UserRepository) CompareAndSwapPassword(ctx context.Context, id int, exp
 // lift the restriction; they are revoked in the same transaction, keeping
 // only keepSessionID, the session that chose the new password.
 func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, expectedHash, newPassword, keepSessionID string) error {
-	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, &keepSessionID)
+	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			UPDATE auth_sessions SET revoked_at = NOW()
+			WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, id, keepSessionID); err != nil {
+			return fmt.Errorf("revoking temporary-password sessions: %w", err)
+		}
+		return nil
+	})
 }
 
-func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, keepSessionID *string) error {
+// ReplacePasswordSigningOutOthers is CompareAndSwapPassword that also signs
+// the account out everywhere except keepSessionID, the session that chose
+// the new password, in the same transaction (RevokeOtherSignInsInTransaction).
+// The caller runs the OnUserSessionsRevoked hook after it returns.
+func (r *UserRepository) ReplacePasswordSigningOutOthers(ctx context.Context, id int, expectedHash, newPassword, keepSessionID string) error {
+	return r.compareAndSwapPassword(ctx, id, expectedHash, newPassword, func(tx pgx.Tx) error {
+		return RevokeOtherSignInsInTransaction(ctx, tx, id, keepSessionID)
+	})
+}
+
+// compareAndSwapPassword runs alsoInTx, when set, in the transaction that
+// replaced the hash.
+func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, alsoInTx func(pgx.Tx) error) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), passwordHashCost)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
@@ -603,11 +622,9 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 		return fmt.Errorf("updating password: %w", err)
 	}
 	if tag.RowsAffected() == 1 {
-		if keepSessionID != nil {
-			if _, err := tx.Exec(ctx, `
-				UPDATE auth_sessions SET revoked_at = NOW()
-				WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, id, *keepSessionID); err != nil {
-				return fmt.Errorf("revoking temporary-password sessions: %w", err)
+		if alsoInTx != nil {
+			if err := alsoInTx(tx); err != nil {
+				return err
 			}
 		}
 		if err := tx.Commit(ctx); err != nil {

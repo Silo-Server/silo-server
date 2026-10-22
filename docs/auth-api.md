@@ -102,8 +102,10 @@ never change an account password.
 Local passwords are bcrypt hashes. Setup, invited signup, and password changes share the same
 password policy. New passwords must contain at least 8 Unicode characters and be
 no more than 72 UTF-8 bytes, the bcrypt input limit. The caller must prove knowledge of the current
-password. Changing the password does not revoke existing login sessions; users can review and
-revoke those separately through the account sessions API.
+password. By default, changing the password does not revoke existing login sessions; users can
+review and revoke those separately through the account sessions API. The v2 operation can also
+sign the account out everywhere else in the same step; see
+[V2 password management](#v2-password-management).
 
 Accounts whose local password login is disabled keep their credential at the external provider and
 cannot use this flow. An administrator can also make a password temporary or issue a reset link;
@@ -165,6 +167,19 @@ password-policy fields above. It supports ETag revalidation and uses
 and PIN verification, even when the account is an administrator.
 
 `POST /api/v2/account/password` accepts the same password body and returns 204.
+An optional `sign_out_other_sessions` boolean (default `false`) also signs the
+account out everywhere except the calling session, in the transaction that
+replaces the password: its other login sessions, "View as user" sessions it
+opened or that view it, its Audiobookshelf-compatible sessions, its stored
+Jellyfin-compatible sessions, and the device sign-ins it approved that the
+device has not collected yet. This is what a password reset revokes, minus the
+caller's session. API keys survive. After commit, every node drops the
+Jellyfin-compatible sessions it holds in memory, as for account-wide admin
+revocation. `null` is not a value for it (`422 validation_failed`). The
+capability document's `sign_out_other_sessions` is true on servers that accept
+the member; older servers reject it as an unknown member with `422`, so clients
+send it only when the capability says so. v1 `POST /auth/account/password` has
+no such member.
 It spends the dedicated `password_change` rate-limit budget used by v1; exhausted
 requests return `429 rate_limited` with `Retry-After`. Invalid password values
 return `422 validation_failed` naming the member. Disallowed account/profile

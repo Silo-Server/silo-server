@@ -45,6 +45,7 @@ type AccountPasswordCapability struct {
 	RequiresCurrentPassword bool `json:"requires_current_password" doc:"Whether changePassword needs current_password; always true today" example:"true"`
 	MinimumPasswordLength   int  `json:"minimum_password_length" doc:"Fewest characters a new password may have" example:"8"`
 	MaximumPasswordBytes    int  `json:"maximum_password_bytes" doc:"Most UTF-8 bytes a new password may have" example:"72"`
+	SignOutOtherSessions    bool `json:"sign_out_other_sessions" doc:"Whether changePassword accepts sign_out_other_sessions. A server that omits this field rejects the member with 422, so send it only when this is true" example:"true"`
 }
 
 // AccountPasswordCapabilityOutput is the getAccountPasswordCapability response.
@@ -57,9 +58,11 @@ type AccountPasswordCapabilityOutput struct {
 
 // ChangePasswordInput replaces the account password.
 type ChangePasswordInput struct {
-	Body struct {
-		CurrentPassword string `json:"current_password" minLength:"1" maxLength:"1024" doc:"The password in use" example:"correct horse battery staple"`
-		NewPassword     string `json:"new_password" minLength:"1" maxLength:"1024" doc:"The replacement; the capability document names the length limits" example:"margin fossil quench hollow"`
+	RawBody []byte
+	Body    struct {
+		CurrentPassword      string `json:"current_password" minLength:"1" maxLength:"1024" doc:"The password in use" example:"correct horse battery staple"`
+		NewPassword          string `json:"new_password" minLength:"1" maxLength:"1024" doc:"The replacement; the capability document names the length limits" example:"margin fossil quench hollow"`
+		SignOutOtherSessions bool   `json:"sign_out_other_sessions,omitempty" doc:"Also sign the account out everywhere except this session, in the same transaction: its other login sessions (including View as user sessions it opened or that view it), its Jellyfin- and Audiobookshelf-compatible sessions, and device sign-ins it approved that were not collected yet. API keys are kept. False or omitted signs nothing else out" example:"false"`
 	}
 }
 
@@ -120,6 +123,7 @@ func (reg *Registry) getAccountPasswordCapability(ctx context.Context, _ *Capabi
 		RequiresCurrentPassword: view.RequiresCurrentPassword,
 		MinimumPasswordLength:   view.MinimumPasswordLength,
 		MaximumPasswordBytes:    view.MaximumPasswordBytes,
+		SignOutOtherSessions:    view.SignOutOtherSessions,
 	}}
 	if !view.Configured {
 		out.Body.State = StateNotConfigured
@@ -128,8 +132,12 @@ func (reg *Registry) getAccountPasswordCapability(ctx context.Context, _ *Capabi
 }
 
 // changePassword runs the same two steps as v1 POST /auth/account/password:
-// the authority check for the declared profile, then the replacement.
+// the authority check for the declared profile, then the replacement. Only
+// v2 offers sign_out_other_sessions.
 func (reg *Registry) changePassword(ctx context.Context, in *ChangePasswordInput) (*struct{}, error) {
+	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+		return nil, p
+	}
 	if reg.deps.Accounts == nil {
 		return nil, unavailable("account")
 	}
@@ -140,7 +148,7 @@ func (reg *Registry) changePassword(ctx context.Context, in *ChangePasswordInput
 	if err := reg.deps.Accounts.AuthorizePasswordChange(ctx, claims, profileFrom(ctx)); err != nil {
 		return nil, passwordProblem(err)
 	}
-	if err := reg.deps.Accounts.ChangePassword(ctx, claims, in.Body.CurrentPassword, in.Body.NewPassword); err != nil {
+	if err := reg.deps.Accounts.ChangePassword(ctx, claims, in.Body.CurrentPassword, in.Body.NewPassword, in.Body.SignOutOtherSessions); err != nil {
 		return nil, passwordProblem(err)
 	}
 	return nil, nil

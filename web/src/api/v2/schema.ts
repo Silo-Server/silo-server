@@ -12618,6 +12618,11 @@ export interface components {
       /** @description Opaque revision of this document */
       revision: string;
       /**
+       * @description Whether changePassword accepts sign_out_other_sessions. A server that omits this field rejects the member with 422, so send it only when this is true
+       * @example true
+       */
+      sign_out_other_sessions: boolean;
+      /**
        * @description Support and configuration state, not health
        * @enum {string}
        */
@@ -21318,6 +21323,11 @@ export interface components {
        * @example margin fossil quench hollow
        */
       new_password: string;
+      /**
+       * @description Also sign the account out everywhere except this session, in the same transaction: its other login sessions (including View as user sessions it opened or that view it), its Jellyfin- and Audiobookshelf-compatible sessions, and device sign-ins it approved that were not collected yet. API keys are kept. False or omitted signs nothing else out
+       * @example false
+       */
+      sign_out_other_sessions?: boolean;
     };
     ChatGPTAccountStatus: {
       client_id: string;
