@@ -3,11 +3,12 @@
  *
  * The flow is deliberately small: read capabilities (memoized per origin for
  * a minute), check the server offers protocol v3, POST the start with the
- * capabilities' `installation_id`, and retry the identical body while the
- * failure looks transient. Start is idempotent server-side on
- * `playback_attempt_id` plus the body digest, so a retry after a lost reply
- * returns the stored decision instead of a second session. A 4xx is final:
- * nothing is retained and the caller decides what to do.
+ * capabilities' `installation_id`, and retry while the failure looks
+ * transient: the capabilities read, then the identical start body. Start is
+ * idempotent server-side on `playback_attempt_id` plus the body digest, so a
+ * retry after a lost reply returns the stored decision instead of a second
+ * session. A 4xx is final: nothing is retained and the caller decides what
+ * to do.
  */
 
 import type { components } from "@/api/v2/schema";
@@ -37,7 +38,13 @@ export function resetPlaybackCapabilitiesV2() {
   capabilitiesCache.clear();
 }
 
-/** Reads `GET /api/v2/playback/capabilities`, memoized per API origin. */
+/**
+ * Reads `GET /api/v2/playback/capabilities`, memoized per API origin. A read
+ * that times out or cannot reach the server answers with the last
+ * capabilities this origin returned, however old: a slow read must not fail
+ * playback, and a start on a changed installation is refused with
+ * `installation_changed`, which drops them.
+ */
 export async function playbackCapabilitiesV2(
   config: PlayerConfig,
   options: { force?: boolean } = {},
@@ -45,18 +52,23 @@ export async function playbackCapabilitiesV2(
   const origin = playerV2Origin(config);
   const cached = capabilitiesCache.get(origin);
   if (!options.force && cached && Date.now() - cached.at < CAPABILITIES_TTL_MS) return cached.cap;
-  const response = await playerFetchResponse(config, `${origin}/api/v2/playback/capabilities`, {
-    headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(CAPABILITIES_TIMEOUT_MS),
-  });
-  if (response.status === 404) throw new Error("API v2 playback is unavailable on this server");
-  if (!response.ok)
-    throw new PlayerFetchError(response.status, "Playback capabilities unavailable");
-  const cap = (await response.json()) as PlaybackCapabilitiesV2;
-  if (!Array.isArray(cap.features) || !Array.isArray(cap.protocol_versions))
-    throw new Error("Invalid playback capabilities");
-  capabilitiesCache.set(origin, { at: Date.now(), cap });
-  return cap;
+  try {
+    const response = await playerFetchResponse(config, `${origin}/api/v2/playback/capabilities`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(CAPABILITIES_TIMEOUT_MS),
+    });
+    if (response.status === 404) throw new Error("API v2 playback is unavailable on this server");
+    if (!response.ok)
+      throw new PlayerFetchError(response.status, "Playback capabilities unavailable");
+    const cap = (await response.json()) as PlaybackCapabilitiesV2;
+    if (!Array.isArray(cap.features) || !Array.isArray(cap.protocol_versions))
+      throw new Error("Invalid playback capabilities");
+    capabilitiesCache.set(origin, { at: Date.now(), cap });
+    return cap;
+  } catch (error) {
+    if (cached && isTransientPlayerRequestError(error)) return cached.cap;
+    throw error;
+  }
 }
 
 function numericFileID(value: unknown): number {
@@ -129,26 +141,16 @@ async function requestPlaybackStartV2(
   body: StartRequestV3,
   options: { signal?: AbortSignal },
 ): Promise<DecisionResponseV3> {
-  const cap = await playbackCapabilitiesV2(config);
-  if (cap.state === "not_configured")
-    throw new Error("API v2 playback is not configured on this server");
-  if (cap.state !== "available" || !cap.allowed || !cap.installation_id)
-    throw new Error("Playback is not available for this account");
-  if (!cap.protocol_versions.includes(3))
-    throw new Error("This server does not offer playback protocol v3");
-  if (body.allow_alternate_versions === false && !cap.features.includes("fixed_media_file_v1"))
-    throw new Error("This server needs an update to keep Watch Party viewers on the same version.");
-  const installationId = cap.installation_id;
-  const payload = JSON.stringify({
-    ...bufferingQualityWire(body, cap.features),
-    file_id: String(body.file_id),
-    installation_id: installationId,
-  } satisfies components["schemas"]["PlaybackStartBody"]);
   const url = `${playerV2Origin(config)}/api/v2/playback/start`;
   const deadline = Date.now() + START_BUDGET_MS;
+  // Built once from the first capabilities read that succeeds, so every
+  // retry sends the identical body.
+  let start: { installationId: string; payload: string } | undefined;
   for (let attempt = 0; ; attempt++) {
     options.signal?.throwIfAborted();
     try {
+      start ??= startBody(await playbackCapabilitiesV2(config), body);
+      const { installationId, payload } = start;
       const controller = new AbortController();
       const timer = setTimeout(
         () => controller.abort(new DOMException("Playback start timed out", "TimeoutError")),
@@ -200,6 +202,25 @@ async function requestPlaybackStartV2(
       if (Date.now() >= deadline) throw error;
     }
   }
+}
+
+/** The start body for these capabilities, or a plain Error when they rule v2 playback out. */
+function startBody(cap: PlaybackCapabilitiesV2, body: StartRequestV3) {
+  if (cap.state === "not_configured")
+    throw new Error("API v2 playback is not configured on this server");
+  if (cap.state !== "available" || !cap.allowed || !cap.installation_id)
+    throw new Error("Playback is not available for this account");
+  if (!cap.protocol_versions.includes(3))
+    throw new Error("This server does not offer playback protocol v3");
+  if (body.allow_alternate_versions === false && !cap.features.includes("fixed_media_file_v1"))
+    throw new Error("This server needs an update to keep Watch Party viewers on the same version.");
+  const installationId = cap.installation_id;
+  const payload = JSON.stringify({
+    ...bufferingQualityWire(body, cap.features),
+    file_id: String(body.file_id),
+    installation_id: installationId,
+  } satisfies components["schemas"]["PlaybackStartBody"]);
+  return { installationId, payload };
 }
 
 /**

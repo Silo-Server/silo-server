@@ -382,6 +382,15 @@ function describePlaybackSessionError(
     return transportError;
   }
 
+  // A request that timed out or could not connect: the browser's own wording
+  // ("signal timed out", "Failed to fetch") means nothing to the viewer.
+  if (isTransientPlayerRequestError(error)) {
+    return {
+      title: "Playback unavailable",
+      message: "Silo couldn't reach the server. Check your connection, then try again.",
+    };
+  }
+
   if (error instanceof Error && error.message.trim().length > 0) {
     return {
       title: "Playback unavailable",

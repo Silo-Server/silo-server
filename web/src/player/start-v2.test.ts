@@ -387,6 +387,31 @@ describe("startPlaybackV2", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  // F1: a capabilities read stalled behind the server's speed-test target.
+  it("does not fail a start on a capabilities read that times out", async () => {
+    vi.useFakeTimers();
+    const timedOut = () => Promise.reject(new DOMException("signal timed out", "TimeoutError"));
+    const fetcher = vi
+      .fn()
+      .mockImplementationOnce(timedOut)
+      .mockResolvedValueOnce(json(capabilities))
+      .mockResolvedValueOnce(json(wireDecision(), 201));
+    vi.stubGlobal("fetch", fetcher);
+    // Without capabilities to fall back on, the read is retried within the start's budget.
+    const first = startPlaybackV2(config, fixtureStartRequestV3());
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await first).toMatchObject({ outcome: "playable" });
+    // Once they are stale, a refresh that times out starts with the last ones at once.
+    vi.advanceTimersByTime(61_000);
+    fetcher.mockImplementationOnce(timedOut).mockResolvedValueOnce(json(wireDecision(), 201));
+    expect(await startPlaybackV2(config, fixtureStartRequestV3())).toMatchObject({
+      outcome: "playable",
+    });
+    expect(JSON.parse(fetcher.mock.calls[4]![1].body).installation_id).toBe(
+      capabilities.installation_id,
+    );
+  });
+
   it("memoizes capabilities per origin and forces a refresh on demand", async () => {
     const fetcher = vi.fn().mockImplementation(async () => json(capabilities));
     vi.stubGlobal("fetch", fetcher);

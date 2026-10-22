@@ -2536,7 +2536,11 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     await waitFor(() => expect(result.current.planRevision).toBe(1));
 
     act(() => result.current.recoverFromFailure({ classification: "startup_timeout" }, 0));
-    await waitFor(() => expect(result.current.error).toBe("Failed to fetch"));
+    await waitFor(() =>
+      expect(result.current.error).toBe(
+        "Silo couldn't reach the server. Check your connection, then try again.",
+      ),
+    );
     expect(result.current.connectionStatus).toBe("connected");
     expect(harness.replanBodies).toHaveLength(1);
 
