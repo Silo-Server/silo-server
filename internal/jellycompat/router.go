@@ -504,7 +504,8 @@ func withDefaults(deps Dependencies) Dependencies {
 	// from creation, not sliding/idle: the session need not outlive its token
 	// while token re-mint is unimplemented, and at 6h long content (audiobooks,
 	// movies) and paused-overnight sessions expired mid-playback even though the
-	// stream token was still valid. Overridable per-deployment via config.
+	// stream token was still valid. jellyfin_compat.playback_session_ttl
+	// defaults to the same 24h and replaces it when an admin sets another value.
 	playbackTTL := playback.MaxTokenTTL
 	if deps.Config != nil && deps.Config.JellyfinCompat.PlaybackSessionTTL > 0 {
 		playbackTTL = deps.Config.JellyfinCompat.PlaybackSessionTTL

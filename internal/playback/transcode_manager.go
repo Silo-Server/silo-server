@@ -17,6 +17,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -1252,7 +1253,7 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 		return fmt.Errorf("sign remote transcode delete: %w", err)
 	}
 
-	resp, err := remoteTranscodeControlClient.Do(req)
+	resp, err := telemetry.DoTrustedNode(remoteTranscodeControlClient, req, "transcode_stop")
 	if err != nil {
 		return fmt.Errorf("send remote transcode delete: %w", err)
 	}

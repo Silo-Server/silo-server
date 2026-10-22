@@ -514,6 +514,10 @@ const DefaultJellyfinWebVersion = "12.1"
 const DefaultJellyfinWebInstallDir = "/var/lib/silo/compat/jellyfin-web"
 const DefaultJellyfinWebDir = DefaultJellyfinWebInstallDir + "/current"
 
+// defaultJellyfinCompatPlaybackSessionTTL matches playback.MaxTokenTTL, the
+// lifetime the compat router gives a play session when nothing overrides it.
+const defaultJellyfinCompatPlaybackSessionTTL = "24h"
+
 // parseDuration parses a duration string that supports Go's time.ParseDuration
 // formats plus a custom "Nd" format for days.
 func parseDuration(s string) (time.Duration, error) {
@@ -607,7 +611,7 @@ func setDefaults() *configRaw {
 			WebDir:                DefaultJellyfinWebDir,
 			WebInstallDir:         DefaultJellyfinWebInstallDir,
 			SessionTTL:            "87600h",
-			PlaybackSessionTTL:    "6h",
+			PlaybackSessionTTL:    defaultJellyfinCompatPlaybackSessionTTL,
 		},
 	}
 }

@@ -167,8 +167,14 @@ are canonical instants. Object keys, uploader identity, and upstream failure
 diagnostics are not returned. Failures use the standard native Problem Details
 contract. A `subtitle_id` that is not in the shape the provider's search returns
 is refused with `422` `validation_failed` at `body.subtitle_id` before the
-provider is contacted. SubDL result files are fetched only from the SubDL
+provider is contacted. SubSource and OpenSubtitles API requests do not follow
+redirects to another host, so the SubSource API key and the OpenSubtitles login
+are sent only to the provider. SubDL result files are fetched only from the SubDL
 download host, and SubDL requests do not follow redirects to another host.
+OpenSubtitles result files are fetched only from public addresses, including
+every redirect; a file link on the server's own network fails the download like
+any other provider error (see
+[outbound address guard](architecture/outbound-address-guard.md#subtitle-downloads)).
 
 This operation is `non_retryable`. Each request contacts the provider before
 stored-content deduplication. Deduplication can reuse identical content but does
