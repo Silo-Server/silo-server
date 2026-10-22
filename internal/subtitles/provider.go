@@ -1,7 +1,14 @@
 // internal/subtitles/provider.go
 package subtitles
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+)
 
 // Provider defines the interface that each subtitle source must implement.
 type Provider interface {
@@ -23,4 +30,23 @@ type BlobStore interface {
 	Put(ctx context.Context, key string, data []byte) error
 	Get(ctx context.Context, key string) ([]byte, error)
 	Delete(ctx context.Context, key string) error
+}
+
+// SameOriginRedirects is the redirect policy for provider API clients. A
+// request follows redirects only on the scheme and host it started on, so a
+// provider reply cannot send the account's key or login, or the server
+// itself, to another host.
+func SameOriginRedirects(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if !SameOrigin(req.URL, via[0].URL) || req.URL.User != nil {
+		return fmt.Errorf("refused redirect off %s", via[0].URL.Host)
+	}
+	return nil
+}
+
+// SameOrigin reports whether a and b have the same scheme and host.
+func SameOrigin(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
 }
