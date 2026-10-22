@@ -56,7 +56,7 @@ import { getPersistedVolume, persistVolume } from "./VolumeControl";
 import { playerV2 } from "../player-v2";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { lowerQualityOption, qualityOptionsFromPlanV3 } from "../playback-info";
-import { autoQualityLabel, qualityReasonMenuLine } from "../quality-reasons";
+import { autoQualityLabel, playingQualityLine, qualityReasonMenuLine } from "../quality-reasons";
 import { preconnectToStreamOrigin } from "../stream-url";
 import { WatchTogetherPanel } from "./WatchTogetherPanel";
 import { readPlanInvalidatedPayload, VIDEO_PLAYBACK_COMMANDS } from "../realtime-protocol";
@@ -5444,6 +5444,7 @@ export function VideoPlayer({
           activeQualityId={activeQualityId}
           activeQuality={plan.active_quality}
           autoQualityLabel={autoQualityLabel(plan)}
+          qualityPlayingLine={playingQualityLine(plan)}
           qualityReasonLine={qualityReasonLine}
           isTranscoding={replanning}
           qualityError={replanError}

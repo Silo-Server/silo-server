@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { fixturePlanV3 } from "./protocol-v3.fixtures";
 import { FEATURE_PLAN_QUALITY_REASONS_V3, type QualityReasonV3 } from "./protocol-v3";
-import { autoQualityLabel, qualityReasonMenuLine, qualityReasonStatsLine } from "./quality-reasons";
+import {
+  autoQualityLabel,
+  playingQuality,
+  qualityReasonMenuLine,
+  qualityReasonStatsLine,
+} from "./quality-reasons";
 
 const advertised = [FEATURE_PLAN_QUALITY_REASONS_V3];
 
@@ -108,5 +113,54 @@ describe("quality reasons", () => {
     { control: "Auto" },
   ])("names $width x $height as $control", ({ width, height, control }) => {
     expect(autoQualityLabel(planWith(undefined, { width, height }))).toBe(control);
+  });
+
+  // Each figure comes from the effective recipe, else the source.
+  it.each<{
+    name: string;
+    recipe: { width?: number; height?: number; bitrate_kbps?: number };
+    source: { width?: number; height?: number; bitrate_kbps?: number };
+    playing: string | null;
+  }>([
+    {
+      name: "the encode's frame and rate",
+      recipe: { width: 1920, height: 800, bitrate_kbps: 6000 },
+      source: { width: 3840, height: 1600, bitrate_kbps: 60000 },
+      playing: "1080p · 6 Mbps",
+    },
+    {
+      name: "the source's frame and rate when the recipe names neither",
+      recipe: {},
+      source: { width: 3840, height: 1600, bitrate_kbps: 58400 },
+      playing: "4K · 58.4 Mbps",
+    },
+    {
+      name: "the encode's frame with the source's rate",
+      recipe: { width: 1280, height: 536 },
+      source: { width: 1920, height: 800, bitrate_kbps: 9000 },
+      playing: "720p · 9 Mbps",
+    },
+    {
+      name: "no rate anywhere",
+      recipe: { width: 1920, height: 1080 },
+      source: {},
+      playing: "1080p",
+    },
+    {
+      name: "no frame size anywhere",
+      recipe: { bitrate_kbps: 6000 },
+      source: { bitrate_kbps: 9000 },
+      playing: null,
+    },
+  ])("plays $name", ({ recipe, source, playing }) => {
+    const plan = fixturePlanV3({ effective_recipe: recipe });
+    plan.source = {
+      ...plan.source,
+      width: undefined,
+      height: undefined,
+      bitrate_kbps: undefined,
+      ...source,
+    };
+    expect(playingQuality(plan)).toBe(playing);
   });
 });

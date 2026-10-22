@@ -17,7 +17,7 @@ import {
   TRANSFORMATION_AUDIO_TO_AAC_V3,
   TRANSFORMATION_VIDEO_TO_H264_V3,
 } from "./protocol-v3";
-import { formatQualityBitrate, qualityReasonStatsLine } from "./quality-reasons";
+import { formatQualityBitrate, playingQuality, qualityReasonStatsLine } from "./quality-reasons";
 import type { PlayerAudioTrack, PlayerFileVersion, PlayerVideoTrack, QualityOption } from "./types";
 
 export interface RuntimePlaybackStats {
@@ -68,6 +68,7 @@ export function buildPlaybackInfoSections({
     requestedVersion.file_id !== currentSourceVersion.file_id
       ? formatRequestedSourceVersion(requestedVersion)
       : null;
+  const playing = playingQuality(plan);
   const reason = qualityReasonStatsLine(plan, serverFeatures);
 
   return [
@@ -76,6 +77,7 @@ export function buildPlaybackInfoSections({
       rows: [
         { label: "Player", value: browserEngine ? "Browser decoder" : "HTML Video Player" },
         { label: "Play method", value: formatDelivery(plan.delivery) },
+        ...(playing ? [{ label: "Playing", value: playing }] : []),
         ...(reason ? [{ label: "Reason", value: reason }] : []),
         { label: "Protocol", value: formatProtocol(streamUrl) },
         { label: "Stream type", value: formatStreamType(plan) },

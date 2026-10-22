@@ -21,9 +21,10 @@ interface QualityMenuProps {
   /** The trigger's label while Auto is lit, naming what Auto delivers. */
   autoLabel?: string;
   /**
-   * Why the plan delivers its quality: under the checked row, or above the
-   * rows when none is checked.
+   * What the plan serves, then why: under the checked row in place of its
+   * bitrate, or above the rows when none is checked.
    */
+  playingLine?: string | null;
   reasonLine?: string | null;
   isTranscoding: boolean;
   error: string | null;
@@ -41,6 +42,7 @@ export function QualityMenu({
   activeId,
   activeQuality,
   autoLabel,
+  playingLine,
   reasonLine,
   isTranscoding,
   error,
@@ -83,6 +85,7 @@ export function QualityMenu({
 
   const menuItemsRef = useRef<(HTMLButtonElement | null)[]>([]);
   const qualityHeadingId = useId();
+  const playingId = useId();
   const reasonId = useId();
 
   const handleMenuKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -127,9 +130,12 @@ export function QualityMenu({
 
   const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, activeQuality);
   const activeOption = options.find((option) => option.id === resolvedActiveId);
-  // A switch in flight still has the old plan's reason; the trigger shows
-  // "…" until the new plan arrives, and the line waits for it too.
+  // A switch in flight still has the old plan; the trigger shows "…" until
+  // the new plan arrives, and the Playing and reason lines wait for it too.
+  const shownPlaying = isTranscoding ? null : playingLine;
   const shownReason = isTranscoding ? null : reasonLine;
+  const describedBy =
+    [shownPlaying && playingId, shownReason && reasonId].filter(Boolean).join(" ") || undefined;
   let sourceLabel: string | null = null;
   if (showQuality) {
     // The Auto row keeps its own wording; the trigger names what Auto plays.
@@ -253,20 +259,22 @@ export function QualityMenu({
               <div
                 role="group"
                 aria-labelledby={qualityHeadingId}
-                aria-describedby={shownReason && !activeOption ? reasonId : undefined}
+                aria-describedby={activeOption ? undefined : describedBy}
               >
-                {/* With no checked row, the reason explains the menu as a whole. */}
-                {shownReason && !activeOption && (
-                  <p id={reasonId} className="max-w-64 px-3 pb-1 text-xs text-white/50">
-                    {shownReason}
-                  </p>
+                {/* With no checked row, the lines explain the menu as a whole. */}
+                {!activeOption && (shownPlaying || shownReason) && (
+                  <div className="max-w-64 px-3 pb-1 text-xs text-white/50">
+                    {shownPlaying && <p id={playingId}>{shownPlaying}</p>}
+                    {shownReason && <p id={reasonId}>{shownReason}</p>}
+                  </div>
                 )}
                 {options.map((opt) => {
                   const idx = menuItemIndex++;
                   const checked = opt.id === resolvedActiveId;
-                  // The reason is the checked row's description, not part of
+                  // The lines are the checked row's description, not part of
                   // its name.
-                  const describedReason = checked ? shownReason : null;
+                  const rowPlaying = checked ? shownPlaying : null;
+                  const rowReason = checked ? shownReason : null;
                   return (
                     <button
                       key={opt.id}
@@ -279,23 +287,34 @@ export function QualityMenu({
                         checked ? "text-white" : "text-white/70"
                       }`}
                       aria-current={checked ? "true" : undefined}
-                      aria-describedby={describedReason ? reasonId : undefined}
+                      aria-describedby={checked ? describedBy : undefined}
                       onClick={() => handleSelect(opt.id)}
                     >
                       <span className="flex min-w-0 flex-col">
                         <span>{opt.label}</span>
-                        {describedReason && (
+                        {rowPlaying && (
+                          <span
+                            id={playingId}
+                            aria-hidden="true"
+                            className="max-w-56 text-xs text-white/50"
+                          >
+                            {rowPlaying}
+                          </span>
+                        )}
+                        {rowReason && (
                           <span
                             id={reasonId}
                             aria-hidden="true"
                             className="max-w-56 text-xs text-white/50"
                           >
-                            {describedReason}
+                            {rowReason}
                           </span>
                         )}
                       </span>
                       <span className="flex items-center gap-2">
-                        <span className="text-xs text-white/40">{opt.sublabel}</span>
+                        {!rowPlaying && (
+                          <span className="text-xs text-white/40">{opt.sublabel}</span>
+                        )}
                         {opt.id === resolvedActiveId && (
                           <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-white text-black">
                             <Check className="size-3" strokeWidth={3} aria-hidden="true" />

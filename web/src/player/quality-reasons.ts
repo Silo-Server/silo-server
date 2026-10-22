@@ -68,11 +68,35 @@ export function resolutionClassLabel(width: number, height: number): string {
 
 /** The quality control's label while Auto plays: Auto and what it delivers. */
 export function autoQualityLabel(plan: PlanV3): string {
+  const resolution = deliveredResolutionLabel(plan);
+  return resolution ? `Auto · ${resolution}` : "Auto";
+}
+
+/**
+ * What the plan serves, as "1080p · 6 Mbps": the delivered frame's class and
+ * rate, each from the effective recipe or else the source. Null without a
+ * frame size; the rate is left off when neither names one.
+ */
+export function playingQuality(plan: PlanV3): string | null {
+  const resolution = deliveredResolutionLabel(plan);
+  if (!resolution) return null;
+  const recipeRate = plan.effective_recipe.bitrate_kbps;
+  const rate = formatQualityBitrate(isPositive(recipeRate) ? recipeRate : plan.source.bitrate_kbps);
+  return rate ? `${resolution} · ${rate}` : resolution;
+}
+
+/** The quality menu's line naming what the plan serves. */
+export function playingQualityLine(plan: PlanV3): string | null {
+  const playing = playingQuality(plan);
+  return playing ? `Playing ${playing}` : null;
+}
+
+function deliveredResolutionLabel(plan: PlanV3): string | null {
   const recipe = plan.effective_recipe;
   const [width, height] = isPositive(recipe.height)
     ? [recipe.width ?? 0, recipe.height]
     : [plan.source.width ?? 0, plan.source.height];
-  return isPositive(height) ? `Auto · ${resolutionClassLabel(width, height)}` : "Auto";
+  return isPositive(height) ? resolutionClassLabel(width, height) : null;
 }
 
 /**
