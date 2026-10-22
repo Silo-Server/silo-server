@@ -548,8 +548,11 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	combined := ContinueTypeAllowsNextUp(continueType) && !resolved.SuppressNextUp &&
 		NextUpMode(ctx, store, f.AdminDefaults, profileID) == NextUpModeCombined
 
+	// Home rows show one card per series, separate or combined with next up.
+	// Callers that suppress next up want every resume point instead.
+	collapseSeries := !resolved.SuppressNextUp
 	dropped := f.activeDroppedSeries(ctx, userID, profileID)
-	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, combined, orderedItems, itemMeta, completedCache,
+	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, collapseSeries, orderedItems, itemMeta, completedCache,
 		func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 			entries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
 			if err != nil {
@@ -612,8 +615,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 // past the requested limit matters because dismissal filtering and
 // library/access scoping happen after the source query: trimming at the
 // source LIMIT would under-fill the section whenever dismissals exist. With
-// collapseSeries, a series' in-progress episodes count as one card, as the
-// combined row shows them.
+// collapseSeries, a series' in-progress episodes count as one card.
 func (f *Fetcher) collectContinueProgressItems(
 	ctx context.Context,
 	store userstore.UserStore,
