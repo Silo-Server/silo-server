@@ -86,7 +86,8 @@ export function RowLine({
             // Phones have no room for the tag next to the name.
             <span className="text-warning font-semibold sm:hidden">
               <Star className="mr-1 inline size-3 align-[-1px]" aria-hidden />
-              {row.webOnly ? "Hero banner · Web only" : "Hero banner"}
+              {/* The short label fits the phone line, which the description shares. */}
+              {row.webOnly ? "Web-only hero" : "Hero banner"}
               <MetaDot />
             </span>
           ) : null}
