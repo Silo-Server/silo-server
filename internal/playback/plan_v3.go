@@ -90,6 +90,9 @@ type PlannerInputV3 struct {
 	Now                         time.Time
 	AttemptedKeys               []string
 	AdditionalSubtitles         []SubtitleInventoryEntryV3
+	// LocalNetwork reports that the request came from the server's local
+	// network (streamlocation.Local). False is treated as remote.
+	LocalNetwork bool
 }
 
 // SourceExecutionMetadataV3 is the immutable source probe snapshot used to
@@ -1216,10 +1219,13 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if hlsRegistry == nil || !hlsRegistry.Available(TransformationVideoToH264V3) || !hlsRegistry.Available(TransformationAudioToAACV3) {
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
-	if !quality.ExplicitRung {
-		// An automatic encode never spends more than the best menu rung of
-		// its class. A conversion at the source's own size starts from the
-		// source's bitrate, which for a remux can be 100 Mbps.
+	// An automatic encode never spends more than the best menu rung of its
+	// class. A conversion at the source's own size starts from the source's
+	// bitrate, which for a remux can be 100 Mbps. On the local network with
+	// neither an estimate nor a cap, nothing says the link is short, so a
+	// conversion or a burn-in keeps the source's bitrate.
+	unbounded := input.LocalNetwork && input.Request.BandwidthEstimateKbps == nil && optionalValueV3(input.Request.BandwidthCapKbps) <= 0 && input.ServerBitrateCapKbps <= 0
+	if !quality.ExplicitRung && !unbounded {
 		outputClass := ladderClassForSize(quality.Width, quality.Height)
 		if quality.PreservesSource {
 			outputClass = ladderClassForSize(0, quality.Height)
