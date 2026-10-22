@@ -357,12 +357,14 @@ source: the one the playlist request names, else the most recent. With no
 such play, or when plays cannot be read, the lines carry no credential.
 Sheets are media requests (see below); the playlist requires a login/API
 token. Both pick the version from `mediaSourceId`, else from a media-source
-id in the item position, else the version this token is playing for the
-item (Swiftfin and Findroid send no `mediaSourceId`), preferring the play a
-`PlaySessionId` names, else the default version, and serve only versions
-the account can see. The selected playback file is persisted in compat
-session state, so previews follow that source across API replicas and
-restarts. An index past the last sheet answers `404`.
+id in the item position, else, for a sheet a `PlaySessionId` authorized, the
+version that negotiation selected, else the version this token is playing
+for the item (Swiftfin and Findroid send no `mediaSourceId`), else the
+default version. They serve only versions the account can see, and a sheet
+a `PlaySessionId` authorized only a version that negotiation offered. The
+selected playback file is persisted in compat session state, so previews
+follow that source across API replicas and restarts. An index past the last
+sheet answers `404`.
 
 The managed Jellyfin Web build opts into `SiloSeekReanchor=true` on
 `PlaybackInfo`. For a copied-video HLS source, the response echoes

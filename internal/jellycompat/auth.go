@@ -25,7 +25,12 @@ import (
 
 type sessionContextKey string
 
-const compatSessionKey sessionContextKey = "jellycompat_session"
+const (
+	compatSessionKey sessionContextKey = "jellycompat_session"
+	// compatPlaybackGrantKey carries the negotiation whose PlaySessionId
+	// authorized a media request, when one did.
+	compatPlaybackGrantKey sessionContextKey = "jellycompat_playback_grant"
+)
 
 var mediaBrowserTokenPattern = regexp.MustCompile(`(?i)token="?([^",\s]+)"?`)
 
@@ -355,7 +360,7 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 						return
 					}
 					if ok {
-						serveWithSession(next, w, r, session)
+						serveWithSession(next, w, r.WithContext(context.WithValue(r.Context(), compatPlaybackGrantKey, playSession)), session)
 						return
 					}
 					writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
@@ -513,6 +518,13 @@ func playbackGrantCovers(session *PlaybackSession, routeItemID, sourceID string)
 		}
 	}
 	return false
+}
+
+// playbackGrantFromContext returns the negotiation whose PlaySessionId
+// authorized the request, or nil when a token did.
+func playbackGrantFromContext(ctx context.Context) *PlaybackSession {
+	grant, _ := ctx.Value(compatPlaybackGrantKey).(*PlaybackSession)
+	return grant
 }
 
 // SessionFromContext returns the authenticated compat session, if present.

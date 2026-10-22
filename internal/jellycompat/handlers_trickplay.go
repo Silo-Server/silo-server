@@ -138,9 +138,11 @@ func trickplayPlaylist(grid catalog.TrickplayGrid, query string) string {
 // trickplayVersion resolves the file whose previews a request names, among
 // the item's versions this account can see, and answers the request itself
 // when there is none. The file is the mediaSourceId query's, else the route's
-// when it names a media source, else the one this token is playing for the
-// item (Swiftfin and Findroid send no mediaSourceId), preferring the play the
-// request's PlaySessionId names, else the item's default version.
+// when it names a media source, else the one the authorizing PlaySessionId's
+// negotiation selected, else the one this token is playing for the item
+// (Swiftfin and Findroid send no mediaSourceId), else the item's default
+// version. A request a PlaySessionId authorized gets only a version that
+// negotiation offered.
 func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Request, session *Session) (catalog.FileVersion, bool) {
 	if h.content == nil {
 		writeError(w, http.StatusServiceUnavailable, "Unavailable", "Catalog unavailable")
@@ -168,14 +170,14 @@ func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
 		return catalog.FileVersion{}, false
 	}
-	if fileID == 0 {
-		fileID = int64(h.playingFile(r.Context(), session, contentID, newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")))
-	}
-	if fileID == 0 {
-		return detail.Versions[0], true
+	grant := playbackGrantFromContext(r.Context())
+	if fileID == 0 && grant != nil {
+		fileID = int64(negotiatedFile(grant))
+	} else if fileID == 0 {
+		fileID = int64(h.playingFile(r.Context(), session, contentID))
 	}
 	for _, version := range detail.Versions {
-		if int64(version.FileID) == fileID {
+		if (fileID == 0 || int64(version.FileID) == fileID) && (grant == nil || negotiationOffersFile(grant, version.FileID)) {
 			return version, true
 		}
 	}
@@ -219,13 +221,33 @@ func (h *PlaybackHandler) trickplayGrant(ctx context.Context, session *Session, 
 	return grant.ID
 }
 
+// negotiatedFile is the file a negotiation selected, either during playback or
+// by offering one source, or zero when it offered several and none was chosen.
+func negotiatedFile(play *PlaybackSession) int {
+	if play.UpstreamMediaFileID != 0 {
+		return play.UpstreamMediaFileID
+	}
+	// A source-specific PlaybackInfo response already identifies the file
+	// before the first stream request creates an upstream session.
+	if len(play.MediaSources) == 1 {
+		return play.MediaSources[0].FileID
+	}
+	return 0
+}
+
+// negotiationOffersFile reports whether play offered fileID as a source.
+func negotiationOffersFile(play *PlaybackSession, fileID int) bool {
+	for _, source := range play.MediaSources {
+		if source.FileID == fileID {
+			return true
+		}
+	}
+	return false
+}
+
 // playingFile is the file this token most recently selected for contentID,
 // either during negotiation or playback, or zero when no source is selected.
-// A play named by playSessionID wins over a more recent one, so a sheet
-// request authorized by that play's grant stays on its sources: when the named
-// play has not selected a file, the answer is zero (the default version, which
-// a negotiation of every version includes), not another play's file.
-func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, contentID, playSessionID string) int {
+func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, contentID string) int {
 	lister, ok := h.playbackStore.(activePlayLister)
 	if !ok {
 		return 0
@@ -237,16 +259,10 @@ func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, con
 	fileID := 0
 	var latest PlaybackSession
 	for _, play := range plays {
-		named := playSessionID != "" && play.ID == playSessionID
-		if play.ItemID != contentID || (!named && fileID != 0 && !play.UpdatedAt.After(latest.UpdatedAt)) {
+		if play.ItemID != contentID || (fileID != 0 && !play.UpdatedAt.After(latest.UpdatedAt)) {
 			continue
 		}
-		selected := play.UpstreamMediaFileID
-		// A source-specific PlaybackInfo response already identifies the file
-		// before the first stream request creates an upstream session.
-		if selected == 0 && len(play.MediaSources) == 1 {
-			selected = play.MediaSources[0].FileID
-		}
+		selected := negotiatedFile(&play)
 		// Existing negotiations written before this field was introduced can
 		// still resolve on their owning process.
 		if selected == 0 && play.UpstreamSessionID != "" && h.sessionMgr != nil {
@@ -255,13 +271,9 @@ func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, con
 				selected = native.MediaFileID
 			}
 		}
-		if named {
-			return selected
+		if selected != 0 {
+			fileID, latest = selected, play
 		}
-		if selected == 0 {
-			continue
-		}
-		fileID, latest = selected, play
 	}
 	return fileID
 }
