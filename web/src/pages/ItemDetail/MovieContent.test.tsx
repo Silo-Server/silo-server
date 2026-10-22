@@ -229,7 +229,8 @@ describe("MovieContent", () => {
     mocks.useCurrentProfile.mockReturnValue({ profile: null });
   });
 
-  it("updates hero metadata when the selected version changes", () => {
+  // A pick is pinned at start (S3); the default version may still be swapped.
+  it("updates hero metadata and marks the version picked when the viewer selects one", () => {
     const standard = movieVersion({
       file_id: 1,
       resolution: "2160p",
@@ -256,6 +257,7 @@ describe("MovieContent", () => {
     );
 
     expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "2h 43m" });
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ versionPicked: false });
     expect(mocks.capturedQualityBadgesProps.value).toEqual({
       summary: {
         durationMinutes: 163,
@@ -273,6 +275,7 @@ describe("MovieContent", () => {
     });
 
     expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "3h 16m" });
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ versionPicked: true });
     expect(mocks.capturedQualityBadgesProps.value).toEqual({
       summary: {
         durationMinutes: 196,

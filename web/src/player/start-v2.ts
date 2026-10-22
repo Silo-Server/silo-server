@@ -213,7 +213,7 @@ function startBody(cap: PlaybackCapabilitiesV2, body: StartRequestV3) {
   if (!cap.protocol_versions.includes(3))
     throw new Error("This server does not offer playback protocol v3");
   if (body.allow_alternate_versions === false && !cap.features.includes("fixed_media_file_v1"))
-    throw new Error("This server needs an update to keep Watch Party viewers on the same version.");
+    throw new Error("This server needs an update to keep playback on the same version.");
   const installationId = cap.installation_id;
   const payload = JSON.stringify({
     ...bufferingQualityWire(body, cap.features),

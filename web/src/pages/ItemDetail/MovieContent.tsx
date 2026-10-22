@@ -116,13 +116,14 @@ export default function MovieContent({
     ],
   );
   const [manualSelectedFileId, setManualSelectedFileId] = useState<number | null>(null);
-  const selectedVersion = useMemo(
+  const pickedVersion = useMemo(
     () =>
-      (manualSelectedFileId != null
+      manualSelectedFileId != null
         ? (sortedVersions.find((version) => version.file_id === manualSelectedFileId) ?? null)
-        : null) ?? defaultSelectedVersion,
-    [defaultSelectedVersion, manualSelectedFileId, sortedVersions],
+        : null,
+    [manualSelectedFileId, sortedVersions],
   );
+  const selectedVersion = pickedVersion ?? defaultSelectedVersion;
   const selectedMediaSummary = useMemo(
     () => resolveSelectedMediaSummary(selectedVersion, item.playback_variants, item.runtime ?? 0),
     [item.playback_variants, item.runtime, selectedVersion],
@@ -339,6 +340,7 @@ export default function MovieContent({
               versions={item.versions}
               playbackVariants={item.playback_variants}
               selectedVersion={selectedVersion}
+              versionPicked={pickedVersion != null}
               onSelectVersion={handleSelectVersion}
               onDownload={
                 user?.download_allowed && item.versions.length > 0

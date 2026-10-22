@@ -271,6 +271,8 @@ export interface WatchPageProps {
   title: string;
   year?: number;
   fileId?: number;
+  /** The viewer chose fileId, so Auto must not swap in another version. */
+  versionPicked?: boolean;
   libraryId?: number;
   versions: PlayerFileVersion[];
   playbackVariants?: PlayerPlaybackVariant[];

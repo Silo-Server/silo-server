@@ -2916,6 +2916,51 @@ it("owes a Restore answered during a start that plays nothing to the next start"
   unmount();
 });
 
+// S3: Auto under any budget may swap in a lower-bitrate sibling version, so a
+// file the viewer chose, or a Watch Party's, starts with alternates refused.
+it.each([
+  { name: "a default play", party: false, picked: false, switchTo: null, sent: [undefined] },
+  { name: "a Watch Party", party: true, picked: false, switchTo: null, sent: [false] },
+  {
+    name: "a version picked before Play",
+    party: false,
+    picked: true,
+    switchTo: null,
+    sent: [false],
+  },
+  { name: "a version switch", party: false, picked: false, switchTo: 99, sent: [undefined, false] },
+])("pins the file of $name", async ({ party, picked, switchTo, sent }) => {
+  const server = recordingServer();
+  const { result, unmount } = renderHook(
+    () =>
+      usePlaybackSession(
+        "request-1",
+        [],
+        [],
+        7,
+        0,
+        false,
+        "auto",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        !party,
+        "always",
+        picked,
+      ),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.planRevision).toBe(1));
+  if (switchTo !== null) act(() => result.current.switchVersion(switchTo, 120));
+  await waitFor(() => expect(server.bodiesTo("/playback/start")).toHaveLength(sent.length));
+  expect(server.bodiesTo("/playback/start").map((body) => body.allow_alternate_versions)).toEqual(
+    sent,
+  );
+  unmount();
+});
+
 // D12/D16: a version switch tells its caller whether it adopted a plan.
 it("tells a version switch's caller the adopted revision, or none", async () => {
   recordingServer();

@@ -150,6 +150,7 @@ function WatchPagePlayer({
   year,
   playbackRequestKey,
   fileId,
+  versionPicked = false,
   libraryId,
   versions,
   playbackVariants = [],
@@ -221,6 +222,7 @@ function WatchPagePlayer({
     initialBitmapSubtitleTrackIndexByFileId,
     !watchTogetherRoomId,
     bufferingMode,
+    versionPicked,
   );
 
   const fallbackHandledRef = useRef<string | null>(null);

@@ -430,6 +430,8 @@ export function usePlaybackSession(
   allowAlternateVersions = true,
   /** Effective profile mode, seeded by the host without waiting for settings. */
   bufferingMode: BufferingMode = "always",
+  /** The viewer chose `fileId`; see `versionPinnedRef`. */
+  versionPicked = false,
 ): UsePlaybackSessionResult {
   const config = usePlayerConfig();
   const probe = useCodecDetection();
@@ -535,6 +537,10 @@ export function usePlaybackSession(
   const planAutoPlayRef = useRef(true);
   const planTransportShownRef = useRef(false);
   const switchingRef = useRef(false);
+  // Whether the file playing is one the viewer chose, before Play or with a
+  // version switch. Its starts send `allow_alternate_versions: false`, so Auto
+  // under a budget cannot swap in a lower-bitrate sibling.
+  const versionPinnedRef = useRef(false);
   const loadSequenceRef = useRef(0);
 
   // v3 identity. `playback_attempt_id` spans one whole attempt chain (a start
@@ -858,7 +864,7 @@ export function usePlaybackSession(
         profileId: config.getProfileId() ?? "",
         playbackAttemptId,
         qualityPreference: qualityRef.current,
-        allowAlternateVersions,
+        allowAlternateVersions: allowAlternateVersions && !versionPinnedRef.current,
         position,
         forceStartPosition,
         explicitAudioTrackIndex: audioTrackIndex,
@@ -1199,6 +1205,7 @@ export function usePlaybackSession(
     }
     activeRequestKeyRef.current = requestKey;
     activeCapabilityRequestKeyRef.current = capabilityRequestKey;
+    versionPinnedRef.current = versionPicked;
     qualityRef.current = normalizeQualityPreferenceV3(qualityPreference);
     playbackPositionRef.current = initialPosition;
     const intentAt = takePlaybackIntent(requestKey);
@@ -1230,6 +1237,7 @@ export function usePlaybackSession(
     loadSession,
     qualityPreference,
     requestKey,
+    versionPicked,
   ]);
 
   // Clean up session on unmount.
@@ -2019,6 +2027,7 @@ export function usePlaybackSession(
         return;
       }
       switchingRef.current = true;
+      versionPinnedRef.current = true;
       let adopted = false;
       // The viewer picked the version in the player: the new attempt's first
       // frame is timed from here.

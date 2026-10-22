@@ -217,7 +217,8 @@ function buildWatchLocationState(request: WatchRouteRequest) {
     request.returnHref == null &&
     request.audioTrackIndex == null &&
     request.prePlaySubtitleMode == null &&
-    request.prePlaySubtitleSelection == null
+    request.prePlaySubtitleSelection == null &&
+    !request.versionPicked
   ) {
     return undefined;
   }
@@ -227,6 +228,7 @@ function buildWatchLocationState(request: WatchRouteRequest) {
     audioTrackIndex: request.audioTrackIndex,
     prePlaySubtitleMode: request.prePlaySubtitleMode,
     prePlaySubtitleSelection: request.prePlaySubtitleSelection ?? null,
+    versionPicked: request.versionPicked,
   };
 }
 
@@ -961,6 +963,8 @@ function WatchPlaybackHostContent() {
           {
             contentId: activeRequest.contentId,
             fileId: nextPartFileId,
+            // The next part of a picked version is still the viewer's pick.
+            versionPicked: activeRequest.versionPicked,
             libraryId: activeRequest.libraryId,
             roomId: activeRequest.roomId,
             roomToken: activeRequest.roomToken,
