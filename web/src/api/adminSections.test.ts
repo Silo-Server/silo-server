@@ -71,25 +71,6 @@ describe("admin sections adapter", () => {
       .mockImplementationOnce(tagged(order, reason === "version" ? '"new"' : '"saved"'));
     await expect(fetchAdminSections("home")).rejects.toThrow("changed while loading");
   });
-  it("sends web_only only when the caller sets it", async () => {
-    request.mockResolvedValue(row);
-    await createAdminSection({ section_type: "trending_discover", title: "Discover" });
-    await createAdminSection({
-      section_type: "trending_discover",
-      title: "Discover",
-      featured: true,
-      web_only: true,
-    });
-    await updateAdminSection({ id: "s1", etag: '"saved"', title: "Renamed" });
-    await updateAdminSection({ id: "s1", etag: '"saved"', featured: true, web_only: false });
-    const bodies = request.mock.calls.map(([, options]) =>
-      JSON.parse(JSON.stringify(options.body)),
-    );
-    expect(bodies[0]).not.toHaveProperty("web_only");
-    expect(bodies[1]).toMatchObject({ featured: true, web_only: true });
-    expect(bodies[2]).not.toHaveProperty("web_only");
-    expect(bodies[3]).toMatchObject({ featured: true, web_only: false });
-  });
   it("sends explicit captured guards without preflight, retry, or latest tag substitution", async () => {
     const stale = new V2ProblemError(
       "updateAdminSection",

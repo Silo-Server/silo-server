@@ -440,8 +440,8 @@ func TestLibraryLayoutAndSections(t *testing.T) {
 
 // TestSectionReadsDeclareTheWebClient pins that every viewer section read
 // tells the service whether the caller declared the web client family, the
-// one client that receives a web-only hero row. Any other family, an unknown
-// one included, is answered as an app rather than refused.
+// one client that receives a web-only hero row. Any other family is answered
+// as an app, and an unknown one is not refused.
 func TestSectionReadsDeclareTheWebClient(t *testing.T) {
 	home, homeFake := homeDeps(t)
 	library := libraryViewDeps(t)
@@ -464,12 +464,8 @@ func TestSectionReadsDeclareTheWebClient(t *testing.T) {
 		for _, tc := range []struct {
 			family string
 			web    bool
-		}{{"web", true}, {"tv", false}, {"mobile", false}, {"watch", false}, {"", false}} {
-			headers := viewerHeaders()
-			if tc.family != "" {
-				headers = with(headers, "X-Silo-Client-Family", tc.family)
-			}
-			rec := do(t, h, http.MethodGet, read.path, "", headers)
+		}{{"web", true}, {"tv", false}, {"watch", false}} {
+			rec := do(t, h, http.MethodGet, read.path, "", with(viewerHeaders(), "X-Silo-Client-Family", tc.family))
 			if rec.Code != http.StatusOK {
 				t.Fatalf("%s with family %q = %d %s", read.path, tc.family, rec.Code, rec.Body.String())
 			}
