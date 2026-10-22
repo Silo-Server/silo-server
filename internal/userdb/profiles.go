@@ -1,15 +1,11 @@
 package userdb
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 
-	"golang.org/x/crypto/bcrypt"
-
-	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -155,24 +151,21 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 }
 
 // UpdateProfile applies partial updates to a profile. Only non-nil fields
-// in the UpdateProfileInput are changed. If PIN is provided, it is bcrypt-hashed
-// before storage.
-func UpdateProfile(ctx context.Context, db *sql.DB, id string, u UpdateProfileInput) error {
+// in the UpdateProfileInput are changed.
+func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("beginning transaction for profile update %s: %w", id, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if err := updateProfile(ctx, tx, id, u); err != nil {
+	if err := updateProfile(tx, id, u); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// profileUpdateSet builds the SET clauses and arguments for the fields u
-// changes, hashing a new PIN.
-func profileUpdateSet(ctx context.Context, u UpdateProfileInput) ([]string, []any, error) {
+func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileInput) error {
 	var setClauses []string
 	var args []any
 
@@ -184,19 +177,9 @@ func profileUpdateSet(ctx context.Context, u UpdateProfileInput) ([]string, []an
 		setClauses = append(setClauses, "avatar = ?")
 		args = append(args, *u.Avatar)
 	}
-	if u.PIN != nil {
-		if *u.PIN == "" {
-			// Empty string clears the PIN rather than hashing an empty value.
-			setClauses = append(setClauses, "pin_hash = ?")
-			args = append(args, "")
-		} else {
-			hash, err := passwordhash.Generate(ctx, []byte(*u.PIN), bcrypt.DefaultCost)
-			if err != nil {
-				return nil, nil, fmt.Errorf("hashing PIN: %w", err)
-			}
-			setClauses = append(setClauses, "pin_hash = ?")
-			args = append(args, string(hash))
-		}
+	if u.PINHash != nil {
+		setClauses = append(setClauses, "pin_hash = ?")
+		args = append(args, *u.PINHash)
 		// The profiles_pin_revision trigger advances pin_revision whenever
 		// pin_hash changes, which invalidates every token minted for the old
 		// PIN, and only this profile's.
@@ -262,14 +245,7 @@ func profileUpdateSet(ctx context.Context, u UpdateProfileInput) ([]string, []an
 		setClauses = append(setClauses, "max_playback_quality = ?")
 		args = append(args, *u.MaxPlaybackQuality)
 	}
-	return setClauses, args, nil
-}
 
-func updateProfile(ctx context.Context, exec preferenceSettingsExecutor, id string, u UpdateProfileInput) error {
-	setClauses, args, err := profileUpdateSet(ctx, u)
-	if err != nil {
-		return err
-	}
 	if len(setClauses) == 0 && u.AllowedLibraryIDs == nil {
 		return nil // nothing to update
 	}

@@ -48,8 +48,8 @@ func (s *SQLiteUserStore) ListProfiles(_ context.Context) ([]userstore.Profile, 
 	return ListProfiles(s.db)
 }
 
-func (s *SQLiteUserStore) UpdateProfile(ctx context.Context, id string, u userstore.UpdateProfileInput) error {
-	return UpdateProfile(ctx, s.db, id, u)
+func (s *SQLiteUserStore) UpdateProfile(_ context.Context, id string, u userstore.UpdateProfileInput) error {
+	return UpdateProfile(s.db, id, u)
 }
 
 func (s *SQLiteUserStore) DeleteProfile(_ context.Context, id string) error {

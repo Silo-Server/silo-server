@@ -40,7 +40,7 @@ func TestDeviceSettingsServiceScope(t *testing.T) {
 	if err := h.RemoveDeviceSettings(ctx, actor, "foreign-profile", "shared", true); err == nil {
 		t.Fatal("foreign profile accepted")
 	}
-	if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PIN: new("1234")}); err != nil {
+	if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PINHash: storedPIN(t, "1234")}); err != nil {
 		t.Fatal(err)
 	}
 	actor.VerifyProfile = func(string) error { return access.ErrProfileUnverified }

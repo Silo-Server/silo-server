@@ -67,9 +67,12 @@ type DeviceEntry struct {
 
 // UpdateProfileInput holds optional fields for updating a profile.
 type UpdateProfileInput struct {
-	Name             *string
-	Avatar           *string
-	PIN              *string
+	Name   *string
+	Avatar *string
+	// PINHash replaces the profile's PIN: a bcrypt hash the caller made
+	// (passwordhash.Generate) before opening any transaction, or "" to remove
+	// the PIN.
+	PINHash          *string
 	IsChild          *bool
 	MaxContentRating *string
 	// MaxAdvisoryAge: nil leaves the limit untouched, 0 clears it, and a

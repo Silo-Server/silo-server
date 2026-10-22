@@ -658,10 +658,15 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
+	pinHash, err := hashProfilePIN(ctx, req.PIN)
+	if err != nil {
+		return none, err
+	}
+
 	input := userstore.UpdateProfileInput{
 		Name:                       req.Name,
 		Avatar:                     avatarRef,
-		PIN:                        req.PIN,
+		PINHash:                    pinHash,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
 		MaxAdvisoryAge:             req.MaxAdvisoryAge,
@@ -687,9 +692,6 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 	if err := h.applyProfileUpdateSettingsSync(
 		ctx, store, userID, profileID, input, settingsSync,
 	); err != nil {
-		if apiErr := busyError(err); apiErr != nil {
-			return none, apiErr
-		}
 		slog.ErrorContext(ctx, "profile update failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
@@ -1002,6 +1004,24 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to issue profile token")
 	}
 	return ProfileVerification{Valid: true, ProfileToken: token, ExpiresAt: expiresAt}, nil
+}
+
+// hashProfilePIN prepares a requested PIN for storage before the profile
+// transaction opens, as creation does, so the transaction never waits for a
+// hashing turn: its bcrypt hash, "" to remove the PIN, or nil to keep it.
+func hashProfilePIN(ctx context.Context, pin *string) (*string, error) {
+	if pin == nil || *pin == "" {
+		return pin, nil
+	}
+	raw, err := passwordhash.Generate(ctx, []byte(*pin), bcrypt.DefaultCost)
+	if apiErr := busyError(err); apiErr != nil {
+		return nil, apiErr
+	}
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
+	}
+	hash := string(raw)
+	return &hash, nil
 }
 
 // PINLockedError is the 429 a PIN check answers while the profile is locked

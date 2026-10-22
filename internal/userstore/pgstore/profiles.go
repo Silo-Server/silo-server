@@ -10,9 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/bcrypt"
 
-	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -177,7 +175,7 @@ func updateProfile(
 	var setClauses []string
 	var args []any
 	argIdx := 1
-	accessPolicyChanged := u.PIN != nil ||
+	accessPolicyChanged := u.PINHash != nil ||
 		u.IsChild != nil ||
 		u.MaxContentRating != nil ||
 		u.MaxAdvisoryAge != nil ||
@@ -198,17 +196,8 @@ func updateProfile(
 	if u.Avatar != nil {
 		addArg("avatar", *u.Avatar)
 	}
-	if u.PIN != nil {
-		if *u.PIN == "" {
-			// Empty string clears the PIN rather than hashing an empty value.
-			addArg("pin_hash", "")
-		} else {
-			hash, err := passwordhash.Generate(ctx, []byte(*u.PIN), bcrypt.DefaultCost)
-			if err != nil {
-				return fmt.Errorf("hashing PIN: %w", err)
-			}
-			addArg("pin_hash", string(hash))
-		}
+	if u.PINHash != nil {
+		addArg("pin_hash", *u.PINHash)
 		// The user_profiles_pin_revision trigger advances pin_revision in
 		// this same UPDATE whenever pin_hash changes, which invalidates every
 		// token minted for the old PIN, and only this profile's. It lives in

@@ -36,11 +36,11 @@ func actingAdminHousehold(t *testing.T, primaryPIN string) userstore.UserStore {
 		t.Fatalf("limit kid: %v", err)
 	}
 	pin := "4321"
-	if err := store.UpdateProfile(ctx, "alex", userstore.UpdateProfileInput{PIN: &pin}); err != nil {
+	if err := store.UpdateProfile(ctx, "alex", userstore.UpdateProfileInput{PINHash: storedPIN(t, pin)}); err != nil {
 		t.Fatalf("lock alex: %v", err)
 	}
 	if primaryPIN != "" {
-		if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PIN: &primaryPIN}); err != nil {
+		if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{PINHash: storedPIN(t, primaryPIN)}); err != nil {
 			t.Fatalf("lock primary: %v", err)
 		}
 	}

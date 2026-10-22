@@ -132,11 +132,11 @@ func (w *sqliteSettingMutationWriter) DeleteSettingValue(
 }
 
 func (w *sqliteSettingMutationWriter) UpdateProfile(
-	ctx context.Context,
+	_ context.Context,
 	id string,
 	u userstore.UpdateProfileInput,
 ) error {
-	return updateProfile(ctx, w.exec, id, u)
+	return updateProfile(w.exec, id, u)
 }
 
 func (w *sqliteSettingMutationWriter) CompareAndSetSettingValue(
