@@ -18424,7 +18424,7 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       updated_at: string;
-      /** @description Only the web app receives this section while it is its page's first featured section, the one the web shows as the banner: a viewer section read answers it only to a caller whose X-Silo-Client-Family is web, so the native apps, which show a featured section as a regular row, never get it. Always false on a section that is not featured. */
+      /** @description Keeps the section off every client but the web app while it is its page's first featured section, the one the web shows as the banner: a viewer section read then answers it only to a caller whose X-Silo-Client-Family is web. Once another featured section comes first, every client gets it as a regular row. Always false on a section that is not featured. */
       web_only: boolean;
     };
     AdminSectionBulkCreate: {
