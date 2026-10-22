@@ -450,7 +450,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.JellyfinCompat.SessionTTL = sessionTTL
-	playbackSessionTTL, err := durationOr(m, "jellyfin_compat.playback_session_ttl", 6*time.Hour)
+	playbackSessionTTL, err := durationOr(m, "jellyfin_compat.playback_session_ttl", 24*time.Hour)
 	if err != nil {
 		return nil, err
 	}

@@ -483,3 +483,7 @@
 ./internal/scanqueue TestCancelByLibraryStillCancelsRunningScanDB
 ./internal/scanqueue TestRequeueLeavesACancelledRunCancelledDB
 ./internal/scanqueue TestRequeueLeavesALaterClaimRunningDB
+
+# The Jellyfin play-session lifetime moves from the old 6h seed to 24h and
+# keeps a value an administrator chose.
+./migrations TestJellyfinCompatPlaySessionTTLMigrationPostgres
