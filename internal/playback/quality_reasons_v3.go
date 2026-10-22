@@ -79,9 +79,9 @@ type qualityFactsV3 struct {
 	// quality is the final quality decision for a video source; zero for
 	// audio-only sources.
 	quality QualityResultV3
-	// capEncode reports that a bitrate cap, not the quality decision, forced
-	// or bounded the encode: a source over the server cap, or an audio-only
-	// source over either cap.
+	// capEncode reports that the server cap requires an encode: the source's
+	// total rate is over it or unknown. Other limits can still decide the
+	// encode's quality.
 	capEncode        bool
 	videoUnsupported bool
 	versionPinned    bool
@@ -130,8 +130,14 @@ func qualityDecisionReasonsV3(facts qualityFactsV3, result PlannerResultV3) []Qu
 	if facts.quality.ExplicitRung {
 		add(QualityReasonV3{Code: QualityReasonUserSelectedV3})
 	}
-	if (encodesVideo || audioOnly) && (facts.quality.CapApplied || facts.capEncode || result.qualityCapBound) {
-		add(capReasonV3(facts.clientCapKbps, facts.serverCapKbps))
+	capReason := capReasonV3(facts.clientCapKbps, facts.serverCapKbps)
+	switch {
+	case audioOnly && (facts.quality.CapApplied || facts.capEncode || result.qualityCapBound):
+		add(capReason)
+	case encodesVideo && (result.qualityCapBound || facts.quality.CapApplied && (facts.quality.BudgetKbps == 0 || capReason.Kbps < facts.quality.BudgetKbps)):
+		// The cap set the encode's bitrate or class: it sits below the
+		// estimate's budget, or no estimate bounds the encode.
+		add(capReason)
 	}
 	if encodesVideo {
 		if facts.quality.OverEstimate {
@@ -154,6 +160,11 @@ func qualityDecisionReasonsV3(facts qualityFactsV3, result PlannerResultV3) []Qu
 	}
 	if result.SubtitleBurnIn {
 		add(QualityReasonV3{Code: QualityReasonSubtitleBurnInV3})
+	}
+	if encodesVideo && facts.capEncode && len(reasons) == 0 {
+		// Only the server cap forced the encode, such as a source whose
+		// total rate is unknown.
+		add(capReason)
 	}
 	if from, to := dynamicRangeTokenV3(plan.Source.DynamicRange), dynamicRangeTokenV3(plan.EffectiveRecipe.DynamicRange); !audioOnly && from != to {
 		add(QualityReasonV3{Code: QualityReasonDynamicRangeConvertedV3, From: from, To: to})

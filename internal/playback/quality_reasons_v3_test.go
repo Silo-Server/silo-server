@@ -64,6 +64,19 @@ func qualityReasonCasesV3() []qualityReasonCaseV3 {
 		{name: "the administrator's cap under the request's", serverCap: 4_000, edit: func(req *StartRequestV3, _ *models.MediaFile) {
 			req.BandwidthCapKbps = new(5_000)
 		}, want: []QualityReasonV3{{Code: QualityReasonServerCapV3, Kbps: 4_000}}},
+		// The source's video fits the cap, but its total rate is unknown, so
+		// the cap alone forces the encode.
+		{name: "the administrator's cap over a source of unknown rate", serverCap: 20_000, edit: func(_ *StartRequestV3, file *models.MediaFile) {
+			file.Bitrate = 0
+		}, want: []QualityReasonV3{{Code: QualityReasonServerCapV3, Kbps: 20_000}}},
+		// The estimate lowered the encode far below the administrator's cap,
+		// so the cap decided nothing.
+		{name: "the administrator's cap over a tighter estimate", serverCap: 8_000, edit: func(req *StartRequestV3, _ *models.MediaFile) {
+			req.BandwidthEstimateKbps = new(3_000)
+		}, want: []QualityReasonV3{{Code: QualityReasonNetworkEstimateV3, Kbps: 3_000}}},
+		{name: "the administrator's cap over a learned limit", serverCap: 8_000, learnedLimit: &BandwidthLimitV3{Kbps: 3_000, ExpiresAt: limit.ExpiresAt}, edit: func(req *StartRequestV3, _ *models.MediaFile) {
+			req.BandwidthEstimateKbps = new(3_000)
+		}, want: []QualityReasonV3{{Code: QualityReasonNetworkLearnedLimitV3, Kbps: 3_000, ExpiresAt: limit.ExpiresAt}}},
 		{name: "the estimate", edit: func(req *StartRequestV3, _ *models.MediaFile) {
 			req.BandwidthEstimateKbps = new(5_100)
 		}, want: []QualityReasonV3{{Code: QualityReasonNetworkEstimateV3, Kbps: 5_100}}},
