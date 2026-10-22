@@ -173,6 +173,10 @@
 # edit on the next read, and lists what the collection's page lists.
 ./internal/sections TestLibraryCollectionRailsMatchTheCollectionPageDB
 
+# Web-only hero rows: the web_only column keeps a featured row off every
+# caller but the web on Home and library pages, and clears with the hero.
+./internal/api/handlers TestWebOnlyHeroRowsDB
+
 # Settings: one query per batched resolution, whatever its scopes and keys.
 ./internal/userstore/pgstore TestPostgresResolutionIssuesOneQuery
 
