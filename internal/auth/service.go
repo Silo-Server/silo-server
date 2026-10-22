@@ -120,6 +120,9 @@ type Service struct {
 	// signInAttempts bounds password attempts per sign-in name; nil allows
 	// every attempt (SetSignInAttempts).
 	signInAttempts SignInAttemptLimiter
+	// sessionsRevoked runs after a password change signed the account out
+	// of its other sessions; see OnSessionsRevoked.
+	sessionsRevoked func(ctx context.Context, userID int)
 }
 
 // PluginProviderSource supplies the current auth-plugin providers. The
@@ -377,6 +380,13 @@ func (s *Service) SetProviderRecheck(r *ProviderRecheck) {
 // to sign-in, discovery and the OAuth handshake.
 func (s *Service) SetPluginProviderSource(src PluginProviderSource) {
 	s.pluginSource = src
+}
+
+// OnSessionsRevoked registers fn to run after ChangePassword signed the
+// account out of its other sessions, so every replica drops the
+// Jellyfin-compatible sessions it holds in memory.
+func (s *Service) OnSessionsRevoked(fn func(ctx context.Context, userID int)) {
+	s.sessionsRevoked = fn
 }
 
 func (s *Service) pluginProviders() []RegisteredProvider {
@@ -1372,8 +1382,10 @@ func (s *Service) PasswordChangeAvailable(ctx context.Context, userID int) (bool
 // Profile authorization and impersonation checks belong to the HTTP boundary;
 // this method owns only the account credential transition. sessionID is the
 // login session making the change: when it replaces a temporary password,
-// every other session of the account is revoked.
-func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string) error {
+// every other login session of the account is revoked. signOutOtherSessions
+// also signs the account out everywhere else, as a password reset does,
+// except sessionID.
+func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string, signOutOtherSessions bool) error {
 	user, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("getting user: %w", err)
@@ -1382,14 +1394,19 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 		return err
 	}
 
-	swap := s.users.CompareAndSwapPassword
-	if user.PasswordChangeRequired {
-		swap = func(ctx context.Context, id int, expectedHash, newPassword string) error {
-			return s.users.ReplaceTemporaryPassword(ctx, id, expectedHash, newPassword, sessionID)
-		}
+	switch {
+	case signOutOtherSessions:
+		err = s.users.ReplacePasswordSigningOutOthers(ctx, userID, user.PasswordHash, newPassword, sessionID)
+	case user.PasswordChangeRequired:
+		err = s.users.ReplaceTemporaryPassword(ctx, userID, user.PasswordHash, newPassword, sessionID)
+	default:
+		err = s.users.CompareAndSwapPassword(ctx, userID, user.PasswordHash, newPassword)
 	}
-	if err := swap(ctx, userID, user.PasswordHash, newPassword); err != nil {
+	if err != nil {
 		return fmt.Errorf("updating password: %w", err)
+	}
+	if signOutOtherSessions && s.sessionsRevoked != nil {
+		s.sessionsRevoked(ctx, userID)
 	}
 	return nil
 }
