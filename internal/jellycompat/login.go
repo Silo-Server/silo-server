@@ -169,6 +169,20 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 	if err := r.sessions.Put(session); err != nil {
 		return nil, err
 	}
+	// A profile deleted while this sign-in ran has already had its sessions
+	// purged, so re-read it and drop the session just written.
+	current, err := store.GetProfile(ctx, profile.ID)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("re-reading profile: %w", err), r.sessions.Delete(session.Token))
+	}
+	if current == nil {
+		// A failed delete may leave the session behind, so it is not reported
+		// as a plain refusal, and its storage error stays off the response.
+		if err := r.sessions.Delete(session.Token); err != nil {
+			return nil, fmt.Errorf("dropping the session of a deleted profile: %w", err)
+		}
+		return nil, ErrProfileNotFound
+	}
 	return &session, nil
 }
 
