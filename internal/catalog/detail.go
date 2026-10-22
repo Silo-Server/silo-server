@@ -1814,14 +1814,19 @@ func (s *DetailService) resolveDetailTarget(ctx context.Context, contentID strin
 	return &detailTarget{episode: episode}, nil
 }
 
-// validatePresentationEpisodeAccess accepts an episode under a presentation
-// library that holds the episode or its series. The series' season and episode
-// lists validate the series alone and list every episode, so a library that
-// holds the series but no file of one episode still links to it. That episode
-// opens, and a read scoped to the library lists no versions for it.
+// validatePresentationEpisodeAccess checks an episode against the presentation
+// library. A read that set SeriesLibraryCoversEpisodes also accepts a library
+// that holds the episode's series: the series' season and episode lists
+// validate the series alone and list every episode, so such a library still
+// links to an episode it has no file for. That episode opens, and a read scoped
+// to the library lists no versions for it. Other reads keep the episode's own
+// libraries.
 func (s *DetailService) validatePresentationEpisodeAccess(ctx context.Context, filter AccessFilter, episode *models.Episode) error {
 	if filter.PresentationLibraryID == nil {
 		return nil
+	}
+	if !filter.SeriesLibraryCoversEpisodes {
+		return s.validatePresentationItemAccess(ctx, filter, episode.ContentID)
 	}
 	membership, err := s.itemRepo.GetItemsInLibrary(ctx, []string{episode.ContentID, episode.SeriesID}, *filter.PresentationLibraryID)
 	if err != nil {

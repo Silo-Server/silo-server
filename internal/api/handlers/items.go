@@ -2308,6 +2308,9 @@ type AccessFilterOptions struct {
 	// ScopeFilesToLibrary also limits file versions to PresentationLibraryID;
 	// see catalog.AccessFilter.ScopeFilesToLibrary.
 	ScopeFilesToLibrary bool
+	// SeriesLibraryCoversEpisodes opens an episode under a library that holds
+	// its series; see catalog.AccessFilter.SeriesLibraryCoversEpisodes.
+	SeriesLibraryCoversEpisodes bool
 	// ImageSize is the artwork variant to presign; Unset picks defaults.
 	ImageSize imagesize.Size
 	// ImageWidths are per-slot target widths overriding ImageSize.
@@ -2323,20 +2326,21 @@ type AccessFilterOptions struct {
 func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilterOptions) (catalog.AccessFilter, error) {
 	if scope, ok := access.GetScope(ctx); ok {
 		return catalog.AccessFilter{
-			AllowedLibraryIDs:         scope.AllowedLibraryIDs,
-			DisabledLibraryIDs:        scope.DisabledLibraryIDs,
-			MaturityLimits:            scope.MaturityLimits,
-			MaxPlaybackQuality:        scope.MaxPlaybackQuality,
-			PresentationLibraryID:     opts.PresentationLibraryID,
-			ScopeFilesToLibrary:       opts.ScopeFilesToLibrary,
-			ProfilePreferredLanguage:  scope.PreferredMetadataLanguage,
-			MetadataLanguageOverrides: scope.MetadataLanguageOverrides,
-			SelectedFileID:            opts.SelectedFileID,
-			ImageSize:                 opts.ImageSize,
-			ImageWidths:               opts.ImageWidths,
-			UserID:                    apimw.GetUserID(ctx),
-			ProfileID:                 apimw.GetProfileID(ctx),
-			DeviceID:                  opts.DeviceID,
+			AllowedLibraryIDs:           scope.AllowedLibraryIDs,
+			DisabledLibraryIDs:          scope.DisabledLibraryIDs,
+			MaturityLimits:              scope.MaturityLimits,
+			MaxPlaybackQuality:          scope.MaxPlaybackQuality,
+			PresentationLibraryID:       opts.PresentationLibraryID,
+			ScopeFilesToLibrary:         opts.ScopeFilesToLibrary,
+			SeriesLibraryCoversEpisodes: opts.SeriesLibraryCoversEpisodes,
+			ProfilePreferredLanguage:    scope.PreferredMetadataLanguage,
+			MetadataLanguageOverrides:   scope.MetadataLanguageOverrides,
+			SelectedFileID:              opts.SelectedFileID,
+			ImageSize:                   opts.ImageSize,
+			ImageWidths:                 opts.ImageWidths,
+			UserID:                      apimw.GetUserID(ctx),
+			ProfileID:                   apimw.GetProfileID(ctx),
+			DeviceID:                    opts.DeviceID,
 		}, nil
 	}
 
@@ -2363,16 +2367,17 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 	}
 
 	return catalog.AccessFilter{
-		AllowedLibraryIDs:     libraryIDs,
-		MaxPlaybackQuality:    maxPlaybackQuality,
-		PresentationLibraryID: opts.PresentationLibraryID,
-		ScopeFilesToLibrary:   opts.ScopeFilesToLibrary,
-		SelectedFileID:        opts.SelectedFileID,
-		ImageSize:             opts.ImageSize,
-		ImageWidths:           opts.ImageWidths,
-		UserID:                apimw.GetUserID(ctx),
-		ProfileID:             apimw.GetProfileID(ctx),
-		DeviceID:              opts.DeviceID,
+		AllowedLibraryIDs:           libraryIDs,
+		MaxPlaybackQuality:          maxPlaybackQuality,
+		PresentationLibraryID:       opts.PresentationLibraryID,
+		ScopeFilesToLibrary:         opts.ScopeFilesToLibrary,
+		SeriesLibraryCoversEpisodes: opts.SeriesLibraryCoversEpisodes,
+		SelectedFileID:              opts.SelectedFileID,
+		ImageSize:                   opts.ImageSize,
+		ImageWidths:                 opts.ImageWidths,
+		UserID:                      apimw.GetUserID(ctx),
+		ProfileID:                   apimw.GetProfileID(ctx),
+		DeviceID:                    opts.DeviceID,
 	}, nil
 }
 

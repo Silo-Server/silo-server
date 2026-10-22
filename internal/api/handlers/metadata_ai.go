@@ -203,16 +203,23 @@ func (h *MetadataAIHandler) viewerPendingLanguage(ctx context.Context, target me
 	if matches(pending) || h.ItemLibraries == nil {
 		return pending, nil
 	}
-	// An episode page in a library is validated against the episode's own
-	// memberships, which can differ from its series'; seasons and items use
-	// the item the request authorizes.
-	membershipID := target.accessContentID
-	if target.episode != nil {
-		membershipID = target.episode.ContentID
-	}
-	libraryIDs, err := h.ItemLibraries.LibraryIDsForItem(ctx, membershipID)
+	// An episode page opens under a library that holds the episode or its
+	// series (catalog.AccessFilter.SeriesLibraryCoversEpisodes), so both sets
+	// count; seasons and items use the item the request authorizes.
+	libraryIDs, err := h.ItemLibraries.LibraryIDsForItem(ctx, target.accessContentID)
 	if err != nil {
 		return "", err
+	}
+	if target.episode != nil {
+		episodeLibraryIDs, err := h.ItemLibraries.LibraryIDsForItem(ctx, target.episode.ContentID)
+		if err != nil {
+			return "", err
+		}
+		for _, libraryID := range episodeLibraryIDs {
+			if !slices.Contains(libraryIDs, libraryID) {
+				libraryIDs = append(libraryIDs, libraryID)
+			}
+		}
 	}
 	// No membership means no library-scoped page resolves the target (an
 	// episode without files, say). LibraryScope would read an empty list as

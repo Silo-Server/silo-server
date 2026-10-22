@@ -13,9 +13,11 @@ import (
 
 // TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB pins the presentation library
 // check for episodes. A series in two libraries lists every episode under
-// either library, so an episode with a file in only one of them must still open
-// from the other: unscoped it lists every version, scoped it lists none. A
-// library that does not hold the series still answers not found.
+// either library, so a native read (SeriesLibraryCoversEpisodes) opens an
+// episode with a file in only one of them from the other: unscoped it lists
+// every version, scoped it lists none. A library that does not hold the series
+// still answers not found, and reads without the opt-in, including watch
+// reads, keep the episode's own libraries.
 func TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
 	ctx := context.Background()
@@ -27,6 +29,11 @@ func TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB(t *testing.T) {
 		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name) VALUES ('series', $1) RETURNING id`, prefix+name).Scan(&id); err != nil {
 			t.Fatalf("seed folder %s: %v", name, err)
 		}
+		t.Cleanup(func() {
+			if _, err := pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, id); err != nil {
+				t.Errorf("delete folder %s: %v", name, err)
+			}
+		})
 		return id
 	}
 	subLib, dubLib, otherLib := folder("sub"), folder("dub"), folder("other")
@@ -34,9 +41,11 @@ func TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB(t *testing.T) {
 	season := prefix + "season"
 	bothEpisode := prefix + "episode-1"
 	subOnlyEpisode := prefix + "episode-3"
+	// Registered after the folders, so it runs before their cleanups.
 	t.Cleanup(func() {
-		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id = $1`, series)
-		batchEquivExec(t, pool, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{subLib, dubLib, otherLib})
+		if _, err := pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series); err != nil {
+			t.Errorf("delete series: %v", err)
+		}
 	})
 
 	batchEquivExec(t, pool, `INSERT INTO media_items (content_id, type, title, genres) VALUES ($1, 'series', 'Two Library Series', '{}')`, series)
@@ -80,7 +89,7 @@ func TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB(t *testing.T) {
 		{"episode in its own library, scoped", subOnlyEpisode, subLib, true, []int{3}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			filter := AccessFilter{PresentationLibraryID: &tc.library, ScopeFilesToLibrary: tc.scoped}
+			filter := AccessFilter{PresentationLibraryID: &tc.library, ScopeFilesToLibrary: tc.scoped, SeriesLibraryCoversEpisodes: true}
 			versions, err := svc.GetItemVersions(ctx, tc.episode, filter)
 			if err != nil {
 				t.Fatalf("GetItemVersions: %v", err)
@@ -99,12 +108,32 @@ func TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB(t *testing.T) {
 	}
 
 	t.Run("library without the series", func(t *testing.T) {
-		filter := AccessFilter{PresentationLibraryID: &otherLib}
+		filter := AccessFilter{PresentationLibraryID: &otherLib, SeriesLibraryCoversEpisodes: true}
 		if _, err := svc.GetItemVersions(ctx, bothEpisode, filter); !errors.Is(err, ErrItemNotFound) {
 			t.Fatalf("GetItemVersions error = %v, want ErrItemNotFound", err)
 		}
 		if _, err := svc.GetItemDetail(ctx, bothEpisode, filter); !errors.Is(err, ErrItemNotFound) {
 			t.Fatalf("GetItemDetail error = %v, want ErrItemNotFound", err)
+		}
+	})
+
+	t.Run("without the opt-in the episode's own libraries decide", func(t *testing.T) {
+		filter := AccessFilter{PresentationLibraryID: &dubLib}
+		if _, err := svc.GetItemDetail(ctx, subOnlyEpisode, filter); !errors.Is(err, ErrItemNotFound) {
+			t.Fatalf("GetItemDetail error = %v, want ErrItemNotFound", err)
+		}
+		if _, err := svc.GetItemDetail(ctx, bothEpisode, filter); err != nil {
+			t.Fatalf("GetItemDetail: %v", err)
+		}
+	})
+
+	t.Run("watch reads keep the episode's own libraries", func(t *testing.T) {
+		filter := AccessFilter{PresentationLibraryID: &dubLib, SeriesLibraryCoversEpisodes: true}
+		if _, err := svc.GetWatchDetail(ctx, subOnlyEpisode, filter); !errors.Is(err, ErrItemNotFound) {
+			t.Fatalf("GetWatchDetail error = %v, want ErrItemNotFound", err)
+		}
+		if _, err := svc.GetWatchDetail(ctx, bothEpisode, filter); err != nil {
+			t.Fatalf("GetWatchDetail: %v", err)
 		}
 	})
 }

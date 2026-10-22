@@ -8,7 +8,7 @@ import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
-import type { EpisodeNavigationState } from "../itemDetailLayout";
+import { episodeLinkLibraryId, type EpisodeNavigationState } from "../itemDetailLayout";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
@@ -35,7 +35,8 @@ export default function EpisodeCarousel({
   const currentEpisodeIndex = episodes.findIndex(
     (episode) => episode.episode_number === currentEpisodeNumber,
   );
-  const prefetchEpisodeDetail = usePrefetchCatalogItemDetail(libraryId);
+  const prefetchScopedEpisode = usePrefetchCatalogItemDetail(libraryId);
+  const prefetchEpisode = usePrefetchCatalogItemDetail();
   const { quickActionMode } = useOverlayPrefs();
   const { hideImages, hideOverviews } = useEpisodeSpoilerPrefs();
   const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
@@ -77,7 +78,11 @@ export default function EpisodeCarousel({
                 quickActionMode={quickActionMode}
                 hideImageIfUnwatched={hideImages}
                 hideOverviewIfUnwatched={hideOverviews}
-                onPrefetch={() => prefetchEpisodeDetail(ep.content_id)}
+                onPrefetch={() =>
+                  (episodeLinkLibraryId(ep, libraryId) === undefined
+                    ? prefetchEpisode
+                    : prefetchScopedEpisode)(ep.content_id)
+                }
               />
             ))}
           </ul>
@@ -121,7 +126,10 @@ function EpisodeCarouselCard({
   const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle = ep.title || `Episode ${ep.episode_number}`;
-  const episodeHref = buildItemHref({ contentId: ep.content_id, libraryId });
+  const episodeHref = buildItemHref({
+    contentId: ep.content_id,
+    libraryId: episodeLinkLibraryId(ep, libraryId),
+  });
   const hideImage =
     hideImageIfUnwatched &&
     isEpisodeStill(ep.still_is_episode_still) &&

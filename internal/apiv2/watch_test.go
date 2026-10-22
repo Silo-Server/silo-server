@@ -30,7 +30,7 @@ type fakeMark struct {
 }
 
 func (f *fakeWatch) ContextAccessFilter(_ context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
-	filter := catalogpkg.AccessFilter{SelectedFileID: opts.SelectedFileID, PresentationLibraryID: opts.PresentationLibraryID, ImageSize: opts.ImageSize, DeviceID: opts.DeviceID}
+	filter := catalogpkg.AccessFilter{SelectedFileID: opts.SelectedFileID, PresentationLibraryID: opts.PresentationLibraryID, SeriesLibraryCoversEpisodes: opts.SeriesLibraryCoversEpisodes, ImageSize: opts.ImageSize, DeviceID: opts.DeviceID}
 	f.filters = append(f.filters, filter)
 	return filter, nil
 }
@@ -101,6 +101,25 @@ func watchDeps(watch *fakeWatch) Dependencies {
 	deps := pilotDeps(nil, nil)
 	deps.Watch = watch
 	return deps
+}
+
+// A watch read keeps the episode's own libraries: its library_id never opts
+// it into SeriesLibraryCoversEpisodes.
+func TestGetWatchDetailKeepsTheEpisodesOwnLibraries(t *testing.T) {
+	watch := &fakeWatch{}
+	h := newTestHandler(t, watchDeps(watch))
+	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+
+	if rec := do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995?library_id=2", "", owner); rec.Code != http.StatusOK {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if len(watch.filters) == 0 {
+		t.Fatal("no access filter resolved")
+	}
+	filter := watch.filters[len(watch.filters)-1]
+	if filter.PresentationLibraryID == nil || *filter.PresentationLibraryID != 2 || filter.SeriesLibraryCoversEpisodes {
+		t.Fatalf("filter = %+v", filter)
+	}
 }
 
 func TestGetWatchStateRejects(t *testing.T) {

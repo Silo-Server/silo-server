@@ -221,8 +221,9 @@ func (m membershipsByID) LibraryIDsForItem(_ context.Context, contentID string) 
 	return m[contentID], nil
 }
 
-// An episode page is scoped by the episode's own libraries, not its series'.
-func TestTranslateOnViewUsesTheEpisodesOwnLibraries(t *testing.T) {
+// An episode page opens under a library that holds the episode or its series,
+// so either one's library can report the missing language.
+func TestTranslateOnViewUsesTheEpisodeAndSeriesLibraries(t *testing.T) {
 	userID := 7
 	jobs := &guardJobs{}
 	h := newGuardHandlerWith(guardConfig, jobs, "", nil)
@@ -235,19 +236,32 @@ func TestTranslateOnViewUsesTheEpisodesOwnLibraries(t *testing.T) {
 	if !passedGuards(jobs, err) {
 		t.Fatalf("episode library: err = %v, want it to reach the service", err)
 	}
-	var apiErr *APIError
 
 	h.ItemLibraries = membershipsByID{"series1": {3, 7}, "ep1": {3}}
 	_, err = h.TranslateOnView(context.Background(), catalog.AccessFilter{}, "ep1", "de", &userID)
-	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
-		t.Fatalf("series-only library: err = %v, want 400", err)
+	if !passedGuards(jobs, err) {
+		t.Fatalf("series library: err = %v, want it to reach the service", err)
 	}
 
-	// An episode in no library is not widened to the viewer's allowlist.
 	h.ItemLibraries = membershipsByID{"series1": {7}}
+	_, err = h.TranslateOnView(context.Background(), catalog.AccessFilter{}, "ep1", "de", &userID)
+	if !passedGuards(jobs, err) {
+		t.Fatalf("episode without files, series library: err = %v, want it to reach the service", err)
+	}
+
+	// Neither in a library: not widened to the viewer's allowlist.
+	var apiErr *APIError
+	h.ItemLibraries = membershipsByID{}
 	_, err = h.TranslateOnView(context.Background(), catalog.AccessFilter{AllowedLibraryIDs: []int{7}}, "ep1", "de", &userID)
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
-		t.Fatalf("episode without libraries: err = %v, want 400", err)
+		t.Fatalf("no libraries: err = %v, want 400", err)
+	}
+
+	// A library holding neither one does not count.
+	h.ItemLibraries = membershipsByID{"series1": {3}, "ep1": {3}}
+	_, err = h.TranslateOnView(context.Background(), catalog.AccessFilter{}, "ep1", "de", &userID)
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("other library: err = %v, want 400", err)
 	}
 }
 

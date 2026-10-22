@@ -21,8 +21,14 @@ type AccessFilter struct {
 	// both are set. Callers opt in per read from the server setting
 	// catalog.scope_versions_to_library; playback and watch-together reads never
 	// set it, so an item always plays from its full accessible version list.
-	ScopeFilesToLibrary  bool
-	PresentationLanguage string
+	ScopeFilesToLibrary bool
+	// SeriesLibraryCoversEpisodes presents an episode under PresentationLibraryID
+	// when the library holds its series, even if it holds none of the episode's
+	// files, the way the series' season and episode lists already validate. The
+	// native v2 catalog reads set it; v1, jellycompat and watch reads leave it
+	// off and keep the episode's own libraries.
+	SeriesLibraryCoversEpisodes bool
+	PresentationLanguage        string
 	// ProfilePreferredLanguage is the viewer profile's preferred metadata
 	// language. Presentation language resolves: explicit PresentationLanguage
 	// → ProfilePreferredLanguage → the library's metadata_language.

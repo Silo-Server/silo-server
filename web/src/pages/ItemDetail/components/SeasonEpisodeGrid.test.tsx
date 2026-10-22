@@ -137,25 +137,28 @@ describe("SeasonEpisodeGrid", () => {
     expect(card).toHaveTextContent("Damaged file");
   });
 
-  it("keeps the page's library on episode links and prefetches", () => {
+  it("keeps the page's library on episodes with a file in the list", () => {
+    const episode = (n: number, files: object[]) => ({
+      content_id: `ep-${n}`,
+      season_number: 1,
+      episode_number: n,
+      title: `Episode title ${n}`,
+      overview: "",
+      air_date: null,
+      runtime: 42,
+      still_url: "",
+      still_thumbhash: "",
+      files: files as never,
+    });
     render(
       <MemoryRouter>
         <SeasonEpisodeGrid
           isLoading={false}
           libraryId={4}
           episodes={[
-            {
-              content_id: "ep-1",
-              season_number: 1,
-              episode_number: 1,
-              title: "Episode title 1",
-              overview: "",
-              air_date: null,
-              runtime: 42,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-            },
+            episode(1, [{ file_id: 1, resolution: "720p" }]),
+            // No file in this library's list: opens with every version.
+            episode(3, []),
           ]}
         />
       </MemoryRouter>,
@@ -165,8 +168,13 @@ describe("SeasonEpisodeGrid", () => {
       .getAllByRole("link")
       .map((link) => link.getAttribute("href"))
       .filter((href) => href?.startsWith("/item/"));
-    expect(hrefs).toEqual(["/item/ep-1?libraryId=4", "/item/ep-1?libraryId=4"]);
-    expect(prefetchLibraries).toEqual([4]);
+    expect(hrefs).toEqual([
+      "/item/ep-1?libraryId=4",
+      "/item/ep-1?libraryId=4",
+      "/item/ep-3",
+      "/item/ep-3",
+    ]);
+    expect(new Set(prefetchLibraries)).toEqual(new Set([4, undefined]));
     // The card menu builds Play links, and playback stays unscoped.
     expect(capturedMenuProps[0]).not.toHaveProperty("libraryId");
   });

@@ -208,6 +208,22 @@ describe("SeasonContent", () => {
   });
 
   it("keeps the page's library on the episode read and links but not on Play", () => {
+    mocks.useItemEpisodes.mockReturnValue({
+      data: {
+        episodes: [
+          {
+            content_id: "episode-1",
+            title: "Pilot",
+            episode_number: 1,
+            still_url: "",
+            files: [{ file_id: 1 }],
+            user_data: null,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+    });
     const item = makeSeasonItem();
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/item/season-1?libraryId=4"]}>

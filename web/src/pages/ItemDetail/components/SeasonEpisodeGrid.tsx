@@ -19,7 +19,7 @@ import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/ove
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import EpisodeCardCaption from "./EpisodeCardCaption";
-import type { EpisodeNavigationState } from "../itemDetailLayout";
+import { episodeLinkLibraryId, type EpisodeNavigationState } from "../itemDetailLayout";
 
 /**
  * How much of a season stays visible before the section scrolls, so a long one
@@ -48,7 +48,8 @@ export default function SeasonEpisodeGrid({
 }: SeasonEpisodeGridProps) {
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const spoilerPrefs = useEpisodeSpoilerPrefs();
-  const prefetchEpisodeDetail = usePrefetchCatalogItemDetail(libraryId);
+  const prefetchScopedEpisode = usePrefetchCatalogItemDetail(libraryId);
+  const prefetchEpisode = usePrefetchCatalogItemDetail();
   const setGridRef = useGridRowCap<HTMLDivElement>(VISIBLE_EPISODE_ROWS, episodes.length);
 
   if (isLoading) {
@@ -79,7 +80,11 @@ export default function SeasonEpisodeGrid({
           overlayPrefs={overlayPrefs}
           quickActionMode={quickActionMode}
           spoilerPrefs={spoilerPrefs}
-          onPrefetch={() => prefetchEpisodeDetail(episode.content_id)}
+          onPrefetch={() =>
+            (episodeLinkLibraryId(episode, libraryId) === undefined
+              ? prefetchEpisode
+              : prefetchScopedEpisode)(episode.content_id)
+          }
         />
       ))}
     </div>
@@ -114,7 +119,10 @@ function SeasonEpisodeCard({
   const hideImage =
     spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);
   const hideOverview = spoilerPrefs.hideOverviews && unwatched;
-  const episodeHref = buildItemHref({ contentId: episode.content_id, libraryId });
+  const episodeHref = buildItemHref({
+    contentId: episode.content_id,
+    libraryId: episodeLinkLibraryId(episode, libraryId),
+  });
 
   return (
     <div ref={cardRef} className="group/card media-card media-card-longpress" {...prefetchHandlers}>
