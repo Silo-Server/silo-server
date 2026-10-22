@@ -2634,7 +2634,7 @@ func main() {
 			deps.EmailBrand,
 		)
 		notificationSystem.SetWatchlistArrivals(
-			watchlist.NewArrivals(deps.DB, catalog.NewItemRepository(deps.DB)),
+			&watchlist.Arrivals{},
 			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)

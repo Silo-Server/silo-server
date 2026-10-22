@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
@@ -33,13 +34,13 @@ type TitleFlags struct {
 // watchlistWaiters finds the profiles whose watchlist waits for catalog items.
 // *watchlist.Arrivals implements it.
 type watchlistWaiters interface {
-	WaitingFor(ctx context.Context, contentIDs []string) (map[string][]watchlist.Waiter, error)
+	WaitingFor(ctx context.Context, q watchlist.Querier, contentIDs []string, arrivedSince time.Time) (map[string][]watchlist.Waiter, error)
 }
 
 // requestWaiters reports which profiles a title's open request will still
 // tell it arrived. *requests.Repository implements it.
 type requestWaiters interface {
-	AwaitingFulfillment(ctx context.Context, mediaType requests.MediaType, tmdbIDs []int, profiles []requests.Follower) (map[requests.Follower]bool, error)
+	AwaitingFulfillment(ctx context.Context, tx pgx.Tx, mediaType requests.MediaType, tmdbIDs []int, profiles []requests.Follower) (map[requests.Follower]bool, error)
 }
 
 // SetWatchlistArrivals wires the watchlist arrival notice into fanout. Call
@@ -59,8 +60,6 @@ type watchlistArrival struct {
 	contentID string
 	waiter    watchlist.Waiter
 }
-
-func (a watchlistArrival) key() profileKey { return profileKey{a.waiter.UserID, a.waiter.ProfileID} }
 
 // arrivalContentIDs names the catalog item each event brings: the movie of a
 // movie event, the series of an episode event. Other kinds have no watchlist.
@@ -92,72 +91,95 @@ func arrivalContentIDs(events []ReleaseEvent) []string {
 // events bring arrived: their watchlist holds it, their notifications are on,
 // they may open it, and no request of the title has told or will tell them.
 // A profile that both requested and watchlisted a title hears once, from the
-// request; a request.fulfilled already sent for the title also counts.
-func (w *FanoutWorker) captureWatchlistArrivals(ctx context.Context, tx pgx.Tx, recipients *recipientAccess, events []ReleaseEvent) ([]watchlistArrival, error) {
+// request; a request.fulfilled already sent for the title also counts. Items
+// created before arrivedSince count only through unpromoted entries.
+func (w *FanoutWorker) captureWatchlistArrivals(ctx context.Context, tx pgx.Tx, recipients *recipientAccess, events []ReleaseEvent, arrivedSince time.Time) ([]watchlistArrival, error) {
 	if w.watchlist == nil {
 		return nil, nil
 	}
 	contentIDs := arrivalContentIDs(events)
-	waiting, err := w.watchlist.WaitingFor(ctx, contentIDs)
+	waiting, err := w.watchlist.WaitingFor(ctx, tx, contentIDs, arrivedSince)
 	if err != nil || len(waiting) == 0 {
 		return nil, err
 	}
 	var arrivals []watchlistArrival
 	for _, contentID := range contentIDs {
-		// Two watchlisted titles can match one item; a profile hears once.
-		var candidates []watchlistArrival
+		// Two watchlist entries can match one item; a profile hears once.
+		var waiters []watchlist.Waiter
 		var keys []profileKey
 		for _, waiter := range waiting[contentID] {
-			arrival := watchlistArrival{contentID: contentID, waiter: waiter}
-			if slices.Contains(keys, arrival.key()) {
+			key := waiterKey(waiter)
+			if slices.Contains(keys, key) {
 				continue
 			}
-			keys = append(keys, arrival.key())
-			candidates = append(candidates, arrival)
+			keys = append(keys, key)
+			waiters = append(waiters, waiter)
+		}
+		if len(waiters) == 0 {
+			continue
 		}
 		prefs, err := w.preferences.GetMany(ctx, tx, keys)
 		if err != nil {
 			return nil, err
 		}
-		for _, candidate := range candidates {
-			if !prefs[candidate.key()].Enabled {
+		told, err := w.titleToldElsewhere(ctx, tx, waiters)
+		if err != nil {
+			return nil, err
+		}
+		for _, waiter := range waiters {
+			key := waiterKey(waiter)
+			if !prefs[key].Enabled || told[key] {
 				continue
 			}
-			told, err := w.titleToldElsewhere(ctx, tx, candidate.waiter)
-			if err != nil {
-				return nil, err
-			}
-			if told {
-				continue
-			}
-			allowed, err := recipients.canOpen(ctx, tx, candidate.waiter.UserID, candidate.waiter.ProfileID, contentID, 0)
+			allowed, err := recipients.canOpen(ctx, tx, waiter.UserID, waiter.ProfileID, contentID, 0)
 			if err != nil {
 				return nil, err
 			}
 			if allowed {
-				arrivals = append(arrivals, candidate)
+				arrivals = append(arrivals, watchlistArrival{contentID: contentID, waiter: waiter})
 			}
 		}
 	}
 	return arrivals, nil
 }
 
-// titleToldElsewhere reports whether a request of the waiter's title already
-// told the profile it arrived, or still will.
-func (w *FanoutWorker) titleToldElsewhere(ctx context.Context, tx pgx.Tx, waiter watchlist.Waiter) (bool, error) {
-	told, err := w.deliveries.HasTitleFulfilled(ctx, tx, waiter.UserID, waiter.ProfileID, waiter.MediaType, waiter.TMDBIDs)
-	if err != nil || told {
+func waiterKey(waiter watchlist.Waiter) profileKey {
+	return profileKey{waiter.UserID, waiter.ProfileID}
+}
+
+// titleToldElsewhere reports which of one item's waiters a request of its
+// title already told it arrived, or still will. The waiters share the item's
+// media type; any TMDB ID one of them holds names the title.
+func (w *FanoutWorker) titleToldElsewhere(ctx context.Context, tx pgx.Tx, waiters []watchlist.Waiter) (map[profileKey]bool, error) {
+	mediaType := waiters[0].MediaType
+	keys := make([]profileKey, len(waiters))
+	var tmdbIDs []int
+	for i, waiter := range waiters {
+		keys[i] = waiterKey(waiter)
+		for _, id := range waiter.TMDBIDs {
+			if !slices.Contains(tmdbIDs, id) {
+				tmdbIDs = append(tmdbIDs, id)
+			}
+		}
+	}
+	told, err := w.deliveries.TitleFulfilledFor(ctx, tx, keys, mediaType, tmdbIDs)
+	if err != nil || w.requests == nil {
 		return told, err
 	}
-	if w.requests == nil {
-		return false, nil
+	var followers []requests.Follower
+	for _, key := range keys {
+		if !told[key] {
+			followers = append(followers, requests.Follower{UserID: key.userID, ProfileID: key.profileID})
+		}
 	}
-	follower := requests.Follower{UserID: waiter.UserID, ProfileID: waiter.ProfileID}
-	awaiting, err := w.requests.AwaitingFulfillment(ctx, requests.MediaType(waiter.MediaType), waiter.TMDBIDs, []requests.Follower{follower})
+	awaiting, err := w.requests.AwaitingFulfillment(ctx, tx, requests.MediaType(mediaType), tmdbIDs, followers)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return awaiting[follower], nil
+	for follower := range awaiting {
+		told[profileKey{follower.UserID, follower.ProfileID}] = true
+	}
+	return told, nil
 }
 
 // deliverWatchlistArrivals inserts one watchlist.available delivery per
@@ -170,7 +192,11 @@ func (w *FanoutWorker) deliverWatchlistArrivals(ctx context.Context, tx pgx.Tx, 
 	}
 	deliveries := make([]Delivery, 0, len(arrivals))
 	for _, arrival := range arrivals {
-		flags, _ := json.Marshal(TitleFlags{TMDBID: arrival.waiter.TMDBIDs[0], MediaType: arrival.waiter.MediaType})
+		title := TitleFlags{MediaType: arrival.waiter.MediaType}
+		if len(arrival.waiter.TMDBIDs) > 0 {
+			title.TMDBID = arrival.waiter.TMDBIDs[0]
+		}
+		flags, _ := json.Marshal(title)
 		contentID := arrival.contentID
 		deliveries = append(deliveries, Delivery{
 			ID:          ulid.Make().String(),
@@ -220,23 +246,41 @@ func (w *FanoutWorker) dispatchInserted(ctx context.Context, ids []string) {
 	}
 }
 
-// HasTitleFulfilled reports whether the account's profile already has a
+// TitleFulfilledFor reports which of the account profiles already have a
 // request.fulfilled delivery for the title, under any TMDB ID it has held.
-func (r *DeliveryRepository) HasTitleFulfilled(ctx context.Context, tx pgx.Tx, userID int, profileID, mediaType string, tmdbIDs []int) (bool, error) {
+func (r *DeliveryRepository) TitleFulfilledFor(ctx context.Context, tx pgx.Tx, keys []profileKey, mediaType string, tmdbIDs []int) (map[profileKey]bool, error) {
+	told := make(map[profileKey]bool)
+	if len(keys) == 0 || len(tmdbIDs) == 0 {
+		return told, nil
+	}
+	userIDs := make([]int, len(keys))
+	profileIDs := make([]string, len(keys))
+	for i, key := range keys {
+		userIDs[i], profileIDs[i] = key.userID, key.profileID
+	}
 	ids := make([]string, len(tmdbIDs))
 	for i, id := range tmdbIDs {
 		ids[i] = strconv.Itoa(id)
 	}
-	var exists bool
-	err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
+	rows, err := tx.Query(ctx, `
+		SELECT p.user_id, p.profile_id
+		FROM unnest($1::int[], $2::text[]) AS p(user_id, profile_id)
+		WHERE EXISTS (
 			SELECT 1 FROM notification_deliveries
 			WHERE type = '`+DeliveryTypeRequestFulfilled+`'
-			  AND user_id = $1 AND profile_id = $2
+			  AND user_id = p.user_id AND profile_id = p.profile_id
 			  AND reason_flags->>'media_type' = $3 AND reason_flags->>'tmdb_id' = ANY($4))`,
-		userID, profileID, mediaType, ids).Scan(&exists)
+		userIDs, profileIDs, mediaType, ids)
 	if err != nil {
-		return false, fmt.Errorf("check title request.fulfilled delivery: %w", err)
+		return nil, fmt.Errorf("check title request.fulfilled deliveries: %w", err)
 	}
-	return exists, nil
+	defer rows.Close()
+	for rows.Next() {
+		var key profileKey
+		if err := rows.Scan(&key.userID, &key.profileID); err != nil {
+			return nil, fmt.Errorf("scan title request.fulfilled delivery: %w", err)
+		}
+		told[key] = true
+	}
+	return told, rows.Err()
 }

@@ -121,7 +121,13 @@ func (r *ItemRepository) ResolveProviderAliases(ctx context.Context, aliases []P
 // providers rejected. Key is left zero. An item that does not exist, is not a
 // movie or series, or carries no IDs has no aliases.
 func (r *ItemRepository) ItemProviderAliases(ctx context.Context, contentID string) (string, []ProviderAlias, error) {
-	rows, err := r.pool.Query(ctx, `
+	return ReadItemProviderAliases(ctx, r.pool, contentID)
+}
+
+// ReadItemProviderAliases is ItemProviderAliases on q, so a caller can read
+// inside its own transaction.
+func ReadItemProviderAliases(ctx context.Context, q rowQuerier, contentID string) (string, []ProviderAlias, error) {
+	rows, err := q.Query(ctx, `
 		WITH item AS (
 			SELECT content_id, type, tmdb_id, imdb_id, tvdb_id
 			FROM media_items
