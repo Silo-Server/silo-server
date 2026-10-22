@@ -27274,7 +27274,7 @@ export interface components {
          */
         observed_at: string;
       } | null;
-      /** @description The best recent playback throughput on this connection, a lower bound on its speed. */
+      /** @description The best recent playback throughput on this connection, a lower bound on its speed. A Test speed result clears it. */
       playback_sample?: components["schemas"]["PlaybackSample"];
       probe?: components["schemas"]["PlaybackProbe"];
     };
@@ -27427,7 +27427,7 @@ export interface components {
       kbps: number;
       /** @description The test proved only that the link carries at least kbps: a quick test that reached its target, or a rate above the bound. */
       lower_bound?: boolean;
-      /** @description The viewer started this test with Test speed; never set for the automatic test. A manual result above the device's learned limit on this connection clears the limit, as a reset does. */
+      /** @description The viewer started this test with Test speed; never set for the automatic test. A manual result clears the connection's playback sample, so the reading becomes this result, and one above the device's learned limit on this connection also clears the limit, as a reset does. */
       manual?: boolean;
       /** @enum {string} */
       transport: "wifi" | "ethernet" | "cellular" | "other";
