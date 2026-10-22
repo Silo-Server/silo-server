@@ -8715,7 +8715,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage emailed invitations. */
+    /**
+     * Manage emailed invitations.
+     * @deprecated
+     * @description Deprecated: the token in the path reaches proxy and CDN access logs. Use lookupInvitationLink.
+     */
     get: operations["lookupInvitation"];
     put?: never;
     post?: never;
@@ -8734,8 +8738,29 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Manage emailed invitations. */
+    /**
+     * Manage emailed invitations.
+     * @deprecated
+     * @description Deprecated: the token in the path reaches proxy and CDN access logs. Use acceptInvitationLink.
+     */
     post: operations["acceptInvitation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/invitations/accept": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Create the invited account through an invitation link. */
+    post: operations["acceptInvitationLink"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8753,6 +8778,23 @@ export interface paths {
     get: operations["getInvitationCapabilities"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/invitations/lookup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Describe an invitation link for the claim screen. */
+    post: operations["lookupInvitationLink"];
     delete?: never;
     options?: never;
     head?: never;
@@ -10090,24 +10132,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v2/password-resets/{token}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Describe a usable password reset link for the reset screen. */
-    get: operations["lookupPasswordReset"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v2/password-resets/{token}/complete": {
+  "/api/v2/password-resets/complete": {
     parameters: {
       query?: never;
       header?: never;
@@ -10117,7 +10142,24 @@ export interface paths {
     get?: never;
     put?: never;
     /** Set a new password through a reset link, sign out everywhere, and sign in. */
-    post: operations["completePasswordReset"];
+    post: operations["completePasswordResetLink"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/password-resets/lookup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Describe a usable password reset link for the reset screen. */
+    post: operations["lookupPasswordResetLink"];
     delete?: never;
     options?: never;
     head?: never;
@@ -16728,6 +16770,8 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description Whether lookupInvitationLink and acceptInvitationLink, which take the token in the request body, are available. Older servers omit this; only the deprecated path operations exist there. */
+      token_in_body: boolean;
     };
     AdminInvitationCreateInputBody: {
       /**
@@ -17803,8 +17847,8 @@ export interface components {
       expires_at: string;
       /**
        * Format: uri
-       * @description Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder
-       * @example https://silo.example.test/reset-password/3f2b47eb7b36dd2d
+       * @description Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder. The token is the URL's fragment, which browsers never send to the server
+       * @example https://silo.example.test/reset-password#3f2b47eb7b36dd2d
        */
       reset_url?: string;
     };
@@ -26340,11 +26384,13 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description Whether lookupInvitationLink and acceptInvitationLink, which take the token in the request body, are available. Older servers omit this; only the deprecated path operations exist there. */
+      token_in_body: boolean;
     };
     InvitationDelivery: {
       /**
        * Format: uri
-       * @description One-time disclosure; never retained for replay. Contains the bearer claim token.
+       * @description One-time disclosure; never retained for replay. Contains the bearer claim token as the URL's fragment, which browsers never send to the server.
        */
       claim_url: string;
       /**
@@ -26353,6 +26399,17 @@ export interface components {
        */
       delivery_status: "sent" | "not_configured" | "failed_or_unknown" | "not_requested";
       invitation: components["schemas"]["AdminInvitation"];
+    };
+    InvitationLinkAcceptInputBody: {
+      /** @description The invitee's address. Required when the lookup reports email_required; ignored otherwise. */
+      email?: string;
+      password: string;
+      /** @description The token from the invitation link's fragment */
+      token: string;
+    };
+    InvitationLinkInputBody: {
+      /** @description The token from the invitation link's fragment */
+      token: string;
     };
     InvitationLookup: {
       acceptance_available: boolean;
@@ -28839,6 +28896,8 @@ export interface components {
        * @example margin fossil quench hollow
        */
       password: string;
+      /** @description The token from the reset link's fragment */
+      token: string;
     };
     PasswordResetCompletion: {
       /** @enum {string} */
@@ -28847,6 +28906,10 @@ export interface components {
       status: "completed";
       tokens?: components["schemas"]["TokenPair"];
       username: string;
+    };
+    PasswordResetLinkInputBody: {
+      /** @description The token from the reset link's fragment */
+      token: string;
     };
     PasswordResetLookup: {
       /**
@@ -113575,6 +113638,146 @@ export interface operations {
       };
     };
   };
+  acceptInvitationLink: {
+    parameters: {
+      query?: never;
+      header?: {
+        "User-Agent"?: string;
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InvitationLinkAcceptInputBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InvitationAcceptance"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getInvitationCapabilities: {
     parameters: {
       query?: never;
@@ -113641,6 +113844,120 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  lookupInvitationLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InvitationLinkInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InvitationLookup"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
           [name: string]: unknown;
         };
         content: {
@@ -124923,16 +125240,26 @@ export interface operations {
       };
     };
   };
-  lookupPasswordReset: {
+  completePasswordResetLink: {
     parameters: {
       query?: never;
-      header?: never;
-      path: {
-        token: string;
+      header?: {
+        "User-Agent"?: string;
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
       };
+      path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordResetCompleteInputBody"];
+      };
+    };
     responses: {
       /** @description OK */
       200: {
@@ -124940,7 +125267,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PasswordResetLookup"];
+          "application/json": components["schemas"]["PasswordResetCompletion"];
         };
       };
       /** @description Bad Request */
@@ -124952,8 +125279,8 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
-      /** @description Not Found */
-      404: {
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };
@@ -124961,8 +125288,26 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
-      /** @description Not Acceptable */
-      406: {
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };
@@ -125008,26 +125353,16 @@ export interface operations {
       };
     };
   };
-  completePasswordReset: {
+  lookupPasswordResetLink: {
     parameters: {
       query?: never;
-      header?: {
-        "User-Agent"?: string;
-        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
-        "X-Silo-Device-Id"?: string;
-        /** @description Optional device name recorded on the login session (first 120 characters) */
-        "X-Silo-Device-Name"?: string;
-        /** @description Optional platform recorded on the login session (first 40 characters) */
-        "X-Silo-Device-Platform"?: string;
-      };
-      path: {
-        token: string;
-      };
+      header?: never;
+      path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["PasswordResetCompleteInputBody"];
+        "application/json": components["schemas"]["PasswordResetLinkInputBody"];
       };
     };
     responses: {
@@ -125037,20 +125372,11 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PasswordResetCompletion"];
+          "application/json": components["schemas"]["PasswordResetLookup"];
         };
       };
       /** @description Bad Request */
       400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
         headers: {
           [name: string]: unknown;
         };

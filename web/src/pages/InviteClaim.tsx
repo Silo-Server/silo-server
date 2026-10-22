@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useNavigate } from "react-router";
 import { captureSessionIdentity, isSessionIdentityCurrent, getAccessToken } from "@/api/client";
 import {
   acceptPublicInvitation,
@@ -10,6 +10,8 @@ import {
 import { sessionFromTokenPair } from "@/api/v2/account";
 import { V2ProblemError } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
+import { AuthCard } from "@/components/auth/AuthCard";
+import { useLinkToken } from "@/hooks/useLinkToken";
 import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
 import { Input } from "@/components/ui/input";
@@ -26,8 +28,40 @@ const EMAIL_TAKEN_MESSAGE =
   "An account already uses this email address. Sign in instead, or use a different address.";
 
 export default function InviteClaim() {
-  const { token = "" } = useParams();
+  const token = useLinkToken("/invite");
+  if (token === null) return <Loading />;
+  // A link scanner that drops the fragment, or a copied address bar, leaves
+  // the page without a token.
+  if (!token) {
+    return (
+      <AuthCard
+        title="Incomplete link"
+        description="Open the invitation link you were sent again. If you copy it, copy all of it."
+      >
+        <SignInLink />
+      </AuthCard>
+    );
+  }
   return <ClaimForm key={token} token={token} />;
+}
+
+function Loading() {
+  return (
+    <div className="auth-shell">
+      <div className="border-primary h-8 w-8 animate-spin rounded-full border-b-2" />
+    </div>
+  );
+}
+
+function SignInLink() {
+  return (
+    <p className="text-muted-foreground text-center text-sm">
+      Already have an account?{" "}
+      <Link to="/login" className="text-foreground underline hover:no-underline">
+        Sign in
+      </Link>
+    </p>
+  );
 }
 
 function ClaimForm({ token }: { token: string }) {
@@ -83,13 +117,7 @@ function ClaimForm({ token }: { token: string }) {
   }, [token, reload, loading, user]);
 
   if (!loading && user && !accepted) return <Navigate to="/" replace />;
-  if (loading || lookup.pending) {
-    return (
-      <div className="auth-shell">
-        <div className="border-primary h-8 w-8 animate-spin rounded-full border-b-2" />
-      </div>
-    );
-  }
+  if (loading || lookup.pending) return <Loading />;
 
   if (!lookup.data) {
     return (
@@ -112,12 +140,7 @@ function ClaimForm({ token }: { token: string }) {
                 Reload invitation
               </Button>
             )}
-            <p className="text-muted-foreground text-center text-sm">
-              Already have an account?{" "}
-              <Link to="/login" className="text-foreground underline hover:no-underline">
-                Sign in
-              </Link>
-            </p>
+            <SignInLink />
           </CardContent>
         </Card>
       </div>

@@ -121,7 +121,7 @@ it("retains revoke confirmation and row on failure", async () => {
 it("keeps a one-time link after clipboard failure, resets mutation state, and disposes on scope change", async () => {
   mocks.resend.mockResolvedValue({
     invitation: row,
-    claim_url: "https://example.invalid/invite/one-time",
+    claim_url: "https://example.invalid/invite#one-time",
     delivery_status: "failed_or_unknown",
   });
   Object.defineProperty(navigator, "clipboard", {
@@ -133,11 +133,11 @@ it("keeps a one-time link after clipboard failure, resets mutation state, and di
   expect(await screen.findByText(/email delivery failed or is uncertain/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
   expect(await screen.findByText(/Could not copy/)).toBeInTheDocument();
-  expect(screen.getByText("https://example.invalid/invite/one-time")).toBeInTheDocument();
+  expect(screen.getByText("https://example.invalid/invite#one-time")).toBeInTheDocument();
   expect(mocks.reset).toHaveBeenCalled();
   setProfileId("other");
   view.rerender(<InvitationsTab />);
-  expect(screen.queryByText("https://example.invalid/invite/one-time")).not.toBeInTheDocument();
+  expect(screen.queryByText("https://example.invalid/invite#one-time")).not.toBeInTheDocument();
 });
 it("blocks synchronous double submit and dismissal until delivery resolves", async () => {
   let resolve!: (value: unknown) => void;
@@ -159,7 +159,7 @@ it("blocks synchronous double submit and dismissal until delivery resolves", asy
   await act(async () =>
     resolve({
       invitation: row,
-      claim_url: "https://example.invalid/invite/created",
+      claim_url: "https://example.invalid/invite#created",
       delivery_status: "not_configured",
     }),
   );
@@ -169,7 +169,7 @@ it("guides unsupported profile creation and preserves false booleans", async () 
   mocks.profile = false;
   mocks.create.mockResolvedValue({
     invitation: row,
-    claim_url: "https://example.invalid/invite/profileless",
+    claim_url: "https://example.invalid/invite#profileless",
     delivery_status: "sent",
   });
   render(<InvitationsTab />, { wrapper: MemoryRouter });
@@ -205,7 +205,7 @@ it("asks for the public URL before anyone fills in an invitation", () => {
 it("creates a link invitation without an address and shows the link to share", async () => {
   mocks.create.mockResolvedValue({
     invitation: linkRow,
-    claim_url: "https://example.invalid/invite/link-only",
+    claim_url: "https://example.invalid/invite#link-only",
     delivery_status: "not_requested",
   });
   render(<InvitationsTab />, { wrapper: MemoryRouter });
@@ -220,7 +220,7 @@ it("creates a link invitation without an address and shows the link to share", a
   expect(body).toMatchObject({ delivery: "link", note: "For Sam" });
   expect(body.email).toBeUndefined();
   expect(await screen.findByText(/Invitation link created/)).toBeInTheDocument();
-  expect(screen.getByText("https://example.invalid/invite/link-only")).toBeInTheDocument();
+  expect(screen.getByText("https://example.invalid/invite#link-only")).toBeInTheDocument();
   expect(screen.getByText(/Anyone with the link can use it/)).toBeInTheDocument();
 });
 it("selects a delivery option when its card text is clicked", () => {
@@ -249,7 +249,7 @@ it("offers only link creation when email is not configured", () => {
 it("replaces an emailed invitation's link without emailing it", async () => {
   mocks.resend.mockResolvedValue({
     invitation: { ...row, delivery: "link" },
-    claim_url: "https://example.invalid/invite/replaced",
+    claim_url: "https://example.invalid/invite#replaced",
     delivery_status: "not_requested",
   });
   render(<InvitationsTab />, { wrapper: MemoryRouter });
@@ -264,12 +264,12 @@ it("replaces an emailed invitation's link without emailing it", async () => {
       `New link created for ${row.email}. Nothing was emailed; share this link with them yourself.`,
     ),
   ).toBeInTheDocument();
-  expect(screen.getByText("https://example.invalid/invite/replaced")).toBeInTheDocument();
+  expect(screen.getByText("https://example.invalid/invite#replaced")).toBeInTheDocument();
 });
 it("emails a new link only when asked and email is configured", async () => {
   mocks.resend.mockResolvedValue({
     invitation: row,
-    claim_url: "https://example.invalid/invite/emailed",
+    claim_url: "https://example.invalid/invite#emailed",
     delivery_status: "sent",
   });
   const view = render(<InvitationsTab />, { wrapper: MemoryRouter });

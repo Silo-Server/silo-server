@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, useParams } from "react-router";
+import { Link } from "react-router";
 import { captureSessionIdentity, getAccessToken, isSessionIdentityCurrent } from "@/api/client";
 import {
   completePasswordReset,
@@ -11,6 +11,7 @@ import { sessionFromTokenPair } from "@/api/v2/account";
 import { V2ProblemError } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useLinkToken } from "@/hooks/useLinkToken";
 import { usePostSignInNavigation } from "@/hooks/usePostSignInNavigation";
 import { usePasswordResetAvailable } from "@/hooks/queries/passwordReset";
 import { formatDateTime } from "@/lib/datetime";
@@ -21,8 +22,32 @@ import { Label } from "@/components/ui/label";
 import { AuthCard, SignInHint } from "@/components/auth/AuthCard";
 
 export default function PasswordReset() {
-  const { token = "" } = useParams();
+  const token = useLinkToken("/reset-password");
+  if (token === null) return <Loading />;
+  // A link scanner that drops the fragment, or a copied address bar, leaves
+  // the page without a token.
+  if (!token) return <IncompleteLink />;
   return <ResetForm key={token} token={token} />;
+}
+
+function Loading() {
+  return (
+    <div className="auth-shell">
+      <div className="border-primary h-8 w-8 animate-spin rounded-full border-b-2" />
+    </div>
+  );
+}
+
+function IncompleteLink() {
+  useDocumentTitle("Reset Password");
+  return (
+    <AuthCard
+      title="Incomplete link"
+      description="Open the reset link from your email again. If you copy it, copy all of it."
+    >
+      <SignInHint />
+    </AuthCard>
+  );
 }
 
 function ResetForm({ token }: { token: string }) {
@@ -96,13 +121,7 @@ function ResetForm({ token }: { token: string }) {
       </AuthCard>
     );
   }
-  if (loading || lookup.pending) {
-    return (
-      <div className="auth-shell">
-        <div className="border-primary h-8 w-8 animate-spin rounded-full border-b-2" />
-      </div>
-    );
-  }
+  if (loading || lookup.pending) return <Loading />;
   if (signInAs) {
     return (
       <AuthCard title="Password changed">
