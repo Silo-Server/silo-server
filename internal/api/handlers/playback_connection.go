@@ -55,8 +55,7 @@ func (h *PlaybackHandler) PlaybackConnection(ctx context.Context, device string,
 // the request the client just sent; only then are its clear and its
 // observed_rebuffer estimate written to the store. A seek-scoped replan replays
 // the stored start request instead, and this function may have rewritten that
-// request's estimate to the limit, or marked a lower probe estimate as
-// observed, so recording it would renew the limit or turn a probe into one.
+// request's estimate to the limit, so recording it would renew the limit.
 func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.StartRequestV3, clientSent bool) (*playback.BandwidthLimitV3, error) {
 	if !isNativeAPIV2(r.Context()) || !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) {
 		return nil, nil
@@ -92,9 +91,7 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 		return nil, err
 	}
 	if req.BandwidthEstimateKbps != nil && *req.BandwidthEstimateKbps < limit.Kbps {
-		// The stricter probe wins, but a learned stall still requires trying
-		// fitting originals before encoding. It did not itself lower the plan.
-		req.BandwidthEstimateSource = playback.BandwidthEstimateObservedRebufferV3
+		// The stricter request estimate wins; the limit did not lower the plan.
 		return nil, nil
 	}
 	req.BandwidthEstimateKbps = new(limit.Kbps)
@@ -138,11 +135,13 @@ func withoutObservedEstimateV3(req playback.StartRequestV3) playback.StartReques
 	return req
 }
 
-// A measured stall budget first tries the existing, authorized edition order.
+// An Auto budget, whatever set it (a speed test, the connection's reading, a
+// stall or a learned limit), first tries the existing, authorized edition
+// order: a lower original costs the server nothing and keeps its picture.
 // Candidate planning proves that the client can copy the video, including HDR,
 // audio and subtitle constraints; a matching bitrate alone is insufficient.
 func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.StartRequestV3, base *models.MediaFile, audio int, settings playback.PlannerSettingsV3) (*models.MediaFile, playback.StartRequestV3, int) {
-	if req.QualityPreference != playback.QualityAutoV3 || req.BandwidthEstimateSource != playback.BandwidthEstimateObservedRebufferV3 || req.BandwidthEstimateKbps == nil || !req.AllowsAlternateVersions() {
+	if req.QualityPreference != playback.QualityAutoV3 || req.BandwidthEstimateKbps == nil || !req.AllowsAlternateVersions() {
 		return base, req, audio
 	}
 	budget := playback.StreamBudgetKbpsV3(*req.BandwidthEstimateKbps)

@@ -40,10 +40,9 @@ func connectionTestPool(t *testing.T) *pgxpool.Pool {
 // TestSeekReplayKeepsLearnedLimitDB: only a request carrying observed_rebuffer
 // records a limit. A client replan that repeats its kept step-down estimate has
 // no source and records nothing. A seek-scoped replan replays the stored
-// start request, which applyLearnedLimit has already rewritten to the limit or
-// marked observed_rebuffer over a lower probe. Only the client's own request
-// may record or clear the limit, so a replay neither renews it nor stores the
-// probe estimate as a new limit. A lowering that reports a lower measured
+// start request, which applyLearnedLimit may have rewritten to the limit. Only
+// the client's own request may record or clear the limit, so a replay neither
+// renews it nor stores a probe estimate as a new limit. A lowering that reports a lower measured
 // throughput records that instead. The last case sends a seek_failure_recovery
 // through the native v2 replan dispatch, which must pass the replay as one.
 func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
@@ -95,8 +94,8 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 		t.Fatalf("a kept estimate changed the limit: kbps=%d observed=%v", kbps, observed)
 	}
 	probed := request(playback.BandwidthEstimateProbeV3, new(20000), "")
-	if limit, err := h.applyLearnedLimit(r, &probed, true); err != nil || limit != nil || probed.BandwidthEstimateSource != playback.BandwidthEstimateObservedRebufferV3 {
-		t.Fatalf("lower probe: limit=%+v source=%q err=%v", limit, probed.BandwidthEstimateSource, err)
+	if limit, err := h.applyLearnedLimit(r, &probed, true); err != nil || limit != nil {
+		t.Fatalf("lower probe: limit=%+v err=%v", limit, err)
 	}
 	for _, replay := range []playback.StartRequestV3{lowered, probed} {
 		if _, err := h.applyLearnedLimit(r, &replay, false); err != nil {
@@ -125,8 +124,11 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	// estimate plans with, and records, the throughput.
 	measured := request(playback.BandwidthEstimateObservedRebufferV3, new(44100), "")
 	measured.ObservedThroughputKbps = new(31000)
-	if limit, err := h.applyLearnedLimit(r, &measured, true); err != nil || limit == nil || limit.Kbps != 31000 || *measured.BandwidthEstimateKbps != 31000 {
-		t.Fatalf("measured lowering: limit=%+v estimate=%d err=%v", limit, *measured.BandwidthEstimateKbps, err)
+	if _, err := h.applyLearnedLimit(r, &measured, true); err != nil {
+		t.Fatal(err)
+	}
+	if kbps, _, _ := stored(); kbps != 31000 || *measured.BandwidthEstimateKbps != 31000 {
+		t.Fatalf("measured lowering recorded %d and planned %d, want 31000", kbps, *measured.BandwidthEstimateKbps)
 	}
 
 	requireSeekRecoveryKeepsLimitV3(t, pool, user, stored)
@@ -266,11 +268,14 @@ func TestBufferedAutoPrefersCopyVersion(t *testing.T) {
 	if chosen.ID != source.ID {
 		t.Fatal("fixed-file request changed version")
 	}
+	// Any Auto budget tries the version first: a speed test's, and a kept
+	// estimate a client repeats without a source.
 	req.AllowAlternateVersions = nil
-	req.BandwidthEstimateSource = "probe"
-	chosen, _, _ = h.lowerBufferedVersion(r, req, source, 0, h.plannerSettingsV3(r.Context()))
-	if chosen.ID != source.ID {
-		t.Fatal("legacy probe behavior changed")
+	for _, estimateSource := range []string{playback.BandwidthEstimateProbeV3, ""} {
+		req.BandwidthEstimateSource = estimateSource
+		if chosen, _, _ = h.lowerBufferedVersion(r, req, source, 0, h.plannerSettingsV3(r.Context())); chosen.ID != alternate.ID {
+			t.Fatalf("source %q selected %d, want lower original %d", estimateSource, chosen.ID, alternate.ID)
+		}
 	}
 }
 

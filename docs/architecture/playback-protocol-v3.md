@@ -2033,8 +2033,8 @@ Auto plans with the lower of the request estimate and the unexpired limit, or
 the limit alone when the request has none. Fixed qualities ignore the limit.
 `ignore` plans without the limit, records nothing and leaves the limit
 stored; `clear` deletes it before planning. The 80% margin and the
-administrator and client caps still apply. When an observed estimate or learned
-limit puts the source over budget and alternate versions are allowed, Auto first
+administrator and client caps still apply. When any estimate or learned limit
+puts the source over budget and alternate versions are allowed, Auto first
 tries versions of the same edition that fit and play without video encoding,
 then a transcode; an unchanged source carries `quality_reduction_unavailable`.
 This buffering search runs on a start, a `quality_change` or `output_change`
