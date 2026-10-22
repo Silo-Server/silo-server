@@ -507,8 +507,12 @@ login session ends the compat session with `401`; a lookup that fails is a
 retryable `503` and keeps it. `sa_` API keys have no login session and are checked
 as keys instead.
 
-Deleting a profile deletes the compatibility sessions signed in as it, so their next
-request gets `401` on every node. The account's other profiles keep their sessions.
+With the Postgres user store, deleting a profile deletes the compatibility sessions
+signed in as it in the same transaction, so their next request gets `401` on every
+node. With the SQLite user store they are deleted after the profile; if that fails,
+the profile stays deleted, the error is logged, and the sessions keep working until
+they expire or the account is signed out. The account's other profiles keep their
+sessions.
 As with token logout below, an open socket closes at its next re-check and signed
 node stream URLs already issued keep their lifetime.
 
