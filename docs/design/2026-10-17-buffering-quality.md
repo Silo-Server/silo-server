@@ -60,7 +60,7 @@ answers where they differ:
 | Question | Decision |
 | --- | --- |
 | When is playback in an outage? | When a media request fails or cannot connect, the device is offline, or the player waits while no media request has received data for `OUTAGE_NO_DATA_MS = 4000` on progressive delivery, or `OUTAGE_NO_DATA_SEGMENTED_MS = 15000` on segmented (HLS) delivery, where the server holds a segment request silent while it produces the segment. A request that keeps receiving data never fails, however slow. A client's player or engine timeouts no longer decide it. |
-| When is a wait with media buffered a stall? | A renderer wait whose buffer stays under the player's own resume amount becomes a stall after `RENDERER_WAIT_MAX_MS = 3000`. On a player that resumes at an explicit buffered amount (Media3, tunneled or not) or as soon as data reaches the playhead (browsers), a wait with more buffered than its ample threshold is a renderer wait from that moment: the device, not the network, is behind. The threshold is 5000 ms in browsers and twice the resume amount on Media3 (10000 ms). AVPlayer has none. |
+| When is a wait with media buffered a stall? | A renderer wait whose buffer stays under the player's own resume amount becomes a stall after `RENDERER_WAIT_MAX_MS = 3000`. On a player that resumes at an explicit buffered amount (Media3, tunneled or not, and Apple's software route) or as soon as data reaches the playhead (browsers), a wait with more buffered than its ample threshold is a renderer wait from that moment: the device, not the network, is behind. The threshold is 5000 ms in browsers and on Apple's software route, which resumes at a fixed 2000 ms lead, and twice the resume amount on Media3 (10000 ms). AVPlayer has none. |
 | What does a lowering send? | The step-down estimate, as before, plus `observed_throughput_kbps`, the throughput the plan that kept buffering measured. The server plans with, and learns, the lower figure. |
 | How low can Auto go? | Until a stream fits a 500 kbps link. The `/api/v2` menu gains 480p Low (800 kbps) and 360p (300 kbps); the frozen `/api/v1` menu does not. An Auto encode fits video and audio together within its budget, in stereo once the audio share drops below 192 kbps. |
 | What if a start or replan sends no estimate? | On Auto, the server uses the connection's current reading in its place. It replaces "the server plans only from the estimate a request carries". |
@@ -69,6 +69,7 @@ answers where they differ:
 | How long a learned limit lasts | 24 hours from the latest observation, not 7 days. A **Test speed** result above the limit clears it. |
 | Which reading counts after **Test speed**? | The test's. A manual result clears the connection's playback sample, so an older, higher sample no longer outvotes it. An automatic test leaves the sample, and the reading stays the higher of the two. |
 | A plan that never shows a frame? | On Auto in `always` mode, a plan whose start deadline passes while it waits for media, a first plan or a replacement, lowers as a long stall would, instead of failing at the same quality, but only when it measurably received its media more slowly than its delivered bitrate. An outage, a renderer wait, a decoder failure, no such measurement, a pending change or nothing lower keeps the failure path, and a deadline lowering that is refused, fails or is never adopted falls back to it. |
+| Can a start that has not played lower on stalls? | Only with the same evidence. Before any plan of the attempt has played, a long stall, two stalls or a missed start deadline lowers only when the plan's media measurably arrived more slowly than its delivered bitrate. Without it, the start runs on to its deadline and the failure path, so a version that cannot start for another reason does not drive Auto and the learned limit down. |
 | When is a replacement a source reload? | Only when it replaces a source that has played. A replacement adopted before any plan of the attempt has played continues the attempt's start wait, under the attempt's original grace. |
 | Can an outage end playback? | No. The client waits for media data or the network, sends no failure recovery during it, and resends a replan that got no response. After it reopens the source, it sends failure recovery only while the network is connected and the server answers. |
 
@@ -222,8 +223,11 @@ measured and where it came from, and never do Auto's arithmetic.
       amount: 10000 ms with the 5000 ms resume amount the Android player
       sets. A network wait that ends at the resume amount is then never taken
       for the renderer's. A tunneled Media3 player follows the same rule.
+    - on Apple's software route, where AetherEngine renders without AVPlayer
+      and resumes once a fixed 2000 ms lead is buffered,
+      `RENDERER_WAIT_AMPLE_MS = 5000`, more than twice that lead.
 
-    AVPlayer has no ample threshold. With
+    AVPlayer, Apple's other route, has no ample threshold. With
     `automaticallyWaitsToMinimizeStalling`, it waits on a link slightly slower
     than the bitrate until it has buffered enough to play through, which
     legitimately exceeds 5000 ms, and the rule would stop Auto from lowering
@@ -242,6 +246,21 @@ measured and where it came from, and never do Auto's arithmetic.
     `STALL_WINDOW_MS = 120000` when the trigger is evaluated;
   - one stall reaching `LONG_STALL_MS = 6000`, while it is still in progress or
     within the window after it ends.
+
+  Before any plan of the playback attempt has played, a trigger also needs
+  evidence that the plan's media arrived more slowly than its delivered bitrate:
+  the client measured the plan's throughput and it is below the delivered
+  bitrate, as for a missed start deadline (see *Lower automatically*). Without
+  that evidence the trigger does not fire, in any mode, and the start runs on to
+  its deadline and the failure path, with the server's exclusion of the failed
+  route. When the first frame ends a start wait that lacked the evidence, that
+  wait does not count as a stall, so a slow start does not lower at its first
+  frame. A version that cannot start for a reason other than the network must
+  not drive Auto and the learned limit down: on an Apple TV, a version whose
+  subtitle rendition the server was still extracting never started, and each
+  replacement lowered again, from 97 Mbps to 125 kbps and a 249 kbps learned
+  limit in under three minutes, before the start failed anyway. Once the attempt
+  has played, the trigger needs no evidence.
 - **Lower rung**: the highest `available_qualities` entry whose bitrate is below
   the lower of the bitrate of the entry the plan names in `active_quality`
   (with `plan_active_quality_v1`) and the delivered bitrate. When the plan names
@@ -347,7 +366,8 @@ A missed start deadline lowers only under these rules:
   A plan that received no bytes is in an outage; one that received them at
   or above its delivered bitrate is failing for another reason, such as a
   stream the device cannot play; and a plan the client cannot measure gives
-  no evidence.
+  no evidence. Before the attempt has played, a long stall or two stalls
+  need the same evidence (see *Trigger*).
 - Only a transport stall lowers: the player was waiting for media. A start
   that fails in the decoder or renderer keeps the failure path; on Android,
   `transport_stall` lowers, and `decoder_no_output`, `render_startup_failure`
@@ -1029,8 +1049,12 @@ events are:
   waits), and `transport_error_end` the moment it ends. These
   are adapter rules: the 2026-10-22 changes left the vectors unchanged.
   The vectors have no case with a replacement adopted before the attempt has
-  played, and no event for a missed start deadline. Each client covers those
-  rules, and the deadline's evidence and fallback, in its own tests.
+  played, and no event for a missed start deadline. They carry no
+  throughput either: a client's harness reports a measurement below every
+  plan's delivered bitrate, so a case that lowers before the attempt has
+  played (`slow_start`) has the evidence *Trigger* requires. Each client
+  covers those rules, a start without that evidence, and the deadline's
+  fallback in its own tests.
 - The pill answers `select_lower`, `select_keep`, `select_restore` and `back`.
 - `pick_sent` and `pick_refused`: the viewer's quality pick is sent, or the
   player refuses it. An adopted pick arrives as `quality_changed`, then its

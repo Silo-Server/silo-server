@@ -1749,7 +1749,11 @@ when every client does this: after two stalls of at least a second within two
 minutes, or one stall of six seconds. Stall time in the first ten seconds of a
 plan does not count, and buffering caused by a seek, pause or source reload is
 not a stall. A replacement adopted before the attempt has played is not a
-reload: it is part of the start, under the start's ten seconds. Clients send
+reload: it is part of the start, under the start's ten seconds. Until a plan of
+the attempt has played, a client lowers only when it measured the plan's media
+arriving more slowly than its delivered bitrate; otherwise the start runs on to
+its deadline and the failure path, so a version that cannot start for another
+reason does not drive Auto and the learned limit down. Clients send
 70% of the delivered bitrate, so the next stream
 targets about 56% of the one that stalled, with the throughput the stalled plan
 measured as `observed_throughput_kbps` when they have it (the server takes the
