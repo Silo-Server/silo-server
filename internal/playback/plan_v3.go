@@ -1658,8 +1658,11 @@ type QualityResultV3 struct {
 	// ExplicitRung marks a user-selected fixed rung, as opposed to an
 	// automatic reduction from device limits, bandwidth evidence, or caps.
 	ExplicitRung bool
-	Reason       string
-	Warnings     []DegradationWarningV3
+	// BudgetKbps is the share of a bandwidth estimate an automatic encode's
+	// video and audio fit within together; 0 when no estimate bounds it.
+	BudgetKbps int
+	Reason     string
+	Warnings   []DegradationWarningV3
 }
 
 // ResolveQualityPolicyV3 selects the delivery quality for a plan.
@@ -1781,10 +1784,12 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	width, effectiveHeight = encodedFrame(source.Width, source.Height, width, effectiveHeight)
 	label := heightLabel(effectiveHeight)
 	bitrate := ladderClassBitrateKbpsV3(class.Height)
-	if budgetKbps > 0 && bitrate > budgetKbps {
-		// A class is earned at its floor, which can sit below the class
-		// bitrate; keep the headroom the class choice assumed.
-		bitrate = budgetKbps
+	if budgetKbps > 0 {
+		// An encode under an estimate uses the budget, up to what the
+		// class's best menu rung spends. A class is earned at its floor,
+		// which can sit below the class bitrate; the budget keeps the
+		// headroom the class choice assumed.
+		bitrate = min(budgetKbps, autoClassCeilingKbpsV3(class.Height))
 	}
 	if source.BitrateKbps > 0 {
 		// A smaller frame never needs more bits than the whole source used,
@@ -1798,7 +1803,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		// is a hard delivery ceiling, never advisory.
 		bitrate = capKbps
 	}
-	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, Reason: reason, Warnings: warnings}
+	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, BudgetKbps: budgetKbps, Reason: reason, Warnings: warnings}
 	result.RequiresTranscode = !result.PreservesSource
 	return result
 }
@@ -2177,6 +2182,20 @@ func ladderClassBitrateKbpsV3(height int) int {
 	default:
 		return 1_500
 	}
+}
+
+// autoClassCeilingKbpsV3 is the most an automatic encode at a ladder class
+// spends when its budget allows: the bitrate of the class's highest menu
+// rung, or the class bitrate when no rung has the class's height.
+func autoClassCeilingKbpsV3(height int) int {
+	class := ladderClassesFrom(height)[0].Height
+	ceiling := ladderClassBitrateKbpsV3(class)
+	for _, rung := range ladderRungsV3 {
+		if rung.Height == class {
+			ceiling = max(ceiling, rung.BitrateKbps)
+		}
+	}
+	return ceiling
 }
 
 type ladderRungV3 struct {
