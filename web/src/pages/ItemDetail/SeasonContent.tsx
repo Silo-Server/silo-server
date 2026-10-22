@@ -72,7 +72,17 @@ export default function SeasonContent({
   const seriesId = item.series_id;
   const seriesHref = seriesId ? buildItemHref({ contentId: seriesId, libraryId }) : "/";
   const firstEpisode = episodes[0];
-  const playableEpisodes = episodes.filter((episode) => (episode.files?.length ?? 0) > 0);
+  // With catalog.scope_versions_to_library on, a list read under a library
+  // holds only that library's files, but playback uses every version. When an
+  // episode shows no file here, the season's unscoped list decides what plays.
+  const needsUnscopedFiles =
+    libraryId !== undefined && episodes.some((episode) => (episode.files?.length ?? 0) === 0);
+  const { data: unscopedEpisodesData } = useItemEpisodes(
+    needsUnscopedFiles ? item.content_id : undefined,
+  );
+  const playbackEpisodes =
+    (needsUnscopedFiles ? unscopedEpisodesData?.episodes : undefined) ?? episodes;
+  const playableEpisodes = playbackEpisodes.filter((episode) => (episode.files?.length ?? 0) > 0);
   const firstUnwatched =
     playableEpisodes.find((episode) => !episode.user_data?.played) ?? playableEpisodes[0];
   const watchTogether = useDetailWatchTogether({

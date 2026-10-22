@@ -231,11 +231,55 @@ describe("SeasonContent", () => {
       </MemoryRouter>,
     );
 
-    expect(mocks.useItemEpisodes).toHaveBeenLastCalledWith(item.content_id, 4);
+    expect(mocks.useItemEpisodes).toHaveBeenCalledWith(item.content_id, 4);
+    // Every episode has a file in the library, so no unscoped read starts.
+    expect(mocks.useItemEpisodes).toHaveBeenCalledWith(undefined);
     expect(markup).toContain('href="/item/episode-1?libraryId=4"');
     expect(markup).not.toContain('href="/item/episode-1"');
     // Playback always sees every version, so Play carries no library.
     expect(mocks.capturedActionBarProps.value?.playHref).toBe("/watch/episode-1");
+  });
+
+  it("picks the watch party target from every library when the opened one lacks an episode", () => {
+    const episode = (n: number, files: object[], played: boolean) => ({
+      content_id: `episode-${n}`,
+      title: `Episode ${n}`,
+      episode_number: n,
+      season_number: 1,
+      still_url: "",
+      files,
+      user_data: { played },
+    });
+    // Scoped to library 4, episode 2 has no file there; unscoped it does.
+    mocks.useItemEpisodes.mockImplementation((_id?: string, libraryId?: number) => ({
+      data: {
+        episodes:
+          libraryId === 4
+            ? [
+                episode(1, [{ file_id: 1 }], true),
+                episode(2, [], false),
+                episode(3, [{ file_id: 3 }], false),
+              ]
+            : [
+                episode(1, [{ file_id: 1 }], true),
+                episode(2, [{ file_id: 2 }], false),
+                episode(3, [{ file_id: 3 }], false),
+              ],
+      },
+      isLoading: false,
+      error: null,
+    }));
+    const item = makeSeasonItem();
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1?libraryId=4"]}>
+        <SeasonContent item={item} libraryId={4} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.useItemEpisodes).toHaveBeenCalledWith(item.content_id);
+    expect(mocks.useDetailWatchTogether).toHaveBeenLastCalledWith(
+      expect.objectContaining({ target: expect.objectContaining({ content_id: "episode-2" }) }),
+    );
   });
 
   it("passes partial-progress restart eligibility to episode menus", () => {
