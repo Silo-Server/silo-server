@@ -3,6 +3,8 @@ package playback
 import (
 	"slices"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Quality reason codes. The list is open: clients tolerate codes they do not
@@ -173,6 +175,14 @@ func qualityDecisionReasonsV3(facts qualityFactsV3, result PlannerResultV3) []Qu
 		add(QualityReasonV3{Code: QualityReasonCompatibilityConversionV3})
 	}
 	return reasons
+}
+
+// samePresentationVersionV3 reports whether a and b are parts of one
+// multi-part version: the parts of a version share its media folder,
+// presentation group and part count.
+func samePresentationVersionV3(a, b *models.MediaFile) bool {
+	return a.PresentationPartTotal > 1 && a.PresentationGroupKey != "" &&
+		a.MediaFolderID == b.MediaFolderID && a.PresentationGroupKey == b.PresentationGroupKey && a.PresentationPartTotal == b.PresentationPartTotal
 }
 
 // appendQualityReasonV3 adds reason unless its code is already listed.

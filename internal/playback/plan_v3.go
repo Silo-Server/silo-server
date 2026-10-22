@@ -262,9 +262,9 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		input.Now = time.Now()
 	}
 	source := SourceDescriptorFromFileV3(file, input.AudioTrackIndex)
-	if file.ID != input.RequestedFile.ID && file.PresentationPartIndex == input.RequestedFile.PresentationPartIndex {
-		// Another version of the requested part plays. A different part is
-		// the same version further along, not an alternate.
+	if file.ID != input.RequestedFile.ID && !samePresentationVersionV3(file, input.RequestedFile) {
+		// Another version plays. Its bitrate and size are compared with the
+		// requested version's first part, which encodes like the others.
 		requested := SourceDescriptorFromFileV3(input.RequestedFile, input.AudioTrackIndex)
 		facts.requested = &requested
 	}

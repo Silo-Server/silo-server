@@ -131,6 +131,14 @@ func qualityReasonCasesV3() []qualityReasonCaseV3 {
 		{name: "another version under a learned limit", requested: fourKVersionV3(), learnedLimit: &BandwidthLimitV3{Kbps: 20_000, ExpiresAt: limit.ExpiresAt}, edit: func(req *StartRequestV3, _ *models.MediaFile) {
 			req.BandwidthEstimateKbps = new(20_000)
 		}, want: []QualityReasonV3{{Code: QualityReasonNetworkLearnedLimitV3, Kbps: 20_000, ExpiresAt: limit.ExpiresAt}, {Code: QualityReasonAlternateVersionV3, MediaFileID: 42}}},
+		// Resuming a two-part title in its second part: part 1 of the
+		// requested version is the request, part 2 plays.
+		{name: "the requested version's next part", requested: multipartV3(41, 1, 7), edit: func(_ *StartRequestV3, file *models.MediaFile) {
+			*file = *multipartV3(42, 2, 7)
+		}, want: []QualityReasonV3{{Code: QualityReasonOriginalV3}}},
+		{name: "another version's next part", requested: multipartV3(41, 1, 7), edit: func(_ *StartRequestV3, file *models.MediaFile) {
+			*file = *multipartV3(52, 2, 8)
+		}, want: []QualityReasonV3{{Code: QualityReasonAlternateVersionV3, MediaFileID: 52}}},
 		// A version chosen after the requested one was refused has no limit
 		// to name.
 		{name: "another version for a refusal", requested: fourKVersionV3(),
@@ -191,5 +199,14 @@ func fourKVersionV3() *models.MediaFile {
 	file := activeQualityFixtureV3()
 	file.ID, file.Resolution, file.Bitrate = 41, "2160p", 60_000
 	file.VideoTracks[0].Width, file.VideoTracks[0].Height, file.VideoTracks[0].Bitrate = 3840, 2160, 60_000
+	return file
+}
+
+// multipartV3 is part of a two-part version of activeQualityFixtureV3's
+// title, kept in folder.
+func multipartV3(id, part, folder int) *models.MediaFile {
+	file := activeQualityFixtureV3()
+	file.ID, file.MediaFolderID = id, folder
+	file.PresentationGroupKey, file.PresentationPartIndex, file.PresentationPartTotal = "movie", part, 2
 	return file
 }
