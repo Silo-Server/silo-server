@@ -431,13 +431,14 @@ export function useAutoQualityDownshift(options: Options) {
       const wait = rendererWait.current;
       if (
         wait !== "ample" &&
-        (wait || c.waitingForData) &&
+        (wait || c.waitingForData || (reloading.current && latest.current.playIntent?.())) &&
         bufferedAheadMs(video) > RENDERER_WAIT_AMPLE_MS
       ) {
         // Plenty buffered makes any wait the renderer's until playback runs;
-        // a stall so far ends uncounted.
+        // a stall so far ends uncounted. A reload's wait is never counted,
+        // but it is latched here, before a start deadline empties the element.
         rendererWait.current = "ample";
-        if (!wait) send("waiting", "renderer");
+        if (c.waitingForData) send("waiting", "renderer");
       } else if (wait === "buffered" && !rendererBusy()) {
         rendererWait.current = undefined;
         c.event({ type: "waiting" }, now());

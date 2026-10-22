@@ -5990,9 +5990,9 @@ describe("VideoPlayer hls.js request timeouts", () => {
   // lowers sooner, so this is mostly a replacement's, whose load is a source
   // reload: here one that receives data at `kbps` and never starts. It fails
   // at the same quality when its link is silent (an outage), when its media
-  // arrives at its bitrate, when nothing is lower, or when the session refuses
-  // the lowering. The controller's tests cover the other cases that keep the
-  // failure.
+  // arrives at its bitrate, when its buffer filled (the renderer's wait), when
+  // nothing is lower, or when the session refuses the lowering. The
+  // controller's tests cover the other cases that keep the failure.
   const original = { label: "original", preserves_source: true, bitrate_kbps: 20_000 };
   const high = { label: "1080p-high", preserves_source: false, bitrate_kbps: 10_000 };
   const low = { label: "720p", preserves_source: false, bitrate_kbps: 4_000 };
@@ -6002,6 +6002,8 @@ describe("VideoPlayer hls.js request timeouts", () => {
     refused?: boolean;
     /** The rate the replacement's media arrives at; 0 for a silent link. */
     kbps?: number;
+    /** Seconds buffered past the playhead while it waits. */
+    buffered?: number;
     lowers?: boolean;
   }>([
     { name: "lowers with a lower rung", lowers: true },
@@ -6009,9 +6011,16 @@ describe("VideoPlayer hls.js request timeouts", () => {
     { name: "fails with nothing lower", rungs: [original, high] },
     { name: "fails on a silent link", kbps: 0 },
     { name: "fails when its media arrives at its bitrate", kbps: 10_000 },
+    { name: "fails when its buffer fills but it never plays", buffered: 6 },
   ])(
     "on Auto, a replacement that misses its start deadline $name",
-    async ({ rungs = [original, high, low], refused = false, kbps = 2_000, lowers = false }) => {
+    async ({
+      rungs = [original, high, low],
+      refused = false,
+      kbps = 2_000,
+      buffered = 0,
+      lowers = false,
+    }) => {
       hlsJS.supported = true;
       const onPlanFailure = vi.fn((_failure: unknown, _position?: number) => true);
       const onQualitySelect = vi.fn(
@@ -6063,6 +6072,15 @@ describe("VideoPlayer hls.js request timeouts", () => {
         }),
       });
       await act(async () => vi.advanceTimersByTimeAsync(0));
+      let bufferedEnd = buffered;
+      Object.defineProperty(video, "buffered", {
+        configurable: true,
+        get: () => ({ length: 1, start: () => 0, end: () => bufferedEnd }),
+      });
+      // The deadline resets the element, emptying it, before it reports.
+      vi.mocked(HTMLMediaElement.prototype.load).mockImplementation(() => {
+        bufferedEnd = 0;
+      });
       if (kbps > 0) loadingFragment(kbps);
       act(() => vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS));
       expect(onQualitySelect.mock.calls.map(([, , request]) => request)).toEqual(
