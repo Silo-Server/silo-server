@@ -162,6 +162,8 @@ export function useAutoQualityDownshift(options: Options) {
   // The failure a start deadline's lowering stands in for, while it is sent.
   const deadlineFailure = useRef<(() => void) | undefined>(undefined);
   const [pill, setPill] = useState<BufferingPillState | null>(null);
+  // Playback waits through an outage: the picture is frozen until it runs.
+  const [outage, setOutage] = useState(false);
   // The pill state changes only when it shows, hides, freezes or resumes; the
   // pill counts down from its deadline itself.
   const refresh = useCallback(() => {
@@ -317,6 +319,9 @@ export function useAutoQualityDownshift(options: Options) {
     const c = controller.current;
     if (!video || !c) return;
     let trouble = false;
+    // A wait for data that an outage held. It lasts until the wait ends,
+    // though the outage may end first: data is back, playback is not yet.
+    let outageWait = false;
     // Where playback stood when the current stall began. A stall can end
     // without a `playing` event (the player clears buffering on `timeupdate`),
     // so advancing time also ends it.
@@ -342,11 +347,17 @@ export function useAutoQualityDownshift(options: Options) {
         c.event({ type: next ? "transport_error_start" : "transport_error_end" }, now());
       trouble = next;
     };
+    const syncOutageWait = () => {
+      const next = c.waitingForData && (outageWait || trouble);
+      if (next !== outageWait) setOutage(next);
+      outageWait = next;
+    };
     const send = (type: BufferingEvent["type"], cause?: BufferingEvent["cause"]) => {
       syncTrouble();
       c.event({ type, cause }, now());
       // A wait that begins on a link already silent is an outage at once.
       if (type === "waiting") syncTrouble();
+      syncOutageWait();
       refresh();
     };
     const playing = () => {
@@ -444,12 +455,14 @@ export function useAutoQualityDownshift(options: Options) {
         c.event({ type: "waiting" }, now());
       }
       c.tick(now());
+      syncOutageWait();
       refresh();
     }, TICK_MS);
     return () => {
       clearInterval(timer);
       for (const [name, handler] of Object.entries(events))
         video.removeEventListener(name, handler);
+      setOutage(false);
     };
   }, [options.videoRef, options.sessionId, refresh]);
   const answer = useCallback(
@@ -484,7 +497,7 @@ export function useAutoQualityDownshift(options: Options) {
   const visiblePill =
     !options.obscured && pill?.planRevision === options.planRevision ? pill : null;
   return useMemo(
-    () => ({ pill: visiblePill, answer, startDeadlinePassed }),
-    [visiblePill, answer, startDeadlinePassed],
+    () => ({ pill: visiblePill, outage, answer, startDeadlinePassed }),
+    [visiblePill, outage, answer, startDeadlinePassed],
   );
 }

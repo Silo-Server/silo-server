@@ -4567,6 +4567,12 @@ export function VideoPlayer({
   startDeadlinePassedRef.current = (fail) =>
     bufferingQuality.startDeadlinePassed(fail, planThroughputKbps(String(planRevision)));
   const bufferingPill = bufferingQuality.pill;
+  // An outage shows the buffering spinner too, and says so: the browser
+  // decoder keeps sending timeupdate while it waits, which clears `buffering`.
+  const stalled = buffering || bufferingQuality.outage;
+  let stallLabel: string | null = null;
+  if (watchTogetherSync.catchingUp) stallLabel = "Catching up to the party";
+  else if (bufferingQuality.outage) stallLabel = "Reconnecting…";
   const { answer: answerBufferingPill } = bufferingQuality;
   // The viewer's latest quality pick while it is pending. A pick that a newer
   // one replaced settles too, but must not end the newer one's suspension.
@@ -5137,17 +5143,17 @@ export function VideoPlayer({
         </div>
       )}
 
-      {/* Buffering spinner (mid-playback stalls only) */}
-      {!isDetached && buffering && !roomSyncWaiting && !awaitingFirstFrame && isPlayerReady && (
+      {/* Buffering spinner (mid-playback stalls and outages only) */}
+      {!isDetached && stalled && !roomSyncWaiting && !awaitingFirstFrame && isPlayerReady && (
         <div
           role="status"
-          aria-label={watchTogetherSync.catchingUp ? "Catching up to the party" : "Buffering"}
+          aria-label={stallLabel ?? "Buffering"}
           className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3"
         >
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-          {watchTogetherSync.catchingUp ? (
+          {stallLabel ? (
             <span className="rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white/85">
-              Catching up to the party
+              {stallLabel}
             </span>
           ) : (
             <span className="sr-only">Buffering</span>

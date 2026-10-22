@@ -94,6 +94,22 @@ it("excludes outages and seek waits", () => {
   expect(h.options.onReplan).not.toHaveBeenCalled();
 });
 
+it("reports a wait an outage held until playback runs", () => {
+  const h = setup();
+  // Offline while playing from the buffer: nothing is frozen yet.
+  h.options.transportTrouble.mockReturnValue(true);
+  h.advance(100);
+  expect(h.result.current.outage).toBe(false);
+  h.send("waiting");
+  expect(h.result.current.outage).toBe(true);
+  // The network is back before playback runs again.
+  h.options.transportTrouble.mockReturnValue(false);
+  h.advance(1_000);
+  expect(h.result.current.outage).toBe(true);
+  h.send("playing");
+  expect(h.result.current.outage).toBe(false);
+});
+
 it("freezes the pill timer while paused and reports the retired plan once", () => {
   const h = setup();
   h.send("waiting");
