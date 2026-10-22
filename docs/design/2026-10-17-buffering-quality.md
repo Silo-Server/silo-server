@@ -67,6 +67,7 @@ answers where they differ:
 | When does Auto try a lower version? | Under any Auto budget, not only after buffering. Of the versions that fit, one that keeps the source's dynamic range comes first, then the highest bitrate. |
 | What does an Auto encode target? | Its budget, up to the bitrate of its class's highest menu rung, and never more than that rung even without an estimate, except on the local network with neither an estimate nor a cap. |
 | How long a learned limit lasts | 24 hours from the latest observation, not 7 days. A **Test speed** result above the limit clears it. |
+| Which reading counts after **Test speed**? | The test's. A manual result clears the connection's playback sample, so an older, higher sample no longer outvotes it. An automatic test leaves the sample, and the reading stays the higher of the two. |
 | A plan that never shows a frame? | On Auto in `always` mode, a plan whose start deadline passes while it waits for media, a first plan or a replacement, lowers as a long stall would, instead of failing at the same quality, but only when it measurably received its media more slowly than its delivered bitrate. An outage, a renderer wait, a decoder failure, no such measurement, a pending change or nothing lower keeps the failure path, and a deadline lowering that is refused, fails or is never adopted falls back to it. |
 | When is a replacement a source reload? | Only when it replaces a source that has played. A replacement adopted before any plan of the attempt has played continues the attempt's start wait, under the attempt's original grace. |
 | Can an outage end playback? | No. The client waits for media data or the network, sends no failure recovery during it, and resends a replan that got no response. After it reopens the source, it sends failure recovery only while the network is connected and the server answers. |
@@ -521,7 +522,8 @@ A limit is recorded when a start or replan carries
   limit also appears in Settings, with a reset action (see below).
 - **Cleared by**: Settings → Reset, **Restore quality**, the admin, expiry, or
   a **Test speed** result above the limit (see *Probe results*). The automatic
-  quick test never clears it.
+  quick test never clears it. Any **Test speed** result also clears the
+  playback sample, so the reading Auto plans with afterwards is that result.
 
 The web's 30-minute browser-local observed limit is retired once the web sends
 `observed_rebuffer`, so all clients share one store.
@@ -813,7 +815,8 @@ there, which reads low.
 The server keeps one sample per device and connection as `playback_sample`. A
 new sample replaces it when it is higher, or when the kept one is older than the
 reading lifetime. Like a quick test that reached its target, it is a lower
-bound.
+bound. A **Test speed** result clears it (see *Probe results*); an automatic
+test does not.
 
 ## Reporting and display
 
@@ -828,9 +831,14 @@ server keeps the latest result per learned-limit key.
 
 `manual` is optional and `false` by default. A client sets it only on a test
 the viewer started with **Test speed**, never on the automatic quick test. A
-manual result whose `kbps` is above the stored learned limit for that device
-and connection clears the limit, as Settings → Reset does, and the client's
-read of the connection after the test shows it gone.
+manual result clears the connection's playback sample in the same write that
+stores it, so the reading becomes the test's result: a deliberate test the
+viewer just ran is not outvoted by an older, higher sample. On an Apple TV, a
+21 Mbps test left the budget at 133 Mbps from a 167 Mbps sample. A manual
+result whose `kbps` is above the stored learned limit for that device and
+connection also clears the limit, as Settings → Reset does, and the client's
+read of the connection after the test shows it gone. An automatic result
+keeps the sample, and the reading stays the higher of the two.
 
 ### `GET /api/v2/playback/connection`
 
@@ -854,8 +862,9 @@ removes them, current or not, and clients judge whether they are current (see
 
 `auto_budget_kbps` is computed by the server: 80% of the lower of the reading
 and the learned limit, then capped by the admin bitrate cap. The reading is the
-higher of the current probe and the current playback sample. Clients display
-the budget and never compute it.
+higher of the current probe and the current playback sample. A **Test speed**
+result clears the sample, so until playback reports a new one the reading is
+that result. Clients display the budget and never compute it.
 
 `DELETE /api/v2/playback/connection/learned-limit` resets the limit. It
 requires `X-Silo-Device-Id`, the device whose limit it resets; without one it
@@ -879,10 +888,11 @@ Phase 2 adds a Connection group:
   with a **Test speed** action. Without a probe, the row shows a playback sample
   as a lower bound: "Faster than 51 Mbps · seen during playback 2 hours ago".
   **Test speed** runs the accurate test in the foreground, which takes up to 10
-  seconds, reports the result with `manual: true` and refreshes the row. A `429` shows "Try again in
-  N seconds" ("1 second" at one) until N seconds have passed. If the report
-  fails, the row says the test could not be saved and keeps showing the
-  server's reading.
+  seconds, reports the result with `manual: true` and refreshes the row. The
+  row and the budget line then show that result (see *Probe results*). A
+  `429` shows "Try again in N seconds" ("1 second" at one) until N seconds
+  have passed. If the report fails, the row says the test could not be saved
+  and keeps showing the server's reading.
 - "Auto plays videos up to 35 Mbps without converting them," from
   `auto_budget_kbps`.
 - On cellular, the row says that speed tests are skipped on cellular, and the

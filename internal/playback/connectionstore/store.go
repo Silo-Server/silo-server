@@ -206,8 +206,9 @@ func Budget(probe *Probe, sample *Sample, limit *Limit, capKbps int) *int {
 }
 
 // ReportProbe stores a device's latest speed test on a connection. A manual
-// test faster than the learned limit clears the limit, as a reset does: the
-// viewer has just shown the link carries more.
+// test also clears the playback sample, so an older, higher sample cannot
+// outvote it, and when faster than the learned limit clears the limit, as a
+// reset does.
 func (s *Store) ReportProbe(ctx context.Context, user int, device, key string, result ProbeResult) error {
 	if s == nil || device == "" || key == "" {
 		return nil
@@ -218,7 +219,9 @@ func (s *Store) ReportProbe(ctx context.Context, user int, device, key string, r
 		ON CONFLICT (user_id, device_id, connection_key) DO UPDATE
 		SET probe_kbps = $4, probe_bytes = $5, probe_duration_ms = $6, probe_transport = $7, probe_lower_bound = $8, measured_at = now(), updated_at = now(),
 		    limit_kbps = CASE WHEN $9 AND playback_connections.limit_kbps < $4 THEN NULL ELSE playback_connections.limit_kbps END,
-		    observed_at = CASE WHEN $9 AND playback_connections.limit_kbps < $4 THEN NULL ELSE playback_connections.observed_at END`,
+		    observed_at = CASE WHEN $9 AND playback_connections.limit_kbps < $4 THEN NULL ELSE playback_connections.observed_at END,
+		    sample_kbps = CASE WHEN $9 THEN NULL ELSE playback_connections.sample_kbps END,
+		    sample_at = CASE WHEN $9 THEN NULL ELSE playback_connections.sample_at END`,
 		user, device, key, result.Kbps, result.Bytes, result.DurationMS, result.Transport, result.LowerBound, result.Manual)
 	return err
 }

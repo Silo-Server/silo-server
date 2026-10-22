@@ -2088,7 +2088,8 @@ field when the plan it replaces had it.
 to the diagnostics allowlist; the existing `bandwidth_estimate_kbps` key
 reports the requested estimate. `throughput_kbps`, the rate the plan's media
 arrived at, becomes the connection's `playback_sample` when it is higher than
-the kept one or the kept one has outlived the reading lifetime. Clients send a summary when a plan stops playing, whether it was
+the kept one or the kept one has outlived the reading lifetime; a **Test
+speed** result (`manual: true`) clears it. Clients send a summary when a plan stops playing, whether it was
 replaced, stopped or failed. A newly inserted summary becomes its connection's
 latest and feeds `silo_playback_stall_ratio{client,delivery}` and
 `silo_playback_buffering_actions_total{mode,action}`; a retried event counts

@@ -89,7 +89,7 @@ func TestStoreLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkResetPreservesObservations(t, s, user)
-	checkManualTestLiftsLimit(t, s, user)
+	checkManualTest(t, s, user)
 	if err := s.Observe(ctx, user, "device", "local", 44100); err != nil {
 		t.Fatal(err)
 	}
@@ -177,9 +177,9 @@ func checkResetPreservesObservations(t *testing.T, s *Store, user int) {
 	}
 }
 
-// checkManualTestLiftsLimit: only a manual test faster than the learned limit
-// clears it; an automatic test never does.
-func checkManualTestLiftsLimit(t *testing.T, s *Store, user int) {
+// checkManualTest: a manual test clears the playback sample, and the learned
+// limit when it is faster than the limit; an automatic test clears neither.
+func checkManualTest(t *testing.T, s *Store, user int) {
 	t.Helper()
 	ctx := t.Context()
 	if err := s.Observe(ctx, user, "device", "local", 44100); err != nil {
@@ -193,11 +193,17 @@ func checkManualTestLiftsLimit(t *testing.T, s *Store, user int) {
 		{kbps: 44100, manual: true, kept: true},
 		{kbps: 60000, manual: true},
 	} {
+		if err := s.ReportSample(ctx, user, "device", "local", 90000, 7*24*time.Hour); err != nil {
+			t.Fatal(err)
+		}
 		if err := s.ReportProbe(ctx, user, "device", "local", ProbeResult{Kbps: step.kbps, Bytes: 1, DurationMS: 1, Transport: "wifi", Manual: step.manual}); err != nil {
 			t.Fatal(err)
 		}
 		if limit, err := s.Get(ctx, user, "device", "local"); err != nil || (limit != nil) != step.kept {
 			t.Fatalf("after a %d kbps test (manual %v): limit %+v (%v), want kept %v", step.kbps, step.manual, limit, err, step.kept)
+		}
+		if c, err := s.Connection(ctx, user, "device", "local"); err != nil || c == nil || (c.PlaybackSample != nil) == step.manual {
+			t.Fatalf("after a %d kbps test (manual %v): row %+v (%v), want the sample kept only after an automatic test", step.kbps, step.manual, c, err)
 		}
 	}
 }

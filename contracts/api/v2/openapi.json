@@ -38672,7 +38672,7 @@
           },
           "playback_sample": {
             "$ref": "#/components/schemas/PlaybackSample",
-            "description": "The best recent playback throughput on this connection, a lower bound on its speed."
+            "description": "The best recent playback throughput on this connection, a lower bound on its speed. A Test speed result clears it."
           },
           "probe": {
             "$ref": "#/components/schemas/PlaybackProbe"
@@ -39074,7 +39074,7 @@
             "type": "boolean"
           },
           "manual": {
-            "description": "The viewer started this test with Test speed; never set for the automatic test. A manual result above the device's learned limit on this connection clears the limit, as a reset does.",
+            "description": "The viewer started this test with Test speed; never set for the automatic test. A manual result clears the connection's playback sample, so the reading becomes this result, and one above the device's learned limit on this connection also clears the limit, as a reset does.",
             "type": "boolean"
           },
           "transport": {

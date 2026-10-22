@@ -509,14 +509,18 @@ returns 204. Bounds are 100–1,000,000 kbps (those of
 `transport` is `wifi`, `ethernet`, `cellular` or `other`; the optional
 `lower_bound` (default `false`) marks a result that proves only "at least
 `kbps`". The optional `manual` (default `false`) marks a test the viewer
-started with **Test speed**; a manual result above the learned limit for the
-device and connection clears the limit, as the reset does. The server keeps
-the latest result per device and connection.
+started with **Test speed**. A manual result clears the connection's
+`playback_sample` in the same write, so the reading becomes the test's result
+rather than an older, higher sample; one above the learned limit for the
+device and connection also clears the limit, as the reset does. An automatic
+result keeps the sample. The server keeps the latest result per device and
+connection.
 
 A `plan_summary` route event may carry the diagnostics key `throughput_kbps`,
 the rate the plan's media requests received data. The server keeps the highest
 per device and connection as `playback_sample`, replacing it with a later one
-that is higher or once it is older than the reading lifetime.
+that is higher or once it is older than the reading lifetime. A manual probe
+result clears it.
 
 The admin device detail adds optional `connections`. Each entry has `id`, an
 opaque connection identifier, `connection`, nullable `probe` (with
