@@ -24,6 +24,7 @@ export function useAccountPasswordCapability() {
 }
 
 export function useChangeAccountPassword() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: V2Body<"POST /api/v2/account/password">) => {
       // Bind the write to the profile that was active when the user submitted:
@@ -32,6 +33,11 @@ export function useChangeAccountPassword() {
       return profileContext
         ? v2("POST /api/v2/account/password", { body, profileContext })
         : v2("POST /api/v2/account/password", { body });
+    },
+    onSuccess: (_result, body) => {
+      // Otherwise Signed-in sessions keeps listing the sessions it just ended.
+      if (body.sign_out_other_sessions)
+        void queryClient.invalidateQueries({ queryKey: ["login-sessions"] });
     },
   });
 }

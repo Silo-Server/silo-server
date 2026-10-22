@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -357,4 +359,168 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestChangePasswordSignOutOtherSessionsDB needs a migrated throwaway DB. A
+// self-service password change keeps every other sign-in unless asked; asked,
+// it signs the account out everywhere a reset does, except the session that
+// made the change, and leaves other accounts alone.
+func TestChangePasswordSignOutOtherSessionsDB(t *testing.T) {
+	f := newSignInFixture(t)
+	ctx := t.Context()
+	target, viewer, other := f.account(models.RoleAdmin), f.account(models.RoleAdmin), f.account(models.RoleUser)
+	caller := f.session(target, nil)
+	// Besides another session of its own: an admin viewing the account, and
+	// the account viewing another.
+	targetOthers := f.signIns(target, f.session(target, nil), f.session(target, &viewer), f.session(other, &target))
+	otherAccount := f.signIns(other, f.session(other, nil))
+	svc := NewService(nil, nil, f.sessions, f.users, nil, nil, nil)
+	var revoked []int
+	svc.OnSessionsRevoked(func(_ context.Context, userID int) { revoked = append(revoked, userID) })
+
+	if err := svc.ChangePassword(ctx, target, caller, "old password", "middle password", false); err != nil {
+		t.Fatal(err)
+	}
+	if live := f.live(targetOthers); slices.Contains(live, false) || len(revoked) != 0 {
+		t.Fatalf("a plain password change signed something out: live %v, hook calls %v", live, revoked)
+	}
+
+	if err := svc.ChangePassword(ctx, target, caller, "middle password", "new password", true); err != nil {
+		t.Fatal(err)
+	}
+	if !f.active(caller) {
+		t.Fatal("the session that changed the password was signed out")
+	}
+	if live := f.live(targetOthers); slices.Contains(live, true) {
+		t.Fatalf("sign-ins survived signing out other sessions: live %v", live)
+	}
+	if live := f.live(otherAccount); slices.Contains(live, false) {
+		t.Fatalf("another account was signed out: live %v", live)
+	}
+	if !slices.Equal(revoked, []int{target}) {
+		t.Fatalf("OnSessionsRevoked calls = %v, want [%d]", revoked, target)
+	}
+	user, err := f.users.GetByID(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !CheckPassword(user, "new password") {
+		t.Fatal("password not replaced")
+	}
+}
+
+// signInFixture creates accounts, all with the password "old password", and
+// sign-ins of every kind RevokeSignInsInTransaction ends, in the database
+// SILO_TEST_DATABASE_URL names.
+type signInFixture struct {
+	t        *testing.T
+	pool     *pgxpool.Pool
+	sessions *SessionRepository
+	users    *UserRepository
+	hash     []byte
+	suffix   string
+	ids      []int
+}
+
+// accountSignIns is one account's sign-ins: login sessions, then a
+// Jellyfin-compatible session, an Audiobookshelf-compatible session and an
+// approved device sign-in the device has not collected.
+type accountSignIns struct {
+	sessions []string
+	jellyfin string
+	abs      int64
+	approval string
+}
+
+func newSignInFixture(t *testing.T) *signInFixture {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("old password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &signInFixture{t: t, pool: pool, sessions: NewSessionRepository(pool), users: NewUserRepository(pool), hash: hash, suffix: strconv.FormatInt(time.Now().UnixNano(), 10)}
+	t.Cleanup(func() {
+		ctx := context.WithoutCancel(t.Context())
+		_, _ = pool.Exec(ctx, `DELETE FROM device_login_requests WHERE device_name=$1`, f.suffix)
+		_, _ = pool.Exec(ctx, `DELETE FROM abs_sessions WHERE user_id=ANY($1)`, f.ids)
+		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_sessions WHERE streamapp_user_id=ANY($1)`, f.ids)
+		_, _ = pool.Exec(ctx, `DELETE FROM auth_sessions WHERE user_id=ANY($1) OR impersonator_user_id=ANY($1)`, f.ids)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id=ANY($1)`, f.ids)
+		pool.Close()
+	})
+	return f
+}
+
+func (f *signInFixture) account(role string) int {
+	f.t.Helper()
+	var id int
+	n := fmt.Sprintf("signin-%s-%d", f.suffix, len(f.ids))
+	if err := f.pool.QueryRow(f.t.Context(), `INSERT INTO users(username,email,password_hash,role,enabled) VALUES($1,$2,$3,$4,true) RETURNING id`, n, n+"@example.test", f.hash, role).Scan(&id); err != nil {
+		f.t.Fatal(err)
+	}
+	f.ids = append(f.ids, id)
+	return id
+}
+
+// session opens a login session of userID, through View as user when
+// impersonator is set.
+func (f *signInFixture) session(userID int, impersonator *int) string {
+	f.t.Helper()
+	id := uuid.NewString()
+	now := time.Now()
+	if _, err := f.pool.Exec(f.t.Context(), `INSERT INTO auth_sessions(id,user_id,impersonator_user_id,device_name,created_at,expires_at) VALUES($1,$2,$3,'Test client',$4,$5)`, id, userID, impersonator, now, now.Add(time.Hour)); err != nil {
+		f.t.Fatal(err)
+	}
+	return id
+}
+
+// signIns gives userID a compatibility session of each kind and an approved
+// device sign-in, alongside the login sessions already opened.
+func (f *signInFixture) signIns(userID int, sessions ...string) accountSignIns {
+	f.t.Helper()
+	ctx := f.t.Context()
+	in := accountSignIns{sessions: sessions, jellyfin: insertJellyfinSession(f.t, f.pool, userID), approval: uuid.NewString()}
+	if err := f.pool.QueryRow(ctx, `INSERT INTO abs_sessions(user_id,token_hash,device_id) VALUES($1,$2,'test') RETURNING id`, userID, uuid.NewString()).Scan(&in.abs); err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO device_login_requests(id,device_code_hash,browser_code_hash,user_code_hash,match_code,device_name,status,approved_by_user_id,approved_at,expires_at)
+		VALUES($1,$2,$3,$4,'00',$5,$6,$7,now(),now() + interval '10 minutes')`,
+		in.approval, uuid.NewString(), uuid.NewString(), uuid.NewString(), f.suffix, DeviceLoginStatusApproved, userID); err != nil {
+		f.t.Fatal(err)
+	}
+	return in
+}
+
+func (f *signInFixture) active(sessionID string) bool {
+	f.t.Helper()
+	_, ok, err := f.sessions.ActiveSession(f.t.Context(), sessionID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return ok
+}
+
+// live reports, in accountSignIns order, whether each sign-in still works.
+func (f *signInFixture) live(in accountSignIns) []bool {
+	f.t.Helper()
+	out := make([]bool, 0, len(in.sessions)+3)
+	for _, id := range in.sessions {
+		out = append(out, f.active(id))
+	}
+	var absLive, approved bool
+	if err := f.pool.QueryRow(f.t.Context(), `SELECT revoked_at IS NULL FROM abs_sessions WHERE id=$1`, in.abs).Scan(&absLive); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(f.t.Context(), `SELECT status = $2 FROM device_login_requests WHERE id=$1`, in.approval, DeviceLoginStatusApproved).Scan(&approved); err != nil {
+		f.t.Fatal(err)
+	}
+	return append(out, jellyfinSessionExists(f.t, f.pool, in.jellyfin), absLive, approved)
 }

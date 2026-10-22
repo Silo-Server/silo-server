@@ -64,7 +64,10 @@ exactly one winner. Sign-in afterwards is a separate effect: when it fails, the
 response still reports the committed reset (`sign_in_required`) and the caller must
 not replay it. The `OnUserSessionsRevoked` hook then drops Jellyfin-compatible
 sessions held in memory, the same as for administrator account edits, on every
-replica: it announces the revocation on the admin event channel.
+replica: it announces the revocation on the admin event channel. A self-service
+password change that asks to sign out other sessions (`sign_out_other_sessions`)
+revokes the same set in its own transaction, except the session that asked
+(`RevokeOtherSignInsInTransaction`), and runs the same hook, so both stay in step.
 
 **No link without an external URL.** Links are built on `server.public_url`
 (`mail.AccountLinkBase`, shared with invitations). Without one, issuing fails with

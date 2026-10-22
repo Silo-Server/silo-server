@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,6 +21,7 @@ export default function AccountSettings() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [signOutOtherSessions, setSignOutOtherSessions] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -44,15 +46,22 @@ export default function AccountSettings() {
       return;
     }
 
+    // Sent only when ticked and offered: a server without the option rejects
+    // the member.
+    const signOutOthers = signOutOtherSessions && limits.sign_out_other_sessions;
     try {
       await changePassword.mutateAsync({
         current_password: currentPassword,
         new_password: newPassword,
+        ...(signOutOthers ? { sign_out_other_sessions: true } : {}),
       });
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      toast.success("Password changed");
+      setSignOutOtherSessions(false);
+      toast.success(
+        signOutOthers ? "Password changed. Other devices are signed out." : "Password changed",
+      );
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Failed to change password.");
     }
@@ -129,6 +138,30 @@ export default function AccountSettings() {
                 required
               />
             </div>
+
+            {capability.data.sign_out_other_sessions ? (
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="account-sign-out-other-sessions"
+                  className="mt-0.5"
+                  checked={signOutOtherSessions}
+                  onCheckedChange={(checked) => setSignOutOtherSessions(checked === true)}
+                  aria-describedby="account-sign-out-other-sessions-description"
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="account-sign-out-other-sessions" className="font-normal">
+                    Sign out of other devices
+                  </Label>
+                  <p
+                    id="account-sign-out-other-sessions-description"
+                    className="text-muted-foreground text-xs"
+                  >
+                    Other browsers and apps must sign in again with the new password. This browser
+                    stays signed in, and API keys keep working.
+                  </p>
+                </div>
+              </div>
+            ) : null}
 
             {formError ? (
               <p className="text-destructive text-sm" role="alert">

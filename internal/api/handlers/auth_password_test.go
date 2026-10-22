@@ -26,7 +26,7 @@ func (s *stubAccountPasswordService) PasswordChangeAvailable(context.Context, in
 	return s.available, s.err
 }
 
-func (s *stubAccountPasswordService) ChangePassword(_ context.Context, userID int, sessionID, currentPassword, newPassword string) error {
+func (s *stubAccountPasswordService) ChangePassword(_ context.Context, userID int, sessionID, currentPassword, newPassword string, _ bool) error {
 	s.userID = userID
 	s.sessionID = sessionID
 	s.current = currentPassword
@@ -188,7 +188,7 @@ func TestChangePasswordRejectsReusedTemporaryPassword(t *testing.T) {
 
 	handler := newPasswordHandler(&stubAccountPasswordService{available: true, err: auth.ErrPasswordUnchanged})
 	claims := passwordClaims()
-	err := handler.ChangePassword(context.Background(), &claims, "temporary-pass", "temporary-pass")
+	err := handler.ChangePassword(context.Background(), &claims, "temporary-pass", "temporary-pass", false)
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.Field != "new_password" || apiErr.Status != http.StatusBadRequest {
 		t.Fatalf("err = %#v", err)

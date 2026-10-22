@@ -58,7 +58,7 @@ func (h *AuthHandler) HandleChangePassword(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if err := h.ChangePassword(r.Context(), claims, req.CurrentPassword, req.NewPassword); err != nil {
+	if err := h.ChangePassword(r.Context(), claims, req.CurrentPassword, req.NewPassword, false); err != nil {
 		writeAPIError(w, err)
 		return
 	}
@@ -75,6 +75,9 @@ type AccountPasswordCapabilityView struct {
 	RequiresCurrentPassword bool
 	MinimumPasswordLength   int
 	MaximumPasswordBytes    int
+	// SignOutOtherSessions is whether ChangePassword can also sign the
+	// account out of its other sessions. v1 does not offer it.
+	SignOutOtherSessions bool
 }
 
 // AccountPasswordCapability answers the password capability for the caller
@@ -99,6 +102,7 @@ func (h *AuthHandler) AccountPasswordCapability(ctx context.Context, claims *aut
 		RequiresCurrentPassword: true,
 		MinimumPasswordLength:   auth.MinimumPasswordLength,
 		MaximumPasswordBytes:    auth.MaximumPasswordBytes,
+		SignOutOtherSessions:    h.passwords != nil,
 	}, nil
 }
 
@@ -122,13 +126,14 @@ func (h *AuthHandler) AuthorizePasswordChange(ctx context.Context, claims *auth.
 }
 
 // ChangePassword replaces the account password after AuthorizePasswordChange
-// allowed it. A rejected password names the member in Field so v2 renders it
-// as a validation problem there.
-func (h *AuthHandler) ChangePassword(ctx context.Context, claims *auth.Claims, currentPassword, newPassword string) error {
+// allowed it, and with signOutOtherSessions signs the account out everywhere
+// except the caller's session. A rejected password names the member in Field
+// so v2 renders it as a validation problem there.
+func (h *AuthHandler) ChangePassword(ctx context.Context, claims *auth.Claims, currentPassword, newPassword string, signOutOtherSessions bool) error {
 	if currentPassword == "" || newPassword == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "Current password and new password are required")
 	}
-	err := h.passwords.ChangePassword(ctx, claims.UserID, claims.SessionID, currentPassword, newPassword)
+	err := h.passwords.ChangePassword(ctx, claims.UserID, claims.SessionID, currentPassword, newPassword, signOutOtherSessions)
 	switch {
 	case err == nil:
 		return nil

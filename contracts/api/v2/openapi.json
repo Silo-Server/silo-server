@@ -464,6 +464,13 @@
             "description": "Opaque revision of this document",
             "type": "string"
           },
+          "sign_out_other_sessions": {
+            "description": "Whether changePassword accepts sign_out_other_sessions. A server that omits this field rejects the member with 422, so send it only when this is true",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -479,6 +486,7 @@
           "requires_current_password",
           "minimum_password_length",
           "maximum_password_bytes",
+          "sign_out_other_sessions",
           "revision",
           "state",
           "allowed"
@@ -23656,6 +23664,13 @@
             "maxLength": 1024,
             "minLength": 1,
             "type": "string"
+          },
+          "sign_out_other_sessions": {
+            "description": "Also sign the account out everywhere except this session, in the same transaction: its other login sessions (including View as user sessions it opened or that view it), its Jellyfin- and Audiobookshelf-compatible sessions, and device sign-ins it approved that were not collected yet. API keys are kept. False or omitted signs nothing else out",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
           }
         },
         "required": [

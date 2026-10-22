@@ -32,6 +32,8 @@ type fakeAccounts struct {
 	wizardErr       error
 	users           map[int]handlers.UserView
 	err             error
+	// signOuts records each accepted ChangePassword's signOutOtherSessions.
+	signOuts *[]bool
 }
 
 func (f fakeAccounts) NeedsSetup(context.Context) (bool, error) { return f.needsSetup, f.err }
@@ -77,6 +79,7 @@ func (f fakeAccounts) AccountPasswordCapability(_ context.Context, claims *auth.
 	return handlers.AccountPasswordCapabilityView{
 		Configured: true, ChangePassword: passwordChangeAllowed(claims, profileID) && f.users[claims.UserID].Username != "off",
 		RequiresCurrentPassword: true, MinimumPasswordLength: auth.MinimumPasswordLength, MaximumPasswordBytes: auth.MaximumPasswordBytes,
+		SignOutOtherSessions: true,
 	}, nil
 }
 
@@ -92,7 +95,7 @@ func (f fakeAccounts) AuthorizePasswordChange(_ context.Context, claims *auth.Cl
 
 // ChangePassword answers the way the real seam does: "pw" is every account's
 // current password (as in Login), the limits are the auth package's.
-func (f fakeAccounts) ChangePassword(_ context.Context, _ *auth.Claims, current, next string) error {
+func (f fakeAccounts) ChangePassword(_ context.Context, _ *auth.Claims, current, next string, signOutOtherSessions bool) error {
 	switch {
 	case f.err != nil:
 		return f.err
@@ -104,6 +107,9 @@ func (f fakeAccounts) ChangePassword(_ context.Context, _ *auth.Claims, current,
 		return &handlers.APIError{Status: 400, Code: "password_too_long", Message: "Password must be at most 72 bytes", Field: "new_password"}
 	case next == "oauth-only":
 		return &handlers.APIError{Status: 409, Code: "password_login_disabled", Message: "This account does not use local password sign-in"}
+	}
+	if f.signOuts != nil {
+		*f.signOuts = append(*f.signOuts, signOutOtherSessions)
 	}
 	return nil
 }

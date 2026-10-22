@@ -48,15 +48,28 @@ func RevokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int) erro
 	return RevokeSignInsForUsersInTransaction(ctx, tx, []int{userID})
 }
 
+// RevokeOtherSignInsInTransaction is RevokeSignInsInTransaction except that
+// keepSessionID, the login session asking for it, stays signed in.
+func RevokeOtherSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int, keepSessionID string) error {
+	return revokeSignInsInTransaction(ctx, tx, []int{userID}, &keepSessionID)
+}
+
 // RevokeSignInsForUsersInTransaction is RevokeSignInsInTransaction for several
 // accounts at once, in a fixed number of statements however many there are.
 func RevokeSignInsForUsersInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
+	return revokeSignInsInTransaction(ctx, tx, userIDs, nil)
+}
+
+// revokeSignInsInTransaction revokes every login session except
+// keepSessionID; nil keeps none.
+func revokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int, keepSessionID *string) error {
 	if len(userIDs) == 0 {
 		return nil
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
-		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL`, userIDs); err != nil {
+		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL
+		  AND id IS DISTINCT FROM $2::text`, userIDs, keepSessionID); err != nil {
 		return fmt.Errorf("revoking login sessions: %w", err)
 	}
 	if err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, userIDs); err != nil {
