@@ -11279,19 +11279,11 @@
             "description": "episode, or the catalog item type; empty when unknown",
             "type": "string"
           },
-          "paused_seconds": {
-            "description": "Wall-clock seconds spent paused; null when the play has no watch-time measurement",
-            "format": "double",
-            "type": [
-              "number",
-              "null"
-            ]
-          },
           "play_method": {
             "type": "string"
           },
           "played_seconds": {
-            "description": "Seconds of the media watched by normal playback, excluding pauses, seeks and buffering; null when the play has no watch-time measurement",
+            "description": "Seconds of the media watched by normal playback, excluding pauses, seeks and buffering; null when the play has no watch-time measurement, which includes every play recorded before it existed",
             "format": "double",
             "type": [
               "number",
@@ -11320,14 +11312,6 @@
           "session_id": {
             "description": "Playback session identifier; unique per attempt",
             "type": "string"
-          },
-          "start_position_seconds": {
-            "description": "Position of the first progress report, in seconds; null when the play has no watch-time measurement",
-            "format": "double",
-            "type": [
-              "number",
-              "null"
-            ]
           },
           "started_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
@@ -11370,9 +11354,7 @@
           "watched_seconds",
           "duration_seconds",
           "completed",
-          "start_position_seconds",
           "played_seconds",
-          "paused_seconds",
           "series_title",
           "season_number",
           "episode_number"

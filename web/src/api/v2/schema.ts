@@ -16592,15 +16592,10 @@ export interface components {
       media_title: string;
       /** @description episode, or the catalog item type; empty when unknown */
       media_type: string;
-      /**
-       * Format: double
-       * @description Wall-clock seconds spent paused; null when the play has no watch-time measurement
-       */
-      paused_seconds: number | null;
       play_method: string;
       /**
        * Format: double
-       * @description Seconds of the media watched by normal playback, excluding pauses, seeks and buffering; null when the play has no watch-time measurement
+       * @description Seconds of the media watched by normal playback, excluding pauses, seeks and buffering; null when the play has no watch-time measurement, which includes every play recorded before it existed
        */
       played_seconds: number | null;
       profile_id: string;
@@ -16615,11 +16610,6 @@ export interface components {
       series_title: string;
       /** @description Playback session identifier; unique per attempt */
       session_id: string;
-      /**
-       * Format: double
-       * @description Position of the first progress report, in seconds; null when the play has no watch-time measurement
-       */
-      start_position_seconds: number | null;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision

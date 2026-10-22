@@ -1504,16 +1504,16 @@ they come from the catalog episode and its series (`series_title` is empty when 
 left the catalog); for anything else they are empty and null.
 
 `watched_seconds` is where the attempt ended, not how long it was watched: an attempt
-resumed partway through reports the resume point plus what was watched. The measured watch
-time is `start_position_seconds` (the first progress report), `played_seconds` (media
-advanced through by normal playback, without pauses, seeks or buffering) and
-`paused_seconds` (wall-clock time paused). The playback session measures them from its
-progress reports (`playback.WatchTime`): a position advance between two reports counts as
-watched when it fits playback at up to twice normal speed plus a short allowance for
-report jitter, and anything larger is a seek. Time after the last progress report before
-the stop is not counted. All three are null for an attempt with no measurement, which
-includes every attempt recorded before measurement existed. A session finalized more than
-once (copies on several replicas) keeps each counter's largest value.
+resumed partway through reports the resume point plus what was watched. `played_seconds`
+is the measured watch time: media advanced through by normal playback, without pauses,
+seeks or buffering. The playback session measures it from its progress reports
+(`playback.WatchTime`): a position advance between two reports counts as watched when it
+fits playback at up to twice normal speed plus a short allowance for report jitter, and
+anything larger is a seek. Time after the last progress report before the stop is not
+counted. It is null for an attempt with no measurement, which includes every attempt
+recorded before measurement existed. A session finalized more than once (copies on several
+replicas) keeps the largest measurement. The history row also stores the first reported
+position and the time spent paused; the route does not expose them.
 
 The administrator history page and the user detail watch-history tab read this route
 under the authority captured when the query was created, keyed by an opaque authority

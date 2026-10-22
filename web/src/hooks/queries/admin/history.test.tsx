@@ -32,9 +32,7 @@ const entry = {
   watched_seconds: 3600,
   duration_seconds: null,
   completed: true,
-  start_position_seconds: 3480,
   played_seconds: 120,
-  paused_seconds: 30,
 };
 
 function page(items: unknown[], next?: string) {
