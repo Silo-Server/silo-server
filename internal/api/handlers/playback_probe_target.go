@@ -23,10 +23,13 @@ const (
 	// viewer can play: a percentile, so a few files with nonsense bitrates
 	// cannot set it.
 	probeTargetPercentile = 0.999
-	probeTargetCacheTTL   = time.Hour
-	// A failed read is retried soon, without a query on every capability read.
-	probeTargetErrorTTL     = time.Minute
-	probeTargetQueryTimeout = 10 * time.Second
+	// The percentile changes only when libraries do, and on a large catalog
+	// reading it scans every file for many seconds, so it is read rarely and
+	// never while a capability read waits.
+	probeTargetCacheTTL = 6 * time.Hour
+	// A failed read is retried after a while, not on every capability read.
+	probeTargetErrorTTL     = 10 * time.Minute
+	probeTargetQueryTimeout = 2 * time.Minute
 	// A probe result is 100 to 1,000,000 kbps, so a target must be too: a
 	// quick test that reached a lower one would report a result the server
 	// refuses.
@@ -40,6 +43,9 @@ type probeTargetCache struct {
 	mu      sync.Mutex
 	entries map[string]probeTargetEntry
 	reads   singleflight.Group
+	// query lets one scope's read scan the catalog at a time, so the scopes
+	// a restart leaves empty do not each hold a database connection at once.
+	query sync.Mutex
 }
 
 type probeTargetEntry struct {
@@ -60,7 +66,7 @@ func (c *probeTargetCache) lookup(key string) (probeTargetEntry, bool) {
 // 25% headroom Auto's 80% margin needs to send it untouched. That bitrate is
 // the percentile of the files they can play, lowered to the administrator's
 // cap for their network, and never below the floor of a probe result. It is 0
-// when there are no bitrates to go on.
+// when there are no bitrates to go on, or none read yet.
 func (h *PlaybackHandler) bandwidthProbeTargetKbps(ctx context.Context) int {
 	kbps := h.sourceBitratePercentile(ctx, AccessFilterFromContext(ctx, ""))
 	if kbps <= 0 {
@@ -81,44 +87,49 @@ func (h *PlaybackHandler) sourceBitratePercentile(ctx context.Context, filter ca
 	builder.WriteString("|quality=")
 	builder.WriteString(filter.MaxPlaybackQuality)
 	key := builder.String()
-	if cached, fresh := h.probeTargets.lookup(key); fresh {
-		return cached.kbps
+	cached, fresh := h.probeTargets.lookup(key)
+	if !fresh {
+		// The capability read sends the last target, or none, and the scope
+		// is read again in the background: one shared read per scope that
+		// outlives the request that started it. A client without a target
+		// treats any current reading as proof of its link.
+		readCtx := context.WithoutCancel(ctx)
+		h.probeTargets.reads.DoChan(key, func() (any, error) {
+			h.readProbeTarget(readCtx, filter, key)
+			return nil, nil
+		})
 	}
-	// Capability reads for one scope share a query, and it outlives the
-	// request that started it, so a client that disconnects mid-read does
-	// not leave a failure cached for everyone.
-	target, _, _ := h.probeTargets.reads.Do(key, func() (any, error) {
-		return h.readProbeTarget(ctx, filter, key), nil
-	})
-	kbps, _ := target.(int)
-	return kbps
+	return cached.kbps
 }
 
 // readProbeTarget reads a scope's percentile for the cache, as the one shared
 // read for that scope.
-func (h *PlaybackHandler) readProbeTarget(ctx context.Context, filter catalog.AccessFilter, key string) int {
-	// Look again: a caller that missed the cache just before another read
-	// stored the target uses it, and a failure below falls back on the
+func (h *PlaybackHandler) readProbeTarget(ctx context.Context, filter catalog.AccessFilter, key string) {
+	h.probeTargets.query.Lock()
+	defer h.probeTargets.query.Unlock()
+	// Look again: a read that missed the cache just before another read
+	// stored the target leaves it, and a failure below falls back on the
 	// latest one.
 	cached, fresh := h.probeTargets.lookup(key)
 	if fresh {
-		return cached.kbps
+		return
 	}
-	queryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTargetQueryTimeout)
+	queryCtx, cancel := context.WithTimeout(ctx, probeTargetQueryTimeout)
 	defer cancel()
 	kbps, err := h.SourceBitrates.Percentile(queryCtx, filter, probeTargetPercentile)
 	entry := probeTargetEntry{kbps: kbps, expires: time.Now().Add(probeTargetCacheTTL)}
 	if err != nil {
 		slog.WarnContext(ctx, "speed test target unavailable", "component", "playback", "error", err)
-		// Keep the last good target while the read is retried soon.
+		// Keep the last good target until the retry.
 		entry = probeTargetEntry{kbps: cached.kbps, expires: time.Now().Add(probeTargetErrorTTL)}
 	}
 	h.probeTargets.mu.Lock()
+	defer h.probeTargets.mu.Unlock()
 	if h.probeTargets.entries == nil {
 		h.probeTargets.entries = map[string]probeTargetEntry{}
 	}
 	// Scopes come and go with profiles and their restrictions. An expired
-	// one stays an hour longer as the last good target for its failed
+	// one stays a cache lifetime longer as the last good target for its
 	// reads, then goes.
 	now := time.Now()
 	for cachedKey, cachedEntry := range h.probeTargets.entries {
@@ -127,6 +138,4 @@ func (h *PlaybackHandler) readProbeTarget(ctx context.Context, filter catalog.Ac
 		}
 	}
 	h.probeTargets.entries[key] = entry
-	h.probeTargets.mu.Unlock()
-	return entry.kbps
 }

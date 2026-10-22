@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -12,13 +14,21 @@ import (
 )
 
 type countingPercentiles struct {
+	mu    sync.Mutex
 	kbps  int
 	err   error
 	calls int
 	last  catalog.AccessFilter
+	// release, when set, holds every read until it is closed.
+	release chan struct{}
 }
 
 func (c *countingPercentiles) Percentile(ctx context.Context, filter catalog.AccessFilter, fraction float64) (int, error) {
+	if c.release != nil {
+		<-c.release
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.calls++
 	c.last = filter
 	if fraction != probeTargetPercentile {
@@ -28,6 +38,32 @@ func (c *countingPercentiles) Percentile(ctx context.Context, filter catalog.Acc
 		return 0, err
 	}
 	return c.kbps, c.err
+}
+
+func (c *countingPercentiles) set(kbps int, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.kbps, c.err = kbps, err
+}
+
+func (c *countingPercentiles) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+// advanceFakeClock moves a synctest bubble's clock forward without waiting.
+func advanceFakeClock(d time.Duration) {
+	time.Sleep(d) //nolint:forbidigo // Inside a synctest bubble this only advances the fake clock.
+}
+
+// settledProbeTarget is the target a capability read sends once the
+// background read its first read started has finished. Call it inside a
+// synctest bubble.
+func settledProbeTarget(h *PlaybackHandler, ctx context.Context) int {
+	h.bandwidthProbeTargetKbps(ctx)
+	synctest.Wait()
+	return h.bandwidthProbeTargetKbps(ctx)
 }
 
 func TestBandwidthProbeTarget(t *testing.T) {
@@ -49,127 +85,138 @@ func TestBandwidthProbeTarget(t *testing.T) {
 		{"no bitrates, no target", 0, &access.Scope{MaxRemoteStreamBitrateKbps: 20000}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &PlaybackHandler{SourceBitrates: &countingPercentiles{kbps: tc.percentile}}
-			ctx := remote
-			if tc.scope != nil {
-				ctx = access.SetScope(ctx, *tc.scope)
-			}
-			if got := h.bandwidthProbeTargetKbps(ctx); got != tc.want {
-				t.Fatalf("target = %d, want %d", got, tc.want)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				h := &PlaybackHandler{SourceBitrates: &countingPercentiles{kbps: tc.percentile}}
+				ctx := remote
+				if tc.scope != nil {
+					ctx = access.SetScope(ctx, *tc.scope)
+				}
+				if got := settledProbeTarget(h, ctx); got != tc.want {
+					t.Fatalf("target = %d, want %d", got, tc.want)
+				}
+			})
 		})
 	}
+}
+
+// A capability read never waits for the percentile: on a large catalog the
+// read takes longer than clients wait for capabilities. Reads that miss the
+// cache send no target and share one background read, which outlives the
+// request that started it; later reads send its target.
+func TestBandwidthProbeTargetNeverWaitsForTheRead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		source := &countingPercentiles{kbps: 40000, release: make(chan struct{})}
+		h := &PlaybackHandler{SourceBitrates: source}
+		ctx := newAuthorizedPlaybackContext()
+		first, cancel := context.WithCancel(ctx)
+		for _, read := range []context.Context{first, ctx, ctx} {
+			if got := h.bandwidthProbeTargetKbps(read); got != 0 {
+				t.Fatalf("target before the read finished = %d, want none", got)
+			}
+		}
+		cancel()
+		close(source.release)
+		synctest.Wait()
+		if got := h.bandwidthProbeTargetKbps(ctx); got != 50000 || source.count() != 1 {
+			t.Fatalf("target = %d after %d reads, want 50000 after 1", got, source.count())
+		}
+	})
 }
 
 // The percentile is read once per library scope and cached; another scope
 // reads its own, and a failed read sends no target.
 func TestBandwidthProbeTargetCachesPerLibraryScope(t *testing.T) {
-	source := &countingPercentiles{kbps: 40000}
-	h := &PlaybackHandler{SourceBitrates: source}
-	all := newAuthorizedPlaybackContext()
-	kids := access.SetScope(all, access.Scope{AllowedLibraryIDs: []int{3}, LibrariesRestricted: true})
-	for range 3 {
-		if got := h.bandwidthProbeTargetKbps(all); got != 50000 {
-			t.Fatalf("target = %d", got)
+	synctest.Test(t, func(t *testing.T) {
+		source := &countingPercentiles{kbps: 40000}
+		h := &PlaybackHandler{SourceBitrates: source}
+		all := newAuthorizedPlaybackContext()
+		kids := access.SetScope(all, access.Scope{AllowedLibraryIDs: []int{3}, LibrariesRestricted: true})
+		for range 3 {
+			if got := settledProbeTarget(h, all); got != 50000 {
+				t.Fatalf("target = %d", got)
+			}
 		}
-	}
-	if source.calls != 1 {
-		t.Fatalf("read the percentile %d times for one scope", source.calls)
-	}
-	h.bandwidthProbeTargetKbps(kids)
-	if source.calls != 2 || len(source.last.AllowedLibraryIDs) != 1 || source.last.AllowedLibraryIDs[0] != 3 {
-		t.Fatalf("restricted scope: calls=%d filter=%+v", source.calls, source.last.AllowedLibraryIDs)
-	}
+		if source.count() != 1 {
+			t.Fatalf("read the percentile %d times for one scope", source.count())
+		}
+		settledProbeTarget(h, kids)
+		if source.count() != 2 || len(source.last.AllowedLibraryIDs) != 1 || source.last.AllowedLibraryIDs[0] != 3 {
+			t.Fatalf("restricted scope: calls=%d filter=%+v", source.count(), source.last.AllowedLibraryIDs)
+		}
 
-	failing := &PlaybackHandler{SourceBitrates: &countingPercentiles{err: errors.New("down")}}
-	if got := failing.bandwidthProbeTargetKbps(all); got != 0 {
-		t.Fatalf("failed read sent target %d", got)
-	}
+		failing := &PlaybackHandler{SourceBitrates: &countingPercentiles{err: errors.New("down")}}
+		if got := settledProbeTarget(failing, all); got != 0 {
+			t.Fatalf("failed read sent target %d", got)
+		}
+	})
 }
 
-// A capability read whose client went away still caches the target it read,
-// and a read that fails after a good one keeps that target until the retry.
-func TestBandwidthProbeTargetSurvivesCanceledAndFailedReads(t *testing.T) {
-	source := &countingPercentiles{kbps: 40000}
-	h := &PlaybackHandler{SourceBitrates: source}
-	canceled, cancel := context.WithCancel(newAuthorizedPlaybackContext())
-	cancel()
-	if got := h.bandwidthProbeTargetKbps(canceled); got != 50000 {
-		t.Fatalf("canceled request: target = %d, want 50000", got)
-	}
+// A stale target is still sent while it is read again. A read that fails
+// keeps the last good target, including after another scope's store swept the
+// cache, and is retried after the error lifetime.
+func TestBandwidthProbeTargetKeepsLastGoodWhileRefreshing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		source := &countingPercentiles{kbps: 40000}
+		h := &PlaybackHandler{SourceBitrates: source}
+		all := newAuthorizedPlaybackContext()
+		kids := access.SetScope(all, access.Scope{AllowedLibraryIDs: []int{3}, LibrariesRestricted: true})
+		settledProbeTarget(h, all)
 
-	all := newAuthorizedPlaybackContext()
-	expireProbeTargets(h, time.Second)
-	source.err = errors.New("down")
-	if got := h.bandwidthProbeTargetKbps(all); got != 50000 {
-		t.Fatalf("failed refresh: target = %d, want the last good 50000", got)
-	}
-	if source.calls != 2 {
-		t.Fatalf("read the percentile %d times, want 2", source.calls)
-	}
+		advanceFakeClock(probeTargetCacheTTL + time.Second)
+		settledProbeTarget(h, kids)
+		source.set(0, errors.New("down"))
+		if got := h.bandwidthProbeTargetKbps(all); got != 50000 {
+			t.Fatalf("stale target = %d, want the last good 50000 while it is read again", got)
+		}
+		synctest.Wait()
+		if got := h.bandwidthProbeTargetKbps(all); got != 50000 || source.count() != 3 {
+			t.Fatalf("failed refresh: target = %d after %d reads, want the last good 50000 after 3", got, source.count())
+		}
+
+		source.set(64000, nil)
+		advanceFakeClock(probeTargetErrorTTL + time.Second)
+		if got := settledProbeTarget(h, all); got != 80000 {
+			t.Fatalf("retry after a failure: target = %d, want 80000", got)
+		}
+	})
 }
 
 // A scope expired for longer than the cache lifetime is dropped when another
 // scope is stored, so profiles that come and go do not leave their targets
 // behind.
 func TestBandwidthProbeTargetDropsExpiredScopes(t *testing.T) {
-	h := &PlaybackHandler{SourceBitrates: &countingPercentiles{kbps: 40000}}
-	all := newAuthorizedPlaybackContext()
-	kids := access.SetScope(all, access.Scope{AllowedLibraryIDs: []int{3}, LibrariesRestricted: true})
-	h.bandwidthProbeTargetKbps(all)
-	expireProbeTargets(h, probeTargetCacheTTL+time.Second)
-	h.bandwidthProbeTargetKbps(kids)
-	h.probeTargets.mu.Lock()
-	defer h.probeTargets.mu.Unlock()
-	if len(h.probeTargets.entries) != 1 {
-		t.Fatalf("kept %d scopes, want only the one just read", len(h.probeTargets.entries))
-	}
+	synctest.Test(t, func(t *testing.T) {
+		h := &PlaybackHandler{SourceBitrates: &countingPercentiles{kbps: 40000}}
+		all := newAuthorizedPlaybackContext()
+		kids := access.SetScope(all, access.Scope{AllowedLibraryIDs: []int{3}, LibrariesRestricted: true})
+		settledProbeTarget(h, all)
+		advanceFakeClock(2*probeTargetCacheTTL + time.Second)
+		settledProbeTarget(h, kids)
+		h.probeTargets.mu.Lock()
+		defer h.probeTargets.mu.Unlock()
+		if len(h.probeTargets.entries) != 1 {
+			t.Fatalf("kept %d scopes, want only the one just read", len(h.probeTargets.entries))
+		}
+	})
 }
 
-// A failed read keeps its scope's last good target even after another
-// scope's store has swept the cache.
-func TestBandwidthProbeTargetKeepsLastGoodAcrossScopes(t *testing.T) {
-	source := &countingPercentiles{kbps: 40000}
-	h := &PlaybackHandler{SourceBitrates: source}
-	all := newAuthorizedPlaybackContext()
-	kids := access.SetScope(all, access.Scope{AllowedLibraryIDs: []int{3}, LibrariesRestricted: true})
-	h.bandwidthProbeTargetKbps(all)
-	expireProbeTargets(h, time.Second)
-	h.bandwidthProbeTargetKbps(kids)
-	source.err = errors.New("down")
-	if got := h.bandwidthProbeTargetKbps(all); got != 50000 {
-		t.Fatalf("failed refresh after another scope's store: target = %d, want the last good 50000", got)
-	}
-}
-
-// Of two capability reads that miss the cache together, the one whose shared
-// read starts after the other's has stored the target uses that target: it
-// neither queries again nor, when that query would fail, replaces the target
-// with a short-lived fallback.
+// A background read that starts after another read stored the scope's target
+// leaves that target: it neither queries again nor, when that query would
+// fail, replaces the target with a short-lived fallback.
 func TestBandwidthProbeTargetLateReadUsesTheStoredTarget(t *testing.T) {
-	source := &countingPercentiles{kbps: 40000}
-	h := &PlaybackHandler{SourceBitrates: source}
-	ctx := newAuthorizedPlaybackContext()
-	h.bandwidthProbeTargetKbps(ctx)
-	var key string
-	for cached := range h.probeTargets.entries {
-		key = cached
-	}
-	source.err = errors.New("down")
-	if got := h.readProbeTarget(ctx, AccessFilterFromContext(ctx, ""), key); got != 40000 || source.calls != 1 {
-		t.Fatalf("late read = %d after %d percentile reads, want the stored 40000 after 1", got, source.calls)
-	}
-	if entry, fresh := h.probeTargets.lookup(key); !fresh || entry.kbps != 40000 || time.Until(entry.expires) <= probeTargetErrorTTL {
-		t.Fatalf("late read replaced the stored target with %+v", entry)
-	}
-}
-
-// expireProbeTargets moves every cached target's expiry age into the past.
-func expireProbeTargets(h *PlaybackHandler, age time.Duration) {
-	h.probeTargets.mu.Lock()
-	defer h.probeTargets.mu.Unlock()
-	for key, entry := range h.probeTargets.entries {
-		entry.expires = time.Now().Add(-age)
-		h.probeTargets.entries[key] = entry
-	}
+	synctest.Test(t, func(t *testing.T) {
+		source := &countingPercentiles{kbps: 40000}
+		h := &PlaybackHandler{SourceBitrates: source}
+		ctx := newAuthorizedPlaybackContext()
+		settledProbeTarget(h, ctx)
+		var key string
+		for cached := range h.probeTargets.entries {
+			key = cached
+		}
+		source.set(0, errors.New("down"))
+		h.readProbeTarget(ctx, AccessFilterFromContext(ctx, ""), key)
+		if entry, fresh := h.probeTargets.lookup(key); !fresh || entry.kbps != 40000 || source.count() != 1 || time.Until(entry.expires) <= probeTargetErrorTTL {
+			t.Fatalf("late read replaced the stored target with %+v after %d reads", entry, source.count())
+		}
+	})
 }
