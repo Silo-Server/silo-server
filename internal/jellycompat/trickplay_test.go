@@ -223,12 +223,13 @@ func TestTrickplayPlaylistGrantsSheetsByPlaySession(t *testing.T) {
 	})
 	grid := testTrickplayGrid
 	sheets := &fakeTrickplaySheets{files: map[int]bool{42: true, 43: true}}
-	router := NewRouter(Dependencies{
+	deps := Dependencies{
 		IDCodec: codec, SessionStore: sessions, PlaybackStore: plays, Trickplay: sheets,
 		ContentService: &stubContentService{detail: &upstreamItemDetail{
 			ContentID: "movie-1", Versions: []catalog.FileVersion{{FileID: 42, Trickplay: &grid}, {FileID: 43, Trickplay: &grid}},
 		}},
-	})
+	}
+	router := NewRouter(deps)
 	get := func(path, token string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		if token != "" {
@@ -267,6 +268,16 @@ func TestTrickplayPlaylistGrantsSheetsByPlaySession(t *testing.T) {
 	if rec := get(base+"0.jpg?PlaySessionId=play-1", ""); rec.Code != http.StatusOK || len(sheets.opened) != 1 || sheets.opened[0] != 42 {
 		t.Fatalf("sheet by grant without source: %d opened %v", rec.Code, sheets.opened)
 	}
+	// The grant decides, not a listing of the caller's plays: when that
+	// listing fails, a grant for the narrow version is not served the default.
+	deps.PlaybackStore = listFailingPlayStore{plays}
+	router = NewRouter(deps)
+	sheets.opened = nil
+	if rec := get(base+"0.jpg?PlaySessionId=play-2", ""); rec.Code != http.StatusOK || len(sheets.opened) != 1 || sheets.opened[0] != 43 {
+		t.Fatalf("sheet by grant while plays cannot be listed: %d opened %v", rec.Code, sheets.opened)
+	}
+	deps.PlaybackStore = plays
+	router = NewRouter(deps)
 	// A playlist names the play the request names over a more recent one.
 	now = now.Add(time.Minute)
 	plays.Put(PlaybackSession{
