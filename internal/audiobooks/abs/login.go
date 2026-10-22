@@ -185,21 +185,17 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, principa
 	}
 
 	now := time.Now()
-	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+	// Both tokens are stored together, and only while the login session the
+	// credential check opened is live: a sign-out everywhere since then
+	// refuses the sign-in.
+	if err := h.deps.TokenStore.IssueTokens(r.Context(), TokenSource{LoginSessionID: principal.LoginSessionID}, ABSToken{
 		ID:        accessJTI,
 		UserID:    userID,
 		ProfileID: profileID,
 		Type:      "access",
 		JTI:       accessJTI,
 		ExpiresAt: now.Add(accessTTL),
-	}); err != nil {
-		http.Error(w, "persist access token: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// Refresh-token insert must also succeed: a client that receives a refresh
-	// token whose JTI isn't in the store will fail on its first use (the
-	// bearer middleware looks up by JTI), forcing an interactive re-login.
-	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+	}, ABSToken{
 		ID:        refreshJTI,
 		UserID:    userID,
 		ProfileID: profileID,
@@ -207,7 +203,11 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, principa
 		JTI:       refreshJTI,
 		ExpiresAt: now.Add(refreshTTL),
 	}); err != nil {
-		http.Error(w, "persist refresh token: "+err.Error(), http.StatusInternalServerError)
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "signed out while signing in; sign in again", http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, "persist tokens: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -461,15 +461,20 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 			}
 			newJTI := ulid.Make().String()
 			if token, mintErr := IssueAccessToken(secret, a.UserID, a.ProfileID, a.PINRevision, newJTI, accessTTL); mintErr == nil {
-				if persistErr := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+				persistErr := h.deps.TokenStore.IssueTokens(r.Context(), TokenSource{JTI: a.JTI}, ABSToken{
 					ID:        newJTI,
 					UserID:    a.UserID,
 					ProfileID: a.ProfileID,
 					Type:      "access",
 					JTI:       newJTI,
 					ExpiresAt: time.Now().Add(accessTTL),
-				}); persistErr == nil {
+				})
+				if persistErr == nil {
 					access = token
+				} else if errors.Is(persistErr, ErrNotFound) {
+					// Revoked since bearerAuth checked it.
+					http.Error(w, "token revoked", http.StatusUnauthorized)
+					return
 				}
 			}
 		}
@@ -530,11 +535,12 @@ const schemeHTTPS = "https"
 // the JSON body. Accept either; header takes precedence when both are sent.
 //
 // Token rotation semantics:
-//  1. Validate the refresh token signature + type.
-//  2. Atomically revoke the old refresh JTI. A concurrent reuse loses here.
-//  3. Mint a NEW access + refresh pair with fresh JTIs.
-//  4. Persist both new JTIs.
-//  5. Return {user:{accessToken, refreshToken}} AND top-level token fields
+//  1. Validate the refresh token signature + type, and its stored row.
+//  2. Mint a NEW access + refresh pair with fresh JTIs.
+//  3. Revoke the old refresh JTI and persist both new JTIs in one step
+//     (TokenStore.IssueTokens). A concurrent reuse, or a sign-out everywhere
+//     that revoked the old JTI first, loses here.
+//  4. Return {user:{accessToken, refreshToken}} AND top-level token fields
 //     for client compatibility — mainline app reads from user{}, third-party
 //     readers may read from the top level.
 func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
@@ -586,9 +592,12 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	if !h.verifyTokenProfile(w, r, claims) {
 		return
 	}
-	row, err := h.deps.TokenStore.RevokeTokenIfActive(r.Context(), claims.JTI)
+	row, err := h.deps.TokenStore.GetTokenByJTI(r.Context(), claims.JTI)
+	if err == nil && row.RevokedAt != nil {
+		err = ErrNotFound
+	}
 	if err != nil {
-		slog.DebugContext(r.Context(), "abs refresh: jti revoke failed", "component", "audiobooks", "jti", claims.JTI, "err", err)
+		slog.DebugContext(r.Context(), "abs refresh: jti lookup failed", "component", "audiobooks", "jti", claims.JTI, "err", err)
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "refresh token revoked", http.StatusUnauthorized)
 		} else {
@@ -637,19 +646,19 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+	if err := h.deps.TokenStore.IssueTokens(r.Context(), TokenSource{JTI: claims.JTI, Rotate: true}, ABSToken{
 		ID: newAccessJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
 		Type: "access", JTI: newAccessJTI, ExpiresAt: now.Add(accessTTL),
-	}); err != nil {
-		slog.ErrorContext(r.Context(), "abs refresh: persist access failed", "component", "audiobooks", "user", claims.UserID, "jti", newAccessJTI, "err", err)
-		http.Error(w, "token persist failed", http.StatusInternalServerError)
-		return
-	}
-	if err := h.deps.TokenStore.InsertToken(r.Context(), ABSToken{
+	}, ABSToken{
 		ID: newRefreshJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
 		Type: "refresh", JTI: newRefreshJTI, ExpiresAt: now.Add(refreshTTL),
 	}); err != nil {
-		slog.ErrorContext(r.Context(), "abs refresh: persist refresh failed", "component", "audiobooks", "user", claims.UserID, "jti", newRefreshJTI, "err", err)
+		if errors.Is(err, ErrNotFound) {
+			slog.DebugContext(r.Context(), "abs refresh: jti revoked before rotation", "component", "audiobooks", "jti", claims.JTI)
+			http.Error(w, "refresh token revoked", http.StatusUnauthorized)
+			return
+		}
+		slog.ErrorContext(r.Context(), "abs refresh: rotation failed", "component", "audiobooks", "user", claims.UserID, "jti", claims.JTI, "err", err)
 		http.Error(w, "token persist failed", http.StatusInternalServerError)
 		return
 	}

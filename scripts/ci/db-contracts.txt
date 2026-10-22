@@ -106,6 +106,10 @@
 ./internal/invitations TestInvitationAtomicConcurrentAccept
 ./internal/invitations TestInvitationAtomicRollbackAndExpiry
 
+# Audiobookshelf-compatible tokens minted while the account is signed out everywhere do not outlive it.
+./internal/audiobooks TestABSTokensMintedDuringSignOutEverywhereDB
+./internal/audiobooks TestABSTokenIssuanceWaitsForTheAccountDB
+
 # Scoped administrator keys cannot redirect recovery through either API version.
 ./internal/apiv2 TestScopedAdminKeyCannotRedirectRecoveryDB
 

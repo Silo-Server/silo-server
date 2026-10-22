@@ -66,6 +66,18 @@ not replay it. The `OnUserSessionsRevoked` hook then drops Jellyfin-compatible
 sessions held in memory, the same as for administrator account edits, on every
 replica: it announces the revocation on the admin event channel.
 
+**Issuing takes the account lock too.** Every sign-out everywhere locks the
+account row before it revokes. A credential it covers is issued under that lock,
+after rechecking what the credential comes from in the same transaction, so it
+either commits first and is revoked or sees the revocation and is refused. A
+local password sign-in rechecks the password hash before opening its login
+session. Audiobookshelf-compatible sign-in, refresh, and `/authorize` hold the
+account row `FOR SHARE` while they check the login session the sign-in opened,
+the refresh token being rotated (revoked in that transaction), or the token
+`/authorize` was called with, then store their tokens. A credentials-plugin
+sign-in still opens its login session outside the lock. Jellyfin-compatible
+sessions carry the login session they came from and end with it.
+
 **No link without an external URL.** Links are built on `server.public_url`
 (`mail.AccountLinkBase`, shared with invitations). Without one, issuing fails with
 `capability_not_configured`, and the capability document reports it up front. Email
