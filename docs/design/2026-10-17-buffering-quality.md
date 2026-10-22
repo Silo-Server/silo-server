@@ -802,9 +802,13 @@ there, which reads low.
 - For the same reason, a client omits `throughput_kbps` when its network
   changed while the plan played, as far as the platform can tell.
 - A client that cannot measure this omits it.
-- Apple will measure it on Aether's upstream reader once AetherEngine reports
-  it, and omits it until then. AVPlayer reads from Aether on 127.0.0.1, so its
-  access log only sees that local hop.
+- Apple measures it on Aether's upstream pump reader, from the byte count
+  AetherEngine publishes once a second. AVPlayer reads from Aether on
+  127.0.0.1, so its access log only sees that local hop. AetherEngine does not
+  yet report a total across every reader of a source, so Apple omits the sample
+  while a second reader may share the link (an embedded or secondary subtitle
+  whose forward prefetch is running) and on server HLS, where the relay has no
+  byte count.
 
 The server keeps one sample per device and connection as `playback_sample`. A
 new sample replaces it when it is higher, or when the kept one is older than the
