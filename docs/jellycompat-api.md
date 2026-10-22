@@ -350,17 +350,19 @@ id, then by width as a string, with `Interval` in milliseconds; a version
 without previews is absent. `GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`
 proxies a sheet (Roku does not follow image redirects) with an `ETag` and
 `private, no-cache`, requiring revalidation after a source switch or
-regeneration, and `…/tiles.m3u8` writes Jellyfin's HLS image
-playlist. Where Jellyfin puts the caller's token on each sheet URL, Silo puts
-the `PlaySessionId` of the caller's most recent live play of that item and
-source, or no credential when there is none. Sheets are media requests (see
-below); the playlist requires a login/API token. Both pick the version
-from `mediaSourceId`, else from a media-source id in the item position, else
-the version this token is playing for the item (Swiftfin and Findroid send
-no `mediaSourceId`), preferring the play a `PlaySessionId` names, else the
-default version, and serve only versions the account can see. The selected playback file is persisted in compat session
-state, so previews follow that source across API replicas and restarts.
-An index past the last sheet answers `404`.
+regeneration, and `…/tiles.m3u8` writes Jellyfin's HLS image playlist.
+Where Jellyfin puts the caller's token on each sheet URL, Silo puts the
+`PlaySessionId` of a live play of the caller that covers that item and
+source: the one the playlist request names, else the most recent. With no
+such play, or when plays cannot be read, the lines carry no credential.
+Sheets are media requests (see below); the playlist requires a login/API
+token. Both pick the version from `mediaSourceId`, else from a media-source
+id in the item position, else the version this token is playing for the
+item (Swiftfin and Findroid send no `mediaSourceId`), preferring the play a
+`PlaySessionId` names, else the default version, and serve only versions
+the account can see. The selected playback file is persisted in compat
+session state, so previews follow that source across API replicas and
+restarts. An index past the last sheet answers `404`.
 
 The managed Jellyfin Web build opts into `SiloSeekReanchor=true` on
 `PlaybackInfo`. For a copied-video HLS source, the response echoes
@@ -417,7 +419,9 @@ The quota is enforced across API processes.
 Media requests require a login/API token or an unexpired `PlaySessionId` grant.
 A grant authorizes GET/HEAD for its negotiated item and source; catalog item and
 source IDs alone are not credentials. An invalid explicit token does not fall
-back to a playback grant. Revoked owner credentials invalidate the grant.
+back to a playback grant, and a grant does not cover a request whose
+`MediaSourceId` spellings name different sources. Revoked owner credentials
+invalidate the grant.
 Media URLs that Silo builds (`DirectStreamUrl`, `TranscodingUrl`, subtitle
 `DeliveryUrl`, attachment URLs, trickplay playlist sheets) carry only
 `PlaySessionId`, never the login token, so a URL recorded by a proxy or player

@@ -176,6 +176,33 @@ func TestTrickplayPlaylistRoute(t *testing.T) {
 	}
 }
 
+// listFailingPlayStore fails every listing of a token's plays.
+type listFailingPlayStore struct{ CompatPlaybackStore }
+
+func (listFailingPlayStore) ListActiveForToken(context.Context, string) ([]PlaybackSession, error) {
+	return nil, errors.New("database unavailable")
+}
+
+// A playlist still serves when the plays cannot be listed; its sheet lines
+// then carry no credential.
+func TestTrickplayPlaylistWithoutPlayListing(t *testing.T) {
+	codec := NewResourceIDCodec()
+	grid := testTrickplayGrid
+	handler := &PlaybackHandler{
+		codec: codec, Trickplay: &fakeTrickplaySheets{}, playbackStore: listFailingPlayStore{NewPlaybackSessionStore(time.Hour, nil)},
+		content: &stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Versions: []catalog.FileVersion{{FileID: 42, Trickplay: &grid}}}},
+	}
+	router := chi.NewRouter()
+	router.Get(compatTrickplayPlaylistRoute, func(w http.ResponseWriter, r *http.Request) {
+		handler.HandleTrickplayPlaylist(w, r.WithContext(context.WithValue(r.Context(), compatSessionKey, &Session{Token: "token"})))
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/Videos/"+codec.EncodeStringID(EncodedIDItem, "movie-1")+"/Trickplay/300/tiles.m3u8", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "\n0.jpg?MediaSourceId="+codec.EncodeIntID(EncodedIDMediaSource, 42)+"\n") {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
 // A playlist's sheet lines carry the PlaySessionId of the caller's live play
 // of that source instead of the caller's token, and that grant alone fetches
 // the sheet, but only for the source it negotiated.
@@ -240,8 +267,21 @@ func TestTrickplayPlaylistGrantsSheetsByPlaySession(t *testing.T) {
 	if rec := get(base+"0.jpg?PlaySessionId=play-1", ""); rec.Code != http.StatusOK || len(sheets.opened) != 1 || sheets.opened[0] != 42 {
 		t.Fatalf("sheet by grant without source: %d opened %v", rec.Code, sheets.opened)
 	}
+	// A playlist names the play the request names over a more recent one.
+	now = now.Add(time.Minute)
+	plays.Put(PlaybackSession{
+		ID: "play-3", CompatToken: "trickplay-grant-token", ItemID: "movie-1", RouteItemID: itemID,
+		MediaSources: []PlaybackMediaSource{{ID: wide, FileID: 42}},
+	})
+	for query, want := range map[string]string{"": "play-3", "&PlaySessionId=play-1": "play-1"} {
+		rec := get(base+"tiles.m3u8?MediaSourceId="+wide+query, "trickplay-grant-token")
+		if !strings.Contains(rec.Body.String(), "\n0.jpg?MediaSourceId="+wide+"&PlaySessionId="+want+"\n") {
+			t.Errorf("playlist%s: %d %s, want grant %s", query, rec.Code, rec.Body.String(), want)
+		}
+	}
 	for _, path := range []string{
 		base + "0.jpg?MediaSourceId=" + narrow + "&PlaySessionId=play-1",
+		base + "0.jpg?MediaSourceId=" + wide + "&mediasourceid=" + narrow + "&PlaySessionId=play-1",
 		"/Videos/" + codec.EncodeStringID(EncodedIDItem, "movie-2") + "/Trickplay/300/0.jpg?PlaySessionId=play-1",
 		base + "0.jpg?MediaSourceId=" + wide,
 	} {

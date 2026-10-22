@@ -2902,13 +2902,12 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 		})
 	}
 
-	return append(streams, subtitleMediaStreams(routeItemID, mediaSourceID, version, selectedSubtitleStreamIndex, playSessionID)...)
+	return appendSubtitleMediaStreams(streams, routeItemID, mediaSourceID, version, selectedSubtitleStreamIndex, playSessionID)
 }
 
-// subtitleMediaStreams describes version's subtitle tracks, with delivery URLs
-// authorized by playSessionID.
-func subtitleMediaStreams(routeItemID, mediaSourceID string, version catalog.FileVersion, selectedSubtitleStreamIndex *int, playSessionID string) []mediaStreamDTO {
-	streams := make([]mediaStreamDTO, 0, len(version.SubtitleTracks))
+// appendSubtitleMediaStreams appends version's subtitle tracks to streams,
+// with delivery URLs authorized by playSessionID.
+func appendSubtitleMediaStreams(streams []mediaStreamDTO, routeItemID, mediaSourceID string, version catalog.FileVersion, selectedSubtitleStreamIndex *int, playSessionID string) []mediaStreamDTO {
 	for index, track := range version.SubtitleTracks {
 		streamIndex := subtitleTrackIndex(version, track, index)
 		format := subtitleRouteFormat(track.Codec)

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -462,8 +463,34 @@ func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool
 		return false
 	}
 	itemID := firstNonEmpty(chi.URLParam(r, "id"), chi.URLParam(r, "routeItemId"))
-	sourceID := firstNonEmpty(chi.URLParam(r, "routeMediaSourceId"), newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId"))
+	sourceID := chi.URLParam(r, "routeMediaSourceId")
+	if sourceID == "" {
+		var ok bool
+		if sourceID, ok = queryMediaSourceID(r.URL.Query()); !ok {
+			return false
+		}
+	}
 	return playbackGrantCovers(session, itemID, sourceID)
+}
+
+// queryMediaSourceID is the MediaSourceId query value in any spelling, and
+// false when spellings carry different sources: the grant check and the
+// handler each read the key case-insensitively, and the lookup would pick one
+// arbitrarily.
+func queryMediaSourceID(query url.Values) (string, bool) {
+	sourceID := ""
+	for key, values := range query {
+		if !strings.EqualFold(key, "MediaSourceId") {
+			continue
+		}
+		for _, value := range values {
+			if sourceID != "" && !mediaSourceIDsEqual(sourceID, value) {
+				return "", false
+			}
+			sourceID = value
+		}
+	}
+	return sourceID, true
 }
 
 // playbackGrantCovers reports whether a live negotiation authorizes media
