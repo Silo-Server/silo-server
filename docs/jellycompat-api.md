@@ -421,15 +421,15 @@ HE-AAC as `mp4a.40.5`, TrueHD as `mlpa`, and DTS as `dtsc`, `dtsh` (DTS-HD HRA
 and MA), or `dtse` (DTS Express). HE-AACv2 is `mp4a.40.29` (RFC 6381), where
 Jellyfin writes `mp4a.40.2`. Copied AV1 Main profile is `av01.0.LLM.DD`, always
 Main tier because the probe does not record the tier. Copied VP9 profiles 0 and
-2 are `vp09.PP.LL.DD`, with the level taken from the picture size alone, as
-FFmpeg writes it into the init segment's `vpcC` box; Jellyfin also counts the
-frame rate. When Silo cannot name every format a variant carries (an unknown
+2 are `vp09.PP.LL.DD`. FFprobe reports no VP9 level, so the level comes from the
+picture size alone, as FFmpeg writes it into the init segment's `vpcC` box;
+Jellyfin also counts the frame rate. When Silo cannot name every format a variant carries (an unknown
 level, another AV1 or VP9 profile, or copied audio with no entry), that variant
 has no `CODECS` or `SUPPLEMENTAL-CODECS`, where Jellyfin writes a partial list.
 For Dolby Vision without a compatible base layer (HEVC profile 5, AV1 profile
 10), a client whose device profile lists `DOVI` in a `VideoRangeType` condition
-also gets Jellyfin 12's `dvh1`/`dav1` variant, listed before the `hvc1`
-fallback, unless the copied audio has no entry. MPEG-TS remuxes keep the single
+also gets Jellyfin 12's `dvh1`/`dav1` variant, listed before the `hvc1` or
+`av01` fallback, unless the copied audio has no entry. MPEG-TS remuxes keep the single
 variant. Audio and subtitle streams carry `LocalizedLanguage`, and audio
 streams carry `LocalizedOriginal`, in English.
 

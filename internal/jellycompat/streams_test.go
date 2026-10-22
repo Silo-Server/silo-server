@@ -1554,6 +1554,7 @@ func TestGenerateCompatCopyVideoMasterManifestCodecsListEveryFormat(t *testing.T
 		{"vp9 profile 0", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: -99, BitDepth: 8, Width: 640, Height: 360, FrameRate: "24.000"}, aac, false, "vp09.00.21.08,mp4a.40.2"},
 		// FFmpeg's vpcC level ignores the frame rate; 1080p60 stays level 4.
 		{"vp9 profile 2", models.VideoTrack{Codec: "vp9", Profile: "Profile 2", Level: -99, BitDepth: 10, Width: 1920, Height: 1080, FrameRate: "60.000"}, aac, false, "vp09.02.40.10,mp4a.40.2"},
+		{"vp9 probed level", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: 41, BitDepth: 8, Width: 1920, Height: 1080}, aac, false, "vp09.00.41.08,mp4a.40.2"},
 		{"vp9 profile 1", models.VideoTrack{Codec: "vp9", Profile: "Profile 1", Level: -99, BitDepth: 8, Width: 640, Height: 360}, aac, false, ""},
 		{"vp9 unknown size", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: -99, BitDepth: 8}, aac, false, ""},
 		{"h264 unknown level", models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080}, aac, false, ""},

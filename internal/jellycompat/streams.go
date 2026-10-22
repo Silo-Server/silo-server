@@ -3962,9 +3962,10 @@ func compatAV1CodecString(video models.VideoTrack) string {
 
 // compatVP9CodecString builds the short form vp09.PP.LL.DD (VP codec ISO media
 // file format binding) for profiles 0 and 2, the 4:2:0 profiles the short form
-// implies. FFprobe reports no VP9 level, so the level is the one FFmpeg's MP4
-// muxer writes into the init segment's vpcC box: the lowest level whose
-// maximum luma picture size holds the frame, whatever the frame rate.
+// implies. The level is the one FFmpeg's MP4 muxer writes into the init
+// segment's vpcC box: the probed level when known (FFprobe reports none today),
+// else the lowest level whose maximum luma picture size holds the frame,
+// whatever the frame rate.
 func compatVP9CodecString(video models.VideoTrack) string {
 	var profile int
 	switch strings.ToLower(strings.TrimSpace(video.Profile)) {
@@ -3978,6 +3979,9 @@ func compatVP9CodecString(video models.VideoTrack) string {
 	bitDepth := models.NormalizeVideoBitDepth(video.BitDepth, video.PixelFormat, video.Profile)
 	if bitDepth != 8 && bitDepth != 10 && bitDepth != 12 {
 		return ""
+	}
+	if video.Level > 0 {
+		return fmt.Sprintf("vp09.%02d.%02d.%02d", profile, video.Level, bitDepth)
 	}
 	pictureSize := video.Width * video.Height
 	if pictureSize <= 0 {
