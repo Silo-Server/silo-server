@@ -52,7 +52,7 @@ func newProfilePINRouter(t *testing.T, verifier *pinVerifier) (http.Handler, *st
 		Config:          cfg,
 		TokenStore:      newMemTokenStore(),
 		MediaStore:      noopMediaStore{},
-		CredValidator:   principalValidator{Principal{UserID: "1", ProfileID: "parent", DisplayName: "Parent", PINRevision: 3}},
+		CredValidator:   principalValidator{Principal{UserID: "1", ProfileID: "parent", DisplayName: "Parent", PINRevision: 3, LoginSessionID: "login-1"}},
 		ProfileVerifier: verifier,
 	})
 	r := chi.NewRouter()
