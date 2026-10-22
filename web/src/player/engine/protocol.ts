@@ -83,6 +83,13 @@ export type WorkerToPageMessage =
   | { type: "audio-buffered"; generation: number }
   /** A read from the source failed and will be retried, or has given up. */
   | { type: "read-failed" }
+  /**
+   * A read from the source received data: request `request` has `bytes` in
+   * all, its first at `first` and its latest at `last`, as
+   * `performance.timeOrigin + performance.now()` so the page can place them
+   * on its own clock. Sent while data arrives, a few times a second.
+   */
+  | { type: "media-data"; request: number; bytes: number; first: number; last: number }
   | {
       type: "error";
       generation: number | null;

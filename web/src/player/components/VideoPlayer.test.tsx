@@ -100,7 +100,11 @@ vi.mock("../engine/routing", async (importOriginal) => {
           : actual.resolveOriginalPlaybackRoute(...args),
   };
 });
-const attachBrowserEngine = vi.hoisted(() => vi.fn(() => ({ destroy: vi.fn() })));
+const attachBrowserEngine = vi.hoisted(() =>
+  vi.fn((_options: Parameters<typeof import("../engine").attachBrowserEngine>[0]) => ({
+    destroy: vi.fn(),
+  })),
+);
 vi.mock("../engine", () => ({ attachBrowserEngine }));
 const releasedMedia = vi.hoisted(() => vi.fn());
 const sourceLoads = vi.hoisted(() => vi.fn());
@@ -5979,6 +5983,35 @@ describe("VideoPlayer playback throughput", () => {
     ],
   ])("reports %s with the plan summary", async (_name, fragments, kbps) => {
     expect((await summaryAfterFragments(fragments)).throughput_kbps).toBe(kbps);
+  });
+
+  it("reports the rate the browser engine's reads received data at", async () => {
+    attachBrowserEngine.mockClear();
+    engineRoute.chosen = true;
+    onTestFinished(() => {
+      engineRoute.chosen = false;
+    });
+    const onBufferingSummary = vi.fn();
+    const { unmount } = renderPlayer({
+      onBufferingSummary,
+      browserEngine: {
+        containers: ["mkv"],
+        videoCodecs: ["h264"],
+        audioCodecs: ["aac"],
+        hdr: false,
+      },
+    });
+    await waitFor(() => expect(attachBrowserEngine).toHaveBeenCalled());
+    const { onMediaData } = attachBrowserEngine.mock.calls.at(-1)![0];
+    // The header read is too short to count; the two long reads overlap for
+    // half a second, which counts once.
+    act(() => {
+      onMediaData?.(0, 200_000, 0, 300);
+      onMediaData?.(1, 2_000_000, 1000, 2000);
+      onMediaData?.(2, 1_000_000, 1500, 2500);
+    });
+    unmount();
+    expect(onBufferingSummary.mock.calls.at(-1)![1]).toMatchObject({ throughput_kbps: 16_000 });
   });
 
   // D1: the server files a sample under the connection that delivers it.

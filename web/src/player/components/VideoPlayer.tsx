@@ -144,7 +144,7 @@ import {
   setWatchTogetherGuestControl,
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
-import { MAX_PROBE_KBPS, MIN_PROBE_KBPS } from "../probe-meter";
+import { MediaDataMeter } from "../media-data-meter";
 import { mediaElementReleased, sourceLoadStarted } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
 
@@ -371,26 +371,6 @@ const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
  */
 const FIREFOX_STALL_BUFFERED_MS = 2_000;
 
-/** Adds `[start, end]` to sorted, disjoint spans, merging any it overlaps. */
-function mergeSpan(spans: [number, number][], span: [number, number]): [number, number][] {
-  const merged: [number, number][] = [];
-  let [start, end] = span;
-  for (const [a, b] of spans) {
-    if (b < start || a > end) merged.push([a, b]);
-    else {
-      start = Math.min(start, a);
-      end = Math.max(end, b);
-    }
-  }
-  merged.push([start, end]);
-  return merged.sort((x, y) => x[0] - y[0]);
-}
-
-/** The time the spans cover. */
-function spanLength(spans: [number, number][]): number {
-  return spans.reduce((total, [a, b]) => total + (b - a), 0);
-}
-
 // A progressive remux is one forward-only response. A paused browser stops
 // reading it, and the server closes it once it has made no progress for its
 // stall window (180s by default, see internal/httpstream). The browser cannot
@@ -497,12 +477,6 @@ function readStringPayload(
   return null;
 }
 
-/**
- * The least receiving time a fragment needs to count toward a plan summary's
- * throughput_kbps, and so the least the summary is taken from.
- */
-const MIN_THROUGHPUT_SAMPLE_MS = 1_000;
-
 export function VideoPlayer({
   title,
   year,
@@ -600,11 +574,12 @@ export function VideoPlayer({
   const fullscreenRootRef = usePlayerFullscreenRoot();
   const isMountedRef = useRef(true);
   const hlsRef = useRef<HlsType | null>(null);
-  // The plan's long media fragments: their bytes, and the times they were
-  // receiving, merged so that overlapping requests count once.
-  const fragmentThroughputRef = useRef<
-    { planRevision: number; bytes: number; spans: [number, number][] } | undefined
-  >(undefined);
+  // The plan's media requests, where its transport can see their bytes:
+  // hls.js fragments and the browser engine's reads. The media element's own
+  // loads show none.
+  const mediaMeterRef = useRef<{ planRevision: number; meter: MediaDataMeter } | undefined>(
+    undefined,
+  );
   const planRevisionForThroughputRef = useRef(planRevision);
   useEffect(() => {
     planRevisionForThroughputRef.current = planRevision;
@@ -2467,6 +2442,13 @@ export function VideoPlayer({
     let autoplayRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let nativeHLSMetadataHandler: (() => void) | null = null;
     let directPlayMetadataHandler: (() => void) | null = null;
+    // The plan's meter. A transport rebuilt for the same plan measures into
+    // the same one.
+    const meterMedia = () => {
+      if (mediaMeterRef.current?.planRevision !== planRevision)
+        mediaMeterRef.current = { planRevision, meter: new MediaDataMeter(performance.now()) };
+      return mediaMeterRef.current.meter;
+    };
 
     mediaRecoveryAttemptsRef.current = 0;
     setError(null);
@@ -2758,24 +2740,22 @@ export function VideoPlayer({
               if ((data as { stalled?: boolean }).stalled)
                 video.dispatchEvent(new Event(MEDIA_ENDED_EVENT));
             });
-            hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
-              const { loaded, loading } = data.frag.stats;
-              const ms = loading.end - loading.first;
-              // A short fragment on a warm connection arrives at the burst
-              // rate, which can be twice what the link sustains; only long
-              // ones count. Subtitles are not the plan's media.
-              if (destroyed || loaded <= 0 || ms < MIN_THROUGHPUT_SAMPLE_MS) return;
-              if ((data.frag as { type?: string }).type === "subtitle") return;
-              const revision = planRevisionForThroughputRef.current;
-              const current =
-                fragmentThroughputRef.current?.planRevision === revision
-                  ? fragmentThroughputRef.current
-                  : { planRevision: revision, bytes: 0, spans: [] };
-              fragmentThroughputRef.current = {
-                planRevision: revision,
-                bytes: current.bytes + loaded,
-                spans: mergeSpan(current.spans, [loading.first, loading.end]),
-              };
+            // Each load gets its own stats object, which hls.js fills in as
+            // the fragment arrives. Subtitles are not the plan's media.
+            const meter = meterMedia();
+            hls.on(Hls.Events.FRAG_LOADING, (_event, { frag }) => {
+              if (destroyed || frag.type === "subtitle") return;
+              const stats = frag.stats;
+              meter.watch(stats, () => ({
+                bytes: stats.loaded,
+                first: stats.loading.first,
+                done: stats.aborted || stats.loading.end > 0,
+              }));
+            });
+            hls.on(Hls.Events.FRAG_LOADED, (_event, { frag }) => {
+              if (destroyed || frag.type === "subtitle") return;
+              const { loaded, loading } = frag.stats;
+              meter.received(frag.stats, loaded, loading.first, loading.end);
             });
 
             hls.on(Hls.Events.BUFFER_APPENDED, (_event, data) => {
@@ -2852,10 +2832,14 @@ export function VideoPlayer({
             const { attachBrowserEngine } = await import("../engine");
             const surface = engineSurfaceRef.current;
             if (destroyed || !surface) return;
+            const meter = meterMedia();
             engineSession = attachBrowserEngine({
               video,
               surface,
               source: route.source,
+              onMediaData: (request, bytes, first, last) => {
+                if (!destroyed) meter.received(request, bytes, first, last);
+              },
               onFailure: (failure) => {
                 if (destroyed) return;
                 // Like MEDIA_ERR_NETWORK on the element: a read that fails
@@ -4453,6 +4437,16 @@ export function VideoPlayer({
     mediaOutageRef.current = false;
   }, [planRevision]);
 
+  // The rate an adoption's media arrived at, where its transport can tell.
+  // None after the browser changed networks while it played: the server files
+  // a sample under the connection of the request that delivers it.
+  const planThroughputKbps = (adoptionId: string | undefined) => {
+    const current = mediaMeterRef.current;
+    if (!current || String(current.planRevision) !== adoptionId) return undefined;
+    if (String(networkChangedInRevisionRef.current) === adoptionId) return undefined;
+    return current.meter.throughputKbps(performance.now());
+  };
+
   // When playback keeps buffering, lower quality, ask first, or only report,
   // as the viewer's setting says. Rooms have their own lower-quality offer.
   const bufferingPlan = useMemo<BufferingPlan>(
@@ -4501,20 +4495,10 @@ export function VideoPlayer({
       else setNotice(next);
     },
     onSummary: (summaryPlan, summary, pageEnding) => {
-      const fragments = fragmentThroughputRef.current;
-      const ms = fragments ? spanLength(fragments.spans) : 0;
-      // Under a second of receiving can be one burst from a buffer, a rate
-      // the link never held; the server keeps the highest sample.
-      const kbps =
-        fragments &&
-        String(fragments.planRevision) === summaryPlan.adoption_id &&
-        String(networkChangedInRevisionRef.current) !== summaryPlan.adoption_id &&
-        ms >= MIN_THROUGHPUT_SAMPLE_MS
-          ? Math.min(Math.floor((fragments.bytes * 8) / ms), MAX_PROBE_KBPS)
-          : 0;
+      const kbps = planThroughputKbps(summaryPlan.adoption_id);
       onBufferingSummary?.(
         summaryPlan,
-        kbps >= MIN_PROBE_KBPS ? { ...summary, throughput_kbps: kbps } : summary,
+        kbps !== undefined ? { ...summary, throughput_kbps: kbps } : summary,
         pageEnding,
       );
     },

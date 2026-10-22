@@ -103,6 +103,12 @@ export interface EnginePlayerOptions {
   /** The speed playback starts at, as a media element's defaultPlaybackRate. */
   playbackRate?: number;
   onFailure: (failure: FailureV3) => void;
+  /**
+   * A read from the file received data: `request` has `bytes` in all, its
+   * first at `first` and its latest at `last`, on the page's
+   * `performance.now()` clock.
+   */
+  onMediaData?: (request: number, bytes: number, first: number, last: number) => void;
 }
 
 function clampRate(value: number): number {
@@ -124,6 +130,7 @@ export class EnginePlayer {
   private readonly layers: HTMLElement;
   private readonly element: HTMLVideoElement;
   private readonly onFailure: (failure: FailureV3) => void;
+  private readonly onMediaData: EnginePlayerOptions["onMediaData"];
   private worker: Worker | null = null;
   private audio: EngineAudioOutput | null = null;
   private renderer: FrameRenderer | null = null;
@@ -192,6 +199,7 @@ export class EnginePlayer {
     options.surface.replaceChildren(this.layers);
     this.element = options.element;
     this.onFailure = options.onFailure;
+    this.onMediaData = options.onMediaData;
     this.volumeValue = options.volume;
     this.mutedValue = options.muted;
     this.rateValue = clampRate(options.playbackRate ?? 1);
@@ -564,6 +572,14 @@ export class EnginePlayer {
         // transport is failing, so the wait is an outage, not a slow link.
         this.dispatch("stalled");
         break;
+      case "media-data":
+        this.onMediaData?.(
+          message.request,
+          message.bytes,
+          message.first - performance.timeOrigin,
+          message.last - performance.timeOrigin,
+        );
+        return;
       case "error":
         if (message.generation === null || message.generation === this.generation) {
           if (message.classification === ENGINE_VIDEO_DECODE_FAILED && this.restartDecoding()) {
