@@ -181,7 +181,7 @@ apart from "I am too old to talk to this server".
 
 Note the layering: a request whose *body* is fine but whose *media* cannot be
 played is not an HTTP error. It is a `201` with `outcome:
-"adaptation_unavailable"` and a terminal reason from §7.3. HTTP statuses on this
+"adaptation_unavailable"` and a terminal reason from §7.4. HTTP statuses on this
 endpoint describe the request; the decision lives in the body.
 
 **Idempotency.** The server stores each `playback_attempt_id` alongside a
@@ -301,8 +301,8 @@ the start request's `playback_attempt_id`, and no `session_id`, `plan_id`,
 `plan_attempt_id`, or `plan_attempt_key`. The server authorizes the event through
 the persisted attempt ownership and returns `202`.
 
-Event names are the eleven in §7.4. `diagnostics` is a string→string map, capped
-at 32 entries, and the server keeps only the keys on its allowlist (§7.5),
+Event names are the eleven in §7.5. `diagnostics` is a string→string map, capped
+at 32 entries, and the server keeps only the keys on its allowlist (§7.6),
 truncating each value to 256 characters. Unknown keys are dropped silently; a
 client sending them is not an error, it just achieves nothing.
 
@@ -1277,7 +1277,64 @@ and the quality reasons `quality_auto_source`, `quality_fixed_rung`,
 not carry the source), `quality_bandwidth_cap`, and `quality_original` (an
 automatic reduction could not run, so the source size was kept).
 
-### 7.2 Degradation warnings
+### 7.2 Quality reasons
+
+On `/api/v2`, every playable plan carries `quality_reasons`, a non-empty list
+that says why the viewer gets this quality. Servers that publish it advertise
+`plan_quality_reasons_v1`; the frozen `/api/v1` response never carries it, and
+terminal responses have no plan. `decision_reason`, `bandwidth_limit` and
+`active_quality` are unchanged.
+
+Entry 0 is the reason that decided the video quality: its resolution, bitrate,
+or version. Later entries are other changes the plan makes. No code repeats.
+Each entry is `{code}` plus only the figures its code lists. The code set is
+open: clients show unknown codes generically.
+
+| Code | When | Figures |
+| --- | --- | --- |
+| `original` | The video plays at the source's resolution and bitrate: direct play, remux, or a video copy. Only ever entry 0 | — |
+| `user_selected` | A fixed rung or plain resolution in `quality_preference`, or a version the viewer pinned (`allow_alternate_versions: false`) that plays as it is | — |
+| `server_cap` | An administrator's bitrate limit lowered the plan | `kbps` (the limit) |
+| `client_cap` | The request's `bandwidth_cap_kbps` lowered the plan | `kbps` (the cap) |
+| `network_learned_limit` | The device's learned limit lowered the plan (`bandwidth_limit` is present) | `kbps`, `expires_at` |
+| `network_estimate` | Auto planned below the source because the estimate's budget cannot carry it | `kbps` (the estimate) |
+| `device_resolution_limit` | The device's maximum resolution, or the tallest class an attested H.264 decoder takes, lowered the plan | `height` |
+| `alternate_version` | Another version of the requested part plays | `media_file_id` (a string, as every v2 identifier) |
+| `video_codec_unsupported` | The device cannot decode the source video, or its evidence tier cannot validate it, so the video is encoded | `from` (source codec) |
+| `subtitle_burn_in` | The selected subtitle is burned into the video | — |
+| `dynamic_range_converted` | The video is delivered in another dynamic range: tone mapping, a Dolby Vision strip, or a client playing the HDR10 or HLG base layer | `from`, `to` |
+| `compatibility_conversion` | The video is encoded for none of the reasons above, such as a source whose video cannot be copied safely or copy routes that already failed on this output | — |
+| `audio_converted` | The audio is re-encoded to another codec or fewer channels | `from`, `to` |
+| `container_unsupported` | A remux changed only the packaging | — |
+
+Codec figures are lower-case tokens such as `hevc`, `h264`, `av1`, `vp9`,
+`mpeg2` and `vc1` for video, and `truehd`, `dts`, `eac3`, `ac3`, `aac`,
+`flac`, `opus` and `pcm` for audio. Range figures are `dolby_vision`, `hdr10`,
+`hdr10_plus`, `hlg` and `sdr`; a source of unknown HDR range counts as `hdr10`.
+
+Entries follow this order, so the first that applies is entry 0:
+`user_selected`, `server_cap`, `client_cap`, `network_learned_limit`,
+`network_estimate`, `device_resolution_limit`, `alternate_version`,
+`video_codec_unsupported`, `subtitle_burn_in`, `dynamic_range_converted`,
+`compatibility_conversion`, `original`, `audio_converted`,
+`container_unsupported`. `original` appears only when nothing before it does.
+A version pin that plays as it is takes its place as `user_selected`.
+
+- A cap is named when it is the lower of the two caps (the administrator's on
+  a tie) and it bounded the encode. A cap looser than the estimate's choice is
+  not named.
+- `alternate_version` follows the limit the requested version exceeded: the
+  tightest of the caps and the estimate's 80% budget, and the device's maximum
+  resolution. A version chosen because the requested one was refused has no
+  limit before it.
+- A learned limit is named after the server has decided that the limit lowered
+  the plan, exactly when `bandwidth_limit` is present; it replaces the
+  `network_estimate` entry for the same rate.
+- A remux lists `container_unsupported` only when it changes nothing else.
+- A client Dolby Vision Profile 7 to 8.1 conversion keeps the Dolby Vision
+  range and is not listed.
+
+### 7.3 Degradation warnings
 
 The plan will play, but something the user might notice was given up.
 
@@ -1298,7 +1355,7 @@ The plan will play, but something the user might notice was given up.
 | `audio_track_unavailable` | The selected audio track is not on the effective file; its default track plays |
 | `subtitle_track_unavailable` | The selected subtitle has no equivalent on the effective file, or is on it but cannot be shown there; playback continues with subtitles off. `message` says which |
 
-### 7.3 Terminal reasons
+### 7.4 Terminal reasons
 
 Playback will not proceed. `terminal.retryable` says whether trying again could
 help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
@@ -1350,13 +1407,13 @@ execution and egress policy and is never retryable, while
 `route_capacity_unavailable` means a legal shape exists but no node could serve
 it right now and is always retryable.
 
-### 7.4 Route event names
+### 7.5 Route event names
 
 `plan_selected`, `plan_invalidated`, `plan_failed`, `first_frame`, `terminal`,
 `stopped`, `runtime_correction_applied`, `runtime_correction_succeeded`,
 `runtime_correction_failed`, `seek_reanchor_requested`, `seek_reanchored`, `plan_summary`.
 
-### 7.5 Diagnostics allowlist
+### 7.6 Diagnostics allowlist
 
 Route-event `diagnostics` keys the server retains. Everything else is dropped;
 every value is truncated to 256 characters.
@@ -1615,6 +1672,7 @@ marks Auto while the session's preference is `auto`, whatever `active_quality`
 says. Servers that publish the field advertise `plan_active_quality_v1`; without
 that feature an absent field says nothing. The frozen `/api/v1` response never
 carries it.
+`quality_reasons` (§7.2) says why the plan delivers what it does.
 
 On `/api/v2` the menu lists only fixed rungs. The source is not an entry,
 because `auto` already returns to it. The frozen `/api/v1` response still leads

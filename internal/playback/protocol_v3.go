@@ -96,6 +96,9 @@ const (
 	// active_quality means "no entry" rather than "a server that predates
 	// the field". It exists only on /api/v2 (see NativeServerFeaturesV3).
 	FeaturePlanActiveQualityV3 = "plan_active_quality_v1"
+	// FeaturePlanQualityReasonsV3 tells a client every playable plan carries
+	// quality_reasons. It exists only on /api/v2 (see NativeServerFeaturesV3).
+	FeaturePlanQualityReasonsV3 = "plan_quality_reasons_v1"
 	// FailureSubtitleHLSRenditionFailedV3 is the failure_recovery
 	// classification a client sends when the plan's subtitle rendition never
 	// became selectable in its player. The server stops offering renditions
@@ -223,7 +226,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeaturePlanQualityReasonsV3)
 }
 
 // WithoutFeatureV3 returns features with every spelling of feature removed.
@@ -1067,6 +1070,11 @@ type PlanV3 struct {
 	// empty when it delivers none of them (see activeQualityV3). Published
 	// on /api/v2 only, under FeaturePlanActiveQualityV3.
 	ActiveQuality string `json:"active_quality,omitempty"`
+	// QualityReasons says why the plan delivers the quality it does: entry 0
+	// decided the video quality, later entries are the plan's other changes
+	// (see qualityReasonsV3). Published on /api/v2 only, under
+	// FeaturePlanQualityReasonsV3.
+	QualityReasons []QualityReasonV3 `json:"quality_reasons,omitempty"`
 }
 
 type TerminalV3 struct {

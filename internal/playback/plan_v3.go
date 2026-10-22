@@ -196,6 +196,12 @@ type PlannerResultV3 struct {
 	ToneMapRecipeVersion     string
 	ToneMapPreflightRequired bool
 	ToneMapSourceRevision    tonemap.SourceRevision
+	// qualityCapBound and qualityDecoderHeight record limits the encode
+	// applied after the quality decision, for the plan's quality reasons: a
+	// bitrate cap that lowered the encode's bitrate, and the height an
+	// attested H.264 decoder held the encode to.
+	qualityCapBound      bool
+	qualityDecoderHeight int
 }
 
 // hlsToneMapCapabilities resolves the lazy pooled inventory when present and
@@ -211,10 +217,20 @@ func (input PlannerInputV3) hlsToneMapCapabilities() tonemap.Capabilities {
 
 // PlanPlaybackV3 chooses a playable protocol-v3 route from source and client facts.
 func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
+	// facts collects what the route choice below decided, for the plan's
+	// quality reasons.
+	facts := qualityFactsV3{
+		clientCapKbps: optionalValueV3(input.Request.BandwidthCapKbps),
+		serverCapKbps: input.ServerBitrateCapKbps,
+		estimateKbps:  optionalValueV3(input.Request.BandwidthEstimateKbps),
+		versionPinned: !input.Request.AllowsAlternateVersions(),
+		maxHeight:     resolutionHeightV3(input.Request.Capabilities.MaxResolution),
+	}
 	// Registered first so it runs last, after any rewrite of the result.
 	defer func() {
 		if result.Plan != nil {
 			result.Plan.ActiveQuality = activeQualityV3(input.Request, *result.Plan)
+			result.Plan.QualityReasons = qualityReasonsV3(facts, result)
 		}
 	}()
 	if input.RequestedFile == nil {
@@ -246,6 +262,12 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		input.Now = time.Now()
 	}
 	source := SourceDescriptorFromFileV3(file, input.AudioTrackIndex)
+	if file.ID != input.RequestedFile.ID && file.PresentationPartIndex == input.RequestedFile.PresentationPartIndex {
+		// Another version of the requested part plays. A different part is
+		// the same version further along, not an alternate.
+		requested := SourceDescriptorFromFileV3(input.RequestedFile, input.AudioTrackIndex)
+		facts.requested = &requested
+	}
 	serverBitrateRequiresEncode := false
 	if input.ServerBitrateCapKbps > 0 {
 		if cap := optionalValueV3(input.Request.BandwidthCapKbps); cap == 0 || input.ServerBitrateCapKbps < cap {
@@ -256,6 +278,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		cap := optionalValueV3(input.Request.BandwidthCapKbps)
 		totalBitrateKbps := normalizeBitrateKbpsV3(file.Bitrate)
 		serverBitrateRequiresEncode = totalBitrateKbps <= 0 || totalBitrateKbps > cap || source.BitrateKbps > cap
+		facts.capEncode = serverBitrateRequiresEncode
 		if serverBitrateRequiresEncode {
 			defer func() {
 				compliant := result.Plan != nil &&
@@ -460,6 +483,8 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		quality.Warnings = warnings
 	}
 	base.DegradationWarnings = append(base.DegradationWarnings, quality.Warnings...)
+	facts.quality = quality
+	facts.videoUnsupported = !videoOK
 
 	if quality.RequiresTranscode || !videoOK ||
 		(!originalRangeOK && !dvStripEligible && !clientDV81Eligible && !clientHDR10Eligible) ||
@@ -1099,7 +1124,7 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 		targetAudioChannels = 0
 		targetAudioBitrateKbps = 0
 	}
-	return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, transcodeAudio), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
+	return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, transcodeAudio), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1, qualityCapBound: bandwidthCapExceeded && transcodeAudio}
 }
 
 func stereoDownmixSourceChannelsV3(sourceChannels, targetChannels int, transcodeAudio bool) int {
@@ -1245,11 +1270,13 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	audioShareKbps := func(budget int) int { return min(defaultAudioBitrateKbps, max(64, budget/4)) }
 	targetAudioBitrateKbps := 0
 	budget := quality.BudgetKbps * 95 / 100
+	capBound := false
 	if input.ServerBitrateCapKbps > 0 {
 		capBudget := optionalValueV3(input.Request.BandwidthCapKbps) * 95 / 100
 		if capBudget-audioShareKbps(capBudget) < 64 {
 			return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable video stream.", false)
 		}
+		capBound = budget <= 0 || capBudget < budget
 		budget = minPositiveV3(budget, capBudget)
 	}
 	if budget > 0 {
@@ -1261,7 +1288,9 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		// An estimate never refuses playback: under the smallest budget the
 		// video still gets 64 kbps.
+		unbudgeted := quality.BitrateKbps
 		quality.BitrateKbps = min(quality.BitrateKbps, max(budget-targetAudioBitrateKbps, 64))
+		capBound = capBound && quality.BitrateKbps < unbudgeted
 	}
 	// Encodes stop at the ladder's top class. A taller source (8K, a square
 	// VR frame) that keeps its own frame on the original route is fitted into
@@ -1279,6 +1308,12 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	// takes, and the bitrate stays within that decoder's limit. h264Quality
 	// is also kept for the H.264 fallback after a failed HEVC attempt.
 	h264Quality := h264BoundedQualityV3(input.Request, quality, source)
+	// decoderHeight is the class an attested H.264 decoder held the encode
+	// to, when it lowered the encode's resolution.
+	decoderHeight := 0
+	if h264Quality.Height < quality.Height {
+		decoderHeight = ladderClassForSize(h264Quality.Width, h264Quality.Height)
+	}
 	hevcQuality := quality
 	quality = h264Quality
 	if input.Settings.AllowHEVCEncoding && hlsRegistry.Available(TransformationVideoToHEVCV3) {
@@ -1290,6 +1325,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		if hlsHEVCOutputSupportedV3(input.Request, hevcQuality, source) {
 			targetVideoCodec, quality = transcodeCodecHEVC, hevcQuality
+			decoderHeight = 0
 		}
 	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
@@ -1360,6 +1396,9 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if targetVideoCodec == transcodeCodecHEVC && planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		targetVideoCodec = transcodeCodecH264
 		quality = h264Quality
+		if h264Quality.Height < hevcQuality.Height {
+			decoderHeight = ladderClassForSize(h264Quality.Width, h264Quality.Height)
+		}
 		plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
 		plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
 		plan.EffectiveRecipe.BitrateKbps = intPointerV3(quality.BitrateKbps)
@@ -1387,7 +1426,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
-	return PlannerResultV3{SubtitleRendition: subtitleRendition, Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
+	return PlannerResultV3{SubtitleRendition: subtitleRendition, Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision, qualityCapBound: capBound, qualityDecoderHeight: decoderHeight}
 }
 
 // h264BoundedQualityV3 fits a transcode target to the client's attested
@@ -1692,8 +1731,15 @@ type QualityResultV3 struct {
 	// BudgetKbps is the share of a bandwidth estimate an automatic encode's
 	// video and audio fit within together; 0 when no estimate bounds it.
 	BudgetKbps int
-	Reason     string
-	Warnings   []DegradationWarningV3
+	// CapApplied, OverEstimate and DeviceLimitHeight record which automatic
+	// limits lowered the result below the source, for its quality reasons:
+	// the bandwidth cap, the estimate's budget, and the device's maximum
+	// resolution (its height, 0 when it did not lower the result).
+	CapApplied        bool
+	OverEstimate      bool
+	DeviceLimitHeight int
+	Reason            string
+	Warnings          []DegradationWarningV3
 }
 
 // ResolveQualityPolicyV3 selects the delivery quality for a plan.
@@ -1735,6 +1781,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	// allows, before the source's own height bounds targetHeight; 0 is no
 	// limit. It keeps a cropped source in the class it earned.
 	var classLimit int
+	deviceLimitHeight := 0
 	if quality != QualityAutoV3 {
 		targetHeight, _ = strconv.Atoi(strings.TrimSuffix(quality, "p"))
 		classLimit = targetHeight
@@ -1745,6 +1792,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		if maxHeight > 0 && (targetHeight == 0 || maxHeight < targetHeight) {
 			targetHeight = maxHeight
 			reason = "quality_device_limit"
+			deviceLimitHeight = maxHeight
 		}
 		classLimit = maxHeight
 	}
@@ -1834,7 +1882,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		// is a hard delivery ceiling, never advisory.
 		bitrate = capKbps
 	}
-	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, BudgetKbps: budgetKbps, Reason: reason, Warnings: warnings}
+	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, BudgetKbps: budgetKbps, CapApplied: capApplied, OverEstimate: overEstimate, DeviceLimitHeight: deviceLimitHeight, Reason: reason, Warnings: warnings}
 	result.RequiresTranscode = !result.PreservesSource
 	return result
 }
@@ -1912,6 +1960,7 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 		BitrateKbps:       bitrate,
 		RequiresTranscode: true,
 		ExplicitRung:      true,
+		CapApplied:        capApplied,
 		Reason:            reason,
 		Warnings:          warnings,
 	}

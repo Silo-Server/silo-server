@@ -10,8 +10,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-// active_quality and its feature are /api/v2 only: the frozen /api/v1 start
-// writes the same plan without them.
+// active_quality, quality_reasons and their features are /api/v2 only: the
+// frozen /api/v1 start writes the same plan without them.
 func TestStartPlaybackActiveQualityIsPublishedOnV2Only(t *testing.T) {
 	newHandler := func(t *testing.T) *PlaybackHandler {
 		file := v3HandlerFixtureFile(t)
@@ -36,7 +36,10 @@ func TestStartPlaybackActiveQualityIsPublishedOnV2Only(t *testing.T) {
 	if v2.PlaybackPlan == nil || v2.PlaybackPlan.ActiveQuality != playback.QualityRung720pMediumV3 {
 		t.Fatalf("v2 plan = %#v, terminal = %#v", v2.PlaybackPlan, v2.Terminal)
 	}
-	if !slices.Contains(v2.ServerFeatures, playback.FeaturePlanActiveQualityV3) {
+	if len(v2.PlaybackPlan.QualityReasons) == 0 || v2.PlaybackPlan.QualityReasons[0].Code != playback.QualityReasonUserSelectedV3 {
+		t.Fatalf("v2 quality_reasons = %+v", v2.PlaybackPlan.QualityReasons)
+	}
+	if !slices.Contains(v2.ServerFeatures, playback.FeaturePlanActiveQualityV3) || !slices.Contains(v2.ServerFeatures, playback.FeaturePlanQualityReasonsV3) {
 		t.Fatalf("v2 features = %v", v2.ServerFeatures)
 	}
 
@@ -46,7 +49,8 @@ func TestStartPlaybackActiveQualityIsPublishedOnV2Only(t *testing.T) {
 	if rr.Code != http.StatusCreated || !strings.Contains(rr.Body.String(), `"server_transcode_hls"`) {
 		t.Fatalf("v1 status = %d, body = %s", rr.Code, rr.Body.String())
 	}
-	if body := rr.Body.String(); strings.Contains(body, "active_quality") || strings.Contains(body, playback.FeaturePlanActiveQualityV3) {
+	if body := rr.Body.String(); strings.Contains(body, "active_quality") || strings.Contains(body, playback.FeaturePlanActiveQualityV3) ||
+		strings.Contains(body, "quality_reasons") || strings.Contains(body, playback.FeaturePlanQualityReasonsV3) {
 		t.Fatalf("v1 body published v2-only fields: %s", body)
 	}
 }

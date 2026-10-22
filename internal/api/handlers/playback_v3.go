@@ -2016,6 +2016,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		}
 		timings.mark("unlimited_planning")
 	}
+	playback.ApplyLearnedLimitReasonV3(result.Plan)
 	appendStartWarningsV3(&result, warnings)
 	response, statusErr := h.startPlannedPlaybackV3(r, userID, profileID, req, requestDigests, requestedFile, effectiveFile, audioIndex, result, clientInfo)
 	timings.mark("session_transport_commit")
@@ -5610,6 +5611,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			result.Plan.BandwidthLimit = nil
 		}
 	}
+	playback.ApplyLearnedLimitReasonV3(result.Plan)
 	if result.Terminal != nil {
 		return playback.NewTerminalResponseV3(result.Terminal.Reason, result.Terminal.Message, result.Terminal.Retryable), *record, nil, nil
 	}
@@ -7115,14 +7117,15 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 }
 
 // frozenV1DecisionV3 removes what only /api/v2 publishes from a decision
-// written on the frozen /api/v1 surface: active_quality, and the menu rungs
-// below 1.5 Mbps that Auto lowering added after the freeze.
+// written on the frozen /api/v1 surface: active_quality, quality_reasons, and
+// the menu rungs below 1.5 Mbps that Auto lowering added after the freeze.
 func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
 	if response.PlaybackPlan == nil {
 		return response
 	}
 	plan := *response.PlaybackPlan
 	plan.ActiveQuality = ""
+	plan.QualityReasons = nil
 	plan.AvailableQualities = slices.DeleteFunc(slices.Clone(plan.AvailableQualities), func(quality playback.AvailableQualityV3) bool {
 		return quality.Label == playback.QualityRung480pLowV3 || quality.Label == playback.QualityRung360pV3
 	})

@@ -81,6 +81,17 @@ type PlaybackBandwidthLimit struct {
 	ExpiresAt string `json:"expires_at" format:"date-time"`
 }
 
+// PlaybackQualityReason is one entry of a plan's quality_reasons.
+type PlaybackQualityReason struct {
+	Code        string `json:"code" doc:"Why the plan delivers this quality. Open set; clients must accept codes they do not know. original: the source's own resolution and bitrate (only ever the first entry). user_selected: the viewer chose a fixed quality or pinned this version. server_cap: an administrator's bitrate limit. client_cap: the request's bandwidth_cap_kbps. network_learned_limit: the device's learned limit (bandwidth_limit). network_estimate: the bandwidth estimate cannot carry the source. device_resolution_limit: the device's maximum resolution. alternate_version: another version of the title plays. video_codec_unsupported: the device cannot decode the source video. subtitle_burn_in: the selected subtitle is burned into the video. dynamic_range_converted: the video is delivered in another dynamic range. compatibility_conversion: the video is converted for none of the other reasons, such as a source that cannot be copied safely or copy routes that already failed. audio_converted: the audio is re-encoded. container_unsupported: only the packaging changed."`
+	Kbps        int    `json:"kbps,omitempty" doc:"The rate behind the reason: the cap for server_cap and client_cap, the limit for network_learned_limit, the estimate the planner used for network_estimate."`
+	ExpiresAt   string `json:"expires_at,omitempty" format:"date-time" doc:"When the learned limit expires; network_learned_limit only."`
+	Height      int    `json:"height,omitempty" doc:"The tallest resolution class the device plays; device_resolution_limit only."`
+	From        string `json:"from,omitempty" doc:"The source's codec or dynamic range: a video codec token (hevc, av1, h264, vp9, mpeg2, vc1, ...) for video_codec_unsupported, a dynamic range (dolby_vision, hdr10, hdr10_plus, hlg, sdr) for dynamic_range_converted, an audio codec token (truehd, dts, eac3, ac3, aac, flac, opus, ...) for audio_converted."`
+	To          string `json:"to,omitempty" doc:"The delivered dynamic range for dynamic_range_converted, or the delivered audio codec token for audio_converted."`
+	MediaFileID ID     `json:"media_file_id,omitempty" doc:"The version that plays; alternate_version only."`
+}
+
 type PlaybackPlan struct {
 	BandwidthLimit         *PlaybackBandwidthLimit         `json:"bandwidth_limit,omitempty"`
 	ProtocolVersion        int                             `json:"protocol_version"`
@@ -106,6 +117,7 @@ type PlaybackPlan struct {
 	Source                 PlaybackSource                  `json:"source"`
 	SubtitleFidelityPolicy string                          `json:"subtitle_fidelity_policy"`
 	ActiveQuality          string                          `json:"active_quality,omitempty" doc:"The available_qualities label this plan delivers, so a client can mark that menu entry: the label quality_preference named while the menu lists it and the encode keeps its resolution, otherwise the rung whose resolution class and bitrate the encode matches. Absent when the plan delivers no listed entry, such as the source played unchanged or a plain-resolution or auto request whose capped encode falls between two rungs. Present on servers that advertise plan_active_quality_v1."`
+	QualityReasons         []PlaybackQualityReason         `json:"quality_reasons,omitempty" doc:"Why the plan delivers the quality it does. The first entry is the reason that decided the video quality (resolution, bitrate or version); later entries are other changes the plan makes. No code repeats. Never empty on servers that advertise plan_quality_reasons_v1; absent from older servers."`
 }
 type PlaybackSource struct {
 	MediaFileID        ID                          `json:"media_file_id"`
@@ -534,7 +546,7 @@ func playbackDecision(in playback.DecisionResponseV3) PlaybackDecision {
 		p := in.PlaybackPlan
 		stream := p.Stream
 		stream.URL = playbackV2MediaURL(stream.URL)
-		out.PlaybackPlan = &PlaybackPlan{ProtocolVersion: p.ProtocolVersion, PlanID: p.PlanID, PlanAttemptKey: p.PlanAttemptKey, SessionID: p.SessionID, ExpiresAt: p.ExpiresAt, Delivery: p.Delivery, Stream: stream, Timeline: p.Timeline, SelectedTracks: p.SelectedTracks, EffectiveRecipe: p.EffectiveRecipe, BandwidthLimit: playbackBandwidthLimit(p.BandwidthLimit), Claims: p.Claims, Subtitle: playbackV2Subtitle(p.Subtitle), Transformations: p.Transformations, AppliedQuirks: p.AppliedQuirks, RuntimeCorrections: p.RuntimeCorrections, AvailableQualities: playbackQualities(p.AvailableQualities), DegradationWarnings: p.DegradationWarnings, DecisionReason: p.DecisionReason, RequestedMediaFileID: ID(strconv.Itoa(p.RequestedMediaFileID)), EffectiveMediaFileID: ID(strconv.Itoa(p.EffectiveMediaFileID)), Source: playbackSource(p.Source), SubtitleFidelityPolicy: p.SubtitleFidelityPolicy, ActiveQuality: p.ActiveQuality}
+		out.PlaybackPlan = &PlaybackPlan{ProtocolVersion: p.ProtocolVersion, PlanID: p.PlanID, PlanAttemptKey: p.PlanAttemptKey, SessionID: p.SessionID, ExpiresAt: p.ExpiresAt, Delivery: p.Delivery, Stream: stream, Timeline: p.Timeline, SelectedTracks: p.SelectedTracks, EffectiveRecipe: p.EffectiveRecipe, BandwidthLimit: playbackBandwidthLimit(p.BandwidthLimit), Claims: p.Claims, Subtitle: playbackV2Subtitle(p.Subtitle), Transformations: p.Transformations, AppliedQuirks: p.AppliedQuirks, RuntimeCorrections: p.RuntimeCorrections, AvailableQualities: playbackQualities(p.AvailableQualities), DegradationWarnings: p.DegradationWarnings, DecisionReason: p.DecisionReason, RequestedMediaFileID: ID(strconv.Itoa(p.RequestedMediaFileID)), EffectiveMediaFileID: ID(strconv.Itoa(p.EffectiveMediaFileID)), Source: playbackSource(p.Source), SubtitleFidelityPolicy: p.SubtitleFidelityPolicy, ActiveQuality: p.ActiveQuality, QualityReasons: playbackQualityReasons(p.QualityReasons)}
 	}
 	return out
 }
@@ -579,6 +591,21 @@ func playbackV2Subtitle(in playback.SubtitleDecisionV3) playback.SubtitleDecisio
 		artifact := *in.Artifact
 		artifact.URL = playbackV2MediaURL(artifact.URL)
 		out.Artifact = &artifact
+	}
+	return out
+}
+
+func playbackQualityReasons(in []playback.QualityReasonV3) []PlaybackQualityReason {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]PlaybackQualityReason, 0, len(in))
+	for _, reason := range in {
+		var mediaFileID ID
+		if reason.MediaFileID > 0 {
+			mediaFileID = ID(strconv.Itoa(reason.MediaFileID))
+		}
+		out = append(out, PlaybackQualityReason{Code: reason.Code, Kbps: reason.Kbps, ExpiresAt: reason.ExpiresAt, Height: reason.Height, From: reason.From, To: reason.To, MediaFileID: mediaFileID})
 	}
 	return out
 }

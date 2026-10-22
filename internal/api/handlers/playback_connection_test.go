@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -549,6 +550,14 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 			limited := start("attempt-limit-start-0002")
 			if limited.EffectiveMediaFileID != alternate.ID || (limited.BandwidthLimit != nil) != tc.limited {
 				t.Fatalf("under the limit played file %d with bandwidth_limit %+v, want the lower version %d, limited=%v", limited.EffectiveMediaFileID, limited.BandwidthLimit, alternate.ID, tc.limited)
+			}
+			// The limit is the plan's first quality reason exactly when it
+			// lowered the plan.
+			namesLimit := slices.ContainsFunc(limited.QualityReasons, func(reason playback.QualityReasonV3) bool {
+				return reason.Code == playback.QualityReasonNetworkLearnedLimitV3
+			})
+			if namesLimit != tc.limited || tc.limited && limited.QualityReasons[0].Code != playback.QualityReasonNetworkLearnedLimitV3 {
+				t.Fatalf("under the limit quality_reasons = %+v, limited=%v", limited.QualityReasons, tc.limited)
 			}
 		})
 	}
