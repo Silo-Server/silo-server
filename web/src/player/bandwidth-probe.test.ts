@@ -112,6 +112,7 @@ describe("Test speed", () => {
       lower_bound: false,
       transport: "other",
       duration_ms: 3000,
+      manual: true,
     });
     expect(readMeasuredBandwidthKbps()).toBe(800_000);
     stopBandwidthProbes();

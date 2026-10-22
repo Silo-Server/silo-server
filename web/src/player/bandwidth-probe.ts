@@ -163,8 +163,10 @@ async function collectProbe(
   const type = networkInformation()?.type;
   const transport = type === "wifi" || type === "ethernet" || type === "cellular" ? type : "other";
   try {
+    // Only Test speed runs the accurate test. The viewer asked for it, so a
+    // result above the learned limit lifts the limit, as Reset would.
     await v2("POST /api/v2/playback/bandwidth-probe/results", {
-      body: { ...result, transport },
+      body: { ...result, transport, ...(mode === "accurate" ? { manual: true } : {}) },
       signal,
     });
   } catch {

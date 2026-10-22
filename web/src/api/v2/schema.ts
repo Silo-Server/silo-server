@@ -27426,6 +27426,8 @@ export interface components {
       kbps: number;
       /** @description The test proved only that the link carries at least kbps: a quick test that reached its target, or a rate above the bound. */
       lower_bound?: boolean;
+      /** @description The viewer started this test with Test speed in Settings; never set for the automatic quick test. A result above the stored learned limit clears it. */
+      manual?: boolean;
       /** @enum {string} */
       transport: "wifi" | "ethernet" | "cellular" | "other";
     };
