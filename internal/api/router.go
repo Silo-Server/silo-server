@@ -200,7 +200,11 @@ type Dependencies struct {
 	// codes each account tries, shared with the Jellyfin-compatible API's
 	// Authorize route. Nil gets a process-local limiter.
 	QuickConnectCodeAttempts *ratelimit.AttemptLimiter
-	ClientIPResolver         *clientip.Resolver
+	// SignInAttempts bounds password sign-ins per sign-in name, shared with
+	// the Jellyfin and Audiobookshelf sign-ins so every surface counts against
+	// one budget. Nil gets a process-local limiter.
+	SignInAttempts   *ratelimit.AttemptLimiter
+	ClientIPResolver *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
 	// runs on every native request and connected overlay origins are accepted
@@ -643,6 +647,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.AuthProviderRecheck != nil {
 			authService.SetProviderRecheck(deps.AuthProviderRecheck)
 		}
+		signInAttempts := deps.SignInAttempts
+		if signInAttempts == nil {
+			signInAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.SignInNamePolicy)
+		}
+		authService.SetSignInAttempts(signInAttempts)
 		if settingsRepo != nil {
 			invitationService = invitations.NewService(
 				invitations.NewRepository(deps.DB),

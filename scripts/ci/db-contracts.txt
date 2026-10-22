@@ -483,3 +483,6 @@
 ./internal/scanqueue TestCancelByLibraryStillCancelsRunningScanDB
 ./internal/scanqueue TestRequeueLeavesACancelledRunCancelledDB
 ./internal/scanqueue TestRequeueLeavesALaterClaimRunningDB
+
+# Password sign-in spends one attempt budget per name on every surface.
+./internal/auth TestSignInNameBudgetDB

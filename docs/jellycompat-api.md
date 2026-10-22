@@ -602,10 +602,13 @@ connection's shared budget, as described in
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
   the global budget, like native `POST /api/v1/auth/login`. Both routes count
-  against the same per-IP `login` counter. It reads at most 64 KiB of the
-  body: when decoding the JSON value needs more, it answers 413 with
-  `{"Error":"PayloadTooLarge",...}` before any credential check. Only the
-  first JSON value is decoded; data after it is ignored, not rejected.
+  against the same per-IP `login` counter. The account name also spends its
+  sign-in attempt budget, shared with native sign-in on every node
+  ([Sign-in attempts per name](auth-api.md#sign-in-attempts-per-name)); a
+  locked name answers 429 `TooManyRequests` with `Retry-After`. It reads at
+  most 64 KiB of the body: when decoding the JSON value needs more, it answers
+  413 with `{"Error":"PayloadTooLarge",...}` before any credential check. Only
+  the first JSON value is decoded; data after it is ignored, not rejected.
 - The Quick Connect routes spend the native device sign-in budgets, as the
   native device operations do: Initiate spends `device_start`, Connect and
   `/Users/AuthenticateWithQuickConnect` spend `device_poll`, and Authorize

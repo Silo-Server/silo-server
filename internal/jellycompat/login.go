@@ -416,6 +416,10 @@ func mapAuthError(err error) error {
 		// Kept as the sentinel, like the PIN errors, so the client sees why.
 		return fmt.Errorf("%w: sign in to Silo to replace your temporary password", err)
 	}
+	if _, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+		// Kept as is: the handler answers 429 with its Retry-After.
+		return err
+	}
 	switch {
 	case errors.Is(err, auth.ErrProviderUnavailable):
 		return &HTTPError{StatusCode: http.StatusServiceUnavailable, Message: "The sign-in provider is unavailable"}
