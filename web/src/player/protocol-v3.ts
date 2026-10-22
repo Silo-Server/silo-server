@@ -600,6 +600,7 @@ export interface QualityReasonV3 {
   from?: string;
   to?: string;
   media_file_id?: string;
+  channels?: number;
 }
 
 export interface PlanV3 {

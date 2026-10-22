@@ -109,11 +109,18 @@ export function qualityReasonText(reason: QualityReasonV3): string | null {
         ? `${tokenName(DYNAMIC_RANGE_NAMES, reason.from)} shown as ${tokenName(DYNAMIC_RANGE_NAMES, reason.to)}`
         : null;
     case "audio_converted":
-      return reason.from && reason.to
-        ? `${tokenName(AUDIO_CODEC_NAMES, reason.from)} audio converted to ${tokenName(AUDIO_CODEC_NAMES, reason.to)}`
-        : null;
+      if (!reason.from || !reason.to) return null;
+      if (reason.from === reason.to) {
+        // The same codec again only says something with the channels it lost.
+        return isPositive(reason.channels)
+          ? `Audio downmixed to ${channelLayoutName(reason.channels)}`
+          : null;
+      }
+      return `${tokenName(AUDIO_CODEC_NAMES, reason.from)} audio converted to ${tokenName(AUDIO_CODEC_NAMES, reason.to)}`;
     case "subtitle_burn_in":
       return "Subtitles burned into the video";
+    case "compatibility_conversion":
+      return "Converted for this device";
     case "container_unsupported":
       return "Repackaged for this device";
     default:
@@ -160,6 +167,19 @@ function publishedReasons(
   if (!serverFeatures.includes(FEATURE_PLAN_QUALITY_REASONS_V3)) return null;
   const reasons = plan?.quality_reasons;
   return reasons && reasons.length > 0 ? reasons : null;
+}
+
+function channelLayoutName(channels: number): string {
+  switch (channels) {
+    case 1:
+      return "mono";
+    case 2:
+      return "stereo";
+    case 6:
+      return "5.1";
+    default:
+      return `${channels} channels`;
+  }
 }
 
 function tokenName(names: Record<string, string>, token: string): string {
