@@ -1234,11 +1234,14 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 			quality.BitrateKbps = min(quality.BitrateKbps, autoClassCeilingKbpsV3(outputClass))
 		}
 	}
+	// Surround sources keep 5.1 through the AAC re-encode (universal Media3
+	// decode); only stereo/mono sources — and unknown layouts — downmix to 2.0.
+	targetAudioChannels := aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, true)
 	// A server bitrate cap, and the estimate budget of an automatic encode,
 	// reserve the AAC and mux share before either video codec is sized, so
 	// the stream fits as a whole and the HEVC decoder check below sees the
 	// real target.
-	_, defaultAudioBitrateKbps := ResolveAACOutputV3(aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, true), 0)
+	_, defaultAudioBitrateKbps := ResolveAACOutputV3(targetAudioChannels, 0)
 	audioShareKbps := func(budget int) int { return min(defaultAudioBitrateKbps, max(64, budget/4)) }
 	targetAudioBitrateKbps := 0
 	budget := quality.BudgetKbps * 95 / 100
@@ -1251,6 +1254,11 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	}
 	if budget > 0 {
 		targetAudioBitrateKbps = audioShareKbps(budget)
+		if _, stereoKbps := ResolveAACOutputV3(2, 0); targetAudioChannels > 2 && targetAudioBitrateKbps < stereoKbps {
+			// A share below what stereo usually gets sounds better as stereo
+			// than spread over six channels.
+			targetAudioChannels = 2
+		}
 		// An estimate never refuses playback: under the smallest budget the
 		// video still gets 64 kbps.
 		quality.BitrateKbps = min(quality.BitrateKbps, max(budget-targetAudioBitrateKbps, 64))
@@ -1298,9 +1306,6 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
 	plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
 	plan.EffectiveRecipe.BitrateKbps = intPointerV3(quality.BitrateKbps)
-	// Surround sources keep 5.1 through the AAC re-encode (universal Media3
-	// decode); only stereo/mono sources — and unknown layouts — downmix to 2.0.
-	targetAudioChannels := aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, true)
 	audioLayout := audioLayoutForChannelsV3(targetAudioChannels)
 	plan.EffectiveRecipe.AudioChannels = intPointerV3(targetAudioChannels)
 	plan.EffectiveRecipe.AudioLayout = audioLayout
