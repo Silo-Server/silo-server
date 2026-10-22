@@ -23,12 +23,19 @@ type webOnlyRowsPage struct {
 	h          *SectionHandler
 	repo       *sections.Repository
 	store      userstore.UserStore
-	viewer     context.Context
+	account    int
 	profile    string
 	scope      string
 	library    int
 	libraryID  *int
 	libraryKey string
+}
+
+// viewer is the profile's request context, which may see the test library.
+func (p webOnlyRowsPage) viewer(t *testing.T) context.Context {
+	ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: p.account})
+	ctx = apimw.SetProfileID(ctx, p.profile)
+	return access.SetScope(ctx, access.Scope{UserID: p.account, ProfileID: p.profile, AllowedLibraryIDs: []int{p.library}, LibrariesRestricted: true})
 }
 
 func (p webOnlyRowsPage) create(t *testing.T, title string, featured bool) AdminSection {
@@ -48,9 +55,9 @@ func (p webOnlyRowsPage) layout(t *testing.T, v SectionViewer) map[string]bool {
 	var view SectionLayoutView
 	var err error
 	if p.scope == "home" {
-		view, err = p.h.HomeLayout(p.viewer, v)
+		view, err = p.h.HomeLayout(p.viewer(t), v)
 	} else {
-		view, err = p.h.LibraryLayout(p.viewer, p.library, v)
+		view, err = p.h.LibraryLayout(p.viewer(t), p.library, v)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -62,12 +69,12 @@ func (p webOnlyRowsPage) layout(t *testing.T, v SectionViewer) map[string]bool {
 	return ids
 }
 
-func (p webOnlyRowsPage) items(id string, v SectionViewer) error {
+func (p webOnlyRowsPage) items(t *testing.T, id string, v SectionViewer) error {
 	if p.scope == "home" {
-		_, err := p.h.HomeSectionItems(p.viewer, id, v)
+		_, err := p.h.HomeSectionItems(p.viewer(t), id, v)
 		return err
 	}
-	_, err := p.h.LibrarySectionItems(p.viewer, p.library, id, v)
+	_, err := p.h.LibrarySectionItems(p.viewer(t), p.library, id, v)
 	return err
 }
 
@@ -99,12 +106,9 @@ func TestWebOnlyHeroRowsDB(t *testing.T) {
 	h := NewSectionHandler(repo, nil)
 	h.StoreProvider = provider
 	h.FolderRepo = catalog.NewFolderRepository(f.pool)
-	viewer := apimw.SetClaims(ctx, &auth.Claims{UserID: f.account})
-	viewer = apimw.SetProfileID(viewer, profile)
-	viewer = access.SetScope(viewer, access.Scope{UserID: f.account, ProfileID: profile, AllowedLibraryIDs: []int{f.library}, LibrariesRestricted: true})
-	home := webOnlyRowsPage{h: h, repo: repo, store: store, viewer: viewer, profile: profile, scope: "home"}
+	home := webOnlyRowsPage{h: h, repo: repo, store: store, account: f.account, profile: profile, scope: "home", library: f.library}
 	library := home
-	library.scope, library.library, library.libraryID, library.libraryKey = "library", f.library, &f.library, strconv.Itoa(f.library)
+	library.scope, library.libraryID, library.libraryKey = "library", &f.library, strconv.Itoa(f.library)
 	for _, page := range []webOnlyRowsPage{home, library} {
 		t.Run(page.scope, func(t *testing.T) { testWebOnlyHeroRows(t, page) })
 	}
@@ -123,7 +127,7 @@ func testWebOnlyHeroRows(t *testing.T, page webOnlyRowsPage) {
 	if got := page.layout(t, web); !got[hero.ID] || !got[plain.ID] {
 		t.Fatalf("web layout: hero %v, plain row %v; want both", got[hero.ID], got[plain.ID])
 	}
-	itemsErr := page.items(hero.ID, app)
+	itemsErr := page.items(t, hero.ID, app)
 	if apiErr, ok := errors.AsType[*APIError](itemsErr); !ok || apiErr.Status != http.StatusNotFound {
 		t.Fatalf("app reading the web-only row = %v, want not found", itemsErr)
 	}
