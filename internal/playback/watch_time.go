@@ -33,8 +33,12 @@ type WatchTime struct {
 	PlayedSeconds float64
 	// PausedSeconds is the wall-clock time spent paused.
 	PausedSeconds float64
+	// Since and Until are when the first and the latest sample were observed.
+	// A copy whose measurement starts after another copy's ended measured a
+	// later stretch of the play, not the same one.
+	Since time.Time
+	Until time.Time
 
-	lastAt       time.Time
 	lastPosition float64
 	lastPaused   bool
 }
@@ -50,13 +54,14 @@ func (w *WatchTime) Observe(position float64, paused bool, now time.Time) {
 	if !w.Measured {
 		w.Measured = true
 		w.StartPosition = position
-		w.lastAt = now
+		w.Since = now
+		w.Until = now
 		w.lastPosition = position
 		w.lastPaused = paused
 		return
 	}
 
-	elapsed := now.Sub(w.lastAt).Seconds()
+	elapsed := now.Sub(w.Until).Seconds()
 	if elapsed < 0 {
 		elapsed = 0
 	}
@@ -69,7 +74,7 @@ func (w *WatchTime) Observe(position float64, paused bool, now time.Time) {
 	// A rewind, or an advance too large to have been played, is a seek:
 	// nothing is credited, and measurement continues from the new position.
 
-	w.lastAt = now
+	w.Until = now
 	w.lastPosition = position
 	w.lastPaused = paused
 }

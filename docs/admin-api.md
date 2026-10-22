@@ -1511,8 +1511,10 @@ seeks or buffering. The playback session measures it from its progress reports
 fits playback at up to twice normal speed plus a short allowance for report jitter, and
 anything larger is a seek. Time after the last progress report before the stop is not
 counted. It is null for an attempt with no measurement, which includes every attempt
-recorded before measurement existed. A session finalized more than once (copies on several
-replicas) keeps the largest measurement. The history row also stores the first reported
+recorded before measurement existed. A session finalized more than once keeps the largest
+measurement when the copies overlap in time (copies on several replicas), and adds them when
+one began measuring after the other ended (a session rebuilt under the same id after it was
+finalized). The history row also stores the first reported
 position and the time spent paused; the route does not expose them.
 
 The administrator history page and the user detail watch-history tab read this route

@@ -365,4 +365,29 @@ func TestAdminPlaybackWatchTimeDB(t *testing.T) {
 	if got.Plays != 2 || got.WatchedSeconds != 180 {
 		t.Fatalf("summary = %d plays, %v seconds; want 2 plays, 180 seconds (120 measured + 60 capped)", got.Plays, got.WatchedSeconds)
 	}
+
+	// A session finalized, rebuilt under the same id and finalized again
+	// watched two stretches; a copy that overlaps one of them, or the same
+	// copy finalized twice, is not another stretch.
+	rebuilt := "rebuilt-" + suffix
+	stretch := func(from, to time.Duration, played float64) {
+		t.Helper()
+		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+			SessionID: rebuilt, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
+			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(to).Format(time.RFC3339Nano),
+			WatchedSeconds: played, Watch: playback.WatchTime{Measured: true, PlayedSeconds: played, Since: started.Add(from), Until: started.Add(to)},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stretch(0, 2*time.Minute, 120)
+	stretch(5*time.Minute, 8*time.Minute, 180)
+	stretch(5*time.Minute, 8*time.Minute, 180)
+	stretch(time.Minute, 7*time.Minute, 200)
+	if err = pool.QueryRow(ctx, `SELECT played_seconds FROM admin_playback_history WHERE session_id=$1`, rebuilt).Scan(&played); err != nil {
+		t.Fatal(err)
+	}
+	if played != 300 {
+		t.Fatalf("rebuilt session played = %v, want 300 (two stretches of 120 and 180)", played)
+	}
 }
