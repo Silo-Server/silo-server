@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -88,13 +89,16 @@ func ListAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath string
 // ExtractAttachedSubtitleFonts extracts font attachments from a media file.
 // Matroska ASS releases commonly include the exact fonts needed by the script;
 // loading them into JASSUB is the closest browser equivalent to libass on a
-// native player.
+// native player. The result holds at most 32 fonts and 32 MiB of font data;
+// fonts that do not fit are skipped in container order, so it can be partial or
+// empty with a nil error.
 func ExtractAttachedSubtitleFonts(ctx context.Context, inputPath string, ffmpegPath string) ([]SubtitleFontAttachment, error) {
 	return extractAttachedSubtitleFonts(ctx, inputPath, ffmpegPath, nil)
 }
 
 // ExtractAttachedSubtitleFont extracts only the requested container stream.
-// The same font validation, attachment count and byte limits apply as to bundles.
+// Font validation and the attachment count and byte limits match bundles, but a
+// font over the byte limit is an error here, where a bundle skips it.
 func ExtractAttachedSubtitleFont(ctx context.Context, inputPath, ffmpegPath string, index int) (*SubtitleFontAttachment, error) {
 	fonts, err := extractAttachedSubtitleFonts(ctx, inputPath, ffmpegPath, &index)
 	if err != nil || len(fonts) == 0 {
@@ -117,17 +121,27 @@ func extractAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath str
 	if len(streams) == 0 {
 		return nil, nil
 	}
-	if len(streams) > maxSubtitleFontAttachments {
-		streams = streams[:maxSubtitleFontAttachments]
-	}
 	selectedName := ""
 	if index != nil {
+		if len(streams) > maxSubtitleFontAttachments {
+			streams = streams[:maxSubtitleFontAttachments]
+		}
 		selected := slices.IndexFunc(streams, func(stream attachmentProbeStream) bool { return stream.Index == *index })
 		if selected < 0 {
 			return nil, nil
 		}
 		selectedName = safeAttachmentDisplayName(streams[selected], fmt.Sprintf("attachment-%d%s", selected, fontAttachmentExt(streams[selected])))
 		streams = streams[selected : selected+1]
+	} else {
+		var omitted int
+		streams, omitted = fontStreamsWithinBudget(streams, maxSubtitleFontBytes)
+		if len(streams) > maxSubtitleFontAttachments {
+			streams = streams[:maxSubtitleFontAttachments]
+		}
+		if omitted > 0 {
+			slog.InfoContext(ctx, "subtitle font bundle over size limit; leaving out fonts that do not fit",
+				"component", "playback", "input", inputPath, "omitted", omitted, "kept", len(streams), "limit_bytes", maxSubtitleFontBytes)
+		}
 	}
 
 	bin := ffmpegPath
@@ -140,6 +154,25 @@ func extractAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath str
 		fonts[0].Name = selectedName
 	}
 	return fonts, err
+}
+
+// fontStreamsWithinBudget keeps attachments, in container order, while their
+// probed sizes fit maxBytes and skips any that would overflow it. A release that
+// ships more font data than the limit still gets each font that fits in what is
+// left of the limit, instead of an error that leaves the script with no attached
+// fonts at all. Sizes of zero or less are kept so dumpFontAttachments still
+// rejects the probe.
+func fontStreamsWithinBudget(streams []attachmentProbeStream, maxBytes int64) ([]attachmentProbeStream, int) {
+	kept := make([]attachmentProbeStream, 0, len(streams))
+	var total int64
+	for _, stream := range streams {
+		if stream.ExtraDataSize > maxBytes-total {
+			continue
+		}
+		kept = append(kept, stream)
+		total += max(stream.ExtraDataSize, 0)
+	}
+	return kept, len(streams) - len(kept)
 }
 
 // EncodeSubtitleFontBundle converts raw font attachments to base64 JSON items.
