@@ -53,11 +53,10 @@ func signInAttemptKey(name string) string {
 // reserveSignIn counts one password attempt against the budget of each of
 // names, in order, skipping repeats. When a name is locked it returns a
 // *SignInThrottledError and the caller must not check the password; a request
-// whose context is done gets the context's error instead. The caller passes
-// the returned keys to finishSignIn.
-func (s *Service) reserveSignIn(ctx context.Context, names ...string) ([]string, error) {
+// whose context is done gets the context's error instead.
+func (s *Service) reserveSignIn(ctx context.Context, names ...string) error {
 	if s.signInAttempts == nil {
-		return nil, nil
+		return nil
 	}
 	keys := make([]string, 0, len(names))
 	for _, name := range names {
@@ -67,25 +66,24 @@ func (s *Service) reserveSignIn(ctx context.Context, names ...string) ([]string,
 		}
 		if retryAfter, ok := s.signInAttempts.Reserve(ctx, key); !ok {
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return err
 			}
-			return nil, &SignInThrottledError{RetryAfter: retryAfter}
+			return &SignInThrottledError{RetryAfter: retryAfter}
 		}
 		keys = append(keys, key)
 	}
-	return keys, nil
+	return nil
 }
 
-// finishSignIn clears the names' counts once a password matched: the sign-in
-// succeeded, or a compatibility sign-in found a temporary password it cannot
-// change. Every other outcome, outages included, keeps the attempt counted.
-// The counts are cleared even when the client has already hung up.
-func (s *Service) finishSignIn(ctx context.Context, keys []string, err error) {
-	if err != nil && !errors.Is(err, ErrPasswordChangeRequired) {
+// finishSignIn clears the budget of name, the name whose password was
+// checked, once that password matched: the sign-in succeeded, or a
+// compatibility sign-in found a temporary password it cannot change. Other
+// names the attempt was charged to stay counted, since their passwords were
+// not checked. Every other outcome, outages included, keeps the attempt
+// counted. The count is cleared even when the client has already hung up.
+func (s *Service) finishSignIn(ctx context.Context, name string, err error) {
+	if s.signInAttempts == nil || (err != nil && !errors.Is(err, ErrPasswordChangeRequired)) {
 		return
 	}
-	ctx = context.WithoutCancel(ctx)
-	for _, key := range keys {
-		s.signInAttempts.Reset(ctx, key)
-	}
+	s.signInAttempts.Reset(context.WithoutCancel(ctx), signInAttemptKey(name))
 }

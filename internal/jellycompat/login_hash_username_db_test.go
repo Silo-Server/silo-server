@@ -147,4 +147,14 @@ func TestLoginAccountNameWithHashDB(t *testing.T) {
 			}
 		}
 	}
+
+	// A success clears only the budget of the account it signed in to. The
+	// sign-in as owner#Kids above signs in to owner, so it leaves the count of
+	// the account named owner#Kids, whose password it did not check.
+	svc.SetSignInAttempts(ratelimit.NewMemoryAttemptLimiter(ratelimit.AttemptPolicy{MaxAttempts: 2, Window: time.Minute}))
+	_, _, _ = svc.LoginWithProvider(ctx, "", squatter.Username, "wrong", "test", "")
+	signIn(squatter.Username, owner, "Kids")
+	if _, _, err := svc.LoginWithProvider(ctx, "", squatter.Username, password, "test", ""); !errors.As(err, new(*auth.SignInThrottledError)) {
+		t.Fatalf("%s after a sign-in to %s: error = %v, want its own count kept and the name locked", squatter.Username, owner.Username, err)
+	}
 }

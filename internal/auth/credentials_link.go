@@ -67,11 +67,10 @@ func (s *Service) LinkCredentialsIdentity(ctx context.Context, in CredentialsLin
 	if username == "" || in.DirectoryPassword == "" {
 		return nil, ErrInvalidCredentials
 	}
-	keys, err := s.reserveSignIn(ctx, username)
-	if err != nil {
+	if err = s.reserveSignIn(ctx, username); err != nil {
 		return nil, err
 	}
-	defer func() { s.finishSignIn(ctx, keys, err) }()
+	defer func() { s.finishSignIn(ctx, username, err) }()
 	_, identityID, err := provider.authenticateCredentials(ctx, Credentials{Username: username, Password: in.DirectoryPassword}, in.UserID)
 	if err != nil {
 		return nil, err

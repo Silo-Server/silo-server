@@ -219,17 +219,16 @@ func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, pa
 	if len(budgetNames) == 0 {
 		budgetNames = []string{username}
 	}
-	keys, err := s.reserveSignIn(ctx, budgetNames...)
-	if err != nil {
+	if err = s.reserveSignIn(ctx, budgetNames...); err != nil {
 		return nil, nil, false, err
 	}
-	defer func() { s.finishSignIn(ctx, keys, err) }()
+	defer func() { s.finishSignIn(ctx, username, err) }()
 	if fallback != "" {
 		// A fallback is a second password that may be checked, so it spends a
 		// second attempt up front, for every name: charging it only where the
 		// fallback runs (local accounts) would tell names apart by how soon
 		// they lock.
-		if _, err = s.reserveSignIn(ctx, budgetNames...); err != nil {
+		if err = s.reserveSignIn(ctx, budgetNames...); err != nil {
 			return nil, nil, false, err
 		}
 	}
@@ -274,11 +273,10 @@ func (s *Service) LoginWithProvider(
 	deviceName string,
 	ip string,
 ) (pair *TokenPair, user *models.User, err error) {
-	keys, err := s.reserveSignIn(ctx, username)
-	if err != nil {
+	if err = s.reserveSignIn(ctx, username); err != nil {
 		return nil, nil, err
 	}
-	defer func() { s.finishSignIn(ctx, keys, err) }()
+	defer func() { s.finishSignIn(ctx, username, err) }()
 	if providerID == "" {
 		routed, err := s.routePasswordLogin(ctx, username)
 		if err != nil {
