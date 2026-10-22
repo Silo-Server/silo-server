@@ -137,7 +137,7 @@ type PlaybackDecision struct {
 	ProtocolVersion int                        `json:"protocol_version"`
 	ServerFeatures  []string                   `json:"server_features"`
 	Outcome         playback.DecisionOutcomeV3 `json:"outcome"`
-	SessionID       string                     `json:"session_id,omitempty"`
+	SessionID       string                     `json:"session_id,omitempty" doc:"Present only when outcome is playable. A terminal decision (adaptation_unavailable), from start or replan, carries none; read outcome before comparing sessions."`
 	PlaybackPlan    *PlaybackPlan              `json:"playback_plan,omitempty"`
 	Terminal        *playback.TerminalV3       `json:"terminal,omitempty"`
 }

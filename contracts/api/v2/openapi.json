@@ -38788,6 +38788,7 @@
             "type": "array"
           },
           "session_id": {
+            "description": "Present only when outcome is playable. A terminal decision (adaptation_unavailable), from start or replan, carries none; read outcome before comparing sessions.",
             "type": "string"
           },
           "terminal": {
