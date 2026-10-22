@@ -1671,6 +1671,9 @@ refusal under any other policy is not one the fallback acts on.
 | `480p-low` | 480p Low | 480 | 800 |
 | `360p` | 360p | 360 | 300 |
 
+`480p-low` and `360p` let Auto lowering reach a 500 kbps link. The frozen
+`/api/v1` menus omit them.
+
 A rung below the source resolution class is always useful. At the source's own
 class, a rung is published only when it undercuts the source bitrate; a 25.2
 Mbps 4K file therefore offers 4K Medium and 4K Low but not a pointless 40 Mbps
@@ -1715,9 +1718,12 @@ and encode at the class bitrate: 20000 kbps for 2160p, 6000 for 1080p, 2000 for
 menu rung (40000 for 2160p, 10000 for 1080p, 4000 for 720p, 1500 for 480p, and
 the class bitrate for 540p), and fits the AAC track and container inside that
 budget too: 95% of it for both tracks, a quarter of that for AAC (at least 64
-and at most its usual bitrate) and the rest, at least 64, for video. Every
-automatic encode, with an estimate or without, stays within its class's highest
-menu rung, a conversion at the source's own size included. A transcode also
+and at most its usual bitrate) and the rest, at least 64, for video. When a
+budget or cap leaves AAC less than 192 kbps, the usual stereo bitrate, a
+surround source is encoded as stereo. Every automatic encode, with an estimate
+or without, stays within its class's highest menu rung, a conversion at the
+source's own size included, except on the local network with no estimate and
+no cap, where a conversion or burn-in keeps the source's bitrate. A transcode also
 never targets more than the source's own bitrate, counted in the output codec
 (H.264 for a scaled encode, or HEVC for any encode when the planner chooses
 HEVC).
@@ -2057,6 +2063,7 @@ stored; `clear` deletes it before planning. The 80% margin and the
 administrator and client caps still apply. When any estimate or learned limit
 puts the source over budget and alternate versions are allowed, Auto first
 tries versions of the same edition that fit and play without video encoding,
+those that keep the source's dynamic range first, then the highest bitrate,
 then a transcode; an unchanged source carries `quality_reduction_unavailable`.
 This buffering search runs on a start, a `quality_change` or `output_change`
 replan, and a `failure_recovery` that changes intent: `quality_changed` changes
@@ -2067,9 +2074,10 @@ or `subtitle_track_changed` changes the corresponding selected track. Explicit
 this search. A plan that the stored limit actually lowered adds
 `bandwidth_limit: {kbps, source: "observed_rebuffer", expires_at}`. The server
 plans the same start or replan again without the limit, and without an
-`observed_rebuffer` estimate the request carries, and keeps the field only when
-that plan sends more, so a version that compatibility alone picks carries no
-field. A replan that starts from the version playing and stays on it keeps the
+`observed_rebuffer` estimate the request carries, with the connection's reading
+in its place and the same version search, and keeps the field only when that
+plan sends more, so a version that compatibility or the reading alone picks
+carries no field. A replan that starts from the version playing and stays on it keeps the
 field when the plan it replaces had it.
 
 `playback_plan_summary_v1` advertises the `plan_summary` route event. It adds
