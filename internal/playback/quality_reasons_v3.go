@@ -237,19 +237,36 @@ func alternateVersionCauseV3(facts qualityFactsV3) []QualityReasonV3 {
 	return reasons
 }
 
-// ApplyLearnedLimitReasonV3 names a learned limit that lowered plan, once the
-// handler has settled plan.BandwidthLimit: the planner saw only an estimate.
-func ApplyLearnedLimitReasonV3(plan *PlanV3) {
-	if plan == nil || plan.BandwidthLimit == nil || plan.QualityReasons == nil {
+// ApplyLearnedLimitReasonV3 settles the reasons once the handler has settled
+// plan.BandwidthLimit. substituted is the learned limit the planner used as
+// its estimate, nil when it used the request's own.
+//
+// A limit that lowered the plan replaces the estimate. A limit found to have
+// lowered nothing takes the estimate's entry with it: the planner's figure
+// was the limit, and the request's estimate, never below the limit it gave
+// way to, lowered nothing either.
+func ApplyLearnedLimitReasonV3(plan *PlanV3, substituted *BandwidthLimitV3) {
+	if plan == nil || plan.QualityReasons == nil || plan.BandwidthLimit == nil && substituted == nil {
 		return
 	}
-	learned := QualityReasonV3{Code: QualityReasonNetworkLearnedLimitV3, Kbps: plan.BandwidthLimit.Kbps, ExpiresAt: plan.BandwidthLimit.ExpiresAt}
 	reasons := slices.DeleteFunc(slices.Clone(plan.QualityReasons), func(reason QualityReasonV3) bool {
-		// The limit replaces the estimate the planner used and lowers what
-		// would otherwise have been the original.
-		return reason.Code == QualityReasonNetworkEstimateV3 || reason.Code == QualityReasonOriginalV3 || reason.Code == QualityReasonNetworkLearnedLimitV3
+		// A kept limit also lowers what would otherwise have been the
+		// original.
+		return reason.Code == QualityReasonNetworkEstimateV3 || reason.Code == QualityReasonNetworkLearnedLimitV3 ||
+			plan.BandwidthLimit != nil && reason.Code == QualityReasonOriginalV3
 	})
-	reasons = append(reasons, learned)
+	if plan.BandwidthLimit != nil {
+		reasons = append(reasons, QualityReasonV3{Code: QualityReasonNetworkLearnedLimitV3, Kbps: plan.BandwidthLimit.Kbps, ExpiresAt: plan.BandwidthLimit.ExpiresAt})
+	} else if !slices.ContainsFunc(reasons, func(reason QualityReasonV3) bool {
+		return qualityReasonRankV3[reason.Code] <= qualityReasonRankV3[QualityReasonOriginalV3]
+	}) {
+		// The estimate was all that explained the video.
+		code := QualityReasonOriginalV3
+		if plan.Delivery == DeliveryTranscodeHLSV3 {
+			code = QualityReasonCompatibilityConversionV3
+		}
+		reasons = append(reasons, QualityReasonV3{Code: code})
+	}
 	sortQualityReasonsV3(reasons)
 	plan.QualityReasons = reasons
 }

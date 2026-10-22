@@ -2016,7 +2016,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		}
 		timings.mark("unlimited_planning")
 	}
-	playback.ApplyLearnedLimitReasonV3(result.Plan)
+	playback.ApplyLearnedLimitReasonV3(result.Plan, learnedLimit)
 	appendStartWarningsV3(&result, warnings)
 	response, statusErr := h.startPlannedPlaybackV3(r, userID, profileID, req, requestDigests, requestedFile, effectiveFile, audioIndex, result, clientInfo)
 	timings.mark("session_transport_commit")
@@ -5611,7 +5611,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			result.Plan.BandwidthLimit = nil
 		}
 	}
-	playback.ApplyLearnedLimitReasonV3(result.Plan)
+	playback.ApplyLearnedLimitReasonV3(result.Plan, learnedLimit)
 	if result.Terminal != nil {
 		return playback.NewTerminalResponseV3(result.Terminal.Reason, result.Terminal.Message, result.Terminal.Retryable), *record, nil, nil
 	}
