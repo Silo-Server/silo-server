@@ -547,7 +547,7 @@ func syncManagedRole(ctx context.Context, tx pgx.Tx, user *models.User, managed 
 			return nil, nil, err
 		}
 	}
-	if err := updateUser(ctx, tx, user.ID, models.UpdateUserInput{Role: &target}); err != nil {
+	if err := updateUser(ctx, tx, user.ID, models.UpdateUserInput{Role: &target}, nil); err != nil {
 		return nil, nil, fmt.Errorf("applying provider role: %w", err)
 	}
 	if err := RevokeSignInsInTransaction(ctx, tx, user.ID); err != nil {

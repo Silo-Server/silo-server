@@ -345,21 +345,42 @@ func accessGroupSetClause(input models.UpdateUserInput, argIndex int) (setClause
 // It runs in its own transaction, so a promotion and the credential cleanup
 // it implies commit together.
 func (r *UserRepository) Update(ctx context.Context, id int, input models.UpdateUserInput) error {
+	passwordHash, err := hashUpdatePassword(ctx, &input)
+	if err != nil {
+		return err
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if err := updateUser(ctx, tx, id, input); err != nil {
+	if err := updateUser(ctx, tx, id, input, passwordHash); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
+// hashUpdatePassword hashes the new password an update sets before the
+// caller opens its transaction, so the transaction never waits for a hashing
+// turn while it holds locks; nil when the update sets none.
+func hashUpdatePassword(ctx context.Context, input *models.UpdateUserInput) (*string, error) {
+	if input == nil || input.Password == nil {
+		return nil, nil
+	}
+	hash, err := passwordhash.Generate(ctx, []byte(*input.Password), passwordHashCost)
+	if err != nil {
+		return nil, fmt.Errorf("hashing password: %w", err)
+	}
+	hashed := string(hash)
+	return &hashed, nil
+}
+
+// updateUser writes input's fields. passwordHash is input.Password prepared by
+// hashUpdatePassword before the transaction; input.Password itself is not read.
 func updateUser(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, id int, input models.UpdateUserInput) error {
+}, id int, input models.UpdateUserInput, passwordHash *string) error {
 	currentRole, err := updateCurrentRole(ctx, db, id, input)
 	if err != nil {
 		return err
@@ -375,15 +396,6 @@ func updateUser(ctx context.Context, db interface {
 	if input.Username != nil {
 		normalized := NormalizeUsername(*input.Username)
 		username = &normalized
-	}
-	var passwordHash *string
-	if input.Password != nil {
-		hash, err := passwordhash.Generate(ctx, []byte(*input.Password), passwordHashCost)
-		if err != nil {
-			return fmt.Errorf("hashing password: %w", err)
-		}
-		hashed := string(hash)
-		passwordHash = &hashed
 	}
 	var permissions []string
 	if input.Permissions != nil {
