@@ -12,10 +12,8 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
-	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -58,11 +56,7 @@ func (s stubLoginSessions) ActiveSession(_ context.Context, sessionID string) (a
 
 func newGrantProxyServer(t *testing.T, cards map[string]playback.RecipeCard) *Server {
 	t.Helper()
-	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = grantTestSecret
-	w.SetConfigForTest(cfg)
-	srv := NewServer(w, nodesessions.NewTracker(nil, "http://proxy-1", "proxy-1", "proxy"))
+	srv := NewServer(testWatcher(grantTestSecret), nodesessions.NewTracker(nil, "http://proxy-1", "proxy-1", "proxy"))
 	srv.SetMediaGrantAuthority(stubGrantStore{cards: cards}, stubLoginSessions{valid: map[string]bool{"login-1": true},
 		remote: map[string]string{"handoff-own": "profile-1", "handoff-other": "profile-2"}})
 	return srv
@@ -161,11 +155,7 @@ func TestProxyGrantRoutesRefuseAPIKeys(t *testing.T) {
 // A node that predates the mode (no grant store, no database) must not pretend
 // it can serve these routes, and must keep working otherwise.
 func TestProxyGrantRoutesReportUnavailableWithoutTheirDependencies(t *testing.T) {
-	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = grantTestSecret
-	w.SetConfigForTest(cfg)
-	srv := NewServer(w, nodesessions.NewTracker(nil, "http://proxy-1", "proxy-1", "proxy"))
+	srv := NewServer(testWatcher(grantTestSecret), nodesessions.NewTracker(nil, "http://proxy-1", "proxy-1", "proxy"))
 
 	rr := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-1", grantAccessToken(t, 7, "login-1"))
 	if rr.Code != http.StatusServiceUnavailable {

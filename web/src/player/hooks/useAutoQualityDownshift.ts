@@ -1,10 +1,11 @@
 import { useEffect, useRef, type RefObject } from "react";
 
 /**
- * Auto quality picks a stream from a bandwidth estimate taken before playback,
- * and a transcode is one HLS rendition, so nothing below the server lowers
- * quality when the link turns out slower. This watches for playback that keeps
- * rebuffering and asks for a plan sized below what it could not sustain.
+ * Auto quality plays the source unless a bandwidth estimate taken before
+ * playback says the link cannot carry it, and a transcode is one HLS
+ * rendition, so nothing below the server lowers quality when the link turns
+ * out slower. This watches for playback that keeps rebuffering and asks for a
+ * plan sized below what it could not sustain.
  */
 
 /** Buffering right after a plan starts is startup, not a slow link. */

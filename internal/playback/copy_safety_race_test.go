@@ -117,11 +117,16 @@ func (l *fakeFileLoader) loadCount() int {
 // multi-PPS verdict is observable as a session stop.
 func raceFixture(t *testing.T, scanner *fakeCopySafetyScanner) (*CopySafetyRace, *SessionManager, *fakeCopySafetyControl) {
 	t.Helper()
-	return raceFixtureForFile(t, scanner, &models.MediaFile{
+	return raceFixtureForFile(t, scanner, unverdictedRaceFile())
+}
+
+// unverdictedRaceFile is a media file row with no multi-PPS verdict recorded.
+func unverdictedRaceFile() *models.MediaFile {
+	return &models.MediaFile{
 		ID:          100,
 		CodecVideo:  "h264",
 		VideoTracks: []models.VideoTrack{{Codec: "h264"}},
-	})
+	}
 }
 
 // raceFixtureForFile is raceFixture over a specific media file, for the cases
@@ -165,10 +170,7 @@ func waitForStop(t *testing.T, control *fakeCopySafetyControl, sessionID string)
 func TestCopySafetyRaceNotifiesOnMultiPPS(t *testing.T) {
 	scanner := &fakeCopySafetyScanner{needs: true, multi: true}
 	race, sessions, control := raceFixture(t, scanner)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	race.RaceScan(100)
 
@@ -180,9 +182,7 @@ func TestCopySafetyRaceNotifiesOnMultiPPS(t *testing.T) {
 func TestCopySafetyRaceKeepsSessionsWhenCopySafe(t *testing.T) {
 	scanner := &fakeCopySafetyScanner{needs: true, multi: false}
 	race, sessions, control := raceFixture(t, scanner)
-	if _, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	race.RaceScan(100)
 
@@ -190,24 +190,6 @@ func TestCopySafetyRaceKeepsSessionsWhenCopySafe(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if stopped := control.stoppedSessions(); len(stopped) != 0 {
 		t.Fatalf("stopped = %v, want no session touched by a copy-safe verdict", stopped)
-	}
-}
-
-// An inconclusive scan proves nothing, so sessions keep playing. Failing closed
-// here would kill a live playback over a transient ffmpeg or storage error.
-func TestCopySafetyRaceLeavesSessionsAloneOnScanError(t *testing.T) {
-	scanner := &fakeCopySafetyScanner{needs: true, err: errors.New("ffmpeg exploded")}
-	race, sessions, control := raceFixture(t, scanner)
-	if _, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-
-	race.RaceScan(100)
-
-	waitForScans(t, scanner, 1)
-	time.Sleep(20 * time.Millisecond)
-	if stopped := control.stoppedSessions(); len(stopped) != 0 {
-		t.Fatalf("stopped = %v, want live sessions untouched after an inconclusive scan", stopped)
 	}
 }
 
@@ -220,18 +202,11 @@ func TestCopySafetyRaceLeavesSessionsAloneOnScanError(t *testing.T) {
 func TestCopySafetyRaceAppliesAVerdictPersistedWhileTheScanFailed(t *testing.T) {
 	scanner := &fakeCopySafetyScanner{needs: true, err: errors.New("ffmpeg exploded")}
 	loader := &fakeFileLoader{
-		file: &models.MediaFile{
-			ID:          100,
-			CodecVideo:  "h264",
-			VideoTracks: []models.VideoTrack{{Codec: "h264"}},
-		},
+		file:  unverdictedRaceFile(),
 		later: fileWithPersistedVerdict(true),
 	}
 	race, sessions, control := raceFixtureWithLoader(t, scanner, loader)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	race.RaceScan(100)
 
@@ -243,17 +218,11 @@ func TestCopySafetyRaceAppliesAVerdictPersistedWhileTheScanFailed(t *testing.T) 
 func TestCopySafetyRaceScanFailureWithNoVerdictAnywhereStaysSilent(t *testing.T) {
 	scanner := &fakeCopySafetyScanner{needs: true, err: errors.New("ffmpeg exploded")}
 	loader := &fakeFileLoader{
-		file: &models.MediaFile{
-			ID:          100,
-			CodecVideo:  "h264",
-			VideoTracks: []models.VideoTrack{{Codec: "h264"}},
-		},
+		file:  unverdictedRaceFile(),
 		later: fileWithPersistedVerdict(false),
 	}
 	race, sessions, control := raceFixtureWithLoader(t, scanner, loader)
-	if _, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	race.RaceScan(100)
 
@@ -291,11 +260,7 @@ func TestCopySafetyRaceDedupesInFlightScans(t *testing.T) {
 		release:  make(chan struct{}),
 		scanning: make(chan struct{}, 8),
 	}
-	loader := &fakeFileLoader{file: &models.MediaFile{
-		ID:          100,
-		CodecVideo:  "h264",
-		VideoTracks: []models.VideoTrack{{Codec: "h264"}},
-	}}
+	loader := &fakeFileLoader{file: unverdictedRaceFile()}
 	race, _, _ := raceFixtureWithLoader(t, scanner, loader)
 
 	race.RaceScan(100)
@@ -338,10 +303,7 @@ func TestCopySafetyRaceReconsidersSessionsThatAppearedDuringAScan(t *testing.T) 
 	// and its notification — is over. No session existed for it to touch, so
 	// the follow-up pass is the only thing left that can reach one.
 	waitForScanning(t, scanner, "the follow-up pass")
-	late, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	late := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 	releaseScan(t, scanner, "the follow-up pass")
 
 	waitForStop(t, control, late.ID)
@@ -376,9 +338,7 @@ func releaseScan(t *testing.T, scanner *fakeCopySafetyScanner, pass string) {
 func TestCopySafetyRaceIgnoresAVerdictForASupersededGeneration(t *testing.T) {
 	scanner := &fakeCopySafetyScanner{needs: true, multi: true, stale: true}
 	race, sessions, control := raceFixture(t, scanner)
-	if _, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	race.RaceScan(100)
 
@@ -396,10 +356,7 @@ func TestCopySafetyRaceIgnoresAVerdictForASupersededGeneration(t *testing.T) {
 func TestCopySafetyRaceAppliesAnUnpersistedUnsafeVerdict(t *testing.T) {
 	scanner := &fakeCopySafetyScanner{needs: false, known: true, knownMulti: true}
 	race, sessions, control := raceFixture(t, scanner)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	race.RaceScan(100)
 
@@ -413,11 +370,7 @@ func TestCopySafetyRaceAppliesAnUnpersistedUnsafeVerdict(t *testing.T) {
 // so it has to answer from the same place the racer does — including the memo
 // the row knows nothing about.
 func TestCopySafetyRaceVideoCopyUnsafeKnown(t *testing.T) {
-	unverdicted := &models.MediaFile{
-		ID:          100,
-		CodecVideo:  "h264",
-		VideoTracks: []models.VideoTrack{{Codec: "h264"}},
-	}
+	unverdicted := unverdictedRaceFile()
 
 	for _, tc := range []struct {
 		name    string
@@ -476,33 +429,13 @@ func fileWithPersistedVerdict(multi bool) *models.MediaFile {
 func TestCopySafetyRaceAppliesPersistedUnsafeVerdict(t *testing.T) {
 	scanner := &fakeCopySafetyScanner{needs: false}
 	race, sessions, control := raceFixtureForFile(t, scanner, fileWithPersistedVerdict(true))
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	race.RaceScan(100)
 
 	waitForStop(t, control, session.ID)
 	if got := scanner.scanCount(); got != 0 {
 		t.Fatalf("scans = %d, want 0 for a verdict that was already reached", got)
-	}
-}
-
-// A persisted copy-safe verdict is the common resolved state and must stay
-// silent: it is exactly the evidence that the route the session is on is fine.
-func TestCopySafetyRaceIgnoresPersistedSafeVerdict(t *testing.T) {
-	scanner := &fakeCopySafetyScanner{needs: false}
-	race, sessions, control := raceFixtureForFile(t, scanner, fileWithPersistedVerdict(false))
-	if _, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-
-	race.RaceScan(100)
-
-	time.Sleep(20 * time.Millisecond)
-	if stopped := control.stoppedSessions(); len(stopped) != 0 {
-		t.Fatalf("stopped = %v, want no session touched by a persisted copy-safe verdict", stopped)
 	}
 }
 

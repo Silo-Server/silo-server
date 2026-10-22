@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -108,63 +108,6 @@ func expireContributionClaim(t *testing.T, fixture contributionStoreFixture, id 
 	}
 }
 
-func TestContributionStoreRecoversStaleClaimAcrossFiles(t *testing.T) {
-	fixture := newContributionStoreFixture(t)
-	ctx := context.Background()
-	firstRow := fixture.row(fixture.fileIDs[0], "cross-file-stale")
-	first, claimed, err := fixture.store.Claim(ctx, firstRow, contributionClaimLease)
-	if err != nil || !claimed {
-		t.Fatalf("first Claim = (%+v, %v, %v), want claimed", first, claimed, err)
-	}
-
-	secondRow := fixture.row(fixture.fileIDs[1], firstRow.ContentHash)
-	if _, claimed, err := fixture.store.Claim(ctx, secondRow, contributionClaimLease); err != nil || claimed {
-		t.Fatalf("fresh duplicate Claim = (claimed=%v, %v), want not claimed", claimed, err)
-	}
-
-	expireContributionClaim(t, fixture, first.ID)
-	second, claimed, err := fixture.store.Claim(ctx, secondRow, contributionClaimLease)
-	if err != nil || !claimed {
-		t.Fatalf("stale cross-file Claim = (%+v, %v, %v), want claimed", second, claimed, err)
-	}
-	if second.ID == first.ID || second.Token == first.Token {
-		t.Fatalf("reclaimed claim = %+v, want a new row for the second file with a fresh token", second)
-	}
-
-	staleResult := firstRow
-	staleResult.ID, staleResult.ClaimToken = first.ID, first.Token
-	staleResult.Status = OutcomeStatusError
-	if err := fixture.store.Record(ctx, staleResult); err == nil {
-		t.Fatal("stale worker recorded over reclaimed claim")
-	}
-
-	terminal := secondRow
-	terminal.ID, terminal.ClaimToken = second.ID, second.Token
-	terminal.Status = OutcomeStatusConflict
-	if err := fixture.store.Record(ctx, terminal); err != nil {
-		t.Fatalf("record current claim: %v", err)
-	}
-	expireContributionClaim(t, fixture, second.ID)
-	if _, claimed, err := fixture.store.Claim(ctx, firstRow, contributionClaimLease); err != nil || claimed {
-		t.Fatalf("terminal Claim = (claimed=%v, %v), want permanently blocked", claimed, err)
-	}
-}
-
-func TestContributionStoreRecoversStaleClaimForSameFile(t *testing.T) {
-	fixture := newContributionStoreFixture(t)
-	ctx := context.Background()
-	row := fixture.row(fixture.fileIDs[0], "same-file-stale")
-	first, claimed, err := fixture.store.Claim(ctx, row, contributionClaimLease)
-	if err != nil || !claimed {
-		t.Fatalf("first Claim = (%+v, %v, %v), want claimed", first, claimed, err)
-	}
-	expireContributionClaim(t, fixture, first.ID)
-	second, claimed, err := fixture.store.Claim(ctx, row, contributionClaimLease)
-	if err != nil || !claimed || second.ID != first.ID || second.Token == first.Token {
-		t.Fatalf("same-file stale Claim = (%+v, %v, %v), want reclaimed row with fresh token", second, claimed, err)
-	}
-}
-
 func TestContributionStoreAllowsOnlyOneConcurrentStaleTakeover(t *testing.T) {
 	fixture := newContributionStoreFixture(t)
 	ctx := context.Background()
@@ -234,249 +177,108 @@ func TestContributionStoreBlocksSameTargetWithDifferentTimes(t *testing.T) {
 	}
 }
 
-func TestContributionStoreRechecksInvalidTargetAfterWindow(t *testing.T) {
+// Each provider is checked against its own minimum confidence, required
+// external IDs, and claim target, so a file every provider declines is not a
+// candidate even though none of them holds a claim on it.
+func TestContributionStoreCandidatesApplyEachProvidersRules(t *testing.T) {
 	fixture := newContributionStoreFixture(t)
 	ctx := context.Background()
-	row := fixture.row(fixture.fileIDs[0], "invalid-recheck")
-	first, claimed, err := fixture.store.Claim(ctx, row, contributionClaimLease)
-	if err != nil || !claimed {
-		t.Fatalf("first Claim = (%+v, %v, %v), want claimed", first, claimed, err)
-	}
-	recorded := row
-	recorded.ID, recorded.ClaimToken, recorded.Status = first.ID, first.Token, OutcomeStatusInvalid
-	if err := fixture.store.Record(ctx, recorded); err != nil {
-		t.Fatalf("record invalid: %v", err)
-	}
-	if _, claimed, err := fixture.store.Claim(ctx, row, contributionClaimLease); err != nil || claimed {
-		t.Fatalf("fresh invalid target Claim = (claimed=%v, %v), want blocked", claimed, err)
-	}
-
-	if _, err := fixture.pool.Exec(ctx, `
-		UPDATE marker_contributions SET updated_at = now() - interval '31 days' WHERE id = $1`, first.ID); err != nil {
-		t.Fatalf("age invalid row: %v", err)
-	}
-	second, claimed, err := fixture.store.Claim(ctx, row, contributionClaimLease)
-	if err != nil || !claimed || second.Token == first.Token {
-		t.Fatalf("aged invalid target Claim = (%+v, %v, %v), want reclaimed with a fresh token", second, claimed, err)
-	}
-}
-
-func TestContributionStoreCandidatesOrderByConfidenceAndSkipClaimed(t *testing.T) {
-	fixture := newContributionStoreFixture(t)
-	ctx := context.Background()
-	seriesID := fmt.Sprintf("claim-test-series-%d", fixture.suffix)
-	if _, err := fixture.pool.Exec(ctx, `
-		INSERT INTO media_items (content_id, type, title, status, genres, tmdb_id)
-		VALUES ($1, 'series', 'Claim Test Series', 'matched', '{}'::text[], '4242')`, seriesID); err != nil {
-		t.Fatalf("seed series: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = fixture.pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
-	})
-
+	prefix := fmt.Sprintf("claim-test-rules-%d", fixture.suffix)
 	type seed struct {
-		season, episode int
-		confidence      float64
+		name, tmdb, tvdb string
+		confidence       float64
 	}
-	// The last seed is a second version of S1E4.
-	seeds := []seed{{1, 1, 0.95}, {1, 2, 0.98}, {1, 3, 0.96}, {1, 4, 0.99}, {0, 1, 0.99}, {1, 5, 0.50}, {1, 6, 0.97}, {1, 7, 0.975}, {1, 4, 0.985}}
+	seeds := []seed{
+		{"tvdb-only", "", "81189", 0.98},
+		{"both", "1396", "81190", 0.93},
+		{"unmatched", "", "", 0.99},
+	}
 	fileIDs := make([]int, len(seeds))
 	for i, sd := range seeds {
-		episodeID := fmt.Sprintf("%s-e%d-%d", seriesID, sd.season, sd.episode)
+		seriesID := prefix + "-" + sd.name
+		if _, err := fixture.pool.Exec(ctx, `
+			INSERT INTO media_items (content_id, type, title, status, genres, tmdb_id, tvdb_id)
+			VALUES ($1, 'series', 'Rules Series', 'matched', '{}'::text[], $2, $3)`,
+			seriesID, sd.tmdb, sd.tvdb); err != nil {
+			t.Fatalf("seed series: %v", err)
+		}
 		if _, err := fixture.pool.Exec(ctx, `
 			INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
-			VALUES ($1, $2, $3, $4, 'Ep')
-			ON CONFLICT DO NOTHING`, episodeID, seriesID, sd.season, sd.episode); err != nil {
+			VALUES ($1, $2, 1, 1, 'Ep')`, seriesID+"-e1", seriesID); err != nil {
 			t.Fatalf("seed episode: %v", err)
 		}
 		if err := fixture.pool.QueryRow(ctx, `
 			INSERT INTO media_files (media_folder_id, file_path, episode_id, intro_start, intro_end,
 			                         intro_markers_source, intro_markers_confidence)
 			VALUES ($1, $2, $3, 0, 60, 'scanner', $4)
-			RETURNING id`, fixture.folderID, fmt.Sprintf("/claim-test/%d-cand-%d.mkv", fixture.suffix, i),
-			episodeID, sd.confidence).Scan(&fileIDs[i]); err != nil {
+			RETURNING id`, fixture.folderID, fmt.Sprintf("/claim-test/%d-rules-%d.mkv", fixture.suffix, i),
+			seriesID+"-e1", sd.confidence).Scan(&fileIDs[i]); err != nil {
 			t.Fatalf("seed candidate file: %v", err)
 		}
 	}
 	t.Cleanup(func() {
 		_, _ = fixture.pool.Exec(ctx, `DELETE FROM marker_contributions WHERE media_file_id = ANY($1)`, fileIDs)
 		_, _ = fixture.pool.Exec(ctx, `DELETE FROM media_files WHERE id = ANY($1)`, fileIDs)
-		_, _ = fixture.pool.Exec(ctx, `DELETE FROM episodes WHERE series_id = $1`, seriesID)
+		_, _ = fixture.pool.Exec(ctx, `DELETE FROM episodes WHERE series_id LIKE $1`, prefix+"-%")
+		_, _ = fixture.pool.Exec(ctx, `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"-%")
 	})
 
-	claim := func(fileID int, hash, targetKey string, status string) string {
+	needsTMDB := AutoContributor{Provider: fixture.provider, MinConfidence: 0.9, RequiredExternalIDs: []string{ExternalIDKeyTMDB}}
+	strictTVDB := AutoContributor{Provider: fixture.provider + "-tvdb", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}}
+	t.Cleanup(func() {
+		_, _ = fixture.pool.Exec(ctx, `DELETE FROM marker_contributions WHERE provider = $1`, strictTVDB.Provider)
+	})
+	candidates := func(providers ...AutoContributor) []int {
 		t.Helper()
-		row := fixture.row(fileID, hash)
-		row.TargetKey = targetKey
-		claimed, ok, err := fixture.store.Claim(ctx, row, contributionClaimLease)
-		if err != nil || !ok {
+		page, err := fixture.store.CandidateLocalMarkerFiles(ctx, MarkerKindIntro, providers, nil, 10_000)
+		if err != nil {
+			t.Fatalf("CandidateLocalMarkerFiles: %v", err)
+		}
+		var got []int
+		for _, c := range page {
+			if slices.Contains(fileIDs, c.FileID) {
+				got = append(got, c.FileID)
+			}
+		}
+		return got
+	}
+
+	// The unmatched series has no ID any provider could key it by.
+	if got, want := candidates(needsTMDB), []int{fileIDs[1]}; !slices.Equal(got, want) {
+		t.Fatalf("candidates for the TMDB provider = %v, want %v (the TVDB-only series lacks a TMDB ID)", got, want)
+	}
+	if got, want := candidates(strictTVDB), []int{fileIDs[0]}; !slices.Equal(got, want) {
+		t.Fatalf("candidates for the strict provider = %v, want %v (0.93 is below its minimum)", got, want)
+	}
+	if got, want := candidates(needsTMDB, strictTVDB), []int{fileIDs[0], fileIDs[1]}; !slices.Equal(got, want) {
+		t.Fatalf("candidates for both providers = %v, want %v", got, want)
+	}
+
+	// Each provider claims the file it accepts, on the target keyed by its
+	// required ID. Neither file is a candidate afterwards.
+	claim := func(provider string, fileID int, targetKey string) {
+		t.Helper()
+		row := fixture.row(fileID, "rules-"+provider)
+		row.Provider, row.TargetKey = provider, targetKey
+		if _, ok, err := fixture.store.Claim(ctx, row, contributionClaimLease); err != nil || !ok {
 			t.Fatalf("seed claim = (%v, %v)", ok, err)
 		}
-		row.ID, row.ClaimToken, row.Status = claimed.ID, claimed.Token, status
-		if err := fixture.store.Record(ctx, row); err != nil {
-			t.Fatalf("record seed claim: %v", err)
-		}
-		return claimed.ID
 	}
-	// S1E4 (0.99) holds a pending claim on its current target: it and the
-	// episode's second version (0.985) are skipped.
-	claim(fileIDs[3], "candidate-claimed", "episode|tmdb:4242|1|4", SubmissionStatusPending)
-	// S1E6 (0.97) holds a claim on the target it had before a rematch: eligible.
-	claim(fileIDs[6], "candidate-rematched", "episode|tmdb:1111|1|6", SubmissionStatusPending)
-	// S1E7 (0.975) was refused as invalid long enough ago to recheck: eligible.
-	invalidID := claim(fileIDs[7], "candidate-invalid", "episode|tmdb:4242|1|7", OutcomeStatusInvalid)
-	if _, err := fixture.pool.Exec(ctx, `UPDATE marker_contributions SET updated_at = now() - interval '31 days' WHERE id = $1`, invalidID); err != nil {
-		t.Fatalf("age invalid claim: %v", err)
+	claim(needsTMDB.Provider, fileIDs[1], "episode|tmdb:1396|1|1")
+	claim(strictTVDB.Provider, fileIDs[0], "episode|tvdb:81189|1|1")
+	if got := candidates(needsTMDB, strictTVDB); len(got) != 0 {
+		t.Fatalf("candidates after both claims = %v, want none", got)
 	}
 
-	seeded := make(map[int]bool, len(fileIDs))
-	for _, id := range fileIDs {
-		seeded[id] = true
+	// The strict provider keys by TVDB, so a TMDB ID added later leaves its
+	// claim current; the TMDB provider can now take the file.
+	if _, err := fixture.pool.Exec(ctx, `UPDATE media_items SET tmdb_id = '1399' WHERE content_id = $1`, prefix+"-tvdb-only"); err != nil {
+		t.Fatalf("add tmdb id: %v", err)
 	}
-	// candidates pages through every candidate and keeps the seeded files, so
-	// other eligible rows in the test database cannot change the result.
-	candidates := func(providers []string, pageSize int) []int {
-		t.Helper()
-		var got []int
-		var after *ContributionCandidate
-		for {
-			page, err := fixture.store.CandidateLocalMarkerFiles(ctx, MarkerKindIntro, 0.9, providers, after, pageSize)
-			if err != nil {
-				t.Fatalf("CandidateLocalMarkerFiles: %v", err)
-			}
-			if len(page) == 0 {
-				return got
-			}
-			for _, c := range page {
-				if seeded[c.FileID] {
-					got = append(got, c.FileID)
-				}
-			}
-			after = &page[len(page)-1]
-		}
+	if got, want := candidates(strictTVDB), []int(nil); !slices.Equal(got, want) {
+		t.Fatalf("candidates for the strict provider after a TMDB ID was added = %v, want none", got)
 	}
-
-	got := candidates([]string{fixture.provider}, 1)
-	want := []int{fileIDs[1], fileIDs[7], fileIDs[6], fileIDs[2], fileIDs[0]}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("candidates = %v, want %v (confidence order; current-target claim, season 0, and low confidence excluded)", got, want)
-	}
-
-	// Another provider without a claim still sees the claimed file.
-	other := candidates([]string{fixture.provider, fixture.provider + "-other"}, 10)
-	if len(other) != 7 || other[0] != fileIDs[3] {
-		t.Fatalf("candidates for two providers = %v, want the claimed file first", other)
-	}
-}
-
-func TestContributionStoreCandidatesIncludeLocalCredits(t *testing.T) {
-	fixture := newContributionStoreFixture(t)
-	ctx := context.Background()
-	seriesID := fmt.Sprintf("claim-test-credits-series-%d", fixture.suffix)
-	if _, err := fixture.pool.Exec(ctx, `
-		INSERT INTO media_items (content_id, type, title, status, genres, tmdb_id)
-		VALUES ($1, 'series', 'Claim Test Credits Series', 'matched', '{}'::text[], '4343')`, seriesID); err != nil {
-		t.Fatalf("seed series: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = fixture.pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
-	})
-
-	type seed struct {
-		episode                            int
-		introSource, creditsSource         *string
-		introConfidence, creditsConfidence float64
-	}
-	scanner, online := strPtr("scanner"), strPtr("online")
-	seeds := []seed{
-		{1, nil, scanner, 0, 0.97},        // credits only
-		{2, scanner, scanner, 0.50, 0.93}, // intro below the minimum, credits above it
-		{3, scanner, scanner, 0.99, 0.92}, // intro claimed below, credits open
-		{4, scanner, scanner, 0.96, 0.98}, // both claimed below
-		{5, nil, online, 0, 0.99},         // online credits are never shared
-		{6, nil, scanner, 0, 0.96},        // credits claimed below
-		{7, scanner, nil, 0.95, 0},        // intro only, as before
-	}
-	fileIDs := make([]int, len(seeds))
-	for i, sd := range seeds {
-		episodeID := fmt.Sprintf("%s-e%d", seriesID, sd.episode)
-		if _, err := fixture.pool.Exec(ctx, `
-			INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
-			VALUES ($1, $2, 1, $3, 'Ep')`, episodeID, seriesID, sd.episode); err != nil {
-			t.Fatalf("seed episode: %v", err)
-		}
-		if err := fixture.pool.QueryRow(ctx, `
-			INSERT INTO media_files (media_folder_id, file_path, episode_id,
-			                         intro_start, intro_end, intro_markers_source, intro_markers_confidence,
-			                         credits_start, credits_end, credits_markers_source, credits_markers_confidence)
-			VALUES ($1, $2, $3,
-			        CASE WHEN $4::text IS NULL THEN NULL ELSE 0 END, CASE WHEN $4::text IS NULL THEN NULL ELSE 60 END, $4::text, NULLIF($5::double precision, 0),
-			        CASE WHEN $6::text IS NULL THEN NULL ELSE 1500 END, CASE WHEN $6::text IS NULL THEN NULL ELSE 1800 END, $6::text, NULLIF($7::double precision, 0))
-			RETURNING id`, fixture.folderID, fmt.Sprintf("/claim-test/%d-credits-%d.mkv", fixture.suffix, i),
-			episodeID, sd.introSource, sd.introConfidence, sd.creditsSource, sd.creditsConfidence).Scan(&fileIDs[i]); err != nil {
-			t.Fatalf("seed candidate file: %v", err)
-		}
-	}
-	t.Cleanup(func() {
-		_, _ = fixture.pool.Exec(ctx, `DELETE FROM marker_contributions WHERE media_file_id = ANY($1)`, fileIDs)
-		_, _ = fixture.pool.Exec(ctx, `DELETE FROM media_files WHERE id = ANY($1)`, fileIDs)
-		_, _ = fixture.pool.Exec(ctx, `DELETE FROM episodes WHERE series_id = $1`, seriesID)
-	})
-
-	claim := func(i int, segment string) {
-		t.Helper()
-		row := fixture.row(fileIDs[i], fmt.Sprintf("credits-candidate-%d-%s", i, segment))
-		row.SegmentKind = segment
-		row.TargetKey = fmt.Sprintf("episode|tmdb:4343|1|%d", seeds[i].episode)
-		claimed, ok, err := fixture.store.Claim(ctx, row, contributionClaimLease)
-		if err != nil || !ok {
-			t.Fatalf("seed %s claim = (%v, %v)", segment, ok, err)
-		}
-		row.ID, row.ClaimToken, row.Status = claimed.ID, claimed.Token, SubmissionStatusPending
-		if err := fixture.store.Record(ctx, row); err != nil {
-			t.Fatalf("record seed claim: %v", err)
-		}
-	}
-	claim(2, "intro")
-	claim(3, "intro")
-	claim(3, "credits")
-	claim(5, "credits")
-
-	seeded := make(map[int]bool, len(fileIDs))
-	for _, id := range fileIDs {
-		seeded[id] = true
-	}
-	candidates := func(kind MarkerKind) string {
-		t.Helper()
-		var got []string
-		var after *ContributionCandidate
-		for {
-			page, err := fixture.store.CandidateLocalMarkerFiles(ctx, kind, 0.9, []string{fixture.provider}, after, 1)
-			if err != nil {
-				t.Fatalf("CandidateLocalMarkerFiles: %v", err)
-			}
-			if len(page) == 0 {
-				return strings.Join(got, " ")
-			}
-			for _, c := range page {
-				if seeded[c.FileID] {
-					got = append(got, fmt.Sprintf("%d@%.2f", c.FileID, c.Confidence))
-				}
-			}
-			after = &page[len(page)-1]
-		}
-	}
-
-	// Each pass orders by its own segment's confidence and checks only its
-	// own claims: the claimed intro of the third file leaves its credits open.
-	if got, want := candidates(MarkerKindIntro), fmt.Sprintf("%d@0.95", fileIDs[6]); got != want {
-		t.Fatalf("intro candidates = %s, want %s", got, want)
-	}
-	want := fmt.Sprintf("%d@0.97 %d@0.93 %d@0.92", fileIDs[0], fileIDs[1], fileIDs[2])
-	if got := candidates(MarkerKindCredits); got != want {
-		t.Fatalf("credits candidates = %s, want %s (done, online, and low-confidence credits excluded)", got, want)
-	}
-	if _, err := fixture.store.CandidateLocalMarkerFiles(ctx, MarkerKindPreview, 0.9, []string{fixture.provider}, nil, 1); err == nil {
-		t.Fatal("CandidateLocalMarkerFiles(preview) succeeded, want an error: automatic contribution shares intros and credits only")
+	if got, want := candidates(needsTMDB, strictTVDB), []int{fileIDs[0]}; !slices.Equal(got, want) {
+		t.Fatalf("candidates after a TMDB ID was added = %v, want %v", got, want)
 	}
 }

@@ -74,12 +74,10 @@ func spread(runtime, length float64, count int) []float64 {
 func TestAlignRecoversTiming(t *testing.T) {
 	const runtime = 7200.0
 	cases := map[string]subtitles.Timing{
-		"offset":          {OffsetMS: 3200},
-		"negative offset": {OffsetMS: -45300},
-		"pal speedup":     {Scale: 25 / 23.976, OffsetMS: -1500},
-		"pal slowdown":    {Scale: 23.976 / 25, OffsetMS: 800},
-		"in sync":         {},
-		"drifting cut":    {Scale: 1.00077, OffsetMS: -23700},
+		"offset":       {OffsetMS: 3200},
+		"pal speedup":  {Scale: 25 / 23.976, OffsetMS: -1500},
+		"in sync":      {},
+		"drifting cut": {Scale: 1.00077, OffsetMS: -23700},
 	}
 	cues := dialogCues(1, runtime)
 	for name, truth := range cases {

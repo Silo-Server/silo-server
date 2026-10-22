@@ -48,8 +48,7 @@ func validateApplePushCommand(cmd ApplePushCommand) (ApplePushDeviceRegistration
 	if cmd.UserID <= 0 || strings.TrimSpace(cmd.ProfileID) == "" || cmd.Generation <= 0 || cmd.DeviceID != strings.TrimSpace(cmd.DeviceID) {
 		return ApplePushDeviceRegistration{}, ErrPushDeviceInvalid
 	}
-	key, err := base64.RawURLEncoding.DecodeString(cmd.InstallationKey)
-	if err != nil || len(key) != 32 || base64.RawURLEncoding.EncodeToString(key) != cmd.InstallationKey {
+	if !validInstallationKey(cmd.InstallationKey) {
 		return ApplePushDeviceRegistration{}, ErrPushInstallationProof
 	}
 	registration, err := normalizeApplePushRegistration(cmd.ApplePushRegistrationInput)
@@ -59,6 +58,14 @@ func validateApplePushCommand(cmd ApplePushCommand) (ApplePushDeviceRegistration
 	registration.UserID, registration.ProfileID = cmd.UserID, cmd.ProfileID
 	return registration, nil
 }
+
+// validInstallationKey accepts only the canonical unpadded base64url form of a
+// 32-byte secret, so one key has exactly one accepted spelling.
+func validInstallationKey(value string) bool {
+	key, err := base64.RawURLEncoding.DecodeString(value)
+	return err == nil && len(key) == 32 && base64.RawURLEncoding.EncodeToString(key) == value
+}
+
 func lockApplePushInstallation(ctx context.Context, tx pgx.Tx, device string) (int64, error) {
 	if _, err := tx.Exec(ctx, `INSERT INTO apple_push_installations(device_id) VALUES($1) ON CONFLICT DO NOTHING`, device); err != nil {
 		return 0, err
@@ -128,15 +135,8 @@ func (r *PushDeviceRepository) ApplyApplePushAndFinalize(ctx context.Context, cm
 			}
 			return result, tx.Commit(ctx)
 		}
-	} else {
-		var foreign bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM push_devices WHERE device_id=$1 AND platform=$2 AND user_id<>$3)`, cmd.DeviceID, PushPlatformApple, cmd.UserID).Scan(&foreign)
-		if err != nil {
-			return result, err
-		}
-		if foreign {
-			return ApplePushReceipt{}, ErrPushGenerationConflict
-		}
+	} else if err = checkPushInstallationOwner(ctx, tx, cmd.DeviceID, PushPlatformApple, cmd.UserID); err != nil {
+		return ApplePushReceipt{}, err
 	}
 	// Fresh row identity also retires pending attempts through their existing FK.
 	// An external request already dispatched cannot be recalled by this transaction.
@@ -183,4 +183,107 @@ func (s *PushDeviceService) ApplyApplePushAndFinalize(ctx context.Context, cmd A
 		return ApplePushReceipt{}, ErrPushDeviceUnavailable
 	}
 	return store.ApplyApplePushAndFinalize(ctx, cmd, s.cipher, finalize)
+}
+
+// ApplePushRetirement stops delivery to an installation without a login
+// session. The installation key is the only authority: an app that removed
+// this server has already discarded its session but still holds the key.
+type ApplePushRetirement struct {
+	DeviceID        string
+	InstallationKey string
+	Generation      int64
+}
+
+// applePushRetiredIntent marks a retired installation. It cannot equal a
+// registration intent, which digests a JSON object, so a registration replayed
+// at the retirement's generation conflicts instead of succeeding.
+var applePushRetiredIntent = pushDigest([]byte("retired"))
+
+func validateApplePushRetirement(cmd ApplePushRetirement) error {
+	if cmd.Generation <= 0 || cmd.DeviceID == "" || cmd.DeviceID != strings.TrimSpace(cmd.DeviceID) || len(cmd.DeviceID) > 128 {
+		return ErrPushDeviceInvalid
+	}
+	if !validInstallationKey(cmd.InstallationKey) {
+		return ErrPushInstallationProof
+	}
+	return nil
+}
+
+// RetireApplePush applies a retirement as the installation's newest intent.
+// It deletes the installation's Apple rows, whose pending attempts cascade, and
+// keeps the key hash and owner so a later registration with a higher generation
+// resumes through the ordinary ordered path. An installation the server never
+// ordered has no key to check; the call then answers removed and writes nothing.
+func (r *PushDeviceRepository) RetireApplePush(ctx context.Context, cmd ApplePushRetirement) (ApplePushReceipt, error) {
+	if r == nil || r.pool == nil {
+		return ApplePushReceipt{}, ErrPushDeviceUnavailable
+	}
+	if err := validateApplePushRetirement(cmd); err != nil {
+		return ApplePushReceipt{}, err
+	}
+	retired := ApplePushReceipt{Generation: cmd.Generation, PushMode: PushModeOff, Removed: true}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return ApplePushReceipt{}, err
+	}
+	// Rolling back also drops the placeholder row the lock inserts for an
+	// unknown installation.
+	defer func() { _ = tx.Rollback(ctx) }()
+	generation, err := lockApplePushInstallation(ctx, tx, cmd.DeviceID)
+	if err != nil {
+		return ApplePushReceipt{}, err
+	}
+	if generation == 0 {
+		return retired, nil
+	}
+	var storedKey, storedIntent string
+	if err = tx.QueryRow(ctx, `SELECT installation_key_hash,intent_hash FROM apple_push_installations WHERE device_id=$1`, cmd.DeviceID).Scan(&storedKey, &storedIntent); err != nil {
+		return ApplePushReceipt{}, err
+	}
+	if !hmac.Equal([]byte(storedKey), []byte(pushDigest([]byte(cmd.InstallationKey)))) {
+		return ApplePushReceipt{}, ErrPushInstallationProof
+	}
+	if cmd.Generation < generation || (cmd.Generation == generation && storedIntent != applePushRetiredIntent) {
+		return ApplePushReceipt{}, ErrPushGenerationConflict
+	}
+	if cmd.Generation == generation {
+		return retired, nil
+	}
+	// Deleting the rows retires queued attempts through their FK. A provider
+	// request already dispatched cannot be recalled.
+	if _, err = tx.Exec(ctx, `DELETE FROM push_devices WHERE device_id=$1 AND platform=$2`, cmd.DeviceID, PushPlatformApple); err != nil {
+		return ApplePushReceipt{}, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE apple_push_installations SET generation=$2,intent_hash=$3,registration_id='',server_device_id='',push_mode=$4 WHERE device_id=$1`, cmd.DeviceID, cmd.Generation, applePushRetiredIntent, PushModeOff); err != nil {
+		return ApplePushReceipt{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return ApplePushReceipt{}, err
+	}
+	return retired, nil
+}
+
+type applePushRetiringStore interface {
+	RetireApplePush(context.Context, ApplePushRetirement) (ApplePushReceipt, error)
+}
+
+// ApplePushRetirementAvailable reports whether ordered Apple storage can
+// accept a session-less retirement.
+func (s *PushDeviceService) ApplePushRetirementAvailable() bool {
+	if !s.Available() {
+		return false
+	}
+	_, ok := s.store.(applePushRetiringStore)
+	return ok
+}
+
+func (s *PushDeviceService) RetireApplePush(ctx context.Context, cmd ApplePushRetirement) (ApplePushReceipt, error) {
+	if !s.Available() {
+		return ApplePushReceipt{}, ErrPushDeviceUnavailable
+	}
+	store, ok := s.store.(applePushRetiringStore)
+	if !ok {
+		return ApplePushReceipt{}, ErrPushDeviceUnavailable
+	}
+	return store.RetireApplePush(ctx, cmd)
 }

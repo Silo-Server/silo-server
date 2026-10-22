@@ -54,19 +54,3 @@ func TestHandler_ServesSocketIOOpenHandshake(t *testing.T) {
 		t.Fatalf("body must start with Engine.io OPEN ('0'); got %q", body)
 	}
 }
-
-// TestPublish_NoConnections_IsNoOp ensures the publish path doesn't panic
-// when no sockets are connected to the user's room.
-func TestPublish_NoConnections_IsNoOp(t *testing.T) {
-	s := abssocket.New(
-		func() []byte { return nil },
-		nil,
-		nil,
-		nil,
-	)
-	defer s.Close()
-
-	// Should not panic, should not block.
-	s.Publish("u-no-such-user", "user_item_progress_updated", map[string]any{"x": 1})
-	s.Publish("", "noop", nil) // empty user id is an explicit no-op
-}

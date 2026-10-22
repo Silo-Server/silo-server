@@ -31,6 +31,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
@@ -62,6 +63,10 @@ type LibraryCollectionHandler struct {
 	// PersonalCollages serves the collages of the personal collections opted
 	// into a library tab; nil when artwork storage is not configured.
 	PersonalCollages *catalog.PersonalCollectionCollages
+	// ArtworkSigner signs the artwork URLs local storage serves; collages
+	// read those posters from ArtworkStore. Nil when storage serves its own
+	// URLs.
+	ArtworkSigner *artworkurl.Signer
 }
 
 var errLibraryCollectionInUse = catalog.ErrLibraryCollectionInUse
@@ -190,7 +195,7 @@ func (h *LibraryCollectionHandler) CollectionCollagePath(collectionID, key strin
 }
 
 func (h *LibraryCollectionHandler) collageComposer() collectionCollageComposer {
-	return collectionCollageComposer{prefix: adminCollectionImagePrefix, store: h.ArtworkStore, posters: h.detailSvc, httpClient: h.httpClient}
+	return collectionCollageComposer{prefix: adminCollectionImagePrefix, store: h.ArtworkStore, posters: h.detailSvc, signer: h.ArtworkSigner, httpClient: h.httpClient}
 }
 
 type libraryCollectionResponse struct {
@@ -2689,7 +2694,7 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 // setListingLogos fills in the logo of each card on a v2 collection page,
 // signed in one batch. items are the cards' media items in any order.
 func (h *LibraryCollectionHandler) setListingLogos(ctx context.Context, cards []itemListResponse, items []*models.MediaItem, access catalog.AccessFilter) {
-	urls := signListingLogos(ctx, h.detailSvc, localizedLogoPaths(ctx, h.detailSvc, items, access), access.ImageSize)
+	urls := signListingLogos(ctx, h.detailSvc, localizedLogoPaths(ctx, h.detailSvc, items, access), access.ImageSizeFor(imagesize.SlotLogo))
 	for i := range cards {
 		cards[i].LogoURL = urls[cards[i].ContentID]
 	}
@@ -2747,6 +2752,21 @@ func (h *LibraryCollectionHandler) withViewerPosters(ctx context.Context, collec
 		out = append(out, &viewed)
 	}
 	return out
+}
+
+// viewerCollectionCounts returns what each collection shows the viewer
+// described by access (catalog ViewerCollectionCounts), or nil
+// when access narrows nothing and the stored counts are the viewer's. A
+// collection whose count could not be read is absent and logged.
+func (h *LibraryCollectionHandler) viewerCollectionCounts(ctx context.Context, collections []*models.LibraryCollection, access catalog.AccessFilter) map[string]catalog.ViewerCollectionCount {
+	if h.repo == nil {
+		return nil
+	}
+	counts, err := h.repo.ViewerCollectionCounts(ctx, collections, access)
+	if err != nil {
+		slog.WarnContext(ctx, "counting server collections for the viewer failed", "component", "collections", "error", err)
+	}
+	return counts
 }
 
 // withViewerPoster is withViewerPosters for one collection and the viewer in
@@ -3188,7 +3208,7 @@ func (h *LibraryCollectionHandler) processArtworkInputs(r *http.Request, collect
 
 		switch {
 		case err == nil:
-		case err == http.ErrMissingFile:
+		case errors.Is(err, http.ErrMissingFile):
 			if sourceByType[imageType] == "" {
 				continue
 			}

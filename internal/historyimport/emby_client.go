@@ -388,8 +388,8 @@ func UpstreamHTTPStatus(err error) int {
 }
 
 func shouldTryAnotherBase(err error) bool {
-	httpErr, ok := err.(*embyHTTPError)
-	if !ok {
+	var httpErr *embyHTTPError
+	if !errors.As(err, &httpErr) {
 		return true
 	}
 	return httpErr.StatusCode == http.StatusNotFound

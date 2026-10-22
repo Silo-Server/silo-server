@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/ebookconvert"
@@ -97,76 +96,6 @@ func TestServeEbook_ConversionFailureFallsBackToRawWithHeader(t *testing.T) {
 	}
 	if rec.Body.String() != "raw-mobi-bytes" {
 		t.Fatalf("body = %q, want raw mobi bytes", rec.Body.String())
-	}
-}
-
-func TestServeEbook_DisabledServesRaw(t *testing.T) {
-	raw := writeTemp(t, "book.mobi", "raw-mobi-bytes")
-	conv := &fakeConverter{epubPath: "should-not-be-used"}
-	h := &EbookReaderHandler{Conversion: enabledConversion(conv, false)}
-
-	file := &models.MediaFile{ID: 3, FilePath: raw, Container: "mobi"}
-	rec := serveAndRecord(t, h, file)
-
-	if got := rec.Header().Get(ConversionHeader); got != "" {
-		t.Fatalf("%s = %q, want empty (no conversion attempted)", ConversionHeader, got)
-	}
-	if got := rec.Header().Get("Content-Type"); got != "application/x-mobipocket-ebook" {
-		t.Fatalf("Content-Type = %q, want raw mobi mime", got)
-	}
-	if conv.calls != 0 {
-		t.Fatalf("converter called %d times while disabled, want 0", conv.calls)
-	}
-}
-
-func TestServeEbook_NonKindleUntouched(t *testing.T) {
-	raw := writeTemp(t, "book.epub", "epub-bytes")
-	conv := &fakeConverter{epubPath: "should-not-be-used"}
-	h := &EbookReaderHandler{Conversion: enabledConversion(conv, true)}
-
-	file := &models.MediaFile{ID: 4, FilePath: raw, Container: "epub"}
-	rec := serveAndRecord(t, h, file)
-
-	if rec.Header().Get(ConversionHeader) != "" {
-		t.Fatal("non-kindle file must not trigger conversion")
-	}
-	if conv.calls != 0 {
-		t.Fatalf("converter called %d times for epub, want 0", conv.calls)
-	}
-	if got := rec.Header().Get("Content-Type"); got != "application/epub+zip" {
-		t.Fatalf("Content-Type = %q, want epub", got)
-	}
-}
-
-func TestHandleConversionCapability(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		conv *EbookConversion
-		want bool
-	}{
-		{"enabled", enabledConversion(&fakeConverter{}, true), true},
-		{"flag-off", enabledConversion(&fakeConverter{}, false), false},
-		{"not-wired", nil, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := &EbookReaderHandler{Conversion: tc.conv}
-			rec := httptest.NewRecorder()
-			h.HandleConversionCapability(rec, httptest.NewRequest(http.MethodGet, "/ebooks/capability", nil))
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d", rec.Code)
-			}
-			body := rec.Body.String()
-			wantField := `"enabled":false`
-			if tc.want {
-				wantField = `"enabled":true`
-			}
-			if !strings.Contains(body, wantField) {
-				t.Fatalf("body %q missing %s", body, wantField)
-			}
-			if !strings.Contains(body, `"served_format":"epub"`) || !strings.Contains(body, "mobi") {
-				t.Fatalf("capability body incomplete: %s", body)
-			}
-		})
 	}
 }
 

@@ -16,17 +16,19 @@ import (
 )
 
 type NotificationInboxService interface {
-	NotificationPushDisplay(context.Context, string, string) (notifications.NotificationDisplay, error)
+	NotificationPushDisplay(context.Context, int, string, string) (notifications.NotificationDisplay, error)
 	NotificationCapabilities(context.Context) handlers.NotificationCapabilitiesView
-	ListNotificationInbox(context.Context, string, bool, int, *notifications.Cursor, *notifications.Cursor) (handlers.NotificationInboxPageView, error)
-	SyncNotificationInbox(context.Context, string, int, *notifications.Cursor) ([]notifications.DeliveryRowPayload, bool, int, error)
-	GetNotificationInboxItem(context.Context, string, string) (notifications.DeliveryRowPayload, error)
-	NotificationUnreadCount(context.Context, string) (int, error)
+	ListNotificationInbox(context.Context, int, string, bool, int, *notifications.Cursor, *notifications.Cursor) (handlers.NotificationInboxPageView, error)
+	SyncNotificationInbox(context.Context, int, string, int, *notifications.Cursor) ([]notifications.DeliveryRowPayload, bool, int, error)
+	GetNotificationInboxItem(context.Context, int, string, string) (notifications.DeliveryRowPayload, error)
+	NotificationUnreadCount(context.Context, int, string) (int, error)
 	MarkNotificationRead(context.Context, int, string, string) error
 	MarkNotificationInboxThrough(context.Context, int, string, notifications.Cursor) error
-	NotificationPreferences(context.Context, string) (notifications.Preferences, error)
-	PatchNotificationPreferences(context.Context, string, notifications.PreferencePatch) (notifications.Preferences, error)
-	ListNotifiedSeries(context.Context, string) ([]notifications.NotifiedSeries, error)
+	NotificationPreferences(context.Context, int, string) (notifications.Preferences, error)
+	PatchNotificationPreferences(context.Context, int, string, notifications.PreferencePatch) (notifications.Preferences, error)
+	ListNotifiedSeries(context.Context, int, string) ([]notifications.NotifiedSeries, error)
+	MuteNotificationSeries(context.Context, int, string, string) error
+	UnmuteNotificationSeries(context.Context, int, string, string) error
 }
 
 // NotificationItem preserves event-specific reason data while normalizing IDs
@@ -208,7 +210,7 @@ func registerNotificationInbox(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		view, err := svc.NotificationPushDisplay(ctx, profileFrom(ctx), string(in.DeliveryID))
+		view, err := svc.NotificationPushDisplay(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), string(in.DeliveryID))
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -224,6 +226,7 @@ func registerNotificationInbox(reg *Registry) {
 		}
 		body := notificationCapabilitiesOf(svc.NotificationCapabilities(ctx))
 		body.Series.Available = reg.deps.PersonalLists != nil
+		body.Series.Mute = body.Series.Available
 		return &NotificationCapabilitiesOutput{Body: body}, nil
 	})
 	Register(reg, notificationOperation(http.MethodGet, "", "listNotifications"), func(ctx context.Context, in *NotificationListInput) (*NotificationListOutput, error) {
@@ -240,7 +243,7 @@ func registerNotificationInbox(reg *Registry) {
 			}
 			through = &pos.Through
 		}
-		view, err := svc.ListNotificationInbox(ctx, profileFrom(ctx), in.Status == "unread", in.Limit, pos.Before, through)
+		view, err := svc.ListNotificationInbox(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), in.Status == "unread", in.Limit, pos.Before, through)
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -278,7 +281,7 @@ func registerNotificationInbox(reg *Registry) {
 				return nil, p
 			}
 		}
-		rows, more, count, err := svc.SyncNotificationInbox(ctx, profileFrom(ctx), in.Limit, since)
+		rows, more, count, err := svc.SyncNotificationInbox(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), in.Limit, since)
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -314,7 +317,7 @@ func registerNotificationInbox(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		count, err := svc.NotificationUnreadCount(ctx, profileFrom(ctx))
+		count, err := svc.NotificationUnreadCount(ctx, claimsFrom(ctx).UserID, profileFrom(ctx))
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -327,7 +330,7 @@ func registerNotificationInbox(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		row, err := svc.GetNotificationInboxItem(ctx, profileFrom(ctx), string(in.ID))
+		row, err := svc.GetNotificationInboxItem(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), string(in.ID))
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -366,7 +369,7 @@ func registerNotificationInbox(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		prefs, err := svc.NotificationPreferences(ctx, profileFrom(ctx))
+		prefs, err := svc.NotificationPreferences(ctx, claimsFrom(ctx).UserID, profileFrom(ctx))
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -387,7 +390,7 @@ func registerNotificationInbox(reg *Registry) {
 			}
 		}
 		b := in.Body
-		prefs, err := svc.PatchNotificationPreferences(ctx, profileFrom(ctx), notifications.PreferencePatch{Enabled: b.Enabled, NotifyFavorites: b.NotifyFavorites, NotifyWatchlist: b.NotifyWatchlist, NotifyContinueWatching: b.NotifyContinueWatching, NotifyNextUp: b.NotifyNextUp})
+		prefs, err := svc.PatchNotificationPreferences(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), notifications.PreferencePatch{Enabled: b.Enabled, NotifyFavorites: b.NotifyFavorites, NotifyWatchlist: b.NotifyWatchlist, NotifyContinueWatching: b.NotifyContinueWatching, NotifyNextUp: b.NotifyNextUp})
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -433,9 +436,11 @@ type NotificationCapabilities struct {
 	Series      NotificationSeriesCapability         `json:"series"`
 }
 
-// NotificationSeriesCapability reports listNotificationSeries.
+// NotificationSeriesCapability reports listNotificationSeries and the series
+// mute.
 type NotificationSeriesCapability struct {
 	Available bool `json:"available" doc:"GET /notifications/series lists the series whose new episodes can notify the profile"`
+	Mute      bool `json:"mute" doc:"PUT and DELETE /notifications/series/{series_id}/mute mute and unmute one series, and list entries carry muted"`
 }
 type NotificationInAppCapability struct {
 	Enabled bool `json:"enabled"`

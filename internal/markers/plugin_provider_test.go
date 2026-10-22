@@ -66,17 +66,24 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	}
 
 	res, err := provider.FetchMarkers(context.Background(), Request{
-		Kind:          ItemKindEpisode,
-		ExternalIDs:   map[string]string{ExternalIDKeyTVDB: "777"},
-		SeasonNumber:  1,
-		EpisodeNumber: 2,
-		Duration:      1800 * time.Second,
+		Kind:               ItemKindEpisode,
+		ExternalIDs:        map[string]string{ExternalIDKeyTVDB: "777"},
+		SeasonNumber:       1,
+		EpisodeNumber:      2,
+		EpisodeExternalIDs: map[string]string{ExternalIDKeyTVDB: "9001", ExternalIDKeyTMDB: "63"},
+		EpisodeNumbering:   "tvdb",
+		EpisodeTitle:       "Second Episode",
+		Duration:           1800 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("FetchMarkers: %v", err)
 	}
 	if client.fetchReq.GetItemType() != "episode" || client.fetchReq.GetExternalIds().GetTvdbId() != "777" {
 		t.Fatalf("fetch request = %+v", client.fetchReq)
+	}
+	if episode := client.fetchReq.GetEpisodeExternalIds(); episode.GetTvdbId() != "9001" || episode.GetTmdbId() != "63" ||
+		client.fetchReq.GetEpisodeTitle() != "Second Episode" || client.fetchReq.GetEpisodeNumbering() != "tvdb" {
+		t.Fatalf("fetch episode identity = %+v %q", episode, client.fetchReq.GetEpisodeTitle())
 	}
 	if res.SourceClass != models.MarkerSourcePlugin || res.ProviderID != "plugin:12:markers" {
 		t.Fatalf("result provenance = source %q provider %q", res.SourceClass, res.ProviderID)
@@ -128,6 +135,11 @@ func TestPluginProviderSubmitMapsRequest(t *testing.T) {
 	if client.submitReq.GetItemType() != "movie" || client.submitReq.GetExternalIds().GetImdbId() != "tt1" {
 		t.Fatalf("submit request identity = %+v", client.submitReq)
 	}
+	// A movie has no episode identity; the field stays unset as from an
+	// older host.
+	if client.submitReq.EpisodeExternalIds != nil || client.submitReq.GetEpisodeTitle() != "" {
+		t.Fatalf("movie submit carried episode identity: %+v", client.submitReq)
+	}
 	if client.submitReq.GetSegment() != "intro" || client.submitReq.GetStartSeconds() != 5 || client.submitReq.GetEndSeconds() != 30 {
 		t.Fatalf("submit request segment = %+v", client.submitReq)
 	}
@@ -150,22 +162,7 @@ func TestPluginProviderSubmitMapsConflicts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &fakePluginMarkerClient{submitErr: tt.err}
-			provider, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
-				InstallationID: 12,
-				CapabilityID:   "markers",
-			}, func(context.Context, int, string) (pluginMarkerClient, error) {
-				return client, nil
-			})
-			if err != nil {
-				t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
-			}
-
-			_, err = provider.SubmitMarker(context.Background(), SubmissionRequest{
-				Kind:        ItemKindMovie,
-				ExternalIDs: map[string]string{ExternalIDKeyTMDB: "123"},
-				Segment:     MarkerKindIntro,
-			})
+			_, err := submitWithPluginError(t, tt.err)
 			var conflict *SubmissionConflictError
 			if !errors.As(err, &conflict) {
 				t.Fatalf("error = %T %v, want SubmissionConflictError", err, err)
@@ -247,4 +244,51 @@ func submitWithPluginError(t *testing.T, pluginErr error) (SubmissionResult, err
 		ExternalIDs: map[string]string{ExternalIDKeyTMDB: "123"},
 		Segment:     MarkerKindIntro,
 	})
+}
+
+// The cmd/silo reload test covers the Submitter side; this pins what that
+// test does not see.
+func TestReadOnlyPluginProviderIsFetchOnly(t *testing.T) {
+	inner, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
+		InstallationID: 42,
+		CapabilityID:   "public-markers",
+		CacheRevision:  "config-revision",
+	}, func(context.Context, int, string) (pluginMarkerClient, error) {
+		return &fakePluginMarkerClient{}, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
+	}
+	var provider Provider = NewReadOnlyPluginProvider(inner)
+	if _, ok := provider.(SubmissionRequirementProvider); ok {
+		t.Fatal("read-only plugin provider exposes submission requirements")
+	}
+	// Population keys its cache by CacheRevision, and plugin reload compares it
+	// to decide whether to refresh the runtime.
+	revisioned, ok := provider.(interface{ CacheRevision() string })
+	if !ok || revisioned.CacheRevision() != "config-revision" {
+		t.Fatalf("CacheRevision not forwarded: ok=%v", ok)
+	}
+}
+
+func TestPluginSupportsContributionFromMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata map[string]any
+		want     bool
+	}{
+		{name: "key absent keeps legacy submitters", metadata: map[string]any{"default_fetch_priority": 20}, want: true},
+		{name: "explicit true", metadata: map[string]any{"supports_contribution": true}, want: true},
+		{name: "explicit false", metadata: map[string]any{"supports_contribution": false}, want: false},
+		{name: "string false", metadata: map[string]any{"supports_contribution": " false "}, want: false},
+		{name: "unparseable string stays compatible", metadata: map[string]any{"supports_contribution": "nope"}, want: true},
+		{name: "wrong type stays compatible", metadata: map[string]any{"supports_contribution": float64(0)}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := PluginSupportsContributionFromMetadata(tt.metadata); got != tt.want {
+				t.Fatalf("PluginSupportsContributionFromMetadata() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

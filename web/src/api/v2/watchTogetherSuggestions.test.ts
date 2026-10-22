@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
-import { listWatchTogetherSuggestions, voteWatchTogetherSuggestion } from "@/lib/watchTogether";
+import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import {
+  deleteWatchTogetherSuggestion,
+  listWatchTogetherSuggestions,
+  voteWatchTogetherSuggestion,
+} from "@/lib/watchTogether";
 
 beforeEach(() => {
   localStorage.clear();
@@ -53,32 +57,42 @@ it("refreshes after the empty vote receipt under the same authority", async () =
   );
   expect(fetch.mock.calls.map((c) => c[1].method)).toEqual(["POST", "GET"]);
 });
-it("does not fetch or publish after vote authority changes", async () => {
+it("deletes exactly the requested suggestion then refreshes under the same proof", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(response({ items: [], page: { has_more: false } }));
+  vi.stubGlobal("fetch", fetch);
+  expect(await deleteWatchTogetherSuggestion("room", "room-proof", "target")).toEqual({
+    suggestions: [],
+  });
+  expect(fetch.mock.calls[0]![0]).toBe("/api/v2/watch-together/rooms/room/suggestions/target");
+  expect(fetch.mock.calls.map((c) => c[1].method)).toEqual(["DELETE", "GET"]);
+  for (const call of fetch.mock.calls) {
+    const headers = new Headers(call[1].headers);
+    expect(headers.get("X-Room-Token")).toBe("room-proof");
+    expect(headers.get("X-Profile-Id")).toBe("profile");
+    expect(String(call[0])).not.toContain("room-proof");
+  }
+});
+// Vote and delete each check the authority after their own 204 receipt.
+it.each([
+  [
+    "does not fetch or publish after vote authority changes",
+    () => setProfileId("other"),
+    () => voteWatchTogetherSuggestion("room", "room-proof", "a"),
+  ],
+  [
+    "refuses a stale deletion receipt before fetching or publishing",
+    () => setProfileToken("replacement"),
+    () => deleteWatchTogetherSuggestion("room", "proof", "target"),
+  ],
+])("%s", async (_name, replaceAuthority, call) => {
   const fetch = vi.fn().mockImplementation(async () => {
-    setProfileId("other");
+    replaceAuthority();
     return new Response(null, { status: 204 });
   });
   vi.stubGlobal("fetch", fetch);
-  await expect(voteWatchTogetherSuggestion("room", "room-proof", "a")).rejects.toThrow();
-  expect(fetch).toHaveBeenCalledTimes(1);
-});
-it("does not replay rejected votes or publish partial page results", async () => {
-  const fetch = vi
-    .fn()
-    .mockResolvedValueOnce(
-      response({ items: [row("a", 0)], page: { has_more: true, next_cursor: "next" } }),
-    )
-    .mockRejectedValueOnce(new Error("lost page"));
-  vi.stubGlobal("fetch", fetch);
-  await expect(listWatchTogetherSuggestions("room", "room-proof")).rejects.toThrow();
-  setAccessToken("synthetic-access");
-  setRefreshToken("synthetic-refresh");
-  fetch.mockReset().mockResolvedValue(
-    new Response(JSON.stringify({ status: 401, code: "authentication_required" }), {
-      status: 401,
-      headers: { "Content-Type": "application/problem+json" },
-    }),
-  );
-  await expect(voteWatchTogetherSuggestion("room", "room-proof", "a")).rejects.toThrow();
+  await expect(call()).rejects.toThrow();
   expect(fetch).toHaveBeenCalledTimes(1);
 });

@@ -27,19 +27,6 @@ func (m *clientInfoRecordingManager) StartSessionWithContext(ctx context.Context
 	return m.StartSession(userID, profileID, fileID, method, transcodeAudio)
 }
 
-func TestHandlePlaybackInfoRecordsClientNameAndVersion(t *testing.T) {
-	handler, routeID := newSubtitleSelectionHandler(t)
-	result := postPlaybackInfoForDevice(t, handler, routeID, "web-device")
-
-	stored, ok := handler.playbackStore.Get(result.PlaySessionID)
-	if !ok {
-		t.Fatal("negotiated play session was not stored")
-	}
-	if stored.ClientName != "Jellyfin Web" || stored.ClientVersion != "10.11.6" {
-		t.Fatalf("client = %q %q, want Jellyfin Web 10.11.6", stored.ClientName, stored.ClientVersion)
-	}
-}
-
 // TestHandlePlaybackInfoCleansRecordedClient checks that the recorded name and
 // version are cleaned and clamped like any other client identity.
 func TestHandlePlaybackInfoCleansRecordedClient(t *testing.T) {

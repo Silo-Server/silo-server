@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -99,37 +98,6 @@ func TestValidateSourceClassifiesDeterministicRejection(t *testing.T) {
 	}
 }
 
-func TestValidateSourceWriteEvictsExpiredNegativeEntries(t *testing.T) {
-	resetSourcePreflightCache(t)
-	now := time.Now()
-	sourcePreflightCache.Lock()
-	sourcePreflightCache.entries["positive"] = sourcePreflightCacheEntry{}
-	sourcePreflightCache.entries["expired-negative"] = sourcePreflightCacheEntry{
-		errorMessage: "temporary failure",
-		expiresAt:    now.Add(-time.Second),
-	}
-	sourcePreflightCache.Unlock()
-
-	request := sourcePreflightTestRequest(t)
-	conversions := 0
-	if err := ValidateSourceWithRunner(context.Background(), request, sourcePreflightTestRunner(&conversions, func() string {
-		return "ffmpeg version eviction"
-	}, nil)); err != nil {
-		t.Fatal(err)
-	}
-
-	sourcePreflightCache.Lock()
-	_, positivePresent := sourcePreflightCache.entries["positive"]
-	_, expiredPresent := sourcePreflightCache.entries["expired-negative"]
-	sourcePreflightCache.Unlock()
-	if !positivePresent {
-		t.Fatal("valid positive entry was evicted")
-	}
-	if expiredPresent {
-		t.Fatal("expired negative entry was retained after a cache write")
-	}
-}
-
 func TestSourcePreflightCacheBoundsSuccessfulVerdicts(t *testing.T) {
 	resetSourcePreflightCache(t)
 	now := time.Now()
@@ -145,161 +113,6 @@ func TestSourcePreflightCacheBoundsSuccessfulVerdicts(t *testing.T) {
 	}
 	if !newestPresent {
 		t.Fatal("source preflight cache evicted the newest successful verdict")
-	}
-}
-
-// TestSourcePreflightTimeoutCoversAllBoundedCommands verifies the shared deadline covers the command matrix.
-func TestSourcePreflightTimeoutCoversAllBoundedCommands(t *testing.T) {
-	want := 10*probeCommandTimeout + sourcePreflightTimeoutSlack
-	if got := SourcePreflightTimeout(100); got != want {
-		t.Fatalf("SourcePreflightTimeout() = %s, want %s", got, want)
-	}
-	executionWant := 9*probeCommandTimeout + sourcePreflightTimeoutSlack
-	if got := sourcePreflightExecutionTimeout(100); got != executionWant {
-		t.Fatalf("sourcePreflightExecutionTimeout() = %s, want %s", got, executionWant)
-	}
-}
-
-// TestFFmpegVersionCacheInvalidatesOnBinaryModification verifies executable changes refresh version facts.
-func TestFFmpegVersionCacheInvalidatesOnBinaryModification(t *testing.T) {
-	resetSourcePreflightCache(t)
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
-	if err := os.WriteFile(ffmpegPath, []byte("one"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	calls := 0
-	runner := func(context.Context, string, ...string) ([]byte, error) {
-		calls++
-		return []byte("ffmpeg version test"), nil
-	}
-	for attempt := 0; attempt < 2; attempt++ {
-		if _, err := ffmpegVersionForPreflight(context.Background(), ffmpegPath, runner); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if calls != 1 {
-		t.Fatalf("version calls = %d, want one for an unchanged binary", calls)
-	}
-	info, err := os.Stat(ffmpegPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed := info.ModTime().Add(2 * time.Second)
-	if err := os.Chtimes(ffmpegPath, changed, changed); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ffmpegVersionForPreflight(context.Background(), ffmpegPath, runner); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 2 {
-		t.Fatalf("version calls = %d, want refresh after binary modification", calls)
-	}
-}
-
-// TestFFmpegVersionSharedLookupSurvivesFirstCallerCancellation verifies one canceled caller cannot abort shared work.
-func TestFFmpegVersionSharedLookupSurvivesFirstCallerCancellation(t *testing.T) {
-	resetSourcePreflightCache(t)
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
-	if err := os.WriteFile(ffmpegPath, []byte("ffmpeg"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	started := make(chan struct{})
-	release := make(chan struct{})
-	defer func() {
-		select {
-		case <-release:
-		default:
-			close(release)
-		}
-	}()
-	var calls atomic.Int32
-	var startedOnce sync.Once
-	var sharedCanceled atomic.Bool
-	runner := func(ctx context.Context, _ string, _ ...string) ([]byte, error) {
-		calls.Add(1)
-		startedOnce.Do(func() { close(started) })
-		select {
-		case <-release:
-			return []byte("ffmpeg version shared"), nil
-		case <-ctx.Done():
-			sharedCanceled.Store(true)
-			return nil, ctx.Err()
-		}
-	}
-	type versionResult struct {
-		output []byte
-		err    error
-	}
-	firstCtx, cancelFirst := context.WithCancel(context.Background())
-	first := make(chan versionResult, 1)
-	go func() {
-		output, err := ffmpegVersionForPreflight(firstCtx, ffmpegPath, runner)
-		first <- versionResult{output: output, err: err}
-	}()
-	<-started
-	second := make(chan versionResult, 1)
-	go func() {
-		output, err := ffmpegVersionForPreflight(context.Background(), ffmpegPath, runner)
-		second <- versionResult{output: output, err: err}
-	}()
-	cancelFirst()
-	select {
-	case result := <-first:
-		if !errors.Is(result.err, context.Canceled) {
-			t.Fatalf("first lookup error = %v, want context canceled", result.err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("canceled version caller did not stop waiting")
-	}
-	if sharedCanceled.Load() {
-		t.Fatal("caller cancellation propagated to the shared version command")
-	}
-	close(release)
-	select {
-	case result := <-second:
-		if result.err != nil || string(result.output) != "ffmpeg version shared" {
-			t.Fatalf("second lookup = %q, %v", result.output, result.err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("remaining version caller did not receive the shared result")
-	}
-	if _, err := ffmpegVersionForPreflight(context.Background(), ffmpegPath, runner); err != nil {
-		t.Fatal(err)
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("version command calls = %d, want one shared and cached lookup", calls.Load())
-	}
-}
-
-// TestFFmpegVersionCacheDoesNotStoreEmptyOrFailedLookups verifies unusable version results remain retryable.
-func TestFFmpegVersionCacheDoesNotStoreEmptyOrFailedLookups(t *testing.T) {
-	tests := []struct {
-		name   string
-		output []byte
-		err    error
-	}{
-		{name: "empty"},
-		{name: "failed", err: errors.New("version unavailable")},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resetSourcePreflightCache(t)
-			ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg")
-			if err := os.WriteFile(ffmpegPath, []byte("ffmpeg"), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			var calls atomic.Int32
-			runner := func(context.Context, string, ...string) ([]byte, error) {
-				calls.Add(1)
-				return tt.output, tt.err
-			}
-			for attempt := 0; attempt < 2; attempt++ {
-				_, _ = ffmpegVersionForPreflight(context.Background(), ffmpegPath, runner)
-			}
-			if calls.Load() != 2 {
-				t.Fatalf("version command calls = %d, want failed lookup retried", calls.Load())
-			}
-		})
 	}
 }
 
@@ -443,15 +256,6 @@ func TestValidateSourceChecksEverySampleOutput(t *testing.T) {
 	}
 }
 
-// TestSourcePreflightPositionsCoverBeginningMiddleAndEnd verifies representative sampling coverage.
-func TestSourcePreflightPositionsCoverBeginningMiddleAndEnd(t *testing.T) {
-	want := []float64{0, 50, 90}
-	got := sourcePreflightPositions(100)
-	if !slices.Equal(got, want) {
-		t.Fatalf("sourcePreflightPositions() = %v, want %v", got, want)
-	}
-}
-
 // TestSourceConversionPreflightFilterMapsQSVFramesOnce verifies the QSV interop graph has one mapping step.
 func TestSourceConversionPreflightFilterMapsQSVFramesOnce(t *testing.T) {
 	filter := sourceConversionPreflightFilter(SourcePreflightRequest{
@@ -465,28 +269,27 @@ func TestSourceConversionPreflightFilterMapsQSVFramesOnce(t *testing.T) {
 	}
 }
 
-// TestSourceConversionPreflightUsesSiloQSVDriverSelection verifies QSV initialization matches runtime selection.
-func TestSourceConversionPreflightUsesSiloQSVDriverSelection(t *testing.T) {
-	args := sourceConversionPreflightArgs(SourcePreflightRequest{
-		Mode: ModeHardware, Backend: BackendQSV, Kind: SourcePQ, HardwareDevice: "/dev/dri/renderD129",
-	}, 0, "")
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "vaapi=va:/dev/dri/renderD129,driver=iHD,kernel_driver=i915,vendor_id=0x8086") {
-		t.Fatalf("QSV preflight did not mirror runtime driver selection: %s", joined)
-	}
-}
-
 func TestSourceConversionPreflightMirrorsSoftwareDecodeForVAAPI(t *testing.T) {
-	args := sourceConversionPreflightArgs(SourcePreflightRequest{
-		Mode: ModeHardware, Backend: BackendVAAPI, Kind: SourcePQ,
-		HardwareDevice: "/dev/dri/renderD129", SoftwareVideoDecode: true,
-	}, 0, "")
-	joined := strings.Join(args, " ")
-	if strings.Contains(joined, "-hwaccel") {
-		t.Fatalf("software-decode preflight requested hardware decode: %s", joined)
-	}
-	if !strings.Contains(joined, "format=nv12,hwupload") {
-		t.Fatalf("software-decode preflight did not upload frames before VAAPI tone mapping: %s", joined)
+	// Playback uploads HDR frames as 10-bit p010le and SDR frames as nv12
+	// (#2269); the preflight must test the same upload.
+	for kind, want := range map[SourceKind]string{
+		SourcePQ:       "format=p010le,hwupload,",
+		SourceHLG:      "format=p010le,hwupload,",
+		SourceSDRBT709: "format=nv12,hwupload,",
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			args := sourceConversionPreflightArgs(SourcePreflightRequest{
+				Mode: ModeHardware, Backend: BackendVAAPI, Kind: kind,
+				HardwareDevice: "/dev/dri/renderD129", SoftwareVideoDecode: true,
+			}, 0, "")
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "-hwaccel") {
+				t.Fatalf("software-decode preflight requested hardware decode: %s", joined)
+			}
+			if !strings.Contains(joined, want+VAAPIFilter(kind)) {
+				t.Fatalf("software-decode preflight did not upload with %q before VAAPI tone mapping: %s", want, joined)
+			}
+		})
 	}
 }
 

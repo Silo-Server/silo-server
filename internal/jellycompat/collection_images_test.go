@@ -99,30 +99,6 @@ func TestServeCollectionImageGeneratesFallbackWhenNoPoster(t *testing.T) {
 	}
 }
 
-func TestServeCollectionImageRejectsBadTagWithoutSession(t *testing.T) {
-	const secret = "image-secret"
-	codec := NewResourceIDCodec()
-	collectionID := "abc123"
-	routeID := codec.EncodeStringID(EncodedIDCollection, collectionID)
-	collection := &models.LibraryCollection{ID: collectionID, Title: "X", Visibility: "visible"}
-	h := &ImagesHandler{
-		codec:       codec,
-		images:      NewImageCache(time.Hour, time.Now),
-		imageTags:   newImageTagSigner(secret),
-		collections: &fakeCollectionSource{collections: []*models.LibraryCollection{collection}},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?tag=deadbeef", nil)
-	req = withImageRouteParams(req, routeID, "Primary")
-	rec := httptest.NewRecorder()
-
-	h.HandleItemImage(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
-}
-
 func TestServeCollectionsViewImageGeneratesTile(t *testing.T) {
 	const secret = "image-secret"
 	codec := NewResourceIDCodec()

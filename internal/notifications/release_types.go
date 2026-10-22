@@ -84,6 +84,8 @@ type SeriesInterest struct {
 	UpdatedAt               time.Time
 }
 
+func (i SeriesInterest) key() profileKey { return profileKey{i.UserID, i.ProfileID} }
+
 // HasAnyInterest reports whether at least one interest flag is set.
 func (i SeriesInterest) HasAnyInterest() bool {
 	return i.Favorite || i.Watchlist || i.ContinueWatching || i.NextUpCandidate
@@ -129,6 +131,7 @@ func (f ReasonFlags) Any() bool {
 // Preferences are the per-profile notification controls. Missing rows default
 // to all-enabled.
 type Preferences struct {
+	UserID                 int       `json:"-"`
 	ProfileID              string    `json:"profile_id"`
 	Enabled                bool      `json:"enabled"`
 	NotifyFavorites        bool      `json:"notify_favorites"`
@@ -138,9 +141,11 @@ type Preferences struct {
 	UpdatedAt              time.Time `json:"-"`
 }
 
-// DefaultPreferences returns the all-enabled defaults for a profile.
-func DefaultPreferences(profileID string) Preferences {
+// DefaultPreferences returns the all-enabled defaults for the profile on
+// userID's account.
+func DefaultPreferences(userID int, profileID string) Preferences {
 	return Preferences{
+		UserID:                 userID,
 		ProfileID:              profileID,
 		Enabled:                true,
 		NotifyFavorites:        true,
@@ -212,3 +217,5 @@ type InsertedDelivery struct {
 	ProfileID string
 	CreatedAt time.Time
 }
+
+func (d InsertedDelivery) key() profileKey { return profileKey{d.UserID, d.ProfileID} }

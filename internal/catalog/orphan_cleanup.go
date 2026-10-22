@@ -79,6 +79,10 @@ const orphanedMediaItemSafetyConditions = `NOT EXISTS (
 	WHERE uds.series_id = mi.content_id
   )
   AND NOT EXISTS (
+	SELECT 1 FROM public.profile_series_notification_mutes psnm
+	WHERE psnm.series_id = mi.content_id
+  )
+  AND NOT EXISTS (
 	SELECT 1 FROM public.user_audio_preferences uap
 	WHERE uap.series_id = mi.content_id
   )

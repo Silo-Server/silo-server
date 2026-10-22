@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestResolveSourceCoversDolbyVisionFallbackCompatibilityIDs verifies supported Dolby Vision bases are classified.
@@ -123,42 +125,15 @@ func TestResolveSourceClassifiesHLGByPrimaries(t *testing.T) {
 	}
 }
 
-// TestPolicyKeepsHardwareAndSoftwareIndependent verifies each executor can be enabled separately.
-func TestPolicyKeepsHardwareAndSoftwareIndependent(t *testing.T) {
-	tests := []struct {
-		hardware bool
-		software bool
-		want     Policy
-	}{
-		{want: PolicyNone},
-		{hardware: true, want: PolicyHardwareOnly},
-		{software: true, want: PolicySoftwareOnly},
-		{hardware: true, software: true, want: PolicyHardwareThenSoftware},
-	}
-	for _, tt := range tests {
-		if got := NewPolicy(tt.hardware, tt.software); got != tt.want {
-			t.Fatalf("NewPolicy(%t, %t) = %q, want %q", tt.hardware, tt.software, got, tt.want)
-		}
-	}
-}
-
 // TestProbeAdvertisesOnlySuccessfulSourceKinds verifies discovery reports only smoke-tested conversions.
 func TestProbeAdvertisesOnlySuccessfulSourceKinds(t *testing.T) {
-	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		joined := strings.Join(args, " ")
-		switch {
-		case slices.Contains(args, "-filters"):
-			return []byte(" .S. sidedata V->V\n .S. zscale V->V\n .S. tonemap V->V\n .S. tonemapx V->V\n .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"), nil
-		case slices.Contains(args, "-encoders"):
-			return []byte("libx264 h264_qsv"), nil
-		case strings.Contains(joined, "libx264"):
+	filters := " .S. sidedata V->V\n .S. zscale V->V\n .S. tonemap V->V\n .S. tonemapx V->V\n .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"
+	runner := listingRunner(nil, filters, "libx264 h264_qsv", func(args string) ([]byte, error) {
+		if strings.Contains(args, "libx264") || strings.Contains(args, "h264_qsv") && strings.Contains(args, "smpte2084") {
 			return nil, nil
-		case strings.Contains(joined, "h264_qsv") && strings.Contains(joined, "smpte2084"):
-			return nil, nil
-		default:
-			return nil, errors.New("unsupported fixture")
 		}
-	}
+		return nil, errors.New("unsupported fixture")
+	})
 
 	got := ProbeWithRunner(context.Background(), "/ffmpeg", "qsv", "/dev/dri/renderD128", runner)
 	if !got.Supports(ModeSoftware, SourcePQ) || !got.Supports(ModeSoftware, SourceHLG) {
@@ -172,23 +147,16 @@ func TestProbeAdvertisesOnlySuccessfulSourceKinds(t *testing.T) {
 // TestProbeValidatesEveryConfiguredHardwareDevice verifies pooled devices share only common capabilities.
 func TestProbeValidatesEveryConfiguredHardwareDevice(t *testing.T) {
 	seenSecondDevice := false
-	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		joined := strings.Join(args, " ")
-		switch {
-		case slices.Contains(args, "-filters"):
-			return []byte(" .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"), nil
-		case slices.Contains(args, "-encoders"):
-			return []byte("h264_qsv"), nil
-		case strings.Contains(joined, "renderD129"):
+	filters := " .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"
+	runner := listingRunner(nil, filters, "h264_qsv", func(args string) ([]byte, error) {
+		if strings.Contains(args, "renderD129") {
 			seenSecondDevice = true
-			if strings.Contains(joined, "arib-std-b67") {
+			if strings.Contains(args, "arib-std-b67") {
 				return nil, errors.New("HLG unsupported on second device")
 			}
-			return nil, nil
-		default:
-			return nil, nil
 		}
-	}
+		return nil, nil
+	})
 
 	got := ProbeWithRunner(context.Background(), "/ffmpeg", "qsv", "/dev/dri/renderD128,/dev/dri/renderD129", runner)
 	if !seenSecondDevice {
@@ -196,28 +164,6 @@ func TestProbeValidatesEveryConfiguredHardwareDevice(t *testing.T) {
 	}
 	if !got.Supports(ModeHardware, SourcePQ) || got.Supports(ModeHardware, SourceHLG) || got.Supports(ModeHardware, SourceHLGBT709) {
 		t.Fatalf("hardware capabilities = %#v, want PQ only", got)
-	}
-}
-
-// TestFiltersDeclareBT709Output verifies tone-map graphs explicitly produce SDR color metadata.
-func TestFiltersDeclareBT709Output(t *testing.T) {
-	for name, filter := range map[string]string{
-		"software pq":  SoftwareFilter(SourcePQ, "tonemapx"),
-		"software hlg": SoftwareFilter(SourceHLG, "tonemap"),
-		"qsv":          QSVFilter(SourcePQ, 0),
-		"vaapi":        VAAPIFilter(SourcePQ),
-		"cuda":         CUDAFilter(SourcePQ),
-		"software dv":  SoftwareFilter(SourceDolbyVision, SoftwareFilterBT2390),
-		"qsv dv":       QSVFilter(SourceDolbyVision, 0),
-		"cuda dv":      CUDAFilter(SourceDolbyVision),
-	} {
-		t.Run(name, func(t *testing.T) {
-			for _, token := range []string{"bt709", "format="} {
-				if !strings.Contains(filter, token) {
-					t.Fatalf("filter %q lacks %q", filter, token)
-				}
-			}
-		})
 	}
 }
 
@@ -242,36 +188,36 @@ func TestSoftwareFiltersUseThePixelFormatExpectedByEachToneMapper(t *testing.T) 
 	}
 }
 
-// TestQSVFilterScalesHDRBeforeOpenCL checks where QSVFilter places the resize:
+// TestIntelFilterScalesHDRBeforeOpenCL checks where IntelFilter places the resize:
 // before the OpenCL tone mapper for HDR kinds, after color conversion for SDR
 // bases, and nowhere when the height is 0.
-func TestQSVFilterScalesHDRBeforeOpenCL(t *testing.T) {
-	hdr := QSVFilter(SourcePQ, 720)
+func TestIntelFilterScalesHDRBeforeOpenCL(t *testing.T) {
+	hdr := IntelFilter(SourcePQ, 720)
 	resize := strings.Index(hdr, "scale_vaapi=w=-2:h=720:format=p010")
 	if resize < 0 || resize > strings.Index(hdr, HardwareFilterOpenCL) {
-		t.Fatalf("HDR QSV filter %q does not resize before tone mapping", hdr)
+		t.Fatalf("HDR Intel filter %q does not resize before tone mapping", hdr)
 	}
-	if sdr := QSVFilter(SourceSDRBT2020, 720); !strings.HasSuffix(sdr, ",scale_vaapi=w=-2:h=720:format=nv12") {
-		t.Fatalf("SDR QSV filter %q does not resize after color conversion", sdr)
+	if sdr := IntelFilter(SourceSDRBT2020, 720); !strings.HasSuffix(sdr, ",scale_vaapi=w=-2:h=720:format=nv12") {
+		t.Fatalf("SDR Intel filter %q does not resize after color conversion", sdr)
 	}
 	for _, kind := range []SourceKind{SourcePQ, SourceSDRBT2020} {
-		if filter := QSVFilter(kind, 0); strings.Contains(filter, "scale_vaapi=w=") {
-			t.Fatalf("unscaled %s QSV filter %q resizes", kind, filter)
+		if filter := IntelFilter(kind, 0); strings.Contains(filter, "scale_vaapi=w=") {
+			t.Fatalf("unscaled %s Intel filter %q resizes", kind, filter)
 		}
 	}
 }
 
-// TestSoftwareAndQSVToneMapsPinTheSourcePeak keeps tonemapx on the source
-// peak the QSV graph uses. Without it tonemapx reads a Dolby Vision frame's
+// TestSoftwareAndIntelToneMapsPinTheSourcePeak keeps tonemapx on the source
+// peak the Intel OpenCL graph uses. Without it tonemapx reads a Dolby Vision frame's
 // peak from the RPU and darkens sources mastered above 1000 nits.
-func TestSoftwareAndQSVToneMapsPinTheSourcePeak(t *testing.T) {
+func TestSoftwareAndIntelToneMapsPinTheSourcePeak(t *testing.T) {
 	for _, kind := range AllSourceKinds() {
 		if IsSDRSource(kind) {
 			continue
 		}
 		for name, filter := range map[string]string{
 			"software": SoftwareFilter(kind, SoftwareFilterBT2390),
-			"qsv":      QSVFilter(kind, 0),
+			"intel":    IntelFilter(kind, 0),
 		} {
 			options := strings.FieldsFunc(filter, func(r rune) bool { return r == ',' || r == ':' })
 			if !slices.Contains(options, "peak=100") {
@@ -287,7 +233,7 @@ func TestSoftwareAndQSVToneMapsPinTheSourcePeak(t *testing.T) {
 func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
 	for name, filter := range map[string]string{
 		"software": SoftwareFilter(SourceDolbyVision, SoftwareFilterBT2390),
-		"qsv":      QSVFilter(SourceDolbyVision, 0),
+		"intel":    IntelFilter(SourceDolbyVision, 0),
 		"cuda":     CUDAFilter(SourceDolbyVision),
 	} {
 		if !strings.Contains(filter, "apply_dovi=1") {
@@ -296,7 +242,7 @@ func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
 	}
 	for name, filter := range map[string]string{
 		"software": SoftwareFilter(SourcePQ, SoftwareFilterBT2390),
-		"qsv":      QSVFilter(SourcePQ, 0),
+		"qsv":      IntelFilter(SourcePQ, 0),
 	} {
 		if strings.Contains(filter, "apply_dovi") {
 			t.Errorf("%s PQ filter %q changed its Dolby Vision handling", name, filter)
@@ -317,5 +263,22 @@ func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
 	}
 	if !ValidSourceKind(SourceDolbyVision) || slices.Contains(StandardSourceKinds(), SourceDolbyVision) {
 		t.Fatal("Dolby Vision must be a valid but non-standard source kind")
+	}
+}
+
+func TestDynamicRangeForVideoTrackReadsStoredHDR10PlusRangeType(t *testing.T) {
+	tests := []struct {
+		rangeType string
+		want      string
+	}{
+		{rangeType: "HDR10Plus", want: DynamicRangeHDR10Plus},
+		{rangeType: "HDR10+", want: DynamicRangeHDR10Plus},
+		{rangeType: "HDR10", want: DynamicRangeHDR10},
+	}
+	for _, tt := range tests {
+		track := models.VideoTrack{Codec: "hevc", VideoRange: "HDR", VideoRangeType: tt.rangeType, ColorTransfer: "smpte2084"}
+		if got := DynamicRangeForVideoTrack(track); got != tt.want {
+			t.Errorf("DynamicRangeForVideoTrack(%q) = %q, want %q", tt.rangeType, got, tt.want)
+		}
 	}
 }

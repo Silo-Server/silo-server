@@ -1,11 +1,13 @@
 // @vitest-environment node
 
+import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   formatDate,
   formatDateTime,
   formatTime,
   getDateTimeFormatPreferences,
+  parseCalendarDate,
   parseDateFormatPreference,
   parseTimeFormatPreference,
   preferredDateLocale,
@@ -63,6 +65,42 @@ describe("formatDate", () => {
     setDateTimeFormatPreferences({ dateFormat: "YYYY-MM-DD", timeFormat: "auto" });
     expect(formatDate(sample.toISOString())).toBe("2026-06-05");
     expect(formatDate("not-a-date")).toBe("");
+  });
+});
+
+describe("calendar dates", () => {
+  it("parses YYYY-MM-DD as local midnight and rejects anything else", () => {
+    expect(parseCalendarDate("2026-02-18")).toEqual(new Date(2026, 1, 18));
+    expect(parseCalendarDate("0063-09-23")?.getFullYear()).toBe(63);
+    expect(parseCalendarDate("2024-02-30")).toBeNull();
+    expect(parseCalendarDate("2026-02-18T00:00:00Z")).toBeNull();
+    expect(parseCalendarDate(undefined)).toBeNull();
+  });
+
+  it("formats the stored day", () => {
+    setDateTimeFormatPreferences({ dateFormat: "MM/DD/YYYY", timeFormat: "auto" });
+    expect(formatDate("2026-02-18")).toBe("02/18/2026");
+    expect(formatDate("2026-02-18", "medium")).toBe("Feb 18, 2026");
+    expect(formatDate("2024-02-30", "medium")).toBe("");
+  });
+
+  // West of UTC, reading the date as UTC midnight would show Feb 17. The time
+  // zone is process-wide, so the check runs in a child process instead of
+  // switching TZ under the test files that share this one. Node before 22.6
+  // can't import datetime.ts there.
+  const canStripTypes = process.allowedNodeEnvironmentFlags.has("--experimental-strip-types");
+  it.skipIf(!canStripTypes)("formats the stored day west of UTC", () => {
+    const script = `
+      const { formatDate, setDateTimeFormatPreferences } = await import(${JSON.stringify(new URL("./datetime.ts", import.meta.url).href)});
+      setDateTimeFormatPreferences({ dateFormat: "MM/DD/YYYY", timeFormat: "auto" });
+      process.stdout.write(formatDate("2026-02-18", "medium"));
+    `;
+    const output = execFileSync(
+      process.execPath,
+      ["--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", script],
+      { env: { ...process.env, TZ: "America/Chicago" }, encoding: "utf8" },
+    );
+    expect(output).toBe("Feb 18, 2026");
   });
 });
 

@@ -22,6 +22,7 @@
         "next_up": true
       },
       "notifies": true,
+      "muted": false,
       "next_up_after": {
         "season_number": 2,
         "episode_number": 8
@@ -48,7 +49,8 @@
         "continue_watching": true,
         "next_up": false
       },
-      "notifies": true
+      "notifies": true,
+      "muted": false
     },
     {
       "item": {
@@ -71,7 +73,32 @@
         "continue_watching": false,
         "next_up": false
       },
-      "notifies": false
+      "notifies": false,
+      "muted": false
+    },
+    {
+      "item": {
+        "content_id": "series:wire",
+        "type": "series",
+        "title": "Title series:wire",
+        "genres": [],
+        "keywords": [],
+        "status": "matched"
+      },
+      "reasons": {
+        "favorite": true,
+        "watchlist": false,
+        "continue_watching": false,
+        "next_up": false
+      },
+      "active_reasons": {
+        "favorite": true,
+        "watchlist": false,
+        "continue_watching": false,
+        "next_up": false
+      },
+      "notifies": false,
+      "muted": true
     }
   ],
   "page": {

@@ -16,11 +16,13 @@ import (
 
 type recordingLimiter struct {
 	keys   []string
+	rates  []Rate
 	denied map[string]bool
 }
 
 func (l *recordingLimiter) Allow(_ context.Context, key string, limit Rate) AllowResult {
 	l.keys = append(l.keys, key)
+	l.rates = append(l.rates, limit)
 	return AllowResult{
 		Allowed:   !l.denied[key],
 		Limit:     max(1, int(limit.RequestsPerSecond)),
@@ -55,32 +57,6 @@ func TestAuthEndpointHandlerUsesGlobalIPAndEndpointBudgets(t *testing.T) {
 	}
 	if !slices.Equal(perKey.keys, []string{"ip:203.0.113.10", "authip:203.0.113.10:login"}) {
 		t.Fatalf("per-key limiter keys = %#v", perKey.keys)
-	}
-}
-
-func TestAuthEndpointHandlerDoesNotConsumeGlobalBudgetForRejectedClient(t *testing.T) {
-	for _, deniedKey := range []string{"ip:203.0.113.10", "authip:203.0.113.10:login"} {
-		t.Run(deniedKey, func(t *testing.T) {
-			perKey := &recordingLimiter{denied: map[string]bool{deniedKey: true}}
-			global := &recordingLimiter{}
-			mw := NewMiddleware(perKey, global, nil, true)
-			mw.cfg = DefaultConfig()
-			handler := mw.AuthEndpointHandler("login")(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				t.Fatal("next handler called for rejected request")
-			}))
-			req := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
-			req = req.WithContext(clientip.SetContext(req.Context(), "203.0.113.10"))
-			rec := httptest.NewRecorder()
-
-			handler.ServeHTTP(rec, req)
-
-			if rec.Code != http.StatusTooManyRequests {
-				t.Fatalf("response = %d, want 429", rec.Code)
-			}
-			if len(global.keys) != 0 {
-				t.Fatalf("global limiter keys = %#v, want no consumed budget", global.keys)
-			}
-		})
 	}
 }
 

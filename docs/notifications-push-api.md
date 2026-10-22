@@ -93,6 +93,48 @@ shared Keychain access group) and clear it on sign-out, server removal, or
 profile change. The server revokes it implicitly when the login session is
 revoked or expires.
 
+## Retirement without a session
+
+```
+POST /api/v2/devices/push/apple/retire
+X-Push-Installation-Key: <installation secret>
+X-Push-Generation: <positive decimal int64>
+
+{"device_id": "<installation device_id>"}
+```
+
+`retireApplePushInstallation` stops delivery to an installation when the app no
+longer has a login session, for example after it removed this server and
+discarded its session before a `push_mode: "off"` registration got through. The
+route is public: the installation key is the only authority, checked against the
+hash stored at registration. It spends the `apple_push_retire` per-IP rate-limit
+budget.
+
+Use the next unused generation, the same counter registration uses. The
+retirement becomes the installation's newest intent:
+
+- A higher generation than the stored one deletes the installation's Apple push
+  rows, which also drops their queued delivery attempts, and returns `200`
+  `{"generation": "<sent generation>", "removed": true}`. A provider request
+  already sent cannot be recalled.
+- Replaying the newest retirement exactly returns the same `200` and writes
+  nothing.
+- A lower generation, or the stored generation when it belongs to a
+  registration, returns `409`. A late retirement therefore never removes a
+  newer registration.
+- A key that does not match the stored hash returns `403`, as registration does.
+- An installation the server has no ordered record of returns `200` with
+  `removed: true` and writes nothing. Without a stored key the server cannot
+  authorize removal, so a legacy unordered registration for that `device_id` is
+  left in place.
+
+The server keeps the key hash and owner. To receive pushes again, register
+through `registerApplePushDevice` with the same key and a higher generation.
+
+Retirement does not revoke the login session, so a display token minted for that
+session keeps working until the session is revoked or expires. No pushes reach
+the installation after retirement, so the extension has no reason to use it.
+
 ## Display fetch
 
 ```
@@ -187,12 +229,51 @@ be unsent; this contract does not guarantee immediate remote-delivery revocation
 
 Once an installation adopts v2, bridge Android registration and generic device
 removal for that installation return `409 push_registration_upgrade_required`.
-Unadopted installations keep their existing bridge behavior. Deploy the migration
+Unadopted installations can still register and switch profiles within their
+account through the bridge, subject to the ownership rule below. Deploy the migration
 and guarded writer code to every API node before activating ordered native
 registration; older binaries that do not acquire the installation lock are not
 safe concurrent writers. No existing installation is enrolled by the migration.
 Native consumer adoption and its independent review remain required before the
 two existing registration/removal mappings can be ratified.
+
+### Android retirement without a session
+
+```
+POST /api/v2/notifications/push/devices/{device_id}/retire
+X-Push-Installation-Key: <installation secret>
+X-Push-Generation: <positive decimal int64>
+```
+
+`retirePushDevice` stops delivery to an Android installation when the app no
+longer has a login session, for example after it removed this server or signed
+out and cleared its login before `unregisterPushDevice` got through. It takes no
+body. The route is public: the installation key is the only authority, checked
+against the hash stored at registration. It spends the `android_push_retire`
+per-IP rate-limit budget.
+
+Use the next unused generation, the same counter registration and removal use.
+The retirement is an ordered removal at that generation on behalf of the
+installation's stored account/profile:
+
+- A higher generation than the stored one deletes the installation's Android
+  push rows, which also drops their queued delivery attempts, and returns `200`
+  `{"generation": "<sent generation>", "removed": true}`. A provider request
+  already sent cannot be recalled.
+- The stored generation returns the same `200` and writes nothing when the
+  stored intent is a removal or retirement, so a replay after a lost response is
+  safe. The owner's `unregisterPushDevice` at that generation also replays.
+- A lower generation, or the stored generation when it belongs to a
+  registration, returns `409`. A late retirement therefore never removes a
+  newer registration.
+- A key that does not match the stored hash returns `403`, as registration does.
+- An installation the server has no ordered record of (unknown, or bridge-only
+  at generation 0) returns `200` with `removed: true` and writes nothing.
+  Without a stored key the server cannot authorize removal, so a bridge
+  registration for that `device_id` is left in place.
+
+The server keeps the key hash and owner. To receive pushes again, register
+through `registerPushDevice` with the same key and a higher generation.
 
 ### Remove a browser subscription by row ID
 
@@ -213,3 +294,25 @@ This operation is **non-retryable**: a delayed repeat can remove a newer registr
 Registration is **non-retryable**. The existing endpoint upsert may re-enable delivery or replace a newer profile/token intent; it is not an ordered installation protocol. Existing provider callbacks and registration identity behavior remain unchanged, including the absence of generation-based late-callback isolation. The response describes stored registration state, not successful delivery. Android installation keys/generations and Apple display-token renewal do not apply.
 
 The browser captures authority before permission and checks it after each service-worker/subscription await and HTTP response. It sends once without authentication replay and publishes only under the captured authority. An already-issued browser or server operation cannot be undone by these checks. Failure or uncertainty does not trigger automatic retry, local unsubscribe, or compensating server removal; such compensation could remove a newer intent. Browser permission and local subscription may therefore remain after a failed registration.
+
+## Legacy mobile registration ownership
+
+The frozen bridge routes `POST /api/v1/devices/push/apple` and
+`POST /api/v1/notifications/push/devices` refuse a generation-zero registration
+when any destination for that device ID and platform belongs to another account.
+They return `409` with code `conflict` and leave every destination and queued
+attempt unchanged. A matching provider token, disabled destination, or matching
+profile ID does not bypass account ownership; profile IDs can repeat across accounts.
+
+Same-account profile switching still retires the previous profile's destination
+and attempts atomically. Refusal is checked under the existing installation lock,
+which serializes bridge writers and ordered v2 writers across API nodes.
+
+An older client switching accounts can therefore receive a conflict while the
+previous account's destination remains registered. Repeating registration does
+not resolve it, and neither does signing out or revoking the owning account's
+sessions. The conflict clears only when the owning account unregisters that
+device, or when the owning profile or account is deleted. Ordered bootstrap must
+occur while that existing account is selected; subsequent account transfers
+require its installation key and a newer generation. This repair adds no
+recovery or automatic rebinding mechanism.

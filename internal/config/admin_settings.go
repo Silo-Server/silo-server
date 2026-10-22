@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/reasoning"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
@@ -371,7 +372,7 @@ var adminSettingDefaults = map[string]string{
 	"jellyfin_compat.web_version":             DefaultJellyfinWebVersion,
 	"jellyfin_compat.web_install_dir":         DefaultJellyfinWebInstallDir,
 	"jellyfin_compat.session_ttl":             "87600h",
-	"jellyfin_compat.playback_session_ttl":    "6h",
+	"jellyfin_compat.playback_session_ttl":    defaultJellyfinCompatPlaybackSessionTTL,
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",
@@ -457,6 +458,8 @@ var adminSettingDefaults = map[string]string{
 
 	"taskmanager.history_retention_days": "30",
 	"taskmanager.history_keep_per_task":  "1000",
+
+	"autoscan.events_retention_days": "30",
 
 	// Off: server addresses non-admin users supply for history import and
 	// webhook sync must be on the public internet (historyimport).
@@ -750,7 +753,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 25000)
 	case "catalog.search.meilisearch.rebuild_task_queue_depth":
 		return normalizeAdminInt(key, value, 1, 16)
-	case "taskmanager.history_retention_days":
+	case "taskmanager.history_retention_days", "autoscan.events_retention_days":
 		return normalizeAdminInt(key, value, 1, 3650)
 	case "taskmanager.history_keep_per_task":
 		return normalizeAdminInt(key, value, 1, math.MaxInt32)
@@ -867,7 +870,37 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return value, nil
 	}
 
+	if def, ok := adminDefaultDefinition(key); ok {
+		return normalizeAdminDefault(def, value)
+	}
+
 	return raw, nil
+}
+
+// adminDefaultDefinition returns the settings-contract definition whose
+// server-wide default the key holds. A contract that fails to load leaves the
+// key unrecognized; the server refuses to start in that state anyway.
+func adminDefaultDefinition(key string) (*settingscontract.Definition, bool) {
+	contract, err := settingscontract.Load()
+	if err != nil {
+		return nil, false
+	}
+	return contract.AdminDefaultFor(key)
+}
+
+// normalizeAdminDefault validates an administrator default against the value
+// schema of the setting it stands in for. Empty clears it, so viewers inherit
+// the contract default again.
+func normalizeAdminDefault(def *settingscontract.Definition, value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	normalized, err := def.ValueSchema.NormalizeValue(json.RawMessage(value), settingscontract.ObjectSchemas())
+	if err != nil {
+		return "", fmt.Errorf("%s must be a valid %s value: %w",
+			settingscontract.AdminDefaultSettingKey(def.Key), def.Key, err)
+	}
+	return string(normalized), nil
 }
 
 // AdminSettingsCapabilities describes durable bootstrap configuration that is

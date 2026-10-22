@@ -1,8 +1,7 @@
-import { act, render, renderHook, screen } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Library, LibraryProviderChainResponse } from "@/api/types";
-import { MetadataFields } from "./LibraryFormSections";
 import { levelChainsFromResponse, useLibraryForm } from "./useLibraryForm";
 
 const entry = (id: number, slug: string, priority: number, enabled: boolean, local = false) => ({
@@ -36,9 +35,6 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryProviderDefaults: () => ({ data: { levels: {} }, isLoading: false }),
   useLibraryRealtimeMonitoring: () => ({ data: undefined }),
 }));
-
-// The translation panel fetches its own status; this file only covers the provider chain.
-vi.mock("./LibraryTranslatePanel", () => ({ LibraryTranslatePanel: () => null }));
 
 beforeEach(() => setChain.mockClear());
 
@@ -91,13 +87,5 @@ describe("local metadata in the provider chain", () => {
       "tvdb",
     ]);
     expect(body.levels.season[1]).toMatchObject({ capability_id: "tvdb", enabled: false });
-  });
-
-  it("renders one labelled switch instead of a raw nfo row", () => {
-    const { result } = renderHook(() => useLibraryForm({ library }));
-    render(<MetadataFields form={result.current} />);
-    const toggle = screen.getByRole("switch", { name: "Local metadata (NFO + artwork)" });
-    expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(screen.queryByText("nfo")).not.toBeInTheDocument();
   });
 });

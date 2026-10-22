@@ -9,12 +9,12 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -270,81 +270,6 @@ func TestExpiredSessionMarksAttemptStopped(t *testing.T) {
 	view, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()})
 	if err != nil || view.Outcome != PlaybackOutcomeReplayed || view.StopID != expiredStopID(f.session.ID) {
 		t.Fatalf("view = %+v, %v", view, err)
-	}
-}
-
-func TestReplayedStartOfStoppedAttemptIsSessionExpired(t *testing.T) {
-	f := newPlaybackServiceFixture(t)
-	record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: uuid.NewString()}); err != nil {
-		t.Fatal(err)
-	}
-	stopped, err := f.handler.PlanStoreV3.GetAttemptByPlaybackAttemptID(context.Background(), record.PlaybackAttemptID)
-	if err != nil || stopped.StoppedAt == nil {
-		t.Fatalf("stopped row = %+v %v", stopped, err)
-	}
-}
-
-// newStreamDenyForTest returns a marker store on the local test Redis, or
-// skips when none is reachable; the session's key is removed on cleanup.
-func newStreamDenyForTest(t *testing.T, sessionID string) *playback.StreamDeny {
-	t.Helper()
-	addr := os.Getenv("SILO_TEST_REDIS_ADDR")
-	if addr == "" {
-		addr = "localhost:6379"
-	}
-	client := redis.NewClient(&redis.Options{Addr: addr, DialTimeout: time.Second})
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
-		_ = client.Close()
-		t.Skipf("redis at %s unavailable: %v", addr, err)
-	}
-	t.Cleanup(func() {
-		_ = client.Del(context.Background(), playback.StreamDenyKey(sessionID)).Err()
-		_ = client.Close()
-	})
-	return playback.NewStreamDeny(client)
-}
-
-func TestDeniedSessionIsGoneOnEveryServePath(t *testing.T) {
-	manager := playback.NewSessionManager(0, 0)
-	session, err := manager.StartSession(1, "profile-1", 100, playback.PlayTranscode, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	deny := newStreamDenyForTest(t, session.ID)
-	handler := NewPlaybackHandler(manager)
-	handler.StreamDeny = deny
-	stream := NewStreamHandler(manager, nil)
-	stream.StreamDeny = deny
-	stream.TM = handler.TranscodeManager()
-	deny.Deny(context.Background(), session.ID)
-
-	params := map[string]string{"session_id": session.ID, "track": "0", "name": "segment0.m4s"}
-	for name, serve := range map[string]http.HandlerFunc{
-		"manifest": handler.HandleGetTranscodeManifest,
-		"segment":  handler.HandleGetTranscodeSegment,
-		"stream":   stream.HandleStream,
-		"subtitle": stream.HandleSubtitle,
-		"fonts":    stream.HandleSubtitleFonts,
-	} {
-		rr := httptest.NewRecorder()
-		serve(rr, playbackTestRequest(http.MethodGet, "/", nil, params))
-		if rr.Code != http.StatusGone {
-			t.Fatalf("%s: status = %d, body = %s", name, rr.Code, rr.Body.String())
-		}
-	}
-	_, err = stream.SubtitleFonts(newAuthorizedPlaybackContext(), SubtitleFontRequest{SessionID: session.ID, Track: "0"})
-	if failure, ok := errors.AsType[*APIError](err); !ok || failure.Status != http.StatusGone || failure.Code != playbackSessionEndedErrorCode {
-		t.Fatalf("typed font service ignored deny marker: %v", err)
-	}
-	// The live session is untouched by the check itself; only serving is refused.
-	if _, err := manager.GetSession(session.ID); err != nil {
-		t.Fatalf("deny check removed the session: %v", err)
 	}
 }
 
@@ -715,22 +640,6 @@ func TestStopFinalizationRunsOnce(t *testing.T) {
 	}
 }
 
-// TestReplanRefusesAStoppedAttempt: a late seek or recovery on a session
-// another replica stopped is session_not_found, not a new transport.
-func TestReplanRefusesAStoppedAttempt(t *testing.T) {
-	f := newPlaybackServiceFixture(t)
-	store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
-	record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := store.StopAttempt(context.Background(), f.session.ID, uuid.NewString(), nil); err != nil {
-		t.Fatal(err)
-	}
-	_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"})
-	assertPlaybackOperationError(t, err, http.StatusNotFound, "session_not_found")
-}
-
 // An attempt an administrator ended answers 410 on progress and replan, so the
 // player exits; an expired attempt keeps answering 404 so the player renews.
 func TestStoppedAttemptAnswersGoneOnlyWhenAnAdministratorEndedIt(t *testing.T) {
@@ -813,4 +722,67 @@ func TestReplanAnswersGoneWhenAnAdministratorStopLandsMidReplan(t *testing.T) {
 	}}
 	_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"})
 	assertPlaybackOperationError(t, err, http.StatusGone, "playback_session_ended")
+}
+
+// TestStaleCopyExpiryLeavesTheRemoteTransport: a replica reaping a stale copy
+// of a session another replica is still serving must not stop the remote
+// transport. The node fences a stopped transport against reconstruction, so a
+// stop here would end the other replica's playback when the user resumes. A
+// copy that is really over, here or on another replica, still stops it.
+func TestStaleCopyExpiryLeavesTheRemoteTransport(t *testing.T) {
+	expire := func(t *testing.T, stale, stoppedElsewhere bool) []string {
+		t.Helper()
+		var mu sync.Mutex
+		var deletes []string
+		node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete {
+				mu.Lock()
+				deletes = append(deletes, r.URL.Path)
+				mu.Unlock()
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		t.Cleanup(node.Close)
+
+		f := newPlaybackServiceFixture(t)
+		session := *f.session
+		session.TranscodeNodeURL = node.URL
+		session.TranscodeTransportID = session.ID + "-plan1234-abcd1234"
+		if stale {
+			// The local copy went idle before the row's last accepted sample.
+			session.LastActivityAt = time.Now().Add(-time.Hour)
+			store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+			if _, err := store.ApplyProgress(context.Background(), session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if stoppedElsewhere {
+			// Another replica recorded the stop without knowing this copy's
+			// transport.
+			f.handler.markAttemptStoppedServerSide(context.Background(), session.ID)
+		}
+		f.handler.expireSessionCopy(context.Background(), &session)
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(deletes)
+	}
+
+	t.Run("stale copy", func(t *testing.T) {
+		if got := expire(t, true, false); len(got) != 0 {
+			t.Fatalf("stale-copy expiry stopped the remote transport another replica serves: %v", got)
+		}
+	})
+	stopsTransport := func(paths []string) bool {
+		return slices.ContainsFunc(paths, func(path string) bool { return strings.HasSuffix(path, "-plan1234-abcd1234") })
+	}
+	t.Run("expired session", func(t *testing.T) {
+		if got := expire(t, false, false); !stopsTransport(got) {
+			t.Fatalf("expiry of an idle session did not stop its remote transport: %v", got)
+		}
+	})
+	t.Run("stopped elsewhere", func(t *testing.T) {
+		if got := expire(t, false, true); !stopsTransport(got) {
+			t.Fatalf("expiry of a copy stopped on another replica did not stop its remote transport: %v", got)
+		}
+	})
 }

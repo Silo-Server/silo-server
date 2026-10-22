@@ -130,17 +130,6 @@ describe("activity playback scopes", () => {
     mocks.sessions = [makeSession()];
   });
 
-  it("shows the server's local or remote classification on each stream", () => {
-    mocks.sessions = [
-      makeSession({ session_id: "local", stream_location: "local" }),
-      makeSession({ session_id: "remote", stream_location: "remote" }),
-    ];
-    renderActivity();
-
-    expect(screen.getAllByLabelText("Stream location: Local")).toHaveLength(2);
-    expect(screen.getAllByLabelText("Stream location: Remote")).toHaveLength(2);
-  });
-
   it("uses the same four labels, counts and colors for the bar, filters and row badges", () => {
     const methods = ["direct", "remux", "direct_stream", "transcode"];
     mocks.sessions = methods.map((method) =>

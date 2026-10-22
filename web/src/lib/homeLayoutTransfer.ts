@@ -74,7 +74,11 @@ export function overrideToWrite(override: SectionOverrideRead): SectionOverrideW
   return write;
 }
 
-/** Builds the export file. Pages without saved overrides are left out. */
+/**
+ * Builds the export file. Every page is written, including one without saved
+ * overrides: an empty page records that the profile shows the server's rows
+ * there, so importing it on the same server restores them.
+ */
 export function buildHomeLayoutFile(input: {
   serverId: string;
   exportedAt: Date;
@@ -89,13 +93,11 @@ export function buildHomeLayoutFile(input: {
     server_id: input.serverId,
     libraries: input.libraries.map(({ id, name, type }) => ({ id, name, type })),
     ...(input.hideWatchedItems !== undefined ? { hide_watched_items: input.hideWatchedItems } : {}),
-    pages: input.pages
-      .filter((page) => page.overrides.length > 0)
-      .map((page) => ({
-        scope: page.scope,
-        ...(page.scope === "library" ? { library_id: page.libraryId } : {}),
-        overrides: page.overrides.map(overrideToWrite),
-      })),
+    pages: input.pages.map((page) => ({
+      scope: page.scope,
+      ...(page.scope === "library" ? { library_id: page.libraryId } : {}),
+      overrides: page.overrides.map(overrideToWrite),
+    })),
   };
 }
 
@@ -198,6 +200,9 @@ export function parseHomeLayoutFile(text: string): HomeLayoutParseResult {
       const write = sanitizeOverride(override);
       if (write) page.overrides.push(write);
     }
+    // An empty page restores the server's rows on import, so a page emptied
+    // by dropping damaged entries is left out rather than read as one.
+    if (raw.overrides.length > 0 && page.overrides.length === 0) continue;
     pages.push(page);
   }
 
@@ -379,6 +384,8 @@ function sectionSkipReason(
   const recipeType = override.user_section_type || override.section_type || "";
   const isFilterType = FILTER_SECTION_TYPES.has(recipeType);
   const recipe = target.recipes.get(recipeType);
+  // The server refuses a new next_up row: it adds the only one itself.
+  if (recipeType === "next_up") return "unknown_recipe";
   // The gallery omits hidden recipes the server still resolves (award_winners),
   // so on the same server a saved row's type is trusted.
   if (!recipe && !isFilterType && !sameServer) return "unknown_recipe";
@@ -526,7 +533,11 @@ export function planHomeLayoutImport(
       planned.overrides.push(write);
     }
 
-    if (planned.overrides.length > 0) plan.pages.push(planned);
+    // A page exported without overrides showed the server's rows. On the same
+    // server importing it restores them; another server's rows differ, so
+    // there it carries nothing.
+    const restoresServerRows = sameServer && page.overrides.length === 0;
+    if (planned.overrides.length > 0 || restoresServerRows) plan.pages.push(planned);
   }
 
   return plan;

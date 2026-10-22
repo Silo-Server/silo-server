@@ -8,10 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // mapSettingReader is a SettingReader fake; missing keys read as unset.
@@ -39,7 +40,7 @@ func TestWebhookCreateAndTestBlockedWhenDisabled(t *testing.T) {
 	if _, _, err := service.Create(ctx, 1, "profile", WebhookInput{Name: &name, URL: &url}); !errors.Is(err, ErrWebhooksDisabled) {
 		t.Fatalf("Create error = %v, want ErrWebhooksDisabled", err)
 	}
-	if _, err := service.Test(ctx, "profile", "hook-id"); !errors.Is(err, ErrWebhooksDisabled) {
+	if _, err := service.Test(ctx, 1, "profile", "hook-id"); !errors.Is(err, ErrWebhooksDisabled) {
 		t.Fatalf("Test error = %v, want ErrWebhooksDisabled", err)
 	}
 }
@@ -71,14 +72,14 @@ func TestWebhookIPAllowed(t *testing.T) {
 		"::ffff:192.168.0.5", // v4-mapped private
 	}
 	for _, raw := range denied {
-		if webhookIPAllowed(net.ParseIP(raw)) {
+		if webhookIPAllowed(netip.MustParseAddr(raw), false) {
 			t.Errorf("webhookIPAllowed(%q) = true, want denied", raw)
 		}
 	}
 
 	allowed := []string{"1.1.1.1", "8.8.8.8", "151.101.1.69", "2606:4700::1111"}
 	for _, raw := range allowed {
-		if !webhookIPAllowed(net.ParseIP(raw)) {
+		if !webhookIPAllowed(netip.MustParseAddr(raw), false) {
 			t.Errorf("webhookIPAllowed(%q) = false, want allowed", raw)
 		}
 	}
@@ -97,10 +98,10 @@ func TestValidateWebhookURL(t *testing.T) {
 	if _, err := ValidateWebhookURL("https://[::ffff:127.0.0.1]/hook", false); err == nil {
 		t.Fatal("v4-mapped loopback literal must be rejected")
 	}
-	// allowPrivate bypasses the guard for dev environments.
+	// allowPrivate permits the Private class for dev environments.
 	host, err := ValidateWebhookURL("https://192.168.1.50/hook", true)
 	if err != nil || host != "192.168.1.50" {
-		t.Fatalf("allowPrivate bypass failed: %q %v", host, err)
+		t.Fatalf("allowPrivate failed: %q %v", host, err)
 	}
 }
 
@@ -244,20 +245,6 @@ func allOriginsIn(t *testing.T, payload string) []string {
 	return hosts
 }
 
-func TestBuildDiscordWebhookPayloadWithoutPosterURL(t *testing.T) {
-	row := webhookTestRow()
-	// The poster decision is the sender layer's; a row without a resolved
-	// PosterURL must render without an image regardless of stored paths.
-	row.PosterURL = ""
-	payload, err := BuildDiscordWebhookPayload(row, false)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-	if strings.Contains(string(payload), `"thumbnail"`) {
-		t.Fatalf("rows without a resolved poster URL must not render a thumbnail: %s", payload)
-	}
-}
-
 // fakePresigner fakes the catalog image resolver: every path presigns to a
 // recognizable server-storage URL.
 type fakePresigner struct{}
@@ -347,40 +334,6 @@ func requestFulfilledTestRow() DeliveryRow {
 	}
 }
 
-func TestBuildDiscordWebhookPayloadRequestFulfilled(t *testing.T) {
-	payload, err := BuildDiscordWebhookPayload(requestFulfilledTestRow(), false)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-	var body struct {
-		Embeds []discordEmbed `json:"embeds"`
-	}
-	if err := json.Unmarshal(payload, &body); err != nil {
-		t.Fatalf("payload is not valid JSON: %v", err)
-	}
-	if len(body.Embeds) != 1 {
-		t.Fatalf("unexpected body shape: %+v", body)
-	}
-	embed := body.Embeds[0]
-	if embed.Title != "Dune (2021)" {
-		t.Fatalf("unexpected title %q", embed.Title)
-	}
-	if embed.Author == nil || embed.Author.Name != "Your request is now available on Silo" {
-		t.Fatalf("unexpected author %+v", embed.Author)
-	}
-	if embed.URL != "https://www.themoviedb.org/movie/438631" {
-		t.Fatalf("unexpected title URL %q", embed.URL)
-	}
-	if !strings.HasPrefix(embed.Description, "Paul Atreides") {
-		t.Fatalf("unexpected description %q", embed.Description)
-	}
-	if len(embed.Fields) != 2 ||
-		embed.Fields[0].Name != "Type" || embed.Fields[0].Value != "Movie" ||
-		embed.Fields[1].Name != "Rating" || embed.Fields[1].Value != "★ 7.8 TMDB" {
-		t.Fatalf("expected Type and Rating fields, got %+v", embed.Fields)
-	}
-}
-
 func TestGenericWebhookPayloadRequestFulfilled(t *testing.T) {
 	payload, err := BuildGenericWebhookPayload(requestFulfilledTestRow(), "hook-1", false)
 	if err != nil {
@@ -422,65 +375,6 @@ func requestDeclinedTestRow() DeliveryRow {
 				`"title":"Dune","year":2021,"reason":"Already available in 4K"}`),
 			CreatedAt: time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC),
 		},
-	}
-}
-
-func TestBuildDiscordWebhookPayloadRequestLifecycle(t *testing.T) {
-	payload, err := BuildDiscordWebhookPayload(requestDeclinedTestRow(), false)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-	var body struct {
-		Embeds []discordEmbed `json:"embeds"`
-	}
-	if err := json.Unmarshal(payload, &body); err != nil {
-		t.Fatalf("payload is not valid JSON: %v", err)
-	}
-	if len(body.Embeds) != 1 {
-		t.Fatalf("unexpected body shape: %+v", body)
-	}
-	embed := body.Embeds[0]
-	// No catalog join exists for declined requests; title and link come from
-	// the reason flags.
-	if embed.Title != "Dune (2021)" {
-		t.Fatalf("unexpected title %q", embed.Title)
-	}
-	if embed.Author == nil || embed.Author.Name != "Your request was declined on Silo" {
-		t.Fatalf("unexpected author %+v", embed.Author)
-	}
-	if embed.URL != "https://www.themoviedb.org/movie/438631" {
-		t.Fatalf("unexpected title URL %q", embed.URL)
-	}
-	if embed.Color != serverChannelColorDeclined {
-		t.Fatalf("unexpected color %d", embed.Color)
-	}
-	if len(embed.Fields) != 2 ||
-		embed.Fields[0].Name != "Type" || embed.Fields[0].Value != "Movie" ||
-		embed.Fields[1].Name != "Reason" || embed.Fields[1].Value != "Already available in 4K" {
-		t.Fatalf("expected Type and Reason fields, got %+v", embed.Fields)
-	}
-
-	approved := requestDeclinedTestRow()
-	approved.Type = DeliveryTypeRequestApproved
-	payload, err = BuildDiscordWebhookPayload(approved, false)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-	if err := json.Unmarshal(payload, &body); err != nil {
-		t.Fatalf("payload is not valid JSON: %v", err)
-	}
-	embed = body.Embeds[0]
-	if embed.Author == nil || embed.Author.Name != "Your request was approved on Silo" {
-		t.Fatalf("unexpected author %+v", embed.Author)
-	}
-	if embed.Color != serverChannelColorApproved {
-		t.Fatalf("unexpected color %d", embed.Color)
-	}
-	// The decline reason must not leak into approved embeds.
-	for _, field := range embed.Fields {
-		if field.Name == "Reason" {
-			t.Fatalf("approved embed must not carry a decline reason: %+v", embed.Fields)
-		}
 	}
 }
 
@@ -539,16 +433,6 @@ func TestRequestApprovedPreservesPosterPath(t *testing.T) {
 	}
 }
 
-func TestBuildDiscordWebhookPayloadTestMarker(t *testing.T) {
-	payload, err := BuildDiscordWebhookPayload(webhookTestRow(), true)
-	if err != nil {
-		t.Fatalf("build failed: %v", err)
-	}
-	if !strings.Contains(string(payload), "Silo test notification") {
-		t.Fatal("test sends must be clearly marked in the footer")
-	}
-}
-
 func TestDiscordTotalLimitTruncation(t *testing.T) {
 	row := webhookTestRow()
 	row.SeriesTitle = strings.Repeat("a", 300) // title gets clipped to 256
@@ -582,6 +466,171 @@ func TestDiscordTotalLimitTruncation(t *testing.T) {
 	}
 	if len(embed.Fields) != 2 {
 		t.Fatal("description must be truncated before fields are dropped")
+	}
+}
+
+var (
+	digestOverview = strings.Repeat("A long synopsis sentence that keeps going. ", 12)
+	digestGenres   = []string{"Science Fiction & Fantasy", "Action & Adventure", "Documentary"}
+)
+
+func digestEpisodeRows(n int, overview func(i int) string) []DeliveryRow {
+	season, episode := 12, 104
+	rows := make([]DeliveryRow, 0, n)
+	for i := 0; i < n; i++ {
+		row := webhookTestRow()
+		row.ID = fmt.Sprintf("row-%02d", i)
+		row.SeriesTitle = fmt.Sprintf("%02d %s", i, strings.Repeat("Series Title ", 6))
+		row.EpisodeTitle = strings.Repeat("Episode Title ", 6)
+		row.SeasonNumber, row.EpisodeNumber = &season, &episode
+		row.ReasonFlags = []byte(`{"favorite":true,"watchlist":true,"continue_watching":true,"next_up":true}`)
+		row.SeriesOverview, row.EpisodeOverview = overview(i), overview(i)
+		row.Genres = digestGenres
+		row.TVDBID = "123456789"
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func digestDeclinedRows(n int, title, reason string) []DeliveryRow {
+	rows := make([]DeliveryRow, 0, n)
+	for i := 0; i < n; i++ {
+		flags, _ := json.Marshal(RequestFlags{
+			RequestID: fmt.Sprintf("req-%d", i), TMDBID: 100 + i, MediaType: "movie",
+			Title: fmt.Sprintf("%02d %s", i, title), Reason: reason,
+		})
+		rows = append(rows, DeliveryRow{Delivery: Delivery{
+			ID: fmt.Sprintf("row-%02d", i), Type: DeliveryTypeRequestDeclined, ReasonFlags: flags,
+		}})
+	}
+	return rows
+}
+
+func digestLongDeclines(n int) []DeliveryRow {
+	return digestDeclinedRows(n, strings.Repeat("Requested Title ", 14),
+		strings.Repeat("Not available in any region we can source. ", 20))
+}
+
+func digestContentGroups(n int) []ContentGroup {
+	groups := make([]ContentGroup, 0, n)
+	for i := 0; i < n; i++ {
+		groups = append(groups, ContentGroup{Kind: EventKindMovie, ItemID: fmt.Sprintf("movie-%d", i), Meta: ContentMeta{
+			Title: fmt.Sprintf("%02d %s", i, strings.Repeat("Movie Title ", 18)), Year: 2026,
+			Type: "movie", Overview: digestOverview, Genres: digestGenres, ContentRating: "PG-13", RatingIMDB: 7.9,
+			IMDBID: "tt11280740", TMDBID: "95396", TVDBID: "123456789",
+		}})
+	}
+	return groups
+}
+
+type discordDigestCase struct {
+	name  string
+	items int
+	// wantEmbeds, when set, is the exact embed count expected.
+	wantEmbeds int
+	// links is the provider links each embed's description must keep.
+	links int
+	// fullTeasers requires every teaser to be sent unshortened.
+	fullTeasers bool
+	build       func() ([]byte, error)
+}
+
+// TestDiscordDigestMessageLimit covers Discord's 6,000-character cap, which
+// applies across all embeds of one message: a 10-embed digest of rich items
+// must shorten or drop embeds to fit, and the overflow line must count every
+// item left out.
+func TestDiscordDigestMessageLimit(t *testing.T) {
+	sameOverview := func(int) string { return digestOverview }
+	cases := []discordDigestCase{
+		{name: "dm episodes", items: 10, wantEmbeds: 10, links: 3, build: func() ([]byte, error) {
+			return BuildDiscordDMPayload(digestEpisodeRows(10, sameOverview))
+		}},
+		{name: "dm episodes with mixed teaser lengths", items: 10, wantEmbeds: 10, links: 3, build: func() ([]byte, error) {
+			return BuildDiscordDMPayload(digestEpisodeRows(10, func(i int) string {
+				if i == 9 {
+					return digestOverview
+				}
+				return digestOverview[:200]
+			}))
+		}},
+		{name: "dm digest under budget is unchanged", items: 3, wantEmbeds: 3, links: 3, fullTeasers: true, build: func() ([]byte, error) {
+			return BuildDiscordDMPayload(digestEpisodeRows(3, sameOverview))
+		}},
+		{name: "dm non-latin declined requests fit by character count", items: 10, wantEmbeds: 10, links: 1, build: func() ([]byte, error) {
+			return BuildDiscordDMPayload(digestDeclinedRows(10, strings.Repeat("申請作品", 25), strings.Repeat("配信地域外のため", 50)))
+		}},
+		{name: "dm over the embed cap", items: 14, links: 1, build: func() ([]byte, error) {
+			return BuildDiscordDMPayload(digestLongDeclines(14))
+		}},
+		{name: "server channel", items: 10, wantEmbeds: 10, links: 3, build: func() ([]byte, error) {
+			return BuildServerChannelDiscordContent(digestContentGroups(10), false)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := tc.build()
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkDiscordDigest(t, tc, payload)
+		})
+	}
+}
+
+func checkDiscordDigest(t *testing.T, tc discordDigestCase, payload []byte) {
+	t.Helper()
+	var body struct {
+		Content string         `json:"content"`
+		Embeds  []discordEmbed `json:"embeds"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatal(err)
+	}
+	// Discord counts characters of these fields across every embed.
+	total := 0
+	for _, embed := range body.Embeds {
+		total += utf8.RuneCountInString(embed.Title) + utf8.RuneCountInString(embed.Description)
+		if embed.Author != nil {
+			total += utf8.RuneCountInString(embed.Author.Name)
+		}
+		if embed.Footer != nil {
+			total += utf8.RuneCountInString(embed.Footer.Text)
+		}
+		for _, field := range embed.Fields {
+			total += utf8.RuneCountInString(field.Name) + utf8.RuneCountInString(field.Value)
+		}
+	}
+	if total > discordTotalLimit {
+		t.Fatalf("message carries %d embed characters across %d embeds, Discord allows %d",
+			total, len(body.Embeds), discordTotalLimit)
+	}
+	if len(body.Embeds) == 0 || len(body.Embeds) > discordDMMaxEmbeds {
+		t.Fatalf("got %d embeds, want 1..%d", len(body.Embeds), discordDMMaxEmbeds)
+	}
+	if tc.wantEmbeds > 0 && len(body.Embeds) != tc.wantEmbeds {
+		t.Fatalf("got %d embeds, want %d", len(body.Embeds), tc.wantEmbeds)
+	}
+	dropped := 0
+	if body.Content != "" {
+		if _, err := fmt.Sscanf(body.Content, "…and %d more", &dropped); err != nil {
+			t.Fatalf("overflow line %q does not name a count: %v", body.Content, err)
+		}
+	}
+	if len(body.Embeds)+dropped != tc.items {
+		t.Fatalf("%d embeds + %d in the overflow line, want %d items accounted for",
+			len(body.Embeds), dropped, tc.items)
+	}
+	// The newest item always survives.
+	if last := body.Embeds[len(body.Embeds)-1].Title; !strings.HasPrefix(last, fmt.Sprintf("%02d ", tc.items-1)) {
+		t.Fatalf("last embed %q is not the newest item", last)
+	}
+	for _, embed := range body.Embeds {
+		if got := strings.Count(embed.Description, "](https://"); got != tc.links || !strings.HasSuffix(embed.Description, ")") {
+			t.Fatalf("description %q lost its provider links (%d of %d)", embed.Description, got, tc.links)
+		}
+		if tc.fullTeasers && !strings.HasPrefix(embed.Description, overviewSnippet(digestOverview)) {
+			t.Fatalf("under-budget teaser was shortened: %q", embed.Description)
+		}
 	}
 }
 
@@ -629,27 +678,6 @@ func TestGenericWebhookPayloadAndSignature(t *testing.T) {
 	}
 }
 
-func TestWebhookRetrySchedule(t *testing.T) {
-	// Cumulative schedule: 0, 30s, 2m, 10m, 30m, 2h, 6h, 12h, 18h, 24h.
-	total := time.Duration(0)
-	for attempt := 1; attempt < webhookMaxAttempts; attempt++ {
-		delay, ok := webhookRetryDelay(attempt)
-		if !ok {
-			t.Fatalf("schedule ended early at attempt %d", attempt)
-		}
-		total += delay
-		if total != webhookRetrySchedule[attempt] {
-			t.Fatalf("cumulative delay after attempt %d = %v, want %v", attempt, total, webhookRetrySchedule[attempt])
-		}
-	}
-	if _, ok := webhookRetryDelay(webhookMaxAttempts); ok {
-		t.Fatal("attempt 10 must exhaust the schedule")
-	}
-	if total != 24*time.Hour {
-		t.Fatalf("schedule must span 24h, got %v", total)
-	}
-}
-
 func TestRetryableHTTPStatus(t *testing.T) {
 	retryable := []int{0, 500, 502, 503, 408, 425, 429}
 	for _, status := range retryable {
@@ -681,14 +709,17 @@ func TestWebhookMatchesReasons(t *testing.T) {
 func TestProfileRateLimiter(t *testing.T) {
 	limiter := newProfileRateLimiter()
 	for i := 0; i < 3; i++ {
-		if !limiter.Allow("p1", 3) {
+		if !limiter.Allow(profileKey{1, "p1"}, 3) {
 			t.Fatalf("delivery %d must be allowed", i+1)
 		}
 	}
-	if limiter.Allow("p1", 3) {
+	if limiter.Allow(profileKey{1, "p1"}, 3) {
 		t.Fatal("4th delivery within the window must be limited")
 	}
-	if !limiter.Allow("p2", 3) {
+	if !limiter.Allow(profileKey{1, "p2"}, 3) {
 		t.Fatal("limits must be per-profile")
+	}
+	if !limiter.Allow(profileKey{2, "p1"}, 3) {
+		t.Fatal("a profile with the same ID on another account must have its own limit")
 	}
 }

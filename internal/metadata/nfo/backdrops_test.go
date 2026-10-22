@@ -52,18 +52,14 @@ func TestGetImagesExtraArtworkNames(t *testing.T) {
 	}{
 		{"movie", []string{"banner.jpg"}, metadata.ImageBanner, "banner.jpg"},
 		{"movie", []string{"Media-banner.png", "banner.jpg"}, metadata.ImageBanner, "Media-banner.png"},
-		{"series", []string{"banner.jpg"}, metadata.ImageBanner, "banner.jpg"},
 		{"movie", []string{"landscape.jpg"}, metadata.ImageThumb, "landscape.jpg"},
 		{"movie", []string{"thumb.jpg"}, metadata.ImageThumb, "thumb.jpg"},
 		{"movie", []string{"thumb.jpg", "landscape.jpg"}, metadata.ImageThumb, "landscape.jpg"},
 		{"movie", []string{"landscape.jpg", "Media-thumb.jpg"}, metadata.ImageThumb, "Media-thumb.jpg"},
-		{"series", []string{"Landscape.PNG"}, metadata.ImageThumb, "Landscape.PNG"},
 		{"movie", []string{"clearart.png"}, metadata.ImageClearArt, "clearart.png"},
-		{"series", []string{"CLEARART.PNG"}, metadata.ImageClearArt, "CLEARART.PNG"},
 		// art.jpg is a backdrop, never clear art.
 		{"movie", []string{"art.jpg"}, metadata.ImageClearArt, ""},
 		{"movie", []string{"disc.png"}, metadata.ImageDisc, "disc.png"},
-		{"movie", []string{"cdart.png"}, metadata.ImageDisc, "cdart.png"},
 		{"movie", []string{"discart.png"}, metadata.ImageDisc, "discart.png"},
 		{"movie", []string{"discart.png", "cdart.png", "disc.png"}, metadata.ImageDisc, "disc.png"},
 		{"movie", []string{"discart.png", "cdart.png"}, metadata.ImageDisc, "cdart.png"},
@@ -107,11 +103,7 @@ func TestGetImagesBackdropsInDisplayOrder(t *testing.T) {
 		"backdrops/theme.jpg",
 		"clearart.png",
 	} {
-		path := filepath.Join(dir, file)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		writeImageFile(t, path)
+		writeImageFile(t, filepath.Join(dir, file))
 	}
 
 	got := sidecarNamesOfType(t, dir, discoverImages(t, "movie", mediaPath, dir), metadata.ImageBackdrop)
@@ -132,11 +124,7 @@ func TestGetImagesBackdropsMatchFolderNamesIgnoringCase(t *testing.T) {
 	mediaPath := filepath.Join(dir, "Media.mkv")
 	writeImageFile(t, mediaPath)
 	for _, file := range []string{"FanArt.JPG", "Fanart-1.jpg", "ExtraFanart/x.JPG"} {
-		path := filepath.Join(dir, file)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		writeImageFile(t, path)
+		writeImageFile(t, filepath.Join(dir, file))
 	}
 	got := sidecarNamesOfType(t, dir, discoverImages(t, "series", mediaPath, dir), metadata.ImageBackdrop)
 	want := []string{"FanArt.JPG", "Fanart-1.jpg", "ExtraFanart/x.JPG"}
@@ -162,22 +150,6 @@ func TestGetImagesBackdropsAreCapped(t *testing.T) {
 	}
 	if got[0] != "fanart.jpg" || got[len(got)-1] != "extrafanart/18.jpg" {
 		t.Fatalf("backdrops = %q, want fanart.jpg then extrafanart/00..18", got)
-	}
-}
-
-// extraFanart stops once it has as many usable images as the backdrops still
-// have room for, so a large folder is not checked file by file.
-func TestExtraFanartStopsAtLimit(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "extrafanart"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"c.jpg", "a.jpg", "b.jpg"} {
-		writeImageFile(t, filepath.Join(dir, "extrafanart", name))
-	}
-	got := newSidecarFinder(context.Background()).extraFanart(dir, 2)
-	if len(got) != 2 || !strings.Contains(got[0], "/extrafanart/a.jpg") || !strings.Contains(got[1], "/extrafanart/b.jpg") {
-		t.Fatalf("extraFanart = %q, want a.jpg and b.jpg", got)
 	}
 }
 

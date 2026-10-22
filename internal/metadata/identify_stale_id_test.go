@@ -40,40 +40,25 @@ func (p *notFoundMetadataProvider) GetMetadata(_ context.Context, req MetadataRe
 // (ModeIdentify). The stale tmdb ID must not be re-injected into the identify
 // request. The rejected value remains a non-actionable negative-cache entry so
 // a later detail response cannot resurrect it.
+// seedFormula1WithStaleTMDB stores the matched Formula 1 series "existing-1"
+// with tmdb 324880 recorded stale. A non-empty durableKey also stores 324880 as
+// a durable provider-ID row under that key.
+func seedFormula1WithStaleTMDB(t *testing.T, h *testHarness, durableKey string) (*fakeProviderIDRepo, *fakeStaleIDRepo) {
+	t.Helper()
+	var durable []string
+	if durableKey != "" {
+		durable = []string{durableKey, "324880"}
+	}
+	return seedProviderIdentity(t, h, &models.MediaItem{
+		ContentID: "existing-1", Type: "series", Title: "Formula 1", Year: 2016, Status: "matched",
+	}, durable, []string{"tmdb", "324880"})
+}
+
 func TestProcess_IdentifyDoesNotResurrectRecordedStaleProviderID(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
 
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "existing-1",
-		Type:      "series",
-		Title:     "Formula 1",
-		Year:      2016,
-		Status:    "matched",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set("existing-1", &models.MediaItemProviderID{
-		ContentID:  "existing-1",
-		ItemType:   "series",
-		Provider:   "tmdb",
-		ProviderID: "324880",
-	})
-	h.service.providerIDRepo = providerRepo
-
-	staleRepo := newFakeStaleIDRepo()
-	staleRepo.set("existing-1", &models.StaleMediaID{
-		ContentID:  "existing-1",
-		Provider:   "tmdb",
-		ProviderID: "324880",
-	})
-	h.service.staleIDRepo = staleRepo
+	providerRepo, staleRepo := seedFormula1WithStaleTMDB(t, h, "tmdb")
 
 	tmdb := &notFoundMetadataProvider{slug: "tmdb"}
 	tvdb := &capturingMetadataProvider{
@@ -129,23 +114,9 @@ func TestProcess_IdentifyPreservesProviderAnchoredContentID(t *testing.T) {
 	)
 	h := newTestHarness()
 	ctx := context.Background()
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: contentID, Type: "movie", Title: correctedTitle, Year: 2020,
-		Status: "matched", TmdbID: "777",
-		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set(contentID, &models.MediaItemProviderID{
-		ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "777",
-	})
-	h.service.providerIDRepo = providerRepo
-	staleRepo := newFakeStaleIDRepo()
-	staleRepo.set(contentID, &models.StaleMediaID{
-		ContentID: contentID, Provider: "tmdb", ProviderID: "777",
-	})
-	h.service.staleIDRepo = staleRepo
+	seedProviderIdentity(t, h, &models.MediaItem{
+		ContentID: contentID, Type: "movie", Title: correctedTitle, Year: 2020, Status: "matched", TmdbID: "777",
+	}, []string{"tmdb", "777"}, []string{"tmdb", "777"})
 
 	provider := &capturingMetadataProvider{response: &MetadataResult{
 		HasMetadata: true, Title: correctedTitle,
@@ -174,36 +145,7 @@ func TestProcess_IdentifySuppressesStaleIDDespiteKeyCasing(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
 
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "existing-1",
-		Type:      "series",
-		Title:     "Formula 1",
-		Year:      2016,
-		Status:    "matched",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	providerRepo := newFakeProviderIDRepo()
-	providerRepo.set("existing-1", &models.MediaItemProviderID{
-		ContentID:  "existing-1",
-		ItemType:   "series",
-		Provider:   "TMDB ",
-		ProviderID: "324880",
-	})
-	h.service.providerIDRepo = providerRepo
-
-	staleRepo := newFakeStaleIDRepo()
-	staleRepo.set("existing-1", &models.StaleMediaID{
-		ContentID:  "existing-1",
-		Provider:   "tmdb",
-		ProviderID: "324880",
-	})
-	h.service.staleIDRepo = staleRepo
+	seedFormula1WithStaleTMDB(t, h, "TMDB ")
 
 	tmdb := &notFoundMetadataProvider{slug: "tmdb"}
 	tvdb := &capturingMetadataProvider{
@@ -246,27 +188,7 @@ func TestProcess_IdentifyKeepsUserSuppliedIDEvenIfRecordedStale(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
 
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "existing-1",
-		Type:      "series",
-		Title:     "Formula 1",
-		Year:      2016,
-		Status:    "matched",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert existing item: %v", err)
-	}
-
-	staleRepo := newFakeStaleIDRepo()
-	staleRepo.set("existing-1", &models.StaleMediaID{
-		ContentID:  "existing-1",
-		Provider:   "tmdb",
-		ProviderID: "324880",
-	})
-	h.service.staleIDRepo = staleRepo
+	_, staleRepo := seedFormula1WithStaleTMDB(t, h, "")
 
 	provider := &capturingMetadataProvider{
 		response: &MetadataResult{

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { PluginConfigSchema } from "@/api/types";
 
 import { adminFormForConfigSchema } from "./configSchemaAdminForm";
+import { field } from "./adminFormField.test-support";
 
 function schema(overrides: Partial<PluginConfigSchema> = {}): PluginConfigSchema {
   return {
@@ -54,16 +55,7 @@ describe("adminFormForConfigSchema", () => {
           required: ["base_url", "username"],
         }),
         admin_form: {
-          fields: [
-            {
-              key: "base_url",
-              label: "Custom URL",
-              control: "TEXT",
-              required: true,
-              secret: false,
-              multiline: false,
-            },
-          ],
+          fields: [field("base_url", "Custom URL", "TEXT", { required: true })],
         },
       }),
     );
@@ -105,30 +97,9 @@ describe("adminFormForConfigSchema", () => {
         }),
         admin_form: {
           fields: [
-            {
-              key: "api_key",
-              label: "API Key",
-              control: "TEXT",
-              required: false,
-              secret: false,
-              multiline: false,
-            },
-            {
-              key: "password",
-              label: "Password",
-              control: "TEXT",
-              required: false,
-              secret: false,
-              multiline: false,
-            },
-            {
-              key: "advanced",
-              label: "Advanced",
-              control: "TEXTAREA",
-              required: false,
-              secret: false,
-              multiline: true,
-            },
+            field("api_key", "API Key", "TEXT"),
+            field("password", "Password", "TEXT"),
+            field("advanced", "Advanced", "TEXTAREA", { multiline: true }),
           ],
         },
       }),

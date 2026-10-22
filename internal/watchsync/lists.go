@@ -50,7 +50,7 @@ type listBinding struct {
 	localRemove func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string) error
 	localList   func(ctx context.Context, store userstore.UserStore, profileID string, limit, offset int) ([]listRow, error)
 
-	setLastSync     func(conn *Connection, at time.Time)
+	setLastSync     func(update *ConnectionSyncUpdate, at time.Time)
 	setImportCounts func(run *SyncRun, found, imported int)
 	setExportCounts func(run *SyncRun, found, sent int)
 	setRemovalCount func(run *SyncRun, removed int)
@@ -120,7 +120,7 @@ func (s *Service) favoritesBinding() listBinding {
 			}
 			return rows, nil
 		},
-		setLastSync: func(conn *Connection, at time.Time) { conn.LastFavoritesSyncAt = &at },
+		setLastSync: func(update *ConnectionSyncUpdate, at time.Time) { update.LastFavoritesSyncAt = &at },
 		setImportCounts: func(run *SyncRun, found, imported int) {
 			run.InboundFavoritesFound, run.InboundFavoritesImported = found, imported
 		},
@@ -189,7 +189,7 @@ func (s *Service) watchlistBinding() listBinding {
 			}
 			return rows, nil
 		},
-		setLastSync: func(conn *Connection, at time.Time) { conn.LastWatchlistSyncAt = &at },
+		setLastSync: func(update *ConnectionSyncUpdate, at time.Time) { update.LastWatchlistSyncAt = &at },
 		setImportCounts: func(run *SyncRun, found, imported int) {
 			run.InboundWatchlistFound, run.InboundWatchlistImported = found, imported
 		},
@@ -356,10 +356,10 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 		}
 	}
 	now := s.now()
-	b.setLastSync(&conn, now)
-	conn.LastError = ""
-	conn.SyncCursors = mergeSyncCursors(conn.SyncCursors, batch.UpdatedCursors)
-	if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
+	update := flowSucceeded(now)
+	b.setLastSync(&update, now)
+	update.SyncCursors = batch.UpdatedCursors
+	if err := s.repo.UpdateConnectionSyncState(ctx, conn.ID, update); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -640,9 +640,9 @@ func (s *Service) exportList(ctx context.Context, conn Connection, cfg ServerCon
 		}
 	}
 	now := s.now()
-	b.setLastSync(&conn, now)
-	conn.LastError = ""
-	if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
+	update := flowSucceeded(now)
+	b.setLastSync(&update, now)
+	if err := s.repo.UpdateConnectionSyncState(ctx, conn.ID, update); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -807,11 +807,12 @@ func (s *Service) processLocalListEvent(ctx context.Context, event LocalListEven
 			s.recordLocalWatchEventError(ctx, conn, err)
 			continue
 		}
-		conn, err = s.refreshConnectionIfNeeded(ctx, provider, cfg, conn)
+		refreshed, err := s.refreshConnectionIfNeeded(ctx, provider, cfg, conn)
 		if err != nil {
 			s.recordLocalWatchEventError(ctx, conn, err)
 			continue
 		}
+		conn = refreshed
 		switch event.Change {
 		case ListChangeAdded:
 			if !b.capExport(provider.Capabilities()) {
@@ -927,8 +928,7 @@ func (s *Service) exportLocalListItems(ctx context.Context, conn Connection, cfg
 			}
 		}
 	}
-	b.setLastSync(&conn, now)
-	conn.LastError = ""
-	_, err = s.repo.UpsertConnection(ctx, conn)
-	return err
+	update := flowSucceeded(now)
+	b.setLastSync(&update, now)
+	return s.repo.UpdateConnectionSyncState(ctx, conn.ID, update)
 }

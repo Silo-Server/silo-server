@@ -60,29 +60,9 @@ describe("ProfileEditorDialog", () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    mocks.useCreateProfile.mockReset();
-    mocks.useUpdateProfile.mockReset();
-    mocks.useUploadProfileAvatar.mockReset();
-    mocks.useDeleteProfileAvatar.mockReset();
-
-    mocks.useCreateProfile.mockReturnValue({
-      isPending: false,
-      mutate: vi.fn(),
-    });
-    mocks.useUpdateProfile.mockReturnValue({
-      isPending: false,
-      mutate: vi.fn(),
-    });
-    mocks.useUploadProfileAvatar.mockReturnValue({
-      isPending: false,
-      mutate: vi.fn(),
-      mutateAsync: vi.fn(),
-    });
-    mocks.useDeleteProfileAvatar.mockReturnValue({
-      isPending: false,
-      mutate: vi.fn(),
-      mutateAsync: vi.fn(),
-    });
+    for (const hook of Object.values(mocks)) {
+      hook.mockReset().mockReturnValue({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() });
+    }
 
     originalResizeObserver = globalThis.ResizeObserver;
     globalThis.ResizeObserver = class ResizeObserver {
@@ -104,18 +84,27 @@ describe("ProfileEditorDialog", () => {
     }
   });
 
-  it("offers the require-advisory-age switch once a limit is set", async () => {
+  async function renderDialog(
+    profile: Profile,
+    support: { advisoryAgeSupported?: boolean; requireAdvisoryAgeSupported?: boolean } = {},
+  ) {
     await act(async () => {
       root.render(
         <ProfileEditorDialog
           open
-          profile={makeProfile({ max_advisory_age: 10, require_advisory_age: true })}
+          profile={profile}
           libraries={[]}
-          advisoryAgeSupported
-          requireAdvisoryAgeSupported
           onOpenChange={() => {}}
+          {...support}
         />,
       );
+    });
+  }
+
+  it("offers the require-advisory-age switch once a limit is set", async () => {
+    await renderDialog(makeProfile({ max_advisory_age: 10, require_advisory_age: true }), {
+      advisoryAgeSupported: true,
+      requireAdvisoryAgeSupported: true,
     });
 
     expect(document.body.textContent).toContain("Maximum advisory age");
@@ -132,33 +121,17 @@ describe("ProfileEditorDialog", () => {
   });
 
   it("hides the require-advisory-age switch without a limit or support", async () => {
-    await act(async () => {
-      root.render(
-        <ProfileEditorDialog
-          open
-          profile={makeProfile()}
-          libraries={[]}
-          advisoryAgeSupported
-          requireAdvisoryAgeSupported
-          onOpenChange={() => {}}
-        />,
-      );
+    await renderDialog(makeProfile(), {
+      advisoryAgeSupported: true,
+      requireAdvisoryAgeSupported: true,
     });
     expect(document.body.textContent).toContain("Edit profile");
     expect(document.body.textContent).toContain("Any content");
     expect(document.body.textContent).toContain("No limit");
     expect(document.body.textContent).not.toContain("Hide titles without an advisory age");
 
-    await act(async () => {
-      root.render(
-        <ProfileEditorDialog
-          open
-          profile={makeProfile({ id: "profile-2", max_advisory_age: 10 })}
-          libraries={[]}
-          advisoryAgeSupported
-          onOpenChange={() => {}}
-        />,
-      );
+    await renderDialog(makeProfile({ id: "profile-2", max_advisory_age: 10 }), {
+      advisoryAgeSupported: true,
     });
     expect(document.body.textContent).toContain("Maximum advisory age");
     expect(document.body.textContent).toContain("Ages 10 and under");
@@ -166,16 +139,7 @@ describe("ProfileEditorDialog", () => {
   });
 
   it("hides the advisory-age control on a server without it", async () => {
-    await act(async () => {
-      root.render(
-        <ProfileEditorDialog
-          open
-          profile={makeProfile({ max_advisory_age: 10 })}
-          libraries={[]}
-          onOpenChange={() => {}}
-        />,
-      );
-    });
+    await renderDialog(makeProfile({ max_advisory_age: 10 }));
 
     expect(document.body.textContent).toContain("Maximum content rating");
     expect(document.body.textContent).not.toContain("Maximum advisory age");

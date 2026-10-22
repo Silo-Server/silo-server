@@ -51,7 +51,10 @@ queues drop its files, a scan neither retries it nor reports it as still unmatch
 library refresh leaves it out, an item refresh completes without changes, and a season
 or episode refresh stops before any provider search and counts as a failed attempt. The
 item stays in its library and playable with its local metadata. Match Item
-still works, and a successful match clears the mark.
+still works, and a successful match clears the mark. A root override saved for an
+ignored item waits: the matcher applies it only after the item is restored, when it
+matches the item's queued files again. Match Item is the way to give an ignored item a
+provider identity directly.
 
 `DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore`
 (`unignoreUnmatchedItem`) clears the mark and answers `204`; an item without the mark is

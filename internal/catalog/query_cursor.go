@@ -67,6 +67,10 @@ type queryCursorTerm struct {
 	// arms, and a leading notNull term also bounds the seek so PostgreSQL can
 	// start an index range scan at the cursor instead of the first row.
 	notNull bool
+	// sqlType, when set, is the SQL type a cursor value binds as instead of
+	// the kind's default. An integer expression compared with a numeric value
+	// is cast to numeric, which keeps an index on it from bounding the seek.
+	sqlType string
 }
 
 func setCursorTermKinds(terms []queryCursorTerm, field string) {
@@ -98,6 +102,9 @@ func setCursorTermKinds(terms []queryCursorTerm, field string) {
 }
 
 func (t queryCursorTerm) cast() string {
+	if t.sqlType != "" {
+		return t.sqlType
+	}
 	switch t.kind {
 	case cursorKindDate:
 		return cursorKindDate
@@ -209,7 +216,7 @@ func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefiniti
 		return QueryCursorPage{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	rows, err := tx.Query(ctx, sql, args...)
+	rows, err := tx.Query(ctx, sql, args...) //nolint:rowserrcheck // scanItemsWithMangaCounts checks Err through the cursorRows wrapper
 	if err != nil {
 		return QueryCursorPage{}, fmt.Errorf("querying cursor page: %w", err)
 	}

@@ -273,7 +273,11 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		process.Kill()
 		return nil, fmt.Errorf("plugin runtime returned an empty manifest")
 	}
-	if !proto.Equal(req.Manifest, liveManifestResponse.GetManifest()) {
+	// Fields and enum values from a newer SDK don't count as a mismatch: both
+	// copies are compared without them, and the client keeps the live copy
+	// that way.
+	liveManifest := KnownManifest(liveManifestResponse.GetManifest())
+	if !proto.Equal(KnownManifest(req.Manifest), liveManifest) {
 		_ = protocol.Close()
 		process.Kill()
 		return nil, fmt.Errorf("plugin runtime manifest does not match installed manifest")
@@ -290,7 +294,7 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		return nil, fmt.Errorf("configure plugin runtime: %w", err)
 	}
 
-	client := newClient(req.InstallationID, rpcClient, liveManifestResponse.GetManifest(), startSeq)
+	client := newClient(req.InstallationID, rpcClient, liveManifest, startSeq)
 	client.ingressToken = ingressToken
 
 	monitorCtx, monitorCancel := context.WithCancel(context.Background())

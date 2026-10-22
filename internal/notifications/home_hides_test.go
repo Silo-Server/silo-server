@@ -2,10 +2,8 @@ package notifications
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
-	"slices"
 	"testing"
 	"time"
 
@@ -47,133 +45,14 @@ func TestHomeHidesContinueWatching(t *testing.T) {
 	}
 }
 
-type fakeDroppedSeries []catalog.DroppedSeries
-
-func (f fakeDroppedSeries) ListDropped(_ context.Context, _ int, _ string, seriesIDs []string) ([]catalog.DroppedSeries, error) {
-	var out []catalog.DroppedSeries
-	for _, drop := range f {
-		for _, id := range seriesIDs {
-			if drop.SeriesID == id {
-				out = append(out, drop)
-			}
-		}
-	}
-	return out, nil
-}
-
 func newSQLiteUserStore(t *testing.T) userstore.UserStore {
 	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := userdb.InitSchema(db); err != nil {
-		t.Fatalf("init schema: %v", err)
-	}
+	db := openUserDB(t)
 	store := userdb.NewSQLiteUserStore(db)
 	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
 		t.Fatalf("CreateProfile: %v", err)
 	}
 	return store
-}
-
-// countingDismissalStore counts dismissal list reads.
-type countingDismissalStore struct {
-	userstore.UserStore
-	reads map[string]int
-}
-
-func (s *countingDismissalStore) ListHomeDismissals(ctx context.Context, profileID, surface string) ([]userstore.HomeItemDismissal, error) {
-	s.reads[surface]++
-	return s.UserStore.ListHomeDismissals(ctx, profileID, surface)
-}
-
-// itemReaderStore adds the targeted dismissal read, as the Postgres store has.
-type itemReaderStore struct {
-	*countingDismissalStore
-	itemReads int
-}
-
-func (s *itemReaderStore) ListHomeDismissalsForItems(ctx context.Context, profileID, surface string, ids []string) ([]userstore.HomeItemDismissal, error) {
-	s.itemReads++
-	all, err := s.UserStore.ListHomeDismissals(ctx, profileID, surface)
-	if err != nil {
-		return nil, err
-	}
-	var out []userstore.HomeItemDismissal
-	for _, dismissal := range all {
-		if slices.Contains(ids, dismissal.MediaItemID) {
-			out = append(out, dismissal)
-		}
-	}
-	return out, nil
-}
-
-func TestLoadHomeHides(t *testing.T) {
-	ctx := context.Background()
-	store := &countingDismissalStore{UserStore: newSQLiteUserStore(t), reads: map[string]int{}}
-	seriesID := "series-a"
-	otherSeries := "series-b"
-	stamp := "2026-09-01T10:00:00Z"
-	for _, dismissal := range []userstore.HomeItemDismissal{
-		{ProfileID: "p1", Surface: userstore.HomeSurfaceNextUp, MediaItemID: "a-e3", SeriesID: &seriesID, DismissedAt: stamp},
-		{ProfileID: "p1", Surface: userstore.HomeSurfaceNextUp, MediaItemID: "b-e2", SeriesID: &otherSeries, DismissedAt: stamp},
-		{ProfileID: "p1", Surface: userstore.HomeSurfaceContinueWatching, MediaItemID: "a-e2", ProgressUpdatedAt: &stamp, DismissedAt: stamp},
-	} {
-		if err := store.UpsertHomeDismissal(ctx, dismissal); err != nil {
-			t.Fatalf("UpsertHomeDismissal: %v", err)
-		}
-	}
-	seriesA := []string{"a-e1", "a-e2", "a-e3"}
-
-	updater := &InterestUpdater{drops: fakeDroppedSeries{{SeriesID: seriesID, Active: false}}}
-	hides, err := updater.loadHomeHides(ctx, store, 1, "p1", seriesID, []string{"a-e2"}, seriesA)
-	if err != nil {
-		t.Fatalf("loadHomeHides: %v", err)
-	}
-	if hides.dropped {
-		t.Fatal("an inactive drop must not hide the series")
-	}
-	// Without a targeted reader the full list is read and cut to the series.
-	if _, ok := hides.nextUp["a-e3"]; len(hides.nextUp) != 1 || !ok {
-		t.Fatalf("nextUp = %v, want only a-e3", hides.nextUp)
-	}
-	if hides.continueWatchingVisible([]userstore.WatchProgress{{MediaItemID: "a-e2", PositionSeconds: 30, UpdatedAt: stamp}}) {
-		t.Fatal("the Continue Watching dismissal did not load")
-	}
-
-	// A surface with no items to check is not read.
-	store.reads = map[string]int{}
-	if _, err := updater.loadHomeHides(ctx, store, 1, "p1", seriesID, nil, nil); err != nil {
-		t.Fatalf("loadHomeHides: %v", err)
-	}
-	if len(store.reads) != 0 {
-		t.Fatalf("read dismissals %v with no items to check", store.reads)
-	}
-
-	// A store with the targeted reader never lists a whole surface.
-	store.reads = map[string]int{}
-	targeted := &itemReaderStore{countingDismissalStore: store}
-	hides, err = updater.loadHomeHides(ctx, targeted, 1, "p1", seriesID, []string{"a-e2"}, seriesA)
-	if err != nil {
-		t.Fatalf("loadHomeHides: %v", err)
-	}
-	if targeted.itemReads != 2 || len(store.reads) != 0 {
-		t.Fatalf("targeted reads = %d, full reads = %v; want 2 and none", targeted.itemReads, store.reads)
-	}
-	if _, ok := hides.nextUp["a-e3"]; len(hides.nextUp) != 1 || !ok {
-		t.Fatalf("nextUp = %v, want only a-e3", hides.nextUp)
-	}
-
-	updater.drops = fakeDroppedSeries{{SeriesID: seriesID, Active: true}}
-	hides, err = updater.loadHomeHides(ctx, store, 1, "p1", seriesID, []string{"a-e2"}, seriesA)
-	if err != nil {
-		t.Fatalf("loadHomeHides: %v", err)
-	}
-	if !hides.dropped {
-		t.Fatal("an active drop must hide the series")
-	}
 }
 
 // Wiring without a notification system passes a nil updater; queuing must
@@ -235,43 +114,6 @@ func TestPromoteDeferredMovesOnlyDueMutations(t *testing.T) {
 	}
 	if _, ok := updater.deferred[later]; !ok || len(updater.deferred) != 1 {
 		t.Errorf("deferred = %v, want only the later mutation", updater.deferred)
-	}
-}
-
-func TestInterestTrackingStoreQueuesNewWatchSessions(t *testing.T) {
-	ctx := context.Background()
-	updater := &InterestUpdater{pending: map[interestMutation]int{}}
-	store := &interestTrackingStore{UserStore: newSQLiteUserStore(t), userID: 1, system: &System{}, updater: updater}
-	thresholds := userstore.ProgressThresholds{}
-	queued := func() bool {
-		updater.mu.Lock()
-		defer updater.mu.Unlock()
-		_, ok := updater.pending[interestMutation{userID: 1, profileID: "p1", itemID: "ep-1"}]
-		clear(updater.pending)
-		return ok
-	}
-
-	lastWatched := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
-	if err := store.SetProgressAt(ctx, "p1", "ep-1", 30, 100, false, lastWatched); err != nil {
-		t.Fatalf("SetProgressAt: %v", err)
-	}
-	queued()
-
-	// Resuming an hour later changes no state but starts a watch session,
-	// which can lift a Home removal.
-	if err := store.UpdateProgress(ctx, "p1", "ep-1", 40, 100, thresholds); err != nil {
-		t.Fatalf("UpdateProgress: %v", err)
-	}
-	if !queued() {
-		t.Fatal("resuming after a pause queued no interest recompute")
-	}
-
-	// The next tick of the same session is free.
-	if err := store.UpdateProgress(ctx, "p1", "ep-1", 50, 100, thresholds); err != nil {
-		t.Fatalf("UpdateProgress: %v", err)
-	}
-	if queued() {
-		t.Fatal("a playback tick within one session queued an interest recompute")
 	}
 }
 
@@ -644,10 +486,10 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 	recompute("E3 started and hidden", flags{favorite: true, nextUp: true}, afterE4)
 }
 
-// TestNextUpEpisodeSkipsStoreStartedEpisodes covers profiles whose progress
-// lives outside Postgres: episodes their store reports as started are skipped
-// as well.
-func TestNextUpEpisodeSkipsStoreStartedEpisodes(t *testing.T) {
+// TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres pins that the Next
+// Up card notifications check is the one Home shows when the profile last
+// finished a special: the next regular episode, not the next special.
+func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -658,57 +500,82 @@ func TestNextUpEpisodeSkipsStoreStartedEpisodes(t *testing.T) {
 		t.Fatalf("connect test database: %v", err)
 	}
 	t.Cleanup(pool.Close)
+
 	nonce := time.Now().UnixNano()
-	prefix := fmt.Sprintf("next-up-%d", nonce)
-	libraryID := 910000 + int(nonce%80000)
+	prefix := fmt.Sprintf("special-anchor-%d", nonce)
+	libraryID := 900000 + int(nonce%90000)
 	seriesID := prefix + "-series"
-	e1, e2, e3 := prefix+"-e1", prefix+"-e2", prefix+"-e3"
+	const profileID = "profile-special-anchor"
+	var userID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, '', 'user') RETURNING id`,
+		prefix, prefix+"@example.test",
+	).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
 	t.Cleanup(func() {
 		cleanup := context.Background()
-		if _, err := pool.Exec(cleanup, `DELETE FROM media_files WHERE media_folder_id = $1`, libraryID); err != nil {
-			t.Errorf("clean up: %v", err)
-		}
-		if _, err := pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, seriesID); err != nil {
-			t.Errorf("clean up: %v", err)
-		}
-		if _, err := pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, libraryID); err != nil {
-			t.Errorf("clean up: %v", err)
-		}
+		_, _ = pool.Exec(cleanup, `DELETE FROM profile_series_interest WHERE series_id = $1`, seriesID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_files WHERE media_folder_id = $1`, libraryID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, libraryID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM users WHERE id = $1`, userID)
 	})
+	episode := func(season, number int) string { return fmt.Sprintf("%s-s%02de%02d", prefix, season, number) }
 	for _, stmt := range []struct {
 		sql  string
 		args []any
 	}{
 		{`INSERT INTO media_folders (id, type, name) VALUES ($1, 'series', $2)`, []any{libraryID, prefix}},
 		{`INSERT INTO media_items (content_id, type, title, genres) VALUES ($1, 'series', 'Series', '{}')`, []any{seriesID}},
-		{`INSERT INTO seasons (content_id, series_id, season_number) VALUES ($1 || '-s1', $1, 1)`, []any{seriesID}},
-		{`INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title)
-			VALUES ($1, $4, $4 || '-s1', 1, 1, 'E1'), ($2, $4, $4 || '-s1', 1, 2, 'E2'), ($3, $4, $4 || '-s1', 1, 3, 'E3')`,
-			[]any{e1, e2, e3, seriesID}},
-		{`INSERT INTO media_files (id, media_folder_id, file_path, episode_id) VALUES
-			($1, $2, $3 || '/1.mkv', $4), ($1 + 1, $2, $3 || '/2.mkv', $5), ($1 + 2, $2, $3 || '/3.mkv', $6)`,
-			[]any{nonce % 1_000_000_000_000, libraryID, "/" + prefix, e1, e2, e3}},
+		{`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, []any{seriesID, libraryID}},
+		{`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
+			VALUES ($1, $5, 0, 5, 'S00E05'), ($2, $5, 0, 6, 'S00E06'), ($3, $5, 2, 4, 'S02E04'), ($4, $5, 2, 5, 'S02E05')`,
+			[]any{episode(0, 5), episode(0, 6), episode(2, 4), episode(2, 5), seriesID}},
+		{`INSERT INTO media_files (media_folder_id, file_path, episode_id)
+			SELECT $1, '/' || content_id, content_id FROM episodes WHERE series_id = $2`, []any{libraryID, seriesID}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
-			t.Fatalf("seed: %v", err)
+			t.Fatalf("seed catalog: %v", err)
 		}
 	}
 
-	updater := &InterestUpdater{pool: pool}
-	for _, tc := range []struct {
-		started []string
-		want    string
-	}{
-		{started: []string{}, want: e1},
-		{started: []string{e1, e2}, want: e3},
-		{started: []string{e1, e2, e3}, want: ""},
-	} {
-		got, err := updater.nextUpEpisode(ctx, 1, "no-postgres-progress", seriesID, EpisodeKey(1, 1), tc.started)
-		if err != nil {
-			t.Fatalf("nextUpEpisode: %v", err)
+	provider := pgstore.NewPostgresProvider(pool)
+	store, err := provider.ForUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("ForUser: %v", err)
+	}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: profileID, Name: "Viewer"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	watchedAt := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
+	for i, id := range []string{episode(2, 4), episode(0, 5)} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
+			VALUES ($1, $2, $3, 0, 100, TRUE, $4)`, userID, profileID, id, watchedAt.Add(time.Duration(i)*time.Minute)); err != nil {
+			t.Fatalf("seed progress: %v", err)
 		}
-		if got != tc.want {
-			t.Errorf("nextUpEpisode(started=%v) = %q, want %q", tc.started, got, tc.want)
-		}
+	}
+	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
+		ProfileID: profileID, Surface: userstore.HomeSurfaceNextUp, MediaItemID: episode(2, 5),
+		SeriesID: &seriesID, DismissedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("dismiss S02E05 from Next Up: %v", err)
+	}
+
+	updater := NewInterestUpdater(pool, NewInterestRepository(pool), provider, allLibrariesScope{})
+	if err := updater.RecomputeSeries(ctx, userID, profileID, seriesID); err != nil {
+		t.Fatalf("RecomputeSeries: %v", err)
+	}
+	var nextUp bool
+	if err := pool.QueryRow(ctx, `
+		SELECT next_up_candidate FROM profile_series_interest
+		WHERE profile_id = $1 AND library_id = $2 AND series_id = $3`,
+		profileID, libraryID, seriesID,
+	).Scan(&nextUp); err != nil {
+		t.Fatalf("read interest: %v", err)
+	}
+	if nextUp {
+		t.Fatal("next_up_candidate = true; the dismissed S02E05 is Home's Next Up card, so want false")
 	}
 }

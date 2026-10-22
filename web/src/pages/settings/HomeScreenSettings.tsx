@@ -23,7 +23,7 @@ import { useOptionalAuth } from "@/hooks/useAuth";
 import { collectionKind, profilePageName, type CollectionSummary } from "@/lib/homeRows/describe";
 import { pageLabel } from "@/lib/homeRows/pages";
 import type { HomeRow } from "@/lib/homeRows/types";
-import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
+import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import {
   CircleMinus,
   Download,
@@ -253,11 +253,9 @@ export default function HomeScreenSettings() {
       .catch(() => toast.error("Failed to save Home preference"));
   }
 
-  function handleNextUpReset() {
-    // Deletes the profile row so the setting inherits the default again.
-    nextUpWriter
-      .reset(SETTING_KEYS.UI_NEXT_UP_MODE)
-      .catch(() => toast.error("Failed to reset the next up preference"));
+  function resetToServerDefault(key: SettingKey) {
+    // Deletes the profile row so the setting inherits the server default again.
+    nextUpWriter.reset(key).catch(() => toast.error("Failed to reset the Home preference"));
   }
 
   function handleNewReleasesFirstChange(enabled: boolean) {
@@ -314,11 +312,18 @@ export default function HomeScreenSettings() {
         nextUpMode={nextUpMode}
         nextUpChosen={nextUp?.source === "profile"}
         onNextUpModeChange={handleNextUpModeChange}
-        onNextUpReset={handleNextUpReset}
+        onNextUpReset={() => resetToServerDefault(SETTING_KEYS.UI_NEXT_UP_MODE)}
         newReleasesFirst={newReleasesFirst}
+        newReleasesFirstChosen={
+          homePreferences.data?.[SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST]?.source === "profile"
+        }
         onNewReleasesFirstChange={handleNewReleasesFirstChange}
+        onNewReleasesFirstReset={() =>
+          resetToServerDefault(SETTING_KEYS.UI_NEXT_UP_NEW_RELEASES_FIRST)
+        }
         hideWatched={hideWatchedItems}
         onHideWatchedChange={handleHideWatchedItemsChange}
+        loaded={homePreferences.data !== undefined}
         disabled={
           homePreferences.isLoading ||
           // Without the effective values a save cannot tell which row it overrides.

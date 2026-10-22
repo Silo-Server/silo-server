@@ -41,41 +41,45 @@ func contentIDs(items []*models.MediaItem) []string {
 	return ids
 }
 
-func TestMergeRecentlyAddedItems_OrdersByAddedAtDescThenContentID(t *testing.T) {
+func TestMergeRecentlyAddedItems_Order(t *testing.T) {
 	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	// Two already-sorted per-library slices (added_at DESC, content_id ASC).
-	libA := []*models.MediaItem{
-		{ContentID: "a3", AddedAt: tsPtr(base.Add(3 * time.Hour))},
-		{ContentID: "a1", AddedAt: tsPtr(base.Add(1 * time.Hour))},
-	}
-	libB := []*models.MediaItem{
-		{ContentID: "b4", AddedAt: tsPtr(base.Add(4 * time.Hour))},
-		{ContentID: "b2", AddedAt: tsPtr(base.Add(2 * time.Hour))},
-	}
-
-	got := contentIDs(mergeRecentlyAddedItems([][]*models.MediaItem{libA, libB}))
-	want := []string{"b4", "a3", "b2", "a1"}
-	if len(got) != len(want) {
-		t.Fatalf("merged length = %d, want %d (%v)", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("merged order = %v, want %v", got, want)
-		}
-	}
-}
-
-func TestMergeRecentlyAddedItems_TieBreaksByContentIDAsc(t *testing.T) {
-	at := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	libA := []*models.MediaItem{{ContentID: "zeta", AddedAt: tsPtr(at)}}
-	libB := []*models.MediaItem{{ContentID: "alpha", AddedAt: tsPtr(at)}}
-
-	got := contentIDs(mergeRecentlyAddedItems([][]*models.MediaItem{libA, libB}))
-	want := []string{"alpha", "zeta"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("tie-break order = %v, want %v", got, want)
-		}
+	tie := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		libs [][]*models.MediaItem
+		want []string
+	}{
+		{
+			// Two already-sorted per-library slices (added_at DESC, content_id ASC).
+			name: "added_at desc across libraries",
+			libs: [][]*models.MediaItem{
+				{
+					{ContentID: "a3", AddedAt: tsPtr(base.Add(3 * time.Hour))},
+					{ContentID: "a1", AddedAt: tsPtr(base.Add(1 * time.Hour))},
+				},
+				{
+					{ContentID: "b4", AddedAt: tsPtr(base.Add(4 * time.Hour))},
+					{ContentID: "b2", AddedAt: tsPtr(base.Add(2 * time.Hour))},
+				},
+			},
+			want: []string{"b4", "a3", "b2", "a1"},
+		},
+		{
+			name: "tie breaks by content_id asc",
+			libs: [][]*models.MediaItem{{{ContentID: "zeta", AddedAt: tsPtr(tie)}}, {{ContentID: "alpha", AddedAt: tsPtr(tie)}}},
+			want: []string{"alpha", "zeta"},
+		},
+		{
+			name: "nil added_at sorts last",
+			libs: [][]*models.MediaItem{{{ContentID: "nil1", AddedAt: nil}}, {{ContentID: "dated", AddedAt: tsPtr(base)}}},
+			want: []string{"dated", "nil1"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := contentIDs(mergeRecentlyAddedItems(tc.libs)); !slices.Equal(got, tc.want) {
+				t.Fatalf("merged order = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -114,19 +118,5 @@ func TestMergeRecentlyAddedItems_DedupsKeepingEarliestAddedAt(t *testing.T) {
 	}
 	if dup.AddedAt == nil || !dup.AddedAt.Equal(early) {
 		t.Fatalf("dup AddedAt = %v, want earliest %v", dup.AddedAt, early)
-	}
-}
-
-func TestMergeRecentlyAddedItems_NilAddedAtSortsLast(t *testing.T) {
-	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	libA := []*models.MediaItem{{ContentID: "nil1", AddedAt: nil}}
-	libB := []*models.MediaItem{{ContentID: "dated", AddedAt: tsPtr(at)}}
-
-	got := contentIDs(mergeRecentlyAddedItems([][]*models.MediaItem{libA, libB}))
-	want := []string{"dated", "nil1"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("nil-handling order = %v, want %v", got, want)
-		}
 	}
 }

@@ -27,7 +27,6 @@ func (p *unreadableLocalArtProvider) GetMetadata(ctx context.Context, req Metada
 // cached sidecar does, and gives way once the NFO is read without it.
 func TestScheduledRefreshKeepsNFOURLArtWhileTheNFOIsUnreadable(t *testing.T) {
 	const (
-		contentID    = "movie:tmdb:7"
 		cachedPoster = "nfo/movies/movie:tmdb:7/poster/original.webp"
 		nfoPoster    = "nfo+https://img.example.org/poster.jpg"
 		remotePoster = "tmdb://remote-poster.jpg"
@@ -46,28 +45,20 @@ func TestScheduledRefreshKeepsNFOURLArtWhileTheNFOIsUnreadable(t *testing.T) {
 		{"NFO read without the URL", nil, remotePoster},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newTestHarness()
 			ctx := context.Background()
-			h.service.SetAutoCacheImages(true)
-			h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
-			providerRepo := newFakeProviderIDRepo()
-			providerRepo.set(contentID, &models.MediaItemProviderID{ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "7"})
-			h.service.providerIDRepo = providerRepo
-			if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-				ContentID: contentID, Type: "movie", Title: "Film", Status: "matched", TmdbID: "7",
+			h := newTestFilmHarness(ctx, t, models.MediaItem{
 				DefaultMetadataLanguage: "en",
 				PosterPath:              cachedPoster, PosterSourcePath: nfoPoster, PosterThumbhash: "nfo-thumb",
-				Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
-			}); err != nil {
-				t.Fatalf("seed item: %v", err)
-			}
+			})
+			h.service.SetAutoCacheImages(true)
+			h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
 			local := &unreadableLocalArtProvider{localHintArtProvider{imageArtProvider{slug: "nfo"}}, tc.readErr}
 			if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-				ContentID: contentID, Mode: ModeScheduledRefresh, Language: "en",
+				ContentID: testFilmContentID, Mode: ModeScheduledRefresh, Language: "en",
 			}, []Provider{local, remote}); err != nil {
 				t.Fatalf("refresh: %v", err)
 			}
-			got, err := h.itemRepo.GetByID(ctx, contentID)
+			got, err := h.itemRepo.GetByID(ctx, testFilmContentID)
 			if err != nil {
 				t.Fatalf("load item: %v", err)
 			}

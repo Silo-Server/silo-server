@@ -41,7 +41,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
@@ -53,10 +53,14 @@ jobs:
         working-directory: web
         run: pnpm run build
 
+      # The archive ships the standard library, so build it on the latest 1.26
+      # patch as CI and the Docker image do, not the go.mod minimum.
+      # check-latest keeps an older cached 1.26 on the runner from winning.
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: '>=1.26 <1.27'
+          check-latest: true
           cache: true
           cache-dependency-path: go.sum
 

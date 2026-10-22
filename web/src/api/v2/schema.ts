@@ -2475,7 +2475,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Request cancellation of a cancellable administrator job. Completed effects and verified storage-copy checkpoints are retained. */
+    /** Request cancellation of a job that reports cancelable: library refresh, storage transition, or image cache cleanup. Completed effects and verified storage-copy checkpoints are retained. */
     post: operations["cancelAdminJob"];
     delete?: never;
     options?: never;
@@ -7369,6 +7369,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/devices/push/apple/retire": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Stop delivery to an Apple installation without a login session, proved by its installation key. Send it after removing this server, when the session is already gone. */
+    post: operations["retireApplePushInstallation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/diagnostics/capabilities": {
     parameters: {
       query?: never;
@@ -9047,7 +9064,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Unlink the account's current Discord identity and turn delivery off. Send once; replay can unlink a later connection. */
+    /**
+     * Unlink the account's current Discord identity and turn delivery off. Send once; replay can unlink a later connection.
+     * @description Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.
+     */
     delete: operations["unlinkNotificationDiscord"];
     options?: never;
     head?: never;
@@ -9063,7 +9083,10 @@ export interface paths {
     };
     /** Read the login account's Discord notification preferences. */
     get: operations["getNotificationDiscordPreferences"];
-    /** Set the login account's Discord delivery mode. */
+    /**
+     * Set the login account's Discord delivery mode.
+     * @description Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.
+     */
     put: operations["updateNotificationDiscordPreferences"];
     post?: never;
     delete?: never;
@@ -9098,7 +9121,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Begin one account-bound Discord consent flow. */
+    /**
+     * Begin one account-bound Discord consent flow.
+     * @description Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.
+     */
     post: operations["beginNotificationDiscordLink"];
     delete?: never;
     options?: never;
@@ -9263,6 +9289,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/notifications/push/devices/{device_id}/retire": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Stop delivery to an Android installation without a login session, proved by its installation key. Send it after removing this server or signing out, when the login is already gone. */
+    post: operations["retirePushDevice"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/notifications/push/devices/capabilities": {
     parameters: {
       query?: never;
@@ -9306,12 +9349,36 @@ export interface paths {
     };
     /**
      * List the series whose new episodes can notify the acting profile.
-     * @description Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, filtered and sorted as asked (by title by default). Each carries its reasons and which of them the profile's notification preferences let notify. Series the viewer may not see are omitted.
+     * @description Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Series the viewer may not see are omitted.
      */
     get: operations["listNotificationSeries"];
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/notifications/series/{series_id}/mute": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mute new-episode notifications for one series.
+     * @description The acting profile gets no new-episode notification for the series on any channel, whatever its reasons, until it unmutes. Favorites, the watchlist, Home, and watch history are unchanged, and other profiles are unaffected. Muting a series already muted succeeds and changes nothing. A series the viewer may not see, or an item that is not a series, is 404.
+     */
+    put: operations["muteNotificationSeries"];
+    post?: never;
+    /**
+     * Unmute new-episode notifications for one series.
+     * @description The series notifies the acting profile again for its active reasons. The mute applies when notification delivery evaluates a new episode, normally within a minute of it arriving: an episode evaluated while the series was muted is not announced later, and one still waiting to be evaluated when the profile unmutes is announced. Unmuting a series that is not muted succeeds and changes nothing. No access check runs, so a profile can lift a mute on a series it can no longer see.
+     */
+    delete: operations["unmuteNotificationSeries"];
     options?: never;
     head?: never;
     patch?: never;
@@ -10664,6 +10731,23 @@ export interface paths {
     };
     /** The values a parameterized recipe offers for its parameter. */
     get: operations["listSectionRecipeCandidates"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/sections/seasonal-themes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The holidays a Seasonal Picks row can follow, with the curated vibes each offers. */
+    get: operations["listSeasonalThemes"];
     put?: never;
     post?: never;
     delete?: never;
@@ -19930,6 +20014,15 @@ export interface components {
        */
       server_id?: string;
     };
+    AndroidPushRetirementReceipt: {
+      /**
+       * @description The retirement's generation, which is now the installation's newest intent.
+       * @example 1
+       */
+      generation: string;
+      /** @description Always true: the server delivers nothing to this installation until it registers again with a higher generation. */
+      removed: boolean;
+    };
     APIKeyScope: {
       description: string;
       name: string;
@@ -19985,6 +20078,18 @@ export interface components {
        * @example 3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35
        */
       server_id?: string;
+    };
+    ApplePushRetirementBody: {
+      device_id: string;
+    };
+    ApplePushRetirementReceipt: {
+      /**
+       * @description The retirement's generation, which is now the installation's newest intent.
+       * @example 1
+       */
+      generation: string;
+      /** @description Always true: the server delivers nothing to this installation until it registers again with a higher generation. */
+      removed: boolean;
     };
     AppliedQuirkV3: {
       action: string;
@@ -24166,6 +24271,12 @@ export interface components {
        */
       watched_at: string;
     };
+    HLSSubtitleRenditionV3: {
+      format: string;
+      group_id: string;
+      mime_type: string;
+      name: string;
+    };
     HomeCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
@@ -24218,6 +24329,10 @@ export interface components {
       /** @description Season-list boolean query parameter; false omits poster URLs and thumbhashes */
       season_list_artwork_param: string;
       sizes: string[];
+      /** @description Per-slot width query parameters, keyed by slot: poster (poster_url), backdrop (backdrop_url, backdrop_urls), logo (logo_url), still (an episode's still_url), photo (cast and crew photo_url). Each takes the width in device pixels the client draws that field at and overrides param for it; the server returns the narrowest cached size at least that wide, else the original. Accepted wherever param is */
+      slot_width_params: {
+        [key: string]: string;
+      };
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -24348,6 +24463,9 @@ export interface components {
       /** Format: int64 */
       file_id?: number;
       kind: string;
+      still_thumbhash?: string;
+      /** @description Presigned, short-lived. 16:9 image of the extra; absent when it has none */
+      still_url?: string;
       title?: string;
     };
     ItemImageEntry: {
@@ -26186,9 +26304,11 @@ export interface components {
       active_reasons: components["schemas"]["NotificationSeriesReasons"];
       /** @description The series as a catalog card */
       item: components["schemas"]["CatalogItem"];
+      /** @description The profile muted the series: it gets no new-episode notification for it, whatever the reasons, until it unmutes. active_reasons still names the reasons that would notify once unmuted. */
+      muted: boolean;
       /** @description With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies */
       next_up_after?: components["schemas"]["NotificationEpisodeRef"];
-      /** @description True when at least one reason is active */
+      /** @description True when at least one reason is active and the profile has not muted the series */
       notifies: boolean;
       /** @description The profile's relationships to the series */
       reasons: components["schemas"]["NotificationSeriesReasons"];
@@ -26196,6 +26316,8 @@ export interface components {
     NotificationSeriesCapability: {
       /** @description GET /notifications/series lists the series whose new episodes can notify the profile */
       available: boolean;
+      /** @description PUT and DELETE /notifications/series/{series_id}/mute mute and unmute one series, and list entries carry muted */
+      mute: boolean;
     };
     NotificationSeriesCollection: {
       /** @description The page's items; empty, never null */
@@ -27111,7 +27233,10 @@ export interface components {
       stop_id?: string;
     };
     PlaybackPlan: {
+      /** @description The available_qualities label this plan delivers, so a client can mark that menu entry: the label quality_preference named while the menu lists it and the encode keeps its resolution, otherwise the rung whose resolution class and bitrate the encode matches. Absent when the plan delivers no listed entry, such as the source played unchanged or a plain-resolution or auto request whose capped encode falls between two rungs. Present on servers that advertise plan_active_quality_v1. */
+      active_quality?: string;
       applied_quirks: components["schemas"]["AppliedQuirkV3"][];
+      /** @description Fixed quality rungs a quality_change replan may request, in menu order. The source is not listed: quality_preference auto returns to it. Empty when no rung applies. */
       available_qualities: components["schemas"]["AvailableQualityV3"][];
       claims: components["schemas"]["ValidationClaimsV3"];
       decision_reason: string;
@@ -27161,7 +27286,10 @@ export interface components {
       attempted_plan_keys: string[];
       /** Format: int64 */
       bandwidth_cap_kbps?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Measured throughput to this server, such as a bandwidth probe result. auto sends a source whose bitrate fits 80% of it as-is and lowers only one that does not. Omit it rather than send a guess.
+       */
       bandwidth_estimate_kbps?: number;
       client_capabilities: components["schemas"]["ClientCodecCapabilitiesV3"];
       client_features?: string[];
@@ -27174,7 +27302,11 @@ export interface components {
        */
       installation_id: string;
       local_mutations?: string[];
-      metered: boolean;
+      /**
+       * @deprecated
+       * @description Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.
+       */
+      metered?: boolean;
       /** @enum {string} */
       operation?:
         | "failure_recovery"
@@ -27190,6 +27322,7 @@ export interface components {
       position_seconds: number;
       /** Format: int64 */
       protocol_version: number;
+      /** @description auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto. */
       quality_preference: string;
       /** @description Client-minted identity of this replan; a retry with the same body replays the durable decision */
       replan_request_id: string;
@@ -27615,7 +27748,10 @@ export interface components {
       audio_track_index?: number;
       /** Format: int64 */
       bandwidth_cap_kbps?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Measured throughput to this server, such as a bandwidth probe result. auto sends a source whose bitrate fits 80% of it as-is and lowers only one that does not. Omit it rather than send a guess.
+       */
       bandwidth_estimate_kbps?: number;
       client_capabilities: components["schemas"]["ClientCodecCapabilitiesV3"];
       client_features: string[];
@@ -27630,7 +27766,11 @@ export interface components {
        * @example 1
        */
       installation_id: string;
-      metered: boolean;
+      /**
+       * @deprecated
+       * @description Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.
+       */
+      metered?: boolean;
       playback_attempt_id: string;
       /**
        * @description Opaque identifier
@@ -27641,6 +27781,7 @@ export interface components {
       progress_persistence?: "server" | "client";
       /** Format: int64 */
       protocol_version: number;
+      /** @description auto (the default), a resolution such as 1080p, or a rung label from available_qualities. auto plays the source unless the device cannot, a measured bandwidth_estimate_kbps cannot carry it, or it is above bandwidth_cap_kbps. original is a deprecated alias of auto. */
       quality_preference: string;
       /** Format: double */
       start_position?: number;
@@ -28111,7 +28252,7 @@ export interface components {
        */
       preferred_metadata_language: string;
       /**
-       * @description Free-form until the vocabulary is ratified (#135). Canonical values today: auto, original, 720p, 1080p, 2160p, 4k; empty when unset
+       * @description Free-form until the vocabulary is ratified (#135). Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto; empty when unset
        * @example auto
        */
       quality_preference: string;
@@ -28231,7 +28372,7 @@ export interface components {
        */
       preferred_metadata_language?: string;
       /**
-       * @description Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k
+       * @description Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto
        * @example auto
        */
       quality_preference?: string;
@@ -28391,7 +28532,7 @@ export interface components {
        */
       preferred_metadata_language?: string | null;
       /**
-       * @description Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k
+       * @description Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, 720p, 1080p, 2160p, 4k; original is a deprecated alias of auto
        * @example auto
        */
       quality_preference?: string;
@@ -29384,6 +29525,65 @@ export interface components {
       /** @example Season 1 */
       title: string;
       user_data?: components["schemas"]["WatchRollup"];
+    };
+    SeasonalTheme: {
+      /** @description Whether a row may set its own yearly window for this holiday in theme_dates. False for weekly themes. */
+      dates_editable: boolean;
+      /**
+       * @description Last day of the default window, MM-DD, inclusive; before start when the window wraps across New Year
+       * @example 10-31
+       */
+      end?: string;
+      /**
+       * @description Stored in the row's enabled_themes config; stable
+       * @example halloween
+       */
+      key: string;
+      /** @example Halloween */
+      name: string;
+      /**
+       * @description First day of the default window, MM-DD. Absent when the holiday moves (Easter) or recurs weekly.
+       * @example 10-01
+       */
+      start?: string;
+      /** @description The first vibe is the default; never empty */
+      vibes: components["schemas"]["SeasonalVibe"][];
+      /**
+       * @description When the holiday is in season by default, for display
+       * @example October
+       */
+      when: string;
+    };
+    SeasonalThemeCatalog: {
+      /**
+       * Format: int64
+       * @description The most custom holidays one row may define
+       * @example 12
+       */
+      max_custom_holidays: number;
+      /** @description In calendar order, for display: dated holidays by their usual start, then the weekly ones */
+      themes: components["schemas"]["SeasonalTheme"][];
+    };
+    SeasonalVibe: {
+      /** @example Spooky fun for all ages. */
+      description: string;
+      /**
+       * @description Stored in the row's vibes config; stable
+       * @example family
+       */
+      key: string;
+      /**
+       * @description The MDBList list behind the vibe
+       * @example https://mdblist.com/lists/purple_smurf/halloween-family2
+       */
+      list_url: string;
+      /** @example Family Halloween */
+      name: string;
+      /**
+       * @description The row's title while this vibe is in season, unless the row sets its own
+       * @example Family Halloween
+       */
+      title: string;
     };
     SeasonCollection: {
       /** @description The page's items; empty, never null */
@@ -30391,6 +30591,7 @@ export interface components {
     SubtitleDecisionV3: {
       artifact?: components["schemas"]["SubtitleArtifactV3"];
       embedded?: components["schemas"]["EmbeddedSubtitleV3"];
+      hls_rendition?: components["schemas"]["HLSSubtitleRenditionV3"];
       inventory: components["schemas"]["SubtitleInventoryItemV3"][];
       mode: string;
       track_id?: string;
@@ -31372,7 +31573,7 @@ export interface components {
       /** @description Logical watch choices, each spanning one or more ordered parts */
       playback_variants?: components["schemas"]["WatchPlaybackVariant"][];
       poster_thumbhash?: string;
-      /** @description The item's poster, an episode's still, or an extra's parent poster, sized by image_size; for system media controls */
+      /** @description The item's poster, an episode's still, or a local extra's still (its parent's poster when it has none), sized by image_size; for system media controls */
       poster_url?: string;
       preview?: components["schemas"]["WatchMarker"];
       recap?: components["schemas"]["WatchMarker"];
@@ -89193,6 +89394,8 @@ export interface operations {
   listCatalogItems: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description For source=library_collection or user_collection */
         collection_id?: string;
         /** @description Repeat the key for several ratings */
@@ -89204,18 +89407,24 @@ export interface operations {
         group?: "work";
         /** @description JSON array of structured rule groups; use POST catalog/query for larger queries */
         groups?: string;
-        /** @description Artwork variant to presign */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Restrict to one library; required for library sections */
         library_id?: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
         /** @description How the filters combine; default all */
         match?: "all" | "any";
         /** @description Alphabetical jump: only titles whose sort title (or title, when none is set) starts here */
         name_prefix?: string;
         /** @description For source=person */
         person_id?: string;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
         /** @description Search text */
         q?: string;
         /** @description Maximum items in the query result; zero means uncapped */
@@ -89242,6 +89451,8 @@ export interface operations {
           | "person";
         /** @description Metadata match state */
         status?: string;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
         /** @description Media scope: movie, series, episode, audiobook, ebook, manga, or video (movies and series). video_with_episodes, for source=query only, searches movies, series, and episodes when q is set and lists movies and series without q; check getCatalogSearchCapabilities.video_with_episodes_scope first */
         type?: string;
         year_max?: number;
@@ -89353,20 +89564,31 @@ export interface operations {
   listAudiobookGroups: {
     parameters: {
       query: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
         group_by: "author" | "narrator" | "series";
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The audiobook library */
         library_id: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
         /** @description Case-insensitive prefix on the group name */
         q?: string;
         /** @description true skips the exact count; the total is then an estimate */
         skip_total?: boolean;
         /** @description Default name */
         sort?: "name" | "count" | "duration";
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -89749,11 +89971,22 @@ export interface operations {
   getCatalogItem: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description The version the viewer selected; affects the effective playback answer */
         file_id?: string;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the item is being viewed in; picks its presentation when the item is in several */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -89866,11 +90099,22 @@ export interface operations {
   listCatalogItemEpisodes: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description The version the viewer selected; affects the effective playback answer */
         file_id?: string;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the item is being viewed in; picks its presentation when the item is in several */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -89981,11 +90225,22 @@ export interface operations {
   listCatalogItemMangaFiles: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description The version the viewer selected; affects the effective playback answer */
         file_id?: string;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the item is being viewed in; picks its presentation when the item is in several */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -90773,11 +91028,22 @@ export interface operations {
   listCatalogItemVersions: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description The version the viewer selected; affects the effective playback answer */
         file_id?: string;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the item is being viewed in; picks its presentation when the item is in several */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -91369,7 +91635,18 @@ export interface operations {
   queryCatalogItems: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -91640,11 +91917,22 @@ export interface operations {
   listSeriesSeasons: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Include poster URLs and thumbhashes; false skips poster preparation */
         include_artwork?: boolean;
         /** @description The library the series is being viewed in */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -91755,9 +92043,20 @@ export interface operations {
   getSeriesSeason: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the series is being viewed in */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -91870,9 +92169,20 @@ export interface operations {
   listSeasonEpisodes: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description The library the series is being viewed in */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -97191,6 +97501,134 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  retireApplePushInstallation: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Positive decimal int64, persisted and incremented for each new installation intent across account/profile switches. Reuse exactly after uncertainty. */
+        "X-Push-Generation": string;
+        /** @description Secret 32-byte base64url installation credential. Persist privately; never rotate on retry or account switch. */
+        "X-Push-Installation-Key": string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ApplePushRetirementBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApplePushRetirementReceipt"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
           [name: string]: unknown;
         };
         content: {
@@ -103553,12 +103991,22 @@ export interface operations {
   listFavorites: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -103989,12 +104437,22 @@ export interface operations {
   listHistory: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -105609,10 +106067,20 @@ export interface operations {
   getHomeLayout: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign for included_sections, as on getHomeSectionItems; absent picks each surface's default */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter */
         include_items?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -105720,8 +106188,18 @@ export interface operations {
   listHomeSections: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -105829,8 +106307,18 @@ export interface operations {
   getHomeSectionItems: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -110727,8 +111215,18 @@ export interface operations {
   listLibrarySections: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -110839,8 +111337,18 @@ export interface operations {
   getLibrarySectionItems: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -111783,12 +112291,22 @@ export interface operations {
   listNotInterested: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -114589,6 +115107,114 @@ export interface operations {
       };
     };
   };
+  retirePushDevice: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Positive decimal int64, persisted and incremented for each new installation intent across account/profile switches. Reuse exactly after uncertainty. */
+        "X-Push-Generation": string;
+        /** @description Secret 32-byte base64url installation credential. Persist privately; never rotate on retry or account switch. */
+        "X-Push-Installation-Key": string;
+      };
+      path: {
+        device_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AndroidPushRetirementReceipt"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getPushRegistrationCapabilities: {
     parameters: {
       query?: never;
@@ -114859,12 +115485,20 @@ export interface operations {
   listNotificationSeries: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
         /** @description Keeps the series whose title or sort title contains this text, case-insensitively */
         q?: string;
         /** @description Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason */
@@ -114879,8 +115513,10 @@ export interface operations {
           | "-added_at"
           | "latest_episode_added"
           | "-latest_episode_added";
-        /** @description active keeps the series the profile's preferences let notify; inactive keeps the ones they silence */
+        /** @description active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series */
         status?: "all" | "active" | "inactive";
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -114901,6 +115537,220 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["NotificationSeriesCollection"];
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  muteNotificationSeries: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Catalog item identifier of the series */
+        series_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  unmuteNotificationSeries: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Catalog item identifier of the series */
+        series_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {
@@ -118777,6 +119627,8 @@ export interface operations {
   getPlaybackManifest: {
     parameters: {
       query?: {
+        /** @description Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist. */
+        silo_rendition?: "video" | "subtitles";
         /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
@@ -118919,6 +119771,7 @@ export interface operations {
         "X-Profile-Token"?: string;
       };
       path: {
+        /** @description Segment name from the media playlist. sub_NNNNN.vtt names a WebVTT subtitle rendition segment, answered from the cues already produced; one the transcode does not reach in time is an empty WebVTT document. */
         name: string;
         session_id: string;
       };
@@ -118939,6 +119792,7 @@ export interface operations {
         content: {
           "application/octet-stream": string;
           "multipart/byteranges": string;
+          "text/vtt": string;
           "video/mp2t": string;
           "video/mp4": string;
         };
@@ -118952,6 +119806,7 @@ export interface operations {
         content: {
           "application/octet-stream": string;
           "multipart/byteranges": string;
+          "text/vtt": string;
           "video/mp2t": string;
           "video/mp4": string;
         };
@@ -121708,8 +122563,20 @@ export interface operations {
   listBecauseWatched: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Cards to answer; default 20, maximum 50 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -121819,7 +122686,20 @@ export interface operations {
   };
   getDiscover: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
+      };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
         "X-Profile-Id": string;
@@ -121926,8 +122806,20 @@ export interface operations {
   getForYouMain: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Cards to answer; default 20, maximum 50 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -122035,8 +122927,20 @@ export interface operations {
   listForYouRows: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Cards to answer; default 20, maximum 50 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -122144,10 +123048,22 @@ export interface operations {
   listPopular: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Window in days; default 30 */
         days?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Cards to answer; default 20, maximum 50 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -122255,10 +123171,22 @@ export interface operations {
   listRecentlyAdded: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Window in days; default 14 */
         days?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Cards to answer; default 20, maximum 50 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -122366,10 +123294,22 @@ export interface operations {
   getRecommendationSection: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Section key: the cluster index of a cluster section or the genre name of a genre section */
         key?: string;
         /** @description Cards to answer; default and maximum 60 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -122487,8 +123427,20 @@ export interface operations {
   listSimilarUsersLiked: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Cards to answer; default 20, maximum 50 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -122596,8 +123548,20 @@ export interface operations {
   listSimilar: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Cards to answer; default 20, maximum 50 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -122951,10 +123915,22 @@ export interface operations {
   listTasteSeedItems: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Cards per page; default 30, maximum 60 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -123062,8 +124038,20 @@ export interface operations {
   getWatchTonight: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Cards to answer; default 5, maximum 20 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -123171,14 +124159,26 @@ export interface operations {
   listWatchTonightCards: {
     parameters: {
       query: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Catalog identifiers already swiped, repeated (exclude_ids=a&exclude_ids=b) */
         exclude_ids?: string[];
         /** @description Discover-mode genre filter, repeated (genres=Crime&genres=Thriller); each must be a known genre */
         genres?: string[];
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
         /** @description Cards per page; default 12, maximum 20 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
         /** @description continue answers in-progress and next-up cards; discover answers taste candidates */
         mode: "continue" | "discover";
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -126011,6 +127011,112 @@ export interface operations {
       };
     };
   };
+  listSeasonalThemes: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SeasonalThemeCatalog"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getSettingsContract: {
     parameters: {
       query?: never;
@@ -128064,8 +129170,18 @@ export interface operations {
   createShuffle: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign on the item cards */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -128214,8 +129330,18 @@ export interface operations {
   getShuffle: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign on the item cards */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -128442,8 +129568,18 @@ export interface operations {
   advanceShuffle: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign on the item cards */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -128594,8 +129730,18 @@ export interface operations {
   skipShuffleItem: {
     parameters: {
       query?: {
-        /** @description Artwork variant to presign on the item cards */
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
@@ -138156,12 +139302,22 @@ export interface operations {
   getWatchState: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Prefer this file when the item has several versions */
         file_id?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Present the item as a member of this library */
         library_id?: string;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header?: {
         /** @description Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account. */
@@ -138602,12 +139758,22 @@ export interface operations {
   listWatchlist: {
     parameters: {
       query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
         /** @description Opaque cursor from page.next_cursor */
         cursor?: string;
-        /** @description Artwork variant to presign; absent picks each surface's default */
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
       };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */

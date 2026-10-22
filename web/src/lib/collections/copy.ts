@@ -453,7 +453,8 @@ export const NAME_FILLED_HELP =
   "Filled in from the list. Picking another list keeps anything you typed.";
 export const SYNCS_ON_CREATE = "It syncs for the first time when you create it.";
 export const PICK_A_LIST_FIRST = "Pick a list, then create it.";
-export const SYNCED_ORDER_HELP = "Blank takes the whole list, up to 500.";
+export const SYNCED_ORDER_HELP =
+  "Blank takes the whole list: up to 10,000 titles from MDBList, or the first 20 of a TMDB chart.";
 
 /** "Kept your name", "Kept your name and description": what a new pick left alone. */
 export function keptMessage(fields: readonly ("name" | "description")[]): string | null {
@@ -743,8 +744,9 @@ const PIN_EVERY_LIBRARY = " This applies in every library it's in.";
 /**
  * What Pin does, given what the shelf sorts by (null for Your order) and
  * whether the collection is in more than one library. Pinned collections also
- * lead the capped Server collections list on every profile's Collections
- * page, which is all Pin does on a shelf that sorts itself.
+ * lead their library's collections in the Server collections list on every
+ * profile's Collections page, which is all Pin does on a shelf that sorts
+ * itself.
  */
 export function pinHelp(shelfSortedBy: string | null, inSeveralLibraries = false): string {
   const help =

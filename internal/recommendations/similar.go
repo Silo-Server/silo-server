@@ -126,6 +126,9 @@ func (e *Engine) applyValidation(ctx context.Context, sourceMeta *ItemMetadata, 
 				candTitles[id] = titleYear{title: title, year: year}
 			}
 		}
+		if err := rows.Err(); err != nil {
+			slog.WarnContext(ctx, "reading candidate titles failed; validating without them", "component", "recommendations", "error", err)
+		}
 	}
 
 	var validated []ScoredItem
@@ -211,6 +214,9 @@ func (e *Engine) assignReasons(ctx context.Context, sourceItemID string, sourceM
 			if rows.Scan(&id, &studios) == nil {
 				candStudios[id] = studios
 			}
+		}
+		if err := rows.Err(); err != nil {
+			slog.WarnContext(ctx, "reading candidate studios failed; assigning reasons without them", "component", "recommendations", "error", err)
 		}
 	}
 

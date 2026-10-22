@@ -47,7 +47,7 @@ func New(cfg Config) *Provider {
 		dlBase = defaultDLBaseURL
 	}
 	return &Provider{
-		client:    &http.Client{Timeout: 15 * time.Second, CheckRedirect: sameOriginRedirects},
+		client:    &http.Client{Timeout: 15 * time.Second, CheckRedirect: subtitles.SameOriginRedirects},
 		baseURL:   base,
 		dlBaseURL: dlBase,
 		apiKey:    cfg.APIKey,
@@ -125,7 +125,7 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 		language := subtitles.NormalizeProviderLanguage("subdl", rawLanguage)
 		format := detectFormat(s.ReleaseName)
 		result := subtitles.SubtitleResult{
-			ID:              s.URL, // relative download path
+			ID:              resultID(s.URL),
 			Provider:        "subdl",
 			Language:        language,
 			ReleaseName:     s.ReleaseName,

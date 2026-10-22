@@ -527,8 +527,12 @@ are rejected. The response is `200` with the current `DownloadEntry`, whose opti
 
 An older or equal event returns the current entry without changing it. A different
 revision returns `409`: reload the registry and reconcile the new bytes instead of
-rewriting the old event's revision. Reports cannot promote preparing, failed, or
-revoked entries into completion. The body is limited to 4 KiB.
+rewriting the old event's revision. Reports cannot promote failed or revoked entries
+into completion, and a `downloading` report for a `preparing` entry returns `404`. A
+`completed` report for a `preparing` entry at the same revision applies: the server
+returns an in-flight entry to `preparing` when it loses the prepared file, and a
+device that fetched the whole file before then still holds it. Send the completion
+even when the registry shows the entry preparing again. The body is limited to 4 KiB.
 
 ### 4.4 Delete a download
 
@@ -854,6 +858,8 @@ compat/remux:          preparing -> ready -> downloading -> completed
 bitrate/transcode:     preparing -> ready -> downloading -> completed
 revoked:               any -> revoked (administrator)
 prepared again:        completed -> preparing -> ready -> downloading -> completed
+server file lost:      ready | downloading -> preparing -> ready -> downloading -> completed
+late completion:       preparing -> completed (same revision, after a lost file)
 failed artifact job:   preparing -> failed
 ```
 
@@ -861,8 +867,9 @@ Direct original rows are `ready` immediately; remux and transcode rows start at
 `preparing` and become `ready` when the artifact completes. `failed` means the
 artifact job exhausted its retries. `revoked` means an administrator revoked the
 entry (§9.3). `completed` returns to `preparing` only when the device asks for an
-expired file again (§4.12). `downloading` and `completed` are set by the client via
-`PATCH`.
+expired file again (§4.12). An entry still `ready` or `downloading` returns to
+`preparing` when the server finds its prepared file missing and prepares it again.
+`downloading` and `completed` are set by the client via `PATCH`.
 
 ---
 
@@ -983,8 +990,8 @@ Notes:
 - `subtitles[].revision` is present on downloaded (`downloaded:{id}`) and
   external (`external:{index}`) subtitles; an external subtitle that cannot be
   read has none. It is an opaque string that changes whenever that subtitle's
-  delivered bytes can change: a timing correction, or an external file edited
-  on disk. When a refreshed manifest shows a different value than the one
+  delivered bytes can change: a timing correction, an external file edited
+  on disk, or a change in how the server decodes subtitle text to UTF-8. When a refreshed manifest shows a different value than the one
   stored with the cached file, re-fetch that subtitle. An external subtitle's
   `file_size` is the size of its delivered bytes.
 - Optional fields are omitted when empty; clients should treat absent values as

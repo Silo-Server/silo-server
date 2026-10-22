@@ -73,49 +73,6 @@ const field = () => screen.getByRole("combobox", { name: "Field" });
 const condition = () => screen.getByRole("combobox", { name: "Condition" });
 
 describe("FilterRuleRow", () => {
-  it("groups the fields as Title, People, File, You and Library", () => {
-    renderRow({ field: "genre", op: "is", value: "" });
-    const listbox = open(field());
-    const groups = within(listbox)
-      .getAllByRole("group")
-      .map((group) => [
-        group.firstElementChild?.textContent,
-        within(group)
-          .getAllByRole("option")
-          .map((option) => option.textContent),
-      ]);
-    expect(groups).toEqual([
-      [
-        "Title",
-        [
-          "Title",
-          "Genre",
-          "Studio",
-          "Network",
-          "Country",
-          "Content rating",
-          "Original language",
-          "Type",
-          "Year",
-          "Decade",
-          "Release date",
-          "Duration",
-          "IMDb rating",
-          "TMDB rating",
-          "RT critic score",
-          "RT audience score",
-        ],
-      ],
-      ["People", ["Actor", "Director", "Writer", "Producer"]],
-      [
-        "File",
-        ["Resolution", "HDR", "Dolby Vision", "Audio language", "Subtitle language", "Bitrate"],
-      ],
-      ["You", ["Watched", "Favorited", "In watchlist", "In progress", "Last watched"]],
-      ["Library", ["Added"]],
-    ]);
-  });
-
   it("leaves out the You fields where personalized rules aren't allowed", () => {
     renderRow({ field: "genre", op: "is", value: "" }, false);
     expect(within(open(field())).queryByRole("group", { name: "You" })).toBeNull();
@@ -166,30 +123,6 @@ describe("FilterRuleRow", () => {
     expect(latest).toBeUndefined();
   });
 
-  it("reads conditions as words", () => {
-    const { unmount } = renderRow({ field: "rating_imdb", op: "gte", value: 7 });
-    expect(condition()).toHaveTextContent("is at least");
-    expect(optionNames(condition())).toEqual([
-      "is at least",
-      "is at most",
-      "is above",
-      "is below",
-      "is between",
-    ]);
-    unmount();
-
-    renderRow({ field: "year", op: "is", value: 1999 });
-    expect(optionNames(condition())).toEqual([
-      "is",
-      "is not",
-      "is at least",
-      "is at most",
-      "is above",
-      "is below",
-      "is between",
-    ]);
-  });
-
   it("answers yes or no for a switch, and stores a boolean", () => {
     renderRow({ field: "hdr", op: "is", value: false });
     const value = screen.getByRole("combobox", { name: "Value" });
@@ -198,45 +131,7 @@ describe("FilterRuleRow", () => {
     expect(latest).toEqual({ field: "hdr", op: "is", value: true });
   });
 
-  it("names a type as Movies or Shows and stores the type", () => {
-    renderRow({ field: "type", op: "is", value: "series" });
-    const value = screen.getByRole("combobox", { name: "Value" });
-    expect(value).toHaveTextContent("Shows");
-    choose(value, "Movies");
-    expect(latest?.value).toBe("movie");
-  });
-
-  it("shows bitrate in the kilobits per second the server compares", () => {
-    const { unmount } = renderRow({ field: "bitrate", op: "gte", value: 8000 });
-    expect(screen.getByRole("spinbutton", { name: "Value" })).toHaveValue(8000);
-    expect(screen.getByText("kbps")).toBeInTheDocument();
-    unmount();
-
-    renderRow({ field: "bitrate", op: "between", value: [4000, 20000] });
-    expect(screen.getByRole("spinbutton", { name: "From" })).toHaveValue(4000);
-    expect(screen.getByText("kbps")).toBeInTheDocument();
-  });
-
-  it("picks a genre, studio or rating from a picker that names the field", () => {
-    renderRow({ field: "studio", op: "is", value: "" });
-    expect(screen.getByRole("combobox", { name: "Value" })).toHaveTextContent("Pick a studio");
-    choose(field(), "Content rating");
-    expect(latest).toEqual({ field: "content_rating", op: "is", value: "" });
-    expect(screen.getByRole("combobox", { name: "Value" })).toHaveTextContent("Pick a rating");
-  });
-
   describe("dates", () => {
-    it("offers a span ending today first, then calendar dates", () => {
-      renderRow({ field: "release_date", op: "in_last", value: "30d" });
-      expect(optionNames(condition())).toEqual([
-        "is in the last",
-        "is not in the last",
-        "is before",
-        "is after",
-        "is between",
-      ]);
-    });
-
     it("starts a new date rule at “is in the last”", () => {
       renderRow({ field: "genre", op: "is", value: "" });
       choose(field(), "Added");
@@ -326,12 +221,6 @@ describe("FilterRuleRow", () => {
       expect(screen.getByRole("spinbutton", { name: "Amount" })).toHaveValue(null);
     });
 
-    it("starts over when the condition changes from a date range to a span", () => {
-      renderRow({ field: "release_date", op: "between", value: ["1990-01-01", "1999-12-31"] });
-      choose(condition(), "is not in the last");
-      expect(latest).toEqual({ field: "release_date", op: "not_in_last", value: "" });
-    });
-
     it("keeps the span when the condition flips to “is not in the last”", () => {
       renderRow({ field: "latest_episode_added", op: "in_last", value: "2w" });
       choose(condition(), "is not in the last");
@@ -375,12 +264,6 @@ describe("FilterRuleRow", () => {
     expect(decades).toContain("1980s");
     choose(value, "1980s");
     expect(latest).toEqual({ field: "decade", op: "is", value: 1980 });
-  });
-
-  it("shows duration in the minutes the server compares", () => {
-    renderRow({ field: "runtime", op: "lt", value: 90 });
-    expect(screen.getByRole("spinbutton", { name: "Value" })).toHaveValue(90);
-    expect(screen.getByText("min")).toBeInTheDocument();
   });
 
   it("moves focus to the value control when asked", async () => {

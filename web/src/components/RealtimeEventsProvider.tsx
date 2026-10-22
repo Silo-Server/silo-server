@@ -124,6 +124,14 @@ function isRequestNotification(notification: Pick<AppNotification, "type">) {
  */
 export const EVENTS_ACCESS_CHANGED_CLOSE_CODE = 4001;
 
+/**
+ * How long the events socket stays open after the page is hidden. Its frames
+ * keep the cache current meanwhile, so a quick tab switch costs no requests. A
+ * longer absence closes the socket, and the return refetches active queries
+ * once to cover the frames it missed.
+ */
+export const HIDDEN_EVENTS_SOCKET_GRACE_MS = 60_000;
+
 function buildEventsUrl(location: Pick<Location, "protocol" | "host">) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${location.host}/api/v2/events/ws`;
@@ -497,12 +505,22 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const nextHandlerIDRef = useRef(1);
   const waitersRef = useRef(new Map<string, JobWaiter>());
   const activeProfileIDRef = useRef<string | null | undefined>(profile?.id);
-  const canApplyRealtimeUpdatesRef = useRef(pageActivity.canApplyRealtimeUpdates);
   const allowDashboardRealtimeUpdatesRef = useRef(allowDashboardRealtimeUpdates);
-  const shouldCatchUpOnFocusRef = useRef(!pageActivity.canApplyRealtimeUpdates);
+  const shouldCatchUpOnFocusRef = useRef(false);
+  const hiddenAtRef = useRef<number | null>(null);
+  const hideCountRef = useRef(0);
+  // An unexpected drop on a visible page is not caught up at once, but the
+  // next return from a hide catches up the frames it lost.
+  const droppedSinceCatchUpRef = useRef(false);
+  const [hiddenGraceExpired, setHiddenGraceExpired] = useState(false);
+  // Bumping these replaces the socket, or runs a catch-up while the page is visible.
+  const [socketGeneration, setSocketGeneration] = useState(0);
+  const [catchUpSignal, setCatchUpSignal] = useState(0);
+  // A frozen page runs no timers or socket handlers, so it gets no grace.
+  const keepSocketOpen =
+    pageActivity.canApplyRealtimeUpdates || (!pageActivity.isFrozen && !hiddenGraceExpired);
 
   activeProfileIDRef.current = profile?.id;
-  canApplyRealtimeUpdatesRef.current = pageActivity.canApplyRealtimeUpdates;
   allowDashboardRealtimeUpdatesRef.current = allowDashboardRealtimeUpdates;
 
   useEffect(() => () => catalogInvalidation.cancel(), [catalogInvalidation]);
@@ -831,12 +849,42 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    if (!authenticatedUserID) {
+    if (pageActivity.canApplyRealtimeUpdates) {
+      setHiddenGraceExpired(false);
       return;
     }
+    const timer = window.setTimeout(
+      () => setHiddenGraceExpired(true),
+      HIDDEN_EVENTS_SOCKET_GRACE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [pageActivity.canApplyRealtimeUpdates]);
+
+  useEffect(() => {
     if (!pageActivity.canApplyRealtimeUpdates) {
-      shouldCatchUpOnFocusRef.current = true;
+      if (hiddenAtRef.current === null) {
+        hiddenAtRef.current = Date.now();
+        hideCountRef.current += 1;
+      }
       return;
+    }
+    const hiddenAt = hiddenAtRef.current;
+    hiddenAtRef.current = null;
+    if (!authenticatedUserID) {
+      shouldCatchUpOnFocusRef.current = false;
+      return;
+    }
+    // A suspended page (a phone browser in the background) runs no timers, so
+    // the grace timer may not have closed the socket. Frames were probably
+    // missed, and the socket may have died without a close event: replace it.
+    if (hiddenAt !== null && Date.now() - hiddenAt >= HIDDEN_EVENTS_SOCKET_GRACE_MS) {
+      shouldCatchUpOnFocusRef.current = true;
+      if (socketRef.current) {
+        setSocketGeneration((generation) => generation + 1);
+      }
+    }
+    if (hiddenAt !== null && droppedSinceCatchUpRef.current) {
+      shouldCatchUpOnFocusRef.current = true;
     }
     if (!shouldCatchUpOnFocusRef.current) {
       return;
@@ -852,6 +900,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     }
 
     shouldCatchUpOnFocusRef.current = false;
+    droppedSinceCatchUpRef.current = false;
     void queryClient.refetchQueries({
       type: "active",
       predicate: (query) => !isDashboardQueryKey(query.queryKey),
@@ -862,6 +911,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     void refreshAccount().catch(() => {});
   }, [
     authenticatedUserID,
+    catchUpSignal,
     isForegroundPlaybackRoute,
     pageActivity.canApplyRealtimeUpdates,
     queryClient,
@@ -869,7 +919,13 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   ]);
 
   useEffect(() => {
-    if (!authenticatedUserID || !pageActivity.canApplyRealtimeUpdates) {
+    if (!authenticatedUserID) {
+      setConnectionState("disconnected");
+      return;
+    }
+    if (!keepSocketOpen) {
+      // Frames sent from now on are missed; catch up when the page returns.
+      shouldCatchUpOnFocusRef.current = true;
       setConnectionState("disconnected");
       return;
     }
@@ -962,6 +1018,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
       activeSocket = socket;
       socketRef.current = socket;
+      const hideCountAtOpen = hideCountRef.current;
       // The server sends access_changed and then closes with
       // EVENTS_ACCESS_CHANGED_CLOSE_CODE; whichever arrives first refreshes.
       let accessChangeHandled = false;
@@ -985,9 +1042,6 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
       socket.onmessage = (event) => {
         if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
-          return;
-        }
-        if (!canApplyRealtimeUpdatesRef.current) {
           return;
         }
         const message = parseEventsMessage(event.data);
@@ -1069,6 +1123,20 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           authorityActive()
         ) {
           handleAccessChanged();
+        } else if (!closedByEffect) {
+          droppedSinceCatchUpRef.current = true;
+        }
+        if (
+          event.code !== EVENTS_ACCESS_CHANGED_CLOSE_CODE &&
+          !closedByEffect &&
+          (hiddenAtRef.current !== null || hideCountRef.current !== hideCountAtOpen)
+        ) {
+          // The socket was up while the page was hidden, and a phone browser
+          // may have been suspended then, so frames could have been lost
+          // without notice. Catalog and user-state channels send no snapshot
+          // on reconnect: catch up now, or when the page returns.
+          shouldCatchUpOnFocusRef.current = true;
+          setCatchUpSignal((signal) => signal + 1);
         }
         socketRef.current = null;
         activeSocket = null;
@@ -1112,7 +1180,8 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     renderedAuthority?.serverOrigin,
     renderedAuthority?.profileId,
     renderedAuthority?.profileToken,
-    pageActivity.canApplyRealtimeUpdates,
+    keepSocketOpen,
+    socketGeneration,
     queryClient,
     refreshAccount,
     sendSubscribe,

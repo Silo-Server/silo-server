@@ -128,7 +128,11 @@ func (l *AttemptLimiter) Reset(ctx context.Context, key string) {
 // RetryAfterSeconds rounds a lockout remainder up to whole seconds for a
 // Retry-After header, never below one.
 func RetryAfterSeconds(d time.Duration) int {
-	s := int((d + time.Second - 1) / time.Second)
+	// Divide before rounding: adding a second first overflows a saturated d.
+	s := int(d / time.Second)
+	if d%time.Second > 0 {
+		s++
+	}
 	if s < 1 {
 		return 1
 	}

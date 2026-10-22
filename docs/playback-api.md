@@ -64,7 +64,7 @@ lets only one of them probe at a time. A tab holds a shared lock while its
 media plays or playback starts, and no tab probes while any tab holds it. A
 playback start is also broadcast to the other tabs, so a probe already running
 in one of them stops and discards its measurement. On a metered link (Data Saver or cellular) it
-sends no cached measurement, so the planner's metered limit applies.
+sends no cached measurement.
 
 Every mutation body carries the `installation_id` the client read from
 capabilities. A different value is `409 installation_changed`: refresh
@@ -76,7 +76,8 @@ per-account enrollment.
 `GET /api/v2/watch/{id}` includes optional `poster_url`, `poster_thumbhash`,
 `backdrop_url`, and `backdrop_thumbhash` for system media controls. Movies
 use their own artwork, episodes use their still as the poster and their
-series' backdrop, and local extras inherit their parent's artwork. URLs use
+series' backdrop, and local extras use their own still as the poster when they
+have one and otherwise inherit their parent's artwork. URLs use
 the same resolver and `image_size` query as catalog item detail. Missing
 artwork is omitted; clients can retain their catalog-detail fallback.
 The frozen v1 watch response does not gain these fields.
@@ -312,7 +313,7 @@ id); clients never retry automatically and treat `429` as drop.
 | --- | --- |
 | Original bytes | GET/HEAD `/api/v2/stream/{session_id}` |
 | HLS manifest | GET `/api/v2/playback/transcode/{session_id}/master.m3u8` |
-| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}` |
+| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment |
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 

@@ -142,10 +142,12 @@ describe("row names", () => {
     expect(savedTitle({ ...blank, config: { window: "90d" } }, recipeCatalogFixture)).toBe(
       "Trending on this server",
     );
-    expect(savedTitle({ ...blank, sectionType: "next_up", config: {} }, recipeCatalogFixture)).toBe(
-      "On Deck",
+    expect(
+      savedTitle({ ...blank, sectionType: "next_in_series", config: {} }, recipeCatalogFixture),
+    ).toBe("Next in Series");
+    expect(savedTitle({ ...blank, sectionType: "next_in_series", config: {} }, undefined)).toBe(
+      "Next in series",
     );
-    expect(savedTitle({ ...blank, sectionType: "next_up", config: {} }, undefined)).toBe("On deck");
   });
 });
 

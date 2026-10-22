@@ -77,18 +77,33 @@ func (e *LocalExtractor) Extract(ctx context.Context, _ *Job, req mediasample.Re
 		runner.HWAccel, runner.HWDevice = resolved, device
 	}
 	result, err := runner.Run(ctx, req)
-	// Opening media stays in the subprocess, where the attempt timeout and
-	// caller cancellation apply to input opening too. Keep absent
-	// mounts and permissions as retryable input failures.
-	if failure, ok := errors.AsType[*mediasample.Error](err); ok && ctx.Err() == nil {
-		for _, attempt := range failure.Attempts {
-			message := strings.ToLower(attempt.StderrTail)
-			if strings.Contains(message, "no such file or directory") || strings.Contains(message, "permission denied") {
-				return result, &inputError{err: err}
-			}
-		}
+	if ctx.Err() == nil && InputUnreadable(err) {
+		return result, &inputError{err: err}
 	}
 	return result, err
+}
+
+// InputUnreadable reports whether a sampling run failed because ffmpeg could
+// not open its input: an absent mount or a permission problem on the host
+// that ran it, which says nothing about the file. Opening media stays in the
+// subprocess, where the attempt timeout and caller cancellation apply to
+// input opening too, so this reads ffmpeg's log. Only the last attempt that
+// ran ffmpeg counts: it is the software one when software ran, and a hardware
+// attempt's log can name a missing driver or device node that has nothing to
+// do with the input. An attempt refused before ffmpeg started, such as a
+// software attempt without a tone-map filter, has no log.
+func InputUnreadable(err error) bool {
+	failure, ok := errors.AsType[*mediasample.Error](err)
+	if !ok {
+		return false
+	}
+	for i := len(failure.Attempts) - 1; i >= 0; i-- {
+		if tail := failure.Attempts[i].StderrTail; tail != "" {
+			message := strings.ToLower(tail)
+			return strings.Contains(message, "no such file or directory") || strings.Contains(message, "permission denied")
+		}
+	}
+	return false
 }
 
 // fallback moves a failed hardware attempt on to software, logging the

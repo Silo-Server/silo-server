@@ -387,11 +387,20 @@ func clearProvisionalProviderIDsLocked(ctx context.Context, pool *pgxpool.Pool, 
 	if contentID == "" {
 		return fmt.Errorf("content_id is required")
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin provisional provider-id clear: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, contentID); err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			// A provisional owner that vanished leaves nothing to clear, as
+			// the status lookup below treats it; the caller retries persist.
+			return nil
+		}
+		return err
+	}
 
 	var status string
 	err = tx.QueryRow(ctx, `SELECT status FROM media_items WHERE content_id = $1 FOR UPDATE`, contentID).Scan(&status)
@@ -435,11 +444,15 @@ func canonicalizeProviderIDDuplicate(
 	if leftContentID == "" || rightContentID == "" || leftContentID == rightContentID {
 		return leftContentID, nil
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return "", fmt.Errorf("begin provider-id canonicalization: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, leftContentID, rightContentID); err != nil {
+		return "", err
+	}
 
 	canonical, source, err := chooseCanonicalProviderOwner(ctx, tx, leftContentID, rightContentID)
 	if err != nil {
@@ -495,11 +508,15 @@ func canonicalizeProviderIDDuplicateInto(
 	if sourceID == canonicalID {
 		return canonicalID, nil
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return "", fmt.Errorf("begin provider-id canonicalization: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, sourceID, canonicalID); err != nil {
+		return "", err
+	}
 
 	candidates := make(map[string]canonicalCandidate, 2)
 	rows, err := tx.Query(ctx, `
@@ -971,6 +988,15 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			ON CONFLICT (user_id, profile_id, series_id) DO UPDATE
 			SET dropped_at = GREATEST(user_dropped_series.dropped_at, EXCLUDED.dropped_at)`},
 	{"delete source dropped series", `DELETE FROM user_dropped_series WHERE series_id = $1`},
+	// A notification mute follows its series; the earlier mute's time is kept.
+	{"merge notification mutes", `
+			INSERT INTO profile_series_notification_mutes (user_id, profile_id, series_id, muted_at)
+			SELECT user_id, profile_id, $2, muted_at
+			FROM profile_series_notification_mutes
+			WHERE series_id = $1
+			ON CONFLICT (user_id, profile_id, series_id) DO UPDATE
+			SET muted_at = LEAST(profile_series_notification_mutes.muted_at, EXCLUDED.muted_at)`},
+	{"delete source notification mutes", `DELETE FROM profile_series_notification_mutes WHERE series_id = $1`},
 	{"merge watch provider dropped items", `
 			INSERT INTO watch_provider_dropped_items (connection_id, provider_account_id, series_id, provider_item_key, remote_seen, updated_at)
 			SELECT connection_id, provider_account_id, $2, '', false, NOW()

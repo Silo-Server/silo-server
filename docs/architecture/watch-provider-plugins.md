@@ -123,6 +123,25 @@ Several items with one key follow these rules:
   names one. Plugin tombstones carry only the key, so one whose rows name more
   than one kind of title changes nothing and adds a warning.
 
+## Watched-history export
+
+A sync drains a connection's whole pending history-export backlog, oldest play
+first, in calls of at most the plugin's `max_batch_size` plays. Each call's
+per-play results are stored before the next call, so a run that stops partway
+keeps its progress. The run pages the backlog by `(watched_at, id)`, so a play
+that fails waits for the next sync instead of being retried within the same
+run; a play stops being retried after five failed attempts. A rate-limit fault
+ends the run and defers the connection until the provider's retry time. A run
+with a deadline (a manual sync) stops starting calls three minutes before it,
+and an export created after the run read local history waits for the next run
+rather than being retired as missing. The same `max_batch_size` also bounds
+every other `ApplyEvents` call and the page size Silo asks for in
+`ListRemoteState`. A
+plugin must answer each play on its own. It reports `APPLIED` or `NO_CHANGE`
+only for a play the provider accepted, `REJECTED` for one the provider cannot
+take, and `RETRY` for one it cannot confirm. Silo records `APPLIED` as sent and
+never sends that play again.
+
 ## Event media
 
 Playback scrobbles, watched exports and unwatch events send a plugin the

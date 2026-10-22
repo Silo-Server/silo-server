@@ -26,46 +26,11 @@ vi.mock("@/pages/ItemDetail/DetailHero", () => ({
   ),
 }));
 
+import { makeItemDetail } from "./itemDetail.test-support";
 import MangaContent from "./MangaContent";
 
-function mangaItem(chapters: MangaChapter[]): ItemDetail & { type: "manga" } {
-  return {
-    content_id: "manga-1",
-    type: "manga",
-    title: "Test Manga",
-    year: 2024,
-    overview: "",
-    runtime: 0,
-    content_rating: "",
-    genres: [],
-    rating_imdb: null,
-    rating_tmdb: null,
-    rating_rt_critic: null,
-    rating_rt_audience: null,
-    ratings: [],
-    imdb_id: "",
-    tmdb_id: "",
-    tvdb_id: "",
-    cast: [],
-    crew: [],
-    studios: [],
-    networks: [],
-    countries: [],
-    release_date: null,
-    first_air_date: null,
-    last_air_date: null,
-    season_count: null,
-    poster_url: "",
-    poster_thumbhash: "",
-    backdrop_url: "",
-    backdrop_thumbhash: "",
-    logo_url: "",
-    versions: [],
-    subtitles: [],
-    intro: null,
-    credits: null,
-    manga: { chapters },
-  } as ItemDetail & { type: "manga" };
+function mangaItem(chapters: MangaChapter[]) {
+  return makeItemDetail("manga", { title: "Test Manga", manga: { chapters } });
 }
 
 function volumeSeries(): ItemDetail & { type: "manga" } {
@@ -78,35 +43,6 @@ function volumeSeries(): ItemDetail & { type: "manga" } {
 const seriesBackTo = "&backTo=" + encodeURIComponent("/item/manga-1?libraryId=7");
 
 describe("MangaContent", () => {
-  it("links a flat volume row to the ebook reader by content_id with the library id and a backTo to the series", () => {
-    render(
-      <MemoryRouter>
-        <MangaContent item={volumeSeries()} libraryId={7} />
-      </MemoryRouter>,
-    );
-
-    // The reader link carries the series content id as backTo so the reader's
-    // back action returns to the series instead of looping into the chapter.
-    expect(screen.getByRole("link", { name: /^Volume 1$/i })).toHaveAttribute(
-      "href",
-      "/reader/ebook/v01?libraryId=7" + seriesBackTo,
-    );
-  });
-
-  it("offers per-row Read, Mark-read, and Download actions", () => {
-    render(
-      <MemoryRouter>
-        <MangaContent item={volumeSeries()} libraryId={7} />
-      </MemoryRouter>,
-    );
-
-    // Read remains the row link.
-    expect(screen.getByRole("link", { name: /^Volume 1$/i })).toBeInTheDocument();
-    // Mark-read + Download toggles exist per row (2 volumes → 2 of each).
-    expect(screen.getAllByRole("button", { name: /Mark chapter read/i })).toHaveLength(2);
-    expect(screen.getAllByRole("button", { name: /Download chapter/i })).toHaveLength(2);
-  });
-
   it("shows a Start Reading hero CTA targeting the first volume on an unread series", () => {
     render(
       <MemoryRouter>

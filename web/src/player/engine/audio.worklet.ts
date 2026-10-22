@@ -6,9 +6,10 @@
  * frames out and, every few quanta, tells the page which media time was
  * rendered at which context time; the page turns that into the playback clock
  * the video follows. Playing slower or faster than 1x steps through the queue
- * at that rate, which shifts pitch: it exists for Watch Together's brief
- * catch-up nudges, not for listening at speed.
+ * at that rate, and the samples come from a time stretcher that keeps the
+ * audio's pitch.
  */
+import { TimeStretcher } from "./timeStretch";
 import type {
   PageToWorkletMessage,
   WorkerToWorkletMessage,
@@ -57,16 +58,29 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
   private consumedFrames = 0;
   private quanta = 0;
   private lastAdvancing = false;
+  /** The rate in the last clock report; a change is reported at once. */
+  private reportedRate = 1;
   /**
    * Media time just past the last sample rendered in this generation, or the
    * generation's start position before anything has played.
    */
   private renderedUntil: number | null = null;
   private worker: MessagePort | null = null;
+  private readonly stretcher: TimeStretcher;
+  /** The PCM at the read head that the stretcher builds its next sequence from. */
+  private readonly stretchInput: Float32Array;
+  /**
+   * Less than a sequence is left before the end of the stream: it plays
+   * unstretched, so its samples fill the media time left instead of a
+   * sequence padded with silence.
+   */
+  private finishing = false;
 
   constructor(options: { processorOptions: { channels: number } }) {
     super(options);
     this.channels = options.processorOptions.channels;
+    this.stretcher = new TimeStretcher(this.channels, sampleRate);
+    this.stretchInput = new Float32Array(this.stretcher.maxInputFrames * this.channels);
     this.port.onmessage = (event: MessageEvent<PageToWorkletMessage>) => this.onPage(event.data);
   }
 
@@ -84,6 +98,8 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     this.underrunReported = false;
     this.consumedFrames = 0;
     this.renderedUntil = null;
+    this.finishing = false;
+    this.stretcher.reset();
   }
 
   private onPage(message: PageToWorkletMessage): void {
@@ -104,9 +120,13 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
       case "playing":
         this.playing = message.playing;
         return;
-      case "rate":
-        this.rate = message.rate > 0 ? message.rate : 1;
+      case "rate": {
+        const rate = message.rate > 0 ? message.rate : 1;
+        if (rate === 1 && this.rate !== 1) this.stretcher.release();
+        else if (rate !== 1 && this.rate === 1) this.stretcher.reset();
+        this.rate = rate;
         return;
+      }
     }
   }
 
@@ -119,7 +139,10 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     }
     const frames = Math.floor(message.samples.length / this.channels);
     if (frames > 0) {
-      this.queue.push({ samples: message.samples, frames, timestamp: message.timestamp });
+      const chunk = { samples: message.samples, frames, timestamp: message.timestamp };
+      // The queue ran dry with the head past the end of the last chunk.
+      if (this.queue.length === 0) this.carryIntoGap(chunk);
+      this.queue.push(chunk);
       this.underrunReported = false;
     }
   }
@@ -134,27 +157,47 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
       mediaTime = this.inGap(head) ? this.renderedUntil : head.timestamp + this.offset / sampleRate;
     }
     let rendered = 0;
+    // The stretcher had too little PCM queued to build its next sequence.
+    let starved = false;
 
     if (this.playing) {
       const channels = Math.min(this.channels, output.length);
       const step = this.rate;
+      const stretched = step !== 1;
       for (; rendered < length && this.queue.length > 0; rendered++) {
         const chunk = this.queue[0]!;
         if (this.inGap(chunk)) {
           for (let c = 0; c < channels; c++) output[c]![rendered] = 0;
           this.renderedUntil! += step / sampleRate;
+          this.stretcher.reset();
           continue;
         }
-        const index = Math.floor(this.offset);
-        const fraction = this.offset - index;
-        const next = index + 1 < chunk.frames ? chunk : this.queue[1];
-        const nextIndex = index + 1 < chunk.frames ? index + 1 : 0;
-        for (let c = 0; c < channels; c++) {
-          const a = chunk.samples[index * this.channels + c]!;
-          const b = fraction > 0 && next ? next.samples[nextIndex * this.channels + c]! : a;
-          // Interpolating between two samples never leaves their range, so the
-          // mix's limiting holds here.
-          output[c]![rendered] = a + (b - a) * fraction;
+        if (stretched && !this.finishing && this.stretcher.pending === 0) {
+          if (this.peek(this.stretcher.inputFrames(step))) {
+            this.stretcher.build(step, this.stretchInput);
+          } else if (this.ended) {
+            this.finishing = true;
+            this.stretcher.release();
+          } else {
+            starved = true;
+            break;
+          }
+        }
+        if (stretched && !this.finishing) {
+          this.stretcher.take(output, rendered, channels);
+        } else {
+          const index = Math.floor(this.offset);
+          const fraction = this.offset - index;
+          const next = index + 1 < chunk.frames ? chunk : this.queue[1];
+          const nextIndex = index + 1 < chunk.frames ? index + 1 : 0;
+          for (let c = 0; c < channels; c++) {
+            const a = chunk.samples[index * this.channels + c]!;
+            const b = fraction > 0 && next ? next.samples[nextIndex * this.channels + c]! : a;
+            // Interpolating between two samples never leaves their range, so the
+            // mix's limiting holds here.
+            output[c]![rendered] = a + (b - a) * fraction;
+          }
+          this.stretcher.blend(output, rendered, channels);
         }
         this.offset += step;
         this.consumedFrames += step;
@@ -162,6 +205,7 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
           const finished = this.queue.shift()!;
           this.offset -= finished.frames;
           this.renderedUntil = finished.timestamp + finished.frames / sampleRate;
+          if (this.queue.length > 0) this.carryIntoGap(this.queue[0]!);
         }
       }
       if (rendered > 0 && this.queue[0] && !this.inGap(this.queue[0])) {
@@ -170,7 +214,8 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     }
     for (let c = 0; c < output.length; c++) output[c]!.fill(0, rendered);
 
-    const ranDry = this.playing && this.queue.length === 0 && !this.ended && !this.underrunReported;
+    const ranDry =
+      this.playing && (this.queue.length === 0 || starved) && !this.ended && !this.underrunReported;
     // When the queue ran dry inside this quantum, the underrun is the report:
     // an advancing clock for the samples before it would carry the clock on
     // through the silence that follows.
@@ -193,17 +238,24 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
     if (
       !ranDry &&
       mediaTime !== null &&
-      (advancing !== this.lastAdvancing || this.quanta % CLOCK_REPORT_QUANTA === 0)
+      (advancing !== this.lastAdvancing ||
+        this.rate !== this.reportedRate ||
+        this.quanta % CLOCK_REPORT_QUANTA === 0)
     ) {
+      this.reportedRate = this.rate;
       this.postPage({
         type: "clock",
         generation: this.generation,
         contextTime: currentTime,
         mediaTime,
         advancing,
+        rate: this.rate,
       });
     }
     this.lastAdvancing = advancing;
+    // Audio flowing again ends a dry spell even without new PCM, as when a
+    // speed change lets the stretcher build from what is already queued.
+    if (advancing) this.underrunReported = false;
     if (this.worker && this.quanta % CONSUMED_REPORT_QUANTA === 0) {
       const report: WorkletToWorkerMessage = {
         type: "consumed",
@@ -218,10 +270,62 @@ class EngineAudioProcessor extends AudioWorkletProcessor {
   /** True while `chunk` is not due yet: silence plays until it is. */
   private inGap(chunk: Chunk): boolean {
     return (
-      this.offset < 1 &&
-      this.renderedUntil !== null &&
-      chunk.timestamp - this.renderedUntil > GAP_TOLERANCE_SECONDS
+      this.offset < 1 && this.renderedUntil !== null && this.startsLate(chunk, this.renderedUntil)
     );
+  }
+
+  /**
+   * Above 1x the head can step past the end of a chunk. When `next` starts
+   * after a gap, those frames play the gap's silence instead of skipping
+   * into it.
+   */
+  private carryIntoGap(next: Chunk): void {
+    if (
+      this.offset > 0 &&
+      this.renderedUntil !== null &&
+      this.startsLate(next, this.renderedUntil)
+    ) {
+      this.renderedUntil += this.offset / sampleRate;
+      this.offset = 0;
+    }
+  }
+
+  private startsLate(chunk: Chunk, after: number): boolean {
+    return chunk.timestamp - after > GAP_TOLERANCE_SECONDS;
+  }
+
+  /**
+   * Copies `frames` frames of the stream from the read head into
+   * stretchInput, with silence where the queue's timestamps leave a gap.
+   * False when less than that is queued.
+   */
+  private peek(frames: number): boolean {
+    const channels = this.channels;
+    const into = this.stretchInput;
+    let written = 0;
+    let index = Math.floor(this.offset);
+    for (let i = 0; i < this.queue.length && written < frames; i++) {
+      const chunk = this.queue[i]!;
+      if (i > 0) {
+        const previous = this.queue[i - 1]!;
+        const end = previous.timestamp + previous.frames / sampleRate;
+        if (this.startsLate(chunk, end)) {
+          const silent = Math.min(
+            frames - written,
+            Math.round((chunk.timestamp - end) * sampleRate),
+          );
+          into.fill(0, written * channels, (written + silent) * channels);
+          written += silent;
+        }
+        index = 0;
+      }
+      const count = Math.min(chunk.frames - index, frames - written);
+      const from = index * channels;
+      const to = written * channels;
+      for (let s = 0; s < count * channels; s++) into[to + s] = chunk.samples[from + s]!;
+      written += count;
+    }
+    return written >= frames;
   }
 
   private postPage(message: WorkletToPageMessage): void {

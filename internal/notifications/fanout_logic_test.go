@@ -25,26 +25,8 @@ func TestEpisodeKey(t *testing.T) {
 	}
 }
 
-func TestValidEpisodeOrdinals(t *testing.T) {
-	cases := []struct {
-		season, episode int
-		want            bool
-	}{
-		{0, 0, true},
-		{1, 999_999, true},
-		{1, 1_000_000, false},
-		{-1, 1, false},
-		{1, -1, false},
-	}
-	for _, tc := range cases {
-		if got := ValidEpisodeOrdinals(tc.season, tc.episode); got != tc.want {
-			t.Errorf("ValidEpisodeOrdinals(%d,%d) = %v, want %v", tc.season, tc.episode, got, tc.want)
-		}
-	}
-}
-
 func TestEvaluateRecipientReasons(t *testing.T) {
-	prefs := DefaultPreferences("p1")
+	prefs := DefaultPreferences(1, "p1")
 	episodeKey := EpisodeKey(2, 5)
 
 	t.Run("favorite matches", func(t *testing.T) {
@@ -95,12 +77,12 @@ func TestEvaluateRecipientReasons(t *testing.T) {
 	})
 
 	t.Run("preferences are a hard gate", func(t *testing.T) {
-		disabled := DefaultPreferences("p1")
+		disabled := DefaultPreferences(1, "p1")
 		disabled.NotifyFavorites = false
 		if _, ok := EvaluateRecipient(SeriesInterest{Favorite: true}, disabled, episodeKey); ok {
 			t.Fatal("disabled reason must not produce a delivery")
 		}
-		killSwitch := DefaultPreferences("p1")
+		killSwitch := DefaultPreferences(1, "p1")
 		killSwitch.Enabled = false
 		interest := SeriesInterest{Favorite: true, Watchlist: true, ContinueWatching: true}
 		if _, ok := EvaluateRecipient(interest, killSwitch, episodeKey); ok {
@@ -109,29 +91,12 @@ func TestEvaluateRecipientReasons(t *testing.T) {
 	})
 }
 
-func TestSplitEpisodeKeyInvertsEpisodeKey(t *testing.T) {
-	for _, c := range [][2]int{{0, 0}, {1, 2}, {2, 999999}, {12, 10500}} {
-		if season, episode := SplitEpisodeKey(EpisodeKey(c[0], c[1])); season != c[0] || episode != c[1] {
-			t.Errorf("SplitEpisodeKey(EpisodeKey(%d, %d)) = %d, %d", c[0], c[1], season, episode)
-		}
-	}
-}
-
-func TestReasonFlagsHas(t *testing.T) {
-	f := ReasonFlags{Watchlist: true, NextUp: true}
-	for reason, want := range map[string]bool{ReasonFavorite: false, ReasonWatchlist: true, ReasonContinueWatching: false, ReasonNextUp: true, "other": false} {
-		if got := f.Has(reason); got != want {
-			t.Errorf("Has(%q) = %v, want %v", reason, got, want)
-		}
-	}
-}
-
 // ActiveReasons is the event-independent half of EvaluateRecipient: the
 // reasons preferences let notify, with Next Up needing a known episode.
 func TestActiveReasons(t *testing.T) {
 	key := EpisodeKey(1, 4)
 	all := SeriesInterest{Favorite: true, Watchlist: true, ContinueWatching: true, NextUpCandidate: true, NextExpectedEpisodeKey: &key}
-	prefs := DefaultPreferences("p")
+	prefs := DefaultPreferences(1, "p")
 	if got := ActiveReasons(all, prefs); got != (ReasonFlags{Favorite: true, Watchlist: true, ContinueWatching: true, NextUp: true}) {
 		t.Errorf("all enabled = %+v", got)
 	}

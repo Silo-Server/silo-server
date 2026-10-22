@@ -526,6 +526,7 @@ GET /api/v2/compat/connect-info	non-media
 GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
+POST /api/v2/devices/push/apple/retire	non-media
 DELETE /api/v2/devices/{device_id}	non-media
 PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
@@ -676,8 +677,11 @@ GET /api/v2/notifications/push/apple/display/{delivery_id}	non-media
 POST /api/v2/notifications/push/devices	non-media
 GET /api/v2/notifications/push/devices/capabilities	non-media
 DELETE /api/v2/notifications/push/devices/{device_id}	non-media
+POST /api/v2/notifications/push/devices/{device_id}/retire	non-media
 POST /api/v2/notifications/read-all	non-media
 GET /api/v2/notifications/series	non-media
+DELETE /api/v2/notifications/series/{series_id}/mute	non-media
+PUT /api/v2/notifications/series/{series_id}/mute	non-media
 GET /api/v2/notifications/sync	non-media
 GET /api/v2/notifications/unread-count	non-media
 GET /api/v2/notifications/web-push/subscriptions	non-media
@@ -790,6 +794,7 @@ POST /api/v2/scan/cancel	non-media
 GET /api/v2/scan/capabilities	non-media
 GET /api/v2/sections/recipes	non-media
 GET /api/v2/sections/recipes/{type}/candidates	non-media
+GET /api/v2/sections/seasonal-themes	non-media
 GET /api/v2/settings/contract	non-media
 GET /api/v2/settings/contract/capabilities	non-media
 DELETE /api/v2/settings/device/subtitle-appearance	non-media
@@ -1806,6 +1811,7 @@ GET /api/v2/compat/connect-info	non-media
 GET /api/v2/devices	non-media
 POST /api/v2/devices/push/apple	non-media
 GET /api/v2/devices/push/apple/capabilities	non-media
+POST /api/v2/devices/push/apple/retire	non-media
 DELETE /api/v2/devices/{device_id}	non-media
 PATCH /api/v2/devices/{device_id}	non-media
 DELETE /api/v2/devices/{device_id}/settings	non-media
@@ -1956,8 +1962,11 @@ GET /api/v2/notifications/push/apple/display/{delivery_id}	non-media
 POST /api/v2/notifications/push/devices	non-media
 GET /api/v2/notifications/push/devices/capabilities	non-media
 DELETE /api/v2/notifications/push/devices/{device_id}	non-media
+POST /api/v2/notifications/push/devices/{device_id}/retire	non-media
 POST /api/v2/notifications/read-all	non-media
 GET /api/v2/notifications/series	non-media
+DELETE /api/v2/notifications/series/{series_id}/mute	non-media
+PUT /api/v2/notifications/series/{series_id}/mute	non-media
 GET /api/v2/notifications/sync	non-media
 GET /api/v2/notifications/unread-count	non-media
 GET /api/v2/notifications/web-push/subscriptions	non-media
@@ -2070,6 +2079,7 @@ POST /api/v2/scan/cancel	non-media
 GET /api/v2/scan/capabilities	non-media
 GET /api/v2/sections/recipes	non-media
 GET /api/v2/sections/recipes/{type}/candidates	non-media
+GET /api/v2/sections/seasonal-themes	non-media
 GET /api/v2/settings/contract	non-media
 GET /api/v2/settings/contract/capabilities	non-media
 DELETE /api/v2/settings/device/subtitle-appearance	non-media

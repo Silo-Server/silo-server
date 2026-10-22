@@ -1,7 +1,6 @@
 package chatgpt
 
 import (
-	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
 	"errors"
@@ -54,13 +53,7 @@ func newIdentityRetryFixture(t *testing.T, key *rsa.PrivateKey) *identityRetryFi
 
 func (f *identityRetryFixture) sign(t *testing.T, key *rsa.PrivateKey) {
 	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, f.claims)
-	token.Header["kid"] = "test-key"
-	signed, err := token.SignedString(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.tokens.IDToken = signed
+	f.tokens.IDToken = signIDToken(t, key, f.claims)
 }
 
 func (f *identityRetryFixture) transport(t *testing.T, metadata func(*http.Request, int) (*http.Response, error)) {
@@ -109,10 +102,7 @@ type identityReadFailure struct{ err error }
 func (r identityReadFailure) Read([]byte) (int, error) { return 0, r.err }
 
 func TestLoginRetriesTransientIdentityMetadata(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testSigningKey(t)
 	for _, path := range []string{"/.well-known/openid-configuration", "/keys"} {
 		for _, failure := range []string{"network", "rate limit", "unavailable", "interrupted body", "network body"} {
 			t.Run(path+"/"+failure, func(t *testing.T) {
@@ -163,10 +153,7 @@ func TestLoginRetriesTransientIdentityMetadata(t *testing.T) {
 }
 
 func TestLoginIdentityRetryHonorsRetryAfterAndExhaustion(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testSigningKey(t)
 	for _, test := range []struct {
 		name   string
 		calls  int
@@ -230,10 +217,7 @@ func TestLoginIdentityRetryHonorsRetryAfterAndExhaustion(t *testing.T) {
 }
 
 func TestLoginIdentityRejectsTerminalVerificationWithoutRetry(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testSigningKey(t)
 	for _, failure := range []string{"malformed discovery", "empty discovery", "untrusted endpoint", "malformed keys", "invalid key", "invalid nonce", "audience", "expired", "signature"} {
 		t.Run(failure, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -283,10 +267,7 @@ func TestLoginIdentityRejectsTerminalVerificationWithoutRetry(t *testing.T) {
 }
 
 func TestLoginIdentityRetryCannotReplaceNewerAttempt(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := testSigningKey(t)
 	synctest.Test(t, func(t *testing.T) {
 		f := newIdentityRetryFixture(t, key)
 		var newer Login

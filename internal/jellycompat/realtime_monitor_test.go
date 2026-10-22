@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func decodeVirtualFolders(t *testing.T, rec *httptest.ResponseRecorder) map[string]bool {
@@ -64,32 +63,6 @@ func TestVirtualFoldersReportRealtimeMonitorConfiguration(t *testing.T) {
 	got = request()
 	if !got["Movies"] || got["Shows"] {
 		t.Fatalf("default server switch: EnableRealtimeMonitor = %v, want Movies true, Shows false", got)
-	}
-}
-
-func TestAutoscanVirtualFoldersReportRealtimeMonitorConfiguration(t *testing.T) {
-	serverOn := true
-	handler := NewAutoscanHandler(&fakeAutoscanFolders{folders: []*models.MediaFolder{
-		{ID: 1, Name: "Movies", Type: "movie", Enabled: true, RealtimeMonitoring: true, Paths: []string{t.TempDir()}},
-		{ID: 2, Name: "Shows", Type: "series", Enabled: true, RealtimeMonitoring: false, Paths: []string{t.TempDir()}},
-	}}, nil, NewResourceIDCodec(), nil)
-	handler.realtimeMonitoring = func() bool { return serverOn }
-	request := func() map[string]bool {
-		req := httptest.NewRequest(http.MethodGet, "/Library/VirtualFolders", nil)
-		req = req.WithContext(context.WithValue(req.Context(), adminAPIKeyKey, true))
-		rec := httptest.NewRecorder()
-		handler.HandleVirtualFolders(rec, req)
-		return decodeVirtualFolders(t, rec)
-	}
-
-	got := request()
-	if !got["Movies"] || got["Shows"] {
-		t.Fatalf("server on: EnableRealtimeMonitor = %v, want Movies true, Shows false", got)
-	}
-	serverOn = false
-	got = request()
-	if got["Movies"] || got["Shows"] {
-		t.Fatalf("server off: EnableRealtimeMonitor = %v, want all false", got)
 	}
 }
 

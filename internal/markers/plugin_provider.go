@@ -81,6 +81,54 @@ type PluginProvider struct {
 
 var _ Submitter = (*PluginProvider)(nil)
 
+// ReadOnlyPluginProvider exposes only the fetch side of a marker plugin whose
+// capability declares supports_contribution=false. The plugin gRPC service has
+// submit methods whether or not the provider accepts contributions, so leaving
+// them off this wrapper makes the Submitter assertion used by contribution and
+// the admin API follow the manifest instead of the service shape.
+type ReadOnlyPluginProvider struct {
+	inner *PluginProvider
+}
+
+var (
+	_ Provider          = (*ReadOnlyPluginProvider)(nil)
+	_ DescribedProvider = (*ReadOnlyPluginProvider)(nil)
+)
+
+func NewReadOnlyPluginProvider(inner *PluginProvider) *ReadOnlyPluginProvider {
+	return &ReadOnlyPluginProvider{inner: inner}
+}
+
+func (p *ReadOnlyPluginProvider) ID() string {
+	if p == nil || p.inner == nil {
+		return ""
+	}
+	return p.inner.ID()
+}
+
+// CacheRevision keeps the plugin revision in the population cache identity and
+// in the reload check that decides whether the runtime needs refreshing.
+func (p *ReadOnlyPluginProvider) CacheRevision() string {
+	if p == nil || p.inner == nil {
+		return ""
+	}
+	return p.inner.CacheRevision()
+}
+
+func (p *ReadOnlyPluginProvider) ProviderDescription() ProviderDescriptor {
+	if p == nil || p.inner == nil {
+		return ProviderDescriptor{}
+	}
+	return p.inner.ProviderDescription()
+}
+
+func (p *ReadOnlyPluginProvider) FetchMarkers(ctx context.Context, req Request) (Result, error) {
+	if p == nil || p.inner == nil {
+		return Result{}, nil
+	}
+	return p.inner.FetchMarkers(ctx, req)
+}
+
 func NewPluginProvider(opts PluginProviderOptions, resolver pluginMarkerResolver) (*PluginProvider, error) {
 	if resolver == nil {
 		return nil, fmt.Errorf("plugin marker resolver is required")
@@ -164,11 +212,14 @@ func (p *PluginProvider) FetchMarkers(ctx context.Context, req Request) (Result,
 		return Result{}, err
 	}
 	response, err := client.FetchMarkers(ctx, &pluginv1.FetchMarkersRequest{
-		ItemType:        itemTypeName(req.Kind),
-		ExternalIds:     externalIDsProto(req.ExternalIDs),
-		SeasonNumber:    int32(req.SeasonNumber),
-		EpisodeNumber:   int32(req.EpisodeNumber),
-		DurationSeconds: req.Duration.Seconds(),
+		ItemType:           itemTypeName(req.Kind),
+		ExternalIds:        externalIDsProto(req.ExternalIDs),
+		SeasonNumber:       int32(req.SeasonNumber),  //nolint:gosec // integer columns in the catalog
+		EpisodeNumber:      int32(req.EpisodeNumber), //nolint:gosec // integer columns in the catalog
+		DurationSeconds:    req.Duration.Seconds(),
+		EpisodeExternalIds: episodeExternalIDsProto(req.EpisodeExternalIDs),
+		EpisodeNumbering:   req.EpisodeNumbering,
+		EpisodeTitle:       req.EpisodeTitle,
 	})
 	if err != nil {
 		return Result{}, pluginProviderError(p.ID(), err)
@@ -206,12 +257,15 @@ func (p *PluginProvider) SubmitMarker(ctx context.Context, req SubmissionRequest
 		return SubmissionResult{}, err
 	}
 	body := &pluginv1.SubmitMarkerRequest{
-		ItemType:        itemTypeName(req.Kind),
-		ExternalIds:     externalIDsProto(req.ExternalIDs),
-		SeasonNumber:    int32(req.SeasonNumber),
-		EpisodeNumber:   int32(req.EpisodeNumber),
-		Segment:         markerKindName(req.Segment),
-		DurationSeconds: req.Duration.Seconds(),
+		ItemType:           itemTypeName(req.Kind),
+		ExternalIds:        externalIDsProto(req.ExternalIDs),
+		SeasonNumber:       int32(req.SeasonNumber),  //nolint:gosec // integer columns in the catalog
+		EpisodeNumber:      int32(req.EpisodeNumber), //nolint:gosec // integer columns in the catalog
+		Segment:            markerKindName(req.Segment),
+		DurationSeconds:    req.Duration.Seconds(),
+		EpisodeExternalIds: episodeExternalIDsProto(req.EpisodeExternalIDs),
+		EpisodeNumbering:   req.EpisodeNumbering,
+		EpisodeTitle:       req.EpisodeTitle,
 	}
 	if req.Start != nil {
 		start := req.Start.Seconds()
@@ -313,6 +367,15 @@ func externalIDsProto(ids map[string]string) *pluginv1.MarkerExternalIDs {
 		TvdbId:      strings.TrimSpace(ids[ExternalIDKeyTVDB]),
 		ProviderIds: structIDs,
 	}
+}
+
+// episodeExternalIDsProto leaves the field unset for a movie or an episode
+// without its own IDs, as a host that predates the field would.
+func episodeExternalIDsProto(ids map[string]string) *pluginv1.MarkerExternalIDs {
+	if len(ids) == 0 {
+		return nil
+	}
+	return externalIDsProto(ids)
 }
 
 func itemTypeName(kind ItemKind) string {
@@ -500,5 +563,20 @@ func PluginDefaultFetchPriorityFromMetadata(metadata map[string]any) (int, bool)
 		return parsed, err == nil
 	default:
 		return 0, false
+	}
+}
+
+// PluginSupportsContributionFromMetadata reports whether a marker capability
+// accepts submissions. Existing manifests omit the key and keep the historical
+// submitter behavior; only an explicit false makes the provider fetch-only.
+func PluginSupportsContributionFromMetadata(metadata map[string]any) bool {
+	switch value := metadata["supports_contribution"].(type) {
+	case bool:
+		return value
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+		return err != nil || parsed
+	default:
+		return true
 	}
 }

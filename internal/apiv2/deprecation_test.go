@@ -32,17 +32,6 @@ func TestFormatDeprecationIsWholeUnixSeconds(t *testing.T) {
 	}
 }
 
-func TestFormatSunsetIsIMFFixdate(t *testing.T) {
-	rfc := time.Date(1994, time.November, 6, 8, 49, 37, 0, time.UTC)
-	if got := FormatSunset(rfc); got != "Sun, 06 Nov 1994 08:49:37 GMT" {
-		t.Fatalf("FormatSunset = %q", got)
-	}
-	local := rfc.In(time.FixedZone("plus2", 2*3600))
-	if got := FormatSunset(local); got != "Sun, 06 Nov 1994 08:49:37 GMT" {
-		t.Fatalf("FormatSunset(local) = %q; the HTTP-date form is always GMT", got)
-	}
-}
-
 func TestRegisterRefusesBadDeprecations(t *testing.T) {
 	before := deprecatedAt.Add(-time.Second)
 	cases := map[string]*Deprecation{

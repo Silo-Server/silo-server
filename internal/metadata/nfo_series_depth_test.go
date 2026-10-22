@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,17 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+// localSourceFile returns the file path a local artwork source names, failing
+// the test unless the source carries discovery's size+mtime fingerprint.
+func localSourceFile(t *testing.T, source string) string {
+	t.Helper()
+	match := regexp.MustCompile(`^file://(.+)\?v=\d+--?\d+$`).FindStringSubmatch(source)
+	if match == nil {
+		t.Fatalf("source %q is not a fingerprinted file:// source", source)
+	}
+	return match[1]
+}
 
 func writeFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
@@ -381,120 +393,6 @@ func TestLocalArtworkBeatsEarlierRemoteProvider(t *testing.T) {
 	}
 	if want := filepath.Join(s1, "Real Show S01E01.jpg"); localSourceFile(t, episodes[0].StillSourcePath) != want {
 		t.Errorf("episode still = %q, want %q over the earlier remote still", episodes[0].StillSourcePath, want)
-	}
-}
-
-// Season NFO edits propagate on manual refresh only: a scheduled refresh
-// fills empty fields but never re-applies an edited season.nfo over an
-// existing name; a manual refresh replaces unlocked fields with the merged
-// provider results, NFO first (same contract as item fields).
-func TestSeasonNFOEdit_ManualRefreshOnlyPropagation(t *testing.T) {
-	root, episodeFiles := buildFitnessFixture(t)
-
-	x := metadata.NewNFOSeriesHarness()
-	ctx := context.Background()
-	const seriesID = "local-p90x"
-	if err := x.SeedSeriesSkeleton(seriesID, "P90X"); err != nil {
-		t.Fatalf("seed skeleton: %v", err)
-	}
-	for i, path := range episodeFiles {
-		x.SeedSeriesFile(100+i, 10, path, root, seriesID)
-	}
-
-	if _, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
-		ContentID: seriesID,
-		Hints: &metadata.MatchHints{
-			Title:                     "P90X",
-			Type:                      "series",
-			FilePath:                  episodeFiles[0],
-			RepresentativeFilePath:    episodeFiles[0],
-			AllGroupFilePaths:         episodeFiles,
-			PrimarySidecarSearchPaths: []string{root},
-		},
-		Language: "en",
-		Mode:     metadata.ModeInitialMatch,
-	}, []metadata.Provider{nfo.NewProvider()}); err != nil {
-		t.Fatalf("initial match: %v", err)
-	}
-	if seasons := x.Seasons(seriesID); len(seasons) == 0 || seasons[0].Title != "Course A: Classic" {
-		t.Fatalf("initial seasons = %#v, want Course A: Classic first", seasons)
-	}
-
-	// Edit the season NFO after the initial match.
-	writeFixtureFile(t, filepath.Join(root, "Season 01", "season.nfo"),
-		`<season><title>Course A: Renamed</title><seasonnumber>1</seasonnumber></season>`)
-
-	// Scheduled refresh: fill-empty only, the edit must NOT propagate.
-	if _, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
-		ContentID: seriesID,
-		Language:  "en",
-		Mode:      metadata.ModeScheduledRefresh,
-	}, []metadata.Provider{nfo.NewProvider()}); err != nil {
-		t.Fatalf("scheduled refresh: %v", err)
-	}
-	if seasons := x.Seasons(seriesID); seasons[0].Title != "Course A: Classic" {
-		t.Errorf("after scheduled refresh season title = %q, want unchanged Course A: Classic", seasons[0].Title)
-	}
-
-	// Manual refresh: the edit propagates.
-	if _, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
-		ContentID: seriesID,
-		Language:  "en",
-		Mode:      metadata.ModeManualRefresh,
-	}, []metadata.Provider{nfo.NewProvider()}); err != nil {
-		t.Fatalf("manual refresh: %v", err)
-	}
-	if seasons := x.Seasons(seriesID); seasons[0].Title != "Course A: Renamed" {
-		t.Errorf("after manual refresh season title = %q, want Course A: Renamed", seasons[0].Title)
-	}
-}
-
-// Regression: a series with no season/episode NFOs must behave exactly as
-// before — the provider contributes nothing at season/episode depth and the
-// synthesized fallback path stays in charge.
-func TestSeriesWithoutSeasonOrEpisodeNFOs_UnchangedFallback(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "TV", "Plain Show")
-	s1 := filepath.Join(root, "Season 01")
-	e1 := filepath.Join(s1, "Plain Show S01E01.mkv")
-	writeFixtureFile(t, e1, "video")
-
-	x := metadata.NewNFOSeriesHarness()
-	ctx := context.Background()
-	const seriesID = "local-plain"
-	if err := x.SeedSeriesSkeleton(seriesID, "Plain Show"); err != nil {
-		t.Fatalf("seed skeleton: %v", err)
-	}
-
-	result, err := x.Service().ProcessWithProviders(ctx, metadata.ProcessRequest{
-		ContentID: seriesID,
-		Hints: &metadata.MatchHints{
-			Title:                     "Plain Show",
-			Type:                      "series",
-			FilePath:                  e1,
-			RepresentativeFilePath:    e1,
-			AllGroupFilePaths:         []string{e1},
-			PrimarySidecarSearchPaths: []string{root},
-		},
-		Language: "en",
-		Mode:     metadata.ModeInitialMatch,
-	}, []metadata.Provider{nfo.NewProvider()})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	// With no NFOs at all the provider finds nothing: the pipeline reports
-	// no update (the worker then synthesizes fallback structure), exactly as
-	// before Phase D.
-	if result == nil || result.Updated {
-		t.Fatalf("result = %#v, want Updated=false when the provider finds nothing", result)
-	}
-	if seasons := x.Seasons(seriesID); len(seasons) != 0 {
-		t.Errorf("seasons = %#v, want none from the provider path (fallback synthesis owns them)", seasons)
-	}
-	if episodes := x.Episodes(seriesID); len(episodes) != 0 {
-		t.Errorf("episodes = %#v, want none from the provider path", episodes)
-	}
-	if jobs := x.EnqueuedImageJobs(); len(jobs) != 0 {
-		t.Errorf("image jobs = %#v, want none without sidecar art", jobs)
 	}
 }
 

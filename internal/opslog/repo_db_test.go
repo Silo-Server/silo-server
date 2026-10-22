@@ -2,10 +2,27 @@ package opslog
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func testPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
 
 // A cursor page must skip the daily partitions newer than the cursor instead
 // of opening an index scan on every one of them.

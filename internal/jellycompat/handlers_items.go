@@ -30,6 +30,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/themedelivery"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -38,6 +39,7 @@ import (
 // ItemsHandler serves Jellyfin browse/search/item endpoints.
 type ItemsHandler struct {
 	storeProvider    userstore.UserStoreProvider
+	adminDefaults    settingsresolve.ServerSettings
 	themeSongs       themeSongStore
 	themeRouter      *themedelivery.Router
 	themeFFmpegPath  func() string
@@ -814,7 +816,7 @@ func (h *ItemsHandler) writeSimilarFromGenre(w http.ResponseWriter, r *http.Requ
 }
 
 // HandleItemStub serves stub responses for unimplemented sub-item endpoints
-// like /Items/{id}/ThemeMedia, /Items/{id}/SpecialFeatures, /Items/{id}/Intros.
+// like /Items/{id}/Intros and /Videos/{id}/AdditionalParts.
 func (h *ItemsHandler) HandleItemStub(w http.ResponseWriter, r *http.Request) {
 	session := SessionFromContext(r.Context())
 	if session == nil {
@@ -1274,6 +1276,12 @@ func (h *ItemsHandler) extraToBaseItem(extra catalog.ItemExtraInfo, parentEncode
 	if extra.DurationSeconds > 0 {
 		dto.RunTimeTicks = secondsToTicks(float64(extra.DurationSeconds))
 	}
+	if tags := imageTagsWithSeed(h.mapper.imageTagSigner,
+		imageTagSeed(extra.ContentID, "Primary", compatCardImageSize, extra.StillPath, extra.StillThumbhash, time.Time{}),
+		extra.StillURL,
+	); tags != nil {
+		dto.ImageTags = tags
+	}
 	applyPlayableLocation(&dto, true)
 	return dto
 }
@@ -1692,7 +1700,15 @@ func (h *ItemsHandler) HandleGenres(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	total := len(items)
+	// Jellyfin returns every genre when Limit is absent and none for Limit=0;
+	// parseItemsQuery's default page size is for item browsing.
+	if query.limitDefaulted {
+		query.limit = total
+	}
 	items = slicePage(items, query.startIndex, query.limit)
+	if query.countOnly {
+		items = []baseItemDTO{}
+	}
 	if !query.enableTotalRecordCount {
 		total = 0
 	}
@@ -2334,8 +2350,9 @@ func (h *ItemsHandler) HandleNextUp(w http.ResponseWriter, r *http.Request) {
 }
 
 // nextUpNewReleasesFirst reads the profile's ui.next_up_new_releases_first,
-// so Jellyfin clients see Next Up in the order Silo's Home uses. Without a
-// store, or when the read fails, it is the default, off.
+// so Jellyfin clients see Next Up in the order Silo's Home uses, including the
+// administrator's default for a profile that has not chosen. Without a store,
+// or when the read fails, it is the default, off.
 func (h *ItemsHandler) nextUpNewReleasesFirst(ctx context.Context, session *Session) bool {
 	if h.storeProvider == nil || session.ProfileID == "" {
 		return false
@@ -2344,7 +2361,7 @@ func (h *ItemsHandler) nextUpNewReleasesFirst(ctx context.Context, session *Sess
 	if err != nil {
 		return false
 	}
-	return access.ResolveViewerPreferences(ctx, store, session.ProfileID).NextUpNewReleasesFirst
+	return access.ResolveViewerPreferences(ctx, store, h.adminDefaults, session.ProfileID).NextUpNewReleasesFirst
 }
 
 // writeNextUpResponse renders a slice of catalog.NextUpResult into the
@@ -2911,7 +2928,13 @@ func (h *ItemsHandler) handleSearchItems(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
+	// Jellyfin returns every named item when Limit is absent, so neither path
+	// below applies parseItemsQuery's default page size, which is for item
+	// browsing. The catalog browse still caps a page at compatBrowseMaxLimit.
 	if len(query.specificCollectionIDs) == 0 && !idsRequestCollectionsView(r) && (query.hasIntersectingFilters() || query.hasItemTypeFilter || query.isFavorite || query.isPlayed != nil || query.isResumable || query.searchTerm != "" || query.sortExplicit) {
+		if query.limitDefaulted {
+			query.limit = len(query.specificIDs)
+		}
 		h.handleBrowseItems(w, r, session, query)
 		return
 	}
@@ -2942,6 +2965,11 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		}
 		h.rememberDetailImages(*detail)
 		dto := h.mapper.itemFromDetailWithFields(*detail, favorites[detail.ContentID], progress[detail.ContentID], query.requestedFields)
+		if query.requestedFields == nil {
+			// Without Fields the mapper fills every list field, as for item
+			// detail; a list leaves out the empty ones nobody asked for.
+			dropUnrequestedEmptyLists(&dto, func(string) bool { return false })
+		}
 		if query.mediaTypesExplicit && !query.mediaTypesSet[strings.ToLower(dto.MediaType)] {
 			continue
 		}
@@ -2988,6 +3016,9 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 	total := len(items)
 	if !query.enableTotalRecordCount {
 		total = 0
+	}
+	if query.limitDefaulted {
+		query.limit = len(items)
 	}
 	items = slicePage(items, query.startIndex, query.limit)
 	h.applyListFileFields(r.Context(), session, items, query)

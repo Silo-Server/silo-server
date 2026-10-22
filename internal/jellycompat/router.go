@@ -98,6 +98,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.SeasonRepo, deps.AccessFilterFn, subtitleRepo)
 	itemsHandler.storeProvider = deps.UserStoreProvider
+	itemsHandler.adminDefaults = deps.AdminDefaults
 	itemsHandler.MarkerPopulation = deps.MarkerPopulation
 	itemsHandler.FileResolver = deps.FileResolver
 	itemsHandler.catalogUserState = deps.Config != nil && deps.Config.UserDB.Backend != sqliteUserStoreBackend
@@ -117,6 +118,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		// left unset as they serve other section types.
 		sf := sections.NewFetcher(deps.DB)
 		sf.StoreProvider = deps.UserStoreProvider
+		sf.AdminDefaults = deps.AdminDefaults
 		itemsHandler.sectionsFetcher = sf
 	}
 	itemsHandler.posterPresigner = deps.PosterPresigner
@@ -201,6 +203,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
+	if deps.DB != nil {
+		imagesHandler.extraRepo = catalog.NewExtraRepository(deps.DB)
+	}
 	imagesHandler.collections = itemsHandler.collections
 	imagesHandler.collectionPosters = itemsHandler.collectionPosters
 	imagesHandler.keyAuth = adminAPIKeyAuth
@@ -273,6 +278,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Items/{id}/SpecialFeatures", itemsHandler.HandleSpecialFeatures)
 			r.Get("/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
+			r.Get("/Videos/{id}/AdditionalParts", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/ThemeMedia", itemsHandler.HandleThemeMedia)
 			r.Get("/Users/{userId}/Items/{id}/ThemeVideos", itemsHandler.HandleThemeSongsStub)
 			r.Get("/Users/{userId}/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongs)
@@ -301,6 +307,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Post("/Users/Configuration", authHandler.HandleUpdateConfiguration)
 			r.Post("/Users/{userId}/Configuration", authHandler.HandleUpdateConfiguration)
 			r.Get("/Localization/Cultures", authHandler.HandleCultures)
+			r.Get("/System/Configuration/{key}", systemHandler.HandleNamedConfiguration)
 			// Clients probe group discovery even when SyncPlayAccess is None.
 			r.Get("/SyncPlay/List", func(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, []struct{}{})
@@ -497,7 +504,8 @@ func withDefaults(deps Dependencies) Dependencies {
 	// from creation, not sliding/idle: the session need not outlive its token
 	// while token re-mint is unimplemented, and at 6h long content (audiobooks,
 	// movies) and paused-overnight sessions expired mid-playback even though the
-	// stream token was still valid. Overridable per-deployment via config.
+	// stream token was still valid. jellyfin_compat.playback_session_ttl
+	// defaults to the same 24h and replaces it when an admin sets another value.
 	playbackTTL := playback.MaxTokenTTL
 	if deps.Config != nil && deps.Config.JellyfinCompat.PlaybackSessionTTL > 0 {
 		playbackTTL = deps.Config.JellyfinCompat.PlaybackSessionTTL

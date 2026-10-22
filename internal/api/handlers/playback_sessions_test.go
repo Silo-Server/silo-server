@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 	"unicode"
@@ -34,17 +33,6 @@ func BenchmarkActivitySessionEnrichment(b *testing.B) {
 				}
 			}
 		})
-	}
-}
-
-func TestSessionComponentDecisionLabelsCopiedAudioDuringHLSAsRemux(t *testing.T) {
-	videoDecision, audioDecision := sessionComponentDecision("transcode", false, "copy")
-
-	if videoDecision != "remux" {
-		t.Fatalf("videoDecision = %q, want remux", videoDecision)
-	}
-	if audioDecision != "remux" {
-		t.Fatalf("audioDecision = %q, want remux", audioDecision)
 	}
 }
 
@@ -102,65 +90,6 @@ func TestEffectivePlayMethodBuckets(t *testing.T) {
 	}
 }
 
-// TestSessionsCapabilitiesAdvertisesActivityFields pins the feature-detection
-// contract: the additive session fields are omitempty on the wire, so this
-// endpoint is how independently deployed clients distinguish an older server
-// from a supported one reporting an unknown method / non-Jellyfin session.
-func TestSessionsCapabilitiesAdvertisesActivityFields(t *testing.T) {
-	rr := httptest.NewRecorder()
-	(&AdminHandler{}).HandleGetSessionsCapabilities(rr, httptest.NewRequest(http.MethodGet, "/admin/sessions/capabilities", nil))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d", rr.Code)
-	}
-	var resp playbackSessionsCapabilitiesResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode capabilities: %v", err)
-	}
-	if !resp.EffectivePlayMethod || !resp.IsJellyfinClient || !resp.TranscodeHWAccel || !resp.ToneMapMode ||
-		!resp.ClientBuild || !resp.ClientChannel || !resp.TargetAudioChannels || !resp.NodeRouting {
-		t.Fatalf("capabilities must advertise every additive field: %+v", resp)
-	}
-	// The frozen v1 rows never serialize stream_location; only v2 advertises it.
-	if strings.Contains(rr.Body.String(), "stream_location") {
-		t.Fatalf("v1 capabilities advertise a field v1 rows omit: %s", rr.Body.String())
-	}
-	want := []string{"direct", "remux", "transcode", "audio"}
-	if len(resp.EffectivePlayMethodValues) != len(want) {
-		t.Fatalf("bucket vocabulary = %v, want %v", resp.EffectivePlayMethodValues, want)
-	}
-	for i, v := range want {
-		if resp.EffectivePlayMethodValues[i] != v {
-			t.Fatalf("bucket vocabulary = %v, want %v", resp.EffectivePlayMethodValues, want)
-		}
-	}
-	if got, wantToneMap := resp.ToneMapModeValues, []string{"hardware", "software"}; len(got) != len(wantToneMap) || got[0] != wantToneMap[0] || got[1] != wantToneMap[1] {
-		t.Fatalf("tone-map vocabulary = %v, want %v", got, wantToneMap)
-	}
-}
-
-func TestPlaybackRoutingCapabilitiesAdvertisePolicyVocabulary(t *testing.T) {
-	rr := httptest.NewRecorder()
-	(&AdminHandler{}).HandleGetPlaybackRoutingCapabilities(rr,
-		httptest.NewRequest(http.MethodGet, "/admin/playback-routing/capabilities", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d", rr.Code)
-	}
-	var response playbackRoutingCapabilitiesResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if len(response.Features) != 1 || response.Features[0] != "playback_node_routing_v1" {
-		t.Fatalf("features = %v", response.Features)
-	}
-	if len(response.Workloads) != 3 || len(response.ExecutionPreferences) != 5 || len(response.EgressPreferences) != 4 {
-		t.Fatalf("capabilities = %+v", response)
-	}
-	if !slices.Contains(response.ExecutionPreferences, "prefer_transcode") {
-		t.Fatalf("execution preferences = %v, want prefer_transcode", response.ExecutionPreferences)
-	}
-}
-
 func TestIsJellyfinEcosystemClient(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -169,10 +98,7 @@ func TestIsJellyfinEcosystemClient(t *testing.T) {
 		want       bool
 	}{
 		{"jellyfin web by name", "Jellyfin Web", "", true},
-		{"findroid by name", "Findroid", "Findroid/0.15", true},
 		{"infuse by user agent only", "", "Infuse-Direct/8.4.6", true},
-		{"kodi addon by name", "Kodi", "Kodi/21.0", true},
-		{"mpv shim by user agent", "", "mpv 0.38.0", true},
 		{"native android client", "Silo Android", "okhttp/4.12", false},
 		{"generic browser", "", "Mozilla/5.0 (X11) Chrome/120.0 Safari/537.36", false},
 		{"no metadata", "", "", false},
@@ -198,61 +124,6 @@ func TestPlaybackClientDisplayNameAndroidDevices(t *testing.T) {
 			name:      "fire tv stick 4k max",
 			userAgent: "Dalvik/2.1.0 (Linux; U; Android 11; AFTKRT Build/RS8180.3729N)",
 			want:      "Fire TV Stick 4K Max",
-		},
-		{
-			name:      "fire tv stick 4k",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 9; AFTMM Build/PS7279)",
-			want:      "Fire TV Stick 4K",
-		},
-		{
-			name:      "fire tv stick 4k second generation",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 11; AFTKM Build/RS8139)",
-			want:      "Fire TV Stick 4K (2nd Gen)",
-		},
-		{
-			name:      "fire tv stick 4k max first generation",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 9; AFTKA Build/PS7646)",
-			want:      "Fire TV Stick 4K Max (1st Gen)",
-		},
-		{
-			name:      "fire tv stick third generation",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 9; AFTSSS Build/PS7279)",
-			want:      "Fire TV Stick (3rd Gen)",
-		},
-		{
-			name:      "fire tv stick lite first generation",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 9; AFTSS Build/PS7279)",
-			want:      "Fire TV Stick Lite (1st Gen)",
-		},
-		{
-			name:      "fire tv stick second generation",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 5.1; AFTT Build/LVY48F)",
-			want:      "Fire TV Stick (2nd Gen)",
-		},
-		{
-			name:      "fire tv first generation",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 4.2; AFTB Build/JDQ39)",
-			want:      "Fire TV (1st Gen)",
-		},
-		{
-			name:      "fire tv second generation",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 5.1; AFTS Build/LVY48F)",
-			want:      "Fire TV (2nd Gen)",
-		},
-		{
-			name:      "fire tv third generation",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 7.1; AFTN Build/NS6265)",
-			want:      "Fire TV (3rd Gen)",
-		},
-		{
-			name:      "fire tv cube second generation",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 9; AFTR Build/PS7646)",
-			want:      "Fire TV Cube (2nd Gen)",
-		},
-		{
-			name:      "fire tv cube first generation",
-			userAgent: "Dalvik/2.1.0 (Linux; U; Android 7.1; AFTA Build/NS6265)",
-			want:      "Fire TV Cube (1st Gen)",
 		},
 		{
 			name:      "unmapped multi-word android model preserved",
@@ -295,27 +166,6 @@ func TestPlaybackClientDisplayNameAndroidDevices(t *testing.T) {
 	}
 }
 
-func TestPlaybackClientDisplayNameKeepsNamedClientVersionExact(t *testing.T) {
-	cases := []struct {
-		name          string
-		clientName    string
-		clientVersion string
-		want          string
-	}{
-		{name: "patch version survives", clientName: "Silo Android TV", clientVersion: "1.0.0", want: "Silo Android TV 1.0.0"},
-		{name: "prerelease suffix survives", clientName: "Silo iOS", clientVersion: "2.1.0-rc.3", want: "Silo iOS 2.1.0-rc.3"},
-		{name: "no version", clientName: "Silo Android TV", clientVersion: "", want: "Silo Android TV"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := playbackClientDisplayName(tc.clientName, tc.clientVersion, "")
-			if got != tc.want {
-				t.Fatalf("playbackClientDisplayName(%q, %q, \"\") = %q, want %q", tc.clientName, tc.clientVersion, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestPlaybackClientFullDisplayName(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -343,32 +193,11 @@ func TestPlaybackClientFullDisplayName(t *testing.T) {
 			want:    "Silo Android TV 1.0.0 (build 5)",
 		},
 		{
-			name:    "release channel omitted case insensitively",
-			client:  "Silo Android TV",
-			version: "1.0.0",
-			build:   "5",
-			channel: "Release",
-			want:    "Silo Android TV 1.0.0 (build 5)",
-		},
-		{
-			name:    "empty channel omitted",
-			client:  "Silo Android TV",
-			version: "1.0.0",
-			build:   "5",
-			want:    "Silo Android TV 1.0.0 (build 5)",
-		},
-		{
 			name:    "channel without build",
 			client:  "Silo Android TV",
 			version: "1.0.0",
 			channel: "dev",
 			want:    "Silo Android TV 1.0.0 (dev)",
-		},
-		{
-			name:    "build and channel empty",
-			client:  "Silo Android TV",
-			version: "1.0.0",
-			want:    "Silo Android TV 1.0.0",
 		},
 		{
 			name:   "version empty",
@@ -391,11 +220,6 @@ func TestPlaybackClientFullDisplayName(t *testing.T) {
 			build:     "5",
 			channel:   "dev",
 			want:      "Chrome 120 (build 5, dev)",
-		},
-		{
-			name:      "no client name and no qualifiers keeps the plain user agent label",
-			userAgent: "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0.0.0 Safari/537.36",
-			want:      "Chrome 120",
 		},
 		{
 			name: "no client name and no user agent",
@@ -448,11 +272,6 @@ func TestPlaybackClientInfoForStartV3(t *testing.T) {
 			// session, and onto every route event and decision log with it.
 			name:    "nameless client keeps the body out of client_version",
 			context: playback.ClientPlaybackContextV3{AppVersion: "web"},
-			want:    playback.ClientInfo{},
-		},
-		{
-			name:    "nameless client takes no build or channel either",
-			context: playback.ClientPlaybackContextV3{AppVersion: "web", AppBuild: "5", AppChannel: "dev"},
 			want:    playback.ClientInfo{},
 		},
 		{

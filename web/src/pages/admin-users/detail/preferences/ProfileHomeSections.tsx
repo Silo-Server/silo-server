@@ -65,7 +65,7 @@ export function ProfileHomeSections({
   const newOverrideId = useRef(createOverrideIdSource());
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the editable list resets when the saved sections load or change
     if (settings.data) setSections(settings.data);
   }, [settings.data]);
 

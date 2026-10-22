@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -187,16 +188,26 @@ func normalizeCanonicalSettingValue(key string, raw json.RawMessage) (json.RawMe
 	return normalized, nil
 }
 
+// errProfileLimitReached reports that the household was already at its
+// profile limit when the creating transaction counted it.
+var errProfileLimitReached = errors.New("profile limit reached")
+
 // createProfileWithSettingsSync creates the profile, snapshots surviving
 // account-wide legacy settings, and writes every canonical row in one store
 // transaction. PostgreSQL's transaction wrapper also holds a per-user
 // advisory lock shared with legacy account-setting fan-out, closing the
 // cross-replica create/write race.
+//
+// The household is counted against limit (0 = unlimited) inside that same
+// transaction, so concurrent creates on one account, on any replica, cannot
+// all pass a count taken before the write. A full household returns
+// errProfileLimitReached and writes nothing.
 func (h *ProfileHandler) createProfileWithSettingsSync(
 	ctx context.Context,
 	store userstore.UserStore,
 	userID int,
 	profile userstore.Profile,
+	limit int,
 	writes []profileSettingSync,
 ) error {
 	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
@@ -205,6 +216,15 @@ func (h *ProfileHandler) createProfileWithSettingsSync(
 	}
 	var changedKeys []string
 	err := transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		if limit >= 1 {
+			ids, err := tx.ListProfileIDs(ctx)
+			if err != nil {
+				return err
+			}
+			if len(ids) >= limit {
+				return errProfileLimitReached
+			}
+		}
 		if err := tx.CreateProfile(ctx, profile); err != nil {
 			return err
 		}

@@ -18,8 +18,10 @@ import (
 type recordingRepo struct {
 	mu        sync.Mutex
 	inserts   int
-	quotaUsed int // returned by CountTranscribeJobsByUserSince
-	lastJob   Job
+	quotaUsed int  // returned by CountTranscribeJobsByUserSince
+	reusable  *Job // completed job GetReusableJobByIdempotencyKey returns for its key
+	active    *Job // in-flight job GetActiveJobByIdempotencyKey returns for its key
+	raceWin   *Job // when set, InsertJob loses the unique-index race to this job
 	completed []int
 	failures  []recordedFailure
 	progress  []recordedProgress
@@ -45,13 +47,31 @@ func (r *recordingRepo) InsertJob(_ context.Context, job *Job, quota *JobQuota) 
 	if quota != nil && r.quotaUsed >= quota.Limit {
 		return &QuotaExceededError{Limit: quota.Limit, Used: r.quotaUsed, Period: quota.Period}
 	}
+	if r.raceWin != nil {
+		r.active = r.raceWin
+		return errors.New("duplicate key value violates unique constraint")
+	}
 	r.inserts++
 	job.ID = int64(r.inserts)
-	r.lastJob = *job
 	return nil
 }
 func (r *recordingRepo) GetJob(context.Context, int64) (*Job, error) { return nil, nil }
-func (r *recordingRepo) GetActiveJobByIdempotencyKey(context.Context, string) (*Job, error) {
+func (r *recordingRepo) GetActiveJobByIdempotencyKey(_ context.Context, key string) (*Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.active != nil && r.active.IdempotencyKey == key {
+		job := *r.active
+		return &job, nil
+	}
+	return nil, nil
+}
+func (r *recordingRepo) GetReusableJobByIdempotencyKey(_ context.Context, key string) (*Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.reusable != nil && r.reusable.IdempotencyKey == key {
+		job := *r.reusable
+		return &job, nil
+	}
 	return nil, nil
 }
 func (r *recordingRepo) ListJobsByMediaFile(context.Context, int) ([]Job, error) { return nil, nil }
@@ -146,52 +166,25 @@ func TestEnqueueRejectsTranscribeOverQuota(t *testing.T) {
 	}
 }
 
-func TestEnqueueAllowsTranscribeUnderQuota(t *testing.T) {
-	svc, repo := newQuotaTestService(t, 2, 3)
-
-	if _, err := svc.Enqueue(context.Background(), transcribeRequest(42, false)); err != nil {
-		t.Fatalf("Enqueue under quota failed: %v", err)
-	}
-	if repo.inserts != 1 {
-		t.Errorf("inserts = %d, want 1", repo.inserts)
-	}
-}
-
-func TestEnqueueQuotaExemptions(t *testing.T) {
-	t.Run("exempt", func(t *testing.T) {
-		svc, repo := newQuotaTestService(t, 10, 1)
-		if _, err := svc.Enqueue(context.Background(), transcribeRequest(42, true)); err != nil {
-			t.Fatalf("exempt Enqueue blocked by quota: %v", err)
-		}
-		if repo.inserts != 1 {
-			t.Errorf("inserts = %d, want 1", repo.inserts)
-		}
-	})
-	t.Run("unlimited", func(t *testing.T) {
-		svc, repo := newQuotaTestService(t, 10, 0)
-		if _, err := svc.Enqueue(context.Background(), transcribeRequest(42, false)); err != nil {
-			t.Fatalf("Enqueue with quota disabled failed: %v", err)
-		}
-		if repo.inserts != 1 {
-			t.Errorf("inserts = %d, want 1", repo.inserts)
-		}
-	})
-}
-
-func TestEnqueueNormalizesSourceLanguageHint(t *testing.T) {
-	svc, repo := newQuotaTestService(t, 0, 0)
-
-	_, err := svc.Enqueue(context.Background(), JobRequest{
-		MediaFileID:    1,
-		Kind:           JobKindTranscribe,
-		SourceIndex:    -1,
-		SourceLanguage: "eng",
-	})
-	if err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	if repo.lastJob.SourceLanguage != "en" {
-		t.Errorf("source language = %q, want en", repo.lastJob.SourceLanguage)
+func TestEnqueueAdmitsTranscribeWithinQuota(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		used, limit int
+		exempt      bool
+	}{
+		{"under quota", 2, 3, false},
+		{"exempt", 10, 1, true},
+		{"unlimited", 10, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo := newQuotaTestService(t, tc.used, tc.limit)
+			if _, err := svc.Enqueue(context.Background(), transcribeRequest(42, tc.exempt)); err != nil {
+				t.Fatalf("Enqueue blocked by quota: %v", err)
+			}
+			if repo.inserts != 1 {
+				t.Errorf("inserts = %d, want 1", repo.inserts)
+			}
+		})
 	}
 }
 

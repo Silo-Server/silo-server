@@ -5,19 +5,6 @@ import (
 	"testing"
 )
 
-func TestConvertToVTTLeavesPlainSRTCuesUnchanged(t *testing.T) {
-	input := "1\n00:00:01,000 --> 00:00:02,500\n<i>First</i> line\nSecond line\n\n2\n00:00:03,000 --> 00:00:04,000\nThird\n"
-	want := "WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.500\n<i>First</i> line\nSecond line\n\n2\n00:00:03.000 --> 00:00:04.000\nThird\n\n"
-
-	got, err := ConvertToVTT([]byte(input), "srt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != want {
-		t.Fatalf("plain SRT changed in conversion:\ngot  %q\nwant %q", got, want)
-	}
-}
-
 // Every \an alignment must reach WebVTT as cue settings, never as cue text.
 func TestConvertToVTTMovesASSAlignmentOntoTheTimingLine(t *testing.T) {
 	settings := map[int]string{
@@ -47,21 +34,6 @@ func TestConvertToVTTMovesASSAlignmentOntoTheTimingLine(t *testing.T) {
 	}
 }
 
-// A right-to-left cue asking for the top of the frame, with the CRLF line
-// endings and BOM that Windows-authored SRT files often carry.
-func TestConvertToVTTHandlesCRLFBOMRightToLeftCue(t *testing.T) {
-	input := "\ufeff1\r\n00:00:01,000 --> 00:00:03,000\r\n{\\an8}(مرحبا)، هذا سطر\r\nسطر ثان\r\n\r\n"
-	want := "WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000 line:0\n(مرحبا)، هذا سطر\nسطر ثان\n\n\n"
-
-	got, err := ConvertToVTT([]byte(input), "srt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != want {
-		t.Fatalf("got  %q\nwant %q", got, want)
-	}
-}
-
 func TestConvertToVTTStripsOverrideBlocks(t *testing.T) {
 	for name, tc := range map[string]struct{ text, settings, want string }{
 		"mid-line block":         {`Hello {\i1}there{\i0}`, "", "Hello there\n"},
@@ -88,10 +60,21 @@ func TestConvertToVTTStripsOverrideBlocks(t *testing.T) {
 	}
 }
 
-// Real SRT files break the blank-line rule between cues in several ways. Each
-// cue must still come out as its own WebVTT cue.
-func TestConvertToVTTSeparatesCuesWithoutBlankLines(t *testing.T) {
+// TestConvertToVTTCueText converts whole SRT documents. Real SRT files break
+// the blank-line rule between cues in several ways; each cue must still come
+// out as its own WebVTT cue.
+func TestConvertToVTTCueText(t *testing.T) {
 	for name, tc := range map[string]struct{ input, want string }{
+		"plain cues unchanged": {
+			"1\n00:00:01,000 --> 00:00:02,500\n<i>First</i> line\nSecond line\n\n2\n00:00:03,000 --> 00:00:04,000\nThird\n",
+			"WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.500\n<i>First</i> line\nSecond line\n\n2\n00:00:03.000 --> 00:00:04.000\nThird\n\n",
+		},
+		// A right-to-left cue asking for the top of the frame, with the CRLF line
+		// endings and BOM that Windows-authored SRT files often carry.
+		"CRLF BOM right-to-left cue": {
+			"\ufeff1\r\n00:00:01,000 --> 00:00:03,000\r\n{\\an8}(مرحبا)، هذا سطر\r\nسطر ثان\r\n\r\n",
+			"WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000 line:0\n(مرحبا)، هذا سطر\nسطر ثان\n\n\n",
+		},
 		"numbered cue without a blank line": {
 			"1\n00:00:01,000 --> 00:00:02,000\nOne\n2\n00:00:03,000 --> 00:00:04,000\n{\\an8}Two\n",
 			"WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.000\nOne\n\n2\n00:00:03.000 --> 00:00:04.000 line:0\nTwo\n\n",

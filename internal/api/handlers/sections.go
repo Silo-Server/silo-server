@@ -17,13 +17,16 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/ctxerr"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -49,6 +52,26 @@ type SectionHandler struct {
 	TrendingRefresher     interface {
 		RefreshConfig(context.Context, json.RawMessage)
 	}
+	// SeasonalLists fetches the lists a saved seasonal row needs, so it fills
+	// without waiting for the scheduled refresh.
+	SeasonalLists interface {
+		RefreshConfig(context.Context, json.RawMessage)
+	}
+}
+
+// refreshSeasonalLists fetches, in the background, the lists saved seasonal
+// row configs need. The refresher skips lists it already has.
+func (h *SectionHandler) refreshSeasonalLists(ctx context.Context, configs ...json.RawMessage) {
+	if h.SeasonalLists == nil || len(configs) == 0 {
+		return
+	}
+	go func() {
+		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		for _, config := range configs {
+			h.SeasonalLists.RefreshConfig(refreshCtx, config)
+		}
+	}()
 }
 
 // NewSectionHandler creates a new SectionHandler.
@@ -820,6 +843,20 @@ func adminOnlyRecipeError() *APIError {
 	return apiError(http.StatusForbidden, "custom_disabled", "this server does not allow profiles to build custom sections")
 }
 
+// refusesNewRow reports a section type no admin or profile may add a row of.
+// The only next_up row is the one maybeInjectNextUp inserts when a profile's
+// ui.next_up_mode is separate: an added copy showed nothing in the combined
+// mode, where Continue Watching carries next episodes, and repeated that row
+// in the separate mode. A profile may keep saving one it already has, which
+// a bridge import can bring in after 20261018213122_retire_next_up_rows.sql.
+func refusesNewRow(sectionType string) bool {
+	return sectionType == string(sections.SectionNextUp)
+}
+
+func newRowRefusedError(sectionType string) *APIError {
+	return apiError(http.StatusBadRequest, "bad_request", sectionType+" rows cannot be added; Next Up shows as its own row when ui.next_up_mode is separate")
+}
+
 // userAddedRecipe is the recipe a stored user-added override runs, read the
 // way the resolver reads it.
 func userAddedRecipe(o userstore.SectionOverride) string {
@@ -854,12 +891,15 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 	// ID -> recipe of the admin-only sections a non-admin sends; each must
 	// already be saved on this page with the same recipe.
 	keptAdminOnly := make(map[string]string)
+	// The same for the sections of a type no one may add (refusesNewRow).
+	keptRefused := make(map[string]string)
 
 	type trendingCandidate struct {
 		id     string
 		config json.RawMessage
 	}
 	refreshCandidates := make([]trendingCandidate, 0, len(writes))
+	var seasonalConfigs []json.RawMessage
 	seenIDs := make(map[string]struct{}, len(writes))
 	baseSections := make(map[string]*sections.PageSection)
 	loadBaseSection := func(sectionID string) (*sections.PageSection, bool, error) {
@@ -907,6 +947,13 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 				}
 				refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
 			}
+			if hasBase && base.Enabled && base.SectionType == sections.SectionSeasonalThemed {
+				cfg := o.Config
+				if !hasSectionConfig(cfg) {
+					cfg = base.Config
+				}
+				seasonalConfigs = append(seasonalConfigs, append(json.RawMessage(nil), cfg...))
+			}
 			continue
 		}
 
@@ -926,6 +973,12 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 			}
 			keptAdminOnly[o.ID] = recipeType
 		}
+		if refusesNewRow(recipeType) {
+			if o.ID == "" {
+				return newRowRefusedError(recipeType)
+			}
+			keptRefused[o.ID] = recipeType
+		}
 		// Validate whichever config the resolver will actually use.
 		cfg := o.UserConfig
 		if len(cfg) == 0 {
@@ -936,6 +989,9 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		}
 		if recipeType == string(sections.SectionTrendingDiscover) && !o.Hidden && !o.Removed {
 			refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
+		}
+		if recipeType == string(sections.SectionSeasonalThemed) && !o.Hidden && !o.Removed {
+			seasonalConfigs = append(seasonalConfigs, append(json.RawMessage(nil), cfg...))
 		}
 	}
 
@@ -958,6 +1014,12 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		old, ok := existingByID[id]
 		if !ok || old.SectionID != "" || userAddedRecipe(old) != recipeType {
 			return adminOnlyRecipeError()
+		}
+	}
+	for id, recipeType := range keptRefused {
+		old, ok := existingByID[id]
+		if !ok || old.SectionID != "" || userAddedRecipe(old) != recipeType {
+			return newRowRefusedError(recipeType)
 		}
 	}
 	refreshConfigsByKey := make(map[string]json.RawMessage, len(refreshCandidates))
@@ -1028,12 +1090,13 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		for _, config := range refreshConfigsByKey {
 			config := config
 			go func() {
-				refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+				refreshCtx, cancel := context.WithTimeout(queryattr.Detach(context.WithoutCancel(ctx)), 2*time.Minute)
 				defer cancel()
 				h.TrendingRefresher.RefreshConfig(refreshCtx, config)
 			}()
 		}
 	}
+	h.refreshSeasonalLists(ctx, seasonalConfigs...)
 	return nil
 }
 
@@ -1273,19 +1336,19 @@ type sectionItemImageURLs struct {
 // already-validated library scope of library-scoped endpoints (nil for the
 // home/profile surfaces) so play-target resolution stays scoped to it.
 func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sections.SectionWithItems, libraryID *int) homeSectionsResponse {
-	return h.buildSections(r.Context(), withItems, libraryID, requestAccessFilter(r), requestImageSize(r))
+	return h.buildSections(r.Context(), withItems, libraryID, requestAccessFilter(r), requestArtwork(r))
 }
 
 // buildSections renders sections for a viewer described by its context,
 // access filter and artwork size; it is what v1 and v2 share.
-func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, size imagesize.Size) homeSectionsResponse {
-	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, size, nil)
+func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request) homeSectionsResponse {
+	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, art, nil)
 }
 
 // buildSectionsWithUserStates is buildSections reusing user states the caller
 // already loaded for these items (the Home hide-watched filter does); nil
 // loads them as buildSections does.
-func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, size imagesize.Size, knownUserStates map[string]*itemUserStateResponse) homeSectionsResponse {
+func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request, knownUserStates map[string]*itemUserStateResponse) homeSectionsResponse {
 	deduplicateSectionItems(ctx, withItems)
 
 	contentIDs := make([]string, 0)
@@ -1311,7 +1374,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	// These lookups read shared inputs and own separate results. Wait before
 	// assembling cards so v1 and v2 both pay the slowest lookup, not their sum.
 	overlaySummaries := make(map[string]*models.OverlaySummary)
-	playTargets := map[string]string{}
+	var playTargets map[string]string
 	var userStates map[string]*itemUserStateResponse
 	var imageURLs map[sectionItemImageKey]sectionItemImageURLs
 	var episodeMeta map[string]sections.SectionItemMeta
@@ -1331,38 +1394,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 		overlaySummaries = summaries
 	})
 
-	wg.Go(func() {
-		if h.playableTargets == nil {
-			return
-		}
-		inputs := make([]catalog.PlayableTargetInput, 0, len(allItems))
-		for _, item := range allItems {
-			if item == nil || item.ContentID == "" {
-				continue
-			}
-			// Section items can come from the process-global resolved-list
-			// cache, so their hint is profile-independent: the resolver
-			// validates it instead of the response emitting it directly.
-			inputs = append(inputs, playableTargetInputForItem(item))
-		}
-		var libraryIDs []int
-		if libraryID != nil && *libraryID > 0 {
-			libraryIDs = []int{*libraryID}
-		}
-		resolvedTargets, err := h.playableTargets.ResolvePlayableTargets(ctx, catalog.PlayableTargetQuery{
-			UserID:        apimw.GetUserID(ctx),
-			ProfileID:     apimw.GetProfileID(ctx),
-			LibraryIDs:    libraryIDs,
-			Access:        viewerAccess,
-			Items:         inputs,
-			ProgressStore: h.sectionProgressStore(ctx),
-		})
-		if err != nil {
-			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "resolving section playable targets", "component", "api", "error", err)
-			return
-		}
-		playTargets = resolvedTargets
-	})
+	wg.Go(func() { playTargets = h.resolveSectionPlayableTargets(ctx, allItems, libraryID, viewerAccess) })
 
 	if knownUserStates != nil {
 		userStates = knownUserStates
@@ -1377,7 +1409,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	wg.Go(func() {
 		localizedItems, pendingTranslations = h.localizeSectionItems(ctx, allItems, localizationAccess)
 	})
-	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, size) })
+	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
 	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	wg.Go(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
 
@@ -1395,28 +1427,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 				card = localizedItems[position]
 			}
 			position++
-			var meta *sections.SectionItemMeta
-			if s.ItemMeta != nil {
-				if value, ok := s.ItemMeta[item.ContentID]; ok {
-					meta = &value
-				}
-			}
-			if meta == nil {
-				if value, ok := episodeMeta[item.ContentID]; ok {
-					meta = &value
-				}
-			}
-			// Manga chapters carry their series linkage on top of whatever
-			// meta (e.g. reading progress) the section already resolved, so
-			// continue-reading cards can head to the series.
-			if value, ok := mangaChapterMeta[item.ContentID]; ok {
-				if meta == nil {
-					empty := sections.SectionItemMeta{}
-					meta = &empty
-				}
-				meta.SeriesID = value.SeriesID
-				meta.SeriesTitle = value.SeriesTitle
-			}
+			meta := sectionCardMeta(s, item.ContentID, episodeMeta, mangaChapterMeta)
 			imageKey := sectionItemImageKey{sectionID: s.ID, contentID: item.ContentID}
 			response := h.toSectionItemResponse(s.SectionType, card, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey], playTargets[playableTargetKeyForItem(item)])
 			response.PendingTranslationLanguage = pendingTranslations[item.ContentID]
@@ -1435,6 +1446,69 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 		})
 	}
 	return resp
+}
+
+// resolveSectionPlayableTargets resolves the play target of every section
+// card, or nil when there is no resolver or resolution fails.
+func (h *SectionHandler) resolveSectionPlayableTargets(ctx context.Context, allItems []*models.MediaItem, libraryID *int, viewerAccess catalog.AccessFilter) map[string]string {
+	if h.playableTargets == nil {
+		return nil
+	}
+	inputs := make([]catalog.PlayableTargetInput, 0, len(allItems))
+	for _, item := range allItems {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		// Section items can come from the process-global resolved-list
+		// cache, so their hint is profile-independent: the resolver
+		// validates it instead of the response emitting it directly.
+		inputs = append(inputs, playableTargetInputForItem(item))
+	}
+	var libraryIDs []int
+	if libraryID != nil && *libraryID > 0 {
+		libraryIDs = []int{*libraryID}
+	}
+	resolvedTargets, err := h.playableTargets.ResolvePlayableTargets(ctx, catalog.PlayableTargetQuery{
+		UserID:        apimw.GetUserID(ctx),
+		ProfileID:     apimw.GetProfileID(ctx),
+		LibraryIDs:    libraryIDs,
+		Access:        viewerAccess,
+		Items:         inputs,
+		ProgressStore: h.sectionProgressStore(ctx),
+	})
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "resolving section playable targets", "component", "api", "error", err)
+		return nil
+	}
+	return resolvedTargets
+}
+
+// sectionCardMeta is a section card's item meta: the section's own, else the
+// episode meta, with a manga chapter's series linkage laid on top.
+func sectionCardMeta(section sections.SectionWithItems, contentID string, episodeMeta, mangaChapterMeta map[string]sections.SectionItemMeta) *sections.SectionItemMeta {
+	var meta *sections.SectionItemMeta
+	if section.ItemMeta != nil {
+		if value, ok := section.ItemMeta[contentID]; ok {
+			meta = &value
+		}
+	}
+	if meta == nil {
+		if value, ok := episodeMeta[contentID]; ok {
+			meta = &value
+		}
+	}
+	// Manga chapters carry their series linkage on top of whatever meta (e.g.
+	// reading progress) the section already resolved, so continue-reading
+	// cards can head to the series.
+	if value, ok := mangaChapterMeta[contentID]; ok {
+		if meta == nil {
+			empty := sections.SectionItemMeta{}
+			meta = &empty
+		}
+		meta.SeriesID = value.SeriesID
+		meta.SeriesTitle = value.SeriesTitle
+	}
+	return meta
 }
 
 // deduplicateSectionItems enforces the wire-level invariant that a non-empty
@@ -1571,60 +1645,58 @@ func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withIte
 	return meta
 }
 
-func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withItems []sections.SectionWithItems, size imagesize.Size) map[sectionItemImageKey]sectionItemImageURLs {
-	result := make(map[sectionItemImageKey]sectionItemImageURLs)
+func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withItems []sections.SectionWithItems, art imagesize.Request) map[sectionItemImageKey]sectionItemImageURLs {
 	if h.DetailSvc == nil {
-		return result
+		return map[sectionItemImageKey]sectionItemImageURLs{}
 	}
-
-	type pendingImages struct {
-		key          sectionItemImageKey
-		posterPath   string
-		backdropPath string
-		logoPath     string
-	}
-
-	pending := make([]pendingImages, 0)
-	paths := make([]string, 0)
-	seenPaths := make(map[string]struct{})
-	addPath := func(path string) {
-		if path == "" || path == "-" {
-			return
-		}
-		if _, ok := seenPaths[path]; ok {
-			return
-		}
-		seenPaths[path] = struct{}{}
-		paths = append(paths, path)
-	}
-
+	cards := make([]featuredArtworkCard[sectionItemImageKey], 0)
 	for _, section := range withItems {
 		for _, item := range section.Items {
 			if item == nil {
 				continue
 			}
-			images := pendingImages{
-				key: sectionItemImageKey{
-					sectionID: section.ID,
-					contentID: item.ContentID,
-				},
-				posterPath:   sizedPosterPath(item.PosterPath, size),
-				backdropPath: sizedSectionBackdropPath(section.SectionType, item.BackdropPath, size),
-				logoPath:     sizedFeaturedLogoPath(item.LogoPath, size),
-			}
-			pending = append(pending, images)
-			addPath(images.posterPath)
-			addPath(images.backdropPath)
-			addPath(images.logoPath)
+			cards = append(cards, featuredArtworkCard[sectionItemImageKey]{
+				key:         sectionItemImageKey{sectionID: section.ID, contentID: item.ContentID},
+				item:        item,
+				sectionType: section.SectionType,
+			})
 		}
 	}
+	return resolveFeaturedArtwork(ctx, h.DetailSvc, cards, art)
+}
 
-	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, requestVariantHint("featured", size))
-	for _, images := range pending {
-		result[images.key] = sectionItemImageURLs{
-			posterURL:   resolved[images.posterPath].URL,
-			backdropURL: resolved[images.backdropPath].URL,
-			logoURL:     resolved[images.logoPath].URL,
+// featuredArtworkCard is one card on a featured surface whose artwork is
+// resolved in a batch, keyed however the surface looks it up.
+type featuredArtworkCard[K comparable] struct {
+	key         K
+	item        *models.MediaItem
+	sectionType sections.SectionType
+}
+
+// resolveFeaturedArtwork resolves every card's poster, backdrop and logo
+// together, each slot at the request's size or target width for it: cached
+// keys in one batch and plugin-hosted art once per slot hint (see
+// catalog.ArtworkBatch). Home and library sections and recommendations share
+// it so a title's card artwork is the same file on every featured surface.
+func resolveFeaturedArtwork[K comparable](ctx context.Context, svc catalog.ArtworkPresigner, cards []featuredArtworkCard[K], art imagesize.Request) map[K]sectionItemImageURLs {
+	posterHint := requestVariantHint("featured", art.For(imagesize.SlotPoster))
+	backdropHint := requestVariantHint("featured", art.For(imagesize.SlotBackdrop))
+	logoHint := requestVariantHint("featured", art.For(imagesize.SlotLogo))
+	var batch catalog.ArtworkBatch
+	pending := make([]featuredArtworkPaths, len(cards))
+	for i, card := range cards {
+		pending[i] = featuredItemArtworkPaths(card.item, card.sectionType, art)
+		batch.Add(pending[i].posterPath, posterHint)
+		batch.Add(pending[i].backdropPath, backdropHint)
+		batch.Add(pending[i].logoPath, logoHint)
+	}
+	resolved := batch.Resolve(ctx, svc, requestVariantHint("featured", art.Size))
+	result := make(map[K]sectionItemImageURLs, len(cards))
+	for i, card := range cards {
+		result[card.key] = sectionItemImageURLs{
+			posterURL:   resolved.Get(pending[i].posterPath, posterHint).URL,
+			backdropURL: resolved.Get(pending[i].backdropPath, backdropHint).URL,
+			logoURL:     resolved.Get(pending[i].logoPath, logoHint).URL,
 		}
 	}
 	return result
@@ -1732,7 +1804,26 @@ func (h *SectionHandler) localizeSectionItems(ctx context.Context, items []*mode
 // Continue Watching / Next Up special case below: a client that asked for one
 // size gets that size in every row.
 func sizedSectionBackdropPath(sectionType sections.SectionType, path string, size imagesize.Size) string {
-	return sizedImagePath(path, imageTypeForBackdropPath(path), size, sectionBackdropPath(sectionType, path))
+	return sizedImagePath(path, artworkkey.ImageBackdrop, size, sectionBackdropPath(sectionType, path))
+}
+
+// featuredArtworkPaths are an item card's poster, backdrop and logo keys on a
+// featured surface: home and library sections and recommendations.
+type featuredArtworkPaths struct {
+	posterPath   string
+	backdropPath string
+	logoPath     string
+}
+
+// featuredItemArtworkPaths sizes an item card's artwork for a featured surface,
+// each slot at the request's size or target width for it. sectionType picks the
+// unsized backdrop default; recommendations pass none.
+func featuredItemArtworkPaths(item *models.MediaItem, sectionType sections.SectionType, art imagesize.Request) featuredArtworkPaths {
+	return featuredArtworkPaths{
+		posterPath:   sizedPosterPath(item.PosterPath, art.For(imagesize.SlotPoster)),
+		backdropPath: sizedSectionBackdropPath(sectionType, item.BackdropPath, art.For(imagesize.SlotBackdrop)),
+		logoPath:     sizedFeaturedLogoPath(item.LogoPath, art.For(imagesize.SlotLogo)),
+	}
 }
 
 // sectionBackdropPath keeps featured-style backdrops for most sections, but
@@ -1784,7 +1875,11 @@ func (h *SectionHandler) maybeInjectNextUp(ctx context.Context, resolved []secti
 	if err != nil {
 		return resolved
 	}
-	if sections.NextUpMode(ctx, store, apimw.GetProfileID(ctx)) == sections.NextUpModeSeparate {
+	var adminDefaults settingsresolve.ServerSettings
+	if h.fetcher != nil {
+		adminDefaults = h.fetcher.AdminDefaults
+	}
+	if sections.NextUpMode(ctx, store, adminDefaults, apimw.GetProfileID(ctx)) == sections.NextUpModeSeparate {
 		return injectNextUpSection(resolved)
 	}
 	return resolved

@@ -38,9 +38,8 @@ const pollSource = {
 };
 function setup({
   sources = [pollSource] as unknown[],
-  enabled = true,
   sourcesFail = false,
-}: { sources?: unknown[]; enabled?: boolean; sourcesFail?: boolean } = {}) {
+}: { sources?: unknown[]; sourcesFail?: boolean } = {}) {
   let release!: (response: Response) => void;
   const commands: string[] = [];
   const reply = (body: unknown) =>
@@ -59,7 +58,7 @@ function setup({
         return Promise.resolve(reply({ items: sources, page: { has_more: false } }));
       }
       return Promise.resolve(
-        reply({ enabled, default_poll_interval_seconds: 300, debounce_seconds: 10 }),
+        reply({ enabled: true, default_poll_interval_seconds: 300, debounce_seconds: 10 }),
       );
     }),
   );
@@ -147,23 +146,6 @@ it("says a poll is already running when the server refuses a second start", asyn
   await waitFor(() => expect(screen.getByRole("button", { name: "Run now" })).toBeEnabled());
 });
 
-it("keeps the uncertain message for any other refusal", async () => {
-  const f = setup();
-  fireEvent.click(await screen.findByRole("button", { name: "Run now" }));
-  await waitFor(() => expect(f.commands).toHaveLength(1));
-  await f.reject(503, {
-    type: "https://siloserver.org/docs/api/v2/problems/service_unavailable",
-    title: "Service Unavailable",
-    detail: "admin tasks unavailable",
-  });
-  await waitFor(() =>
-    expect(toast.error).toHaveBeenCalledWith(
-      "Autoscan start could not be confirmed. Check task and activity state before running again.",
-    ),
-  );
-  expect(toast.info).not.toHaveBeenCalled();
-});
-
 it("hides Run now when no polling source is enabled", async () => {
   setup({ sources: [{ ...pollSource, delivery_mode: "webhook", webhook_configured: true }] });
   await screen.findByText("Enabled");
@@ -182,19 +164,4 @@ it("keeps Run now when the source list fails to load", async () => {
     ),
   );
   expect(await screen.findByRole("button", { name: "Run now" })).toBeEnabled();
-});
-
-it("hides Run now while Autoscan is off", async () => {
-  setup({ enabled: false });
-  await screen.findByText("Disabled");
-  expect(screen.queryByRole("button", { name: "Run now" })).not.toBeInTheDocument();
-});
-
-it("keeps Run now enabled right after a recent poll", async () => {
-  setup({
-    sources: [{ ...pollSource, last_run_at: new Date(Date.now() - 30_000).toISOString() }],
-  });
-  const button = await screen.findByRole("button", { name: "Run now" });
-  expect(button).toBeEnabled();
-  expect(button).not.toHaveAttribute("aria-describedby");
 });

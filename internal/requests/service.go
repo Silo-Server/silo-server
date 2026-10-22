@@ -13,10 +13,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
-	"golang.org/x/sync/errgroup"
 )
 
 type TMDBClient interface {
@@ -2712,18 +2713,18 @@ func routerQualityConfigured(q Quality, conns []ResolvedRouterConnection) bool {
 		if hasRouterQualityKey(conn.Config) {
 			usesTieredDefaults = true
 		}
-		if q == Quality2160p && boolConfig(conn.Config, "is_default_4k") {
+		if q == Quality2160p && (boolConfig(conn.Config, configIsDefault4K) || boolConfig(conn.Config, configSupports4K)) {
 			return true
 		}
 	}
-	// Generic request_router implementations may not expose arr-style HD/4K
-	// default flags. In that case, preserve the host's requested qualities and
-	// let the plugin decide what it can fulfill.
+	// Generic request_router implementations may not expose an HD/4K flag
+	// (arr-style defaults or Seerr's 4K switch). In that case, preserve the
+	// host's requested qualities and let the plugin decide what it can fulfill.
 	return !usesTieredDefaults
 }
 
 func hasRouterQualityKey(config map[string]any) bool {
-	for _, key := range []string{"is_default", "is_default_4k", "is_4k"} {
+	for _, key := range []string{configIsDefault, configIsDefault4K, configIs4K, configSupports4K} {
 		if _, ok := config[key]; ok {
 			return true
 		}
@@ -2759,7 +2760,7 @@ func (s *Service) markSubmissionFailed(ctx context.Context, claimed Request, act
 			// lease and another claim holds the request now.
 			return s.store.GetRequest(ctx, claimed.ID)
 		}
-		return nil, fmt.Errorf("submit request failed: %w; mark failed: %v", submitErr, err)
+		return nil, fmt.Errorf("submit request failed: %w; mark failed: %v", submitErr, err) //nolint:errorlint // callers classify the submission error; the mark-failed error is only reported
 	}
 	return failed, nil
 }

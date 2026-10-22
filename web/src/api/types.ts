@@ -1126,6 +1126,9 @@ export interface ItemExtra {
   title?: string;
   duration_seconds?: number;
   file_id?: number;
+  /** 16:9 image: a sidecar beside the file, or a frame of the video. */
+  still_url?: string;
+  still_thumbhash?: string;
 }
 
 /**
@@ -1678,7 +1681,7 @@ export interface LibraryTabResponse {
 
 // One library's bucket of server (admin-curated) collections in the aggregated
 // server-collections response. `collections` is a capped teaser slice;
-// `total_count` is the full visible count, used for the "See all (N)" link.
+// `total_count` is the full visible count.
 export interface ServerCollectionsLibrary {
   library_id: number;
   library_name: string;
@@ -3288,6 +3291,9 @@ export interface AdminPlaybackHistoryItem {
   watched_seconds: number;
   duration_seconds: number | null;
   completed: boolean;
+  series_title: string;
+  season_number: number | null;
+  episode_number: number | null;
 }
 
 export interface AdminUserProfile {

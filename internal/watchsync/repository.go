@@ -22,6 +22,7 @@ type Repository interface {
 	UpsertAuthSession(ctx context.Context, session DeviceAuthSession) (DeviceAuthSession, error)
 	GetAuthSession(ctx context.Context, id string) (DeviceAuthSession, error)
 	UpsertConnection(ctx context.Context, conn Connection) (Connection, error)
+	UpdateConnectionSyncState(ctx context.Context, id string, update ConnectionSyncUpdate) error
 	UpdateConnectionTokens(ctx context.Context, expected, updated Connection) (Connection, error)
 	GetConnection(ctx context.Context, provider string, userID int, profileID string) (Connection, bool, error)
 	GetConnectionByID(ctx context.Context, id string) (Connection, bool, error)
@@ -36,7 +37,7 @@ type Repository interface {
 	ListLocalWatchEventConnections(ctx context.Context, userID int, profileID string, kind LocalWatchEventKind) ([]Connection, error)
 	ListListEventConnections(ctx context.Context, userID int, profileID string, list ListKind) ([]Connection, error)
 	UpsertHistoryExports(ctx context.Context, exports []HistoryExport) error
-	ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error)
+	ListPendingHistoryExports(ctx context.Context, connectionID string, after HistoryExportCursor, limit int) ([]HistoryExport, error)
 	ListPendingHistoryExportsByHistoryIDs(ctx context.Context, connectionID string, historyIDs []string, limit int) ([]HistoryExport, error)
 	MarkHistoryExportStatus(ctx context.Context, id string, status string, lastError string) error
 	MarkHistoryExportSatisfiedByScrobble(ctx context.Context, connectionID string, historyID string) error
@@ -399,6 +400,52 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		return Connection{}, fmt.Errorf("upsert watch provider connection: %w", err)
 	}
 	return saved, nil
+}
+
+// UpdateConnectionSyncState writes one flow's bookkeeping to the saved
+// connection with id. Tokens, credentials and settings are never written, so
+// a token refresh during a long sync survives it, and a connection that was
+// disconnected meanwhile stays gone: there is no row to update, and no error.
+// A cleared error is kept while a deferral that has not ended explains it.
+func (r *PostgresRepository) UpdateConnectionSyncState(ctx context.Context, id string, update ConnectionSyncUpdate) error {
+	if id == "" {
+		return nil
+	}
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_connections
+		SET last_inbound_sync_at = COALESCE($2::timestamptz, last_inbound_sync_at),
+		    last_progress_sync_at = COALESCE($3::timestamptz, last_progress_sync_at),
+		    last_outbound_sync_at = COALESCE($4::timestamptz, last_outbound_sync_at),
+		    last_favorites_sync_at = COALESCE($5::timestamptz, last_favorites_sync_at),
+		    last_watchlist_sync_at = COALESCE($6::timestamptz, last_watchlist_sync_at),
+		    last_error = CASE
+		        WHEN $7::text IS NULL THEN last_error
+		        WHEN $7::text = '' AND rate_limited_until > $9::timestamptz THEN last_error
+		        ELSE $7::text
+		    END,
+		    rate_limited_until = CASE
+		        WHEN $8::timestamptz IS NOT NULL THEN $8::timestamptz
+		        WHEN rate_limited_until <= $9::timestamptz THEN NULL
+		        ELSE rate_limited_until
+		    END,
+		    sync_cursors = sync_cursors || $10::jsonb,
+		    updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
+		WHERE id = $1::uuid
+	`,
+		id,
+		update.LastInboundSyncAt,
+		update.LastProgressSyncAt,
+		update.LastOutboundSyncAt,
+		update.LastFavoritesSyncAt,
+		update.LastWatchlistSyncAt,
+		update.LastError,
+		update.RateLimitedUntil,
+		update.ClearRateLimitBy,
+		encodeSyncCursors(mergeSyncCursors(nil, update.SyncCursors)),
+	); err != nil {
+		return fmt.Errorf("update watch provider connection sync state: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) GetConnection(
@@ -1325,9 +1372,18 @@ func (r *PostgresRepository) UpsertHistoryExports(ctx context.Context, exports [
 	return nil
 }
 
-func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 100
+func (r *PostgresRepository) ListPendingHistoryExports(
+	ctx context.Context,
+	connectionID string,
+	after HistoryExportCursor,
+	limit int,
+) ([]HistoryExport, error) {
+	if limit <= 0 || limit > maxHistoryExportPage {
+		limit = maxHistoryExportPage
+	}
+	var afterID any
+	if after.ID != "" {
+		afterID = after.ID
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id::text, connection_id::text, history_id, media_item_id, watched_at,
@@ -1336,9 +1392,12 @@ func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, conn
 		WHERE connection_id = $1::uuid
 		  AND status IN ('pending', 'failed')
 		  AND attempt_count < 5
-		ORDER BY watched_at ASC
+		  AND ($3::uuid IS NULL OR (watched_at, id) > ($4::timestamptz, $3::uuid))
+		-- Qualified: a bare "id" would sort by the id::text output column,
+		-- not the uuid the cursor compares.
+		ORDER BY watched_at ASC, watch_provider_history_exports.id ASC
 		LIMIT $2
-	`, connectionID, limit)
+	`, connectionID, limit, afterID, after.WatchedAt)
 	if err != nil {
 		return nil, fmt.Errorf("list pending history exports: %w", err)
 	}
@@ -2137,13 +2196,7 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return result
 }
 
-type listItemStateRows interface {
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-}
-
-func scanListItemStates(rows listItemStateRows) ([]ListItemState, error) {
+func scanListItemStates(rows pgx.Rows) ([]ListItemState, error) {
 	var states []ListItemState
 	for rows.Next() {
 		var state ListItemState

@@ -142,48 +142,60 @@ func TestProcessLocalImageCachesWithinLibraryRoots(t *testing.T) {
 	}
 }
 
-func TestProcessLocalImageRejectsPathOutsideRoots(t *testing.T) {
-	root := t.TempDir()
-	other := t.TempDir()
-	posterPath := writeLocalPoster(t, other)
-	job := localArtworkJob("file://" + posterPath)
-	p, jobs, cacher, _, _ := newLocalProcessorForTest(job, []string{root}, "")
+// A local source outside the library roots, through a ".." or a symlinked
+// leaf, or missing on disk is never read or cached; all but the symlink fail
+// as stable failures, fingerprinted sources included.
+func TestProcessLocalImageRejectsUnreadableSources(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source func(t *testing.T, root, outside string) string
+		stable bool
+	}{
+		{name: "outside roots", stable: true, source: func(t *testing.T, _, outside string) string {
+			return "file://" + writeLocalPoster(t, outside)
+		}},
+		{name: "dot-dot traversal", stable: true, source: func(t *testing.T, root, outside string) string {
+			posterPath := writeLocalPoster(t, outside)
+			return "file://" + root + "/../" + filepath.Base(outside) + "/" + filepath.Base(posterPath)
+		}},
+		{name: "missing file", stable: true, source: func(_ *testing.T, root, _ string) string {
+			return "file://" + filepath.Join(root, "poster.jpg")
+		}},
+		{name: "symlinked leaf", source: func(t *testing.T, root, _ string) string {
+			target := writeLocalPoster(t, root)
+			link := filepath.Join(root, "linked.jpg")
+			if err := os.Symlink(target, link); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			return "file://" + link
+		}},
+		{name: "fingerprinted, outside root", stable: true, source: func(t *testing.T, _, outside string) string {
+			return fingerprintedSource(t, writeLocalPoster(t, outside))
+		}},
+		{name: "fingerprinted, dot-dot", stable: true, source: func(t *testing.T, root, outside string) string {
+			rel, err := filepath.Rel(root, writeLocalPoster(t, outside))
+			if err != nil {
+				t.Fatalf("rel: %v", err)
+			}
+			return "file://" + root + string(filepath.Separator) + rel + "?v=12-1"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			job := localArtworkJob(tc.source(t, root, t.TempDir()))
+			p, jobs, cacher, _, _ := newLocalProcessorForTest(job, []string{root}, "")
 
-	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if stats.Failed != 1 {
-		t.Fatalf("stats = %+v, want 1 failed", stats)
-	}
-	if !isStableProviderImageFailure(jobs.failedText) {
-		t.Fatalf("confinement failure %q must be a stable failure", jobs.failedText)
-	}
-	if len(cacher.bytesReq) != 0 {
-		t.Fatal("must not read or cache a file outside library roots")
-	}
-}
-
-func TestProcessLocalImageRejectsDotDotTraversal(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
-	posterPath := writeLocalPoster(t, outside)
-	traversal := root + "/../" + filepath.Base(outside) + "/" + filepath.Base(posterPath)
-	job := localArtworkJob("file://" + traversal)
-	p, jobs, cacher, _, _ := newLocalProcessorForTest(job, []string{root}, "")
-
-	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if stats.Failed != 1 {
-		t.Fatalf("stats = %+v, want 1 failed", stats)
-	}
-	if !isStableProviderImageFailure(jobs.failedText) {
-		t.Fatalf("traversal failure %q must be a stable failure", jobs.failedText)
-	}
-	if len(cacher.bytesReq) != 0 {
-		t.Fatal("must not cache a traversal path")
+			stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
+			if err != nil {
+				t.Fatalf("RunOnce: %v", err)
+			}
+			if stats.Failed != 1 || len(cacher.bytesReq) != 0 {
+				t.Fatalf("stats = %+v, reads = %d; want 1 failed and nothing read or cached", stats, len(cacher.bytesReq))
+			}
+			if tc.stable && !isStableProviderImageFailure(jobs.failedText) {
+				t.Fatalf("failure %q must be a stable failure", jobs.failedText)
+			}
+		})
 	}
 }
 
@@ -209,45 +221,6 @@ func TestProcessLocalImageAcceptsLogicalPathUnderSymlinkedRoot(t *testing.T) {
 	}
 	if len(cacher.bytesReq) != 1 {
 		t.Fatal("expected the logical path to be read and cached")
-	}
-}
-
-func TestProcessLocalImageMissingFileIsStableFailure(t *testing.T) {
-	root := t.TempDir()
-	job := localArtworkJob("file://" + filepath.Join(root, "poster.jpg"))
-	p, jobs, _, _, _ := newLocalProcessorForTest(job, []string{root}, "")
-
-	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if stats.Failed != 1 {
-		t.Fatalf("stats = %+v, want 1 failed", stats)
-	}
-	if !isStableProviderImageFailure(jobs.failedText) {
-		t.Fatalf("ENOENT failure %q must be a stable failure", jobs.failedText)
-	}
-}
-
-func TestProcessLocalImageRejectsSymlinkedLeaf(t *testing.T) {
-	root := t.TempDir()
-	target := writeLocalPoster(t, root)
-	link := filepath.Join(root, "linked.jpg")
-	if err := os.Symlink(target, link); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	job := localArtworkJob("file://" + link)
-	p, _, cacher, _, _ := newLocalProcessorForTest(job, []string{root}, "")
-
-	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if stats.Failed != 1 {
-		t.Fatalf("stats = %+v, want 1 failed", stats)
-	}
-	if len(cacher.bytesReq) != 0 {
-		t.Fatal("must not cache a symlinked leaf")
 	}
 }
 
@@ -356,35 +329,6 @@ func TestProcessLocalImageStripsFingerprintBeforeReading(t *testing.T) {
 	// The target update matches on the stored, fingerprinted source.
 	if items.sourcePath != source {
 		t.Fatalf("updated source = %q, want %q", items.sourcePath, source)
-	}
-}
-
-func TestProcessLocalImageFingerprintKeepsConfinement(t *testing.T) {
-	root := t.TempDir()
-	other := t.TempDir()
-	outside := writeLocalPoster(t, other)
-	rel, err := filepath.Rel(root, outside)
-	if err != nil {
-		t.Fatalf("rel: %v", err)
-	}
-	for name, source := range map[string]string{
-		"outside root": fingerprintedSource(t, outside),
-		"dot-dot":      "file://" + root + string(filepath.Separator) + rel + "?v=12-1",
-	} {
-		t.Run(name, func(t *testing.T) {
-			job := localArtworkJob(source)
-			p, jobs, cacher, _, _ := newLocalProcessorForTest(job, []string{root}, "")
-			stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
-			if err != nil {
-				t.Fatalf("RunOnce: %v", err)
-			}
-			if stats.Failed != 1 || len(cacher.byteReqs) != 0 {
-				t.Fatalf("stats = %+v, reads = %d: a fingerprinted source escaped the library roots", stats, len(cacher.byteReqs))
-			}
-			if !isStableProviderImageFailure(jobs.failedText) {
-				t.Fatalf("confinement failure %q must be a stable failure", jobs.failedText)
-			}
-		})
 	}
 }
 

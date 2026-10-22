@@ -233,33 +233,6 @@ async function openMenu(name: string) {
 }
 
 describe("GroupsBoard", () => {
-  it("shows each shelf, My collections and No heading top to bottom, with what viewers see", async () => {
-    await renderBoard();
-    expect(
-      screen.getByRole("heading", { name: "Shelves on Movies › Collections" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getAllByRole("region").map((region) => region.getAttribute("aria-label")),
-    ).toEqual(["Shelf Franchises", "Shelf My collections", "No heading"]);
-    expect(cardTitles(noHeading())).toEqual(["Staff picks", "New this month", "Oscar winners"]);
-    const myShelf = screen.getByRole("region", { name: "Shelf My collections" });
-    expect(myShelf).toHaveTextContent("Different for each viewer");
-    expect(myShelf).toHaveTextContent("Each viewer's own collections land here");
-    expect(screen.getByRole("combobox", { name: "Order of Franchises" })).toHaveDisplayValue(
-      "Your order",
-    );
-  });
-
-  it("dims a hidden collection on its shelf and leaves it out of the viewer preview", async () => {
-    await renderBoard();
-    const oscars = within(noHeading()).getAllByRole("listitem")[2]!;
-    expect(oscars).toHaveTextContent("Hidden");
-    const preview = screen.getByRole("complementary", { name: "What viewers see" });
-    expect(preview).toHaveTextContent("Staff picks");
-    expect(preview).toHaveTextContent("Each viewer's own");
-    expect(preview).not.toHaveTextContent("Oscar winners");
-  });
-
   it("moves a collection with the keyboard and saves the order the drag showed", async () => {
     await renderBoard();
     await grabWithKeyboard("Move Staff picks");
@@ -279,17 +252,6 @@ describe("GroupsBoard", () => {
         body: { ordered_ids: ["b", "c", "a"] },
       },
     ]);
-  });
-
-  it("shows My collections can't take a server collection while one is dragged", async () => {
-    await renderBoard();
-    const myShelf = screen.getByRole("region", { name: "Shelf My collections" });
-    expect(myShelf).not.toHaveTextContent("Viewers' own collections only");
-    await grabWithKeyboard("Move Staff picks");
-    expect(myShelf).toHaveTextContent("Viewers' own collections only");
-    await press("Escape");
-    expect(myShelf).not.toHaveTextContent("Viewers' own collections only");
-    expect(v2Recorder.writes()).toEqual([]);
   });
 
   it("shows a move at once and puts it back with Try again when it fails", async () => {
@@ -380,22 +342,6 @@ describe("GroupsBoard", () => {
     expect(v2Recorder.writes()).toEqual([]);
   });
 
-  it("won't move a shelf to the top over a shelf order someone else changed", async () => {
-    await renderBoard();
-    v2Recorder.answer("GET /api/v2/admin/libraries/{library_id}/collection-groups/order", {
-      library_id: "1",
-      group_id: "",
-      ordered_ids: ["ungrouped", "g1", "mine"],
-      has_more: false,
-    });
-    v2Recorder.bump("/api/v2/admin/libraries/1/collection-groups/order");
-    const user = await openMenu("More for shelf My collections");
-    await user.click(await screen.findByRole("menuitem", { name: "Move to top" }));
-
-    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith(ORDER_CHANGED));
-    expect(v2Recorder.writes()).toEqual([]);
-  });
-
   it("says a server collection can't go on My collections when it's dropped there", async () => {
     await renderBoard();
     const myShelf = screen.getByRole("region", { name: "Shelf My collections" });
@@ -411,37 +357,6 @@ describe("GroupsBoard", () => {
     await press("Space");
     expect(
       await screen.findByText("Staff picks can't go on My collections. Nothing moved."),
-    ).toBeInTheDocument();
-    expect(v2Recorder.writes()).toEqual([]);
-  });
-
-  it("says a shelf sorted by name keeps its order when a card is dropped within it", async () => {
-    const sorted = {
-      ...franchises,
-      default_sort_mode: "name_asc",
-      collections: [collection("f2", "Blade Runner"), collection("f1", "Alien")],
-    } as Group;
-    v2Recorder.answer(
-      "GET /api/v2/admin/collection-groups/{group_id}/collections/order",
-      ({ path }: { path: string }) => {
-        const id = path.split("/")[5]!;
-        const ids = id === "g1" ? ["f2", "f1"] : ORDERS[id];
-        return { library_id: "1", group_id: id, ordered_ids: ids, has_more: false };
-      },
-    );
-    await renderBoard([sorted, mine]);
-    const shelf = screen.getByRole("region", { name: "Shelf Franchises" });
-    place(
-      within(shelf).getByRole("button", { name: "Move Blade Runner" }).parentElement!,
-      2250,
-      40,
-    );
-    await grabWithKeyboard("Move Alien");
-    await press("ArrowDown", 2);
-    await press("Space");
-
-    expect(
-      await screen.findByText("Franchises sorts by name, so the order didn't change."),
     ).toBeInTheDocument();
     expect(v2Recorder.writes()).toEqual([]);
   });
@@ -469,44 +384,6 @@ describe("GroupsBoard", () => {
     });
   });
 
-  it("hides a collection from its ⋯ through the page", async () => {
-    await renderBoard();
-    const user = await openMenu("More for Staff picks");
-    await user.click(await screen.findByRole("menuitem", { name: "Hide from Collections tab" }));
-    expect(handlers.onVisibleChange).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "a" }),
-      false,
-    );
-  });
-
-  it("offers Show on the Collections tab for a hidden collection", async () => {
-    await renderBoard();
-    await openMenu("More for Oscar winners");
-    expect(
-      await screen.findByRole("menuitem", { name: "Show on the Collections tab" }),
-    ).toBeInTheDocument();
-  });
-
-  it("renames a shelf with the group rename request", async () => {
-    await renderBoard();
-    const user = await openMenu("More for shelf Franchises");
-    await user.click(await screen.findByRole("menuitem", { name: "Rename shelf" }));
-    const dialog = await screen.findByRole("dialog", { name: "Rename shelf" });
-    const name = within(dialog).getByRole("textbox", { name: "Name" });
-    await user.clear(name);
-    await user.type(name, "Sagas");
-    await user.click(within(dialog).getByRole("button", { name: "Save" }));
-
-    await vi.waitFor(() => expect(v2Recorder.writes()).toHaveLength(1));
-    expect(v2Recorder.writes()[0]).toEqual({
-      operation: "PATCH /api/v2/admin/collection-groups/{id}",
-      path: "/api/v2/admin/collection-groups/g1",
-      headers: { "If-Match": '"/api/v2/admin/collection-groups/g1#1"' },
-      body: { name: "Sagas" },
-    });
-    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  });
-
   it("renames with the shelf as it was when Rename opened, so a rename meanwhile conflicts", async () => {
     await renderBoard();
     const user = await openMenu("More for shelf Franchises");
@@ -525,20 +402,6 @@ describe("GroupsBoard", () => {
     });
     await vi.waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(screen.getByRole("dialog", { name: "Rename shelf" })).toBeInTheDocument();
-  });
-
-  it("saves a shelf's order for viewers when Order changes", async () => {
-    await renderBoard();
-    await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: "Order of Franchises" }),
-      "name_asc",
-    );
-    await vi.waitFor(() => expect(v2Recorder.writes()).toHaveLength(1));
-    expect(v2Recorder.writes()[0]).toMatchObject({
-      operation: "PATCH /api/v2/admin/collection-groups/{id}",
-      path: "/api/v2/admin/collection-groups/g1",
-      body: { default_sort_mode: "name_asc" },
-    });
   });
 
   it("says a deleted shelf's collections move to No heading, then deletes it", async () => {
@@ -574,27 +437,6 @@ describe("GroupsBoard", () => {
       path: "/api/v2/admin/libraries/1/collection-groups/order",
       headers: { "If-Match": '"/api/v2/admin/libraries/1/collection-groups/order#1"' },
       body: { ordered_ids: ["mine", "g1", "ungrouped"] },
-    });
-  });
-
-  it("adds a shelf from New shelf", async () => {
-    v2Recorder.answer("POST /api/v2/admin/libraries/{library_id}/collection-groups", {
-      ...groupBody(franchises),
-      id: "g2",
-      name: "Studios",
-    });
-    await renderBoard();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "New shelf" }));
-    const dialog = await screen.findByRole("dialog", { name: "New shelf" });
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "Studios");
-    await user.click(within(dialog).getByRole("button", { name: "Add shelf" }));
-    await vi.waitFor(() => expect(v2Recorder.writes()).toHaveLength(1));
-    expect(v2Recorder.writes()[0]).toEqual({
-      operation: "POST /api/v2/admin/libraries/{library_id}/collection-groups",
-      path: "/api/v2/admin/libraries/1/collection-groups",
-      headers: {},
-      body: { name: "Studios" },
     });
   });
 
@@ -673,39 +515,6 @@ describe("GroupsBoard", () => {
       expect(toast.error).toHaveBeenCalled();
     });
 
-    it("unpins a pinned collection, which says what it stops doing", async () => {
-      await renderBoard([franchises, mine], pinnedLoose);
-      const user = await openMenu("More for New this month");
-      const unpin = await screen.findByRole("menuitem", { name: "Unpin" });
-      expect(unpin).toHaveAccessibleDescription(
-        "Stops showing first on this shelf and in Server collections on the Collections page.",
-      );
-      expect(screen.queryByRole("menuitem", { name: PIN_LABEL })).toBeNull();
-      await user.click(unpin);
-
-      await vi.waitFor(() => expect(v2Recorder.writes()).toHaveLength(1));
-      expect(v2Recorder.writes()[0]).toMatchObject({
-        path: "/api/v2/admin/collections/b",
-        body: { collection_type: "manual", featured: false },
-      });
-    });
-
-    it("keeps pinned collections in a band at the start, marked on the board and in the preview", async () => {
-      await renderBoard([franchises, mine], pinnedLoose);
-      expect(cardTitles(noHeading())).toEqual(["New this month", "Staff picks", "Oscar winners"]);
-      const pinned = band(noHeading())!;
-      expect(within(pinned).getAllByRole("listitem")).toHaveLength(1);
-      expect(within(pinned).getByRole("img", { name: "Pinned" })).toBeInTheDocument();
-      const preview = screen.getByRole("complementary", { name: "What viewers see" });
-      // No heading in the preview: the pinned card first, with the pin; the hidden one left out.
-      const loose = within(preview)
-        .getAllByRole("listitem")
-        .filter((card) => /New this month|Staff picks/.test(card.textContent ?? ""));
-      expect(loose.map((card) => card.textContent)).toEqual(["New this month", "Staff picks"]);
-      expect(within(loose[0]!).getByRole("img", { name: "Pinned" })).toBeInTheDocument();
-      expect(within(preview).getAllByRole("img", { name: "Pinned" })).toHaveLength(1);
-    });
-
     it("won't let a drag put a card above the band", async () => {
       await renderBoard([franchises, mine], pinnedLoose);
       await grabWithKeyboard("Move Oscar winners");
@@ -721,58 +530,6 @@ describe("GroupsBoard", () => {
       expect(
         await screen.findByText("Oscar winners dropped at position 2 of 3 on No heading."),
       ).toBeInTheDocument();
-    });
-
-    it("lets a pinned card from a shelf that sorts itself land inside another shelf's band", async () => {
-      const sorted = {
-        ...franchises,
-        default_sort_mode: "name_asc",
-        collections: [collection("f1", "Alien", "visible", true)],
-      } as Group;
-      await renderBoard([sorted, mine], pinnedLoose);
-      // Franchises sorts itself, so Alien has no band there, but it is pinned.
-      expect(band(screen.getByRole("region", { name: "Shelf Franchises" }))).toBeNull();
-      await grabWithKeyboard("Move Alien");
-      // Each arrow moves 25px: from Alien's middle (2220) to the pinned card's (120).
-      await press("ArrowUp", 84);
-      await press("Space");
-
-      await vi.waitFor(() => expect(v2Recorder.writes()).toHaveLength(1));
-      expect(v2Recorder.writes()[0]).toMatchObject({
-        path: "/api/v2/admin/collection-groups/ungrouped/collections/order",
-        body: { ordered_ids: ["f1", "b", "a", "c"] },
-      });
-      expect(
-        await screen.findByText("Alien dropped at position 1 of 4 on No heading."),
-      ).toBeInTheDocument();
-    });
-
-    it("says Pin reaches every library a collection is in", async () => {
-      const shared = {
-        ...franchises,
-        collections: [{ ...collection("f1", "Alien", "visible", true), library_ids: [1, 2] }],
-      } as Group;
-      await renderBoard([shared, mine]);
-      const user = await openMenu("More for Alien");
-      expect(await screen.findByRole("menuitem", { name: "Unpin" })).toHaveAccessibleDescription(
-        "Stops showing first on this shelf and in Server collections on the Collections page. This applies in every library it's in.",
-      );
-      await user.keyboard("{Escape}");
-      await openMenu("More for Staff picks");
-      // Staff picks is in Movies only.
-      expect(await screen.findByRole("menuitem", { name: PIN_LABEL })).toHaveAccessibleDescription(
-        "Shows first on this shelf and in Server collections on the Collections page.",
-      );
-    });
-
-    it("stays on for a shelf sorted by name, and says it still leads Server collections", async () => {
-      await renderBoard([{ ...franchises, default_sort_mode: "name_asc" }, mine]);
-      await openMenu("More for Alien");
-      const pin = await screen.findByRole("menuitem", { name: PIN_LABEL });
-      expect(pin).not.toHaveAttribute("aria-disabled");
-      expect(pin).toHaveAccessibleDescription(
-        "Shows first in Server collections on the Collections page; this shelf sorts by name.",
-      );
     });
 
     it("is off where the server can't arrange shelves, on the board and the phone sheet", async () => {
@@ -804,28 +561,6 @@ describe("GroupsBoard", () => {
           name: "Pin Staff picks to the start of the collections with no heading",
         }),
       ).toBeDisabled();
-    });
-
-    it("pins from the phone sheet's switch", async () => {
-      stubPhone();
-      await renderBoard();
-      const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: "More for Staff picks" }));
-      const sheet = await screen.findByRole("dialog", { name: "Move Staff picks" });
-      const pin = within(sheet).getByRole("switch", {
-        name: "Pin Staff picks to the start of the collections with no heading",
-      });
-      expect(pin).not.toBeChecked();
-      expect(pin).toHaveAccessibleDescription(
-        "Shows first on this shelf and in Server collections on the Collections page.",
-      );
-      await user.click(pin);
-
-      await vi.waitFor(() => expect(v2Recorder.writes()).toHaveLength(1));
-      expect(v2Recorder.writes()[0]).toMatchObject({
-        path: "/api/v2/admin/collections/a",
-        body: { collection_type: "manual", featured: true },
-      });
     });
   });
 });

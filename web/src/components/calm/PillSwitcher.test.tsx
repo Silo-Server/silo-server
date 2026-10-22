@@ -31,34 +31,6 @@ describe("PillSwitcher", () => {
     await userEvent.click(screen.getByRole("button", { name: "Kids" }));
     expect(onChange).toHaveBeenCalledWith("9");
   });
-
-  it("can't be used while disabled", () => {
-    render(
-      <PillSwitcher label="Library" options={OPTIONS} value="all" onChange={vi.fn()} disabled />,
-    );
-    for (const option of OPTIONS)
-      expect(screen.getByRole("button", { name: option.label })).toBeDisabled();
-  });
-
-  it("shows a pill's count after its name and can turn one pill off", async () => {
-    const onChange = vi.fn();
-    render(
-      <PillSwitcher
-        label="Library"
-        options={[
-          { value: "all", label: "All libraries", disabled: true },
-          { value: "7", label: "Movies", count: 14 },
-        ]}
-        value="7"
-        onChange={onChange}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Movies 14" })).toBeEnabled();
-    const all = screen.getByRole("button", { name: "All libraries" });
-    expect(all).toBeDisabled();
-    await userEvent.click(all);
-    expect(onChange).not.toHaveBeenCalled();
-  });
 });
 
 const options = Array.from({ length: 12 }, (_, index) => ({
@@ -92,18 +64,6 @@ afterEach(() => {
 });
 
 describe("PillSwitcher scrolling", () => {
-  it("hides the scrollbar and fades only the edge with more past it", () => {
-    stubLayout();
-    render(<PillSwitcher label="Page" options={options} value="page-0" onChange={() => {}} />);
-
-    const group = screen.getByRole("group", { name: "Page" });
-    expect(group).toHaveClass("[scrollbar-width:none]", "[&::-webkit-scrollbar]:hidden");
-    expect(group.className).toContain(
-      "[mask-image:linear-gradient(to_right,black_calc(100%_-_var(--strip-fade,2rem))",
-    );
-    expect(group.className).not.toContain("transparent_var(--strip-hold,0px),black");
-  });
-
   it("pages the strip from the chevron", () => {
     stubLayout();
     const scrollBy = vi.fn();

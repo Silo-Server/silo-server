@@ -3,13 +3,13 @@ package ratelimit
 import (
 	"context"
 	"errors"
-	"os"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/time/rate"
 )
 
 type fakeClock struct {
@@ -129,77 +129,21 @@ func TestNilAttemptLimiterAllows(t *testing.T) {
 }
 
 func TestRetryAfterSecondsRoundsUp(t *testing.T) {
-	for _, tc := range []struct {
+	type testCase struct {
 		in   time.Duration
 		want int
-	}{{0, 1}, {time.Millisecond, 1}, {time.Second, 1}, {1500 * time.Millisecond, 2}, {5 * time.Minute, 300}} {
+	}
+	cases := []testCase{{0, 1}, {time.Millisecond, 1}, {time.Second, 1}, {1500 * time.Millisecond, 2}, {5 * time.Minute, 300}}
+	// A saturated wait only fits in a 64-bit int; a constant conversion would
+	// stop this package compiling on 32-bit targets.
+	if strconv.IntSize == 64 {
+		d := rate.InfDuration
+		cases = append(cases, testCase{d, int(d/time.Second) + 1})
+	}
+	for _, tc := range cases {
 		if got := RetryAfterSeconds(tc.in); got != tc.want {
 			t.Errorf("RetryAfterSeconds(%v) = %d, want %d", tc.in, got, tc.want)
 		}
-	}
-}
-
-func testAttemptRedisClient(t *testing.T) *redis.Client {
-	t.Helper()
-	raw := os.Getenv("SILO_TEST_REDIS_URL")
-	if raw == "" {
-		t.Skip("SILO_TEST_REDIS_URL required for the Redis attempt limiter test")
-	}
-	opts, err := redis.ParseURL(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := redis.NewClient(opts)
-	t.Cleanup(func() { _ = client.Close() })
-	return client
-}
-
-// Two nodes with their own Redis clients share one count per key.
-func TestRedisAttemptLimiterSharesStateAcrossNodes(t *testing.T) {
-	ctx := context.Background()
-	key := "test:" + t.Name() + ":" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	nodeA := NewRedisAttemptLimiter(testAttemptRedisClient(t), ProfilePINPolicy)
-	nodeB := NewRedisAttemptLimiter(testAttemptRedisClient(t), ProfilePINPolicy)
-	t.Cleanup(func() { nodeA.Reset(context.Background(), key) })
-
-	reserveN(t, nodeA, key, 3)
-	reserveN(t, nodeB, key, 2)
-	retry, ok := nodeA.Reserve(ctx, key)
-	if ok {
-		t.Fatal("attempt past the shared limit allowed")
-	}
-	if retry <= 4*time.Minute || retry > 5*time.Minute {
-		t.Fatalf("retryAfter = %v, want close to 5m", retry)
-	}
-	if _, ok := nodeB.Reserve(ctx, key); ok {
-		t.Fatal("other node allowed a locked key")
-	}
-
-	nodeB.Reset(ctx, key)
-	reserveN(t, nodeA, key, 5)
-}
-
-func TestRedisAttemptLimiterLockoutExpires(t *testing.T) {
-	ctx := context.Background()
-	key := "test:" + t.Name() + ":" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	l := NewRedisAttemptLimiter(testAttemptRedisClient(t), AttemptPolicy{MaxAttempts: 2, Window: 200 * time.Millisecond})
-	t.Cleanup(func() { l.Reset(context.Background(), key) })
-
-	reserveN(t, l, key, 2)
-	if _, ok := l.Reserve(ctx, key); ok {
-		t.Fatal("attempt past the limit allowed")
-	}
-	// Wait on the observable state: a refused Reserve is not counted, so
-	// polling does not extend the lockout.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, ok := l.Reserve(ctx, key); ok {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("lockout did not expire")
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }
 

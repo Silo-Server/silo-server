@@ -106,64 +106,60 @@ func (p *remoteStubProvider) lastSearchProviderIDs() map[string]string {
 	return copyMap(p.lastSearchIDs)
 }
 
-func TestInitialMatch_MalformedNFOIdentityDoesNotSuppressTitleSearch(t *testing.T) {
+// TestInitialMatch_MalformedIdentityDoesNotSuppressTitleSearch covers malformed
+// trusted IDs, from an NFO or from the scanner: the match falls back to a title
+// search instead of sending them to the remote provider.
+func TestInitialMatch_MalformedIdentityDoesNotSuppressTitleSearch(t *testing.T) {
 	t.Parallel()
-	h := newTestHarness()
-	nfo := &localHintStubProvider{
-		hints:         map[string]string{"tmdb": "not-a-number", "imdb": "nm1234567"},
-		searchResults: []SearchResult{{Name: "The Matrix", Year: 1999, Provider: "nfo", ProviderIDs: map[string]string{"tmdb": "not-a-number"}}},
-		metadata:      &MetadataResult{HasMetadata: true, Title: "The Matrix"},
-	}
-	remote := &remoteStubProvider{
-		slug: "tmdb",
-		searchResults: []SearchResult{{
-			Name: "The Matrix", Year: 1999, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"},
-		}},
-		metadata: &MetadataResult{HasMetadata: true, Title: "The Matrix", Year: 1999, ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"}},
-	}
-
-	result, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
-		Hints: &MatchHints{Title: "The Matrix", Year: 1999, Type: "movie"},
-		Mode:  ModeInitialMatch,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders() error = %v", err)
-	}
-	if result == nil || !result.Updated {
-		t.Fatalf("result = %#v, want title-based remote match", result)
-	}
-	if ids := remote.lastSearchProviderIDs(); ids["tmdb"] != "" || ids["imdb"] != "" {
-		t.Fatalf("remote search received malformed trusted IDs: %#v", ids)
-	}
-}
-
-func TestInitialMatch_MalformedScannerIdentityDoesNotSuppressTitleSearch(t *testing.T) {
-	t.Parallel()
-	h := newTestHarness()
-	remote := &remoteStubProvider{
-		slug: "tmdb",
-		searchResults: []SearchResult{{
-			Name: "The Matrix", Year: 1999, Provider: "tmdb",
-			ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"},
-		}},
-		metadata: &MetadataResult{HasMetadata: true, Title: "The Matrix", Year: 1999, ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"}},
-	}
-
-	result, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
-		Hints: &MatchHints{
-			Title: "The Matrix", Year: 1999, Type: "movie",
-			TmdbID: "not-a-number", ImdbID: "nm1234567",
+	for _, tc := range []struct {
+		name  string
+		hints MatchHints
+		nfo   *localHintStubProvider
+	}{
+		{
+			name:  "NFO identity",
+			hints: MatchHints{Title: "The Matrix", Year: 1999, Type: "movie"},
+			nfo: &localHintStubProvider{
+				hints:         map[string]string{"tmdb": "not-a-number", "imdb": "nm1234567"},
+				searchResults: []SearchResult{{Name: "The Matrix", Year: 1999, Provider: "nfo", ProviderIDs: map[string]string{"tmdb": "not-a-number"}}},
+				metadata:      &MetadataResult{HasMetadata: true, Title: "The Matrix"},
+			},
 		},
-		Mode: ModeInitialMatch,
-	}, []Provider{remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders() error = %v", err)
-	}
-	if result == nil || !result.Updated {
-		t.Fatalf("result = %#v, want title-based remote match", result)
-	}
-	if ids := remote.lastSearchProviderIDs(); ids["tmdb"] != "" || ids["imdb"] != "" {
-		t.Fatalf("remote search received malformed scanner IDs: %#v", ids)
+		{
+			name:  "scanner identity",
+			hints: MatchHints{Title: "The Matrix", Year: 1999, Type: "movie", TmdbID: "not-a-number", ImdbID: "nm1234567"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newTestHarness()
+			remote := &remoteStubProvider{
+				slug: "tmdb",
+				searchResults: []SearchResult{{
+					Name: "The Matrix", Year: 1999, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"},
+				}},
+				metadata: &MetadataResult{HasMetadata: true, Title: "The Matrix", Year: 1999, ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"}},
+			}
+			providers := []Provider{remote}
+			if tc.nfo != nil {
+				providers = []Provider{tc.nfo, remote}
+			}
+
+			hints := tc.hints
+			result, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+				Hints: &hints,
+				Mode:  ModeInitialMatch,
+			}, providers)
+			if err != nil {
+				t.Fatalf("ProcessWithProviders() error = %v", err)
+			}
+			if result == nil || !result.Updated {
+				t.Fatalf("result = %#v, want title-based remote match", result)
+			}
+			if ids := remote.lastSearchProviderIDs(); ids["tmdb"] != "" || ids["imdb"] != "" {
+				t.Fatalf("remote search received malformed trusted IDs: %#v", ids)
+			}
+		})
 	}
 }
 
@@ -382,95 +378,50 @@ func TestInitialMatch_TitleOnlyNFO_RemoteSearchWins(t *testing.T) {
 	}
 }
 
-// Initial match: NFO hints beat folder-name-derived hints on conflict.
-func TestInitialMatch_NFOHintBeatsFolderNameHint(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
+// TestRefresh_StoredIDVersusNFOHint covers which TMDB ID a refresh fetches when
+// the NFO names another one: a scheduled refresh keeps the stored ID, a manual
+// refresh follows the NFO unless the NFO's ID is recorded dead.
+func TestRefresh_StoredIDVersusNFOHint(t *testing.T) {
+	for _, tc := range []struct {
+		name, title, hintID, nfoTitle string
+		remoteID, staleID, wantID     string
+		mode                          RefreshMode
+	}{
+		{name: "scheduled refresh: stored ID beats the NFO hint", title: "Stable Movie", hintID: "999", nfoTitle: "Stable Movie", remoteID: "100", mode: ModeScheduledRefresh, wantID: "100"},
+		{name: "manual refresh: NFO hint beats the stored ID", title: "Misidentified Movie", hintID: "200", nfoTitle: "Corrected Movie", remoteID: "200", mode: ModeManualRefresh, wantID: "200"},
+		{name: "manual refresh: a dead NFO hint keeps the stored ID", title: "Stored Movie", hintID: "200", nfoTitle: "Stored Movie", remoteID: "100", staleID: "200", mode: ModeManualRefresh, wantID: "100"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			seedMovieItem(t, h, "movie:tmdb:100", tc.title, 2018)
+			h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
+			if tc.staleID != "" {
+				staleRepo := newFakeStaleIDRepo()
+				staleRepo.set("movie:tmdb:100", &models.StaleMediaID{ContentID: "movie:tmdb:100", Provider: "tmdb", ProviderID: tc.staleID})
+				h.service.staleIDRepo = staleRepo
+			}
 
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": "222"},
-		metadata: &MetadataResult{HasMetadata: true, Title: "Right Movie"},
-	}
-	remote := &remoteStubProvider{
-		slug:     "tmdb",
-		metadata: &MetadataResult{HasMetadata: true, Title: "Right Movie", ProviderIDs: map[string]string{"tmdb": "222"}},
-	}
+			nfo := &localHintStubProvider{
+				hints:    map[string]string{"tmdb": tc.hintID},
+				metadata: &MetadataResult{HasMetadata: true, Title: tc.nfoTitle},
+			}
+			remote := &remoteStubProvider{
+				slug:     "tmdb",
+				metadata: &MetadataResult{HasMetadata: true, Title: tc.nfoTitle, ProviderIDs: map[string]string{"tmdb": tc.remoteID}},
+			}
 
-	_, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		Hints: &MatchHints{
-			Title:  "Right Movie",
-			Year:   2020,
-			Type:   "movie",
-			TmdbID: "111", // folder-name-derived hint
-		},
-		Language: "en",
-		Mode:     ModeInitialMatch,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if got := remote.lastMetadataIDs()["tmdb"]; got != "222" {
-		t.Errorf("remote GetMetadata tmdb id = %q, want 222 (NFO hint beats folder-name hint)", got)
-	}
-}
-
-// Scheduled refresh: stored durable IDs beat NFO hints (no background
-// identity flips).
-func TestScheduledRefresh_StoredIDBeatsNFOHint(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:100", "Stable Movie", 2018)
-	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
-
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": "999"},
-		metadata: &MetadataResult{HasMetadata: true, Title: "Stable Movie"},
-	}
-	remote := &remoteStubProvider{
-		slug:     "tmdb",
-		metadata: &MetadataResult{HasMetadata: true, Title: "Stable Movie", ProviderIDs: map[string]string{"tmdb": "100"}},
-	}
-
-	_, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "movie:tmdb:100",
-		Language:  "en",
-		Mode:      ModeScheduledRefresh,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if got := remote.lastMetadataIDs()["tmdb"]; got != "100" {
-		t.Errorf("scheduled refresh tmdb id = %q, want 100 (stored id beats NFO hint)", got)
-	}
-}
-
-// Manual refresh: NFO hints beat stored IDs — fixing a wrong NFO id and
-// refreshing re-anchors the item (recovery path).
-func TestManualRefresh_NFOHintBeatsStoredID(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:100", "Misidentified Movie", 2018)
-	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
-
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": "200"},
-		metadata: &MetadataResult{HasMetadata: true, Title: "Corrected Movie"},
-	}
-	remote := &remoteStubProvider{
-		slug:     "tmdb",
-		metadata: &MetadataResult{HasMetadata: true, Title: "Corrected Movie", ProviderIDs: map[string]string{"tmdb": "200"}},
-	}
-
-	_, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "movie:tmdb:100",
-		Language:  "en",
-		Mode:      ModeManualRefresh,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if got := remote.lastMetadataIDs()["tmdb"]; got != "200" {
-		t.Errorf("manual refresh tmdb id = %q, want 200 (NFO hint beats stored id)", got)
+			if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+				ContentID: "movie:tmdb:100",
+				Language:  "en",
+				Mode:      tc.mode,
+			}, []Provider{nfo, remote}); err != nil {
+				t.Fatalf("ProcessWithProviders: %v", err)
+			}
+			if got := remote.lastMetadataIDs()["tmdb"]; got != tc.wantID {
+				t.Errorf("refresh tmdb id = %q, want %s", got, tc.wantID)
+			}
+		})
 	}
 }
 
@@ -558,37 +509,5 @@ func TestPhase2_NFOMetadataDoesNotInjectProviderIDs(t *testing.T) {
 	}
 	if item.ImdbID != "" {
 		t.Errorf("item imdb id = %q, want empty (NFO must not extend a remotely-anchored identity)", item.ImdbID)
-	}
-}
-
-// Manual refresh: an NFO ID already recorded as dead neither re-matches the
-// item nor counts as a correction, so the valid stored ID stays.
-func TestManualRefresh_DeadNFOHintKeepsStoredID(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:100", "Stored Movie", 2018)
-	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
-	staleRepo := newFakeStaleIDRepo()
-	staleRepo.set("movie:tmdb:100", &models.StaleMediaID{ContentID: "movie:tmdb:100", Provider: "tmdb", ProviderID: "200"})
-	h.service.staleIDRepo = staleRepo
-
-	nfo := &localHintStubProvider{
-		hints:    map[string]string{"tmdb": "200"},
-		metadata: &MetadataResult{HasMetadata: true, Title: "Stored Movie"},
-	}
-	remote := &remoteStubProvider{
-		slug:     "tmdb",
-		metadata: &MetadataResult{HasMetadata: true, Title: "Stored Movie", ProviderIDs: map[string]string{"tmdb": "100"}},
-	}
-
-	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "movie:tmdb:100",
-		Language:  "en",
-		Mode:      ModeManualRefresh,
-	}, []Provider{nfo, remote}); err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if got := remote.lastMetadataIDs()["tmdb"]; got != "100" {
-		t.Errorf("manual refresh tmdb id = %q, want the stored 100 (the NFO's 200 is dead)", got)
 	}
 }

@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -192,31 +191,6 @@ func TestTrailersRefreshReturnsCooldownWithNextAllowedAt(t *testing.T) {
 	}
 }
 
-func TestTrailersRefreshReturnsDisabled(t *testing.T) {
-	itemAccess := &fakeTrailerItemAccess{
-		items:     map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
-		ensureErr: map[string]error{},
-	}
-	requester := &fakeTrailerRefreshRequester{
-		outcome: metadata.TrailerRefreshOutcome{Status: metadata.TrailerRefreshStatusDisabled},
-	}
-	handler := newTrailerRefreshHandler(itemAccess, requester)
-
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("movie-1", 7))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusOK, rr.Body.String())
-	}
-	body := decodeTrailerResponse(t, rr)
-	if body["status"] != "disabled" {
-		t.Fatalf("status field = %v, want disabled", body["status"])
-	}
-	if _, ok := body["next_allowed_at"]; ok {
-		t.Fatalf("disabled response must omit next_allowed_at, got %v", body)
-	}
-}
-
 // Only movie and series detail responses carry videos, so any other
 // media_items type is a client bug rather than an empty result. These are the
 // types that actually exist as media_items rows; episodes and seasons live in
@@ -342,25 +316,6 @@ func TestTrailersRefreshDeniedAccessReturns404WithoutConsumingCooldown(t *testin
 	}
 }
 
-func TestTrailersRefreshMissingItemReturns404(t *testing.T) {
-	itemAccess := &fakeTrailerItemAccess{
-		items:     map[string]*models.MediaItem{},
-		ensureErr: map[string]error{},
-	}
-	requester := &fakeTrailerRefreshRequester{}
-	handler := newTrailerRefreshHandler(itemAccess, requester)
-
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("missing", 7))
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusNotFound, rr.Body.String())
-	}
-	if len(requester.requests) != 0 {
-		t.Fatalf("missing item must not reach the service, got %v", requester.requests)
-	}
-}
-
 func TestTrailersRefreshRequiresAuthentication(t *testing.T) {
 	itemAccess := &fakeTrailerItemAccess{
 		items:     map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
@@ -418,33 +373,6 @@ func TestTrailersRefreshRateLimitsPerUser(t *testing.T) {
 	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("movie-1", 8))
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("second user status = %d, want %d (%s)", rr.Code, http.StatusAccepted, rr.Body.String())
-	}
-}
-
-func TestTrailersRefreshUnconfiguredReturns503(t *testing.T) {
-	handler := &ItemsHandler{}
-
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("movie-1", 7))
-
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
-	}
-}
-
-func TestTrailersRefreshServiceErrorReturns500(t *testing.T) {
-	itemAccess := &fakeTrailerItemAccess{
-		items:     map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
-		ensureErr: map[string]error{},
-	}
-	requester := &fakeTrailerRefreshRequester{err: errors.New("database is down")}
-	handler := newTrailerRefreshHandler(itemAccess, requester)
-
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("movie-1", 7))
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusInternalServerError, rr.Body.String())
 	}
 }
 

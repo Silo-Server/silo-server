@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -706,16 +707,20 @@ func (r *FolderRepository) DeleteWithStats(
 	if progress != nil {
 		progress(orphanTotal, orphanTotal, "Deleting media files")
 	}
+	// An extra whose parent survives in another library loses its image with
+	// its last file.
 	if _, err := deleteInBatches(ctx, folderChildDeleteBatch, func(ctx context.Context) (int64, error) {
-		tag, e := r.pool.Exec(ctx, `
-			DELETE FROM media_files
-			WHERE id IN (
-				SELECT id FROM media_files WHERE media_folder_id = $1 LIMIT $2
-			)`, id, folderChildDeleteBatch)
-		if e != nil {
-			return 0, e
-		}
-		return tag.RowsAffected(), nil
+		var deleted int64
+		e := r.pool.QueryRow(ctx, `
+			WITH deleted AS (
+				DELETE FROM media_files
+				WHERE id IN (
+					SELECT id FROM media_files WHERE media_folder_id = $1 LIMIT $2
+				)
+				RETURNING id, extra_id
+			)`+ClearEmptiedExtraStillsCTE+`
+			SELECT count(*) FROM deleted`, id, folderChildDeleteBatch).Scan(&deleted)
+		return deleted, e
 	}); err != nil {
 		return nil, fmt.Errorf("deleting media files: %w", err)
 	}
@@ -748,10 +753,25 @@ func (r *FolderRepository) DeleteWithStats(
 
 	// Phase 4: delete the now-lightweight folder row. Tolerate 0 rows so a
 	// resumed run that already removed it still succeeds.
-	if err := retryOnDeadlock(ctx, func() error {
-		_, e := r.pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, id)
-		return e
-	}); err != nil {
+	deleteFolder := func() error {
+		tx, e := r.pool.Begin(ctx)
+		if e != nil {
+			return e
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if e := moveCollectionsOffFolder(ctx, tx, id); e != nil {
+			return e
+		}
+		if _, e := tx.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, id); e != nil {
+			return e
+		}
+		return tx.Commit(ctx)
+	}
+	err = retryOnDeadlock(ctx, deleteFolder)
+	for attempt := 1; errors.Is(err, errFolderCollectionsChanged) && attempt < 5; attempt++ {
+		err = retryOnDeadlock(ctx, deleteFolder)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("deleting folder: %w", err)
 	}
 
@@ -759,6 +779,124 @@ func (r *FolderRepository) DeleteWithStats(
 		progress(orphanTotal, orphanTotal, "Library deletion completed")
 	}
 	return stats, nil
+}
+
+// errFolderCollectionsChanged reports that a collection started using a folder
+// while its delete waited for the folder lock.
+var errFolderCollectionsChanged = errors.New("collections changed while locking the folder")
+
+// moveCollectionsOffFolder keeps admin collections that cover other libraries
+// when folderID is deleted. library_collections.library_id still holds the
+// first library an admin picked and cascades with it, so a collection whose
+// library_id is folderID moves to another library it covers. Collections that
+// cover only folderID are left for the cascade.
+func moveCollectionsOffFolder(ctx context.Context, tx pgx.Tx, folderID int) error {
+	// Collection writers lock collections in ID order
+	// (lockLibraryCollectionParents) before their foreign keys lock the folder,
+	// so take the collections the cascade touches first, then hold the folder so
+	// no writer adds a reference to it. A collection that gained a reference in
+	// between can't be locked now without breaking the ID order, so the caller
+	// starts over.
+	const touchedCollections = `
+		SELECT c.id FROM library_collections c
+		WHERE c.library_id = $1
+		   OR EXISTS (SELECT 1 FROM library_collection_libraries l WHERE l.collection_id = c.id AND l.library_id = $1)
+		ORDER BY c.id`
+	rows, err := tx.Query(ctx, touchedCollections+` FOR UPDATE OF c`, folderID)
+	if err != nil {
+		return fmt.Errorf("locking folder collections: %w", err)
+	}
+	locked, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("locking folder collections: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_folders WHERE id = $1 FOR UPDATE`, folderID); err != nil {
+		return fmt.Errorf("locking folder: %w", err)
+	}
+	rows, err = tx.Query(ctx, touchedCollections, folderID)
+	if err != nil {
+		return fmt.Errorf("listing folder collections: %w", err)
+	}
+	touched, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("listing folder collections: %w", err)
+	}
+	for _, id := range touched {
+		if !slices.Contains(locked, id) {
+			return errFolderCollectionsChanged
+		}
+	}
+
+	rows, err = tx.Query(ctx, `
+		SELECT c.id, c.slug, array_agg(l.library_id ORDER BY l.library_id)
+		FROM library_collections c
+		JOIN library_collection_libraries l ON l.collection_id = c.id AND l.library_id <> $1
+		WHERE c.library_id = $1
+		GROUP BY c.id
+		ORDER BY c.id`, folderID)
+	if err != nil {
+		return fmt.Errorf("listing collections to move: %w", err)
+	}
+	type sharedCollection struct {
+		id, slug  string
+		libraries []int32
+	}
+	shared, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (sharedCollection, error) {
+		var c sharedCollection
+		err := row.Scan(&c.id, &c.slug, &c.libraries)
+		return c, err
+	})
+	if err != nil {
+		return fmt.Errorf("listing collections to move: %w", err)
+	}
+	for _, c := range shared {
+		if err := moveCollectionToLibrary(ctx, tx, c.id, c.slug, c.libraries); err != nil {
+			return fmt.Errorf("moving collection %s: %w", c.id, err)
+		}
+	}
+	return nil
+}
+
+// moveCollectionToLibrary points a collection at the lowest of libraries where
+// its slug is free, keeping links that name the slug working. When every
+// library already has the slug, it takes the lowest library and the first free
+// "<slug>-<n>". A writer that claims the slug first is retried.
+func moveCollectionToLibrary(ctx context.Context, tx pgx.Tx, collectionID, slug string, libraries []int32) error {
+	for range 5 {
+		var libraryID int32
+		target := slug
+		err := tx.QueryRow(ctx, `
+			SELECT lib FROM unnest($2::int[]) lib
+			WHERE NOT EXISTS (SELECT 1 FROM library_collections WHERE library_id = lib AND slug = $1)
+			ORDER BY lib LIMIT 1`, slug, libraries).Scan(&libraryID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			libraryID = libraries[0]
+			err = tx.QueryRow(ctx, `
+				SELECT candidate FROM (
+					SELECT n, $1 || '-' || n AS candidate FROM generate_series(2, 10000) n
+				) s
+				WHERE NOT EXISTS (SELECT 1 FROM library_collections WHERE library_id = $2 AND slug = s.candidate)
+				ORDER BY n LIMIT 1`, slug, libraryID).Scan(&target)
+		}
+		if err != nil {
+			return fmt.Errorf("choosing library and slug: %w", err)
+		}
+
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = sp.Exec(ctx, `UPDATE library_collections SET library_id = $2, slug = $3 WHERE id = $1`, collectionID, libraryID, target)
+		if err == nil {
+			return sp.Commit(ctx)
+		}
+		_ = sp.Rollback(ctx)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.ConstraintName != "library_collections_library_slug_unique" {
+			return err
+		}
+	}
+	return errors.New("slug kept being claimed by other writers")
 }
 
 // collectOrphanBatch returns up to limit content IDs whose only library
@@ -1006,7 +1144,7 @@ func collectOrphanIDs(ctx context.Context, tx pgx.Tx, contentIDs []string) ([]st
 }
 
 // collectRawImageDirs returns the deduped S3 directory prefixes referenced by
-// the given content IDs (items, their seasons, and their episodes), without
+// the given content IDs (items, their seasons, episodes and local extras), without
 // filtering out dirs still used by other content.
 func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string) ([]string, error) {
 	imgRows, err := q.Query(ctx, `
@@ -1021,6 +1159,8 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 		SELECT poster_path, '', '' FROM seasons WHERE series_id = ANY($1)
 		UNION ALL
 		SELECT still_path, '', '' FROM episodes WHERE series_id = ANY($1)
+		UNION ALL
+		SELECT still_path, '', '' FROM media_extras WHERE parent_id = ANY($1)
 	`, contentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("collecting image paths: %w", err)
@@ -1121,6 +1261,9 @@ func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deleti
 			UNION ALL
 			SELECT e.still_path FROM episodes e
 				WHERE NOT (e.series_id = ANY($2::text[])) AND e.still_path <> ''
+			UNION ALL
+			SELECT x.still_path FROM media_extras x
+				WHERE NOT (x.parent_id = ANY($2::text[])) AND x.still_path <> ''
 		), referenced AS (
 			SELECT DISTINCT left(p.path, n) AS dir
 			FROM referenced_path p

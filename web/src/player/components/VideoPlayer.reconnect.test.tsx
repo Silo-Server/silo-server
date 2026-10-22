@@ -34,6 +34,11 @@ vi.mock("../hooks/useWatchProgress", () => ({
 vi.mock("../hooks/useKeyboardShortcuts", () => ({ useKeyboardShortcuts: vi.fn() }));
 vi.mock("../hooks/useSubtitleTracks", () => ({ useSubtitleTracks: () => [] }));
 vi.mock("../hooks/useASSSubtitles", () => ({ useASSSubtitles: () => ({ isActive: false }) }));
+// The delay is the profile's saved offset; plain state stands in for the query.
+vi.mock("../hooks/useSubtitleDelay", async () => {
+  const { useState } = await import("react");
+  return { useSubtitleDelay: () => useState(0) };
+});
 vi.mock("../hooks/useSubtitleAppearance", () => ({
   useSubtitleAppearance: () => ({
     settings: { position: "bottom", fontSize: "large" },
@@ -60,6 +65,11 @@ vi.mock("hls.js", () => ({
       BUFFER_APPENDED: "bufferAppended",
     };
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
+    static ErrorDetails = {
+      MANIFEST_LOAD_ERROR: "manifestLoadError",
+      MANIFEST_LOAD_TIMEOUT: "manifestLoadTimeOut",
+      MANIFEST_PARSING_ERROR: "manifestParsingError",
+    };
     static isSupported = () => true;
 
     handlers = new Map<string, (event: string, data: unknown) => void>();

@@ -16,7 +16,8 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE profile_series_interest (LIKE public.profile_series_interest INCLUDING ALL);
 		CREATE TABLE media_items (LIKE public.media_items INCLUDING ALL);
-		CREATE TABLE notification_preferences (LIKE public.notification_preferences INCLUDING ALL)`); err != nil {
+		CREATE TABLE notification_preferences (LIKE public.notification_preferences INCLUDING ALL);
+		CREATE TABLE profile_series_notification_mutes (LIKE public.profile_series_notification_mutes INCLUDING ALL)`); err != nil {
 		t.Fatalf("create tables: %v", err)
 	}
 	nextUp, laterNextUp := EpisodeKey(2, 3), EpisodeKey(2, 5)
@@ -36,8 +37,8 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 			(1, 'p1', 1, 'series:inert', false, false, false, $1),
 			(1, 'p1', 1, 'series:gone', true, false, false, NULL),
 			(1, 'p2', 1, 'series:andor', true, false, false, NULL)`, []any{nextUp, laterNextUp}},
-		{`INSERT INTO notification_preferences (profile_id, enabled, notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up)
-			VALUES ('p1', true, true, false, true, true)`, nil},
+		{`INSERT INTO notification_preferences (user_id, profile_id, enabled, notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up)
+			VALUES (1, 'p1', true, true, false, true, true)`, nil},
 	} {
 		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -45,7 +46,7 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	}
 	s := &System{Interests: NewInterestRepository(pool), Preferences: NewPreferencesRepository(pool)}
 
-	got, err := s.ListNotifiedSeries(ctx, "p1")
+	got, err := s.ListNotifiedSeries(ctx, 1, "p1")
 	if err != nil {
 		t.Fatalf("ListNotifiedSeries: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE notification_preferences SET enabled = false WHERE profile_id = 'p1'`); err != nil {
 		t.Fatal(err)
 	}
-	got, err = s.ListNotifiedSeries(ctx, "p1")
+	got, err = s.ListNotifiedSeries(ctx, 1, "p1")
 	if err != nil {
 		t.Fatalf("ListNotifiedSeries: %v", err)
 	}

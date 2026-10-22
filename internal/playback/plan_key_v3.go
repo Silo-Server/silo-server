@@ -35,6 +35,7 @@ func DeterministicPlanIDV3(attemptID string, requestedFileID, effectiveFileID in
 		strings.Join(transformations, ","),
 	}
 	parts = appendEmbeddedSubtitleIdentityV3(parts, plan.Subtitle.Embedded)
+	parts = appendHLSSubtitleRenditionIdentityV3(parts, plan.Subtitle.HLSRendition)
 	parts = appendVideoSampleEntryIdentityV3(parts, plan.EffectiveRecipe.VideoSampleEntry)
 	parts = appendQuirkIdentityV3(parts, plan)
 	parts = append(parts, PlanRecipeVersionV3)
@@ -66,6 +67,7 @@ func PlanAttemptKeyV3(plan PlanV3, outputContextID string, localMutations []stri
 		strings.Join(transformations, ","),
 	}
 	parts = appendEmbeddedSubtitleIdentityV3(parts, plan.Subtitle.Embedded)
+	parts = appendHLSSubtitleRenditionIdentityV3(parts, plan.Subtitle.HLSRendition)
 	parts = appendVideoSampleEntryIdentityV3(parts, plan.EffectiveRecipe.VideoSampleEntry)
 	parts = appendQuirkIdentityV3(parts, plan)
 	parts = append(parts,
@@ -118,4 +120,14 @@ func appendEmbeddedSubtitleIdentityV3(parts []string, embedded *EmbeddedSubtitle
 		return parts
 	}
 	return append(parts, "embedded_subtitle="+strconv.Itoa(embedded.StreamIndex)+":"+embedded.ContainerTrackID)
+}
+
+// appendHLSSubtitleRenditionIdentityV3 keeps a rendition plan distinct from
+// the sidecar plan for the same track, so a failed rendition can fall back.
+// Plans without one keep their historical identity.
+func appendHLSSubtitleRenditionIdentityV3(parts []string, rendition *HLSSubtitleRenditionV3) []string {
+	if rendition == nil {
+		return parts
+	}
+	return append(parts, "hls_subtitle_rendition="+rendition.GroupID+":"+rendition.Format)
 }

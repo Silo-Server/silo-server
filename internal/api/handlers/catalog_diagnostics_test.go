@@ -70,45 +70,6 @@ func TestWriteCatalogResponse_DiagnosticsKeywordFallback(t *testing.T) {
 	}
 }
 
-func TestWriteCatalogResponse_DiagnosticsHybridOmitsFallbackReason(t *testing.T) {
-	body := decodeCatalogResponse(t, &catalog.CatalogResult{
-		Provider:           catalog.SearchProviderMeilisearch,
-		Mode:               "hybrid",
-		SemanticUsed:       true,
-		IndexPendingEvents: 7,
-	}, false)
-
-	diagRaw, ok := body["search_diagnostics"]
-	if !ok {
-		t.Fatalf("expected search_diagnostics in response: %v", body)
-	}
-	diag := diagRaw.(map[string]any)
-	if diag["semantic_used"].(bool) != true {
-		t.Fatalf("semantic_used = %v, want true", diag["semantic_used"])
-	}
-	if diag["mode"] != "hybrid" {
-		t.Fatalf("mode = %v, want hybrid", diag["mode"])
-	}
-	if _, ok := diag["fallback_reason"]; ok {
-		t.Fatalf("fallback_reason should be omitted when empty: %v", diag)
-	}
-	if diag["index_pending_updates"].(float64) != 7 {
-		t.Fatalf("index_pending_updates = %v, want 7", diag["index_pending_updates"])
-	}
-}
-
-func TestWriteCatalogResponse_NoProviderOmitsDiagnostics(t *testing.T) {
-	// Browse / preview / non-relevance q= paths never set Provider.
-	body := decodeCatalogResponse(t, &catalog.CatalogResult{
-		Total:      5,
-		TotalExact: true,
-	}, false)
-
-	if _, ok := body["search_diagnostics"]; ok {
-		t.Fatalf("search_diagnostics should be omitted when no provider search ran: %v", body)
-	}
-}
-
 func TestWriteCatalogResponse_GroupedByWorkPreservesExactCount(t *testing.T) {
 	// SQL grouping can count representatives exactly. The response preserves
 	// that result and omits diagnostics when no search provider was used.

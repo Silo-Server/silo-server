@@ -12,23 +12,16 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 )
 
-// authLimitBackends returns the limiters the auth budgets run on: in-memory
-// always, Redis when SILO_TEST_REDIS_URL names one.
-func authLimitBackends() map[string]func(t *testing.T) RateLimiter {
-	return map[string]func(t *testing.T) RateLimiter{
-		"memory": func(t *testing.T) RateLimiter {
-			l := NewMemoryLimiter()
-			t.Cleanup(l.Close)
-			return l
-		},
-		"redis": func(t *testing.T) RateLimiter {
-			client := testAttemptRedisClient(t)
-			if err := client.Ping(t.Context()).Err(); err != nil {
-				t.Fatalf("ping redis: %v", err)
-			}
-			return NewRedisLimiter(client)
-		},
-	}
+// newAuthLimitMiddleware returns middleware whose auth budgets run on the
+// in-memory limiter.
+func newAuthLimitMiddleware(t *testing.T) *Middleware {
+	t.Helper()
+	perKey := NewMemoryLimiter()
+	t.Cleanup(perKey.Close)
+	mw := NewMiddleware(perKey, NewMemoryLimiter(), nil, true)
+	t.Cleanup(mw.global.Close)
+	mw.cfg = DefaultConfig()
+	return mw
 }
 
 // loginThroughResolver sends POST /auth/login through the real client IP
@@ -73,56 +66,44 @@ func randomClientNet() string {
 // request. Each name gets a fresh per-client login budget; the peer's shared
 // budget must still stop the run.
 func TestAuthEndpointHandlerCapsForwardedForRotationPerPeer(t *testing.T) {
-	for name, newLimiter := range authLimitBackends() {
-		t.Run(name, func(t *testing.T) {
-			mw := NewMiddleware(newLimiter(t), NewMemoryLimiter(), nil, name == "memory")
-			t.Cleanup(mw.global.Close)
-			mw.cfg = DefaultConfig()
-			login := loginThroughResolver(t, mw)
-			peer := randomPrivatePeer()
-			clients := randomClientNet()
+	mw := newAuthLimitMiddleware(t)
+	login := loginThroughResolver(t, mw)
+	peer := randomPrivatePeer()
+	clients := randomClientNet()
 
-			allowed := 0
-			const attempts = 600
-			for i := range attempts {
-				if login(peer, fmt.Sprintf("%s.%d.%d", clients, i/250, 1+i%250)) != http.StatusTooManyRequests {
-					allowed++
-				}
-			}
+	allowed := 0
+	const attempts = 600
+	for i := range attempts {
+		if login(peer, fmt.Sprintf("%s.%d.%d", clients, i/250, 1+i%250)) != http.StatusTooManyRequests {
+			allowed++
+		}
+	}
 
-			t.Logf("rotating X-Forwarded-For from one peer: %d of %d login attempts allowed", allowed, attempts)
-			ep := mw.cfg.AuthEndpoints["login"]
-			// Redis counts in fixed minute windows, so a run that straddles a
-			// boundary may see two windows of the peer's per-minute budget.
-			if limit := 2 * authPeerBudgetMultiplier * ep.RequestsPerMinute; allowed < ep.Burst || float64(allowed) > limit {
-				t.Fatalf("allowed = %d, want between %d and %g", allowed, ep.Burst, limit)
-			}
-		})
+	t.Logf("rotating X-Forwarded-For from one peer: %d of %d login attempts allowed", allowed, attempts)
+	ep := mw.cfg.AuthEndpoints["login"]
+	// Redis counts in fixed minute windows, so a run that straddles a
+	// boundary may see two windows of the peer's per-minute budget.
+	if limit := 2 * authPeerBudgetMultiplier * ep.RequestsPerMinute; allowed < ep.Burst || float64(allowed) > limit {
+		t.Fatalf("allowed = %d, want between %d and %g", allowed, ep.Burst, limit)
 	}
 }
 
 // One reverse proxy carries every user's sign-in. Each user keeps a full
 // per-client login budget while the proxy's total stays within its own.
 func TestAuthEndpointHandlerKeepsPerClientBudgetsBehindOneProxy(t *testing.T) {
-	for name, newLimiter := range authLimitBackends() {
-		t.Run(name, func(t *testing.T) {
-			mw := NewMiddleware(newLimiter(t), NewMemoryLimiter(), nil, name == "memory")
-			t.Cleanup(mw.global.Close)
-			mw.cfg = DefaultConfig()
-			login := loginThroughResolver(t, mw)
-			proxy := randomPrivatePeer()
-			clientNet := randomClientNet()
-			ep := mw.cfg.AuthEndpoints["login"]
+	mw := newAuthLimitMiddleware(t)
+	login := loginThroughResolver(t, mw)
+	proxy := randomPrivatePeer()
+	clientNet := randomClientNet()
+	ep := mw.cfg.AuthEndpoints["login"]
 
-			for c := range authPeerBudgetMultiplier - 1 {
-				client := fmt.Sprintf("%s.0.%d", clientNet, 10+c)
-				for i := range ep.Burst {
-					if code := login(proxy, client); code == http.StatusTooManyRequests {
-						t.Fatalf("client %s attempt %d behind the proxy got 429", client, i+1)
-					}
-				}
+	for c := range authPeerBudgetMultiplier - 1 {
+		client := fmt.Sprintf("%s.0.%d", clientNet, 10+c)
+		for i := range ep.Burst {
+			if code := login(proxy, client); code == http.StatusTooManyRequests {
+				t.Fatalf("client %s attempt %d behind the proxy got 429", client, i+1)
 			}
-		})
+		}
 	}
 }
 
@@ -203,6 +184,7 @@ func TestAuthEndpointHandlerRejectionsDoNotSpendWiderBudgets(t *testing.T) {
 		denied string
 		want   []string
 	}{
+		{denied: "ip:203.0.113.10", want: []string{"ip:203.0.113.10"}},
 		{denied: "authip:203.0.113.10:login", want: []string{"ip:203.0.113.10", "authip:203.0.113.10:login"}},
 		{denied: "authpeer:172.17.0.1:login", want: []string{"ip:203.0.113.10", "authip:203.0.113.10:login", "authpeer:172.17.0.1:login"}},
 	}

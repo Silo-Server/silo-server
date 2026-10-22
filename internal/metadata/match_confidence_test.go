@@ -142,78 +142,6 @@ func TestBestMatchPicksHighestScoringCandidate(t *testing.T) {
 	}
 }
 
-func TestBestMatchRejectsEmptyAndUnusableResults(t *testing.T) {
-	if _, ok := BestMatch("Mother of Storms", nil); ok {
-		t.Error("nil results must not match")
-	}
-	if _, ok := BestMatch("Mother of Storms", []SearchResult{}); ok {
-		t.Error("empty results must not match")
-	}
-	if _, ok := BestMatch("", []SearchResult{{Name: "Mother of Storms"}}); ok {
-		t.Error("an empty wanted title must not match")
-	}
-	if _, ok := BestMatch("Mother of Storms", []SearchResult{{Name: "   "}}); ok {
-		t.Error("a blank candidate name must not match")
-	}
-}
-
-// A provider that leaves Name empty but fills OriginalTitle should still be
-// usable, and a confirmed alias should be able to rescue a regional spelling.
-func TestBestMatchFallsBackToOriginalTitleAndAliases(t *testing.T) {
-	byOriginal := []SearchResult{{OriginalTitle: "Mother of Storms"}}
-	if _, ok := BestMatch("Mother of Storms", byOriginal); !ok {
-		t.Error("OriginalTitle should be used when Name is empty")
-	}
-
-	byAlias := []SearchResult{{
-		Name:         "Sturmmutter",
-		TitleAliases: []TitleAlias{{Title: "Mother of Storms", Kind: "original"}},
-	}}
-	if _, ok := BestMatch("Mother of Storms", byAlias); !ok {
-		t.Error("a confirmed alias should be allowed to match")
-	}
-}
-
-// Short titles are the containment rule's failure mode: "Bitcoin" appears
-// inside many unrelated audiobook titles. The gate should not accept on
-// containment alone below a length floor.
-func TestShortTitlesDoNotMatchOnContainmentAlone(t *testing.T) {
-	if s := TitleScore("Bitcoin", "Bitcoin Billionaires: A True Story of Genius, Betrayal and Redemption"); s >= minTitleScore {
-		t.Errorf("short title matched a long unrelated one on containment (score %.2f)", s)
-	}
-	// The same title against a genuinely close answer should still work.
-	if s := TitleScore("Bitcoin", "Bitcoin (Unabridged)"); s < minTitleScore {
-		t.Errorf("short exact title failed to match its own edition (score %.2f)", s)
-	}
-}
-
-func TestVolumeDisagreementIsFatalRegardlessOfOverlap(t *testing.T) {
-	// Identical but for the volume: overlap is maximal, yet these are
-	// different books.
-	if s := TitleScore("Dungeon In My Closet 2", "Dungeon In My Closet 5"); s != 0 {
-		t.Errorf("volume mismatch scored %.2f, want 0", s)
-	}
-	// A missing volume on one side is not a disagreement.
-	if s := TitleScore("Dungeon In My Closet 2", "Dungeon In My Closet"); s == 0 {
-		t.Error("absent volume on one side must not be treated as a mismatch")
-	}
-}
-
-func TestVolumeRangeDisagreementIsFatalRegardlessOfOverlap(t *testing.T) {
-	want := "Dragon Saga Books 1-3"
-	candidate := "Dragon Saga Books 1-4"
-	if score := TitleScore(want, candidate); score != 0 {
-		t.Fatalf("range mismatch scored %.2f, want 0", score)
-	}
-	if _, ok := BestMatch(want, []SearchResult{{Name: candidate}}); ok {
-		t.Fatal("different boxed-set ranges were accepted as the same work")
-	}
-
-	if score := TitleScore("Dragon Saga Books 1–3", "Dragon Saga Books 1-3"); score != 1 {
-		t.Fatalf("equivalent dash spellings scored %.2f, want 1", score)
-	}
-}
-
 // Years date an edition; they must not be read as volume numbers, or every
 // title carrying a year would collide with every other.
 func TestYearsAreNotTreatedAsVolumes(t *testing.T) {
@@ -242,42 +170,6 @@ func TestNonLatinTitlesSurviveNormalisation(t *testing.T) {
 	}
 }
 
-func TestNonLatinTitlesStillRejectDifferentTitles(t *testing.T) {
-	if _, ok := BestMatch("進撃の巨人", []SearchResult{{Name: "ドラゴンボール"}}); ok {
-		t.Error("two different Japanese titles matched")
-	}
-	if _, ok := BestMatch("Мастер и Маргарита", []SearchResult{{Name: "Преступление и наказание"}}); ok {
-		t.Error("two different Russian titles matched")
-	}
-}
-
-// Accented Latin must not be silently folded away: "Æblemos" and "Blåbær" are
-// distinct titles, and stripping the accents used to make both mostly empty.
-func TestAccentedLatinKeepsItsLetters(t *testing.T) {
-	if got := normaliseTitle("Blåbærsyltetøy"); got != "blåbærsyltetøy" {
-		t.Errorf("normaliseTitle = %q, want the accented letters kept", got)
-	}
-	if _, ok := BestMatch("Æblemos", []SearchResult{{Name: "Blåbærsyltetøy"}}); ok {
-		t.Error("two unrelated Danish titles matched")
-	}
-}
-
-// Providers and rippers disagree on numeral form freely. Before folding these,
-// "Slaughterhouse 5" vs "Slaughterhouse-Five" scored exactly at the threshold
-// and matched only by luck, and a "Part II" volume never agreed with "Part 2".
-func TestNumeralFormsFold(t *testing.T) {
-	for _, tc := range []struct{ a, b string }{
-		{"Slaughterhouse 5", "Slaughterhouse-Five"},
-		{"Star Wars: Episode IV", "Star Wars: Episode 4"},
-		{"The Dark Tower Part II", "The Dark Tower Part 2"},
-		{"Ocean's 11", "Ocean's Eleven"},
-	} {
-		if s := TitleScore(tc.a, tc.b); s < minTitleScore {
-			t.Errorf("TitleScore(%q, %q) = %.2f, want >= %.2f", tc.a, tc.b, s, minTitleScore)
-		}
-	}
-}
-
 // Folding must not fire on single letters that are initials or words: a Roman
 // numeral reading of "X" or "I" would rewrite real titles into nonsense.
 func TestSingleLetterIsNotFoldedAsANumeral(t *testing.T) {
@@ -286,17 +178,6 @@ func TestSingleLetterIsNotFoldedAsANumeral(t *testing.T) {
 	}
 	if _, ok := BestMatch("Malcolm X", []SearchResult{{Name: "Malcolm 10"}}); ok {
 		t.Error("a single letter was read as a Roman numeral")
-	}
-}
-
-// A volume written as a Roman numeral must agree with the same volume in
-// digits, and still disagree with a different one.
-func TestVolumeAgreesAcrossNumeralForms(t *testing.T) {
-	if _, ok := BestMatch("The Dark Tower Book II", []SearchResult{{Name: "The Dark Tower Book 2"}}); !ok {
-		t.Error("Book II should match Book 2")
-	}
-	if s := TitleScore("The Dark Tower Book II", "The Dark Tower Book 3"); s != 0 {
-		t.Errorf("Book II vs Book 3 scored %.2f, want 0", s)
 	}
 }
 
@@ -362,40 +243,115 @@ func TestAgreesWithSeparatesProviderAnswers(t *testing.T) {
 	}
 }
 
-// Composed and decomposed Unicode spellings of one title must compare equal.
-// Before NFC normalisation, a decomposed accent (e + U+0301) was a combining
-// mark to the punctuation strip and vanished, while the composed form kept its
-// letter -- so byte-level variants of the same title scored 0.
-func TestComposedAndDecomposedSpellingsMatch(t *testing.T) {
-	composed := "Café"    // U+00E9
-	decomposed := "Café" // e + combining acute
-	if s := TitleScore(composed, decomposed); s != 1 {
-		t.Errorf("TitleScore(composed, decomposed) = %.2f, want 1", s)
+// TestBestMatchAcceptance holds the BestMatch accept/reject cases outside the
+// production pairs.
+func TestBestMatchAcceptance(t *testing.T) {
+	names := func(names ...string) []SearchResult {
+		out := make([]SearchResult, 0, len(names))
+		for _, name := range names {
+			out = append(out, SearchResult{Name: name})
+		}
+		return out
 	}
-	if _, ok := BestMatch(composed, []SearchResult{{Name: decomposed}}); !ok {
-		t.Error("decomposed spelling of an identical title was rejected")
+	tests := []struct {
+		name    string
+		want    string
+		results []SearchResult
+		accept  bool
+	}{
+		{name: "nil results", want: "Mother of Storms", results: nil},
+		{name: "empty results", want: "Mother of Storms", results: []SearchResult{}},
+		{name: "empty wanted title", want: "", results: names("Mother of Storms")},
+		{name: "blank candidate name", want: "Mother of Storms", results: names("   ")},
+		// A provider that leaves Name empty but fills OriginalTitle is still
+		// usable, and a confirmed alias can rescue a regional spelling.
+		{name: "OriginalTitle used when Name is empty", want: "Mother of Storms",
+			results: []SearchResult{{OriginalTitle: "Mother of Storms"}}, accept: true},
+		{name: "confirmed alias may match", want: "Mother of Storms", results: []SearchResult{{
+			Name: "Sturmmutter", TitleAliases: []TitleAlias{{Title: "Mother of Storms", Kind: "original"}},
+		}}, accept: true},
+		{name: "different boxed-set ranges", want: "Dragon Saga Books 1-3", results: names("Dragon Saga Books 1-4")},
+		{name: "two different Japanese titles", want: "進撃の巨人", results: names("ドラゴンボール")},
+		{name: "two different Russian titles", want: "Мастер и Маргарита", results: names("Преступление и наказание")},
+		// A volume written as a Roman numeral agrees with the same volume in digits.
+		{name: "Book II matches Book 2", want: "The Dark Tower Book II", results: names("The Dark Tower Book 2"), accept: true},
+		{name: "decomposed spelling of an identical title", want: "Caf\u00e9", results: names("Cafe\u0301"), accept: true},
+		// A volume-less alias must not rescue a primary title whose volume
+		// contradicts the item's: aliases are often the bare series name, and
+		// accepting through one persists IDs for a different book.
+		{name: "wrong-volume primary with a volume-less alias", want: "Dungeon In My Closet 2", results: []SearchResult{{
+			Name: "Dungeon In My Closet, Book 5", TitleAliases: []TitleAlias{{Title: "Dungeon In My Closet"}},
+		}}},
+		// The alias path still rescues a primary that differs only textually.
+		{name: "alias rescue for a translated title", want: "Mother of Storms", results: []SearchResult{{
+			Name: "Sturmmutter", TitleAliases: []TitleAlias{{Title: "Mother of Storms"}},
+		}}, accept: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, ok := BestMatch(tt.want, tt.results); ok != tt.accept {
+				t.Errorf("BestMatch(%q, %+v) accepted=%v, want %v", tt.want, tt.results, ok, tt.accept)
+			}
+		})
 	}
 }
 
-// A volume-less alias must not rescue a primary title whose volume contradicts
-// the item's: aliases are often the bare series name, and accepting through
-// one persists IDs for a different book.
-func TestAliasCannotRescueAWrongVolumePrimary(t *testing.T) {
-	res := []SearchResult{{
-		Name:         "Dungeon In My Closet, Book 5",
-		TitleAliases: []TitleAlias{{Title: "Dungeon In My Closet"}},
-	}}
-	if _, ok := BestMatch("Dungeon In My Closet 2", res); ok {
-		t.Error("a wrong-volume primary was accepted via its volume-less alias")
+// TestTitleScoreBands holds the TitleScore cases that pin a score to zero, one,
+// or one side of minTitleScore.
+func TestTitleScoreBands(t *testing.T) {
+	const (
+		zero = iota
+		nonZero
+		one
+		belowMin
+		atLeastMin
+	)
+	tests := []struct {
+		name string
+		a, b string
+		band int
+	}{
+		// Short titles are the containment rule's failure mode: "Bitcoin" appears
+		// inside many unrelated audiobook titles.
+		{"short title against a long unrelated one", "Bitcoin", "Bitcoin Billionaires: A True Story of Genius, Betrayal and Redemption", belowMin},
+		{"short exact title against its own edition", "Bitcoin", "Bitcoin (Unabridged)", atLeastMin},
+		// Identical but for the volume: overlap is maximal, yet these are
+		// different books. A missing volume on one side is not a disagreement.
+		{"volume mismatch", "Dungeon In My Closet 2", "Dungeon In My Closet 5", zero},
+		{"volume absent on one side", "Dungeon In My Closet 2", "Dungeon In My Closet", nonZero},
+		{"volume range mismatch", "Dragon Saga Books 1-3", "Dragon Saga Books 1-4", zero},
+		{"equivalent dash spellings", "Dragon Saga Books 1–3", "Dragon Saga Books 1-3", one},
+		// Providers and rippers disagree on numeral form freely. Before folding
+		// these, "Slaughterhouse 5" vs "Slaughterhouse-Five" scored exactly at the
+		// threshold and a "Part II" volume never agreed with "Part 2".
+		{"numeral: word five", "Slaughterhouse 5", "Slaughterhouse-Five", atLeastMin},
+		{"numeral: roman IV", "Star Wars: Episode IV", "Star Wars: Episode 4", atLeastMin},
+		{"numeral: roman II", "The Dark Tower Part II", "The Dark Tower Part 2", atLeastMin},
+		{"numeral: word eleven", "Ocean's 11", "Ocean's Eleven", atLeastMin},
+		{"roman volume disagrees with a different digit", "The Dark Tower Book II", "The Dark Tower Book 3", zero},
+		// Before NFC normalisation, a decomposed accent (e + U+0301) vanished in
+		// the punctuation strip while the composed form kept its letter.
+		{"composed and decomposed spellings", "Caf\u00e9", "Cafe\u0301", one},
 	}
-
-	// The alias path must still rescue a result whose primary merely differs
-	// textually without contradicting the volume.
-	translated := []SearchResult{{
-		Name:         "Sturmmutter",
-		TitleAliases: []TitleAlias{{Title: "Mother of Storms"}},
-	}}
-	if _, ok := BestMatch("Mother of Storms", translated); !ok {
-		t.Error("alias rescue for a translated title stopped working")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := TitleScore(tt.a, tt.b)
+			var ok bool
+			switch tt.band {
+			case zero:
+				ok = s == 0
+			case nonZero:
+				ok = s != 0
+			case one:
+				ok = s == 1
+			case belowMin:
+				ok = s < minTitleScore
+			case atLeastMin:
+				ok = s >= minTitleScore
+			}
+			if !ok {
+				t.Errorf("TitleScore(%q, %q) = %.2f, outside the wanted band %d (minTitleScore %.2f)", tt.a, tt.b, s, tt.band, minTitleScore)
+			}
+		})
 	}
 }

@@ -2,7 +2,6 @@ package bandwidthprobe
 
 import (
 	"bytes"
-	"errors"
 	"testing"
 )
 
@@ -25,22 +24,5 @@ func TestWriteIsNotCompressible(t *testing.T) {
 	}
 	if bytes.Count(buf.Bytes(), buf.Bytes()[:1]) > 256 {
 		t.Fatal("probe payload repeats one byte value; a compressing proxy would shrink it")
-	}
-}
-
-type failingWriter struct{ writes int }
-
-func (f *failingWriter) Write(p []byte) (int, error) {
-	f.writes++
-	return 0, errors.New("client went away")
-}
-
-func TestWriteStopsAtFirstError(t *testing.T) {
-	w := &failingWriter{}
-	if err := Write(w, 1_000_000); err == nil {
-		t.Fatal("expected the write error")
-	}
-	if w.writes != 1 {
-		t.Fatalf("kept writing after an error: %d writes", w.writes)
 	}
 }

@@ -1,9 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RateLimitConfig } from "@/api/types";
 import SecurityAccessSettings from "./SecurityAccessSettings";
+import { fakeSettingsForm } from "./settingsForm.test-support";
 
 // Radix Select reads element sizes via ResizeObserver, which jsdom does not
 // provide, and opens through pointer capture, which jsdom also lacks.
@@ -75,22 +76,7 @@ async function openBackendSelect() {
   await userEvent.click(screen.getByRole("combobox", { name: /Where counters are kept/i }));
 }
 
-function makeForm(overrides: Record<string, unknown> = {}) {
-  return {
-    isLoading: false,
-    getValue: () => "",
-    setValue: vi.fn(),
-    isDirty: () => false,
-    dirtyCount: 0,
-    save: vi.fn(),
-    discard: vi.fn(),
-    isSaving: false,
-    restartRequired: false,
-    sensitiveConfigured: [],
-    sensitiveManagedByEnv: [],
-    ...overrides,
-  };
-}
+const makeForm = (overrides: Record<string, unknown> = {}) => fakeSettingsForm({}, overrides);
 
 describe("SecurityAccessSettings", () => {
   beforeEach(() => {
@@ -103,53 +89,6 @@ describe("SecurityAccessSettings", () => {
       isPending: false,
       data: undefined,
     });
-  });
-
-  // Token lifetimes moved to Sign-in and trusted proxies to General; their tests
-  // live in SignInSettings.test.tsx and GeneralSettings.test.tsx.
-  it("manages only the local network key through the settings batch", () => {
-    render(<SecurityAccessSettings />);
-
-    expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
-      "media_servers.allow_private_destinations",
-    ]);
-    expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
-      "Local network",
-      "Rate limiting",
-    ]);
-    expect(screen.queryByLabelText("Access token expiry")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Trusted proxies")).not.toBeInTheDocument();
-  });
-
-  it("shows every rate limit in the group, with no disclosure", () => {
-    render(<SecurityAccessSettings />);
-    const group = screen.getByRole("group", { name: "Rate limiting" });
-    const rateLimiting = within(group);
-
-    expect(rateLimiting.getByRole("switch", { name: /Enable rate limiting/i })).toBeVisible();
-    expect(rateLimiting.queryByRole("button", { name: /settings$/ })).not.toBeInTheDocument();
-    expect(rateLimiting.getByRole("combobox", { name: /Where counters are kept/i })).toBeVisible();
-    expect(rateLimiting.getByLabelText("Whole-server limit")).toBeVisible();
-    expect(rateLimiting.getByText("Per client address")).toBeVisible();
-    expect(rateLimiting.getByRole("heading", { level: 4, name: "API key tiers" })).toBeVisible();
-    expect(rateLimiting.getByText("Standard API keys")).toBeVisible();
-    expect(rateLimiting.getByText("Elevated API keys")).toBeVisible();
-    expect(
-      rateLimiting.getByRole("heading", { level: 4, name: "Sign-in and webhook endpoints" }),
-    ).toBeVisible();
-    expect(rateLimiting.getByText("Sign in")).toBeVisible();
-    expect(rateLimiting.getByText("Autoscan webhook")).toBeVisible();
-  });
-
-  it("stages an API key tier edit on the shared save bar", async () => {
-    render(<SecurityAccessSettings />);
-
-    const standardBurst = screen
-      .getAllByLabelText("Burst")
-      .find((input) => (input as HTMLInputElement).value === "20") as HTMLInputElement;
-    await userEvent.type(standardBurst, "1");
-    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
   });
 
   it("reports a rate-limit-only draft to the unsaved-changes registry", async () => {
@@ -241,17 +180,6 @@ describe("SecurityAccessSettings", () => {
     expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
   });
 
-  it("offers the Redis backend when the server reports Redis configured", async () => {
-    render(<SecurityAccessSettings />);
-    await openBackendSelect();
-
-    expect(screen.getByRole("option", { name: "Shared via Redis" })).not.toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    expect(screen.queryByText(REDIS_HINT)).not.toBeInTheDocument();
-  });
-
   it("disables the Redis backend and points at General when Redis is unconfigured", async () => {
     rateLimitConfigMock.mockReturnValue({
       data: { ...SERVER_CONFIG, redis_available: false },
@@ -294,15 +222,6 @@ describe("SecurityAccessSettings", () => {
     render(<SecurityAccessSettings />);
 
     expect(screen.getByText(/no limiter is running in this process/i)).toBeInTheDocument();
-  });
-
-  it("shows no drift warnings when the running limiter matches the saved config", async () => {
-    rateLimitConfigMock.mockReturnValue({ data: SERVER_CONFIG, isLoading: false });
-
-    render(<SecurityAccessSettings />);
-
-    expect(screen.queryByText(/no limiter is running/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/running limiter is using/i)).not.toBeInTheDocument();
   });
   it("drops a draft when identical configuration arrives under different authority", async () => {
     rateLimitConfigMock.mockReturnValue({

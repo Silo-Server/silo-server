@@ -8,8 +8,14 @@ import (
 	"testing"
 	"time"
 
-	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 type fakeServiceConfigStore struct {
@@ -123,27 +129,10 @@ func TestSetGlobalConfigWithClearsValidatesTheClearedResult(t *testing.T) {
 			} else {
 				manifest.GlobalConfigSchema[0].JsonSchema = `{"type":"object","properties":{"api_key":{"type":"string","format":"password"}},"additionalProperties":false}`
 			}
-			installPath := writeInstalledPluginManifest(t, manifest)
-			store := &fakeServiceConfigStore{configsByInstallation: map[int][]*RuntimeConfig{
-				7: {{
-					InstallationID: 7,
-					Key:            "connection",
-					Value: map[string]any{
-						"api_key":      "clawrouter-e2e-secret",
-						"plugin_owned": "retained",
-					},
-				}},
-			}}
-			service := &Service{
-				installations: newFakeServiceInstallationStore(&Installation{
-					ID:          7,
-					PluginID:    manifest.GetPluginId(),
-					Version:     manifest.GetVersion(),
-					InstallPath: installPath,
-					Enabled:     true,
-				}),
-				configs: store,
-			}
+			service, store := connectionConfigService(t, manifest, map[string]any{
+				"api_key":      "clawrouter-e2e-secret",
+				"plugin_owned": "retained",
+			})
 
 			err := service.SetGlobalConfigWithClears(
 				context.Background(),
@@ -196,30 +185,13 @@ func TestSetGlobalConfigWithClearsPreservesAndExplicitlyClearsNestedSecretObject
 		"additionalProperties":false
 	}`
 	manifest.GlobalConfigSchema[0].AdminForm = nil
-	installPath := writeInstalledPluginManifest(t, manifest)
-	store := &fakeServiceConfigStore{configsByInstallation: map[int][]*RuntimeConfig{
-		7: {{
-			InstallationID: 7,
-			Key:            "connection",
-			Value: map[string]any{
-				"connection": map[string]any{
-					"api_key":  "clawrouter-e2e-secret",
-					"endpoint": "https://old.example.invalid",
-				},
-				"region": "old",
-			},
-		}},
-	}}
-	service := &Service{
-		installations: newFakeServiceInstallationStore(&Installation{
-			ID:          7,
-			PluginID:    manifest.GetPluginId(),
-			Version:     manifest.GetVersion(),
-			InstallPath: installPath,
-			Enabled:     true,
-		}),
-		configs: store,
-	}
+	service, store := connectionConfigService(t, manifest, map[string]any{
+		"connection": map[string]any{
+			"api_key":  "clawrouter-e2e-secret",
+			"endpoint": "https://old.example.invalid",
+		},
+		"region": "old",
+	})
 
 	err := service.SetGlobalConfigWithClears(
 		context.Background(),
@@ -284,33 +256,16 @@ func TestSetGlobalConfigClearsEmptiedNonSecretFields(t *testing.T) {
 		"additionalProperties":false
 	}`
 	manifest.GlobalConfigSchema[0].AdminForm = nil
-	installPath := writeInstalledPluginManifest(t, manifest)
-	store := &fakeServiceConfigStore{configsByInstallation: map[int][]*RuntimeConfig{
-		7: {{
-			InstallationID: 7,
-			Key:            "connection",
-			Value: map[string]any{
-				"issuer_url":             "https://idp.example.invalid",
-				"client_secret":          "stored-secret",
-				"allowed_groups":         "silo-users",
-				"scopes":                 "openid groups",
-				"ca_pem":                 "-----BEGIN CERTIFICATE-----",
-				"refresh_token_lifetime": "30d",
-				"max_age":                float64(60),
-				"plugin_owned":           "retained",
-			},
-		}},
-	}}
-	service := &Service{
-		installations: newFakeServiceInstallationStore(&Installation{
-			ID:          7,
-			PluginID:    manifest.GetPluginId(),
-			Version:     manifest.GetVersion(),
-			InstallPath: installPath,
-			Enabled:     true,
-		}),
-		configs: store,
-	}
+	service, store := connectionConfigService(t, manifest, map[string]any{
+		"issuer_url":             "https://idp.example.invalid",
+		"client_secret":          "stored-secret",
+		"allowed_groups":         "silo-users",
+		"scopes":                 "openid groups",
+		"ca_pem":                 "-----BEGIN CERTIFICATE-----",
+		"refresh_token_lifetime": "30d",
+		"max_age":                float64(60),
+		"plugin_owned":           "retained",
+	})
 	submitted := map[string]any{
 		"issuer_url":             "https://idp.example.invalid",
 		"client_secret":          "",
@@ -367,35 +322,18 @@ func TestSetGlobalConfigPreservesOmittedPluginOwnedFields(t *testing.T) {
 		"additionalProperties":false
 	}`
 	manifest.GlobalConfigSchema[0].AdminForm = nil
-	installPath := writeInstalledPluginManifest(t, manifest)
 	pluginState := map[string]any{
 		"cursor":  "plugin-managed-cursor",
 		"options": []any{"one", "two"},
 	}
-	store := &fakeServiceConfigStore{configsByInstallation: map[int][]*RuntimeConfig{
-		7: {{
-			InstallationID: 7,
-			Key:            "connection",
-			Value: map[string]any{
-				"display_name": "old",
-				"plugin_state": pluginState,
-				"settings": map[string]any{
-					"endpoint":     "https://example.invalid",
-					"plugin_owned": "retained",
-				},
-			},
-		}},
-	}}
-	service := &Service{
-		installations: newFakeServiceInstallationStore(&Installation{
-			ID:          7,
-			PluginID:    manifest.GetPluginId(),
-			Version:     manifest.GetVersion(),
-			InstallPath: installPath,
-			Enabled:     true,
-		}),
-		configs: store,
-	}
+	service, store := connectionConfigService(t, manifest, map[string]any{
+		"display_name": "old",
+		"plugin_state": pluginState,
+		"settings": map[string]any{
+			"endpoint":     "https://example.invalid",
+			"plugin_owned": "retained",
+		},
+	})
 
 	err := service.SetGlobalConfig(
 		context.Background(),
@@ -453,32 +391,13 @@ func TestSetGlobalConfigRetriesConcurrentMerge(t *testing.T) {
 		"properties":{"display_name":{"type":"string"}}
 	}`
 	manifest.GlobalConfigSchema[0].AdminForm = nil
-	installPath := writeInstalledPluginManifest(t, manifest)
-	store := &fakeServiceConfigStore{
-		configsByInstallation: map[int][]*RuntimeConfig{
-			7: {{
-				InstallationID: 7,
-				Key:            "connection",
-				Value: map[string]any{
-					"display_name": "old",
-					"plugin_state": map[string]any{"cursor": "old"},
-				},
-			}},
-		},
-		casFailures: 1,
-		concurrentUpdates: map[string]any{
-			"plugin_state": map[string]any{"cursor": "concurrent"},
-		},
-	}
-	service := &Service{
-		installations: newFakeServiceInstallationStore(&Installation{
-			ID:          7,
-			PluginID:    manifest.GetPluginId(),
-			Version:     manifest.GetVersion(),
-			InstallPath: installPath,
-			Enabled:     true,
-		}),
-		configs: store,
+	service, store := connectionConfigService(t, manifest, map[string]any{
+		"display_name": "old",
+		"plugin_state": map[string]any{"cursor": "old"},
+	})
+	store.casFailures = 1
+	store.concurrentUpdates = map[string]any{
+		"plugin_state": map[string]any{"cursor": "concurrent"},
 	}
 
 	err := service.SetGlobalConfig(
@@ -720,18 +639,8 @@ func TestServiceTestGlobalConfigReturnsUnsupportedWithoutStartingPlugin(t *testi
 			DisplayName: "Refresh",
 		},
 	}
-	installPath := writeInstalledPluginManifest(t, manifest)
 	host := &fakeServiceHost{}
-	service := &Service{
-		installations: newFakeServiceInstallationStore(&Installation{
-			ID:          7,
-			PluginID:    manifest.GetPluginId(),
-			Version:     manifest.GetVersion(),
-			InstallPath: installPath,
-			Enabled:     true,
-		}),
-		host: host,
-	}
+	service := &Service{installations: installedPluginStore(t, 7, manifest), host: host}
 
 	err := service.TestGlobalConfig(context.Background(), 7, "connection", map[string]any{
 		"api_key": "draft",
@@ -755,40 +664,80 @@ func TestServiceTestGlobalConfigReturnsUnsupportedWithoutStartingPlugin(t *testi
 	}
 }
 
-func TestServiceTestGlobalConfigStopsTemporaryInstanceOnProbeFailure(t *testing.T) {
-	probeErr := errors.New("metadata provider unavailable")
+// fakeMarkerStats answers GetMarkerProviderStats for marker connection checks.
+type fakeMarkerStats struct {
+	pluginv1.MarkerProviderClient
+	err   error
+	calls int
+}
 
-	manifest := connectionTestManifest(t, "silo.metadb", "0.0.36")
-	installPath := writeInstalledPluginManifest(t, manifest)
-	host := &fakeServiceHost{
-		startResult: &fakePluginClient{manifest: manifest, metadataProviderErr: probeErr},
+func (f *fakeMarkerStats) GetMarkerProviderStats(context.Context, *pluginv1.GetMarkerProviderStatsRequest, ...grpc.CallOption) (*pluginv1.MarkerProviderStatsResponse, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
 	}
-	service := &Service{
-		installations: newFakeServiceInstallationStore(&Installation{
-			ID:          19,
-			PluginID:    manifest.GetPluginId(),
-			Version:     manifest.GetVersion(),
-			InstallPath: installPath,
-			Enabled:     true,
-		}),
-		host: host,
-	}
+	return &pluginv1.MarkerProviderStatsResponse{Total: 3}, nil
+}
 
-	err := service.TestGlobalConfig(context.Background(), 19, "connection", map[string]any{
-		"api_key": "draft",
-	})
-	if !errors.Is(err, probeErr) {
-		t.Fatalf("TestGlobalConfig() error = %v, want %v", err, probeErr)
+func TestServiceTestGlobalConfigChecksMarkerProviderAccount(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		statsErr    error
+		wantMessage string
+	}{
+		{name: "accepted key"},
+		{
+			name:        "rejected key",
+			statsErr:    status.Error(codes.Unknown, "introdb: stats HTTP 401: Invalid or expired token"),
+			wantMessage: "Connection check failed: introdb: stats HTTP 401: Invalid or expired token",
+		},
+		{
+			name:        "provider without account statistics",
+			statsErr:    status.Error(codes.Unimplemented, "method GetMarkerProviderStats not implemented"),
+			wantMessage: "Connection checks are not supported for this plugin yet.",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := connectionTestManifest(t, "silo.theintrodb", "0.2.0")
+			manifest.Capabilities = []*pluginv1.CapabilityDescriptor{{
+				Type: "marker_provider.v1", Id: "introdb", DisplayName: "TheIntroDB",
+			}}
+			stats := &fakeMarkerStats{err: tt.statsErr}
+			host := &fakeServiceHost{startResult: &fakePluginClient{
+				manifest:       manifest,
+				markerProvider: pluginhost.NewMarkerProviderClient(stats),
+			}}
+			service := &Service{installations: installedPluginStore(t, 4, manifest), host: host}
+
+			err := service.TestGlobalConfig(context.Background(), 4, "connection", map[string]any{"api_key": "draft"})
+			if tt.wantMessage == "" {
+				if err != nil {
+					t.Fatalf("TestGlobalConfig() error = %v, want success", err)
+				}
+			} else {
+				var connectionErr *ConnectionTestError
+				if !errors.As(err, &connectionErr) || connectionErr.Error() != tt.wantMessage {
+					t.Fatalf("TestGlobalConfig() error = %v, want message %q", err, tt.wantMessage)
+				}
+			}
+			if stats.calls != 1 {
+				t.Fatalf("stats calls = %d, want 1", stats.calls)
+			}
+			if len(host.started) != 1 || len(host.stopped) != 1 || host.stopped[0] != host.started[0].InstallationID {
+				t.Fatalf("temporary instance: started=%v stopped=%v", host.started, host.stopped)
+			}
+		})
 	}
-	if len(host.started) != 1 {
-		t.Fatalf("start calls = %d, want 1", len(host.started))
-	}
-	if len(host.stopped) != 1 {
-		t.Fatalf("stop calls = %d, want 1", len(host.stopped))
-	}
-	if host.stopped[0] != host.started[0].InstallationID {
-		t.Fatalf("stopped installation id = %d, want %d", host.stopped[0], host.started[0].InstallationID)
-	}
+}
+
+// connectionConfigService serves manifest as installation 7 with stored saved
+// under its "connection" key.
+func connectionConfigService(t *testing.T, manifest *pluginv1.PluginManifest, stored map[string]any) (*Service, *fakeServiceConfigStore) {
+	t.Helper()
+	store := &fakeServiceConfigStore{configsByInstallation: map[int][]*RuntimeConfig{
+		7: {{InstallationID: 7, Key: "connection", Value: stored}},
+	}}
+	return &Service{installations: installedPluginStore(t, 7, manifest), configs: store}, store
 }
 
 func connectionTestManifest(t *testing.T, pluginID, version string) *pluginv1.PluginManifest {
@@ -818,28 +767,11 @@ func TestSetGlobalConfigClearsUseAdminFormSecrets(t *testing.T) {
 		{Key: "button_label"},
 		{Key: "api_token", Control: pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_PASSWORD},
 	}}
-	installPath := writeInstalledPluginManifest(t, manifest)
-	store := &fakeServiceConfigStore{configsByInstallation: map[int][]*RuntimeConfig{
-		7: {{
-			InstallationID: 7,
-			Key:            "connection",
-			Value: map[string]any{
-				"issuer_url":   "https://idp.example.invalid",
-				"button_label": "Company SSO",
-				"api_token":    "stored-token",
-			},
-		}},
-	}}
-	service := &Service{
-		installations: newFakeServiceInstallationStore(&Installation{
-			ID:          7,
-			PluginID:    manifest.GetPluginId(),
-			Version:     manifest.GetVersion(),
-			InstallPath: installPath,
-			Enabled:     true,
-		}),
-		configs: store,
-	}
+	service, store := connectionConfigService(t, manifest, map[string]any{
+		"issuer_url":   "https://idp.example.invalid",
+		"button_label": "Company SSO",
+		"api_token":    "stored-token",
+	})
 	submitted := map[string]any{"issuer_url": "https://idp.example.invalid", "button_label": "", "api_token": ""}
 	if err := service.SetGlobalConfigWithClears(context.Background(), 7, "connection", submitted, nil); err != nil {
 		t.Fatal(err)

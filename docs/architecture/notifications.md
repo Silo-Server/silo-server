@@ -52,9 +52,16 @@ the fact would be noise.
 Server channels read the event feed directly, suppressed events included, and
 skip a title that a different, still existing library had made available
 before the event: a second copy (a 4K library beside an HD one) is not news
-for a server-wide post. Profile fanout keeps those events. It already deduplicates per episode
-across libraries, and it must still reach profiles that can see only the
-library that got the copy.
+for a server-wide post. Profile fanout keeps those events, because it must
+still reach profiles that can see only the library that got the copy. It
+skips a profile that can open the episode through another library that
+holds it now and made it available before the event, so the copy is not news
+to that profile. The check reads current access and current copies, not
+what the profile was told: a profile that can open the earlier copy is
+skipped even if that copy's own event never reached it (a burst-capped or
+stale event, or access granted later). Once the earlier library's copy is
+gone, the check no longer skips the profile, though the delivery dedupe key
+below still holds the copy back while the first delivery is in the inbox.
 
 The delivery `type` registry (`episode.available`, `webhook.auto_disabled`,
 `request.*`, …) is extensible by construction; clients must render unknown
@@ -82,7 +89,10 @@ release event's episode key:
     is still the card Home would show: the first episode after the most
     recently completed one that has a present file and that the profile has
     not started (by Home's Postgres progress test, or by the profile's own
-    store).
+    store). Specials (season 0) have no airing position, so when the most
+    recent completion is a special in a series with regular seasons, Home
+    counts from the most recently completed regular episode instead, or from
+    the start of season 1 when the profile has finished none.
 
   Favorites and watchlist are unaffected. The progression cursor is kept, so
   `next_up` resumes from the right episode once a removal lapses. Every
@@ -99,6 +109,27 @@ release event's episode key:
   for the daily interest rebuild. A release fanned out in that window is
   judged on the stale interest. Evaluating Home removals at fanout time would
   close the gap.
+- A series the profile muted is a hard gate too. `ListActiveBySeries`, the
+  query that loads a release's candidate recipients, anti-joins
+  `profile_series_notification_mutes`, so a muting profile is never a
+  candidate: no delivery row is created and no channel sees the event. The
+  check costs one index probe per candidate inside that query, and it runs
+  again when fanout re-reads the candidates under the inbox locks. A mute
+  committed after that second read is like a preference change made just
+  after the delivery. Muting writes no interest row: the mute lives in its own
+  table keyed by account, profile, and series, because interest rows are
+  recomputed per library and pruned once their reasons go, and a mute lasts
+  until the profile unmutes. The account is part of the key because profile
+  IDs, such as the legacy `default`, repeat across accounts. A muted
+  profile's notification cursor does not move. The mute is read when fanout
+  evaluates a release, not when the episode arrives: unmuting does not
+  announce episodes fanout already evaluated during the mute, since their
+  release events are processed, but an event still inside the settle delay at
+  unmute is fanned out to the profile. No suppression state is kept per
+  release; the window is the settle delay plus one claim pass, and it applies
+  symmetrically to a mute made just after a release. A mute follows its series through a
+  catalog merge or split like other per-profile series state, and profile
+  deletion removes it.
 - Profile-level notification preferences are a hard gate: a reason disabled
   in preferences can never match, so no delivery row is created and no
   channel — including webhooks — ever sees the event. Per-webhook reason
@@ -120,15 +151,29 @@ release event's episode key:
   when access changes later.
 
 Multiple matching reasons produce one delivery with merged reason flags.
-Deliveries are deduplicated per `(profile, release event)` and, for
-`episode.available`, per `(profile, episode)` across libraries, so
-dual-quality library setups notify at most once. Reprocessing an event is
-idempotent.
+Deliveries are deduplicated per `(account, profile, release event)` and, for
+`episode.available`, per `(account, profile, episode)` across libraries.
+Retention removes those rows, so once the first delivery is gone, profile
+fanout's earlier-copy check (see "Release types") is what keeps a profile
+that can still open the earlier copy from being told again.
+Reprocessing an event is idempotent.
+
+A profile ID is unique only within its account: every account from before
+profiles has a profile named `default`. Interest rows, preferences, mutes,
+the delivery dedupe keys, and every inbox read, count, and mark-read are
+therefore keyed by account and profile, and profile deletion removes those
+for the deleted profile's account only. The email channel reads a profile's
+deliveries on the account that owns its email settings. Still keyed by
+profile ID alone: the inbox clock (`notification_inbox_clocks`), which only
+orders inserts, so two accounts' same-ID profiles share it and serialize
+their inserts without changing either inbox's order; and the email settings,
+push devices, web push subscriptions, and webhooks.
 
 The notified-series list (`GET /api/v2/notifications/series`) shows a profile
-the same index fanout evaluates. `ActiveReasons` is the event-independent half
-of these rules, shared by fanout and the list, so the two cannot disagree about
-which reasons a preference silences. The list filters series through the
+the same index fanout evaluates, plus the series it muted. `ActiveReasons` is
+the event-independent half of these rules, shared by fanout and the list, so
+the two cannot disagree about which reasons a preference silences; a muted
+series keeps its active reasons on the list but does not notify. The list filters series through the
 catalog's card access check rather than fanout's per-library one, and it leaves
 out the per-episode checks (Next Up's expected episode and the
 already-notified cursor), which depend on the episode that arrives.
@@ -201,8 +246,8 @@ the destination URL is attacker-controllable input against that server's
 network position:
 
 - HTTPS only; TLS verification is not user-overridable.
-- The destination host must never resolve to a private or special-purpose
-  address. The deny set covers the IPv4 private/special ranges (loopback,
+- By default, the destination host must never resolve to a private or
+  special-purpose address. The deny set covers the IPv4 private/special ranges (loopback,
   RFC 1918, link-local, CGNAT, TEST-NETs, benchmarking, multicast, reserved)
   and the IPv6 equivalents (unspecified, loopback, ULA, site-local, link-local,
   documentation, NAT64, multicast). IPv4-mapped IPv6 addresses are unwrapped
@@ -213,7 +258,12 @@ network position:
   re-validates the resolved address) to defeat DNS rebinding. Redirects are
   bounded and each hop is re-checked.
 - An admin-only `notifications.webhooks.allow_private_destinations` setting
-  exists for development environments.
+  exists for development environments. It permits the shared Private class;
+  Blocked addresses remain refused at registration and every connection.
+  Registration in either mode requires every resolved address to be allowed;
+  lookup failure, an empty answer, or the two-second lookup deadline rejects
+  the destination. Public-only requests also refuse the server's own interface
+  addresses, as required by the shared policy.
 
 Webhook URLs and generic signing secrets are encrypted at rest, never
 returned by the API after creation (only the host is readable — a Discord
@@ -245,6 +295,12 @@ values, 2048-char footer, 6000 chars total — truncating description first
 and never the title. Embeds cannot ping: Discord only parses mentions from
 the top-level `content` field, which this payload never sets (the
 `allowed_mentions` field is omitted rather than sent).
+
+Discord applies the 6000-char total to a whole message, not to each embed.
+Multi-embed messages (Discord DM digests and server-channel content posts, up
+to 10 embeds) count characters across all their embeds: overview teasers
+shorten first, then the oldest embeds move into the "…and N more" `content`
+line, which also counts items past the 10-embed cap.
 
 ### Generic payload and HMAC signing
 

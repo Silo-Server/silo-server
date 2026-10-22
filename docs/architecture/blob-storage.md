@@ -185,6 +185,15 @@ Listings use lexical keys and a cursor equal to the last returned key. Local
 pagination skips completed subtrees and stops after a page plus one object;
 each visited directory's entries are read and sorted in memory.
 
+`Matches` lets the image cache skip rewriting an immutable object whose bytes
+are already stored. It is only an optimization, so on S3 a `HeadObject` 403
+reports no match instead of an error and the object is rewritten. A HEAD
+response has no body, so the 403 cannot say whether the key is missing (AWS S3
+answers 403 for a missing key when the credential lacks `s3:ListBucket`) or the
+credential is denied. The `PutObject` that follows reports a real denial with
+the backend's error code. Other reads (`Stat`, `ObjectExists`, delivery
+verification) still return a 403 as an error.
+
 Keys are relative, non-empty, and at most 1024 bytes. Empty segments, dot
 segments, backslashes, and control characters are rejected. Local storage
 refuses symlinks and non-regular files below its root. MIME types come from key
@@ -442,13 +451,17 @@ timestamps are truncated to a quarter of the token TTL instead, which leaves
 each URL valid for at least three quarters of it. Other presigned and token
 URLs are issued fresh on every resolve, and public URLs never change.
 
+Every backend consults the publication manifest for a rung a ladder change
+added: existing revisions lack the new widest rung until the ladder backfill
+regenerates them, so a request for it gets a smaller rung the revision
+published, and artwork without a manifest is limited to its type's medium rung.
 Local storage publishes each object with an atomic rename, and direct S3 reads
-see an object as soon as its upload returns, so catalog responses resolve the
-manifest key they hold and a missing object answers 404 and enqueues repair.
-Only external delivery (a public or token-authenticated read endpoint in front
-of S3) can lag behind a write. That configuration alone runs the
-`verify_artwork_delivery` task and consults the verified-keys manifest when
-choosing which variant to advertise.
+see an object as soon as its upload returns, so on those backends every other
+key resolves as held, without a lookup, and a published key that is
+nevertheless missing answers 404 and enqueues repair. Only external delivery (a
+public or token-authenticated read endpoint in front of S3) can lag behind a
+write. That configuration alone runs the `verify_artwork_delivery` task, and it
+consults the verified-keys manifest for every key.
 
 A verdict is scoped to the delivery configuration and is current only until
 the revision is published again. Publication records exact keys only after

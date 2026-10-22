@@ -73,6 +73,9 @@ linters:
     - gomoddirectives
     - iotamixing
     - zerologlint
+    - reassign
+    - goprintffuncname
+    - mirror
 
   # Unenrolled checks retain their selection reason. Failed scans are unmeasured.
   # - prealloc # 222 findings; disabled pending review.
@@ -80,7 +83,6 @@ linters:
   # - mnd # Declined: broad style cleanup.
   # - dupl # Declined: broad style cleanup.
   # - wrapcheck # Declined: broad style cleanup.
-  # - reassign # 0 findings; pending global-assignment contract review.
   # - contextcheck # not measured; needs a prototype for detached Background cancellation.
   # - canonicalheader # 41 findings; disabled pending review.
   # - nilnil # 879 findings; TEST nil/value contracts require review.
@@ -92,12 +94,10 @@ linters:
   # - intrange # 278 findings; disabled pending review.
   # - modernize # 1405 findings; disabled pending review.
   # - varnamelen # 7302 findings; disabled pending review.
-  # - mirror # 5 findings; disabled pending review.
   # - tagliatelle # 1046 findings; disabled pending review.
   # - copyloopvar # 83 findings; disabled pending review.
   # - musttag # 108 findings; disabled pending review.
   # - dogsled # 40 findings; disabled pending review.
-  # - goprintffuncname # 4 findings; disabled pending review.
   # - embeddedstructfieldcheck # 765 findings; TEST mutex/embedding contracts require review.
   # - whitespace # 57 findings; disabled pending review.
   # - spancheck # Declined for six tracing sites.
@@ -117,10 +117,10 @@ linters:
     gocritic:
       disable-all: true
       enabled-checks:
-        # - argOrder # 3 findings; disabled.
+        - argOrder
         # - assignOp # 21 findings; disabled.
-        # - badCall # 2 findings; disabled.
-        # - badCond # 1 findings; disabled.
+        - badCall
+        - badCond
         - caseOrder
         - codegenComment
         - defaultCaseOrder
@@ -130,12 +130,12 @@ linters:
         - dupCase
         - dupSubExpr
         - elseif
-        # - exitAfterDefer # 1 findings; disabled.
+        - exitAfterDefer
         - flagDeref
         - flagName
-        # - mapKey # 13 findings; disabled.
+        # - mapKey # 14 findings, all whitespace-trimming test inputs; disabled.
         - newDeref
-        # - offBy1 # 4 findings; disabled.
+        - offBy1
         - regexpMust
         - sloppyLen
         - sloppyTypeAssert
@@ -147,17 +147,17 @@ linters:
         - valSwap
         - wrapperFunc
         - badLock
-        # - badRegexp # 1 findings; disabled.
+        - badRegexp
         - badSyncOnceFunc
-        # - deferInLoop # 7 findings; disabled.
+        - deferInLoop
         - externalErrorReassign
         - sortSlice
         - truncateCmp
-        # - uncheckedInlineErr # 2 findings; disabled.
-        # - weakCond # 10 findings; disabled.
+        - uncheckedInlineErr
+        # - weakCond # 10 findings, all regexp index results, which are full length when non-nil; disabled.
         - badSorting
         - dynamicFmtString
-        # - evalOrder # 2 findings; disabled.
+        - evalOrder
         - returnAfterHttpError
         - sqlQuery
         # - emptyFallthrough # 1 findings; disabled.
@@ -173,14 +173,14 @@ linters:
         # - stringXbytes # 28 findings; disabled.
         # - boolExprSimplify # 1 findings; disabled.
         # - builtinShadow # 123 findings; disabled.
-        # - dupImport # 2 findings; disabled.
+        - dupImport
         # - emptyStringTest # 15 findings; disabled.
         # - equalFold # 12 findings; disabled.
         # - filepathJoin # 15 findings; disabled.
         # - httpNoBody # 1114 findings; disabled.
         # - importShadow # 97 findings; disabled.
         # - nestingReduce # 19 findings; disabled.
-        # - nilValReturn # 2 findings; disabled.
+        - nilValReturn
         - redundantSprint
         - regexpPattern
         # - sloppyReassign # 120 findings; disabled.
@@ -273,7 +273,7 @@ linters:
         - name: time-equal
         - name: atomic
         - name: identical-branches
-        # - name: identical-ifelseif-branches # 2 findings; disabled.
+        - name: identical-ifelseif-branches
         # - name: identical-switch-branches # 56 findings; disabled.
         - name: identical-switch-conditions
         # - name: var-naming # Declined naming work.

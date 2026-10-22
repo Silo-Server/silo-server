@@ -98,7 +98,7 @@ type FCMPushDeviceRegistration struct {
 type PushDeviceStore interface {
 	UpsertApple(ctx context.Context, registration ApplePushDeviceRegistration, cipher *secret.Cipher) (*PushDevice, error)
 	UpsertFCM(ctx context.Context, registration FCMPushDeviceRegistration, cipher *secret.Cipher) (*PushDevice, error)
-	DeleteByProfileDevice(ctx context.Context, profileID, deviceID string) error
+	DeleteByProfileDevice(ctx context.Context, userID int, profileID, deviceID string) error
 }
 
 type PushDeviceRepository struct {
@@ -163,8 +163,8 @@ func (s *PushDeviceService) RegisterFCM(ctx context.Context, userID int, profile
 }
 
 // Unregister removes every registration this device install holds for the
-// profile, regardless of platform.
-func (s *PushDeviceService) Unregister(ctx context.Context, profileID, deviceID string) error {
+// account profile, regardless of platform.
+func (s *PushDeviceService) Unregister(ctx context.Context, userID int, profileID, deviceID string) error {
 	if !s.Available() {
 		return ErrPushDeviceUnavailable
 	}
@@ -173,7 +173,7 @@ func (s *PushDeviceService) Unregister(ctx context.Context, profileID, deviceID 
 	if profileID == "" || deviceID == "" {
 		return fmt.Errorf("%w: profile_id and device_id are required", ErrPushDeviceInvalid)
 	}
-	return s.store.DeleteByProfileDevice(ctx, profileID, deviceID)
+	return s.store.DeleteByProfileDevice(ctx, userID, profileID, deviceID)
 }
 
 func normalizeApplePushRegistration(input ApplePushRegistrationInput) (ApplePushDeviceRegistration, error) {
@@ -321,14 +321,16 @@ func (r *PushDeviceRepository) UpsertApple(ctx context.Context, registration App
 	if generation > 0 {
 		return nil, ErrPushLegacyWriter
 	}
+	if err := checkPushInstallationOwner(ctx, tx, registration.DeviceID, PushPlatformApple, registration.UserID); err != nil {
+		return nil, err
+	}
 
-	// A device install registers for the profile it is currently signed into.
-	// Purge the same install's registrations under other profiles (attempts
-	// cascade with them) so a profile switch on a shared device doesn't leave
-	// the previous profile's notifications flowing to it.
+	// A legacy install can switch profiles within its account. Account transfers
+	// require the ordered protocol's installation proof; a supplied device ID or
+	// provider token alone cannot retire another account's rows or attempts.
 	if _, err := tx.Exec(ctx,
-		`DELETE FROM push_devices WHERE device_id = $1 AND platform = $2 AND profile_id <> $3`,
-		registration.DeviceID, PushPlatformApple, registration.ProfileID); err != nil {
+		`DELETE FROM push_devices WHERE device_id = $1 AND platform = $2 AND user_id = $3 AND profile_id <> $4`,
+		registration.DeviceID, PushPlatformApple, registration.UserID, registration.ProfileID); err != nil {
 		return nil, fmt.Errorf("purge reassigned push device: %w", err)
 	}
 
@@ -386,12 +388,15 @@ func (r *PushDeviceRepository) UpsertFCM(ctx context.Context, registration FCMPu
 	if generation > 0 {
 		return nil, ErrPushLegacyWriter
 	}
+	if err := checkPushInstallationOwner(ctx, tx, registration.DeviceID, PushPlatformAndroid, registration.UserID); err != nil {
+		return nil, err
+	}
 
 	// Same profile-switch cleanup as UpsertApple: one install notifies one
-	// profile at a time.
+	// account profile at a time.
 	if _, err := tx.Exec(ctx,
-		`DELETE FROM push_devices WHERE device_id = $1 AND platform = $2 AND profile_id <> $3`,
-		registration.DeviceID, PushPlatformAndroid, registration.ProfileID); err != nil {
+		`DELETE FROM push_devices WHERE device_id = $1 AND platform = $2 AND user_id = $3 AND profile_id <> $4`,
+		registration.DeviceID, PushPlatformAndroid, registration.UserID, registration.ProfileID); err != nil {
 		return nil, fmt.Errorf("purge reassigned push device: %w", err)
 	}
 
@@ -431,18 +436,33 @@ func (r *PushDeviceRepository) UpsertFCM(ctx context.Context, registration FCMPu
 	return device, nil
 }
 
-// DeleteAllForProfile removes push registrations for a deleted profile.
-func (r *PushDeviceRepository) DeleteAllForProfile(ctx context.Context, profileID string) error {
+// checkPushInstallationOwner refuses a generation-zero write (bridge
+// registration or ordered bootstrap) when another account holds a destination
+// for this installation. Callers hold the platform's installation lock, so
+// ownership cannot change between this check and the write.
+func checkPushInstallationOwner(ctx context.Context, tx pgx.Tx, deviceID, platform string, userID int) error {
+	var foreign bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM push_devices WHERE device_id=$1 AND platform=$2 AND user_id<>$3)`, deviceID, platform, userID).Scan(&foreign); err != nil {
+		return fmt.Errorf("check push installation owner: %w", err)
+	}
+	if foreign {
+		return ErrPushGenerationConflict
+	}
+	return nil
+}
+
+// DeleteAllForProfile removes push registrations for a deleted account profile.
+func (r *PushDeviceRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
 	if r == nil || r.pool == nil {
 		return nil
 	}
-	_, err := r.pool.Exec(ctx, `DELETE FROM push_devices WHERE profile_id = $1`, profileID)
+	_, err := r.pool.Exec(ctx, `DELETE FROM push_devices WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
 	return err
 }
 
-// DeleteByProfileDevice removes one install's registrations for a profile
-// across every platform (attempts cascade with the device rows).
-func (r *PushDeviceRepository) DeleteByProfileDevice(ctx context.Context, profileID, deviceID string) error {
+// DeleteByProfileDevice removes one install's registrations for an account
+// profile across every platform (attempts cascade with the device rows).
+func (r *PushDeviceRepository) DeleteByProfileDevice(ctx context.Context, userID int, profileID, deviceID string) error {
 	if r == nil || r.pool == nil {
 		return ErrPushDeviceUnavailable
 	}
@@ -466,7 +486,7 @@ func (r *PushDeviceRepository) DeleteByProfileDevice(ctx context.Context, profil
 	if generation > 0 {
 		return ErrPushLegacyWriter
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM push_devices WHERE profile_id=$1 AND device_id=$2`, profileID, deviceID); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM push_devices WHERE user_id=$1 AND profile_id=$2 AND device_id=$3`, userID, profileID, deviceID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

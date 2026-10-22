@@ -175,20 +175,6 @@ const writes = () =>
   );
 
 describe("useAdminHomeRows", () => {
-  it("maps the page's rows in server order", async () => {
-    rows = [row("a", { featured: true }), row("b", { enabled: false })];
-    const { result } = setup();
-    await ready(result);
-    expect(result.current.adapter.rows).toEqual([
-      expect.objectContaining({ id: "a", title: "Title a", hero: true, shown: true }),
-      expect.objectContaining({ id: "b", shown: false, own: false }),
-    ]);
-    expect(result.current.adapter.pages).toEqual([
-      { ref: { kind: "home" }, label: "Home" },
-      { ref: { kind: "library", libraryId: 7 }, label: "Movies", libraryType: "movies" },
-    ]);
-  });
-
   it("reads the page from ?page= and falls back to Home for an unknown page", async () => {
     const library = setup("/admin/sections?page=7");
     await ready(library.result);

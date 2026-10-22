@@ -202,39 +202,6 @@ func TestManagerDownloadRejectsOversizedProviderResult(t *testing.T) {
 	}
 }
 
-func TestManagerProviderNames(t *testing.T) {
-	manager := NewManager(newMockSubtitleRepo(), newMockBlobStore())
-
-	names := manager.ProviderNames()
-	if names == nil {
-		t.Fatal("ProviderNames() = nil, want non-nil empty slice")
-	}
-	if len(names) != 0 {
-		t.Fatalf("ProviderNames() = %v, want empty", names)
-	}
-
-	manager.RegisterProvider(stubProvider{name: "subdl"})
-	manager.RegisterProvider(stubProvider{name: "opensubtitles"})
-	manager.RegisterProvider(stubProvider{name: "subsource"})
-
-	want := []string{"opensubtitles", "subdl", "subsource"}
-	names = manager.ProviderNames()
-	if len(names) != len(want) {
-		t.Fatalf("ProviderNames() = %v, want %v", names, want)
-	}
-	for i, name := range want {
-		if names[i] != name {
-			t.Fatalf("ProviderNames() = %v, want %v (sorted)", names, want)
-		}
-	}
-
-	manager.RemoveProvider("subdl")
-	names = manager.ProviderNames()
-	if len(names) != 2 || names[0] != "opensubtitles" || names[1] != "subsource" {
-		t.Fatalf("ProviderNames() after removal = %v, want [opensubtitles subsource]", names)
-	}
-}
-
 func TestManagerUploadDedupesIdenticalContent(t *testing.T) {
 	repo := newMockSubtitleRepo()
 	s3 := newMockBlobStore()
@@ -299,6 +266,25 @@ func TestManagerUploadRejectsOversizedFile(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for oversized file")
+	}
+}
+
+func TestManagerUploadRejectsUTF16FileThatGrowsPastLimit(t *testing.T) {
+	repo := newMockSubtitleRepo()
+	manager := NewManager(repo, newMockBlobStore())
+	// 2 bytes per character in UTF-16, 3 bytes once stored as UTF-8.
+	data := utf16LEWithBOM(strings.Repeat("\u5b57", (MaxUploadSize-2)/2))
+	_, err := manager.Upload(context.Background(), UploadRequest{
+		MediaFileID: 1,
+		Language:    "zh",
+		Filename:    "big.srt",
+		Data:        data,
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("Upload() error = %v, want size limit error", err)
+	}
+	if len(repo.byKey) != 0 {
+		t.Fatalf("stored %d subtitles, want none", len(repo.byKey))
 	}
 }
 

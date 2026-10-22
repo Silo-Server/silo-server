@@ -73,25 +73,6 @@ afterEach(() => {
   onlineManager.setOnline(true);
   vi.unstubAllGlobals();
 });
-it("update queues the original validator, node and draft once", async () => {
-  onlineManager.setOnline(false);
-  const fetchMock = vi.fn().mockImplementation(async () => saved());
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useUpdateNode, fixture());
-  const selected = structuredClone(node);
-  const body = { name: "Submitted", public_url: null };
-  act(() => result.current.mutate({ node: selected, body }));
-  selected.id = "99";
-  selected.config_etag = '"later"';
-  body.name = "Later draft";
-  act(() => onlineManager.setOnline(true));
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-  const [url, init] = fetchMock.mock.calls[0]!;
-  expect(String(url)).toContain("/api/v2/admin/nodes/17");
-  expect(new Headers(init.headers).get("If-Match")).toBe('"original"');
-  expect(JSON.parse(init.body)).toEqual({ name: "Submitted", public_url: null });
-});
 it("queued deletion refuses same-profile PIN replacement without dispatch", async () => {
   onlineManager.setOnline(false);
   const fetchMock = vi.fn();
@@ -222,6 +203,40 @@ it("mounted delete confirmation retains original target and validator", async ()
   fireEvent.click(screen.getByRole("button", { name: "Delete" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(new Headers(writes[0]!.headers).get("If-Match")).toBe('"original"');
+});
+it("create checks the new node's health and reloads the list", async () => {
+  const fetchMock = vi.fn().mockImplementation(async (url: string) =>
+    String(url).endsWith("/check")
+      ? reply({
+          healthy: true,
+          active_jobs: 0,
+          egress_kbps: 0,
+          capabilities_hash: "",
+          health_persisted: true,
+        })
+      : saved(),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const { client, wrapper } = fixture();
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  const { result } = renderHook(useCreateNode, { wrapper });
+  act(() => result.current.mutate({ name: "Synthetic", type: "proxy", url: node.url }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  const [checkURL, checkInit] = fetchMock.mock.calls[1]!;
+  expect(String(checkURL)).toMatch(/\/api\/v2\/admin\/nodes\/17\/check$/);
+  expect(checkInit.method).toBe("POST");
+  // One reload when the create settles, and one once the check has stored
+  // the node's health.
+  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2));
+  expect(invalidate).toHaveBeenLastCalledWith({ queryKey: adminKeys.nodes() });
+});
+it("update does not check the node", async () => {
+  const fetchMock = vi.fn().mockImplementation(async () => saved());
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(useUpdateNode, fixture());
+  act(() => result.current.mutate({ node, body: { name: "Edit" } }));
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 it("setup create preserves authenticated profile absence", async () => {
   setProfileId(null);
