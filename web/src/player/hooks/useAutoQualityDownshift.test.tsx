@@ -280,6 +280,27 @@ it("does not count a slow start's wait while the renderer, not the network, is b
   expect(onReplan).not.toHaveBeenCalled();
 });
 
+// A track the device cannot render: the network delivered, nothing plays.
+it("does not lower a start whose buffer fills but never plays", () => {
+  const h = setup({ paused: true, playIntent: () => true });
+  let bufferedEnd = 0;
+  Object.defineProperty(h.options.videoRef.current, "buffered", {
+    configurable: true,
+    get: () => ({ length: 1, start: () => 0, end: () => bufferedEnd }),
+  });
+  h.advance(3_000);
+  bufferedEnd = 6;
+  h.advance(30_000);
+  // It stays the renderer's wait even if the buffer runs down again.
+  bufferedEnd = 0.5;
+  h.advance(30_000);
+  expect(h.options.onReplan).not.toHaveBeenCalled();
+  const fail = vi.fn();
+  act(() => h.result.current.startDeadlinePassed(fail));
+  expect(fail).toHaveBeenCalledTimes(1);
+  expect(h.options.onReplan).not.toHaveBeenCalled();
+});
+
 it("keeps timing a slow start through a seek before its first frame", () => {
   const video = document.createElement("video");
   Object.defineProperty(video, "paused", { value: true, configurable: true });

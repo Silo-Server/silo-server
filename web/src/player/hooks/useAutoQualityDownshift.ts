@@ -2,6 +2,7 @@ import {
   BufferingQualityController,
   OUTAGE_NO_DATA_MS,
   OUTAGE_NO_DATA_SEGMENTED_MS,
+  RENDERER_WAIT_AMPLE_MS,
   RENDERER_WAIT_BUFFER_MS,
   type BufferingAnswer,
   type BufferingEvent,
@@ -150,6 +151,10 @@ export function useAutoQualityDownshift(options: Options) {
   // The adopted plan has played. Until it has, a seek, the player's own
   // start-position seek included, does not end the start's wait.
   const planRan = useRef(false);
+  // The wait is the renderer's, not the network's. One that began with media
+  // buffered becomes a stall if the buffer runs down; one that came to hold
+  // plenty stays the renderer's until playback runs.
+  const rendererWait = useRef<"buffered" | "ample" | undefined>(undefined);
   // The page is closing, so the playing plan's summary is its last word.
   const pageEnding = useRef(false);
   // The failure a start deadline's lowering stands in for, while it is sent.
@@ -267,6 +272,7 @@ export function useAutoQualityDownshift(options: Options) {
     if (isNewPlan) {
       starting.current = false;
       planRan.current = false;
+      rendererWait.current = undefined;
       attemptStarted.current = true;
     }
     if (isNewPlan && video) {
@@ -309,9 +315,6 @@ export function useAutoQualityDownshift(options: Options) {
     // without a `playing` event (the player clears buffering on `timeupdate`),
     // so advancing time also ends it.
     let stalledAt: number | undefined;
-    // A wait that began with media buffered, until playback resumes or the
-    // buffer runs down and makes it a stall.
-    let rendererWait = false;
     // Buffering after a seek or a source reload is theirs until playback runs
     // again, including a seek made while paused.
     let seekSincePlaying = false;
@@ -340,7 +343,7 @@ export function useAutoQualityDownshift(options: Options) {
     };
     const playing = () => {
       stalledAt = undefined;
-      rendererWait = false;
+      rendererWait.current = undefined;
       seekSincePlaying = false;
       reloading.current = false;
       starting.current = false;
@@ -348,7 +351,9 @@ export function useAutoQualityDownshift(options: Options) {
       send("playing");
     };
     const rendererBusy = () =>
-      decoderRecovering(video) || bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS;
+      rendererWait.current === "ample" ||
+      decoderRecovering(video) ||
+      bufferedAheadMs(video) > RENDERER_WAIT_BUFFER_MS;
     const waitCause = (): BufferingEvent["cause"] => {
       // Until its first frame, a start the viewer means to play is the plan's
       // wait, though the transport emptied the element or a seek moved it on
@@ -364,11 +369,12 @@ export function useAutoQualityDownshift(options: Options) {
     const waiting = () => {
       stalledAt = video.currentTime;
       const cause = waitCause();
-      rendererWait = cause === "renderer";
+      if (rendererWait.current !== "ample")
+        rendererWait.current = cause === "renderer" ? "buffered" : undefined;
       send("waiting", cause);
     };
     const pause = () => {
-      rendererWait = false;
+      rendererWait.current = undefined;
       starting.current = false;
       send("pause");
     };
@@ -380,13 +386,13 @@ export function useAutoQualityDownshift(options: Options) {
       const forward = video.currentTime - (stalledAt ?? lastPosition);
       if (stalledAt !== undefined && forward >= 0 && forward <= GAP_SKIP_MAX_SECONDS) return;
       stalledAt = undefined;
-      rendererWait = false;
+      rendererWait.current = undefined;
       seekSincePlaying = true;
       send("seek");
     };
     const reload = () => {
       stalledAt = undefined;
-      rendererWait = false;
+      rendererWait.current = undefined;
       reloading.current = true;
       send("reload");
       // The new transport empties the element as it attaches; its start is
@@ -413,8 +419,18 @@ export function useAutoQualityDownshift(options: Options) {
     if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) playing();
     const timer = setInterval(() => {
       syncTrouble();
-      if (rendererWait && !rendererBusy()) {
-        rendererWait = false;
+      const wait = rendererWait.current;
+      if (
+        wait !== "ample" &&
+        (wait || c.waitingForData) &&
+        bufferedAheadMs(video) > RENDERER_WAIT_AMPLE_MS
+      ) {
+        // Plenty buffered makes any wait the renderer's until playback runs;
+        // a stall so far ends uncounted.
+        rendererWait.current = "ample";
+        if (!wait) send("waiting", "renderer");
+      } else if (wait === "buffered" && !rendererBusy()) {
+        rendererWait.current = undefined;
         c.event({ type: "waiting" }, now());
       }
       c.tick(now());
@@ -437,10 +453,15 @@ export function useAutoQualityDownshift(options: Options) {
    * The player's start deadline passed before the plan's first frame. When
    * Auto lowers on its own, the controller lowers instead (see its
    * startDeadlinePassed); `fail` reports the plan's failure when it does not,
-   * or when its lowering is not adopted.
+   * or when its lowering is not adopted. A start held up by the renderer,
+   * not the network, fails without lowering.
    */
   const startDeadlinePassed = useCallback(
     (fail: () => void) => {
+      if (rendererWait.current) {
+        fail();
+        return;
+      }
       deadlineFailure.current = fail;
       const lowered = controller.current?.startDeadlinePassed(now()) ?? false;
       deadlineFailure.current = undefined;

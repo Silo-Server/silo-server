@@ -145,6 +145,13 @@ const STALL_MIN_MS = 1_000;
  */
 export const RENDERER_WAIT_BUFFER_MS = 1_000;
 /**
+ * A wait, a start's included, that comes to hold more than this much media
+ * past the playhead is the renderer's from then on, however it began: the
+ * network delivered, so the stall so far ends uncounted and the wait stays the
+ * renderer's until playback runs.
+ */
+export const RENDERER_WAIT_AMPLE_MS = 5_000;
+/**
  * A wait in which none of the plan's media requests has received data for
  * this long is an outage: the link is silent, not slow. It is counted from
  * the last byte any of them received, so a wait that begins on a link
