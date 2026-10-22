@@ -1,5 +1,7 @@
 import {
   BufferingQualityController,
+  OUTAGE_NO_DATA_MS,
+  OUTAGE_NO_DATA_SEGMENTED_MS,
   RENDERER_WAIT_BUFFER_MS,
   type BufferingAnswer,
   type BufferingEvent,
@@ -73,6 +75,14 @@ interface Options {
    * path owns, so it never counts as a stall.
    */
   transportTrouble?: () => boolean;
+  /**
+   * When the plan's media requests last received data, on the
+   * `performance.now()` clock, and whether they are segments, or undefined
+   * where the player cannot see their bytes (the media element's own loads).
+   * Read on every tick, so a transport that is polled can time the data it
+   * finds.
+   */
+  mediaData?: () => { at: number; segmented: boolean } | undefined;
   /**
    * Whether a newly adopted plan's transport will start playing on its own.
    * Its element starts paused and plays once enough data has arrived, so until
@@ -285,7 +295,15 @@ export function useAutoQualityDownshift(options: Options) {
     let reloadSincePlaying = false;
     let lastPosition = video.currentTime;
     const syncTrouble = () => {
-      const next = latest.current.transportTrouble?.() ?? false;
+      // A wait on a link that has gone silent is an outage too; one whose
+      // data keeps arriving, however slowly, is a stall. The server holds a
+      // segment silent while it produces it, so segments get longer.
+      const data = latest.current.mediaData?.();
+      const silent =
+        c.waitingForData &&
+        data !== undefined &&
+        now() - data.at >= (data.segmented ? OUTAGE_NO_DATA_SEGMENTED_MS : OUTAGE_NO_DATA_MS);
+      const next = (latest.current.transportTrouble?.() ?? false) || silent;
       if (next !== trouble)
         c.event({ type: next ? "transport_error_start" : "transport_error_end" }, now());
       trouble = next;
@@ -293,6 +311,8 @@ export function useAutoQualityDownshift(options: Options) {
     const send = (type: BufferingEvent["type"], cause?: BufferingEvent["cause"]) => {
       syncTrouble();
       c.event({ type, cause }, now());
+      // A wait that begins on a link already silent is an outage at once.
+      if (type === "waiting") syncTrouble();
       refresh();
     };
     const playing = () => {

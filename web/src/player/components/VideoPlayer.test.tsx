@@ -165,6 +165,7 @@ vi.mock("hls.js", () => ({
       ERROR: "error",
       MANIFEST_PARSED: "manifestParsed",
       BUFFER_APPENDED: "bufferAppended",
+      FRAG_LOADING: "fragLoading",
       FRAG_LOADED: "fragLoaded",
       FRAG_BUFFERED: "fragBuffered",
       BUFFER_EOS: "bufferEos",
@@ -5828,41 +5829,96 @@ describe("VideoPlayer hls.js request timeouts", () => {
   });
 
   /**
-   * An hls.js player that has played, failed a load and is waiting, with
-   * too little buffered to be the renderer's wait; `setEnd` moves the end
-   * of the buffered media.
+   * A player that has played, met `beforeWait` and is waiting, with too
+   * little buffered to be the renderer's wait. Its media keeps receiving data
+   * slowly, through hls.js fragments or the browser engine's reads, until
+   * `silentFor` ms before the wait; `setEnd` moves the end of the buffered
+   * media.
    */
-  async function waitingAfterError(error: Record<string, unknown>) {
-    hlsJS.supported = true;
+  async function waitingAfter({
+    beforeWait = () => {},
+    transport = "hls.js",
+    silentFor,
+  }: { beforeWait?: () => void; transport?: "hls.js" | "engine"; silentFor?: number } = {}) {
+    const qualities = {
+      available_qualities: [
+        { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
+        { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
+      ],
+      source: { ...directPlan.source, bitrate_kbps: 20_000 },
+    };
+    if (transport === "engine") {
+      attachBrowserEngine.mockClear();
+      engineRoute.chosen = true;
+      onTestFinished(() => {
+        engineRoute.chosen = false;
+      });
+    } else hlsJS.supported = true;
     const rendered = renderPlayer({
       bufferingMode: "ask",
       qualityPreference: "auto",
-      plan: fixturePlanV3({
-        stream: {
-          url: "/playback/transcode/session-1/master.m3u8",
-          protocol: "hls",
-          headers: {},
-          header_refresh: "none",
-        },
-        available_qualities: [
-          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
-          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
-        ],
-        source: { ...directPlan.source, bitrate_kbps: 20_000 },
-      }),
+      ...(transport === "engine"
+        ? {
+            plan: fixturePlanV3({
+              ...qualities,
+              delivery: "original_http",
+              stream: directPlan.stream,
+            }),
+            browserEngine: {
+              containers: ["mkv"],
+              videoCodecs: ["h264"],
+              audioCodecs: ["aac"],
+              hdr: false,
+            },
+          }
+        : {
+            plan: fixturePlanV3({
+              ...qualities,
+              stream: {
+                url: "/playback/transcode/session-1/master.m3u8",
+                protocol: "hls",
+                headers: {},
+                header_refresh: "none",
+              },
+            }),
+          }),
     });
     await act(async () => vi.advanceTimersByTimeAsync(0));
     const video = rendered.container.querySelector("video");
-    if (!video || !hlsJS.latest) throw new Error("expected hls.js on a video element");
+    if (!video) throw new Error("expected a video element");
     let end = 0.2;
     Object.defineProperty(video, "buffered", {
       configurable: true,
       get: () => ({ length: 1, start: () => 0, end: () => end }),
     });
+    let receiving = true;
+    if (transport === "engine") {
+      const { onMediaData } = attachBrowserEngine.mock.calls.at(-1)![0];
+      setInterval(() => {
+        const at = Math.floor(performance.now());
+        if (receiving) onMediaData?.(0, at, 0, at);
+      }, 250);
+    } else {
+      // hls.js fills in a loading fragment's stats as its data arrives.
+      let loaded = 0;
+      const stats = {
+        aborted: false,
+        loading: { start: 0, first: 1, end: 0 },
+        get loaded() {
+          if (receiving) loaded = Math.floor(performance.now());
+          return loaded;
+        },
+      };
+      act(() => hlsJS.latest?.emit("fragLoading", { frag: { type: "main", stats } }));
+    }
     markPlaying(video);
     fireEvent.playing(video);
     act(() => vi.advanceTimersByTime(20_000));
-    act(() => hlsJS.latest?.emit("error", { type: "networkError", fatal: false, ...error }));
+    if (silentFor !== undefined) {
+      receiving = false;
+      act(() => vi.advanceTimersByTime(silentFor));
+    }
+    act(beforeWait);
     fireEvent.waiting(video);
     return {
       video,
@@ -5871,6 +5927,11 @@ describe("VideoPlayer hls.js request timeouts", () => {
       },
     };
   }
+  const waitingAfterError = (error: Record<string, unknown>) =>
+    waitingAfter({
+      beforeWait: () =>
+        hlsJS.latest?.emit("error", { type: "networkError", fatal: false, ...error }),
+    });
   const prompt = () => screen.queryByRole("button", { name: "Lower quality" });
   async function stallAfterError(error: Record<string, unknown>) {
     await waitingAfterError(error);
@@ -5893,6 +5954,21 @@ describe("VideoPlayer hls.js request timeouts", () => {
     ["a failed subtitle segment", { details: "fragLoadError", frag: { type: "subtitle" } }, true],
   ])("after %s, prompts: %s", async (_name, error, prompts) => {
     expect((await stallAfterError(error)) !== null).toBe(prompts);
+  });
+
+  // C1: a wait is an outage once no media data has arrived for 4 s on the
+  // engine's progressive reads, or for 15 s on hls.js segments, which the
+  // server holds silent while it makes them. A shorter silence, or data that
+  // keeps arriving however slowly, leaves a stall that counts.
+  it.each<[string, boolean, "hls.js" | "engine", number | undefined]>([
+    ["hls.js segments that go silent as the wait begins", true, "hls.js", 0],
+    ["hls.js segments silent for 16 s when the wait begins", false, "hls.js", 16_000],
+    ["engine reads that keep receiving", true, "engine", undefined],
+    ["engine reads that go silent as the wait begins", false, "engine", 0],
+  ])("8 s into a wait on %s, prompts: %s", async (_name, prompts, transport, silentFor) => {
+    await waitingAfter({ transport, silentFor });
+    act(() => vi.advanceTimersByTime(8_000));
+    expect(prompt() !== null).toBe(prompts);
   });
 
   it("ends the outage when hls.js appends media without a progress event", async () => {

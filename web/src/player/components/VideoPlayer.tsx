@@ -577,9 +577,9 @@ export function VideoPlayer({
   // The plan's media requests, where its transport can see their bytes:
   // hls.js fragments and the browser engine's reads. The media element's own
   // loads show none.
-  const mediaMeterRef = useRef<{ planRevision: number; meter: MediaDataMeter } | undefined>(
-    undefined,
-  );
+  const mediaMeterRef = useRef<
+    { planRevision: number; meter: MediaDataMeter; segmented: boolean } | undefined
+  >(undefined);
   const planRevisionForThroughputRef = useRef(planRevision);
   useEffect(() => {
     planRevisionForThroughputRef.current = planRevision;
@@ -2444,10 +2444,13 @@ export function VideoPlayer({
     let directPlayMetadataHandler: (() => void) | null = null;
     // The plan's meter. A transport rebuilt for the same plan measures into
     // the same one.
-    const meterMedia = () => {
-      if (mediaMeterRef.current?.planRevision !== planRevision)
-        mediaMeterRef.current = { planRevision, meter: new MediaDataMeter(performance.now()) };
-      return mediaMeterRef.current.meter;
+    const meterMedia = (segmented: boolean) => {
+      const meter =
+        mediaMeterRef.current?.planRevision === planRevision
+          ? mediaMeterRef.current.meter
+          : new MediaDataMeter(performance.now());
+      mediaMeterRef.current = { planRevision, meter, segmented };
+      return meter;
     };
 
     mediaRecoveryAttemptsRef.current = 0;
@@ -2742,7 +2745,7 @@ export function VideoPlayer({
             });
             // Each load gets its own stats object, which hls.js fills in as
             // the fragment arrives. Subtitles are not the plan's media.
-            const meter = meterMedia();
+            const meter = meterMedia(true);
             hls.on(Hls.Events.FRAG_LOADING, (_event, { frag }) => {
               if (destroyed || frag.type === "subtitle") return;
               const stats = frag.stats;
@@ -2832,7 +2835,7 @@ export function VideoPlayer({
             const { attachBrowserEngine } = await import("../engine");
             const surface = engineSurfaceRef.current;
             if (destroyed || !surface) return;
-            const meter = meterMedia();
+            const meter = meterMedia(false);
             engineSession = attachBrowserEngine({
               video,
               surface,
@@ -4482,6 +4485,12 @@ export function VideoPlayer({
       connectionStatus !== "connected" ||
       (typeof navigator !== "undefined" && navigator.onLine === false) ||
       mediaOutageRef.current,
+    mediaData: () => {
+      const current = mediaMeterRef.current;
+      return current?.planRevision === planRevision
+        ? { at: current.meter.lastDataAt(performance.now()), segmented: current.segmented }
+        : undefined;
+    },
     onReplan: (request, onAdopt) =>
       onQualitySelect?.(request.quality_preference, currentTime, request, onAdopt),
     onNotice: (key) => {

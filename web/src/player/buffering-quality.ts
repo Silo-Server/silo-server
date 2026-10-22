@@ -139,6 +139,21 @@ const STALL_MIN_MS = 1_000;
  * once the buffer falls to this.
  */
 export const RENDERER_WAIT_BUFFER_MS = 1_000;
+/**
+ * A wait in which none of the plan's media requests has received data for
+ * this long is an outage: the link is silent, not slow. It is counted from
+ * the last byte any of them received, so a wait that begins on a link
+ * already silent this long is an outage at once. This is for progressive
+ * reads, which the server streams as fast as the link allows.
+ */
+export const OUTAGE_NO_DATA_MS = 4_000;
+/**
+ * The same for segmented delivery (HLS transcode or remux segments). The
+ * server holds a segment request silent while it produces the segment, up to
+ * 12 s for a transcode, so a shorter silence is a slow transcode: a stall,
+ * which lowering fixes.
+ */
+export const OUTAGE_NO_DATA_SEGMENTED_MS = 15_000;
 /** This many counted stalls within the window means the link cannot keep up. */
 const STALLS_BEFORE_TRIGGER = 2;
 const STALL_WINDOW_MS = 120_000;
@@ -269,6 +284,14 @@ export class BufferingQualityController {
     private onKeptEstimate?: (kbps: number | undefined) => void,
   ) {
     this.lastTick = now;
+  }
+
+  /**
+   * A wait for media data is in progress: one this controller times as a
+   * stall unless an outage holds it.
+   */
+  get waitingForData(): boolean {
+    return this.waiting;
   }
 
   /**
