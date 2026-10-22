@@ -61,6 +61,11 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 	if !isNativeAPIV2(r.Context()) || !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) {
 		return nil, nil
 	}
+	if observed := req.ObservedThroughputKbps; observed != nil && req.BandwidthEstimateKbps != nil && *observed < *req.BandwidthEstimateKbps {
+		// The plan that kept buffering received less than the client's step
+		// down from it: that throughput is what the link carried.
+		req.BandwidthEstimateKbps = new(*observed)
+	}
 	key, _ := connectionstore.Key(r.Context(), h.JWTSecret)
 	user := apimw.GetUserID(r.Context())
 	device, _ := r.Context().Value(playbackConnectionDeviceContextKey{}).(string)

@@ -19,6 +19,7 @@
   "metered": false,
   "bandwidth_estimate_kbps": 5600,
   "bandwidth_estimate_source": "observed_rebuffer",
+  "observed_throughput_kbps": 4200,
   "selected_tracks": {
     "audio": {
       "id": "file:42:audio:0",

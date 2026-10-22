@@ -43,7 +43,8 @@ func connectionTestPool(t *testing.T) *pgxpool.Pool {
 // start request, which applyLearnedLimit has already rewritten to the limit or
 // marked observed_rebuffer over a lower probe. Only the client's own request
 // may record or clear the limit, so a replay neither renews it nor stores the
-// probe estimate as a new limit. The last case sends a seek_failure_recovery
+// probe estimate as a new limit. A lowering that reports a lower measured
+// throughput records that instead. The last case sends a seek_failure_recovery
 // through the native v2 replan dispatch, which must pass the replay as one.
 func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	pool := connectionTestPool(t)
@@ -119,6 +120,13 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	}
 	if _, _, ok := stored(); ok {
 		t.Fatal("the client's clear kept the limit")
+	}
+	// A lowering that measured its plan's throughput below its step-down
+	// estimate plans with, and records, the throughput.
+	measured := request(playback.BandwidthEstimateObservedRebufferV3, new(44100), "")
+	measured.ObservedThroughputKbps = new(31000)
+	if limit, err := h.applyLearnedLimit(r, &measured, true); err != nil || limit == nil || limit.Kbps != 31000 || *measured.BandwidthEstimateKbps != 31000 {
+		t.Fatalf("measured lowering: limit=%+v estimate=%d err=%v", limit, *measured.BandwidthEstimateKbps, err)
 	}
 
 	requireSeekRecoveryKeepsLimitV3(t, pool, user, stored)

@@ -111,6 +111,9 @@
         "observed_rebuffer"
       ]
     },
+    "observed_throughput_kbps": {
+      "$ref": "#/$defs/bandwidth_kbps"
+    },
     "learned_limit": {
       "type": "string",
       "enum": [
@@ -873,6 +876,23 @@
         "required": [
           "bandwidth_estimate_kbps"
         ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "observed_throughput_kbps"
+        ]
+      },
+      "then": {
+        "required": [
+          "bandwidth_estimate_source"
+        ],
+        "properties": {
+          "bandwidth_estimate_source": {
+            "const": "observed_rebuffer"
+          }
+        }
       }
     },
     {

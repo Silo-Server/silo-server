@@ -1813,7 +1813,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if !isNativeAPIV2(r.Context()) {
 		// The frozen /api/v1 surface ignored these fields as unknown. Drop them
 		// before validation so v1 neither rejects nor acts on them.
-		req.BandwidthEstimateSource, req.LearnedLimit = "", ""
+		req.BandwidthEstimateSource, req.ObservedThroughputKbps, req.LearnedLimit = "", nil, ""
 	}
 	warnings, err := req.NormalizeAndValidate()
 	if err != nil {
@@ -4811,7 +4811,7 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 	}
 	if !isNativeAPIV2(r.Context()) {
 		// As on start: /api/v1 ignores the buffering-quality fields.
-		req.BandwidthEstimateSource, req.LearnedLimit = "", ""
+		req.BandwidthEstimateSource, req.ObservedThroughputKbps, req.LearnedLimit = "", nil, ""
 	}
 	// Reject malformed identity/bounds before doing any session lookup. When
 	// client_features is omitted, temporarily allow the only validation rule
@@ -5337,6 +5337,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		start.Metered = req.Metered
 		start.BandwidthEstimateKbps = copyOptionalIntV3(req.BandwidthEstimateKbps)
 		start.BandwidthEstimateSource = req.BandwidthEstimateSource
+		start.ObservedThroughputKbps = copyOptionalIntV3(req.ObservedThroughputKbps)
 		start.LearnedLimit = req.LearnedLimit
 		start.BandwidthCapKbps = copyOptionalIntV3(req.BandwidthCapKbps)
 		start.Capabilities = req.Capabilities

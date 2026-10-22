@@ -661,6 +661,7 @@ type StartRequestV3 struct {
 	Metered                    bool                      `json:"metered"`
 	BandwidthEstimateKbps      *int                      `json:"bandwidth_estimate_kbps,omitempty"`
 	BandwidthEstimateSource    string                    `json:"bandwidth_estimate_source,omitempty"`
+	ObservedThroughputKbps     *int                      `json:"observed_throughput_kbps,omitempty"`
 	LearnedLimit               string                    `json:"learned_limit,omitempty"`
 	BandwidthCapKbps           *int                      `json:"bandwidth_cap_kbps,omitempty"`
 	Capabilities               ClientCodecCapabilitiesV3 `json:"client_capabilities"`
@@ -739,6 +740,7 @@ type ReplanRequestV3 struct {
 	Metered                 bool                      `json:"metered"`
 	BandwidthEstimateKbps   *int                      `json:"bandwidth_estimate_kbps,omitempty"`
 	BandwidthEstimateSource string                    `json:"bandwidth_estimate_source,omitempty"`
+	ObservedThroughputKbps  *int                      `json:"observed_throughput_kbps,omitempty"`
 	LearnedLimit            string                    `json:"learned_limit,omitempty"`
 	BandwidthCapKbps        *int                      `json:"bandwidth_cap_kbps,omitempty"`
 	SelectedTracks          SelectedTracksV3          `json:"selected_tracks"`
@@ -1118,10 +1120,13 @@ func (r *StartRequestV3) NormalizeAndValidate() ([]DegradationWarningV3, error) 
 	if r.ProgressPersistence == ProgressPersistenceClientV3 && r.StartPosition == nil {
 		return nil, errors.New("start_position is required when progress_persistence is client")
 	}
-	if err := validateBufferingQualityV3(r.ClientFeatures, r.BandwidthEstimateSource, r.LearnedLimit, r.BandwidthEstimateKbps); err != nil {
+	if err := validateBufferingQualityV3(r.ClientFeatures, r.BandwidthEstimateSource, r.LearnedLimit, r.BandwidthEstimateKbps, r.ObservedThroughputKbps); err != nil {
 		return nil, err
 	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthEstimateKbps, 100, 1_000_000, "bandwidth_estimate_kbps"); err != nil {
+		return nil, err
+	}
+	if err := validateOptionalBoundedIntV3(r.ObservedThroughputKbps, 100, 1_000_000, "observed_throughput_kbps"); err != nil {
 		return nil, err
 	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthCapKbps, 100, 1_000_000, "bandwidth_cap_kbps"); err != nil {
@@ -1196,10 +1201,13 @@ func (r *ReplanRequestV3) Validate() error {
 			return errors.New("invalid local mutation")
 		}
 	}
-	if err := validateBufferingQualityV3(r.ClientFeatures, r.BandwidthEstimateSource, r.LearnedLimit, r.BandwidthEstimateKbps); err != nil {
+	if err := validateBufferingQualityV3(r.ClientFeatures, r.BandwidthEstimateSource, r.LearnedLimit, r.BandwidthEstimateKbps, r.ObservedThroughputKbps); err != nil {
 		return err
 	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthEstimateKbps, 100, 1_000_000, "bandwidth_estimate_kbps"); err != nil {
+		return err
+	}
+	if err := validateOptionalBoundedIntV3(r.ObservedThroughputKbps, 100, 1_000_000, "observed_throughput_kbps"); err != nil {
 		return err
 	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthCapKbps, 100, 1_000_000, "bandwidth_cap_kbps"); err != nil {
@@ -1590,8 +1598,8 @@ func boundExceedsFloatV3(output, panel float64) bool {
 	return panel > 0 && (output == 0 || output > panel)
 }
 
-func validateBufferingQualityV3(features []string, source, limit string, estimate *int) error {
-	if source == "" && limit == "" {
+func validateBufferingQualityV3(features []string, source, limit string, estimate, observed *int) error {
+	if source == "" && limit == "" && observed == nil {
 		return nil
 	}
 	if !HasFeatureV3(features, FeatureBufferingQualityV1) {
@@ -1602,6 +1610,9 @@ func validateBufferingQualityV3(features []string, source, limit string, estimat
 	}
 	if source != "" && estimate == nil {
 		return errors.New("bandwidth_estimate_source requires bandwidth_estimate_kbps")
+	}
+	if observed != nil && source != BandwidthEstimateObservedRebufferV3 {
+		return errors.New("observed_throughput_kbps requires bandwidth_estimate_source observed_rebuffer")
 	}
 	if limit != "" && limit != LearnedLimitIgnoreV3 && limit != LearnedLimitClearV3 {
 		return errors.New("invalid learned_limit")

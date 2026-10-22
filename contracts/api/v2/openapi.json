@@ -39202,6 +39202,13 @@
             "description": "Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.",
             "type": "boolean"
           },
+          "observed_throughput_kbps": {
+            "description": "What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps.",
+            "format": "int64",
+            "maximum": 1000000,
+            "minimum": 100,
+            "type": "integer"
+          },
           "operation": {
             "enum": [
               "failure_recovery",
@@ -40170,6 +40177,13 @@
             "deprecated": true,
             "description": "Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.",
             "type": "boolean"
+          },
+          "observed_throughput_kbps": {
+            "description": "What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps.",
+            "format": "int64",
+            "maximum": 1000000,
+            "minimum": 100,
+            "type": "integer"
           },
           "playback_attempt_id": {
             "type": "string"

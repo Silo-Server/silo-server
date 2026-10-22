@@ -2001,12 +2001,13 @@ and round-trips a replan without computing an identity is conforming.
 
 ## Buffering quality (native v2)
 
-`buffering_quality_v1` gates two optional start and replan fields. A client
+`buffering_quality_v1` gates three optional start and replan fields. A client
 lists the feature in `client_features` before it sends
 `bandwidth_estimate_source` (`probe` or `observed_rebuffer`, which requires
-`bandwidth_estimate_kbps`) or `learned_limit` (`ignore` or `clear`). A request
+`bandwidth_estimate_kbps`), `observed_throughput_kbps` (100 to 1,000,000, only
+with `observed_rebuffer`) or `learned_limit` (`ignore` or `clear`). A request
 without the feature neither records nor applies learned limits. The frozen v1
-bridge does not negotiate the feature and ignores both fields, as it ignores
+bridge does not negotiate the feature and ignores these fields, as it ignores
 any unknown field.
 
 A learned limit is kept for the authenticated account, `X-Silo-Device-Id` and
@@ -2020,7 +2021,10 @@ profile check the account's registry after their delete commits.
 
 Only a start or replan that the client sent with
 `bandwidth_estimate_source: "observed_rebuffer"` on Auto records a limit, and
-recording restarts its seven days. An estimate without a source, which is how a
+recording restarts its seven days. `observed_throughput_kbps` is the throughput
+the plan that kept buffering received, measured as `plan_summary`
+`throughput_kbps`; the server plans with, and records, the lower of it and
+`bandwidth_estimate_kbps`. An estimate without a source, which is how a
 client repeats its kept step-down estimate on later replans, records nothing.
 A seek reanchor reuses the playing recipe and a seek failure recovery replays
 the stored start request; neither records nor clears a limit.

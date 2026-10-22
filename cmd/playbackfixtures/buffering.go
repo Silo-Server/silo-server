@@ -16,7 +16,8 @@ func goldenBufferingStartRequest() playback.StartRequestV3 {
 }
 
 // goldenBufferingReplanRequest is the lowering a client sends after repeated
-// buffering on Auto: 70% of the delivered bitrate, observed while rebuffering.
+// buffering on Auto: 70% of the delivered bitrate, observed while rebuffering,
+// with the lower throughput the stalled plan measured.
 func goldenBufferingReplanRequest() playback.ReplanRequestV3 {
 	request := goldenReplanRequest()
 	request.ClientFeatures = append(request.ClientFeatures, playback.FeatureBufferingQualityV1)
@@ -26,6 +27,7 @@ func goldenBufferingReplanRequest() playback.ReplanRequestV3 {
 	request.BandwidthCapKbps = nil
 	request.BandwidthEstimateKbps = new(5_600)
 	request.BandwidthEstimateSource = playback.BandwidthEstimateObservedRebufferV3
+	request.ObservedThroughputKbps = new(4_200)
 	return request
 }
 
