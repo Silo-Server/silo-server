@@ -3723,7 +3723,7 @@ func TestHandleReplanPlaybackV3LowerQualityMovesToLowerVersionWithout4KTranscode
 		playback.QualityOriginalV3, "1080p",
 		playback.QualityRung1080pMediumV3, playback.QualityRung1080pLowV3,
 		playback.QualityRung720pHighV3, playback.QualityRung720pMediumV3, playback.QualityRung720pLowV3,
-		"480p", playback.QualityRung480pLowV3, playback.QualityRung360pV3,
+		"480p",
 	}
 	if !reflect.DeepEqual(labels, wantLabels) {
 		t.Fatalf("menu = %v, want %v", labels, wantLabels)
@@ -3812,7 +3812,7 @@ func TestHandleStartPlaybackV3LowerVersionMenuFollowsAdoptedVersion(t *testing.T
 	for _, quality := range plan.AvailableQualities {
 		labels = append(labels, quality.Label)
 	}
-	want := []string{playback.QualityOriginalV3, "720p", playback.QualityRung720pMediumV3, playback.QualityRung720pLowV3, "480p", playback.QualityRung480pLowV3, playback.QualityRung360pV3}
+	want := []string{playback.QualityOriginalV3, "720p", playback.QualityRung720pMediumV3, playback.QualityRung720pLowV3, "480p"}
 	if !reflect.DeepEqual(labels, want) {
 		t.Fatalf("menu = %v, want %v describing the adopted 720p version", labels, want)
 	}

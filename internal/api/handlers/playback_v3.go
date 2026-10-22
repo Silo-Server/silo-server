@@ -7114,13 +7114,18 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 }
 
 // frozenV1DecisionV3 removes what only /api/v2 publishes from a decision
-// written on the frozen /api/v1 surface.
+// written on the frozen /api/v1 surface: active_quality, and the menu rungs
+// below 1.5 Mbps that Auto lowering added after the freeze.
 func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
-	if response.PlaybackPlan != nil && response.PlaybackPlan.ActiveQuality != "" {
-		plan := *response.PlaybackPlan
-		plan.ActiveQuality = ""
-		response.PlaybackPlan = &plan
+	if response.PlaybackPlan == nil {
+		return response
 	}
+	plan := *response.PlaybackPlan
+	plan.ActiveQuality = ""
+	plan.AvailableQualities = slices.DeleteFunc(slices.Clone(plan.AvailableQualities), func(quality playback.AvailableQualityV3) bool {
+		return quality.Label == playback.QualityRung480pLowV3 || quality.Label == playback.QualityRung360pV3
+	})
+	response.PlaybackPlan = &plan
 	return response
 }
 
