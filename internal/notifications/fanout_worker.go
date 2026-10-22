@@ -275,7 +275,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	}
 	// A series arriving with its first episodes, or a movie, tells the
 	// profiles whose watchlist waits for it.
-	arrivals, err := w.captureWatchlistArrivals(ctx, tx, recipients, append(arrivalEvents, fanout...))
+	arrivals, err := w.captureWatchlistArrivals(ctx, tx, recipients, append(arrivalEvents, fanout...), staleCutoff)
 	if err != nil {
 		return 0, err
 	}

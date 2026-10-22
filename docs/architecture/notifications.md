@@ -263,7 +263,12 @@ deliveries. A fresh movie event names the movie; an episode event names its
 series, so a series counts as arrived with its first episode. For each named
 item, `watchlist.Arrivals` finds the profiles with a `user_watchlist_titles`
 entry whose title carries any provider ID the item carries or once carried,
-the matching promotion uses. Each is told unless:
+the matching promotion uses. A profile that read its watchlist between the
+arrival and the fanout (the settle delay) has had that entry promoted onto the
+library watchlist already, so it also counts a library watchlist entry whose
+`added_at`, which promotion keeps from the title entry, predates the item's
+`created_at`, for items created within the staleness horizon. The lookups run
+on the fanout transaction. Each is told unless:
 
 - its notifications are off (the master switch; there is no per-type switch),
 - it may not open the item (the access check episodes use, against any

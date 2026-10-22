@@ -6,6 +6,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Following a title: a profile that finds a title someone else has already
@@ -265,8 +267,8 @@ func (r *Repository) ListRequestFollowers(ctx context.Context, req Request) ([]F
 // fulfilled notification has not gone out, and the notify pass has not given
 // it up (ListFulfilledUnnotified's horizon). tmdbIDs are every TMDB ID the
 // title has held. The watchlist arrival notice leaves these profiles to the
-// request.
-func (r *Repository) AwaitingFulfillment(ctx context.Context, mediaType MediaType, tmdbIDs []int, profiles []Follower) (map[Follower]bool, error) {
+// request. It reads on tx, the notification fanout's transaction.
+func (r *Repository) AwaitingFulfillment(ctx context.Context, tx pgx.Tx, mediaType MediaType, tmdbIDs []int, profiles []Follower) (map[Follower]bool, error) {
 	out := map[Follower]bool{}
 	if len(tmdbIDs) == 0 || len(profiles) == 0 {
 		return out, nil
@@ -276,7 +278,7 @@ func (r *Repository) AwaitingFulfillment(ctx context.Context, mediaType MediaTyp
 	for i, f := range profiles {
 		userIDs[i], profileIDs[i] = f.UserID, f.ProfileID
 	}
-	rows, err := r.pool.Query(ctx, `
+	rows, err := tx.Query(ctx, `
 		SELECT p.user_id, p.profile_id
 		FROM unnest($3::int[], $4::text[]) AS p(user_id, profile_id)
 		WHERE EXISTS (

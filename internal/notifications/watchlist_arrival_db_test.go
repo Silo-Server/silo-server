@@ -7,17 +7,18 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/watchlist"
 )
 
 // TestWatchlistArrivalTellsEachWatcherOnce covers the watchlist arrival
 // notice: a series arriving tells the profiles whose watchlist waits for it,
-// matched by any TMDB ID the title held, once each, and leaves out the
-// profiles a request of the title tells instead (its requester and followers,
-// or a profile it already told), profiles with notifications off, and
-// profiles that may not open the series.
+// matched by any TMDB ID the title held, once each, and also tells a profile
+// whose entry promotion already moved onto the library watchlist. It leaves
+// out a profile that added the series after it arrived, the profiles a
+// request of the title tells instead (its requester and followers, or a
+// profile it already told), profiles with notifications off, and profiles
+// that may not open the series.
 func TestWatchlistArrivalTellsEachWatcherOnce(t *testing.T) {
 	pool := inboxPageDB(t)
 	ctx := t.Context()
@@ -31,6 +32,7 @@ func TestWatchlistArrivalTellsEachWatcherOnce(t *testing.T) {
 		{`CREATE TABLE watchlist_titles (LIKE public.watchlist_titles INCLUDING ALL);
 		  CREATE TABLE watchlist_title_aliases (LIKE public.watchlist_title_aliases INCLUDING ALL);
 		  CREATE TABLE user_watchlist_titles (LIKE public.user_watchlist_titles INCLUDING ALL);
+		  CREATE TABLE user_watchlist (LIKE public.user_watchlist INCLUDING ALL);
 		  CREATE TABLE media_requests (LIKE public.media_requests INCLUDING ALL);
 		  CREATE TABLE media_request_follows (LIKE public.media_request_follows INCLUDING ALL)`, nil},
 		{`UPDATE media_items SET tmdb_id = $2 WHERE content_id = $1`, []any{c.series, "424242"}},
@@ -40,6 +42,11 @@ func TestWatchlistArrivalTellsEachWatcherOnce(t *testing.T) {
 		{`INSERT INTO user_watchlist_titles (user_id, profile_id, title_id) VALUES
 			(1, 'watcher', 1), (2, 'watcher', 1), (1, 'requester', 1), (1, 'follower', 1),
 			(1, 'told', 1), (1, 'off', 1), (1, 'blocked', 1)`, nil},
+		// Promotion moved one entry onto the library watchlist before fanout
+		// ran, keeping the entry's added_at; another profile added the
+		// series once it was in the library.
+		{`INSERT INTO user_watchlist (user_id, profile_id, media_item_id, added_at) VALUES
+			(1, 'promoted', $1, now() - interval '1 day'), (1, 'later', $1, now() + interval '1 minute')`, []any{c.series}},
 		// The open request was made under the title's former TMDB ID.
 		{`INSERT INTO media_requests (id, media_type, tmdb_id, title, status, requested_by_user_id, requested_by_profile_id)
 			VALUES ('req-open', 'series', $1, 'Series', 'approved', 1, 'requester')`, []any{formerTMDB}},
@@ -56,10 +63,10 @@ func TestWatchlistArrivalTellsEachWatcherOnce(t *testing.T) {
 	}
 
 	worker := newAccessFanoutWorker(pool, scopeByProfile{
-		"watcher": {}, "requester": {}, "follower": {}, "told": {}, "off": {},
+		"watcher": {}, "requester": {}, "follower": {}, "told": {}, "off": {}, "promoted": {}, "later": {},
 		"blocked": {AllowedLibraryIDs: []int{c.otherLibrary + 1}},
 	})
-	worker.watchlist = watchlist.NewArrivals(pool, catalog.NewItemRepository(pool))
+	worker.watchlist = &watchlist.Arrivals{}
 	worker.requests = requests.NewRepository(pool, nil)
 	arrivals := func() []string {
 		t.Helper()
@@ -70,7 +77,7 @@ func TestWatchlistArrivalTellsEachWatcherOnce(t *testing.T) {
 	if _, err := worker.processBatch(ctx); err != nil {
 		t.Fatalf("processBatch: %v", err)
 	}
-	want := []string{"1/watcher", "2/watcher"}
+	want := []string{"1/promoted", "1/watcher", "2/watcher"}
 	if got := arrivals(); !slices.Equal(got, want) {
 		t.Fatalf("watchlist arrivals = %v, want %v", got, want)
 	}
@@ -107,7 +114,7 @@ func TestWatchlistArrivalTellsEachWatcherOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	nextEvent("event-3", 4)
-	want = []string{"1/follower", "1/requester", "1/watcher", "2/watcher"}
+	want = []string{"1/follower", "1/promoted", "1/requester", "1/watcher", "2/watcher"}
 	if got := arrivals(); !slices.Equal(got, want) {
 		t.Fatalf("watchlist arrivals after the decline = %v, want %v", got, want)
 	}
