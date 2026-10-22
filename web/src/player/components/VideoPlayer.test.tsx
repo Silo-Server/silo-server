@@ -5853,15 +5853,23 @@ describe("VideoPlayer hls.js request timeouts", () => {
   /**
    * A player that has played, met `beforeWait` and is waiting, with too
    * little buffered to be the renderer's wait. Its media keeps receiving data
-   * slowly, through hls.js fragments or the browser engine's reads, until
-   * `silentFor` ms before the wait; `setEnd` moves the end of the buffered
-   * media.
+   * slowly, through hls.js fragments (at `kbps`) or the browser engine's
+   * reads, until `silentFor` ms before the wait; `setEnd` moves the end of
+   * the buffered media.
    */
   async function waitingAfter({
     beforeWait = () => {},
     transport = "hls.js",
     silentFor,
-  }: { beforeWait?: () => void; transport?: "hls.js" | "engine"; silentFor?: number } = {}) {
+    kbps,
+    props,
+  }: {
+    beforeWait?: () => void;
+    transport?: "hls.js" | "engine";
+    silentFor?: number;
+    kbps?: number;
+    props?: Partial<Parameters<typeof VideoPlayer>[0]>;
+  } = {}) {
     const qualities = {
       available_qualities: [
         { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
@@ -5879,6 +5887,7 @@ describe("VideoPlayer hls.js request timeouts", () => {
     const rendered = renderPlayer({
       bufferingMode: "ask",
       qualityPreference: "auto",
+      ...props,
       ...(transport === "engine"
         ? {
             plan: fixturePlanV3({
@@ -5924,7 +5933,7 @@ describe("VideoPlayer hls.js request timeouts", () => {
       silence = () => {
         receiving = false;
       };
-    } else silence = loadingFragment();
+    } else silence = loadingFragment(kbps);
     markPlaying(video);
     fireEvent.playing(video);
     act(() => vi.advanceTimersByTime(20_000));
@@ -5968,6 +5977,32 @@ describe("VideoPlayer hls.js request timeouts", () => {
     ["a failed subtitle segment", { details: "fragLoadError", frag: { type: "subtitle" } }, true],
   ])("after %s, prompts: %s", async (_name, error, prompts) => {
     expect((await stallAfterError(error)) !== null).toBe(prompts);
+  });
+
+  // C3: a lowering says what the plan's media arrived at, except after the
+  // browser changed networks while the plan played.
+  it.each<[string, boolean, number | undefined]>([
+    ["carries", false, 2_000],
+    ["leaves out after a network change", true, undefined],
+  ])("a lowering %s the plan's measured throughput", async (_name, networkChanged, kbps) => {
+    const onQualitySelect = vi.fn();
+    const { setEnd } = await waitingAfter({
+      kbps: 2_000,
+      props: { onQualitySelect },
+      beforeWait: () => {
+        if (!networkChanged) return;
+        window.dispatchEvent(new Event("offline"));
+        window.dispatchEvent(new Event("online"));
+      },
+    });
+    // Media arriving ends the outage a network change begins.
+    setEnd(0.4);
+    act(() => hlsJS.latest?.emit("bufferAppended", { parent: "main" }));
+    act(() => vi.advanceTimersByTime(7_000));
+    fireEvent.click(prompt()!);
+    expect(
+      onQualitySelect.mock.calls.map(([, , request]) => request.observed_throughput_kbps),
+    ).toEqual([kbps]);
   });
 
   // C1: a wait is an outage once no media data has arrived for 4 s on the
