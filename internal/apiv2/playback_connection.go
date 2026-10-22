@@ -95,6 +95,7 @@ type PlaybackProbeResultsInput struct {
 		DurationMS int    `json:"duration_ms" minimum:"1" maximum:"60000"`
 		Transport  string `json:"transport" enum:"wifi,ethernet,cellular,other"`
 		LowerBound bool   `json:"lower_bound,omitempty" doc:"The test proved only that the link carries at least kbps: a quick test that reached its target, or a rate above the bound."`
+		Manual     bool   `json:"manual,omitempty" doc:"The viewer started this test with Test speed; never set for the automatic test. A manual result above the device's learned limit on this connection clears the limit, as a reset does."`
 	}
 }
 
@@ -104,7 +105,7 @@ func registerPlaybackProbeResults(reg *Registry) {
 		if !ok {
 			return nil, unavailable("connection observations")
 		}
-		err := service.ReportPlaybackProbe(ctx, in.DeviceID, connectionstore.ProbeResult{Kbps: in.Body.Kbps, Bytes: in.Body.Bytes, DurationMS: in.Body.DurationMS, Transport: in.Body.Transport, LowerBound: in.Body.LowerBound})
+		err := service.ReportPlaybackProbe(ctx, in.DeviceID, connectionstore.ProbeResult{Kbps: in.Body.Kbps, Bytes: in.Body.Bytes, DurationMS: in.Body.DurationMS, Transport: in.Body.Transport, LowerBound: in.Body.LowerBound, Manual: in.Body.Manual})
 		if err != nil {
 			return nil, playbackProblem(err)
 		}

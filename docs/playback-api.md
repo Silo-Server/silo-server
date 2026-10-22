@@ -502,12 +502,15 @@ the budget is absent.
 limit and returns 204.
 
 `POST /api/v2/playback/bandwidth-probe/results` (`connection_speed_v1`)
-accepts `{kbps, bytes, duration_ms, transport, lower_bound}` and returns 204.
-Bounds are 100–1,000,000 kbps (those of `bandwidth_estimate_kbps`),
-1–1,000,000,000 bytes and 1–60,000 milliseconds; `transport` is `wifi`,
-`ethernet`, `cellular` or `other`; the optional
+accepts `{kbps, bytes, duration_ms, transport, lower_bound, manual}` and
+returns 204. Bounds are 100–1,000,000 kbps (those of
+`bandwidth_estimate_kbps`), 1–1,000,000,000 bytes and 1–60,000 milliseconds;
+`transport` is `wifi`, `ethernet`, `cellular` or `other`; the optional
 `lower_bound` (default `false`) marks a result that proves only "at least
-`kbps`". The server keeps the latest result per device and connection.
+`kbps`". The optional `manual` (default `false`) marks a test the viewer
+started with **Test speed**; a manual result above the learned limit for the
+device and connection clears the limit, as the reset does. The server keeps
+the latest result per device and connection.
 
 A `plan_summary` route event may carry the diagnostics key `throughput_kbps`,
 the rate the plan's media requests received data. The server keeps the highest

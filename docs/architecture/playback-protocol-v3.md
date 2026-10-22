@@ -2021,7 +2021,7 @@ profile check the account's registry after their delete commits.
 
 Only a start or replan that the client sent with
 `bandwidth_estimate_source: "observed_rebuffer"` on Auto records a limit, and
-recording restarts its seven days. `observed_throughput_kbps` is the throughput
+recording restarts its 24 hours. `observed_throughput_kbps` is the throughput
 the plan that kept buffering received, measured as `plan_summary`
 `throughput_kbps`; the server plans with, and records, the lower of it and
 `bandwidth_estimate_kbps`. An estimate without a source, which is how a

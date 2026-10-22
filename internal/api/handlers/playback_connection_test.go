@@ -78,7 +78,7 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	if limit, err := h.applyLearnedLimit(r, &lowered, true); err != nil || limit == nil || limit.Kbps != 44100 {
 		t.Fatalf("client lowering: limit=%+v err=%v", limit, err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 day' WHERE user_id = $1`, user); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 hour' WHERE user_id = $1`, user); err != nil {
 		t.Fatal(err)
 	}
 	_, before, _ := stored()
@@ -177,7 +177,7 @@ func requireSeekRecoveryKeepsLimitV3(t *testing.T, pool *pgxpool.Pool, user int,
 	if stalled.EffectiveMediaFileID != alternate.ID {
 		t.Fatalf("the stall played file %d, want the lower version %d", stalled.EffectiveMediaFileID, alternate.ID)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 day' WHERE user_id = $1`, user); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 hour' WHERE user_id = $1`, user); err != nil {
 		t.Fatal(err)
 	}
 	_, before, _ := stored()
