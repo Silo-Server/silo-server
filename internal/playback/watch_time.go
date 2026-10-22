@@ -66,10 +66,14 @@ func (w *WatchTime) Observe(position float64, paused bool, now time.Time) {
 
 	elapsed := secondsBetween(w.Until, now)
 	if !w.pausedAt.IsZero() {
-		// The player played until the confirmed pause and was paused after
-		// it, so only the time before it can explain the position advance.
-		w.PausedSeconds += secondsBetween(w.pausedAt, now)
-		elapsed = secondsBetween(w.Until, w.pausedAt)
+		if paused {
+			// The player played until the confirmed pause and was paused
+			// after it, so only the time before it can explain the advance.
+			w.PausedSeconds += secondsBetween(w.pausedAt, now)
+			elapsed = secondsBetween(w.Until, w.pausedAt)
+		}
+		// Otherwise it resumed at some unknown point since, and the whole
+		// interval is judged as playing.
 		w.pausedAt = time.Time{}
 	}
 	if w.lastPaused {
@@ -87,9 +91,10 @@ func (w *WatchTime) Observe(position float64, paused bool, now time.Time) {
 }
 
 // Pause records that the player confirmed a pause at now without reporting
-// where it held. The next sample supplies the position: the advance to it is
-// judged against the playing time before now, and the time after now counts
-// as paused, so a seek made while paused is not credited as viewing.
+// where it held. If the next sample is still paused, it supplies that
+// position: the advance to it is judged against the playing time before now,
+// and the time after now counts as paused, so a seek made while paused is not
+// credited as viewing.
 func (w *WatchTime) Pause(now time.Time) {
 	if w.Measured && !w.lastPaused && w.pausedAt.IsZero() {
 		w.pausedAt = now

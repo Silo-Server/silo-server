@@ -61,6 +61,11 @@ func TestWatchTimeObserve(t *testing.T) {
 			samples:    []sample{{0, 0, false, false}, {10, 0, true, true}, {100, 100, true, false}},
 			wantPaused: 90,
 		},
+		{
+			name:       "a resume before the next sample keeps the viewing after it",
+			samples:    []sample{{0, 0, false, false}, {2, 0, true, true}, {10, 9, false, false}},
+			wantPlayed: 9,
+		},
 	}
 
 	base := time.Date(2026, 1, 1, 20, 0, 0, 0, time.UTC)
