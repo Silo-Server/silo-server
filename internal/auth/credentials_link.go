@@ -89,7 +89,11 @@ func confirmLocalPassword(ctx context.Context, users OAuthUserReader, userID int
 	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
 		return nil, ErrPasswordLoginDisabled
 	}
-	if !CheckPassword(user, password) {
+	ok, err := CheckPassword(ctx, user, password)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, ErrLinkTicketPassword
 	}
 	return user, nil

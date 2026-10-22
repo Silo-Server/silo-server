@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -144,12 +145,14 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 			return nil, fmt.Errorf("%w: use password#pin format to access PIN-protected profiles", ErrProfileHasPIN)
 		}
 		// A locked profile fails like a wrong PIN: Jellyfin clients have no
-		// lockout response, so only the message says why.
+		// lockout response, so only the message says why. The check waits
+		// for a hashing turn ahead of sign-ins, then reads the PIN hash
+		// current at that moment: the session carries no PIN revision.
 		attemptKey := ratelimit.ProfilePINKey(user.ID, profile.ID)
 		if _, ok := r.pinAttempts.Reserve(ctx, attemptKey); !ok {
 			return nil, fmt.Errorf("%w: too many incorrect PINs for profile %s; try again later", ErrInvalidPIN, profile.Name)
 		}
-		valid, verifyErr := store.VerifyPIN(ctx, profile.ID, pinCandidate)
+		valid, verifyErr := checkProfilePIN(ctx, store, profile.ID, pinCandidate)
 		if verifyErr != nil {
 			return nil, fmt.Errorf("verifying profile PIN: %w", verifyErr)
 		}
@@ -321,6 +324,25 @@ func parseProfileLogin(username string) (accountUsername string, profileName str
 	return accountUsername, profileName, true, nil
 }
 
+// checkProfilePIN compares pin with the profile's PIN hash as stored when a
+// hashing turn comes (passwordhash.AdmitAhead), so a PIN changed while the
+// check waited is the one compared.
+func checkProfilePIN(ctx context.Context, store userstore.UserStore, profileID, pin string) (bool, error) {
+	permit, err := passwordhash.AdmitAhead(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer permit.Release()
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil {
+		return false, err
+	}
+	if profile == nil || profile.PINHash == "" {
+		return false, fmt.Errorf("profile %s has no PIN", profileID)
+	}
+	return permit.Matches([]byte(profile.PINHash), []byte(pin))
+}
+
 func selectProfile(accountUsername, requestedProfile string, hasExplicitProfile bool, profiles []upstreamProfile) (upstreamProfile, error) {
 	if hasExplicitProfile {
 		return selectNamedProfile(requestedProfile, profiles)
@@ -404,6 +426,9 @@ func mapLoginError(err error) (int, string, string) {
 	if errors.Is(err, ErrProfileRequired) || errors.Is(err, ErrProfileNotFound) || errors.Is(err, ErrProfileAmbiguous) || errors.Is(err, ErrProfileHasPIN) || errors.Is(err, ErrInvalidPIN) || errors.Is(err, auth.ErrPasswordChangeRequired) {
 		return http.StatusUnauthorized, loginErrorCode, err.Error()
 	}
+	if errors.Is(err, passwordhash.ErrBusy) {
+		return http.StatusServiceUnavailable, "ServiceUnavailable", "The server is busy; try again in a moment"
+	}
 	return http.StatusInternalServerError, "ServerError", "Unexpected login failure"
 }
 
@@ -417,6 +442,9 @@ func mapAuthError(err error) error {
 		return fmt.Errorf("%w: sign in to Silo to replace your temporary password", err)
 	}
 	switch {
+	case errors.Is(err, passwordhash.ErrBusy):
+		// Never a wrong password: mapLoginError answers 503.
+		return err
 	case errors.Is(err, auth.ErrProviderUnavailable):
 		return &HTTPError{StatusCode: http.StatusServiceUnavailable, Message: "The sign-in provider is unavailable"}
 	case errors.Is(err, auth.ErrLocalLoginDisabled), errors.Is(err, auth.ErrNotPermitted),

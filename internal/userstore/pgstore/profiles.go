@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -202,7 +203,7 @@ func updateProfile(
 			// Empty string clears the PIN rather than hashing an empty value.
 			addArg("pin_hash", "")
 		} else {
-			hash, err := bcrypt.GenerateFromPassword([]byte(*u.PIN), bcrypt.DefaultCost)
+			hash, err := passwordhash.Generate(ctx, []byte(*u.PIN), bcrypt.DefaultCost)
 			if err != nil {
 				return fmt.Errorf("hashing PIN: %w", err)
 			}
@@ -429,32 +430,6 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 	}
 
 	return tx.Commit(ctx)
-}
-
-func (s *PostgresUserStore) VerifyPIN(ctx context.Context, profileID, pin string) (bool, error) {
-	var pinHash string
-	err := s.pool.QueryRow(ctx,
-		"SELECT pin_hash FROM user_profiles WHERE user_id = $1 AND id = $2",
-		s.userID, profileID,
-	).Scan(&pinHash)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, fmt.Errorf("profile %s not found", profileID)
-	}
-	if err != nil {
-		return false, fmt.Errorf("querying PIN hash for profile %s: %w", profileID, err)
-	}
-	if pinHash == "" {
-		return false, fmt.Errorf("profile %s has no PIN set", profileID)
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(pinHash), []byte(pin))
-	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("comparing PIN for profile %s: %w", profileID, err)
-	}
-	return true, nil
 }
 
 // deleteProfileSectionOverrides takes a profile's entries out of the account's

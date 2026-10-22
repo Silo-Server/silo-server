@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -456,7 +457,10 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	// failed hash must not leave behind a profile that can be used without proof.
 	var pinHash string
 	if req.PIN != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(req.PIN), bcrypt.DefaultCost)
+		hash, err := passwordhash.Generate(ctx, []byte(req.PIN), bcrypt.DefaultCost)
+		if apiErr := busyError(err); apiErr != nil {
+			return none, apiErr
+		}
 		if err != nil {
 			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set profile PIN")
 		}
@@ -683,6 +687,9 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 	if err := h.applyProfileUpdateSettingsSync(
 		ctx, store, userID, profileID, input, settingsSync,
 	); err != nil {
+		if apiErr := busyError(err); apiErr != nil {
+			return none, apiErr
+		}
 		slog.ErrorContext(ctx, "profile update failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
@@ -961,12 +968,18 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 
 	// The attempt is counted before the PIN is checked, so concurrent
 	// guesses cannot overrun the limit, and while the profile is locked even
-	// the right PIN is refused.
+	// the right PIN is refused. The check then waits for a hashing turn ahead
+	// of sign-ins, and compares against the hash read with the revision above.
 	attemptKey := ratelimit.ProfilePINKey(cmd.UserID, cmd.ProfileID)
 	if retryAfter, ok := h.PINAttempts.Reserve(ctx, attemptKey); !ok {
 		return none, PINLockedError(retryAfter)
 	}
-	valid, err := store.VerifyPIN(ctx, cmd.ProfileID, cmd.PIN)
+	permit, err := passwordhash.AdmitAhead(ctx)
+	if apiErr := busyError(err); apiErr != nil {
+		return none, apiErr
+	}
+	valid, err := permit.Matches([]byte(profile.PINHash), []byte(cmd.PIN))
+	permit.Release()
 	if err != nil {
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
 	}

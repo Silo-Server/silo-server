@@ -27,6 +27,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -941,6 +942,10 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
 			return
 		}
+		if apiErr := busyError(err); apiErr != nil {
+			writeAPIError(w, apiErr)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create user")
 		return
 	}
@@ -1089,6 +1094,8 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusNotFound, "not_found", "User not found")
 		case auth.IsDuplicate(err):
 			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
+		case errors.Is(err, passwordhash.ErrBusy):
+			writeAPIError(w, busyError(err))
 		default:
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		}

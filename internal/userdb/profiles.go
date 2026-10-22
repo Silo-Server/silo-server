@@ -1,6 +1,7 @@
 package userdb
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -155,20 +157,22 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 // UpdateProfile applies partial updates to a profile. Only non-nil fields
 // in the UpdateProfileInput are changed. If PIN is provided, it is bcrypt-hashed
 // before storage.
-func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
+func UpdateProfile(ctx context.Context, db *sql.DB, id string, u UpdateProfileInput) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("beginning transaction for profile update %s: %w", id, err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if err := updateProfile(tx, id, u); err != nil {
+	if err := updateProfile(ctx, tx, id, u); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileInput) error {
+// profileUpdateSet builds the SET clauses and arguments for the fields u
+// changes, hashing a new PIN.
+func profileUpdateSet(ctx context.Context, u UpdateProfileInput) ([]string, []any, error) {
 	var setClauses []string
 	var args []any
 
@@ -186,9 +190,9 @@ func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileIn
 			setClauses = append(setClauses, "pin_hash = ?")
 			args = append(args, "")
 		} else {
-			hash, err := bcrypt.GenerateFromPassword([]byte(*u.PIN), bcrypt.DefaultCost)
+			hash, err := passwordhash.Generate(ctx, []byte(*u.PIN), bcrypt.DefaultCost)
 			if err != nil {
-				return fmt.Errorf("hashing PIN: %w", err)
+				return nil, nil, fmt.Errorf("hashing PIN: %w", err)
 			}
 			setClauses = append(setClauses, "pin_hash = ?")
 			args = append(args, string(hash))
@@ -258,7 +262,14 @@ func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileIn
 		setClauses = append(setClauses, "max_playback_quality = ?")
 		args = append(args, *u.MaxPlaybackQuality)
 	}
+	return setClauses, args, nil
+}
 
+func updateProfile(ctx context.Context, exec preferenceSettingsExecutor, id string, u UpdateProfileInput) error {
+	setClauses, args, err := profileUpdateSet(ctx, u)
+	if err != nil {
+		return err
+	}
 	if len(setClauses) == 0 && u.AllowedLibraryIDs == nil {
 		return nil // nothing to update
 	}
@@ -394,30 +405,4 @@ func DeleteProfile(db *sql.DB, id string) error {
 	}
 
 	return tx.Commit()
-}
-
-// VerifyPIN checks a plaintext PIN against the bcrypt hash stored for a
-// profile. Returns true if the PIN matches, false otherwise. Returns an
-// error if the profile is not found or has no PIN set.
-func VerifyPIN(db *sql.DB, profileID string, pin string) (bool, error) {
-	var pinHash string
-	err := db.QueryRow("SELECT pin_hash FROM profiles WHERE id = ?", profileID).Scan(&pinHash)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, fmt.Errorf("profile %s not found", profileID)
-	}
-	if err != nil {
-		return false, fmt.Errorf("querying PIN hash for profile %s: %w", profileID, err)
-	}
-	if pinHash == "" {
-		return false, fmt.Errorf("profile %s has no PIN set", profileID)
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(pinHash), []byte(pin))
-	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("comparing PIN for profile %s: %w", profileID, err)
-	}
-	return true, nil
 }

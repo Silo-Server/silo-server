@@ -7,6 +7,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
@@ -149,6 +150,8 @@ func passwordResetProblem(err error) *Problem {
 		return passwordMemberProblem("Use at least 8 characters.")
 	case errors.Is(err, auth.ErrPasswordTooLong):
 		return passwordMemberProblem("Use at most 72 bytes.")
+	case errors.Is(err, passwordhash.ErrBusy):
+		return passwordHashBusyProblem()
 	}
 	return NewProblem(TypeInternalError, "Unable to process the password reset.")
 }

@@ -302,6 +302,8 @@ linters:
       forbid:
         - pattern: '^time\.Sleep$'
           msg: Wait on observable state; timing tests require a reasoned nolint.
+        - pattern: '^bcrypt\.(GenerateFromPassword|CompareHashAndPassword)$'
+          msg: Hash and compare through internal/auth/passwordhash, which bounds how many run at once.
       analyze-types: true
       exclude-godoc-examples: false
 
@@ -369,6 +371,12 @@ linters:
           - errchkjson
       # Sleeps in production are not test synchronization.
       - path-except: _test\.go$
+        text: Wait on observable state
+        linters:
+          - forbidigo
+      # Tests hash directly; production goes through passwordhash's limit.
+      - path: (_test\.go$|^internal/auth/passwordhash/)
+        text: internal/auth/passwordhash, which bounds
         linters:
           - forbidigo
       # Allow repeated strings in test files

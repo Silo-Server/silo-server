@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -39,6 +40,9 @@ var (
 	// records) because the store failed or timed out. The refresh token was
 	// not judged: the session stays valid and the caller retries later.
 	ErrSessionCheckUnavailable = errors.New("login session could not be checked")
+	// ErrSignupSessionStart reports a signup whose account was created but
+	// whose sign-in failed: repeating the signup cannot succeed.
+	ErrSignupSessionStart = errors.New("account created but login failed")
 )
 
 // SessionCheckRetryAfterSeconds is the Retry-After of every answer to a
@@ -696,6 +700,14 @@ func (s *Service) loginWithProvider(
 		err        error
 	)
 	if plugin, ok := provider.(*PluginProvider); ok {
+		// A name without a local account goes to the directory and costs no
+		// hash, so take a turn anyway: under load, every name answers
+		// passwordhash.ErrBusy, not only those with local accounts.
+		var permit *passwordhash.Permit
+		if permit, err = passwordhash.Admit(ctx); err != nil {
+			return nil, nil, err
+		}
+		permit.Release()
 		user, identityID, err = plugin.authenticateCredentials(ctx, creds, 0)
 	} else {
 		user, err = provider.Authenticate(ctx, creds)
@@ -913,7 +925,11 @@ func (s *Service) Signup(
 	}
 
 	// Log them in to create a session and return tokens.
-	return s.Login(ctx, username, password, deviceName, ip)
+	pair, user, err := s.Login(ctx, username, password, deviceName, ip)
+	if err != nil {
+		return nil, nil, errors.Join(ErrSignupSessionStart, err)
+	}
+	return pair, user, nil
 }
 
 // SetupWizardCompleted reports whether the first-run setup wizard recorded
@@ -1245,7 +1261,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 	if err != nil {
 		return fmt.Errorf("getting user: %w", err)
 	}
-	if err := validatePasswordChange(user, currentPassword, newPassword); err != nil {
+	if err := validatePasswordChange(ctx, user, currentPassword, newPassword); err != nil {
 		return err
 	}
 
@@ -1261,11 +1277,15 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 	return nil
 }
 
-func validatePasswordChange(user *models.User, currentPassword, newPassword string) error {
+func validatePasswordChange(ctx context.Context, user *models.User, currentPassword, newPassword string) error {
 	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
 		return ErrPasswordLoginDisabled
 	}
-	if !CheckPassword(user, currentPassword) {
+	ok, err := CheckPassword(ctx, user, currentPassword)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return ErrCurrentPasswordInvalid
 	}
 	if err := ValidateNewPassword(newPassword); err != nil {

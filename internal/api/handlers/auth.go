@@ -237,6 +237,9 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 		if errors.Is(err, auth.ErrUserDisabled) {
 			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
 		}
+		if apiErr := busyError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		if apiErr := externalSignInError(err); apiErr != nil {
 			return TokenPairView{}, apiErr
 		}
@@ -277,6 +280,9 @@ func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) 
 			return TokenPairView{}, apiError(http.StatusForbidden, "not_permitted", "This device is not permitted to sign in to this server")
 		case errors.Is(err, auth.ErrUserDisabled):
 			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
+		}
+		if apiErr := busyError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
 		}
 		if apiErr := externalSignInError(err); apiErr != nil {
 			return TokenPairView{}, apiErr

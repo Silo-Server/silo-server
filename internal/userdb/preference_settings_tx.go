@@ -77,11 +77,11 @@ func (tx *preferenceSettingsTx) ListSettings(_ context.Context) ([]userstore.Set
 }
 
 func (tx *preferenceSettingsTx) UpdateProfile(
-	_ context.Context,
+	ctx context.Context,
 	id string,
 	u userstore.UpdateProfileInput,
 ) error {
-	return updateProfile(tx.exec, id, u)
+	return updateProfile(ctx, tx.exec, id, u)
 }
 
 func (tx *preferenceSettingsTx) SetSubtitlePreference(_ context.Context, pref userstore.SubtitlePreference) error {

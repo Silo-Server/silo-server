@@ -9,6 +9,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/invitations"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -191,6 +192,8 @@ func invitationProblem(err error, public bool) *Problem {
 		return NewProblem(TypeCapabilityNotConfigured, "Email is not configured; create a link instead.")
 	case errors.Is(err, invitations.ErrNoLinkBase):
 		return NewProblem(TypeCapabilityNotConfigured, "Invitation links are not configured.")
+	case errors.Is(err, passwordhash.ErrBusy):
+		return passwordHashBusyProblem()
 	default:
 		return NewProblem(TypeInternalError, "Unable to process invitation.")
 	}

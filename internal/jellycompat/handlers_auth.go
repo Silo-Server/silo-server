@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -183,6 +185,9 @@ func (h *AuthHandler) HandleAuthenticateByName(w http.ResponseWriter, r *http.Re
 
 	session, err := h.loginResolver.Resolve(r.Context(), req.Username, password, r.UserAgent(), clientip.FromContext(r.Context()))
 	if err != nil {
+		if errors.Is(err, passwordhash.ErrBusy) {
+			w.Header().Set("Retry-After", strconv.Itoa(passwordhash.RetryAfterSeconds))
+		}
 		status, code, message := mapLoginError(err)
 		writeError(w, status, code, message)
 		return

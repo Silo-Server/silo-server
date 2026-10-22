@@ -368,6 +368,33 @@ Direct connections and requests through a network access provider, whose plugin 
 header itself, spend only the per-client budget. An exhausted budget answers 429 with
 `Retry-After`.
 
+### When the server is too busy to check a password
+
+Every bcrypt hash and comparison, for account passwords and profile PINs alike, runs
+under one limit per server process (`internal/auth/passwordhash`). At most half the
+process's processors hash at once (`GOMAXPROCS`, which follows a container CPU limit;
+at least one), and up to four requests per slot wait for a turn, for at most two
+seconds. A request beyond that is refused before its password or PIN is checked, so on
+a server with more than one processor a burst of sign-ins cannot take every core from
+playback and the rest of the API.
+
+The refusal is `503` with `Retry-After: 1`: v2 `dependency_unavailable`, v1 error code
+`service_unavailable`, Jellyfin `ServiceUnavailable`, and a plain `503` on the
+Audiobookshelf listener. It never answers as a wrong password, and every sign-in name
+gets the same answer whether or not it has an account. Password sign-in, password
+changes and resets, setup, signup, invitation acceptance, account creation and edits by
+an administrator, credential linking, and setting a profile PIN all answer this way;
+clients retry after the delay. A signup or invitation acceptance whose account was
+already created when its sign-in was refused answers as before (`500`, or
+`sign_in_required` from v2 invitation acceptance), since repeating it cannot succeed. A
+first OAuth sign-in that has to create the account fails with `login_failed`, and the
+person starts it again.
+
+Profile PIN checks wait in a queue of their own that takes every other turn, so a burst
+of sign-ins does not keep a signed-in household from switching profiles; see
+[Profile PINs](#profile-pins). A Jellyfin or Audiobookshelf sign-in with `password#PIN`
+still checks the password first and can be refused with it.
+
 ## Authenticated account allowance
 
 Authenticated routes also spend one `account:<user_id>` budget, shared across the
@@ -421,7 +448,10 @@ right PIN included, so the lockout cannot be bypassed by guessing on. A correct 
 while not locked clears the count, and so does setting or removing the profile's PIN.
 A count that never reaches five expires five minutes after its first attempt.
 Attempts are counted before the PIN is compared, so concurrent guesses cannot overrun
-the limit.
+the limit. The check then waits for a hashing turn in its own queue, ahead of
+sign-ins ([when the server is too busy](#when-the-server-is-too-busy-to-check-a-password)).
+When that queue is full or no turn comes within two seconds it answers that `503`, and
+the attempt counts like any other; clients still must not replay a check automatically.
 
 A locked check answers 429 with `Retry-After` giving the seconds left:
 
