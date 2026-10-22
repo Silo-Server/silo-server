@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,4 +154,113 @@ func TestDeletedProfileCompatSessionsEndPostgres(t *testing.T) {
 	if _, err := store.Lookup(ctx, tokens[keptProfile]); err != nil {
 		t.Fatalf("session of the other profile: %v", err)
 	}
+}
+
+// TestSignInRacingProfileDeleteKeepsNoSessionPostgres: a password sign-in
+// that read the profile list before the profile was deleted, and stores its
+// session after the delete purged the profile's sessions, is refused and
+// keeps no session. If dropping that session fails, the sign-in fails as a
+// server error whose message carries no storage detail.
+func TestSignInRacingProfileDeleteKeepsNoSessionPostgres(t *testing.T) {
+	pool, suffix := jellyfin12CompatPool(t)
+	ctx := context.Background()
+	users := auth.NewUserRepository(pool)
+	loginSessions := auth.NewSessionRepository(pool)
+	svc := auth.NewService(auth.NewLocalProvider(users, loginSessions), auth.NewJWTService("jellycompat-login-test-secret-0123456789", time.Minute, time.Hour),
+		loginSessions, users, nil, nil, nil)
+	cipher, err := secret.New([]byte("jellycompat-profile-delete-key-0123456789"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const password = "correct horse battery"
+	storageErr := errors.New("dial tcp 10.0.0.5:5432: connection refused")
+
+	for _, tc := range []struct {
+		name      string
+		deleteErr error
+	}{
+		{name: "dropped"},
+		{name: "drop fails", deleteErr: storageErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := fmt.Sprintf("jfdeleteracing-%d-%s", suffix, strings.ReplaceAll(tc.name, " ", "-"))
+			user, err := users.Create(ctx, models.CreateUserInput{Username: name, Email: name + "@example.test", Password: password, Role: models.RoleUser})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID) })
+			stores := pgstore.NewPostgresProvider(pool)
+			profiles, err := stores.ForUser(ctx, user.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kid := uuid.NewString()
+			for _, p := range []userstore.Profile{{ID: uuid.NewString(), Name: "Main", IsPrimary: true}, {ID: kid, Name: "Kid"}} {
+				if err := profiles.CreateProfile(ctx, p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var repo sessionPersistence = NewSessionRepository(pool, cipher)
+			if tc.deleteErr != nil {
+				repo = failingDelete{sessionPersistence: repo, err: tc.deleteErr}
+			}
+			resolver := NewLoginResolver(svc, deleteAfterListing{UserStoreProvider: stores, profileID: kid},
+				NewPersistentSessionStore(time.Hour, nil, repo), nil, nil)
+
+			_, err = resolver.Resolve(ctx, name+"#Kid", password, "test", "")
+			if tc.deleteErr == nil {
+				if !errors.Is(err, ErrProfileNotFound) {
+					t.Fatalf("sign-in racing the delete = %v, want ErrProfileNotFound", err)
+				}
+				var rows int
+				if err := pool.QueryRow(ctx, `SELECT count(*) FROM jellycompat_sessions WHERE streamapp_user_id = $1`, user.ID).Scan(&rows); err != nil {
+					t.Fatal(err)
+				}
+				if rows != 0 {
+					t.Fatalf("deleted profile has %d stored compat sessions, want 0", rows)
+				}
+				return
+			}
+			if !errors.Is(err, tc.deleteErr) || errors.Is(err, ErrProfileNotFound) {
+				t.Fatalf("sign-in whose session drop failed = %v, want the drop error and not ErrProfileNotFound", err)
+			}
+			status, _, message := mapLoginError(err)
+			if status != http.StatusInternalServerError || strings.Contains(message, "10.0.0.5") {
+				t.Fatalf("response = %d %q, want 500 without the storage error", status, message)
+			}
+		})
+	}
+}
+
+// failingDelete fails every session delete with err.
+type failingDelete struct {
+	sessionPersistence
+	err error
+}
+
+func (f failingDelete) DeleteByToken(context.Context, string) error { return f.err }
+
+// deleteAfterListing deletes a profile right after a sign-in lists the
+// account's profiles, as a delete landing mid sign-in would.
+type deleteAfterListing struct {
+	userstore.UserStoreProvider
+	profileID string
+}
+
+func (p deleteAfterListing) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
+	store, err := p.UserStoreProvider.ForUser(ctx, userID)
+	return deletingAfterListStore{UserStore: store, profileID: p.profileID}, err
+}
+
+type deletingAfterListStore struct {
+	userstore.UserStore
+	profileID string
+}
+
+func (s deletingAfterListStore) ListProfiles(ctx context.Context) ([]userstore.Profile, error) {
+	profiles, err := s.UserStore.ListProfiles(ctx)
+	if err == nil {
+		err = s.DeleteProfile(ctx, s.profileID)
+	}
+	return profiles, err
 }
