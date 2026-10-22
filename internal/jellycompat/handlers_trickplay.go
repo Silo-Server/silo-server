@@ -106,13 +106,8 @@ func (h *PlaybackHandler) HandleTrickplayPlaylist(w http.ResponseWriter, r *http
 	}
 	sourceID := h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
 	query := url.Values{compatMediaSourceIDQuery: {sourceID}}
-	grant, err := h.trickplayGrant(r.Context(), session, chiURLParam(r, "id"), sourceID)
-	if err != nil {
-		slog.WarnContext(r.Context(), "jellycompat: listing plays for a trickplay playlist failed", "component", "jellycompat", "error", err)
-		writeSessionCheckUnavailable(w)
-		return
-	}
-	if grant != "" {
+	playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
+	if grant := h.trickplayGrant(r.Context(), session, chiURLParam(r, "id"), sourceID, playSessionID); grant != "" {
 		query.Set("PlaySessionId", grant)
 	}
 	w.Header().Set("Content-Type", "application/x-mpegURL")
@@ -194,26 +189,34 @@ type activePlayLister interface {
 }
 
 // trickplayGrant is the PlaySessionId a sheet URL can carry in place of the
-// caller's token: the caller's most recent live play that PlaybackSessionAuth
-// accepts for a sheet of routeItemID (the item as the request path names it)
-// and sourceID. It is empty when there is none, and an error only when the
-// plays could not be read.
-func (h *PlaybackHandler) trickplayGrant(ctx context.Context, session *Session, routeItemID, sourceID string) (string, error) {
+// caller's token: a live play of the caller that PlaybackSessionAuth accepts
+// for a sheet of routeItemID (the item as the request path names it) and
+// sourceID, preferring the one playSessionID names, else the most recent. It
+// is empty when there is none or the plays could not be read; the sheets then
+// need the caller's own credential.
+func (h *PlaybackHandler) trickplayGrant(ctx context.Context, session *Session, routeItemID, sourceID, playSessionID string) string {
 	lister, ok := h.playbackStore.(activePlayLister)
 	if !ok {
-		return "", nil
+		return ""
 	}
 	plays, err := lister.ListActiveForToken(ctx, session.Token)
 	if err != nil {
-		return "", err
+		slog.WarnContext(ctx, "jellycompat: listing plays for a trickplay playlist failed", "component", "jellycompat", "error", err)
+		return ""
 	}
 	var grant PlaybackSession
 	for _, play := range plays {
-		if playbackGrantCovers(&play, routeItemID, sourceID) && (grant.ID == "" || play.UpdatedAt.After(grant.UpdatedAt)) {
+		if !playbackGrantCovers(&play, routeItemID, sourceID) {
+			continue
+		}
+		if play.ID == playSessionID {
+			return play.ID
+		}
+		if grant.ID == "" || play.UpdatedAt.After(grant.UpdatedAt) {
 			grant = play
 		}
 	}
-	return grant.ID, nil
+	return grant.ID
 }
 
 // playingFile is the file this token most recently selected for contentID,
