@@ -185,13 +185,15 @@ export function useAutoQualityDownshift(options: Options) {
         if (output.type === "replan" && output.body.operation === "quality_change") {
           requestedPlan.current = undefined;
           const fail = deadlineFailure.current;
+          const failedPlan = latest.current.planRevision;
           latest.current.onReplan(output.body, (revision, sent) => {
             if (controller.current !== c) return;
             requestedPlan.current = revision;
             if (sent === false) c.event({ type: "replan_failed", unsent: true }, now());
             // The plan that missed its deadline is dead; without a lower
-            // plan to replace it, it fails as it would have.
-            if (revision === undefined) fail?.();
+            // plan to replace it, it fails as it would have, unless another
+            // plan has replaced it meanwhile.
+            if (revision === undefined && latest.current.planRevision === failedPlan) fail?.();
           });
         }
         if (output.type === "notice") latest.current.onNotice(output.key);
@@ -458,19 +460,20 @@ export function useAutoQualityDownshift(options: Options) {
   );
   /**
    * The player's start deadline passed before the plan's first frame. When
-   * Auto lowers on its own, the controller lowers instead (see its
+   * Auto lowers on its own and `observedKbps`, the plan's measured
+   * throughput, is below its bitrate, the controller lowers instead (see its
    * startDeadlinePassed); `fail` reports the plan's failure when it does not,
    * or when its lowering is not adopted. A start held up by the renderer,
    * not the network, fails without lowering.
    */
   const startDeadlinePassed = useCallback(
-    (fail: () => void) => {
+    (fail: () => void, observedKbps?: number) => {
       if (rendererWait.current) {
         fail();
         return;
       }
       deadlineFailure.current = fail;
-      const lowered = controller.current?.startDeadlinePassed(now()) ?? false;
+      const lowered = controller.current?.startDeadlinePassed(now(), observedKbps) ?? false;
       deadlineFailure.current = undefined;
       refresh();
       if (!lowered) fail();

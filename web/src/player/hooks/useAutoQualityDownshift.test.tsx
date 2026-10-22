@@ -314,6 +314,17 @@ it("does not lower a start whose buffer fills but never plays", () => {
   expect(h.options.onReplan).not.toHaveBeenCalled();
 });
 
+it("does not fail a plan that replaced one whose deadline lowering failed", () => {
+  const h = setup();
+  h.rerender({ ...h.options, planRevision: 2, plan: { ...plan, plan_id: "p2" } });
+  const fail = vi.fn();
+  act(() => h.result.current.startDeadlinePassed(fail, 3000));
+  const [, settle] = h.options.onReplan.mock.calls[0]!;
+  h.rerender({ ...h.options, planRevision: 3, plan: { ...plan, plan_id: "p3" } });
+  act(() => settle(undefined));
+  expect(fail).not.toHaveBeenCalled();
+});
+
 it("keeps timing a slow start through a seek before its first frame", () => {
   const video = document.createElement("video");
   Object.defineProperty(video, "paused", { value: true, configurable: true });

@@ -365,11 +365,18 @@ export class BufferingQualityController {
    * or pick leave the failure to the usual recovery. So does an outage in
    * progress or one that ended less than LONG_STALL_MS before: the start
    * never had a fair run on a working network.
+   *
+   * `observedKbps`, the plan's measured throughput, is the evidence that its
+   * media arrived more slowly than it plays. Without a measurement, or with
+   * one at the delivered bitrate or above, the start fails as before: the
+   * link may be silent, or the stream failing for another reason.
    */
-  startDeadlinePassed(now: number): boolean {
+  startDeadlinePassed(now: number, observedKbps?: number): boolean {
     this.tick(now, false);
     if (
       this.plan?.quality !== "auto" ||
+      observedKbps === undefined ||
+      observedKbps >= this.plan.delivered_kbps ||
       this.mode !== "always" ||
       this.answered ||
       this.suspended ||

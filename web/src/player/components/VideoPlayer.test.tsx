@@ -5829,16 +5829,17 @@ describe("VideoPlayer hls.js request timeouts", () => {
     hlsJS.latest = null;
   });
 
-  /** A main fragment hls.js is loading, whose data keeps arriving until `silence`. */
-  function loadingFragment() {
+  /** A main fragment hls.js is loading, receiving `kbps` until `silence`. */
+  function loadingFragment(kbps = 8) {
     // hls.js fills in a loading fragment's stats as its data arrives.
+    const first = performance.now();
     let receiving = true;
     let loaded = 0;
     const stats = {
       aborted: false,
-      loading: { start: 0, first: 1, end: 0 },
+      loading: { start: first, first, end: 0 },
       get loaded() {
-        if (receiving) loaded = Math.floor(performance.now());
+        if (receiving) loaded = Math.floor(((performance.now() - first) * kbps) / 8);
         return loaded;
       },
     };
@@ -5984,23 +5985,33 @@ describe("VideoPlayer hls.js request timeouts", () => {
   });
 
   // C9: on Auto in the always mode, a plan that misses the player's own start
-  // deadline lowers as a long stall would. A first start's wait is timed as a
-  // stall and lowers sooner, so this is mostly a replacement's, whose load is
-  // a source reload: here one that receives data slowly and never starts. It
-  // fails at the same quality when its link is silent (an outage), when
-  // nothing is lower, or when the session refuses the lowering. The
-  // controller's tests cover the other cases that keep the failure.
+  // deadline lowers as a long stall would, when its media was measured arriving
+  // more slowly than it plays. A first start's wait is timed as a stall and
+  // lowers sooner, so this is mostly a replacement's, whose load is a source
+  // reload: here one that receives data at `kbps` and never starts. It fails
+  // at the same quality when its link is silent (an outage), when its media
+  // arrives at its bitrate, when nothing is lower, or when the session refuses
+  // the lowering. The controller's tests cover the other cases that keep the
+  // failure.
   const original = { label: "original", preserves_source: true, bitrate_kbps: 20_000 };
   const high = { label: "1080p-high", preserves_source: false, bitrate_kbps: 10_000 };
   const low = { label: "720p", preserves_source: false, bitrate_kbps: 4_000 };
-  it.each<[string, boolean, AvailableQualityV3[], boolean, boolean]>([
-    ["with a lower rung", false, [original, high, low], false, true],
-    ["with a lower rung the session refuses", true, [original, high, low], true, true],
-    ["with nothing lower", true, [original, high], false, true],
-    ["on a silent link", true, [original, high, low], false, false],
+  it.each<{
+    name: string;
+    rungs?: AvailableQualityV3[];
+    refused?: boolean;
+    /** The rate the replacement's media arrives at; 0 for a silent link. */
+    kbps?: number;
+    lowers?: boolean;
+  }>([
+    { name: "lowers with a lower rung", lowers: true },
+    { name: "fails when the session refuses the lowering", refused: true },
+    { name: "fails with nothing lower", rungs: [original, high] },
+    { name: "fails on a silent link", kbps: 0 },
+    { name: "fails when its media arrives at its bitrate", kbps: 10_000 },
   ])(
-    "on Auto, a replacement that misses its start deadline %s fails: %s",
-    async (_name, fails, rungs, refused, receiving) => {
+    "on Auto, a replacement that misses its start deadline $name",
+    async ({ rungs = [original, high, low], refused = false, kbps = 2_000, lowers = false }) => {
       hlsJS.supported = true;
       const onPlanFailure = vi.fn((_failure: unknown, _position?: number) => true);
       const onQualitySelect = vi.fn(
@@ -6052,22 +6063,22 @@ describe("VideoPlayer hls.js request timeouts", () => {
         }),
       });
       await act(async () => vi.advanceTimersByTimeAsync(0));
-      if (receiving) loadingFragment();
+      if (kbps > 0) loadingFragment(kbps);
       act(() => vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS));
-      const lowers = receiving && rungs.length > 2;
       expect(onQualitySelect.mock.calls.map(([, , request]) => request)).toEqual(
-        lowers
+        lowers || refused
           ? [
               {
                 operation: "quality_change",
                 quality_preference: "auto",
                 bandwidth_estimate_kbps: 7_000,
                 bandwidth_estimate_source: "observed_rebuffer",
+                observed_throughput_kbps: kbps,
               },
             ]
           : [],
       );
-      expect(onPlanFailure).toHaveBeenCalledTimes(fails ? 1 : 0);
+      expect(onPlanFailure).toHaveBeenCalledTimes(lowers ? 0 : 1);
     },
   );
 

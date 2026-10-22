@@ -4548,7 +4548,10 @@ export function VideoPlayer({
     },
     onKeptEstimate,
   });
-  startDeadlinePassedRef.current = bufferingQuality.startDeadlinePassed;
+  // A start that missed its deadline lowers only when its media was measured
+  // arriving more slowly than it plays.
+  startDeadlinePassedRef.current = (fail) =>
+    bufferingQuality.startDeadlinePassed(fail, planThroughputKbps(String(planRevision)));
   const bufferingPill = bufferingQuality.pill;
   const { answer: answerBufferingPill } = bufferingQuality;
   // The viewer's latest quality pick while it is pending. A pick that a newer

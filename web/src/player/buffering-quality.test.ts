@@ -137,7 +137,8 @@ it("does not keep the estimate of a lowering the player refused to send", () => 
 
 // C9: the adapter reports a start that showed no frame by its own deadline.
 // After `before`, a later plan is adopted at 100 s; after `during`, its start,
-// it misses its deadline at 160 s. A row that lowers names its estimate.
+// it misses its deadline at 160 s, its media measured at `observed` kbps (null
+// for no measurement). A row that lowers names its estimate.
 it.each<{
   name: string;
   mode?: BufferingMode;
@@ -145,9 +146,12 @@ it.each<{
   before?: (c: BufferingQualityController) => void;
   later?: Partial<typeof plan>;
   during?: (c: BufferingQualityController) => void;
+  observed?: number | null;
   estimate?: number;
 }>([
   { name: "lowers on Auto in the always mode", estimate: 44100 },
+  { name: "fails when nothing measured its media", observed: null },
+  { name: "fails when its media arrived at its bitrate", observed: 63000 },
   { name: "fails in the ask mode", mode: "ask" },
   { name: "fails in the never mode", mode: "never" },
   { name: "fails for a picked quality", quality: "4k" },
@@ -169,7 +173,7 @@ it.each<{
   },
   {
     name: "lowers again when the lowered plan does not start either",
-    before: (c) => expect(c.startDeadlinePassed(60000)).toBe(true),
+    before: (c) => expect(c.startDeadlinePassed(60000, 3000)).toBe(true),
     later: {
       delivered_kbps: 10000,
       available_qualities: [
@@ -200,7 +204,7 @@ it.each<{
   },
 ])(
   "a start that misses its deadline: $name",
-  ({ mode = "always", quality = "auto", before, later, during, estimate }) => {
+  ({ mode = "always", quality = "auto", before, later, during, observed = 3000, estimate }) => {
     const outputs: unknown[] = [];
     const c = new BufferingQualityController(mode, (output) => outputs.push(output), 0);
     c.event({ type: "plan_adopted", plan: { ...plan, quality } }, 0);
@@ -208,7 +212,7 @@ it.each<{
     c.event({ type: "plan_adopted", plan: { ...plan, plan_id: "p2", quality, ...later } }, 100000);
     during?.(c);
     outputs.length = 0;
-    expect(c.startDeadlinePassed(160000)).toBe(estimate !== undefined);
+    expect(c.startDeadlinePassed(160000, observed ?? undefined)).toBe(estimate !== undefined);
     expect(outputs).toEqual(
       estimate === undefined
         ? []
