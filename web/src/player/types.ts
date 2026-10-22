@@ -231,6 +231,8 @@ export interface PlaybackExitState {
   lastHDR?: boolean;
   lastCodecVideo?: string;
   lastEditionKey?: string;
+  /** The file that ended was one the viewer chose; its next part keeps the choice. */
+  versionPinned?: boolean;
   destinationHref?: string;
 }
 

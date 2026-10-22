@@ -963,8 +963,9 @@ function WatchPlaybackHostContent() {
           {
             contentId: activeRequest.contentId,
             fileId: nextPartFileId,
-            // The next part of a picked version is still the viewer's pick.
-            versionPicked: activeRequest.versionPicked,
+            // The next part of a version the viewer picked, before Play or
+            // in the player, is still the viewer's pick.
+            versionPicked: activeRequest.versionPicked || exitState?.versionPinned,
             libraryId: activeRequest.libraryId,
             roomId: activeRequest.roomId,
             roomToken: activeRequest.roomToken,

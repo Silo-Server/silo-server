@@ -358,6 +358,7 @@ function WatchPagePlayer({
     refresh();
   }, [refetchTrickplay, session.mediaFileId, trickplayQuery.isError]);
 
+  const versionPinned = session.versionPinned;
   const handleEnded = useCallback(() => {
     onEnded?.({
       positionSeconds: session.durationSeconds ?? 0,
@@ -367,8 +368,9 @@ function WatchPagePlayer({
       lastHDR: activePlaybackVersion?.hdr,
       lastCodecVideo: activePlaybackVersion?.codec_video,
       lastEditionKey: activePlaybackVersion?.edition_key,
+      versionPinned: versionPinned(),
     });
-  }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId]);
+  }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId, versionPinned]);
 
   const handleSwitchAudio = useCallback(
     (index: number, currentPosition: number) => {

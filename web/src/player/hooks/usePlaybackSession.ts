@@ -187,6 +187,11 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
     currentPosition: number,
     onAdopt?: (planRevision?: number) => void,
   ) => void;
+  /**
+   * Whether the file playing is one the viewer chose, before Play or with
+   * `switchVersion`. The next part of a multi-part file keeps the choice.
+   */
+  versionPinned: () => boolean;
   /** `track_change` replan selecting another audio track by combined index. */
   switchAudioTrack: (index: number, currentPosition: number) => void;
   /**
@@ -2059,12 +2064,14 @@ export function usePlaybackSession(
     },
     [allowAlternateVersions, loadSession],
   );
+  const versionPinned = useCallback(() => versionPinnedRef.current, []);
 
   return {
     ...state,
     browserEngine: browserEngine.capabilities,
     nativeOriginalSupport,
     switchVersion,
+    versionPinned,
     switchAudioTrack,
     changeSubtitleTrack,
     changeQuality,

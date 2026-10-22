@@ -101,6 +101,7 @@ function playbackSession(
     browserEngine: null,
     nativeOriginalSupport: { containers: [], videoCodecs: [], audioCodecs: [] },
     switchVersion: vi.fn(),
+    versionPinned: vi.fn(() => false),
     switchAudioTrack: vi.fn(),
     changeSubtitleTrack: vi.fn(),
     changeQuality: vi.fn(),
