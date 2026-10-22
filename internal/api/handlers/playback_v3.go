@@ -1946,7 +1946,8 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		return playback.DecisionResponseV3{}, playbackStoreOperationError()
 	}
 	// The start without the limit, planned only when the plan would carry the
-	// limit's label, to check that the limit lowered it.
+	// limit's label, to check that the limit lowered it. A stall's estimate
+	// goes with the limit; the connection's reading then stands in for it.
 	unlimitedReq, unlimitedFile, unlimitedAudioIndex := withoutObservedEstimateV3(req), effectiveFile, audioIndex
 	learnedLimit, limitErr := h.applyLearnedLimit(r, &req, true)
 	if limitErr != nil {
@@ -2003,10 +2004,13 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	markLearnedLimit(&result, learnedLimit, requestedFile, req, serverBitrateCapV3(r.Context()))
 	if result.Plan != nil && result.Plan.BandwidthLimit != nil {
 		// Bitrates alone cannot tell whether the requested file could play. When
-		// compatibility picks the same version without the limit, or nothing
-		// plays without it, the limit lowered nothing.
+		// compatibility, or the budget the start has without the limit, picks
+		// the same version, or nothing plays without it, the limit lowered
+		// nothing.
+		readingErr := h.applyConnectionReading(r, &unlimitedReq)
+		unlimitedFile, unlimitedReq, unlimitedAudioIndex = h.lowerBufferedVersion(r, unlimitedReq, unlimitedFile, unlimitedAudioIndex, settings)
 		unlimited, _ := h.planStartV3(r, unlimitedReq, requestedFile, alternateBase, unlimitedFile, unlimitedAudioIndex, settings, lowerVersion)
-		if unlimited.result.Plan == nil || deliveredKbpsV3(result.Plan) >= deliveredKbpsV3(unlimited.result.Plan) {
+		if readingErr != nil || unlimited.result.Plan == nil || deliveredKbpsV3(result.Plan) >= deliveredKbpsV3(unlimited.result.Plan) {
 			result.Plan.BandwidthLimit = nil
 		}
 		timings.mark("unlimited_planning")
@@ -5512,8 +5516,14 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	// The replan without the learned limit, planned again only when the plan
-	// would carry the limit's label, to check that the limit lowered it.
+	// would carry the limit's label, to check that the limit lowered it. A
+	// stall's estimate goes with the limit; the connection's reading then
+	// stands in for it.
 	unlimitedStart, unlimitedFile, unlimitedAudioIndex := withoutObservedEstimateV3(start), effectiveFile, audioIndex
+	// A quality change, and an output change that went back to the requested
+	// edition, choose a version again. Under a buffering budget that must not
+	// be the source that stalled. A track change stays on the mounted version.
+	choosesVersion := qualityChange || (intentChange && !trackChange)
 	if !seekReanchor {
 		var limitErr error
 		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)
@@ -5521,11 +5531,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: limitErr}
 		}
 		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
-		// A quality change, and an output change that went back to the
-		// requested edition, choose a version again. Under a buffering budget
-		// that must not be the source that stalled. A track change stays on
-		// the mounted version.
-		if qualityChange || (intentChange && !trackChange) {
+		if choosesVersion {
 			effectiveFile, start, audioIndex = h.lowerBufferedVersion(r, start, effectiveFile, audioIndex, plannerSettings)
 		}
 		if requestedEditionResolved {
@@ -5591,8 +5597,15 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// bitrates alone cannot tell whether the requested file could play.
 	staysLimited := (!intentChange || trackChange) && effectiveFile.ID == record.EffectiveMediaFileID && record.CurrentPlan.BandwidthLimit != nil
 	if result.Plan != nil && result.Plan.BandwidthLimit != nil && !staysLimited {
+		var readingErr error
+		if !seekScopedRecovery {
+			readingErr = h.applyConnectionReading(r, &unlimitedStart)
+		}
+		if choosesVersion {
+			unlimitedFile, unlimitedStart, unlimitedAudioIndex = h.lowerBufferedVersion(r, unlimitedStart, unlimitedFile, unlimitedAudioIndex, plannerSettings)
+		}
 		unlimited, unlimitedErr := h.planReplanV3(r, planning, unlimitedStart, unlimitedFile, unlimitedAudioIndex, false)
-		if unlimitedErr != nil || unlimited.result.Plan == nil || deliveredKbpsV3(result.Plan) >= deliveredKbpsV3(unlimited.result.Plan) {
+		if readingErr != nil || unlimitedErr != nil || unlimited.result.Plan == nil || deliveredKbpsV3(result.Plan) >= deliveredKbpsV3(unlimited.result.Plan) {
 			result.Plan.BandwidthLimit = nil
 		}
 	}

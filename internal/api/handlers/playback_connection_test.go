@@ -440,7 +440,7 @@ func TestLearnedLimitCarriesThroughReplansDB(t *testing.T) {
 // start would without the limit. A client that cannot decode the 4K HDR HEVC
 // source plays its 1080p H.264 version either way, so the limit lowered
 // nothing. A client that plays the source moves to that version only under
-// the limit.
+// the limit, unless the connection's speed-test reading already moves it.
 func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 	pool := connectionTestPool(t)
 	var user int
@@ -452,9 +452,12 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		decodesSource bool
+		readingKbps   int
+		limited       bool
 	}{
-		{"compatibility picks the version", false},
-		{"the limit picks the version", true},
+		{"compatibility picks the version", false, 0, false},
+		{"the limit picks the version", true, 0, true},
+		{"the reading picks the version", true, 50000, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
@@ -472,6 +475,7 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 			caller := PlaybackCaller{UserID: user, ProfileID: "profile-1", InstallationID: serviceInstallation, ConnectionDeviceID: device}
 			ctx := apimw.SetProfileID(apimw.SetClaims(t.Context(), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "profile-1")
 			ctx = clientip.SetContext(ctx, "203.0.113.7")
+			reportReadingV3(t, handler, ctx, device, tc.readingKbps)
 			start := func(attempt string) *playback.PlanV3 {
 				request := startRequest
 				request.PlaybackAttemptID = attempt
@@ -485,7 +489,7 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 
 			unlimited := start("attempt-limit-start-0001")
 			want := alternate.ID
-			if tc.decodesSource {
+			if tc.decodesSource && tc.readingKbps == 0 {
 				want = source.ID
 			}
 			if unlimited.EffectiveMediaFileID != want || unlimited.BandwidthLimit != nil {
@@ -496,8 +500,8 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 				t.Fatal(err)
 			}
 			limited := start("attempt-limit-start-0002")
-			if limited.EffectiveMediaFileID != alternate.ID || (limited.BandwidthLimit != nil) != tc.decodesSource {
-				t.Fatalf("under the limit played file %d with bandwidth_limit %+v, want the lower version %d, limited=%v", limited.EffectiveMediaFileID, limited.BandwidthLimit, alternate.ID, tc.decodesSource)
+			if limited.EffectiveMediaFileID != alternate.ID || (limited.BandwidthLimit != nil) != tc.limited {
+				t.Fatalf("under the limit played file %d with bandwidth_limit %+v, want the lower version %d, limited=%v", limited.EffectiveMediaFileID, limited.BandwidthLimit, alternate.ID, tc.limited)
 			}
 		})
 	}
@@ -509,7 +513,9 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 // source plays its 1080p H.264 version either way, so no replan is limited. A
 // client that plays the source moves to that version under the limit, and a
 // later track change keeps that version, and so the label, even though the
-// same track change without the limit would stay on it too.
+// same track change without the limit would stay on it too. When the
+// connection's speed-test reading already moves Auto to that version, the
+// stall's limit lowered nothing either.
 func TestLearnedLimitMarksOnlyAReplanItLoweredDB(t *testing.T) {
 	pool := connectionTestPool(t)
 	var user int
@@ -521,9 +527,12 @@ func TestLearnedLimitMarksOnlyAReplanItLoweredDB(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		decodesSource bool
+		readingKbps   int
+		limited       bool
 	}{
-		{"compatibility picks the version", false},
-		{"the limit picks the version", true},
+		{"compatibility picks the version", false, 0, false},
+		{"the limit picks the version", true, 0, true},
+		{"the reading picks the version", true, 50000, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
@@ -535,13 +544,16 @@ func TestLearnedLimitMarksOnlyAReplanItLoweredDB(t *testing.T) {
 			want := alternate.ID
 			if tc.decodesSource {
 				startRequest.Capabilities.VideoDecode = append(startRequest.Capabilities.VideoDecode, h264)
-				want = source.ID
 			} else {
 				startRequest.Capabilities.VideoDecode = []playback.VideoDecodeCapabilityV3{h264}
+			}
+			if tc.decodesSource && tc.readingKbps == 0 {
+				want = source.ID
 			}
 			caller := PlaybackCaller{UserID: user, ProfileID: "profile-1", InstallationID: serviceInstallation, ConnectionDeviceID: "tv-" + strings.ReplaceAll(tc.name, " ", "-")}
 			ctx := apimw.SetProfileID(apimw.SetClaims(t.Context(), &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "profile-1")
 			ctx = clientip.SetContext(ctx, "203.0.113.7")
+			reportReadingV3(t, handler, ctx, caller.ConnectionDeviceID, tc.readingKbps)
 			started, err := handler.StartPlaybackV2(ctx, caller, startRequest)
 			if err != nil || started.PlaybackPlan == nil || started.PlaybackPlan.EffectiveMediaFileID != want {
 				t.Fatalf("start: err=%v response=%#v, want file %d", err, started, want)
@@ -572,11 +584,22 @@ func TestLearnedLimitMarksOnlyAReplanItLoweredDB(t *testing.T) {
 					t.Fatalf("%s: err=%v response=%#v", step.operation, err, response)
 				}
 				plan = response.PlaybackPlan
-				if plan.EffectiveMediaFileID != alternate.ID || (plan.BandwidthLimit != nil) != tc.decodesSource {
-					t.Fatalf("%s played file %d with bandwidth_limit %+v, want the lower version %d, limited=%v", step.operation, plan.EffectiveMediaFileID, plan.BandwidthLimit, alternate.ID, tc.decodesSource)
+				if plan.EffectiveMediaFileID != alternate.ID || (plan.BandwidthLimit != nil) != tc.limited {
+					t.Fatalf("%s played file %d with bandwidth_limit %+v, want the lower version %d, limited=%v", step.operation, plan.EffectiveMediaFileID, plan.BandwidthLimit, alternate.ID, tc.limited)
 				}
 			}
 		})
+	}
+}
+
+// reportReadingV3 stores a speed test for device, or nothing for zero.
+func reportReadingV3(t *testing.T, h *PlaybackHandler, ctx context.Context, device string, kbps int) {
+	t.Helper()
+	if kbps == 0 {
+		return
+	}
+	if err := h.ReportPlaybackProbe(ctx, device, connectionstore.ProbeResult{Kbps: kbps, Bytes: 3000000, DurationMS: 500, Transport: "ethernet"}); err != nil {
+		t.Fatal(err)
 	}
 }
 
