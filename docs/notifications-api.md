@@ -14,7 +14,7 @@ push-registration protocol retain their existing shapes.
 | `GET /unread-count` | `{ "count": 0 }` |
 | `POST /{id}/read` | 204; already read succeeds, unknown delivery is 404 |
 | `POST /read-all` | 204; body requires `{ "through": "<read_cutoff>" }` |
-| `GET /preferences` | Profile ID and five preference booleans |
+| `GET /preferences` | Profile ID, `enabled`, and `notify_next_up` |
 | `PUT /preferences` | Updated preferences; omitted fields retain their values |
 | `GET /series` | The series whose new episodes can notify the profile, as `items` and `page` |
 | `PUT /series/{series_id}/mute` | 204; mutes the series for the profile, already muted succeeds, a series the viewer may not see is 404 |
@@ -30,6 +30,35 @@ Delivery IDs and linked library/item IDs are strings. Public timestamps use UTC
 milliseconds; the signed cursors retain the database timestamp precision. The
 `reason_flags` object retains event-specific data used by existing clients.
 
+## What notifies
+
+A profile hears about two things:
+
+- `episode.available`: a new episode that becomes the profile's Next Up. It
+  must be the exact next episode after the one the profile finished most
+  recently (Home's Next Up anchor), skipping episodes the profile already
+  started. An episode the catalog lists but the library has no file for yet
+  holds that place, so a later episode arriving first does not notify. When
+  the catalog lists no unstarted episode after the anchor, as after a season
+  finale before the next season is known, the first episode to arrive after it
+  notifies. A batch of new episodes notifies once, for the first of them.
+  Nothing notifies while an episode of the series is partly watched, or while
+  the profile removed the series from Next Up or muted it. `reason_flags` is
+  `{"next_up": true}`.
+- A title the profile wanted arrives: `request.fulfilled` for the requester and
+  followers of a request, and `watchlist.available` for a profile whose
+  watchlist held the title before the library had it, whether or not anyone
+  requested it. A profile that both requested and watchlisted a title hears
+  once, from the request. `watchlist.available` names the arrived movie or
+  series in `series_id` and carries `{"tmdb_id", "media_type"}` in
+  `reason_flags`; it goes out once per account, profile and item, and
+  webhooks receive it under `notify_requests`.
+
+Favorites, the watchlist and Continue Watching do not make new episodes
+notify. Every channel (inbox, push, email, Discord messages, and profile
+webhooks) carries the same deliveries. Server channels are admin broadcasts of
+every release and are not filtered per profile.
+
 Delivery insertion serializes each profile's timestamp allocation through a
 database row lock held until commit. A trigger assigns `created_at` strictly
 above that profile's previous committed timestamp, even when a transaction
@@ -41,12 +70,11 @@ retain their timestamps, and migration seeds the boundary from their maximum.
 
 ## Notified series
 
-`GET /series` (`listNotificationSeries`) lists every series the acting profile
-favorited, put on its watchlist, is partway through, or waits on a next episode
-of, and every series it muted. It reads the same interest index and mutes
-episode fanout reads, so it names exactly the series a new episode is evaluated
-for. A series in several libraries is one entry carrying every library's
-reasons.
+`GET /series` (`listNotificationSeries`) lists every series that shows in the
+acting profile's Next Up with no episode partly watched, and every series it
+muted. It reads the same interest index and mutes episode fanout reads, so it
+names exactly the series a new episode is evaluated for. A series in several
+libraries is one entry.
 
 Each entry has the series as a catalog card in `item`, the profile's
 relationships in `reasons`, and in `active_reasons` the ones the profile's
@@ -55,20 +83,20 @@ preferences let notify. `muted` is true when the profile muted the series.
 muted series keeps its `active_reasons`, so a client can say what would notify
 after an unmute, and it is listed even with no reason left, so the profile can
 still unmute it. With an
-active Next Up reason, `next_up_after` names the last episode the profile
-finished; on that reason alone, only a new episode after it notifies. It names
-the finished episode rather than the next one because the next may not exist
-yet: after a season finale, the following season's first episode notifies.
-The other reasons notify on any new episode. Delivery still skips an episode the profile was
-already notified about and a series the profile can no longer open.
+active Next Up reason, `next_up_after` names the episode the profile finished
+most recently; only the first episode after it that the profile has not
+started notifies. It names the finished episode rather than the next one
+because the next may not exist yet: after a season finale, the following
+season's first episode notifies. Delivery still skips an episode the profile
+was already notified about and a series the profile can no longer open.
 
 Filters combine:
 
 - `status=active` keeps the series that notify, `status=inactive` the ones that
   do not (the preferences silence every reason, or the profile muted the
   series), and the default `all` keeps both.
-- `reason=favorite|watchlist|continue_watching|next_up` keeps the series with
-  that relationship, whether or not the preferences let it notify.
+- `reason=next_up` keeps the series with that reason, whether or not the
+  preferences let it notify. It is the only reason.
 - `q` keeps the series whose title or sort title contains the text,
   case-insensitively.
 
@@ -86,8 +114,8 @@ check, so a cursor never names a hidden series. A page can still hold fewer
 than `limit` entries if access changes between that check and card resolution.
 `image_size` selects the card artwork variant.
 
-The interest index follows favorites, watchlist, and progress changes
-asynchronously, so a just-favorited series can take a moment to appear.
+The interest index follows progress changes and Home removals asynchronously,
+so a series can take a moment to appear after the profile finishes an episode.
 `series.available` in `GET /capabilities` reports the operation.
 
 ### Muting one series
@@ -145,9 +173,10 @@ scope; legacy v1 cursors cannot be reused.
 
 ## Preference writes
 
-`enabled`, `notify_favorites`, `notify_watchlist`, `notify_continue_watching`, and
-`notify_next_up` are optional booleans. Explicit false is preserved; v2 rejects
-null. Both API versions now apply partial fields in one database statement,
+`enabled` and `notify_next_up` are optional booleans. Explicit false is
+preserved; v2 rejects null. v2 dropped `notify_favorites`, `notify_watchlist`
+and `notify_continue_watching` before the 1.0 lock and rejects them. v1 still
+accepts them, ignores them, and reports them as false. Both API versions now apply partial fields in one database statement,
 preventing independent concurrent toggles from overwriting each other. Missing
 preference rows retain the existing all-enabled defaults.
 

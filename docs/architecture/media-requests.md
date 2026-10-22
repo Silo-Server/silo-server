@@ -351,7 +351,9 @@ nothing to follow); `GET /requests/status` advertises `follow_supported`.
 
 Adding a movie or series the library doesn't have to a watchlist
 ([External watchlist titles](external-watchlist.md)) can also request it, so the
-fulfilled notification tells the profile when it arrives. This happens only
+fulfilled notification tells the profile when it arrives (without a request,
+the watchlist arrival notice does; see
+[Notifications](notifications.md#watchlist-arrivals)). This happens only
 when requests are on, the server's `request_settings.watchlist_requests` is on
 (default on), the profile's `requests.watchlist_auto_request` setting is on
 (default on), and the account may request (`RequestCapabilityAllowed`). A

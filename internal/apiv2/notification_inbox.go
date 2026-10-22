@@ -135,25 +135,19 @@ type NotificationCapabilitiesOutput struct {
 	Body         NotificationCapabilities
 }
 type NotificationPreferences struct {
-	ProfileID              ID   `json:"profile_id"`
-	Enabled                bool `json:"enabled"`
-	NotifyFavorites        bool `json:"notify_favorites"`
-	NotifyWatchlist        bool `json:"notify_watchlist"`
-	NotifyContinueWatching bool `json:"notify_continue_watching"`
-	NotifyNextUp           bool `json:"notify_next_up"`
+	ProfileID    ID   `json:"profile_id"`
+	Enabled      bool `json:"enabled"`
+	NotifyNextUp bool `json:"notify_next_up" doc:"A new episode that becomes the profile's Next Up notifies"`
 }
 
 func notificationPreferencesOf(p notifications.Preferences) NotificationPreferences {
-	return NotificationPreferences{ProfileID: ID(p.ProfileID), Enabled: p.Enabled, NotifyFavorites: p.NotifyFavorites, NotifyWatchlist: p.NotifyWatchlist, NotifyContinueWatching: p.NotifyContinueWatching, NotifyNextUp: p.NotifyNextUp}
+	return NotificationPreferences{ProfileID: ID(p.ProfileID), Enabled: p.Enabled, NotifyNextUp: p.NotifyNextUp}
 }
 
 type NotificationPreferencesOutput struct{ Body NotificationPreferences }
 type NotificationPreferencesPatch struct {
-	Enabled                *bool `json:"enabled,omitempty"`
-	NotifyFavorites        *bool `json:"notify_favorites,omitempty"`
-	NotifyWatchlist        *bool `json:"notify_watchlist,omitempty"`
-	NotifyContinueWatching *bool `json:"notify_continue_watching,omitempty"`
-	NotifyNextUp           *bool `json:"notify_next_up,omitempty"`
+	Enabled      *bool `json:"enabled,omitempty"`
+	NotifyNextUp *bool `json:"notify_next_up,omitempty"`
 }
 type NotificationPreferencesInput struct {
 	RawBody []byte
@@ -390,7 +384,7 @@ func registerNotificationInbox(reg *Registry) {
 			}
 		}
 		b := in.Body
-		prefs, err := svc.PatchNotificationPreferences(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), notifications.PreferencePatch{Enabled: b.Enabled, NotifyFavorites: b.NotifyFavorites, NotifyWatchlist: b.NotifyWatchlist, NotifyContinueWatching: b.NotifyContinueWatching, NotifyNextUp: b.NotifyNextUp})
+		prefs, err := svc.PatchNotificationPreferences(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), notifications.PreferencePatch{Enabled: b.Enabled, NotifyNextUp: b.NotifyNextUp})
 		if err != nil {
 			return nil, serviceProblem(err)
 		}

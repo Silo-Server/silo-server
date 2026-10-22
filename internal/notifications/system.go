@@ -586,8 +586,8 @@ func (s *System) SeedAvailability(ctx context.Context, progress func(percent int
 
 const interestRebuildTask = "interest_rebuild"
 
-// RebuildInterest incrementally rebuilds profile_series_interest from
-// favorites, watchlist, and watch progress for every profile. Checkpointed
+// RebuildInterest incrementally rebuilds profile_series_interest from watch
+// progress for every profile. Checkpointed
 // per profile so a crash resumes with at most one profile of repeated work;
 // recomputes are idempotent upserts. Completed runs reset and start over
 // (the task doubles as periodic drift repair).
@@ -664,39 +664,15 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 	return nil
 }
 
-// rebuildProfileInterest recomputes every series the profile has any
-// relationship with (favorites, watchlist, progress, completed watch
-// history), plus every series that already has interest rows in Postgres —
+// rebuildProfileInterest recomputes every series the profile has watch
+// progress in, plus every series that already has interest rows in Postgres —
 // rows whose sources were all removed must be recomputed too, or the
-// drift-repair pass would keep notifying about unfollowed shows forever.
+// drift-repair pass would keep notifying about series the profile no longer
+// waits on.
 func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.UserStore, userID int, profileID string) error {
 	const pageSize = 500
 	itemIDs := make(map[string]struct{}, 64)
 
-	for offset := 0; ; offset += pageSize {
-		favorites, err := store.ListFavorites(ctx, profileID, pageSize, offset)
-		if err != nil {
-			return fmt.Errorf("list favorites: %w", err)
-		}
-		for _, favorite := range favorites {
-			itemIDs[favorite.MediaItemID] = struct{}{}
-		}
-		if len(favorites) < pageSize {
-			break
-		}
-	}
-	for offset := 0; ; offset += pageSize {
-		watchlist, err := store.ListWatchlist(ctx, profileID, pageSize, offset)
-		if err != nil {
-			return fmt.Errorf("list watchlist: %w", err)
-		}
-		for _, entry := range watchlist {
-			itemIDs[entry.MediaItemID] = struct{}{}
-		}
-		if len(watchlist) < pageSize {
-			break
-		}
-	}
 	for offset := 0; ; offset += pageSize {
 		progress, err := store.ListProgress(ctx, profileID, "", pageSize, offset)
 		if err != nil {
@@ -706,25 +682,6 @@ func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.Use
 			itemIDs[entry.MediaItemID] = struct{}{}
 		}
 		if len(progress) < pageSize {
-			break
-		}
-	}
-	// History imports (watch providers, history import runs) may record
-	// watched episodes without any progress row; they are watch relationships
-	// all the same.
-	for offset := 0; ; offset += pageSize {
-		history, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
-			ProfileID: profileID,
-			Limit:     pageSize,
-			Offset:    offset,
-		})
-		if err != nil {
-			return fmt.Errorf("list completed history: %w", err)
-		}
-		for _, entry := range history {
-			itemIDs[entry.MediaItemID] = struct{}{}
-		}
-		if len(history) < pageSize {
 			break
 		}
 	}

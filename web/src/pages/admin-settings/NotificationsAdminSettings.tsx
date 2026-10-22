@@ -72,7 +72,6 @@ const PIPELINE_KEYS = ["notifications.release_events_enabled", "notifications.fa
 /** Batching and flood control; all advanced. */
 const FANOUT_KEYS = [
   "notifications.fanout.settle_seconds",
-  "notifications.fanout.max_series_burst",
   "notifications.fanout.max_event_age_hours",
 ];
 
@@ -1296,14 +1295,6 @@ export default function NotificationsAdminSettings() {
                 value={numberValue("notifications.fanout.settle_seconds", "30")}
                 onChange={(v) => form.setValue("notifications.fanout.settle_seconds", v)}
                 restartRequired={needsRestart("notifications.fanout.settle_seconds")}
-              />
-              <SettingField
-                label="Max messages per show"
-                description="Anything past this is skipped for that batch."
-                type="number"
-                value={numberValue("notifications.fanout.max_series_burst", "3")}
-                onChange={(v) => form.setValue("notifications.fanout.max_series_burst", v)}
-                restartRequired={needsRestart("notifications.fanout.max_series_burst")}
               />
               <SettingField
                 label="Max content age"

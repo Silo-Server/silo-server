@@ -1,3 +1,214 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "getNotificationPreferences",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "3c3a9c6b5d1fec525b365d943c05f8d72adbf69f90aef53a22c29d3cef721e9b",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "getNotificationPreferences",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "ba3378557adc80b6343ea1791b339092cf09840d5becd9d005efa57ce209e35a",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "getNotificationPreferences",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "d9e148003bafa91db44c06a314effb4f53cd23ddca8cf6e93eaefa616933ad92",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationSeries",
+      "change_id": "request-parameter-enum-value-removed",
+      "fingerprint": "bdd3e4abe41aba333d05ec8b1bb29a23ac51c2bfc3a2e41a0b6b829be8e093fa",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationSeries",
+      "change_id": "request-parameter-enum-value-removed",
+      "fingerprint": "bdd909861f101e34fb30bb656abd1d87e63416a1d122a5b1b77c362ec0117cde",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationSeries",
+      "change_id": "request-parameter-enum-value-removed",
+      "fingerprint": "e2161732b1c7c5a1a5a08bf3d39154eec36a4fda314720e03fa33ef1f79f2280",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationSeries",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "081912e40b1ede1c793fe1d1ae73bc3b8fc141bd350f5e963eacb39c7041b127",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationSeries",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "0bc9f4b44c3b5509120efd79ddee5951a83557ac2c4bb11dd26963007b42adf5",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationSeries",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "6bab48048b1c6763c237cf66b874f442f90ccdd93fdcb520d7072bb7976da1f6",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationSeries",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "749dfeea48810f093f37a32de17528b98569292158ae9a1cdd465a3d63e0a73f",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationSeries",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "b47af2f21042f96dc22b096e8f5613efbb05b386f51854d8e190dcb3a9555f3a",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationSeries",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "d6058a808c8336012b14f9a2d4058181362a0d9b60907291faafbeee04fc79e3",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationWebhooks",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "4aa00746107fb20ae8f7c40c6de2a0abdefe5b80f67bbb06f1217594d1cafc20",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationWebhooks",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "8f2278a053e22a1c1734e2b7728d6aa95856a529a96feccf355bd6780a48eb94",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "listNotificationWebhooks",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "ffbf1a0a99ccdd1ce6ddb48de599653b4edf8479e161b4d243622f615b217dfd",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationPreferences",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "10ce8fa298775cfcc156db771138255de0a5266a93518fdc4ae5c63301d64608",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationPreferences",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "4451aad30e4bf10af021092da2798fcecdad1f7412ffcd5d41df0651037a3547",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationPreferences",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "b9994473459ea5be394720d477338d7c9b1d47631b8f319177e78cea0988bcad",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationWebhook",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "53e2d3ae3526d950cb78ba797f53f2f24e88cfae682ee971f0f2c9d01cf63186",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationWebhook",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "6e5d98fee97aac4d6607cb62cbe15b350c950360c02cda2ab8eb15874436cb7b",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationWebhook",
+      "change_id": "response-required-property-removed",
+      "fingerprint": "77ce20fafe81deb51518644b5d1cf4e2636b4f97cadca471e480b3ecdfa03811",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "createNotificationWebhook",
+      "change_id": "request-property-removed",
+      "fingerprint": "0935ff4aaaa8bbed8bac3d2ce9009973b4a707dd593d9682159234e9674f8f89",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "createNotificationWebhook",
+      "change_id": "request-property-removed",
+      "fingerprint": "0de3c2f196cc662fc3ebe851e45b72d38af11df08cf4ee054f24b9d4becb0bd8",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "createNotificationWebhook",
+      "change_id": "request-property-removed",
+      "fingerprint": "a5366e9a27744c503ac9d3bd7cc2637539787f60345e36b55dc5cc5be73623f0",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationPreferences",
+      "change_id": "request-property-removed",
+      "fingerprint": "21f701e2d90ae208c3d713a3de3ceb8e39b977aca37ee27f43df86547e6adfe6",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationPreferences",
+      "change_id": "request-property-removed",
+      "fingerprint": "632c11243600a379bb98edb580dbb78d4535b651191c3e45f0fad27f27df01dc",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationPreferences",
+      "change_id": "request-property-removed",
+      "fingerprint": "c94222d572ea68e318620a2960381a3b243481211cd7336c2b17d76324f1c455",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationWebhook",
+      "change_id": "request-property-removed",
+      "fingerprint": "0e3a5391e998358c6e0d5a4b75c2a73f7dcfdd3e647d20443c2dc406720a12c6",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationWebhook",
+      "change_id": "request-property-removed",
+      "fingerprint": "98157abffb9515663ec0eea7ff29e42070c2e301bda49bee2f8f9214f06c9b17",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    },
+    {
+      "operation_id": "updateNotificationWebhook",
+      "change_id": "request-property-removed",
+      "fingerprint": "f3ab3f41990c927bdfe75483eee5f490b146bf540a91ca982039dc859f615b3d",
+      "reason": "Pre-lock removal: favorites, the watchlist and Continue Watching no longer make new episodes notify, so their switches and reasons leave v2; client follow-ups are coordinated with silo-android and silo-apple.",
+      "approved_in": "#2888"
+    }
+  ]
 }

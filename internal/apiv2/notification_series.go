@@ -14,7 +14,7 @@ import (
 )
 
 // The notified-series list: every series whose new episodes the acting
-// profile has a reason to hear about, the index episode fanout reads, so a
+// profile can hear about through Next Up, the index episode fanout reads, so a
 // profile can see why a series notifies it or why it does not. A profile can
 // mute one series, which stops its new-episode notifications whatever its
 // reasons, until it unmutes.
@@ -44,7 +44,7 @@ type NotificationSeriesInput struct {
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJ0IjoiYmVhciJ9"`
 	Status string `query:"status" default:"all" enum:"all,active,inactive" doc:"active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series"`
-	Reason string `query:"reason" enum:"favorite,watchlist,continue_watching,next_up" doc:"Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason"`
+	Reason string `query:"reason" enum:"next_up" doc:"Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason"`
 	Q      string `query:"q" maxLength:"200" doc:"Keeps the series whose title or sort title contains this text, case-insensitively" example:"bear"`
 	Sort   string `query:"sort" default:"title" enum:"title,-title,year,-year,added_at,-added_at,latest_episode_added,-latest_episode_added" doc:"One field, descending with a leading '-'. added_at is when the series joined the catalog; latest_episode_added when it last gained an episode. A series without a year or an episode sorts last either way; ties order by title."`
 }
@@ -52,14 +52,11 @@ type NotificationSeriesInput struct {
 // NotificationSeriesReasons are the reasons a profile can hear about a
 // series, keyed like an episode notification's reason_flags.
 type NotificationSeriesReasons struct {
-	Favorite         bool `json:"favorite" doc:"The series is one of the profile's favorites"`
-	Watchlist        bool `json:"watchlist" doc:"The series is on the profile's watchlist"`
-	ContinueWatching bool `json:"continue_watching" doc:"The profile is partway through the series"`
-	NextUp           bool `json:"next_up" doc:"The profile finished an episode and waits for the next"`
+	NextUp bool `json:"next_up" doc:"The series shows in the profile's Next Up and no episode of it is partly watched: the next episode notifies when it arrives"`
 }
 
 func notificationSeriesReasonsOf(f notifications.ReasonFlags) NotificationSeriesReasons {
-	return NotificationSeriesReasons{Favorite: f.Favorite, Watchlist: f.Watchlist, ContinueWatching: f.ContinueWatching, NextUp: f.NextUp}
+	return NotificationSeriesReasons{NextUp: f.NextUp}
 }
 
 // NotificationEpisodeRef names an episode by its season and episode number.
@@ -75,7 +72,7 @@ type NotificationSeries struct {
 	ActiveReasons NotificationSeriesReasons `json:"active_reasons" doc:"The reasons the profile's notification preferences let notify; all false when they silence the series"`
 	Notifies      bool                      `json:"notifies" doc:"True when at least one reason is active and the profile has not muted the series"`
 	Muted         bool                      `json:"muted" doc:"The profile muted the series: it gets no new-episode notification for it, whatever the reasons, until it unmutes. active_reasons still names the reasons that would notify once unmuted."`
-	NextUpAfter   *NotificationEpisodeRef   `json:"next_up_after,omitempty" doc:"With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"`
+	NextUpAfter   *NotificationEpisodeRef   `json:"next_up_after,omitempty" doc:"With an active Next Up reason, the episode the profile finished most recently: only the first episode after it that the profile has not started notifies"`
 }
 
 // NotificationSeriesCollection is the listNotificationSeries envelope.
@@ -166,7 +163,7 @@ func registerNotificationSeries(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	op := notificationOperation(http.MethodGet, "/series", opListNotificationSeries)
 	op.Summary = "List the series whose new episodes can notify the acting profile."
-	op.Description = "Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Series the viewer may not see are omitted."
+	op.Description = "Every series that shows in the profile's Next Up with no episode partly watched, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Favorites, the watchlist and Continue Watching do not make a series notify. Series the viewer may not see are omitted."
 	Register(reg, op, func(ctx context.Context, in *NotificationSeriesInput) (*NotificationSeriesOutput, error) {
 		return reg.listNotificationSeries(ctx, cursors, in)
 	})
@@ -326,11 +323,11 @@ func notificationSeriesOf(s notifications.NotifiedSeries, item CatalogItem) Noti
 		Notifies:      s.Notifies(),
 		Muted:         s.Muted,
 	}
-	// Next Up waits for any episode keyed at or past last-finished + 1, which
-	// need not exist (after a season finale the next is the following season's
-	// first), so the contract names the finished episode instead.
-	if s.NextExpectedEpisodeKey != nil {
-		season, episode := notifications.SplitEpisodeKey(*s.NextExpectedEpisodeKey - 1)
+	// The episode Next Up waits for need not be in the catalog yet (after a
+	// season finale the next is the following season's first), so the
+	// contract names the finished episode instead.
+	if s.LastCompletedEpisodeKey != nil {
+		season, episode := notifications.SplitEpisodeKey(*s.LastCompletedEpisodeKey)
 		out.NextUpAfter = &NotificationEpisodeRef{SeasonNumber: season, EpisodeNumber: episode}
 	}
 	return out

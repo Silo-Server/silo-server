@@ -40,14 +40,17 @@ Event kinds:
   profiles. An unset kind is normalized to `episode` (the column defaults to
   it; only in-memory events can be empty).
 - Flat item kinds (`movie`, `audiobook`, `ebook`) — carry an item ID only and
-  feed the server-channel broadcast feed; they do not fan out per profile.
+  feed the server-channel broadcast feed; they do not fan out per profile
+  except as watchlist arrivals (see "Watchlist arrivals").
 
 Events can be suppressed instead of fanned out, with the reason recorded on
-the row: `series_burst` when the per-series burst cap consumed the event
-(bulk imports fan out only the highest few episode keys per series per
-batch), or `stale` when the event aged past the fanout staleness horizon
+the row: `stale` when the event aged past the fanout staleness horizon
 (extended downtime, fanout disabled for a stretch) — delivering it long after
-the fact would be noise.
+the fact would be noise. Older rows may carry `series_burst` from the removed
+per-series burst cap; one notification per Next Up position bounds a season
+pack now. Fanout evaluates a batch's episodes of a series in ascending key
+order, so with an open Next Up cursor the lowest arriving episode is the one
+that notifies.
 
 Server channels read the event feed directly, suppressed events included, and
 skip a title that a different, still existing library had made available
@@ -58,8 +61,8 @@ skips a profile that can open the episode through another library that
 holds it now and made it available before the event, so the copy is not news
 to that profile. The check reads current access and current copies, not
 what the profile was told: a profile that can open the earlier copy is
-skipped even if that copy's own event never reached it (a burst-capped or
-stale event, or access granted later). Once the earlier library's copy is
+skipped even if that copy's own event never reached it (a stale event, or
+access granted later). Once the earlier library's copy is
 gone, the check no longer skips the profile, though the delivery dedupe key
 below still holds the copy back while the first delivery is in the inbox.
 
@@ -69,33 +72,43 @@ types with a generic fallback.
 
 ## Eligibility rules
 
-Fanout evaluates each candidate `(profile, series)` interest row against the
-release event's episode key:
+A new episode notifies only when it becomes the profile's Next Up. Favorites,
+the watchlist and Continue Watching never make an episode notify; a wanted
+title arriving is a separate notice (see "Watchlist arrivals" and "Request
+notifications").
 
-- `favorite`, `watchlist`, and `continue_watching` notify on any newly
-  available episode of the series.
-- `next_up` notifies only when the episode is at or beyond the profile's
-  `next_expected_episode_key`.
-- Suppress when `last_notified_episode_key >= episode_key`.
-- `continue_watching` and `next_up` follow Home. The interest recompute
-  clears them for a series the profile removed from that surface:
-  - An active series drop clears both until the profile watches the series
+The interest recompute keeps one row per `(account, profile, library, series)`
+with a Next Up cursor that follows Home:
+
+- The anchor (`last_completed_episode_key`) is the episode the profile
+  completed most recently, by its progress row, as Home anchors Next Up.
+  Specials (season 0) have no airing position, so when the most recent
+  completion is a special in a series with regular seasons, the cursor counts
+  from the most recently completed regular episode instead, or from the start
+  of season 1 when the profile has finished none. Without a completed episode
+  there is no row.
+- `next_expected_episode_key` is the first catalog episode after the anchor
+  that the profile has not started, whether or not the library has its file.
+  An episode the catalog lists but the library lacks holds the cursor, so a
+  later one landing first does not notify, and the cursor moves only with
+  watch progress, never with availability. When the catalog lists no
+  unstarted episode after the anchor (a finale before the next season's
+  metadata exists, or a rewatch of a series watched through),
+  `next_expected_open` is set and the cursor sits just past the highest known
+  key: the first episode to arrive at or past it is the next.
+- `next_up_candidate` is false while an episode of the series is partly
+  watched and no later episode was completed more recently (the next episode
+  will be waiting when the profile finishes it), and while the profile
+  removed the series from Next Up on Home:
+  - An active series drop clears it until the profile watches the series
     again.
-  - A per-card Continue Watching dismissal clears `continue_watching` while
-    the dismissed episode's progress is unchanged. As on Home, an in-progress
-    episode no longer counts once a later episode of the series was completed
-    more recently.
-  - A per-card Next Up dismissal clears `next_up` while the dismissed episode
-    is still the card Home would show: the first episode after the most
-    recently completed one that has a present file and that the profile has
-    not started (by Home's Postgres progress test, or by the profile's own
-    store). Specials (season 0) have no airing position, so when the most
-    recent completion is a special in a series with regular seasons, Home
-    counts from the most recently completed regular episode instead, or from
-    the start of season 1 when the profile has finished none.
+  - A per-card Next Up dismissal clears it while the dismissed episode is
+    still the card Home would show: the first episode after the anchor that
+    has a present file and that the profile has not started (by Home's
+    Postgres progress test, or by the profile's own store).
 
-  Favorites and watchlist are unaffected. The progression cursor is kept, so
-  `next_up` resumes from the right episode once a removal lapses. Every
+  The cursor is kept either way, so Next Up resumes from the right episode
+  once a removal lapses or the episode is finished. Every
   removal or restore queues a recompute, and a second one ten minutes later.
   Resuming playback can lift a removal without changing any progress state,
   so a progress write queues one too when it is the row's first write since
@@ -109,6 +122,16 @@ release event's episode key:
   for the daily interest rebuild. A release fanned out in that window is
   judged on the stale interest. Evaluating Home removals at fanout time would
   close the gap.
+
+Fanout evaluates each candidate row against the release event's episode key:
+
+- The row must be a Next Up candidate with a cursor.
+- The episode must be the exact `next_expected_episode_key`, or with an open
+  cursor at or past it.
+- Suppress once `last_notified_episode_key` reaches the cursor: one
+  notification per Next Up position. A batch drop of E06 to E08 for a profile
+  caught up through E05 notifies for E06 only, and nothing more notifies until
+  the profile watches on and the cursor moves.
 - A series the profile muted is a hard gate too. `ListActiveBySeries`, the
   query that loads a release's candidate recipients, anti-joins
   `profile_series_notification_mutes`, so a muting profile is never a
@@ -130,10 +153,10 @@ release event's episode key:
   symmetrically to a mute made just after a release. A mute follows its series through a
   catalog merge or split like other per-profile series state, and profile
   deletion removes it.
-- Profile-level notification preferences are a hard gate: a reason disabled
-  in preferences can never match, so no delivery row is created and no
-  channel — including webhooks — ever sees the event. Per-webhook reason
-  filters can only narrow further, never re-enable.
+- Profile-level notification preferences (`enabled`, `notify_next_up`) are a
+  hard gate: a reason disabled in preferences can never match, so no delivery
+  row is created and no channel — including webhooks — ever sees the event.
+  Per-webhook reason filters can only narrow further, never re-enable.
 - Access is the other hard gate, checked when fanout runs. The candidate's
   scope is resolved the way a catalog request resolves it, the event's
   library must be in that scope, and the episode must pass the catalog's
@@ -150,7 +173,6 @@ release event's episode key:
   a delivery are resolved. A delivery already in an inbox is not re-checked
   when access changes later.
 
-Multiple matching reasons produce one delivery with merged reason flags.
 Deliveries are deduplicated per `(account, profile, release event)` and, for
 `episode.available`, per `(account, profile, episode)` across libraries.
 Retention removes those rows, so once the first delivery is gone, profile
@@ -202,8 +224,7 @@ profile that followed the title (see
 in its `reason_flags` so every channel words it as a followed title rather than
 the recipient's own request. Their `reason_flags` carry request
 identifiers (request ID, TMDB ID, media type; approved/declined also carry
-the title since no catalog item exists yet) rather than the four reason
-booleans. Partial unique indexes make the inserts idempotent:
+the title since no catalog item exists yet) rather than the reason booleans. Partial unique indexes make the inserts idempotent:
 `request.fulfilled` per `(user_id, profile_id, request_id)`, because a
 follower on another account can share the requester's profile id (every
 account from before profiles has a `default` profile), and approved/declined,
@@ -231,6 +252,44 @@ a `requests.ApprovalOrigin`, and the requester notice requires
 `ApprovalOriginAdmin` explicitly: any other origin is skipped, and an
 unrecognized one is logged, so a new policy-driven path cannot reintroduce the
 notice by omission.
+
+## Watchlist arrivals
+
+A profile that watchlisted a movie or series before the library had it is told
+when it arrives, whoever requested it and whether or not anyone did: a profile
+that turned off watchlist requests, or a server without requests, still hears.
+Fanout handles it from release events, in the same transaction as episode
+deliveries. A fresh movie event names the movie; an episode event names its
+series, so a series counts as arrived with its first episode. For each named
+item, `watchlist.Arrivals` finds the profiles with a `user_watchlist_titles`
+entry whose title carries any provider ID the item carries or once carried,
+the matching promotion uses. A profile that read its watchlist between the
+arrival and the fanout (the settle delay) has had that entry promoted onto the
+library watchlist already, so it also counts a library watchlist entry whose
+`added_at`, which promotion keeps from the title entry, predates the item's
+`created_at`, for items created within the staleness horizon. The lookups run
+on the fanout transaction. Each is told unless:
+
+- its notifications are off (the master switch; there is no per-type switch),
+- it may not open the item (the access check episodes use, against any
+  library),
+- a request of the title will tell it: it requested or follows an active
+  request whose fulfilled notice has not gone out, under any TMDB ID the
+  title held, or
+- a `request.fulfilled` for the title already reached it.
+
+So a profile that both requested and watchlisted a title hears once, from the
+request. The delivery is `watchlist.available`, with the arrived item in
+`series_id` (as `request.fulfilled` names it) and the title's TMDB ID and media
+type in `reason_flags`. A partial unique index keeps one per `(account,
+profile, item)`, so later episodes of the series are no new arrival. Webhooks
+carry it under `notify_requests`.
+
+Arrival rides on release events, so it inherits their gaps: a library's silent
+seeding scan and events past the staleness horizon tell nobody. A watchlist
+entry is promoted onto the library watchlist only when the profile reads its
+watchlist; an entry still unpromoted when a later release of the same item
+arrives after retention removed the first delivery can be told again.
 
 ## Outbound webhooks
 
@@ -288,8 +347,8 @@ Discord's infrastructure and to everyone in the channel. The rules:
 ### Discord payload
 
 Discord webhooks receive a native embed (no `content` line), with
-`username: "Silo"` and a per-reason accent color (favorite, watchlist,
-continue-watching, next-up precedence order). The builder enforces Discord's
+`username: "Silo"` and an accent color: one for Next Up episodes, one for
+every other delivery. The builder enforces Discord's
 embed limits — 256-char title, 4096-char description, 1024-char field
 values, 2048-char footer, 6000 chars total — truncating description first
 and never the title. Embeds cannot ping: Discord only parses mentions from

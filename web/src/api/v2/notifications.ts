@@ -22,13 +22,7 @@ function notification(
   const value = row.reason_flags;
   if (value && typeof value === "object") {
     const raw = value as Record<string, unknown>;
-    for (const key of [
-      "favorite",
-      "watchlist",
-      "continue_watching",
-      "next_up",
-      "follower",
-    ] as const)
+    for (const key of ["next_up", "follower"] as const)
       if (key in raw && typeof raw[key] === "boolean") reasonFlags[key] = raw[key];
     for (const key of ["request_id", "media_type", "title", "reason"] as const)
       if (key in raw && typeof raw[key] === "string") reasonFlags[key] = raw[key];
@@ -70,10 +64,9 @@ export async function listNotifications(
 export type NotifiedSeries = V2Result<"GET /api/v2/notifications/series">["items"][number];
 export type NotifiedSeriesStatus = "active" | "inactive";
 type NotifiedSeriesQuery = NonNullable<V2Query<"GET /api/v2/notifications/series">>;
-/** The search, reason filter, and sort the Series view applies to both lists. */
+/** The search and sort the Series view applies to both lists. */
 export type NotifiedSeriesOptions = {
   q?: string;
-  reason?: NotifiedSeriesQuery["reason"];
   sort?: NotifiedSeriesQuery["sort"];
 };
 export async function listNotificationSeries(
@@ -90,7 +83,6 @@ export async function listNotificationSeries(
       cursor,
       image_size: "small",
       q: options.q || undefined,
-      reason: options.reason,
       sort: options.sort,
     },
     profileContext,
@@ -152,9 +144,6 @@ export async function updateNotificationPreferences(
   const body = await v2("PUT /api/v2/notifications/preferences", {
     body: {
       enabled: input.enabled,
-      notify_favorites: input.notify_favorites,
-      notify_watchlist: input.notify_watchlist,
-      notify_continue_watching: input.notify_continue_watching,
       notify_next_up: input.notify_next_up,
     },
     profileContext,

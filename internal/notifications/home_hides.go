@@ -17,25 +17,15 @@ type droppedSeriesLister interface {
 	ListDropped(ctx context.Context, userID int, profileID string, seriesIDs []string) ([]catalog.DroppedSeries, error)
 }
 
-// homeHides is what a profile removed from Home for one series. The
-// continue_watching and next_up interest reasons follow those removals, so a
-// series the profile removed from a surface stops notifying for that reason.
-// Favorites and watchlist are unaffected.
+// homeHides is what a profile removed from Next Up on Home for one series. The
+// next_up interest reason follows those removals, so a series the profile
+// removed from Next Up stops notifying.
 type homeHides struct {
-	// dropped is an active series drop, which hides the series from both
-	// surfaces until the profile watches it again.
+	// dropped is an active series drop, which hides the series from Home
+	// until the profile watches it again.
 	dropped bool
-	// continueWatching holds the profile's per-card Continue Watching
-	// dismissals, each valid only for the progress stamp it captured.
-	continueWatching catalog.HomeDismissalIndex
 	// nextUp holds the items the profile dismissed from Next Up.
 	nextUp map[string]struct{}
-}
-
-// continueWatchingVisible reports whether any in-progress episode of the
-// series still shows in Continue Watching.
-func (h homeHides) continueWatchingVisible(inProgress []userstore.WatchProgress) bool {
-	return !h.dropped && len(h.continueWatching.FilterProgress(inProgress)) > 0
 }
 
 // nextUpVisible reports whether the series still shows in Next Up, given the
@@ -118,10 +108,29 @@ func (u *InterestUpdater) nextUpEpisode(ctx context.Context, userID int, profile
 	return episodeID, nil
 }
 
+// showsInNextUp reports whether the series still shows in the profile's Next
+// Up on Home after the anchor: it is not dropped, and its Next Up card is not
+// dismissed. episodeIDs are the series' episodes, started the ones the profile
+// started.
+func (u *InterestUpdater) showsInNextUp(ctx context.Context, store userstore.UserStore, userID int, profileID, seriesID string, episodeIDs []string, anchor int, started []string) (bool, error) {
+	hides, err := u.loadHomeHides(ctx, store, userID, profileID, seriesID, episodeIDs)
+	if err != nil || hides.dropped {
+		return false, err
+	}
+	if len(hides.nextUp) == 0 {
+		return true, nil
+	}
+	next, err := u.nextUpEpisode(ctx, userID, profileID, seriesID, anchor+1, started)
+	if err != nil {
+		return false, err
+	}
+	return hides.nextUpVisible(next), nil
+}
+
 // loadHomeHides reads the profile's Home removals that apply to the series:
-// its drop, and its per-card dismissals of the given items on each surface.
-// A surface with no items is not read.
-func (u *InterestUpdater) loadHomeHides(ctx context.Context, store userstore.UserStore, userID int, profileID, seriesID string, continueWatchingItems, nextUpItems []string) (homeHides, error) {
+// its drop, and its Next Up dismissals of the given items. No items means no
+// dismissal is read.
+func (u *InterestUpdater) loadHomeHides(ctx context.Context, store userstore.UserStore, userID int, profileID, seriesID string, nextUpItems []string) (homeHides, error) {
 	var hides homeHides
 	if u.drops != nil {
 		drops, err := u.drops.ListDropped(ctx, userID, profileID, []string{seriesID})
@@ -130,19 +139,12 @@ func (u *InterestUpdater) loadHomeHides(ctx context.Context, store userstore.Use
 		}
 		for _, drop := range drops {
 			if drop.Active {
-				// A drop hides both surfaces; per-card dismissals add nothing.
+				// A drop hides the series; per-card dismissals add nothing.
 				return homeHides{dropped: true}, nil
 			}
 		}
 	}
 
-	if len(continueWatchingItems) > 0 {
-		dismissals, err := listHomeDismissals(ctx, store, profileID, userstore.HomeSurfaceContinueWatching, continueWatchingItems)
-		if err != nil {
-			return homeHides{}, err
-		}
-		hides.continueWatching = catalog.NewHomeDismissalIndex(dismissals)
-	}
 	if len(nextUpItems) > 0 {
 		dismissals, err := listHomeDismissals(ctx, store, profileID, userstore.HomeSurfaceNextUp, nextUpItems)
 		if err != nil {

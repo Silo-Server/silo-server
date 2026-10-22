@@ -736,7 +736,6 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "Work out who wants it",
       "Grouping and flood control",
       "Settle window",
-      "Max messages per show",
       "Max content age",
       "Retention",
       "Read notifications",

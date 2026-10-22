@@ -36037,16 +36037,8 @@
           "enabled": {
             "type": "boolean"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
+            "description": "A new episode that becomes the profile's Next Up notifies",
             "type": "boolean"
           },
           "profile_id": {
@@ -36061,9 +36053,6 @@
         "required": [
           "profile_id",
           "enabled",
-          "notify_favorites",
-          "notify_watchlist",
-          "notify_continue_watching",
           "notify_next_up"
         ],
         "type": "object"
@@ -36074,16 +36063,7 @@
           "enabled": {
             "type": "boolean"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           }
         },
@@ -36235,7 +36215,7 @@
           },
           "next_up_after": {
             "$ref": "#/components/schemas/NotificationEpisodeRef",
-            "description": "With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"
+            "description": "With an active Next Up reason, the episode the profile finished most recently: only the first episode after it that the profile has not started notifies"
           },
           "notifies": {
             "description": "True when at least one reason is active and the profile has not muted the series",
@@ -36296,27 +36276,12 @@
       "NotificationSeriesReasons": {
         "additionalProperties": false,
         "properties": {
-          "continue_watching": {
-            "description": "The profile is partway through the series",
-            "type": "boolean"
-          },
-          "favorite": {
-            "description": "The series is one of the profile's favorites",
-            "type": "boolean"
-          },
           "next_up": {
-            "description": "The profile finished an episode and waits for the next",
-            "type": "boolean"
-          },
-          "watchlist": {
-            "description": "The series is on the profile's watchlist",
+            "description": "The series shows in the profile's Next Up and no episode of it is partly watched: the next episode notifies when it arrives",
             "type": "boolean"
           }
         },
         "required": [
-          "favorite",
-          "watchlist",
-          "continue_watching",
           "next_up"
         ],
         "type": "object"
@@ -36712,19 +36677,10 @@
             "minLength": 1,
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "type": {
@@ -36809,19 +36765,10 @@
           "name": {
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "type": {
@@ -36842,9 +36789,6 @@
           "type",
           "url_host",
           "enabled",
-          "notify_favorites",
-          "notify_watchlist",
-          "notify_continue_watching",
           "notify_next_up",
           "notify_requests",
           "consecutive_failures",
@@ -36877,19 +36821,10 @@
           "name": {
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "url": {
@@ -176756,7 +176691,7 @@
     },
     "/api/v2/notifications/series": {
       "get": {
-        "description": "Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Series the viewer may not see are omitted.",
+        "description": "Every series that shows in the profile's Next Up with no episode partly watched, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Favorites, the watchlist and Continue Watching do not make a series notify. Series the viewer may not see are omitted.",
         "operationId": "listNotificationSeries",
         "parameters": [
           {
@@ -176935,9 +176870,6 @@
             "schema": {
               "description": "Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason",
               "enum": [
-                "favorite",
-                "watchlist",
-                "continue_watching",
                 "next_up"
               ],
               "type": "string"
