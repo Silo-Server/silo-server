@@ -1860,15 +1860,7 @@ func (h *ItemsHandler) writeSeasonItemsResponse(w http.ResponseWriter, r *http.R
 	})
 	total := len(seasons)
 	if page {
-		start := query.startIndex
-		if start > total {
-			start = total
-		}
-		end := total
-		if query.limit > 0 && start+query.limit < end {
-			end = start + query.limit
-		}
-		seasons = seasons[start:end]
+		seasons = slicePage(seasons, query.startIndex, query.limit)
 	}
 
 	items := make([]baseItemDTO, 0, len(seasons))
@@ -2317,7 +2309,7 @@ func (h *ItemsHandler) HandleNextUp(w http.ResponseWriter, r *http.Request) {
 		UserID:          session.StreamAppUserID,
 		ProfileID:       session.ProfileID,
 		AccessFilter:    h.resolveAccessFilter(r.Context(), session),
-		Limit:           query.limit + query.startIndex, // fetch enough to paginate
+		Limit:           pageFetchLimit(query.startIndex, query.limit), // fetch enough to paginate
 		EnableResumable: parseBool(qp.Get("enableResumable"), false),
 	}
 
@@ -2429,17 +2421,7 @@ func (h *ItemsHandler) writeNextUpResponse(w http.ResponseWriter, r *http.Reques
 // slicePageIDs applies sliceBaseItems' bounds to the parallel content-id
 // slice so page positions stay aligned after StartIndex/Limit slicing.
 func slicePageIDs(ids []string, startIndex, limit int) []string {
-	if startIndex < 0 {
-		startIndex = 0
-	}
-	if startIndex >= len(ids) {
-		return []string{}
-	}
-	if limit <= 0 {
-		limit = len(ids)
-	}
-	end := min(startIndex+limit, len(ids))
-	return ids[startIndex:end]
+	return slicePage(ids, startIndex, limit)
 }
 
 // HandleUpcoming follows Jellyfin's UTC yesterday-and-later premiere window.
@@ -2769,7 +2751,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	favoriteLimit := max(query.limit+query.startIndex, 200)
+	favoriteLimit := max(pageFetchLimit(query.startIndex, query.limit), 200)
 	if favoriteItemsNeedBrowseFilters(query) {
 		favoriteLimit = 10000
 	}
@@ -3777,17 +3759,7 @@ func validatePseudoUser(w http.ResponseWriter, userID string, session *Session) 
 }
 
 func sliceBaseItems(items []baseItemDTO, startIndex, limit int) []baseItemDTO {
-	if startIndex < 0 {
-		startIndex = 0
-	}
-	if startIndex >= len(items) {
-		return []baseItemDTO{}
-	}
-	if limit <= 0 {
-		limit = len(items)
-	}
-	end := min(startIndex+limit, len(items))
-	return items[startIndex:end]
+	return slicePage(items, startIndex, limit)
 }
 
 func (h *ItemsHandler) rememberLibraryImages(library upstreamUserLibrary, routeID string) {

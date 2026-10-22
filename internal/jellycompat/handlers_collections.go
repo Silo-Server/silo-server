@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"slices"
@@ -457,11 +458,22 @@ func slicePage[T any](items []T, startIndex, limit int) []T {
 	if startIndex >= len(items) {
 		return []T{}
 	}
-	if limit <= 0 {
-		limit = len(items)
+	// Compare limit with what is left rather than adding it to startIndex: a
+	// client Limit near math.MaxInt would overflow the sum.
+	end := len(items)
+	if limit > 0 && limit < end-startIndex {
+		end = startIndex + limit
 	}
-	end := min(startIndex+limit, len(items))
 	return items[startIndex:end]
+}
+
+// pageFetchLimit returns how many rows to read from offset 0 to serve the
+// page at startIndex, saturating at math.MaxInt instead of wrapping negative.
+func pageFetchLimit(startIndex, limit int) int {
+	if startIndex > 0 && limit > math.MaxInt-startIndex {
+		return math.MaxInt
+	}
+	return startIndex + limit
 }
 
 // handleBoxSetItem serves GET /Items/{id} when the ID decodes as a collection.
