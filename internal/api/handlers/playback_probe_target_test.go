@@ -19,6 +19,8 @@ type countingPercentiles struct {
 	err   error
 	calls int
 	last  catalog.AccessFilter
+	// panics makes a read panic instead of answering.
+	panics bool
 	// release, when set, holds every read until it is closed.
 	release chan struct{}
 }
@@ -31,6 +33,9 @@ func (c *countingPercentiles) Percentile(ctx context.Context, filter catalog.Acc
 	defer c.mu.Unlock()
 	c.calls++
 	c.last = filter
+	if c.panics {
+		panic("percentile read failed")
+	}
 	if fraction != probeTargetPercentile {
 		return 0, errors.New("unexpected percentile")
 	}
@@ -40,10 +45,10 @@ func (c *countingPercentiles) Percentile(ctx context.Context, filter catalog.Acc
 	return c.kbps, c.err
 }
 
-func (c *countingPercentiles) set(kbps int, err error) {
+func (c *countingPercentiles) set(kbps int, err error, panics bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.kbps, c.err = kbps, err
+	c.kbps, c.err, c.panics = kbps, err, panics
 }
 
 func (c *countingPercentiles) count() int {
@@ -151,9 +156,9 @@ func TestBandwidthProbeTargetCachesPerLibraryScope(t *testing.T) {
 	})
 }
 
-// A stale target is still sent while it is read again. A read that fails
-// keeps the last good target, including after another scope's store swept the
-// cache, and is retried after the error lifetime.
+// A stale target is still sent while it is read again. A read that fails,
+// or panics, keeps the last good target, including after another scope's
+// store swept the cache, and is retried after the error lifetime.
 func TestBandwidthProbeTargetKeepsLastGoodWhileRefreshing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		source := &countingPercentiles{kbps: 40000}
@@ -164,7 +169,7 @@ func TestBandwidthProbeTargetKeepsLastGoodWhileRefreshing(t *testing.T) {
 
 		advanceFakeClock(probeTargetCacheTTL + time.Second)
 		settledProbeTarget(h, kids)
-		source.set(0, errors.New("down"))
+		source.set(0, errors.New("down"), false)
 		if got := h.bandwidthProbeTargetKbps(all); got != 50000 {
 			t.Fatalf("stale target = %d, want the last good 50000 while it is read again", got)
 		}
@@ -173,7 +178,13 @@ func TestBandwidthProbeTargetKeepsLastGoodWhileRefreshing(t *testing.T) {
 			t.Fatalf("failed refresh: target = %d after %d reads, want the last good 50000 after 3", got, source.count())
 		}
 
-		source.set(64000, nil)
+		source.set(64000, nil, true)
+		advanceFakeClock(probeTargetErrorTTL + time.Second)
+		if got := settledProbeTarget(h, all); got != 50000 || source.count() != 4 {
+			t.Fatalf("panicking refresh: target = %d after %d reads, want the last good 50000 after 4", got, source.count())
+		}
+
+		source.set(64000, nil, false)
 		advanceFakeClock(probeTargetErrorTTL + time.Second)
 		if got := settledProbeTarget(h, all); got != 80000 {
 			t.Fatalf("retry after a failure: target = %d, want 80000", got)
@@ -196,27 +207,6 @@ func TestBandwidthProbeTargetDropsExpiredScopes(t *testing.T) {
 		defer h.probeTargets.mu.Unlock()
 		if len(h.probeTargets.entries) != 1 {
 			t.Fatalf("kept %d scopes, want only the one just read", len(h.probeTargets.entries))
-		}
-	})
-}
-
-// A background read that starts after another read stored the scope's target
-// leaves that target: it neither queries again nor, when that query would
-// fail, replaces the target with a short-lived fallback.
-func TestBandwidthProbeTargetLateReadUsesTheStoredTarget(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		source := &countingPercentiles{kbps: 40000}
-		h := &PlaybackHandler{SourceBitrates: source}
-		ctx := newAuthorizedPlaybackContext()
-		settledProbeTarget(h, ctx)
-		var key string
-		for cached := range h.probeTargets.entries {
-			key = cached
-		}
-		source.set(0, errors.New("down"))
-		h.readProbeTarget(ctx, AccessFilterFromContext(ctx, ""), key)
-		if entry, fresh := h.probeTargets.lookup(key); !fresh || entry.kbps != 40000 || source.count() != 1 || time.Until(entry.expires) <= probeTargetErrorTTL {
-			t.Fatalf("late read replaced the stored target with %+v after %d reads", entry, source.count())
 		}
 	})
 }

@@ -2,14 +2,15 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/sync/singleflight"
-
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // SourceBitratePercentiler reads a bitrate percentile of the video files a
@@ -42,7 +43,9 @@ const (
 type probeTargetCache struct {
 	mu      sync.Mutex
 	entries map[string]probeTargetEntry
-	reads   singleflight.Group
+	// reading marks the scopes a background read is refreshing, so a scope
+	// has at most one.
+	reading map[string]bool
 	// query lets one scope's read scan the catalog at a time, so the scopes
 	// a restart leaves empty do not each hold a database connection at once.
 	query sync.Mutex
@@ -53,12 +56,46 @@ type probeTargetEntry struct {
 	expires time.Time
 }
 
-// lookup returns the entry stored for key and whether it is still fresh.
-func (c *probeTargetCache) lookup(key string) (probeTargetEntry, bool) {
+// claim returns the target stored for key, and whether the caller is to read
+// it again: it is missing or stale and no read of it is running. A claimed
+// read runs until finish.
+func (c *probeTargetCache) claim(key string) (int, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[key]
-	return entry, ok && time.Now().Before(entry.expires)
+	if ok && time.Now().Before(entry.expires) || c.reading[key] {
+		return entry.kbps, false
+	}
+	if c.reading == nil {
+		c.reading = map[string]bool{}
+	}
+	c.reading[key] = true
+	return entry.kbps, true
+}
+
+// finish stores what the claimed read of key found and ends it. A failed read
+// keeps the last good target until its retry.
+func (c *probeTargetCache) finish(key string, kbps int, failed bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.reading, key)
+	now := time.Now()
+	entry := probeTargetEntry{kbps: kbps, expires: now.Add(probeTargetCacheTTL)}
+	if failed {
+		entry = probeTargetEntry{kbps: c.entries[key].kbps, expires: now.Add(probeTargetErrorTTL)}
+	}
+	if c.entries == nil {
+		c.entries = map[string]probeTargetEntry{}
+	}
+	// Scopes come and go with profiles and their restrictions. An expired
+	// one stays a cache lifetime longer as the last good target for its
+	// reads, then goes.
+	for cachedKey, cachedEntry := range c.entries {
+		if now.Sub(cachedEntry.expires) > probeTargetCacheTTL {
+			delete(c.entries, cachedKey)
+		}
+	}
+	c.entries[key] = entry
 }
 
 // bandwidthProbeTargetKbps is the rate a quick speed test has to prove for
@@ -87,55 +124,37 @@ func (h *PlaybackHandler) sourceBitratePercentile(ctx context.Context, filter ca
 	builder.WriteString("|quality=")
 	builder.WriteString(filter.MaxPlaybackQuality)
 	key := builder.String()
-	cached, fresh := h.probeTargets.lookup(key)
-	if !fresh {
-		// The capability read sends the last target, or none, and the scope
-		// is read again in the background: one shared read per scope that
-		// outlives the request that started it. A client without a target
-		// treats any current reading as proof of its link.
-		readCtx := context.WithoutCancel(ctx)
-		h.probeTargets.reads.DoChan(key, func() (any, error) {
-			h.readProbeTarget(readCtx, filter, key)
-			return nil, nil
-		})
+	// The capability read sends the last target, or none, and a stale scope
+	// is read again in the background, by one read that outlives the request
+	// that started it. A client without a target treats any current reading
+	// as proof of its link.
+	kbps, read := h.probeTargets.claim(key)
+	if read {
+		go h.readProbeTarget(context.WithoutCancel(ctx), filter, key)
 	}
-	return cached.kbps
+	return kbps
 }
 
-// readProbeTarget reads a scope's percentile for the cache, as the one shared
-// read for that scope.
+// readProbeTarget is the claimed read of a scope's percentile. It runs on its
+// own goroutine, out of reach of the request's panic recovery, so a panic is
+// logged and counts as a failed read.
 func (h *PlaybackHandler) readProbeTarget(ctx context.Context, filter catalog.AccessFilter, key string) {
+	kbps, failed := 0, true
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			slog.ErrorContext(ctx, "speed test target read panicked", "component", "playback",
+				"panic", logredact.SanitizeText(fmt.Sprint(recovered)), "stack", string(debug.Stack()))
+		}
+		h.probeTargets.finish(key, kbps, failed)
+	}()
 	h.probeTargets.query.Lock()
 	defer h.probeTargets.query.Unlock()
-	// Look again: a read that missed the cache just before another read
-	// stored the target leaves it, and a failure below falls back on the
-	// latest one.
-	cached, fresh := h.probeTargets.lookup(key)
-	if fresh {
-		return
-	}
 	queryCtx, cancel := context.WithTimeout(ctx, probeTargetQueryTimeout)
 	defer cancel()
 	kbps, err := h.SourceBitrates.Percentile(queryCtx, filter, probeTargetPercentile)
-	entry := probeTargetEntry{kbps: kbps, expires: time.Now().Add(probeTargetCacheTTL)}
 	if err != nil {
 		slog.WarnContext(ctx, "speed test target unavailable", "component", "playback", "error", err)
-		// Keep the last good target until the retry.
-		entry = probeTargetEntry{kbps: cached.kbps, expires: time.Now().Add(probeTargetErrorTTL)}
+		return
 	}
-	h.probeTargets.mu.Lock()
-	defer h.probeTargets.mu.Unlock()
-	if h.probeTargets.entries == nil {
-		h.probeTargets.entries = map[string]probeTargetEntry{}
-	}
-	// Scopes come and go with profiles and their restrictions. An expired
-	// one stays a cache lifetime longer as the last good target for its
-	// reads, then goes.
-	now := time.Now()
-	for cachedKey, cachedEntry := range h.probeTargets.entries {
-		if now.Sub(cachedEntry.expires) > probeTargetCacheTTL {
-			delete(h.probeTargets.entries, cachedKey)
-		}
-	}
-	h.probeTargets.entries[key] = entry
+	failed = false
 }
