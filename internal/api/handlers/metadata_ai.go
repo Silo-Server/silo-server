@@ -222,8 +222,8 @@ func (h *MetadataAIHandler) viewerPendingLanguage(ctx context.Context, target me
 		}
 	}
 	// No membership means no library-scoped page resolves the target (an
-	// episode without files, say). LibraryScope would read an empty list as
-	// the viewer's whole allowlist, so stop here.
+	// episode whose series is in no library either, say). LibraryScope would
+	// read an empty list as the viewer's whole allowlist, so stop here.
 	if len(libraryIDs) == 0 {
 		return pending, nil
 	}

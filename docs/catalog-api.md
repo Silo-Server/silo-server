@@ -356,7 +356,9 @@ request returns.
 The web app keeps the library on links from a series to its seasons and episodes,
 but not on Play links. An episode card whose list entry has no file keeps no library,
 so with the setting on, an episode the opened library has no file for opens with
-every version rather than nothing to play.
+every version rather than nothing to play. An entry also has no file when the viewer
+may access none of the episode's files, or the episode has none; that episode opens
+without the library, and so without its metadata-language fallback.
 
 ## Device-scoped playback answers
 

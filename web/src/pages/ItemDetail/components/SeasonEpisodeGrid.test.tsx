@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SeasonEpisodeGrid from "./SeasonEpisodeGrid";
@@ -22,11 +22,12 @@ vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
 }));
 
 const prefetchLibraries: (number | undefined)[] = [];
+const prefetchCalls: [number | undefined, string][] = [];
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
   usePrefetchCatalogItemDetail: (libraryId?: number) => {
     prefetchLibraries.push(libraryId);
-    return vi.fn();
+    return (id: string) => prefetchCalls.push([libraryId, id]);
   },
 }));
 
@@ -34,6 +35,7 @@ describe("SeasonEpisodeGrid", () => {
   beforeEach(() => {
     capturedMenuProps.length = 0;
     prefetchLibraries.length = 0;
+    prefetchCalls.length = 0;
     spoilerPrefs.hideImages = false;
     spoilerPrefs.hideOverviews = false;
   });
@@ -175,6 +177,23 @@ describe("SeasonEpisodeGrid", () => {
       "/item/ep-3",
     ]);
     expect(new Set(prefetchLibraries)).toEqual(new Set([4, undefined]));
+
+    // Each card prefetches the detail its link opens.
+    vi.useFakeTimers();
+    try {
+      for (const title of ["S01E01 · Episode title 1", "S01E03 · Episode title 3"]) {
+        const card = screen.getByText(title).closest(".media-card")!;
+        fireEvent.mouseEnter(card);
+        act(() => vi.advanceTimersByTime(140));
+        fireEvent.mouseLeave(card);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(prefetchCalls).toEqual([
+      [4, "ep-1"],
+      [undefined, "ep-3"],
+    ]);
     // The card menu builds Play links, and playback stays unscoped.
     expect(capturedMenuProps[0]).not.toHaveProperty("libraryId");
   });
