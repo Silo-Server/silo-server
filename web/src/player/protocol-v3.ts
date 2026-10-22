@@ -345,6 +345,8 @@ export interface StartRequestV3 {
   subtitle_track_index?: number;
   bandwidth_estimate_kbps?: number;
   bandwidth_estimate_source?: "probe" | "observed_rebuffer";
+  /** The current plan's measured throughput; only with an `observed_rebuffer` estimate. */
+  observed_throughput_kbps?: number;
   learned_limit?: "ignore" | "clear";
   bandwidth_cap_kbps?: number;
   client_capabilities: ClientCodecCapabilitiesV3;
@@ -383,6 +385,8 @@ export interface ReplanRequestV3 {
   position_seconds: number;
   bandwidth_estimate_kbps?: number;
   bandwidth_estimate_source?: "probe" | "observed_rebuffer";
+  /** The current plan's measured throughput; only with an `observed_rebuffer` estimate. */
+  observed_throughput_kbps?: number;
   learned_limit?: "ignore" | "clear";
   bandwidth_cap_kbps?: number;
   selected_tracks: SelectedTracksV3;

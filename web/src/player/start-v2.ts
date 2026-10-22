@@ -240,6 +240,7 @@ export function bufferingQualityWire<T extends StartRequestV3 | ReplanRequestV3>
       result.client_features.push("buffering_quality_v1");
   } else {
     delete result.bandwidth_estimate_source;
+    delete result.observed_throughput_kbps;
     delete result.learned_limit;
     result.client_features = result.client_features.filter((f) => f !== "buffering_quality_v1");
   }

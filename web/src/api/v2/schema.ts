@@ -27474,6 +27474,11 @@ export interface components {
        * @description Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.
        */
       metered?: boolean;
+      /**
+       * Format: int64
+       * @description The current plan's measured throughput so far, sent only with bandwidth_estimate_source observed_rebuffer. The server plans with, and records as the learned limit, the lower of it and bandwidth_estimate_kbps.
+       */
+      observed_throughput_kbps?: number;
       /** @enum {string} */
       operation?:
         | "failure_recovery"
@@ -27952,6 +27957,11 @@ export interface components {
        * @description Deprecated; ignored. A client on a metered link sends its cellular quality as quality_preference and bandwidth_cap_kbps instead.
        */
       metered?: boolean;
+      /**
+       * Format: int64
+       * @description The current plan's measured throughput so far, sent only with bandwidth_estimate_source observed_rebuffer. The server plans with, and records as the learned limit, the lower of it and bandwidth_estimate_kbps.
+       */
+      observed_throughput_kbps?: number;
       playback_attempt_id: string;
       /**
        * @description Opaque identifier

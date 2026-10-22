@@ -36,6 +36,11 @@ export interface BufferingReplan {
   quality_preference: string;
   bandwidth_estimate_kbps?: number;
   bandwidth_estimate_source?: "observed_rebuffer";
+  /**
+   * What the stalled plan's media arrived at, sent with the estimate. The
+   * player adds it when it can measure it; the controller never does.
+   */
+  observed_throughput_kbps?: number;
   learned_limit?: "clear";
 }
 

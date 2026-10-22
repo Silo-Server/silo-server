@@ -4491,8 +4491,21 @@ export function VideoPlayer({
         ? { at: current.meter.lastDataAt(performance.now()), segmented: current.segmented }
         : undefined;
     },
-    onReplan: (request, onAdopt) =>
-      onQualitySelect?.(request.quality_preference, currentTime, request, onAdopt),
+    onReplan: (request, onAdopt) => {
+      // A lowering also says what this plan's media arrived at: the server
+      // plans with the lower figure, so one lowering reaches a link far
+      // below the stalled stream instead of stepping down title by title.
+      const observed =
+        request.bandwidth_estimate_source === "observed_rebuffer"
+          ? planThroughputKbps(String(planRevision))
+          : undefined;
+      onQualitySelect?.(
+        request.quality_preference,
+        currentTime,
+        observed !== undefined ? { ...request, observed_throughput_kbps: observed } : request,
+        onAdopt,
+      );
+    },
     onNotice: (key) => {
       const next: PlaybackNoticeState = {
         message: BUFFERING_QUALITY_COPY[key],

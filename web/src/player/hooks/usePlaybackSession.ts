@@ -1659,6 +1659,7 @@ export function usePlaybackSession(
               ? {
                   bandwidthEstimateKbps: buffering.bandwidth_estimate_kbps ?? null,
                   bandwidthEstimateSource: buffering.bandwidth_estimate_source,
+                  observedThroughputKbps: buffering.observed_throughput_kbps,
                   learnedLimit: buffering.learned_limit,
                 }
               : {}),

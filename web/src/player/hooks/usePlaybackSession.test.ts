@@ -2806,6 +2806,23 @@ it("sends the speed-test reading on a start but never on a replan", async () => 
   unmount();
 });
 
+// C3: the server plans with the lower of the estimate and what the stalled
+// plan's media arrived at.
+it("sends a lowering's observed throughput with its estimate", async () => {
+  const server = recordingServer();
+  const { result, unmount } = await startSession();
+  act(() =>
+    result.current.changeQuality("auto", 120, { ...lowering, observed_throughput_kbps: 11_800 }),
+  );
+  await waitFor(() => expect(server.bodiesTo("/replan")).toHaveLength(1));
+  expect(server.bodiesTo("/replan")[0]).toMatchObject({
+    bandwidth_estimate_kbps: 44100,
+    bandwidth_estimate_source: "observed_rebuffer",
+    observed_throughput_kbps: 11_800,
+  });
+  unmount();
+});
+
 // The player counts a quality pick once the session adopts its plan, and the
 // controller must hear of the pick before that plan's adoption.
 it("tells a quality change it was adopted before the new plan renders", async () => {

@@ -81,6 +81,8 @@ function clampPosition(seconds: number): number {
 export interface ReplanOptions {
   bandwidthEstimateKbps?: number | null;
   bandwidthEstimateSource?: "probe" | "observed_rebuffer";
+  /** The current plan's measured throughput; sent only with an `observed_rebuffer` estimate. */
+  observedThroughputKbps?: number;
   learnedLimit?: "ignore" | "clear";
   operation: ReplanOperationV3;
   positionSeconds: number;
@@ -216,6 +218,10 @@ export function buildReplanRequestV3(input: ReplanRequestInput): ReplanRequestV3
     ...(input.failure ? { failure: boundFailureV3(input.failure) } : {}),
     ...(input.bandwidthEstimateKbps != null
       ? { bandwidth_estimate_kbps: input.bandwidthEstimateKbps }
+      : {}),
+    ...(input.observedThroughputKbps !== undefined &&
+    input.bandwidthEstimateSource === "observed_rebuffer"
+      ? { observed_throughput_kbps: input.observedThroughputKbps }
       : {}),
     ...(input.bandwidthCapKbps != null ? { bandwidth_cap_kbps: input.bandwidthCapKbps } : {}),
   };
