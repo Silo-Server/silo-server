@@ -123,7 +123,7 @@ export function MoreOptions({
                 <p className="text-muted-foreground mt-1 text-[13px]">
                   {webOnly
                     ? "Only the web shows this row. The apps don't get it."
-                    : "The apps show this row as a regular row."}
+                    : "The apps show this row too."}
                 </p>
               </div>
               <Switch

@@ -32,7 +32,7 @@ describe("the hero banner's apps choice", () => {
     await renderHero(true);
     const apps = screen.getByRole("switch", { name: "Show in the apps" });
     expect(apps).toBeChecked();
-    expect(screen.getByText("The apps show this row as a regular row.")).toBeInTheDocument();
+    expect(screen.getByText("The apps show this row too.")).toBeInTheDocument();
     await userEvent.click(apps);
     expect(apps).not.toBeChecked();
     expect(
