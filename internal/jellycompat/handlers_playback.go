@@ -1412,6 +1412,9 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 	}
 	switch method {
 	case string(playback.PlayRemux):
+		if !source.TranscodeAudio {
+			claims.CopyAudioCodec = compatSourceAudioCodec(source)
+		}
 		claims.RoutingWorkload = string(noderouting.WorkloadRemux)
 		claims.RoutingExecution = string(noderouting.ExecutionProxy)
 		claims.RoutingExecutionNodeID = proxyNode.ID
@@ -2082,7 +2085,6 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 	remoteToLocal := recipe != nil && recipe.TranscodeNodeURL == "" && previousRecipe != nil && previousRecipe.TranscodeNodeURL != ""
 	oldNodeRecipeRemoved := false
 	if remoteToLocal {
-		h.tm.StopRemoteTranscode(upstreamSessionID, previousRecipe.TranscodeNodeURL)
 		if h.RecipeNodeStore != nil {
 			deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 			err := h.RecipeNodeStore.Delete(deleteCtx, upstreamSessionID)
@@ -2128,6 +2130,13 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 			return errors.Join(updateErr, restoreErr, compatRestoreErr)
 		}
 		return updateErr
+	}
+	if remoteToLocal {
+		// Stop the replaced node job only once the local recipe has committed.
+		// The node fences a stopped transport against reconstruction, so a
+		// rollback that restored the remote recipe could not resume it; leaving
+		// the job running until here keeps that rollback playable.
+		h.tm.StopRemoteTranscode(upstreamSessionID, previousRecipe.TranscodeNodeURL)
 	}
 	return nil
 }
@@ -2365,6 +2374,16 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
 		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
+		// Jellyfin Web stops retrying a failed stream with copy refused once the
+		// stream URL names both refusals; append them the way Jellyfin does.
+		if dto.TranscodingURL != "" {
+			if !boolDefault(req.AllowVideoStreamCopy, true) {
+				dto.TranscodingURL += "&allowVideoStreamCopy=false"
+			}
+			if !boolDefault(req.AllowAudioStreamCopy, true) {
+				dto.TranscodingURL += "&allowAudioStreamCopy=false"
+			}
+		}
 		warmSubtitles = append(warmSubtitles, compatWarmsTextSubtitles(subtitleMode, dto.MediaStreams))
 		dto.MediaAttachments = h.mediaAttachments(attachmentContext, routeItemID, playSessionID, source)
 
@@ -3138,6 +3157,16 @@ func compatSourceAudioChannels(source PlaybackMediaSource) int {
 		return 0
 	}
 	return channels
+}
+
+// compatSourceAudioCodec is the selected source audio track's codec, or empty
+// when the source has no such track.
+func compatSourceAudioCodec(source PlaybackMediaSource) string {
+	audioTrackIndex := compatAudioTrackIndexOrDefault(source)
+	if audioTrackIndex < 0 || audioTrackIndex >= len(source.Version.AudioTracks) {
+		return ""
+	}
+	return source.Version.AudioTracks[audioTrackIndex].Codec
 }
 
 func isValidCompatAudioStreamIndex(version catalog.FileVersion, streamIndex int) bool {

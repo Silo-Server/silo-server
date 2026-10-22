@@ -297,8 +297,8 @@ func methodLabel(method string) string {
 }
 
 // statusClass buckets a status for the metric label. A response that was
-// never written (the client left before the buffered body flushed) is
-// "abandoned" rather than a fabricated code.
+// never written, or a server error whose client went away, is "abandoned"
+// rather than a fabricated code.
 func statusClass(status int) string {
 	if status == 0 {
 		return "abandoned"

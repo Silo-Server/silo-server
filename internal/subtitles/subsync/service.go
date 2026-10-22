@@ -688,7 +688,7 @@ func (s *Service) align(ctx context.Context, r *run) (Outcome, error) {
 		return Outcome{}, err
 	}
 	r.report(ctx, PhaseAnalyzing, 0)
-	cues, err := subtitles.ParseCuesForFormat(subj.format, subj.data)
+	cues, err := subtitles.ParseCuesForFormat(subj.format, subtitles.DecodeText(subj.format, subj.language, subj.data))
 	if err != nil {
 		return Outcome{}, fmt.Errorf("read subtitle cues: %w", err)
 	}

@@ -635,7 +635,7 @@ type recordingMissingMarker struct {
 	ids []int
 }
 
-func (m *recordingMissingMarker) MarkMissing(_ context.Context, id int, _ time.Time) error {
+func (m *recordingMissingMarker) MarkMissing(_ context.Context, id int, _ string, _ time.Time) error {
 	m.ids = append(m.ids, id)
 	return nil
 }
@@ -747,6 +747,62 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 				}
 				if event[0].PositionSeconds != tt.wantEventPosition {
 					t.Fatalf("position = %v, want %v", event[0].PositionSeconds, tt.wantEventPosition)
+				}
+				if event[0].SessionEnded {
+					t.Fatal("a teardown the client can rebuild was reported as an ended session")
+				}
+			}
+		})
+	}
+}
+
+// Expiry and abort retire the session id, so their pause tells providers the
+// session ended. A session that keeps no progress is not scrobbled on abort.
+// A Jellyfin play's upstream session can be revived under the same id, and
+// jellycompat sends that play's own stop, so its expiry stays a plain pause.
+func TestRetiredSessionsReportEndedPause(t *testing.T) {
+	expire := func(h *PlaybackHandler, s *playback.Session) { h.finalizeExpiredSession(context.Background(), s) }
+	abort := func(h *PlaybackHandler, s *playback.Session) {
+		h.finalizeSessionAbort(context.Background(), s, false, "")
+	}
+	tests := []struct {
+		name               string
+		finalize           func(*PlaybackHandler, *playback.Session)
+		disablePersistence bool
+		jellyfinCompat     bool
+		wantPauses         int
+		wantEnded          bool
+	}{
+		{"expiry", expire, false, false, 1, true},
+		{"abort", abort, false, false, 1, true},
+		{"abort without progress", abort, true, false, 0, false},
+		{"jellyfin expiry", expire, false, true, 1, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}
+			scrobbler := &recordingPlaybackWatchScrobbler{}
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
+			handler.WatchScrobbler = scrobbler
+
+			tt.finalize(handler, &playback.Session{
+				ID:                         "session-1",
+				UserID:                     1,
+				ProfileID:                  "profile-1",
+				MediaFileID:                file.ID,
+				Position:                   600,
+				DisableProgressPersistence: tt.disablePersistence,
+				IsJellyfinCompat:           tt.jellyfinCompat,
+				StartedAt:                  time.Now().Add(-time.Minute),
+			})
+
+			if len(scrobbler.stops) != 0 || len(scrobbler.pauses) != tt.wantPauses {
+				t.Fatalf("pauses = %d, stops = %d, want %d pauses", len(scrobbler.pauses), len(scrobbler.stops), tt.wantPauses)
+			}
+			for _, event := range scrobbler.pauses {
+				if event.SessionEnded != tt.wantEnded {
+					t.Fatalf("pause SessionEnded = %v, want %v", event.SessionEnded, tt.wantEnded)
 				}
 			}
 		})

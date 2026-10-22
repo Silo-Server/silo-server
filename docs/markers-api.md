@@ -54,6 +54,12 @@ the numbering is that of the first TVDB or TMDB provider in the chain whose ID
 the episode carries. Automatic sharing skips specials; sharing a manually
 edited special's markers is allowed.
 
+Automatic sharing selects an episode file only while some provider would
+submit it: the marker meets that provider's minimum confidence, the series has
+every external ID the provider requires, and the provider has not already
+claimed the episode. A file that every provider declines is not selected again
+until one of those inputs changes, for example when the series gains a TMDB ID.
+
 A manual deletion removes every occurrence of that kind for the selected file.
 The empty range retains manual provenance: provider lookups, local detection,
 rescans, and file-identity changes cannot restore it. An explicit manual set

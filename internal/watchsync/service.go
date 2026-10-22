@@ -455,9 +455,9 @@ func (s *Service) processLocalWatchEvent(ctx context.Context, event LocalWatchEv
 				continue
 			}
 			now := s.now()
-			conn.LastOutboundSyncAt = &now
-			conn.LastError = ""
-			if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
+			update := flowSucceeded(now)
+			update.LastOutboundSyncAt = &now
+			if err := s.repo.UpdateConnectionSyncState(ctx, conn.ID, update); err != nil {
 				return err
 			}
 		}
@@ -469,8 +469,7 @@ func (s *Service) recordLocalWatchEventError(ctx context.Context, conn Connectio
 	if err == nil {
 		return
 	}
-	conn.LastError = err.Error()
-	if _, updateErr := s.repo.UpsertConnection(ctx, conn); updateErr != nil {
+	if updateErr := s.repo.UpdateConnectionSyncState(ctx, conn.ID, connectionError(err.Error())); updateErr != nil {
 		slog.WarnContext(ctx, "failed to record local watch provider event error", "component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID, "error", updateErr)
 	}
 }
@@ -850,7 +849,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 		return completed, err
 	}
 	// Clear an expired deferral after refresh, which reloads the connection.
-	// The first successful flow persists the cleared value.
+	// Each successful flow's ClearRateLimitBy persists the cleared value.
 	if conn.RateLimitedUntil != nil && !conn.RateLimitedUntil.After(s.now()) {
 		conn.RateLimitedUntil = nil
 	}
@@ -866,6 +865,29 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			rateLimited = &rle
 		}
 	}
+	// After a flow succeeds, the next one starts from the stored connection.
+	// A connection disconnected meanwhile ends the run, whether the flow
+	// succeeded or failed on the missing connection: nothing is left to sync
+	// it for.
+	disconnected := false
+	reload := func(label string) {
+		refreshed, err := s.reloadConnection(ctx, conn)
+		if err != nil {
+			flowErrors = append(flowErrors, label+" connection refresh: "+err.Error())
+			disconnected = disconnected || errors.Is(err, ErrConnectionNotFound)
+			return
+		}
+		conn = refreshed
+	}
+	afterFlow := func(label string, err error) {
+		if err != nil {
+			recordFlowError(label, err)
+			disconnected = disconnected || errors.Is(err, ErrConnectionNotFound)
+			return
+		}
+		reload(label)
+	}
+	halted := func() bool { return rateLimited != nil || disconnected }
 	// Dropped shows run first: they cost a request or two, and a large
 	// history read that exhausts the provider's rate limit must not starve
 	// them. Order does not change the merge: imported history keeps its
@@ -873,15 +895,9 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 	if conn.SyncDroppedEnabled && provider.Capabilities().SyncDropped {
 		result, err := s.syncDropped(ctx, conn, cfg, provider)
 		run.Warning = appendWarning(run.Warning, result.Warnings)
-		if err != nil {
-			recordFlowError("dropped shows", err)
-		} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
-			flowErrors = append(flowErrors, "dropped shows connection refresh: "+refreshErr.Error())
-		} else {
-			conn = refreshed
-		}
+		afterFlow("dropped shows", err)
 	}
-	if rateLimited == nil && conn.ImportWatchedEnabled && provider.Capabilities().ImportWatched {
+	if !halted() && conn.ImportWatchedEnabled && provider.Capabilities().ImportWatched {
 		importer, ok := provider.(WatchedImporter)
 		if !ok {
 			flowErrors = append(flowErrors, fmt.Sprintf("provider %q does not implement watched import", conn.Provider))
@@ -891,16 +907,10 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			run.InboundWatchedImported = result.Imported
 			signalsChanged = signalsChanged || result.Imported > 0
 			run.Warning = appendWarning(run.Warning, result.Warnings)
-			if err != nil {
-				recordFlowError("watched import", err)
-			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
-				flowErrors = append(flowErrors, "watched import connection refresh: "+refreshErr.Error())
-			} else {
-				conn = refreshed
-			}
+			afterFlow("watched import", err)
 		}
 	}
-	if rateLimited == nil && conn.ImportProgressEnabled && provider.Capabilities().ImportProgress {
+	if !halted() && conn.ImportProgressEnabled && provider.Capabilities().ImportProgress {
 		importer, ok := provider.(ProgressImporter)
 		if !ok {
 			flowErrors = append(flowErrors, fmt.Sprintf("provider %q does not implement progress import", conn.Provider))
@@ -910,16 +920,10 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			run.InboundProgressImported = result.Imported
 			signalsChanged = signalsChanged || result.Imported > 0
 			run.Warning = appendWarning(run.Warning, result.Warnings)
-			if err != nil {
-				recordFlowError("progress import", err)
-			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
-				flowErrors = append(flowErrors, "progress import connection refresh: "+refreshErr.Error())
-			} else {
-				conn = refreshed
-			}
+			afterFlow("progress import", err)
 		}
 	}
-	if rateLimited == nil && conn.ExportWatchedEnabled && provider.Capabilities().ExportWatched {
+	if !halted() && conn.ExportWatchedEnabled && provider.Capabilities().ExportWatched {
 		exporter, ok := provider.(WatchedExporter)
 		if !ok {
 			flowErrors = append(flowErrors, fmt.Sprintf("provider %q does not implement watched export", conn.Provider))
@@ -927,18 +931,12 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			result, err := s.ExportWatched(ctx, conn, cfg, exporter)
 			run.OutboundFound = result.LocalFound
 			run.OutboundSent = result.Sent
-			if err != nil {
-				recordFlowError("watched export", err)
-			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
-				flowErrors = append(flowErrors, "watched export connection refresh: "+refreshErr.Error())
-			} else {
-				conn = refreshed
-			}
+			afterFlow("watched export", err)
 		}
 	}
 	// Favorites and watchlist share one pipeline, run per list kind.
 	for _, b := range s.listBindings() {
-		if rateLimited != nil {
+		if halted() {
 			break
 		}
 		caps := provider.Capabilities()
@@ -947,27 +945,15 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			b.setImportCounts(&run, result.Found, result.Imported)
 			signalsChanged = signalsChanged || result.changedLocalList()
 			run.Warning = appendWarning(run.Warning, result.Warnings)
-			if err != nil {
-				recordFlowError(string(b.kind)+" import", err)
-			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
-				flowErrors = append(flowErrors, string(b.kind)+" import connection refresh: "+refreshErr.Error())
-			} else {
-				conn = refreshed
-			}
+			afterFlow(string(b.kind)+" import", err)
 		}
-		if rateLimited == nil && b.exportEnabled(conn) && b.capExport(caps) {
+		if !halted() && b.exportEnabled(conn) && b.capExport(caps) {
 			result, err := s.exportList(ctx, conn, cfg, provider, b)
 			b.setExportCounts(&run, result.LocalFound, result.Sent)
 			run.Warning = appendWarning(run.Warning, result.Warnings)
-			if err != nil {
-				recordFlowError(string(b.kind)+" export", err)
-			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
-				flowErrors = append(flowErrors, string(b.kind)+" export connection refresh: "+refreshErr.Error())
-			} else {
-				conn = refreshed
-			}
+			afterFlow(string(b.kind)+" export", err)
 		}
-		if rateLimited == nil && b.removalsEnabled(conn) && b.capRemove(caps) {
+		if !halted() && b.removalsEnabled(conn) && b.capRemove(caps) {
 			removed, err := s.removePendingListItems(ctx, conn, cfg, provider, b)
 			b.setRemovalCount(&run, removed)
 			if err != nil {
@@ -975,7 +961,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			}
 		}
 	}
-	if rateLimited == nil && (conn.ImportRatingsEnabled || conn.ExportRatingsEnabled) &&
+	if !halted() && (conn.ImportRatingsEnabled || conn.ExportRatingsEnabled) &&
 		(provider.Capabilities().ImportRatings || provider.Capabilities().ExportRatings) {
 		result, err := s.syncRatings(ctx, conn, cfg, provider)
 		run.InboundRatingsFound = result.RemoteFound
@@ -984,16 +970,10 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 		run.OutboundRatingsFound = result.LocalFound
 		run.OutboundRatingsSent = result.Sent
 		run.Warning = appendWarning(run.Warning, result.Warnings)
-		if err != nil {
-			recordFlowError("ratings", err)
-		} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
-			flowErrors = append(flowErrors, "ratings connection refresh: "+refreshErr.Error())
-		} else {
-			conn = refreshed
-		}
+		afterFlow("ratings", err)
 	}
 
-	if rateLimited != nil {
+	if rateLimited != nil && !disconnected {
 		if err := s.deferRateLimitedConnection(ctx, conn, *rateLimited); err != nil {
 			flowErrors = append(flowErrors, "record rate limit deferral: "+err.Error())
 		}
@@ -1052,9 +1032,9 @@ func (s *Service) deferRateLimitedConnection(ctx context.Context, conn Connectio
 			return err
 		}
 	} else {
-		fresh.RateLimitedUntil = &until
-		fresh.LastError = lastError
-		if _, err := s.repo.UpsertConnection(ctx, fresh); err != nil {
+		update := connectionError(lastError)
+		update.RateLimitedUntil = &until
+		if err := s.repo.UpdateConnectionSyncState(ctx, fresh.ID, update); err != nil {
 			return err
 		}
 	}
@@ -1073,7 +1053,7 @@ func (s *Service) reloadConnection(ctx context.Context, conn Connection) (Connec
 		return Connection{}, err
 	}
 	if !ok {
-		return Connection{}, fmt.Errorf("watch provider connection %s not found", conn.ID)
+		return Connection{}, fmt.Errorf("watch provider connection %s: %w", conn.ID, ErrConnectionNotFound)
 	}
 	return refreshed, nil
 }
@@ -1265,10 +1245,10 @@ func (s *Service) ImportWatched(
 		}
 	}
 	now := s.now()
-	conn.LastInboundSyncAt = &now
-	conn.LastError = ""
-	conn.SyncCursors = mergeSyncCursors(conn.SyncCursors, batch.UpdatedCursors)
-	if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
+	update := flowSucceeded(now)
+	update.LastInboundSyncAt = &now
+	update.SyncCursors = batch.UpdatedCursors
+	if err := s.repo.UpdateConnectionSyncState(ctx, conn.ID, update); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -1385,10 +1365,10 @@ func (s *Service) ImportProgress(
 		}
 	}
 	now := s.now()
-	conn.LastProgressSyncAt = &now
-	conn.LastError = ""
-	conn.SyncCursors = mergeSyncCursors(conn.SyncCursors, batch.UpdatedCursors)
-	if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
+	update := flowSucceeded(now)
+	update.LastProgressSyncAt = &now
+	update.SyncCursors = batch.UpdatedCursors
+	if err := s.repo.UpdateConnectionSyncState(ctx, conn.ID, update); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -1808,9 +1788,9 @@ func (s *Service) ExportWatched(
 	}
 
 	now := s.now()
-	conn.LastOutboundSyncAt = &now
-	conn.LastError = ""
-	if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
+	update := flowSucceeded(now)
+	update.LastOutboundSyncAt = &now
+	if err := s.repo.UpdateConnectionSyncState(ctx, conn.ID, update); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -1925,25 +1905,13 @@ func (s *Service) exportLocalPlays(
 		return err
 	}
 	now := s.now()
-	conn.LastOutboundSyncAt = &now
-	conn.LastError = ""
-	if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
-		return err
-	}
-	return nil
+	update := flowSucceeded(now)
+	update.LastOutboundSyncAt = &now
+	return s.repo.UpdateConnectionSyncState(ctx, conn.ID, update)
 }
 
 func (s *Service) persistConnectionError(ctx context.Context, conn Connection, message string) error {
-	if conn.ID != "" {
-		fresh, err := s.reloadConnection(ctx, conn)
-		if err != nil {
-			return err
-		}
-		conn = fresh
-	}
-	conn.LastError = message
-	_, err := s.repo.UpsertConnection(ctx, conn)
-	return err
+	return s.repo.UpdateConnectionSyncState(ctx, conn.ID, connectionError(message))
 }
 
 func watchedExportBatchSize(exporter WatchedExporter, fallback int) int {
@@ -2151,14 +2119,31 @@ func parseInt(value string) int {
 	return parsed
 }
 
-const scrobbleActionStop = "stop"
+const (
+	scrobbleActionStart = "start"
+	scrobbleActionPause = "pause"
+	scrobbleActionStop  = "stop"
+)
+
+// stopsEndedSessions reports whether provider must receive a stop, not a
+// pause, when a playback session ends without a user stop. Such a provider
+// may mirror live sessions and learn one is over only from a stop. The
+// first-party plugins that replaced the Simkl and MDBList built-ins
+// keep the pause, which saves progress and ends their "watching" state.
+func stopsEndedSessions(provider Provider) bool {
+	if _, firstParty := FirstPartyPluginID(provider.Key()); firstParty {
+		return false
+	}
+	_, ok := provider.(interface{ stopsEndedSessions() })
+	return ok
+}
 
 func (s *Service) ScrobbleStart(ctx context.Context, event ScrobbleEvent) error {
-	return s.scrobble(ctx, event, "start", false)
+	return s.scrobble(ctx, event, scrobbleActionStart, false)
 }
 
 func (s *Service) ScrobblePause(ctx context.Context, event ScrobbleEvent) error {
-	return s.scrobble(ctx, event, "pause", false)
+	return s.scrobble(ctx, event, scrobbleActionPause, false)
 }
 
 func (s *Service) ScrobbleStop(ctx context.Context, event ScrobbleEvent) error {
@@ -2169,7 +2154,7 @@ func (s *Service) ScrobbleStop(ctx context.Context, event ScrobbleEvent) error {
 // or persistence failures to the caller. It is used when the caller owns a
 // durable terminal event that must not be acknowledged after a mere enqueue.
 func (s *Service) ScrobbleStopConfirmed(ctx context.Context, event ScrobbleEvent) error {
-	return s.scrobble(ctx, event, "stop", true)
+	return s.scrobble(ctx, event, scrobbleActionStop, true)
 }
 
 func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action string, confirm bool) error {
@@ -2222,12 +2207,16 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 			}
 			continue
 		}
-		if action == "start" {
-			if err := s.repo.UpsertScrobbleSession(ctx, event, conn.ID, action); err != nil {
+		connAction := action
+		if connAction == scrobbleActionPause && event.SessionEnded && stopsEndedSessions(provider) {
+			connAction = scrobbleActionStop
+		}
+		if connAction == scrobbleActionStart {
+			if err := s.repo.UpsertScrobbleSession(ctx, event, conn.ID, connAction); err != nil {
 				return err
 			}
 		} else if !confirm {
-			if err := s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, action, event.PositionSeconds, event.HistoryID, "", nil); err != nil {
+			if err := s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, connAction, event.PositionSeconds, event.HistoryID, "", nil); err != nil {
 				return err
 			}
 		}
@@ -2235,7 +2224,7 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 		// remains the low-latency path; the normal history-export reconciliation
 		// retries this desired state after crashes, plugin downtime, or uncertain
 		// upstream outcomes.
-		if action == scrobbleActionStop && event.Completed && provider.Capabilities().ExportWatched {
+		if connAction == scrobbleActionStop && event.Completed && provider.Capabilities().ExportWatched {
 			if err := s.persistCompletedScrobbleExport(ctx, conn, event); err != nil {
 				if confirm {
 					dispatchErrors = append(dispatchErrors, err)
@@ -2252,15 +2241,15 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 		}
 		cfg, err := s.serverConfig(ctx, conn.Provider)
 		if err != nil {
-			_ = s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, action, event.PositionSeconds, event.HistoryID, err.Error(), nil)
+			_ = s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, connAction, event.PositionSeconds, event.HistoryID, err.Error(), nil)
 			continue
 		}
 		conn, err = s.refreshConnectionIfNeeded(ctx, provider, cfg, conn)
 		if err != nil {
-			_ = s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, action, event.PositionSeconds, event.HistoryID, err.Error(), nil)
+			_ = s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, connAction, event.PositionSeconds, event.HistoryID, err.Error(), nil)
 			continue
 		}
-		s.dispatchScrobbleAsync(scrobbler, cfg, conn, event, startTitles(), action)
+		s.dispatchScrobbleAsync(scrobbler, cfg, conn, event, startTitles(), connAction)
 	}
 	if len(confirmedTargets) > 0 {
 		confirmedTitles := startTitles()
@@ -2357,7 +2346,7 @@ func (s *Service) dispatchScrobbleConfirmed(ctx context.Context, provider Provid
 			)
 			return err
 		}
-		return s.dispatchScrobble(ctx, scrobbler, cfg, refreshedConn, titledWithin(ctx, titled, event), "stop", &claimVersion)
+		return s.dispatchScrobble(ctx, scrobbler, cfg, refreshedConn, titledWithin(ctx, titled, event), scrobbleActionStop, &claimVersion)
 	}
 	result := make(chan error, 1)
 	s.enqueueOrderedScrobble(scrobbleDispatchKey(scrobbler, conn, event), func() {
@@ -2402,7 +2391,7 @@ func (s *Service) enqueueOrderedScrobble(key string, dispatch func()) {
 func (s *Service) dispatchScrobble(ctx context.Context, scrobbler Scrobbler, cfg ServerConfig, conn Connection, event ScrobbleEvent, action string, confirmedClaim *time.Time) error {
 	var err error
 	switch action {
-	case "pause":
+	case scrobbleActionPause:
 		err = scrobbler.Pause(ctx, cfg, conn, event)
 	case scrobbleActionStop:
 		err = scrobbler.Stop(ctx, cfg, conn, event)

@@ -36,7 +36,7 @@ const controls = vi.hoisted(() => ({
     onFullscreenToggle?: () => void;
     videoFit?: VideoFitMode;
     onVideoFitToggle?: () => void;
-    onSubtitleJobAccepted?: (jobId: string) => void;
+    onSubtitleJobAccepted?: (jobId: string, resultSubtitleId?: string) => void;
     onMutedChange?: (muted: boolean) => void;
     onVolumeChange?: (volume: number) => void;
     playbackSpeed?: number;
@@ -63,6 +63,7 @@ const hlsJS = vi.hoisted(() => ({
   constructed: vi.fn(),
   startLoad: vi.fn(),
   stopLoad: vi.fn(),
+  loadSource: vi.fn(),
   latest: null as null | { emit: (event: string, data: unknown) => void },
 }));
 
@@ -145,11 +146,17 @@ vi.mock("hls.js", () => ({
       BUFFER_APPENDED: "bufferAppended",
     };
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
+    static ErrorDetails = {
+      MANIFEST_LOAD_ERROR: "manifestLoadError",
+      MANIFEST_LOAD_TIMEOUT: "manifestLoadTimeOut",
+      MANIFEST_PARSING_ERROR: "manifestParsingError",
+    };
     static isSupported = () => hlsJS.supported;
 
     handlers = new Map<string, (event: string, data: unknown) => void>();
     startLoad = hlsJS.startLoad;
     stopLoad = hlsJS.stopLoad;
+    loadSource = hlsJS.loadSource;
 
     constructor(config?: unknown) {
       hlsJS.constructed(config);
@@ -162,7 +169,6 @@ vi.mock("hls.js", () => ({
     emit(event: string, data: unknown) {
       this.handlers.get(event)?.(event, data);
     }
-    loadSource() {}
     attachMedia() {}
     destroy() {}
   },
@@ -4553,6 +4559,197 @@ describe("VideoPlayer translation handoff", () => {
     expect(toastError).toHaveBeenCalledTimes(2);
   });
 
+  it("selects the saved track when the server returns an already finished translation", async () => {
+    const english: PlayerSubtitleInfo = {
+      index: 0,
+      language: "en",
+      label: "English",
+      source: "embedded",
+      codec: "subrip",
+      url: "/en.vtt",
+    };
+    const german: PlayerSubtitleInfo = {
+      index: 1,
+      language: "de",
+      label: "English → German (AI)",
+      source: "downloaded",
+      codec: "srt",
+      sync_key: "stored-31",
+      url: "/api/v2/stream/session-1/subtitles/1.vtt?file_id=7&downloaded_subtitle_id=31",
+    };
+    const onRefreshSubtitles = vi.fn();
+    playerV2Mock.mockResolvedValue({ job: { status: "completed", result_subtitle_id: "31" } });
+    renderPlayer({ subtitleUrls: [english, german], onRefreshSubtitles });
+
+    await act(async () => {
+      controls.current?.onSubtitleJobAccepted?.("12");
+    });
+
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(1));
+    expect(onRefreshSubtitles).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the inventory once when a reused track is not listed yet", async () => {
+    const onRefreshSubtitles = vi.fn();
+    playerV2Mock.mockResolvedValue({ job: { status: "completed", result_subtitle_id: "44" } });
+    const { rerenderPlayer } = renderPlayer({ subtitleUrls: [], onRefreshSubtitles });
+
+    await act(async () => {
+      controls.current?.onSubtitleJobAccepted?.("13");
+    });
+    await waitFor(() => expect(onRefreshSubtitles).toHaveBeenCalledOnce());
+
+    rerenderPlayer({
+      onRefreshSubtitles,
+      subtitleUrls: [
+        {
+          index: 4,
+          language: "es",
+          label: "English → Spanish (AI)",
+          source: "downloaded",
+          codec: "srt",
+          sync_key: "stored-44",
+          url: "/es.vtt",
+        },
+      ],
+    });
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(4));
+    expect(onRefreshSubtitles).toHaveBeenCalledOnce();
+  });
+
+  it("selects a reused track from the create response without reading the job again", async () => {
+    const german: PlayerSubtitleInfo = {
+      index: 2,
+      language: "de",
+      label: "English → German (AI)",
+      source: "downloaded",
+      codec: "srt",
+      sync_key: "stored-31",
+      url: "/de.vtt",
+    };
+    playerV2Mock.mockImplementation((_config: unknown, route: string) =>
+      route === "GET /api/v2/subtitles/ai/jobs/{job_id}"
+        ? Promise.reject(new Error("network"))
+        : Promise.resolve(undefined),
+    );
+    renderPlayer({ subtitleUrls: [german] });
+
+    await act(async () => {
+      controls.current?.onSubtitleJobAccepted?.("12", "31");
+    });
+
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(2));
+    expect(playerV2Mock).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "GET /api/v2/subtitles/ai/jobs/{job_id}",
+      expect.anything(),
+    );
+  });
+
+  it("drops a reused track still waiting for the inventory when a newer job is accepted", async () => {
+    const onRefreshSubtitles = vi.fn();
+    playerV2Mock.mockResolvedValue({ job: { status: "running" } });
+    const { rerenderPlayer } = renderPlayer({ subtitleUrls: [], onRefreshSubtitles });
+
+    await act(async () => {
+      controls.current?.onSubtitleJobAccepted?.("13", "44");
+    });
+    await waitFor(() => expect(onRefreshSubtitles).toHaveBeenCalledOnce());
+    await act(async () => {
+      controls.current?.onSubtitleJobAccepted?.("14");
+    });
+
+    rerenderPlayer({
+      onRefreshSubtitles,
+      subtitleUrls: [
+        {
+          index: 4,
+          language: "es",
+          label: "English → Spanish (AI)",
+          source: "downloaded",
+          codec: "srt",
+          sync_key: "stored-44",
+          url: "/es.vtt",
+        },
+      ],
+    });
+    await act(async () => {});
+    expect(controls.current?.activeSubtitleIndex).not.toBe(4);
+  });
+
+  it("keeps the viewer's menu choice over a reused track still waiting for the inventory", async () => {
+    const onRefreshSubtitles = vi.fn();
+    const { rerenderPlayer } = renderPlayer({ subtitleUrls: [], onRefreshSubtitles });
+
+    await act(async () => {
+      controls.current?.onSubtitleJobAccepted?.("13", "44");
+    });
+    await waitFor(() => expect(onRefreshSubtitles).toHaveBeenCalledOnce());
+    act(() =>
+      (
+        controls.current as unknown as { onSubtitleSelect: (i: number | null) => void }
+      ).onSubtitleSelect(null),
+    );
+
+    rerenderPlayer({
+      onRefreshSubtitles,
+      subtitleUrls: [
+        {
+          index: 4,
+          language: "es",
+          label: "English → Spanish (AI)",
+          source: "downloaded",
+          codec: "srt",
+          sync_key: "stored-44",
+          url: "/es.vtt",
+        },
+      ],
+    });
+    await act(async () => {});
+    expect(controls.current?.activeSubtitleIndex).toBeNull();
+  });
+
+  it("keeps a reused track when an earlier live translation finishes later", async () => {
+    const german: PlayerSubtitleInfo = {
+      index: 2,
+      language: "de",
+      label: "English → German (AI)",
+      source: "downloaded",
+      codec: "srt",
+      sync_key: "stored-31",
+      url: "/de.vtt",
+    };
+    const onRefreshSubtitles = vi.fn();
+    renderPlayer({ subtitleUrls: [german], onRefreshSubtitles });
+    const base = { session_id: "session-1", file_id: 7, job_id: 1, track_key: "ai-1" };
+    act(() => {
+      realtimeOptions.current?.onEvent?.({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_translation_started",
+        payload: { ...base, language: "hr", total_cues: 2 },
+      });
+    });
+
+    await act(async () => {
+      controls.current?.onSubtitleJobAccepted?.("12", "31");
+    });
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(2));
+    expect(subtitleTimeline.liveKey).toBeNull();
+
+    act(() => {
+      realtimeOptions.current?.onEvent?.({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_translation_completed",
+        payload: { ...base, subtitle_id: 44, language: "hr" },
+      });
+    });
+    expect(controls.current?.activeSubtitleIndex).toBe(2);
+    expect(onRefreshSubtitles).not.toHaveBeenCalled();
+  });
+
   it("isolates cue batches, completion and failures when a newer AI job starts", () => {
     const onRefreshSubtitles = vi.fn();
     const onApplySubtitleTrack = vi.fn();
@@ -5135,6 +5332,7 @@ describe("VideoPlayer lost connection", () => {
     hlsJS.constructed.mockClear();
     hlsJS.startLoad.mockClear();
     hlsJS.stopLoad.mockClear();
+    hlsJS.loadSource.mockClear();
     hlsJS.latest = null;
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
@@ -5351,6 +5549,61 @@ describe("VideoPlayer lost connection", () => {
     act(() => hlsJS.latest?.emit("error", fatalNetworkError));
     expect(onConnectionLost).toHaveBeenCalledOnce();
     expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+  });
+
+  it("loads the manifest again after a fatal manifest error, then reports the route failed", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onPlanFailure = vi.fn();
+    const url = "/playback/transcode/session-1/master.m3u8";
+    const plan = fixturePlanV3({
+      stream: { url, protocol: "hls", headers: {}, header_refresh: "none" },
+    });
+    renderPlayer({ plan, onPlanFailure });
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+    expect(hlsJS.loadSource).toHaveBeenCalledOnce();
+
+    // hls.js does not request a failed manifest again on startLoad(), so the
+    // recovery has to load the source again for the second failure to come.
+    const fatalManifestError = { fatal: true, type: "networkError", details: "manifestLoadError" };
+    vi.spyOn(Date, "now").mockReturnValue(10_000);
+    act(() => hlsJS.latest?.emit("error", fatalManifestError));
+    expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+    expect(hlsJS.loadSource.mock.calls[1]).toEqual(hlsJS.loadSource.mock.calls[0]);
+    expect(hlsJS.startLoad).not.toHaveBeenCalled();
+    expect(onPlanFailure).not.toHaveBeenCalled();
+
+    vi.spyOn(Date, "now").mockReturnValue(20_000);
+    act(() => hlsJS.latest?.emit("error", fatalManifestError));
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+    expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
+  });
+
+  it("reports the route failed when the reloaded manifest fails within the recovery cooldown", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onPlanFailure = vi.fn();
+    const url = "/playback/transcode/session-1/master.m3u8";
+    const plan = fixturePlanV3({
+      stream: { url, protocol: "hls", headers: {}, header_refresh: "none" },
+    });
+    renderPlayer({ plan, onPlanFailure });
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+
+    const fatalManifestError = {
+      fatal: true,
+      type: "networkError",
+      details: "manifestParsingError",
+    };
+    vi.spyOn(Date, "now").mockReturnValue(10_000);
+    act(() => hlsJS.latest?.emit("error", fatalManifestError));
+    expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+
+    vi.spyOn(Date, "now").mockReturnValue(10_500);
+    act(() => hlsJS.latest?.emit("error", fatalManifestError));
+    expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+    expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
   });
 
   it("gives a replacement HLS transport that never played its startup recovery", async () => {

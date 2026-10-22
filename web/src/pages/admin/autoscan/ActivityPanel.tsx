@@ -704,9 +704,9 @@ function AutoscanQueue({
                     : "Waiting for capacity"}
                 </div>
               </TableCell>
-              <TableCell className="max-w-xl">
+              <TableCell>
                 <div className="text-sm">{formatActiveScanMode(scan)}</div>
-                <div className="text-muted-foreground mt-1 font-mono text-xs [overflow-wrap:anywhere]">
+                <div className="text-muted-foreground mt-1 max-w-xl font-mono text-xs [overflow-wrap:anywhere] whitespace-normal">
                   {scan.path || "Entire library"}
                 </div>
               </TableCell>
@@ -879,13 +879,16 @@ export function ScanHistoryTable({
               <div className="text-muted-foreground mt-1 font-mono text-[11px]">{scan.id}</div>
             </TableCell>
             <TableCell className="whitespace-nowrap">{scanSourceName(scan, lookups)}</TableCell>
-            <TableCell className="max-w-xl">
+            {/* Table cells default to nowrap. The path and error set their own
+                width bounds so the text wraps within them, and the error keeps a
+                minimum so a failed scan's column does not collapse to a sliver. */}
+            <TableCell>
               <div className="text-sm">{formatActiveScanMode(scan)}</div>
-              <div className="text-muted-foreground mt-1 font-mono text-xs [overflow-wrap:anywhere]">
+              <div className="text-muted-foreground mt-1 max-w-xl font-mono text-xs [overflow-wrap:anywhere] whitespace-normal">
                 {scan.path || "Entire library"}
               </div>
               {scan.error_message ? (
-                <div className="text-destructive mt-1 text-xs [overflow-wrap:anywhere]">
+                <div className="text-destructive mt-1 max-w-xl min-w-[16rem] text-xs [overflow-wrap:anywhere] whitespace-normal">
                   {scan.error_message}
                 </div>
               ) : null}
@@ -998,8 +1001,9 @@ export function PollEventTable({
             </TableCell>
             <TableCell>
               <PollMetricStrip event={event} />
+              {/* Table cells default to nowrap; the error must wrap within its cap. */}
               {event.error_message ? (
-                <div className="text-destructive mt-1 max-w-md text-xs [overflow-wrap:anywhere]">
+                <div className="text-destructive mt-1 max-w-md text-xs [overflow-wrap:anywhere] whitespace-normal">
                   {event.error_message}
                 </div>
               ) : null}

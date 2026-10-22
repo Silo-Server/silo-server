@@ -771,60 +771,91 @@ func (s *countingArtworkStore) Put(ctx context.Context, key string, data []byte)
 	return s.Filesystem.Put(ctx, key, data)
 }
 
+// AWS S3 answers HEAD on a missing key with 403 when the credential lacks
+// s3:ListBucket. The reuse check cannot tell that from a denial, so the cacher
+// uploads, and once the objects exist the same credential reuses them (#911).
 func TestCacheBytesRepeatedS3ArtworkDoesNotWrite(t *testing.T) {
-	var mu sync.Mutex
-	type object struct {
-		size     int
-		checksum string
-	}
-	objects := map[string]object{}
-	writes := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		switch r.Method {
-		case http.MethodPut:
-			data, err := io.ReadAll(r.Body)
+	for _, missingStatus := range []int{http.StatusNotFound, http.StatusForbidden} {
+		t.Run(http.StatusText(missingStatus), func(t *testing.T) {
+			var mu sync.Mutex
+			type object struct {
+				size     int
+				checksum string
+			}
+			objects := map[string]object{}
+			writes := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				switch r.Method {
+				case http.MethodPut:
+					data, err := io.ReadAll(r.Body)
+					if err != nil {
+						t.Error(err)
+						w.WriteHeader(500)
+						return
+					}
+					objects[r.URL.Path] = object{len(data), r.Header.Get("X-Amz-Meta-Silo-Sha256")}
+					writes++
+				case http.MethodHead:
+					obj, ok := objects[r.URL.Path]
+					if !ok {
+						w.WriteHeader(missingStatus)
+						return
+					}
+					w.Header().Set("Content-Length", strconv.Itoa(obj.size))
+					w.Header().Set("X-Amz-Meta-Silo-Sha256", obj.checksum)
+				default:
+					w.WriteHeader(405)
+				}
+			}))
+			defer server.Close()
+			store := blobstore.NewS3(s3client.NewClient(s3client.BucketConfig{Endpoint: server.URL, Bucket: "artwork", PathStyle: true, AccessKey: "test", SecretKey: "test"}))
+			cacher := New(store)
+			data := makeTestJPEG(t)
+			req := CacheRequest{ProviderID: "tmdb", ContentType: "movies", ContentID: "550", ImageType: metadata.ImagePoster}
+			first, err := cacher.CacheBytes(context.Background(), data, req)
 			if err != nil {
-				t.Error(err)
-				w.WriteHeader(500)
-				return
+				t.Fatal(err)
 			}
-			objects[r.URL.Path] = object{len(data), r.Header.Get("X-Amz-Meta-Silo-Sha256")}
-			writes++
-		case http.MethodHead:
-			obj, ok := objects[r.URL.Path]
-			if !ok {
-				w.WriteHeader(404)
-				return
+			mu.Lock()
+			firstWrites := writes
+			mu.Unlock()
+			second, err := cacher.CacheBytes(context.Background(), data, req)
+			if err != nil {
+				t.Fatal(err)
 			}
-			w.Header().Set("Content-Length", strconv.Itoa(obj.size))
-			w.Header().Set("X-Amz-Meta-Silo-Sha256", obj.checksum)
-		default:
-			w.WriteHeader(405)
+			mu.Lock()
+			finalWrites := writes
+			mu.Unlock()
+			if first.UploadedVariants == 0 || firstWrites != first.UploadedVariants || finalWrites != firstWrites || second.UploadedVariants != 0 || second.ExistingVariants != first.UploadedVariants {
+				t.Fatalf("writes %d -> %d, first %#v, second %#v", firstWrites, finalWrites, first, second)
+			}
+		})
+	}
+}
+
+// A credential denied everything still fails, with the upload's error code
+// rather than the bodiless HEAD's.
+func TestCacheBytesReportsS3UploadDenial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusForbidden)
+		if r.Method != http.MethodHead {
+			_, _ = io.WriteString(w, "<Error><Code>AccessDenied</Code><Message>Access Denied.</Message></Error>")
 		}
 	}))
 	defer server.Close()
 	store := blobstore.NewS3(s3client.NewClient(s3client.BucketConfig{Endpoint: server.URL, Bucket: "artwork", PathStyle: true, AccessKey: "test", SecretKey: "test"}))
 	cacher := New(store)
-	data := makeTestJPEG(t)
 	req := CacheRequest{ProviderID: "tmdb", ContentType: "movies", ContentID: "550", ImageType: metadata.ImagePoster}
-	first, err := cacher.CacheBytes(context.Background(), data, req)
-	if err != nil {
-		t.Fatal(err)
+
+	_, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), req)
+	if err == nil {
+		t.Fatal("CacheBytes() succeeded with a denied credential")
 	}
-	mu.Lock()
-	firstWrites := writes
-	mu.Unlock()
-	second, err := cacher.CacheBytes(context.Background(), data, req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	finalWrites := writes
-	mu.Unlock()
-	if firstWrites != first.UploadedVariants || finalWrites != firstWrites || second.UploadedVariants != 0 || second.ExistingVariants != first.UploadedVariants {
-		t.Fatalf("writes %d -> %d, first %#v, second %#v", firstWrites, finalWrites, first, second)
+	if !strings.Contains(err.Error(), "upload") || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("CacheBytes() error = %v, want the upload's AccessDenied", err)
 	}
 }
 

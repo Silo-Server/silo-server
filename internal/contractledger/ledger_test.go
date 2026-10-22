@@ -960,6 +960,7 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 var mutationWithoutLegacyRow = map[string]string{
 	"muteNotificationSeries":                   "V2-only mute of one series' new-episode notifications (v1 is frozen). Muting a muted series inserts no row, so a replay converges on the same mute.",
 	"unmuteNotificationSeries":                 "V2-only lift of a series mute (v1 is frozen). Unmuting a series that is not muted deletes nothing, so a replay converges.",
+	"retirePushDevice":                         "V2-only session-less Android push retirement (v1 is frozen). It is ordered by the installation generation: a replay at the newest removal's generation answers removed without writing, and an older one conflicts.",
 	"markNotInterested":                        "V2-only Not interested mark (v1 is frozen). Marking a marked title changes no row and sends no notice, so a replay converges on the same mark.",
 	"unmarkNotInterested":                      "V2-only clearing of a Not interested mark (v1 is frozen). Clearing an absent mark changes no row and sends no notice, so a replay converges.",
 	"translateLibraryMetadata":                 "V2-only library prewarm of AI metadata translation (v1 is frozen). It coalesces on the library's active prewarm for the language; a replay after it finished starts another prewarm that finds only what is still missing, so nothing is translated twice.",
@@ -968,6 +969,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"resumeAdminNode":                          "V2-only lift of a transcode node drain request (v1 is frozen): it clears the request, so a replay converges on the same state.",
 	"ignoreUnmatchedItem":                      "V2-only mark of an unmatched item as intentionally unmatched (v1 is frozen): it keeps the first time the mark was set, so a replay converges on the same mark.",
 	"unignoreUnmatchedItem":                    "V2-only clear of that mark, the inverse of ignoreUnmatchedItem. Clearing an unmarked item is a no-op, so a replay converges on no mark.",
+	"retireApplePushInstallation":              "V2-only session-less Apple push retirement (v1 is frozen). It is ordered by the installation generation: an exact replay of the newest retirement answers removed without writing, and an older one conflicts.",
 	"updateDevice":                             "V2-only rename of a profile's device entry (v1 is frozen): it sets or clears custom_name on one registry row, so a replay converges on the same name.",
 	"startAdminChatGPTLogin":                   "V2-only administrator ChatGPT sign-in: each request supersedes the pending attempt and creates fresh PKCE, state and nonce values, so an uncertain result must not be replayed automatically.",
 	"completeAdminChatGPTLogin":                "V2-only administrator ChatGPT sign-in completion: it consumes a single-use authorization code and pending attempt, so a replay is refused without exchanging the code twice.",

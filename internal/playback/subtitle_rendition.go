@@ -3,8 +3,11 @@ package playback
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"os"
@@ -101,13 +104,26 @@ func subtitleCueFileName(generation uint64) string {
 	return fmt.Sprintf("subtitles_%d.vtt", generation)
 }
 
+// subtitleCueFileGeneration is the generation number in a cue file name.
+func subtitleCueFileGeneration(name string) (uint64, bool) {
+	digits, ok := strings.CutPrefix(name, "subtitles_")
+	if !ok {
+		return 0, false
+	}
+	digits, ok = strings.CutSuffix(digits, subtitleSegmentExt)
+	if !ok || digits == "" || strings.Trim(digits, "0123456789") != "" {
+		return 0, false
+	}
+	generation, err := strconv.ParseUint(digits, 10, 64)
+	return generation, err == nil
+}
+
 // appendSubtitleRenditionOutputArgs adds the WebVTT cue output after the HLS
 // output. -flush_packets writes every cue as soon as it is demuxed, which is
 // what lets a subtitle segment be served once the video around it exists.
-// -y lets it replace a cue file of the same name: a reconstructed session
-// reuses its predecessor's output directory and numbers generations from 0
-// again, and without -y ffmpeg would wait at its overwrite prompt on the open
-// stdin pipe instead of transcoding.
+// -y lets it replace a cue file of the same name, one left by a span the
+// session no longer serves, instead of waiting at ffmpeg's overwrite prompt
+// on the open stdin pipe.
 func appendSubtitleRenditionOutputArgs(args []string, opts TranscodeOpts) []string {
 	if !subtitleRenditionActive(opts) {
 		return args
@@ -159,18 +175,19 @@ func (s *TranscodeSession) startSubtitleSpanLocked(opts TranscodeOpts) {
 func (s *TranscodeSession) closeSubtitleSpan() {
 	head, ok := s.liveProducedHead()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for i := range s.subtitleSpans {
 		if s.subtitleSpans[i].end >= 0 {
 			continue
 		}
 		if !ok || head < s.subtitleSpans[i].start {
 			s.subtitleSpans = append(s.subtitleSpans[:i], s.subtitleSpans[i+1:]...)
-			return
+		} else {
+			s.subtitleSpans[i].end = head
 		}
-		s.subtitleSpans[i].end = head
-		return
+		break
 	}
+	s.mu.Unlock()
+	s.saveSubtitleSpans()
 }
 
 // liveProducedHead returns the last segment the current generation's own
@@ -184,14 +201,212 @@ func (s *TranscodeSession) liveProducedHead() (int, bool) {
 	if err != nil || inherited != nil && sameManifestFile(info, inherited) {
 		return 0, false
 	}
-	head, found := -1, false
+	_, head, ok := playlistSegmentRange(data)
+	return head, ok
+}
+
+// playlistSegmentRange returns the lowest and highest segment numbers a
+// playlist lists.
+func playlistSegmentRange(data []byte) (first, head int, found bool) {
+	first, head = -1, -1
 	for line := range bytes.SplitSeq(data, []byte("\n")) {
 		segNum, parseErr := ParseSegmentNumber(filepath.Base(string(bytes.TrimSpace(line))))
-		if parseErr == nil && segNum > head {
-			head, found = segNum, true
+		if parseErr != nil {
+			continue
+		}
+		if !found || segNum < first {
+			first = segNum
+		}
+		head, found = max(head, segNum), true
+	}
+	return first, head, found
+}
+
+// subtitleSpanRecordName is the record of a session's spans in its output
+// directory. Spans otherwise live only in memory, and a session rebuilt from
+// its recipe on the same directory (after the server or node that ran it went
+// away without removing it) serves the earlier processes' video segments from
+// disk: without the record their subtitle segments would come back empty.
+const subtitleSpanRecordName = "subtitle_spans.json"
+
+// subtitleSpanRecord is the content of subtitleSpanRecordName. Track and
+// SegmentDuration tie it to the recipe whose grid its segment numbers use.
+type subtitleSpanRecord struct {
+	Track           int                     `json:"track"`
+	SegmentDuration int                     `json:"segment_duration"`
+	Spans           []subtitleSpanRecordRow `json:"spans"`
+}
+
+type subtitleSpanRecordRow struct {
+	File  string `json:"file"`
+	Start int    `json:"start"`
+	// End is -1 for the generation that was live when the record was written.
+	End int `json:"end"`
+	// InheritedPlaylist identifies the stream.m3u8 an earlier generation left
+	// when the live generation started, so a rebuild can tell whether the
+	// playlist on disk is the live generation's progress.
+	InheritedPlaylist *subtitleSpanRecordPlaylist `json:"inherited_playlist,omitempty"`
+	// Origin is the span's observed origin. A rebuild may not be able to
+	// observe it again: a later generation that started at or before the
+	// span's start makes its segments unreadable as the span's own.
+	Origin *float64 `json:"origin,omitempty"`
+}
+
+type subtitleSpanRecordPlaylist struct {
+	Size    int64 `json:"size"`
+	ModTime int64 `json:"mod_time_ns"`
+}
+
+func recordedPlaylist(info os.FileInfo) *subtitleSpanRecordPlaylist {
+	if info == nil {
+		return nil
+	}
+	return &subtitleSpanRecordPlaylist{Size: info.Size(), ModTime: info.ModTime().UnixNano()}
+}
+
+func (p *subtitleSpanRecordPlaylist) matches(info os.FileInfo) bool {
+	return p != nil && info.Size() == p.Size && info.ModTime().UnixNano() == p.ModTime
+}
+
+// saveSubtitleSpans writes the session's spans to its output directory. It
+// runs whenever a generation starts or closes and when a span's origin is
+// observed. The snapshot is taken under
+// subtitleRecordMu, so the last write always holds the latest spans. A failed
+// write only costs a later rebuild the earlier cues.
+func (s *TranscodeSession) saveSubtitleSpans() {
+	if s.outputDir == "" {
+		return
+	}
+	s.subtitleRecordMu.Lock()
+	defer s.subtitleRecordMu.Unlock()
+	s.mu.Lock()
+	if s.outputRemoved {
+		s.mu.Unlock()
+		return
+	}
+	opts := s.opts
+	record := subtitleSpanRecord{Track: opts.SubtitleTrackIndex, SegmentDuration: renditionSegmentDuration(opts)}
+	for _, span := range s.subtitleSpans {
+		row := subtitleSpanRecordRow{File: span.file, Start: span.start, End: span.end}
+		if span.originKnown {
+			row.Origin = &span.origin
+		}
+		if span.end < 0 {
+			row.InheritedPlaylist = recordedPlaylist(s.inheritedManifest)
+		}
+		record.Spans = append(record.Spans, row)
+	}
+	s.mu.Unlock()
+	if !subtitleRenditionActive(opts) || len(record.Spans) == 0 {
+		return
+	}
+	data, err := json.Marshal(record)
+	if err == nil {
+		err = writeFileAtomic(s.outputDir, subtitleSpanRecordName, data)
+	}
+	if err != nil {
+		slog.Warn("record subtitle rendition spans", "component", "playback",
+			"playback_session_id", opts.SessionID, "error", err)
+	}
+}
+
+// writeFileAtomic replaces dir/name through a temporary file and a rename, so
+// a crash never leaves a partial file.
+func writeFileAtomic(dir, name string, data []byte) error {
+	tmp, err := os.CreateTemp(dir, "."+name+".*.tmp")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.Write(data)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), filepath.Join(dir, name))
+	}
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+	}
+	return err
+}
+
+// loadSubtitleSpans reads the spans an earlier session recorded in the output
+// directory this recipe reuses, and the first generation number whose cue file
+// name none of them used. It runs before the new process starts, while the
+// playlist on disk is still the earlier process's. A span is kept only while
+// it can serve its cues: its cue file exists and, for the generation that was
+// live when the earlier session went away, its own playlist on disk shows how
+// far it got.
+func loadSubtitleSpans(opts TranscodeOpts) ([]subtitleCueSpan, uint64) {
+	root, err := os.OpenRoot(opts.OutputDir)
+	if err != nil {
+		return nil, 0
+	}
+	defer func() { _ = root.Close() }()
+	data, err := root.ReadFile(subtitleSpanRecordName)
+	if err != nil {
+		return nil, 0
+	}
+	var record subtitleSpanRecord
+	if json.Unmarshal(data, &record) != nil {
+		return nil, 0
+	}
+	var spans []subtitleCueSpan
+	next := uint64(0)
+	for i, row := range record.Spans {
+		generation, ok := subtitleCueFileGeneration(row.File)
+		if !ok {
+			continue
+		}
+		next = max(next, generation+1)
+		if record.Track != opts.SubtitleTrackIndex || record.SegmentDuration != renditionSegmentDuration(opts) || row.Start < 0 {
+			continue
+		}
+		if _, err := root.Stat(row.File); err != nil {
+			continue
+		}
+		end := row.End
+		if end < 0 {
+			if i != len(record.Spans)-1 {
+				continue
+			}
+			end = recordedLiveSpanHead(root, row)
+		}
+		if end >= row.Start {
+			span := subtitleCueSpan{file: row.File, start: row.Start, end: end}
+			if row.Origin != nil {
+				span.origin, span.originKnown = *row.Origin, true
+			}
+			spans = append(spans, span)
 		}
 	}
-	return head, found
+	return spans, next
+}
+
+// recordedLiveSpanHead returns the last segment a generation that never closed
+// finished, or -1 when the playlist on disk is not its own.
+func recordedLiveSpanHead(root *os.Root, row subtitleSpanRecordRow) int {
+	f, err := root.Open("stream.m3u8")
+	if err != nil {
+		return -1
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil || row.InheritedPlaylist.matches(info) {
+		return -1
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return -1
+	}
+	// A generation's own playlist starts at its first segment. One that
+	// starts elsewhere was written by another generation, for example after
+	// a failed record write left this row stale.
+	first, head, ok := playlistSegmentRange(data)
+	if !ok || first != row.Start {
+		return -1
+	}
+	return head
 }
 
 // liveSubtitleFileLocked names the live generation's cue file, or "" between
@@ -366,20 +581,23 @@ func (s *TranscodeSession) subtitleSpanOrigin(ctx context.Context, file string, 
 		float64((observed-span.start)*renditionSegmentDuration(opts))
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	i := slices.IndexFunc(s.subtitleSpans, func(candidate subtitleCueSpan) bool {
 		return candidate.file == file && candidate.start == span.start
 	})
 	if i < 0 || s.restarting != nil || s.subtitleSegmentRewrittenLocked(i, observed) {
 		// A restart began while the segment was read; it may not have been
 		// this generation's any more.
+		s.mu.Unlock()
 		return span.start, 0, false
 	}
 	if err != nil {
 		s.subtitleSpans[i].originFailedAt = time.Now()
+		s.mu.Unlock()
 		return span.start, 0, false
 	}
 	s.subtitleSpans[i].origin, s.subtitleSpans[i].originKnown = origin, true
+	s.mu.Unlock()
+	s.saveSubtitleSpans()
 	return span.start, origin, true
 }
 

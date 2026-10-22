@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // Resolver resolves the real client IP from an HTTP request, accounting for
@@ -17,7 +18,7 @@ type Resolver struct {
 }
 
 // NewResolver creates a Resolver with the given trusted proxy CIDRs.
-// If trusted is nil or empty, forwarding headers are never consulted.
+// If trusted is nil or empty, forwarding headers never name the client.
 func NewResolver(trusted []*net.IPNet) *Resolver {
 	return &Resolver{trusted: trusted}
 }
@@ -25,7 +26,8 @@ func NewResolver(trusted []*net.IPNet) *Resolver {
 // ClientIP returns the resolved client IP address string.
 // The returned value is always normalized via net.ParseIP().String().
 //
-// Forwarding headers count only when the transport peer is a trusted proxy.
+// Forwarding headers name the client only when the transport peer is a
+// trusted proxy.
 // X-Forwarded-For is read across all of its header lines in order, because
 // some proxies (HAProxy's option forwardfor) add their own line after the
 // client's instead of appending to it. Each entry was written by the hop to
@@ -41,6 +43,13 @@ func NewResolver(trusted []*net.IPNet) *Resolver {
 // would only resolve a client that sends junk X-Forwarded-For to the proxy's
 // own, local-looking address.
 func (r *Resolver) ClientIP(req *http.Request) string {
+	ip, _ := r.resolve(req)
+	return normalize(ip)
+}
+
+// resolve returns the client IP and whether it is the address of a forwarder
+// whose client the resolver could not identify (see ForwardedClientUnknown).
+func (r *Resolver) resolve(req *http.Request) (net.IP, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -48,27 +57,29 @@ func (r *Resolver) ClientIP(req *http.Request) string {
 
 	// If the connecting IP is not a trusted proxy, ignore forwarding headers.
 	if !r.isTrusted(remoteIP) {
-		return normalize(remoteIP)
+		return remoteIP, hasForwardingHeaders(req.Header)
 	}
 
-	if ip := r.forwardedFor(req.Header.Values("X-Forwarded-For")); ip != nil {
-		return normalize(ip)
+	if ip, forwarded := r.forwardedFor(req.Header.Values("X-Forwarded-For")); ip != nil {
+		return ip, forwarded
 	}
 
 	if realIP := req.Header.Values("X-Real-IP"); len(realIP) == 1 {
 		if parsed := parseForwardedAddr(strings.TrimSpace(realIP[0])); parsed != nil {
-			return normalize(parsed)
+			return parsed, false
 		}
 	}
 
-	return normalize(remoteIP)
+	return remoteIP, hasForwardingHeaders(req.Header)
 }
 
 // forwardedFor walks the X-Forwarded-For lines right to left and returns the
 // first untrusted entry, the leftmost entry when all are trusted, or the
 // trusted hop before an entry that is not an address. It returns nil when the
-// peer named no address.
-func (r *Resolver) forwardedFor(lines []string) net.IP {
+// peer named no address. The flag reports that the returned hop forwarded for
+// someone it could not name: entries remain to its left, or the walk stopped
+// at an entry that is not an address.
+func (r *Resolver) forwardedFor(lines []string) (net.IP, bool) {
 	var last net.IP
 	for i := len(lines) - 1; i >= 0; i-- {
 		entries := strings.Split(lines[i], ",")
@@ -79,25 +90,55 @@ func (r *Resolver) forwardedFor(lines []string) net.IP {
 			}
 			ip := parseForwardedAddr(entry)
 			if ip == nil {
-				return last
+				return last, true
 			}
 			if !r.isTrusted(ip) {
-				return ip
+				return ip, hasForwardedEntry(entries[:j]) || hasForwardedEntry(lines[:i])
 			}
 			last = ip
 		}
 	}
-	return last
+	return last, false
+}
+
+// hasForwardedEntry reports whether any of the comma-separated values holds a
+// non-blank entry.
+func hasForwardedEntry(values []string) bool {
+	for _, value := range values {
+		if strings.TrimFunc(value, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasForwardingHeaders reports whether the request names a forwarded client
+// in any header the resolver knows of. Forwarded (RFC 7239) is never parsed
+// for an address, but its presence still shows the peer is a forwarder.
+func hasForwardingHeaders(h http.Header) bool {
+	return hasForwardedEntry(h.Values("X-Forwarded-For")) ||
+		hasForwardedEntry(h.Values("X-Real-IP")) ||
+		hasForwardedEntry(h.Values("Forwarded"))
 }
 
 // parseForwardedAddr parses a forwarded address: a bare IP, or an IP with a
 // port or in brackets, as some proxies write it. It returns nil otherwise.
 func parseForwardedAddr(addr string) net.IP {
 	if host, _, err := net.SplitHostPort(addr); err == nil {
-		return net.ParseIP(host)
+		return parseUnzonedIP(host)
 	}
 	if len(addr) > 1 && addr[0] == '[' && addr[len(addr)-1] == ']' {
 		addr = addr[1 : len(addr)-1]
+	}
+	return parseUnzonedIP(addr)
+}
+
+// parseUnzonedIP parses an IP, dropping the zone of an IPv6 address such as
+// "fe80::1%eth0". Go's reverse proxy writes a link-local client's address with
+// its zone, which means something only on that proxy's host.
+func parseUnzonedIP(addr string) net.IP {
+	if i := strings.IndexByte(addr, '%'); i >= 0 && strings.Contains(addr[:i], ":") {
+		addr = addr[:i]
 	}
 	return net.ParseIP(addr)
 }

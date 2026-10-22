@@ -325,14 +325,18 @@ func TestResolveQualityPolicyV3OriginalIsAuto(t *testing.T) {
 }
 
 // Automatic streaming quality re-encodes a source over a bitrate cap or over
-// an estimate's budget at the ladder class that limit earns, the same ladder
-// as download presets, keeping a fifth of the limit as headroom when choosing
-// the class. The cap is a hard delivery ceiling on the bitrate too.
+// an estimate's budget at a class of the same ladder as download presets. An
+// estimate keeps a fifth of itself as headroom when choosing the class. A cap
+// keeps none: it earns the tallest class whose encode bitrate fits within it,
+// so a cap between two classes gets the lower one (#2643: every cap from 2500
+// to 6249 kbps used to play 720p). The cap is a hard delivery ceiling on the
+// bitrate too.
 func TestResolveQualityPolicyV3AutoUsesTheLadder(t *testing.T) {
 	uhd := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 23.976}
 	scope := SourceDescriptorV3{Width: 3840, Height: 1600, BitrateKbps: 30_000, FrameRate: 23.976}
 	uhd60 := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 60}
 	hd8M := SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 8_000, FrameRate: 24}
+	hd12M := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 12_000, FrameRate: 23.976}
 	for _, tc := range []struct {
 		name        string
 		source      SourceDescriptorV3
@@ -346,9 +350,23 @@ func TestResolveQualityPolicyV3AutoUsesTheLadder(t *testing.T) {
 		{"cap: 7 Mbps reaches 1080p", uhd, true, 7_000, 1920, 1080, "1080p", 6_000},
 		{"cap: 10 Mbps encodes 1080p at the class bitrate", uhd, true, 10_000, 1920, 1080, "1080p", 6_000},
 		{"cap: 4 Mbps is 720p", uhd, true, 4_000, 1280, 720, "720p", 2_000},
+		{"cap: 2 Mbps is 720p", uhd, true, 2_000, 1280, 720, "720p", 2_000},
 		{"cap: 1 Mbps is 480p", uhd, true, 1_000, 854, 480, "480p", 1_000},
+		{"cap: 20 Mbps reaches 2160p", uhd, true, 20_000, 3840, 2160, "2160p", 20_000},
+		{"cap: just under 2160p is 1080p", uhd, true, 19_999, 1920, 1080, "1080p", 6_000},
+		{"cap: 6249 kbps is 1080p", hd12M, true, 6_249, 1920, 1080, "1080p", 6_000},
+		{"cap: 6 Mbps is 1080p", hd12M, true, 6_000, 1920, 1080, "1080p", 6_000},
+		{"cap: just under 1080p is 720p", hd12M, true, 5_999, 1280, 720, "720p", 2_000},
+		{"cap: 3 Mbps is 720p", hd12M, true, 3_000, 1280, 720, "720p", 2_000},
+		{"cap: 2500 kbps is 720p", hd12M, true, 2_500, 1280, 720, "720p", 2_000},
+		{"cap: just under 720p is 540p", hd12M, true, 1_999, 960, 540, "540p", 1_800},
+		{"cap: 1800 kbps is 540p", hd12M, true, 1_800, 960, 540, "540p", 1_800},
+		{"cap: just under 540p is 480p", hd12M, true, 1_799, 854, 480, "480p", 1_500},
+		{"cap: 1500 kbps is 480p", hd12M, true, 1_500, 854, 480, "480p", 1_500},
+		{"cap: under 480p lowers the bitrate", hd12M, true, 1_499, 854, 480, "480p", 1_499},
 		{"cap: scope keeps its shape", scope, true, 10_000, 1920, 800, "800p", 6_000},
-		{"cap: 60 fps drops a class", uhd60, true, 7_000, 1280, 720, "720p", 2_000},
+		{"cap: a cropped source shorter than the cap's class fits that class", SourceDescriptorV3{Width: 1920, Height: 600, BitrateKbps: 12_000, FrameRate: 24}, true, 2_000, 1280, 400, "400p", 2_000},
+		{"cap: 60 fps keeps the class the cap pays for", uhd60, true, 7_000, 1920, 1080, "1080p", 6_000},
 		{"cap: a source over the cap is re-encoded at its own size", hd8M, true, 7_000, 1920, 1080, "1080p", 6_000},
 		{"cap: a 720p source over the cap keeps the 720p bitrate", SourceDescriptorV3{Width: 1280, Height: 720, BitrateKbps: 8_000, FrameRate: 24}, true, 7_000, 1280, 720, "720p", 2_000},
 		{"cap: an odd source frame is re-encoded at an even size", SourceDescriptorV3{Width: 1920, Height: 1079, BitrateKbps: 8_000, FrameRate: 24}, true, 7_000, 1918, 1078, "1078p", 6_000},
@@ -372,6 +390,76 @@ func TestResolveQualityPolicyV3AutoUsesTheLadder(t *testing.T) {
 					tc.kbps, got.Width, got.Height, got.Label, got.BitrateKbps, got.RequiresTranscode, tc.wantW, tc.wantH, tc.wantLabel, tc.wantBitrate)
 			}
 		})
+	}
+}
+
+// A plain resolution under a cap keeps its resolution while the cap reaches
+// that resolution's lowest menu rung and lowers only the bitrate, as the
+// explicit rung does: 1080p at 3000 kbps is 1080p Low. It steps down only when
+// the cap is below every rung of the resolution, and a source under the cap
+// still plays as-is.
+func TestResolveQualityPolicyV3PlainResolutionKeepsItsRungUnderACap(t *testing.T) {
+	hd := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 15_000, FrameRate: 24}
+	uhd := SourceDescriptorV3{VideoCodec: "hevc", Width: 3840, Height: 2160, BitrateKbps: 40_000, FrameRate: 24}
+	scope := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 800, BitrateKbps: 15_000, FrameRate: 24}
+	hd720 := SourceDescriptorV3{VideoCodec: "h264", Width: 1280, Height: 720, BitrateKbps: 5_000, FrameRate: 24}
+	for _, tc := range []struct {
+		name        string
+		preference  string
+		source      SourceDescriptorV3
+		capKbps     int
+		wantLabel   string
+		wantBitrate int
+	}{
+		{"1080p at 1080p Low's bitrate", "1080p", hd, 3_000, "1080p", 3_000},
+		{"1080p just below 1080p Low steps to 720p", "1080p", hd, 2_999, "720p", 2_000},
+		{"1080p at 1080p Medium's bitrate", "1080p", hd, 6_000, "1080p", 6_000},
+		{"1080p at 720p Low's bitrate", "1080p", hd, 1_500, "720p", 1_500},
+		{"1080p below every 720p rung is 480p at the cap", "1080p", hd, 1_000, "480p", 1_000},
+		{"1080p from a 4K source", "1080p", uhd, 3_000, "1080p", 3_000},
+		{"2160p below 4K Low steps to 1080p", "2160p", uhd, 8_000, "1080p", 6_000},
+		{"2160p at 4K Low", "2160p", uhd, 10_000, "2160p", 10_000},
+		{"720p at 720p Low's bitrate", "720p", hd, 1_500, "720p", 1_500},
+		{"a cropped source keeps its size", "1080p", scope, 3_000, "800p", 3_000},
+		{"a cropped source wider than the capped class fits its box", "1080p", SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 600, BitrateKbps: 8_000, FrameRate: 24}, 1_500, "400p", 1_500},
+		{"a 720p source keeps 720p", "1080p", hd720, 3_000, "720p", 2_000},
+		{"a 720p source below 720p Low is 480p", "1080p", hd720, 1_000, "480p", 1_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := validStartRequestV3()
+			req.QualityPreference = tc.preference
+			req.BandwidthCapKbps = &tc.capKbps
+			got := ResolveQualityPolicyV3(req, tc.source)
+			if got.Label != tc.wantLabel || got.BitrateKbps != tc.wantBitrate || !got.RequiresTranscode || got.Reason != decisionReasonBandwidthCapV3 {
+				t.Fatalf("%s under a %d kbps cap = %q %d kbps (transcode %v, reason %s), want %q %d kbps capped",
+					tc.preference, tc.capKbps, got.Label, got.BitrateKbps, got.RequiresTranscode, got.Reason, tc.wantLabel, tc.wantBitrate)
+			}
+		})
+	}
+
+	// The plain preference and its explicit 1080p Low rung plan the same encode.
+	req := validStartRequestV3()
+	capKbps := 3_000
+	req.BandwidthCapKbps = &capKbps
+	req.QualityPreference = "1080p"
+	plain := ResolveQualityPolicyV3(req, hd)
+	req.QualityPreference = QualityRung1080pLowV3
+	rung := ResolveQualityPolicyV3(req, hd)
+	if plain.Height != rung.Height || plain.Width != rung.Width || plain.BitrateKbps != rung.BitrateKbps {
+		t.Fatalf("1080p under a 3000 kbps cap = %dx%d %d kbps, 1080p Low = %dx%d %d kbps; want the same encode",
+			plain.Width, plain.Height, plain.BitrateKbps, rung.Width, rung.Height, rung.BitrateKbps)
+	}
+
+	// A source under the cap, or a resolution whose class bitrate fits it,
+	// is not capped.
+	fits := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 2_500, FrameRate: 24}
+	req.QualityPreference = "1080p"
+	if got := ResolveQualityPolicyV3(req, fits); !got.PreservesSource || got.Reason == decisionReasonBandwidthCapV3 {
+		t.Fatalf("a 2.5 Mbps source under a 3 Mbps cap = %#v, want it preserved", got)
+	}
+	req.QualityPreference = "720p"
+	if got := ResolveQualityPolicyV3(req, hd); got.Label != "720p" || got.BitrateKbps != 2_000 || got.Reason == decisionReasonBandwidthCapV3 {
+		t.Fatalf("720p under a 3 Mbps cap = %#v, want the uncapped 720p class", got)
 	}
 }
 

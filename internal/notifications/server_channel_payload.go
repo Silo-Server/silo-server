@@ -174,8 +174,9 @@ func contentGroupTitle(group ContentGroup) string {
 const serverChannelMaxEmbeds = discordDMMaxEmbeds
 
 // BuildServerChannelDiscordContent renders a content digest as a Discord
-// webhook body: one embed per group up to the 10-embed cap, the newest groups
-// kept, with an overflow line for the rest. Pure function.
+// webhook body: one embed per group up to the 10-embed cap and the message's
+// 6,000-character budget, the newest groups kept, with an overflow line for
+// the rest. Pure function.
 func BuildServerChannelDiscordContent(groups []ContentGroup, test bool) ([]byte, error) {
 	overflow := 0
 	if len(groups) > serverChannelMaxEmbeds {
@@ -183,7 +184,7 @@ func BuildServerChannelDiscordContent(groups []ContentGroup, test bool) ([]byte,
 		groups = groups[len(groups)-serverChannelMaxEmbeds:]
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	embeds := make([]discordEmbed, 0, len(groups))
+	entries := make([]discordDigestEntry, 0, len(groups))
 	for _, group := range groups {
 		author := "New episodes available on Silo"
 		if flat, ok := flatKindByString(group.Kind); ok {
@@ -207,21 +208,21 @@ func BuildServerChannelDiscordContent(groups []ContentGroup, test bool) ([]byte,
 			fields = append(fields, discordEmbedField{Name: "Genres", Value: genres, Inline: true})
 		}
 		embed := discordEmbed{
-			Title:       truncateWithEllipsis(contentGroupTitle(group), discordTitleLimit),
-			URL:         ids.titleURL(),
-			Description: embedDescription(group.Meta.Overview, ids),
-			Color:       serverChannelColorContent,
-			Author:      &discordEmbedAuthor{Name: author},
-			Footer:      &discordEmbedFooter{Text: discordEmbedFooterText(group.Meta.ContentRating, test)},
-			Timestamp:   now,
-			Fields:      fields,
+			Title:     truncateWithEllipsis(contentGroupTitle(group), discordTitleLimit),
+			URL:       ids.titleURL(),
+			Color:     serverChannelColorContent,
+			Author:    &discordEmbedAuthor{Name: author},
+			Footer:    &discordEmbedFooter{Text: discordEmbedFooterText(group.Meta.ContentRating, test)},
+			Timestamp: now,
+			Fields:    fields,
 		}
 		if group.Meta.PosterURL != "" {
 			embed.Thumbnail = &discordEmbedMedia{URL: group.Meta.PosterURL}
 		}
-		enforceDiscordTotalLimit(&embed)
-		embeds = append(embeds, embed)
+		entries = append(entries, newDiscordDigestEntry(embed, group.Meta.Overview, ids))
 	}
+	embeds, dropped := fitDiscordMessage(entries)
+	overflow += dropped
 	body := discordWebhookBody{Embeds: embeds, Username: siloSenderName}
 	if overflow > 0 {
 		body.Content = fmt.Sprintf("…and %d more new items on Silo", overflow)

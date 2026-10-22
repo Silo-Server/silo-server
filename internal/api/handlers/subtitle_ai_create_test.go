@@ -24,6 +24,9 @@ func (r *subtitleCreateRepo) GetActiveJobByIdempotencyKey(context.Context, strin
 	r.lookups++
 	return r.existing, nil
 }
+func (r *subtitleCreateRepo) GetReusableJobByIdempotencyKey(context.Context, string) (*ai.Job, error) {
+	return nil, nil
+}
 func (r *subtitleCreateRepo) InsertJob(_ context.Context, job *ai.Job, _ *ai.JobQuota) error {
 	job.ID = 9007199254740993
 	job.CreatedAt = time.Now()
@@ -58,7 +61,7 @@ func TestSubtitleAICreateAuthorizesAndBindsBeforeEnqueue(t *testing.T) {
 			command := SubtitleAICreateCommand{MediaFileID: 42, Kind: ai.JobKindTranslate, SourceIndex: 3, TargetLanguage: "fr", SessionID: session.ID, StartPosition: 12.5}
 			switch name {
 			case "deduplicated":
-				repo.existing = &ai.Job{ID: 9, MediaFileID: 42, Status: ai.JobStatusRunning, RequestedBy: new(99)}
+				repo.existing = &ai.Job{ID: 9, MediaFileID: 42, SourceIndex: 3, Status: ai.JobStatusRunning, RequestedBy: new(99)}
 			case "background":
 				command.SessionID = ""
 			case "foreign-session":

@@ -461,11 +461,14 @@ func TestHandlePlaybackReport_AliasContradictedByItemFallsBack(t *testing.T) {
 
 // racingStartSessionManager simulates a concurrent request winning the
 // upstream-attach race: while this caller is inside StartSession, the store's
-// play session is re-pointed at a different upstream id/method.
+// play session is re-pointed at a different upstream id/method. winnerLocal
+// says whether the winner attached in this process (so its native session is
+// here) or on another replica.
 type racingStartSessionManager struct {
 	testCompatSessionManager
 	store        CompatPlaybackStore
 	winnerMethod string
+	winnerLocal  bool
 }
 
 func (m *racingStartSessionManager) StartSession(userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error) {
@@ -474,62 +477,62 @@ func (m *racingStartSessionManager) StartSession(userID int, profileID string, f
 		current.UpstreamPlayMethod = m.winnerMethod
 		return nil
 	})
+	if m.winnerLocal {
+		if m.sessions == nil {
+			m.sessions = make(map[string]*playback.Session)
+		}
+		m.sessions["upstream-winner"] = &playback.Session{ID: "upstream-winner", PlayMethod: method}
+	}
 	return m.testCompatSessionManager.StartSession(userID, profileID, fileID, method, transcodeAudio)
 }
 
-// TestEnsureUpstreamPlayback_CASLoserAdoptsSameMethodWinner proves the loser
-// of a concurrent attach race stops its own freshly created session and
-// adopts the winner when the winner serves the same play method.
-func TestEnsureUpstreamPlayback_CASLoserAdoptsSameMethodWinner(t *testing.T) {
-	handler, _, _, _ := newReportLivenessHandler("", false)
-	base := handler.sessionMgr.(*testCompatSessionManager)
-	racer := &racingStartSessionManager{
-		testCompatSessionManager: *base,
-		store:                    handler.playbackStore,
-		winnerMethod:             "direct",
+// TestEnsureUpstreamPlayback_CASLoser proves the loser of a concurrent attach
+// race stops its own freshly created session. It adopts a same-method winner
+// whose native session this process holds, and otherwise surfaces a conflict:
+// a method switch would leave mismatched transcode bookkeeping, and serving a
+// winner attached on another replica would start a second transcode here.
+func TestEnsureUpstreamPlayback_CASLoser(t *testing.T) {
+	tests := []struct {
+		name         string
+		winnerMethod string
+		winnerLocal  bool
+		wantAdopt    bool
+	}{
+		{name: "adopts same-method winner", winnerMethod: "direct", winnerLocal: true, wantAdopt: true},
+		{name: "rejects method switch", winnerMethod: "transcode", winnerLocal: true},
+		{name: "rejects winner on another replica", winnerMethod: "direct"},
 	}
-	handler.sessionMgr = racer
-	playSession, _ := handler.playbackStore.Get("play-1")
-	source := playSession.MediaSources[0]
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, _, _, _ := newReportLivenessHandler("", false)
+			base := handler.sessionMgr.(*testCompatSessionManager)
+			racer := &racingStartSessionManager{
+				testCompatSessionManager: *base,
+				store:                    handler.playbackStore,
+				winnerMethod:             tt.winnerMethod,
+				winnerLocal:              tt.winnerLocal,
+			}
+			handler.sessionMgr = racer
+			playSession, _ := handler.playbackStore.Get("play-1")
+			source := playSession.MediaSources[0]
 
-	got, err := handler.ensureUpstreamPlayback(context.Background(),
-		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"},
-		"play-1", source, "direct")
-	if err != nil {
-		t.Fatalf("ensureUpstreamPlayback: %v", err)
-	}
-	if got.UpstreamSessionID != "upstream-winner" {
-		t.Fatalf("UpstreamSessionID = %q, want the concurrent winner", got.UpstreamSessionID)
-	}
-	if len(racer.stopCalls) != 1 || racer.stopCalls[0] != "upstream-started" {
-		t.Fatalf("StopSession calls = %v, want rollback of the loser's session", racer.stopCalls)
-	}
-}
-
-// TestEnsureUpstreamPlayback_CASLoserRejectsMethodSwitch proves the loser does
-// NOT adopt a winner running a different play method — it rolls back its
-// session and surfaces a conflict instead of continuing with mismatched
-// transcode bookkeeping.
-func TestEnsureUpstreamPlayback_CASLoserRejectsMethodSwitch(t *testing.T) {
-	handler, _, _, _ := newReportLivenessHandler("", false)
-	base := handler.sessionMgr.(*testCompatSessionManager)
-	racer := &racingStartSessionManager{
-		testCompatSessionManager: *base,
-		store:                    handler.playbackStore,
-		winnerMethod:             "transcode",
-	}
-	handler.sessionMgr = racer
-	playSession, _ := handler.playbackStore.Get("play-1")
-	source := playSession.MediaSources[0]
-
-	_, err := handler.ensureUpstreamPlayback(context.Background(),
-		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"},
-		"play-1", source, "direct")
-	if !errors.Is(err, errUpstreamReplaced) {
-		t.Fatalf("error = %v, want errUpstreamReplaced", err)
-	}
-	if len(racer.stopCalls) != 1 || racer.stopCalls[0] != "upstream-started" {
-		t.Fatalf("StopSession calls = %v, want rollback of the loser's session", racer.stopCalls)
+			got, err := handler.ensureUpstreamPlayback(context.Background(),
+				&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"},
+				"play-1", source, "direct")
+			if tt.wantAdopt {
+				if err != nil {
+					t.Fatalf("ensureUpstreamPlayback: %v", err)
+				}
+				if got.UpstreamSessionID != "upstream-winner" {
+					t.Fatalf("UpstreamSessionID = %q, want the concurrent winner", got.UpstreamSessionID)
+				}
+			} else if !errors.Is(err, errUpstreamReplaced) {
+				t.Fatalf("error = %v, want errUpstreamReplaced", err)
+			}
+			if len(racer.stopCalls) != 1 || racer.stopCalls[0] != "upstream-started" {
+				t.Fatalf("StopSession calls = %v, want rollback of the loser's session", racer.stopCalls)
+			}
+		})
 	}
 }
 

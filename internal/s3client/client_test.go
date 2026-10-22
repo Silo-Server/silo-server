@@ -669,3 +669,34 @@ func TestSafeErrorCodeAllowsOnlyIdentifierCodes(t *testing.T) {
 		}
 	}
 }
+
+// A HEAD response has no body, so a 403 cannot say whether the key is missing
+// (AWS S3 answers 403 for a missing key when the credential lacks
+// s3:ListBucket) or access is denied. ObjectMatches reports it as unverified so
+// the caller rewrites the object and the PUT reports any real denial (#911).
+func TestObjectMatchesStatusMapping(t *testing.T) {
+	for _, tc := range []struct {
+		status  int
+		wantErr bool
+	}{
+		{status: http.StatusNotFound},
+		{status: http.StatusForbidden},
+		{status: http.StatusBadRequest, wantErr: true},
+	} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			t.Cleanup(server.Close)
+			client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "artwork", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+
+			matched, err := client.ObjectMatches(t.Context(), client.Bucket(), "poster/original.webp", []byte("image"))
+			if matched {
+				t.Fatal("ObjectMatches() = true for a failed HEAD")
+			}
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ObjectMatches() error = %v, want error %v", err, tc.wantErr)
+			}
+		})
+	}
+}

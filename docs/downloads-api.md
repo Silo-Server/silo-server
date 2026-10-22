@@ -990,8 +990,8 @@ Notes:
 - `subtitles[].revision` is present on downloaded (`downloaded:{id}`) and
   external (`external:{index}`) subtitles; an external subtitle that cannot be
   read has none. It is an opaque string that changes whenever that subtitle's
-  delivered bytes can change: a timing correction, or an external file edited
-  on disk. When a refreshed manifest shows a different value than the one
+  delivered bytes can change: a timing correction, an external file edited
+  on disk, or a change in how the server decodes subtitle text to UTF-8. When a refreshed manifest shows a different value than the one
   stored with the cached file, re-fetch that subtitle. An external subtitle's
   `file_size` is the size of its delivered bytes.
 - Optional fields are omitted when empty; clients should treat absent values as

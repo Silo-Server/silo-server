@@ -248,15 +248,7 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 	// unrefined start for good.
 	if sampled && mediasample.Classify(silenceErr) == mediasample.ReasonTimeout {
 		summary.CreditsTailScanErrors++
-		spec := movieTailSpec(candidate)
-		if err := a.repo.RecordArtifactFailure(ctx, mediaartifact.Failure{
-			MediaFileID: candidate.FileID,
-			Key:         spec.key,
-			Identity:    spec.window.identity(candidate),
-			RecordedBy:  a.nodeName(),
-			Error:       silenceErr.Error(),
-			At:          time.Now().UTC(),
-		}); err != nil {
+		if err := a.recordCreditsTailFailure(ctx, candidate, movieTailSpec(candidate), silenceErr); err != nil {
 			summary.Errors = append(summary.Errors, err.Error())
 		}
 		return summary

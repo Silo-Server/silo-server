@@ -83,7 +83,7 @@ func TestSubtitleUploadServiceAuthorizationAndAttribution(t *testing.T) {
 	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
 	h := NewSubtitleSearchHandler(manager, repo, nil)
 	h.FileAuthorizer = &MediaFileAuthorizer{FileResolver: stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "movie"}}, ItemAccess: stubItemAccessChecker{err: catalog.ErrItemNotFound}}
-	request := subtitles.UploadRequest{MediaFileID: 42, UserID: new(999), Filename: "synthetic.en.srt", Language: "fr", PreferUserLanguage: true, Data: []byte("synthetic")}
+	request := subtitles.UploadRequest{MediaFileID: 42, UserID: new(999), Filename: "synthetic.en.srt", Language: "fr", PreferUserLanguage: true, Data: []byte("1\n00:00:01,000 --> 00:00:02,000\nSynthetic\n")}
 	_, err := h.UploadStoredSubtitle(t.Context(), catalog.AccessFilter{UserID: 1}, request)
 	if failure, ok := errors.AsType[*APIError](err); !ok || failure.Status != 404 {
 		t.Fatalf("authorization: %v", err)

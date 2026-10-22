@@ -455,9 +455,9 @@ export default function CompatibilityProxiesSettings() {
               restartRequired={restartKeys.has("jellyfin_compat.session_ttl")}
             />
             <SettingField
-              label="Forget idle playback after"
+              label="End playback sessions after"
               type="duration"
-              description="For example 6h."
+              description="Counted from when playback starts, paused or not. For example 24h."
               value={form.getValue("jellyfin_compat.playback_session_ttl")}
               onChange={(v) => form.setValue("jellyfin_compat.playback_session_ttl", v)}
               restartRequired={restartKeys.has("jellyfin_compat.playback_session_ttl")}

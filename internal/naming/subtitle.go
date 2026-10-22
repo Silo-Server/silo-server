@@ -17,14 +17,46 @@ type SubtitleTags struct {
 // SubtitleSuffix returns the part of a sidecar subtitle's name between the
 // video's name and the subtitle extension, both given without extensions:
 // ".en.sdh" for "Movie.en.sdh" next to "Movie". ok is false when the sidecar
-// does not belong to the video; its name must equal the video's or continue
-// with a dot, so "MovieExtra" does not match "Movie".
+// does not belong to the video; its name must equal the video's, ignoring
+// case, or continue with a dot, so "MovieExtra" does not match "Movie" while
+// "movie.en" does.
 func SubtitleSuffix(videoBase, subtitleBase string) (suffix string, ok bool) {
-	suffix, ok = strings.CutPrefix(subtitleBase, videoBase)
-	if !ok || (suffix != "" && !strings.HasPrefix(suffix, ".")) {
-		return "", false
+	// Case folding can change a name's byte length ("ß" and "ẞ"), so compare
+	// the whole name before each dot rather than cutting at len(videoBase).
+	for i := 0; i <= len(subtitleBase); i++ {
+		if i < len(subtitleBase) && subtitleBase[i] != '.' {
+			continue
+		}
+		if strings.EqualFold(subtitleBase[:i], videoBase) {
+			return subtitleBase[i:], true
+		}
 	}
-	return suffix, true
+	return "", false
+}
+
+// SubtitleDescriptorTags reads the name of a subtitle that is not named for a
+// video, such as "English" or "2_English" in a Subs/ folder: an optional track
+// number and underscore, then dot-separated words that each name a language
+// or a flag ParseSubtitleSuffix knows. ok is false when any word is something
+// else, so "Other Movie.en" is not a descriptor.
+func SubtitleDescriptorTags(subtitleBase string) (SubtitleTags, bool) {
+	words := subtitleBase
+	if digits := strings.IndexFunc(words, func(r rune) bool { return r < '0' || r > '9' }); digits > 0 && words[digits] == '_' {
+		words = words[digits+1:]
+	}
+	if words == "" {
+		return SubtitleTags{}, false
+	}
+	for _, word := range strings.Split(words, ".") {
+		switch strings.ToLower(strings.TrimSpace(word)) {
+		case "forced", "sdh", "cc", "hi":
+		default:
+			if lang.RegisteredTag(word) == "" {
+				return SubtitleTags{}, false
+			}
+		}
+	}
+	return ParseSubtitleSuffix(words), true
 }
 
 // SidecarSubtitleTags reads the tags of the sidecar at subtitlePath as a
