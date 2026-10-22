@@ -352,7 +352,39 @@ var profileCascadeTables = []string{
 	"ebook_reader_annotations",
 }
 
+// lockProfileForDelete locks the profile row and reads the image the delete
+// will remove. Setting clears delete user_setting_values rows and then update
+// the profile's legacy columns under the account's preference-settings lock.
+// Taking that lock before the profile row lock keeps that order; locking the
+// profile first and then deleting its settings would deadlock against a clear.
+func (s *PostgresUserStore) lockProfileForDelete(ctx context.Context, tx pgx.Tx, id string) (*userstore.Profile, error) {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)",
+		preferenceSettingsAdvisoryClass, int32(s.userID)); err != nil { //nolint:gosec // users.id is a 32-bit serial, keyed as in WithPreferenceSettingsTransaction
+		return nil, fmt.Errorf("locking preference settings transaction: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2 FOR UPDATE", s.userID, id); err != nil {
+		return nil, fmt.Errorf("locking profile %s: %w", id, err)
+	}
+	deleted, err := getProfile(ctx, tx, s.userID, id)
+	if err != nil {
+		return nil, err
+	}
+	if deleted == nil {
+		return nil, fmt.Errorf("profile %s not found", id)
+	}
+	return deleted, nil
+}
+
 func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error {
+	return s.DeleteProfileAudited(ctx, id, nil)
+}
+
+var _ userstore.AuditedProfileDeleter = (*PostgresUserStore)(nil)
+
+// DeleteProfileAudited is DeleteProfile with audit run in the delete's
+// transaction before it commits; a nil audit records nothing. The profile row
+// is locked before it is read, so audit sees the image that was deleted.
+func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *userstore.Profile) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning transaction for profile delete: %w", err)
@@ -373,6 +405,13 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		ORDER BY id FOR UPDATE`,
 		s.userID, id); err != nil {
 		return fmt.Errorf("locking collections of profile %s: %w", id, err)
+	}
+
+	var deleted *userstore.Profile
+	if audit != nil {
+		if deleted, err = s.lockProfileForDelete(ctx, tx, id); err != nil {
+			return err
+		}
 	}
 
 	// Preferences belong to viewers, not creators, so remove every override
@@ -426,6 +465,11 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 	}
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("profile %s not found", id)
+	}
+	if audit != nil {
+		if err := audit(tx, deleted); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit(ctx)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/policy"
 )
 
@@ -216,6 +217,12 @@ type Operation struct {
 	// Deprecation retires the operation through the RFC 9745 / RFC 8594
 	// header flow (see Deprecation). Nil means not deprecated.
 	Deprecation *Deprecation
+	// Audited opts a mutation outside /admin into domain audit rows: the
+	// account, permission and credential actions its service records through
+	// auditmutation (docs/admin-api.md, "Account and permission audit
+	// details"). Every /admin operation records them already; any other
+	// operation, and every v1 route, records request rows only.
+	Audited bool
 }
 
 // Registry is the deterministic registration surface. Domain files call
@@ -240,6 +247,7 @@ type Declared struct {
 	Conditional bool
 	CreateOnly  bool
 	RetrySafety RetrySafety
+	Audited     bool
 }
 
 // Declared lists every registered operation, sorted by method then path.
@@ -263,6 +271,12 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	handler = prepareCapabilityOperation(&op, handler)
 	if err := checkOperation(op); err != nil {
 		panic(fmt.Sprintf("apiv2: %s: %v", op.OperationID, err))
+	}
+	if op.Audited {
+		audited := handler
+		handler = func(ctx context.Context, in *I) (*O, error) {
+			return audited(auditmutation.WithDomainAudit(ctx), in)
+		}
 	}
 	var in I
 	if err := checkInput(reflect.TypeOf(in)); err != nil {
@@ -313,7 +327,7 @@ func Register[I, O any](reg *Registry, op Operation, handler func(context.Contex
 	}
 	reg.mu.Lock()
 	reg.ops = append(reg.ops, Declared{Method: op.Method, Path: op.Path, OperationID: op.OperationID, Class: op.Class,
-		Guarded: op.Guarded, Conditional: op.Conditional, CreateOnly: op.CreateOnly, RetrySafety: op.RetrySafety})
+		Guarded: op.Guarded, Conditional: op.Conditional, CreateOnly: op.CreateOnly, RetrySafety: op.RetrySafety, Audited: op.Audited})
 	reg.mu.Unlock()
 	// Huma's defineErrors rewrites every status in Errors with the bare
 	// http.StatusText, and the registration's Responses map is shared with
@@ -352,6 +366,9 @@ func checkOperation(op Operation) error {
 	}
 	if !strings.HasPrefix(op.Path, Prefix+"/") {
 		return fmt.Errorf("path %q must start with %s/", op.Path, Prefix)
+	}
+	if op.Audited && (!isMutatingMethod(op.Method) || strings.HasPrefix(op.Path, Prefix+"/admin/")) {
+		return fmt.Errorf("audited operations are mutations outside %s/admin, which records domain actions already", Prefix)
 	}
 	if strings.HasSuffix(op.Path, "/") {
 		return fmt.Errorf("path %q must not end with a slash", op.Path)

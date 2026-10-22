@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -1043,9 +1046,15 @@ func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUse
 	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 		return nil, nil, nil, fmt.Errorf("creating session: %w", err)
 	}
+	audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionImpersonationStarted, auditmutation.TargetUser,
+		strconv.Itoa(target.ID), http.StatusOK, auditmutation.Created(auditFieldImpersonationSession, sessionID))
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, nil, nil, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 
 	pair, err := s.generateTokenPair(Claims{
 		UserID:             target.ID,
@@ -1060,20 +1069,27 @@ func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUse
 	return pair, admin, target, nil
 }
 
+// auditFieldImpersonationSession names the login session a View as user
+// runs in. A session ID identifies the session; it is not a credential.
+const auditFieldImpersonationSession = "impersonation_session_id"
+
+// auditFieldLoginSession names a login session one revocation ended.
+const auditFieldLoginSession = "login_session_id"
+
 // EndImpersonation revokes an impersonated session without affecting the original admin session.
 func (s *Service) EndImpersonation(ctx context.Context, sessionID string, impersonatorUserID int) error {
-	session, err := s.sessions.GetByID(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	if session.ImpersonatorUserID == nil {
-		return ErrNotImpersonating
-	}
-	if *session.ImpersonatorUserID != impersonatorUserID {
-		return ErrImpersonationNotAllowed
-	}
-
-	return s.sessions.Revoke(ctx, sessionID)
+	return s.sessions.revokeChecked(ctx, sessionID, func(session *models.AuthSession) error {
+		if session.ImpersonatorUserID == nil {
+			return ErrNotImpersonating
+		}
+		if *session.ImpersonatorUserID != impersonatorUserID {
+			return ErrImpersonationNotAllowed
+		}
+		return nil
+	}, func(tx pgx.Tx, session *models.AuthSession) (*auditmutation.Entry, error) {
+		return auditmutation.RecordMutation(ctx, tx, auditmutation.ActionImpersonationEnded, auditmutation.TargetUser,
+			strconv.Itoa(session.UserID), http.StatusNoContent, auditmutation.Removed(auditFieldImpersonationSession, session.ID))
+	})
 }
 
 // Refresh validates the refresh token, checks that the associated session is
@@ -1323,16 +1339,15 @@ func (s *Service) LoginSessionActive(ctx context.Context, sessionID string) (boo
 // RevokeSession revokes a specific session. It verifies the session belongs
 // to the given user before revoking.
 func (s *Service) RevokeSession(ctx context.Context, sessionID string, userID int) error {
-	session, err := s.sessions.GetByID(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-
-	if session.UserID != userID {
-		return ErrSessionNotFound
-	}
-
-	return s.sessions.Revoke(ctx, sessionID)
+	return s.sessions.revokeChecked(ctx, sessionID, func(session *models.AuthSession) error {
+		if session.UserID != userID {
+			return ErrSessionNotFound
+		}
+		return nil
+	}, func(tx pgx.Tx, session *models.AuthSession) (*auditmutation.Entry, error) {
+		return auditmutation.RecordMutation(ctx, tx, auditmutation.ActionLoginSessionRevoked, auditmutation.TargetUser,
+			strconv.Itoa(session.UserID), http.StatusNoContent, auditmutation.Removed(auditFieldLoginSession, session.ID))
+	})
 }
 
 // generateTokenPair creates a new access/refresh token pair for the given

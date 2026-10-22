@@ -81,7 +81,7 @@ func registerAuth(reg *Registry) {
 	// anyone; on v2 that is a 409 conflict with the session's state, and a
 	// refused return is 403.
 	end.Errors = []int{http.StatusForbidden, http.StatusConflict}
-	Register(reg, Operation{Operation: end, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true}, reg.endImpersonation)
+	Register(reg, Operation{Operation: end, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.endImpersonation)
 	login := humaOp(http.MethodPost, Prefix+"/auth/login", "login", "auth",
 		"Authenticate with a username and password and open a login session.")
 	// Wrong credentials are 401 invalid_token; a disabled account, turned-off

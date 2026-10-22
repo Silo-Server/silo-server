@@ -274,6 +274,20 @@
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
 
+# Account, credential, session, API key and profile audit rows: what each
+# records, that no secret reaches them, and the locks their writes take.
+./internal/activitylog TestSelfServiceDomainRowsDB
+./internal/api/handlers TestProfileAuditDB
+./internal/auth TestImpersonationAuditDB
+./internal/auth TestOwnershipTransferAuditDB
+./internal/auth TestPasswordChangeAuditDB
+./internal/auth TestLoginSessionRevocationAuditDB
+./internal/auth TestSessionRevocationQueuesBehindAccountLockDB
+./internal/auth TestAPIKeyAuditDB
+./internal/passwordreset TestPasswordResetAuditDB
+./internal/userstore/pgstore TestPostgresDeleteProfileAuditedSeesConcurrentUpdate
+./internal/userstore/pgstore TestPostgresDeleteProfileAuditedWaitsForSettingClear
+
 # A retried push attempt key migration keeps the key an earlier run built.
 ./internal/database TestPushAttemptKeyMigrationRetriesKeepTheBuiltKeyPostgres
 

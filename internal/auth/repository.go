@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -12,6 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -610,9 +613,15 @@ func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, exp
 				return fmt.Errorf("revoking temporary-password sessions: %w", err)
 			}
 		}
+		audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionPasswordChanged, auditmutation.TargetUser,
+			strconv.Itoa(id), http.StatusNoContent, auditmutation.SecretChanged(auditmutation.FieldPassword))
+		if err != nil {
+			return err
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("commit password update: %w", err)
 		}
+		auditmutation.CommitMutation(ctx, audit)
 		return nil
 	}
 

@@ -98,7 +98,7 @@ func (d resetDB) issue(t *testing.T, userID int, token string, expiresAt time.Ti
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.repo.Issue(t.Context(), userID, user.Email, auth.HashLinkToken(token), nil, expiresAt); err != nil {
+	if err := d.repo.Issue(t.Context(), userID, user.Email, auth.HashLinkToken(token), nil, expiresAt, DeliveryLink); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -253,7 +253,7 @@ func TestResetIssuanceSerializesEmailChangeDB(t *testing.T) {
 					}
 					done <- err
 				} else {
-					done <- d.repo.Issue(t.Context(), id, "pending-email@example.invalid", "pending-link", nil, time.Now().Add(time.Hour))
+					done <- d.repo.Issue(t.Context(), id, "pending-email@example.invalid", "pending-link", nil, time.Now().Add(time.Hour), DeliveryLink)
 				}
 			}()
 			// Observe the real database lock before committing the email change.
