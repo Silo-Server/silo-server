@@ -29,7 +29,9 @@ func TestPlanPlaybackV3NamesTheActiveQuality(t *testing.T) {
 		{name: "a requested rung of a scope film", quality: QualityRung720pMediumV3, width: 1920, height: 800, want: QualityRung720pMediumV3},
 		{name: "a requested rung of an ultrawide film", quality: QualityRung1080pMediumV3, width: 2560, height: 1080, want: QualityRung1080pMediumV3},
 		{name: "a requested rung of a scope film a decoder held to 720p", quality: QualityRung1080pMediumV3, width: 1920, height: 800, decoder720p: true, want: QualityRung720pMediumV3},
-		{name: "auto plays the source", quality: QualityAutoV3, want: ""},
+		// The 15 Mbps source needs converting; Auto encodes it at no more
+		// than its class's best rung.
+		{name: "auto converts the source at its class's top rung", quality: QualityAutoV3, want: QualityRung1080pHighV3},
 		{name: "a resolution the source fits plays the source", quality: "1080p", want: ""},
 		{name: "a lower resolution names its class rung", quality: "720p", want: QualityRung720pMediumV3},
 		{name: "a resolution a cap held to 720p", quality: "1080p", capKbps: 3_000, want: QualityRung720pMediumV3},

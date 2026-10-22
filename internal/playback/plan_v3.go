@@ -1216,6 +1216,18 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if hlsRegistry == nil || !hlsRegistry.Available(TransformationVideoToH264V3) || !hlsRegistry.Available(TransformationAudioToAACV3) {
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
+	if !quality.ExplicitRung {
+		// An automatic encode never spends more than the best menu rung of
+		// its class. A conversion at the source's own size starts from the
+		// source's bitrate, which for a remux can be 100 Mbps.
+		outputClass := ladderClassForSize(quality.Width, quality.Height)
+		if quality.PreservesSource {
+			outputClass = ladderClassForSize(0, quality.Height)
+		}
+		if outputClass > 0 {
+			quality.BitrateKbps = min(quality.BitrateKbps, autoClassCeilingKbpsV3(outputClass))
+		}
+	}
 	// A server bitrate cap, and the estimate budget of an automatic encode,
 	// reserve the AAC and mux share before either video codec is sized, so
 	// the stream fits as a whole and the HEVC decoder check below sees the
