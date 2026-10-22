@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -1270,6 +1271,18 @@ func (s *Server) sessionOutputDir(sessionID string) string {
 	return filepath.Join(s.transcodeDir, sessionID)
 }
 
+// sessionIDPattern keeps a session id to one plain directory name under the
+// transcode root. sessionOutputDir joins it unchecked, stop and the reapers
+// RemoveAll that path, and FFmpeg expands % in the segment filename, so "." (the
+// root), ".." (its parent), separators and % are all refused.
+var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+// validSessionID also refuses the prepared-download store's directory name,
+// which sits under the same root by default.
+func validSessionID(sessionID string) bool {
+	return sessionIDPattern.MatchString(sessionID) && sessionID != downloadprepare.ArtifactDirectoryName
+}
+
 func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) {
 	defer s.trackInFlight()()
 	artifactID := chi.URLParam(r, "artifact_id")
@@ -1672,6 +1685,10 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session_id and input_path are required", http.StatusBadRequest)
 		return
 	}
+	if !validSessionID(req.SessionID) {
+		http.Error(w, "invalid session_id", http.StatusBadRequest)
+		return
+	}
 	if req.ThrottleSeconds < 0 {
 		http.Error(w, "throttle_seconds must not be negative", http.StatusBadRequest)
 		return
@@ -2059,6 +2076,10 @@ func recipeIsComplete(card playback.RecipeCard) bool {
 // register sessionID. Returns nil if the spawn fails or the slot wait is canceled.
 func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSegment int, card playback.RecipeCard) (*playback.TranscodeSession, error) {
 	defer s.trackInFlight()()
+	if !validSessionID(sessionID) {
+		slog.WarnContext(r.Context(), "transcode node reconstruct session id rejected", "component", "transcodenode", "session", sessionID)
+		return nil, nil
+	}
 	if s.inputPaths == nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct input authority unavailable", "component", "transcodenode", "session", sessionID)
 		return nil, nil
