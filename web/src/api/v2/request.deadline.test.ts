@@ -84,10 +84,17 @@ describe("v2 request deadline", () => {
     expect(await outcome).toBeInstanceOf(V2TimeoutError);
   });
 
-  it("bounds the catalog browse, a read sent as POST", async () => {
+  it.each([
+    ["the catalog browse", () => v2("POST /api/v2/catalog/query", { body: {} })],
+    [
+      "a reset link lookup",
+      () => v2("POST /api/v2/password-resets/lookup", { body: { token: "t" } }),
+    ],
+    ["an invitation lookup", () => v2("POST /api/v2/invitations/lookup", { body: { token: "t" } })],
+  ])("bounds %s, a read sent as POST", async (_, send) => {
     vi.stubGlobal("fetch", hungFetch());
 
-    const outcome = v2("POST /api/v2/catalog/query", { body: {} }).catch((error: unknown) => error);
+    const outcome = send().catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(API_READ_TIMEOUT_MS);
     expect(await outcome).toBeInstanceOf(V2TimeoutError);
   });

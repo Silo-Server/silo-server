@@ -164,7 +164,7 @@ func TestRequestEmailsTheMatchingAccount(t *testing.T) {
 		if got.userID != 5 || got.minAge != selfServiceCooldown || got.expiresAt.Before(before.Add(SelfServiceTTL)) || got.expiresAt.After(time.Now().Add(SelfServiceTTL)) {
 			t.Fatalf("%q: stored %+v", login, got)
 		}
-		_, token, ok := strings.Cut(msg.TextBody, "https://silo.example.test/reset-password/")
+		_, token, ok := strings.Cut(msg.TextBody, "https://silo.example.test/reset-password#")
 		token, _, _ = strings.Cut(token, "\n")
 		if !ok || msg.To[0] != "alice@example.test" || auth.HashLinkToken(token) != got.tokenHash {
 			t.Fatalf("%q: email to %v does not carry the stored link", login, msg.To)
@@ -252,10 +252,10 @@ func TestIssueDeliversLinkOnlyWhereAsked(t *testing.T) {
 	s := newTestService(repo, sender, fakeSettings{"server.public_url": "https://silo.example.test/"})
 
 	link, err := s.Issue(t.Context(), IssueInput{UserID: 5, IssuedBy: 1, Delivery: DeliveryLink})
-	if err != nil || !strings.HasPrefix(link.URL, "https://silo.example.test/reset-password/") || len(sender.sent) != 0 {
+	if err != nil || !strings.HasPrefix(link.URL, "https://silo.example.test/reset-password#") || len(sender.sent) != 0 {
 		t.Fatalf("link = %+v, %v, sent %d", link, err, len(sender.sent))
 	}
-	token := strings.TrimPrefix(link.URL, "https://silo.example.test/reset-password/")
+	token := strings.TrimPrefix(link.URL, "https://silo.example.test/reset-password#")
 	if repo.issued[0] != auth.HashLinkToken(token) {
 		t.Fatal("stored digest does not match the returned link")
 	}
@@ -264,7 +264,7 @@ func TestIssueDeliversLinkOnlyWhereAsked(t *testing.T) {
 	if err != nil || !emailed.EmailSent || emailed.URL != "" || len(sender.sent) != 1 || sender.sent[0].To[0] != "alice@example.test" {
 		t.Fatalf("email = %+v, %v", emailed, err)
 	}
-	if !strings.Contains(sender.sent[0].TextBody, "/reset-password/") {
+	if !strings.Contains(sender.sent[0].TextBody, "/reset-password#") {
 		t.Fatal("email carries no link")
 	}
 	if inline := sender.sent[0].Inline; len(inline) != 1 || !strings.Contains(sender.sent[0].HTMLBody, "cid:"+inline[0].ContentID) {

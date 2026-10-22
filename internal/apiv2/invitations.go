@@ -36,6 +36,7 @@ type InvitationCapabilities struct {
 	Capability
 	DefaultProfile bool `json:"default_profile" doc:"Whether the selected profile store can atomically provision a requested default profile."`
 	Profileless    bool `json:"profileless"`
+	TokenInBody    bool `json:"token_in_body" doc:"Whether lookupInvitationLink and acceptInvitationLink, which take the token in the request body, are available. Older servers omit this; only the deprecated path operations exist there."`
 }
 type InvitationCapabilitiesOutput struct {
 	Status       int
@@ -60,6 +61,23 @@ type InvitationAcceptInput struct {
 	Token     string `path:"token" minLength:"1" maxLength:"128"`
 	UserAgent string `header:"User-Agent"`
 	Body      struct {
+		Email    string `json:"email,omitempty" maxLength:"254" doc:"The invitee's address. Required when the lookup reports email_required; ignored otherwise."`
+		Password string `json:"password" minLength:"8" maxLength:"72"`
+	}
+}
+
+// InvitationLinkInput names an invitation by its claim token. The token
+// travels in the body, never the URL, so proxies and access logs in front of
+// the server do not record it.
+type InvitationLinkInput struct {
+	Body struct {
+		Token string `json:"token" minLength:"1" maxLength:"128" doc:"The token from the invitation link's fragment"`
+	}
+}
+type InvitationLinkAcceptInput struct {
+	UserAgent string `header:"User-Agent"`
+	Body      struct {
+		Token    string `json:"token" minLength:"1" maxLength:"128" doc:"The token from the invitation link's fragment"`
 		Email    string `json:"email,omitempty" maxLength:"254" doc:"The invitee's address. Required when the lookup reports email_required; ignored otherwise."`
 		Password string `json:"password" minLength:"8" maxLength:"72"`
 	}
@@ -130,7 +148,7 @@ type AdminInvitationCreateInput struct {
 }
 type InvitationDelivery struct {
 	Invitation     AdminInvitation `json:"invitation"`
-	ClaimURL       string          `json:"claim_url" doc:"One-time disclosure; never retained for replay. Contains the bearer claim token."`
+	ClaimURL       string          `json:"claim_url" doc:"One-time disclosure; never retained for replay. Contains the bearer claim token as the URL's fragment, which browsers never send to the server."`
 	DeliveryStatus string          `json:"delivery_status" enum:"sent,not_configured,failed_or_unknown,not_requested" doc:"not_requested: a link invitation; nothing was emailed."`
 }
 type InvitationDeliveryOutput struct {
@@ -248,7 +266,7 @@ func registerInvitations(reg *Registry) {
 			profile = reg.deps.Invitations.SupportsDefaultProfile()
 			profileless = true
 		}
-		return &InvitationCapabilitiesOutput{Body: InvitationCapabilities{Capability: Capability{State: state}, DefaultProfile: profile, Profileless: profileless}}, nil
+		return &InvitationCapabilitiesOutput{Body: InvitationCapabilities{Capability: Capability{State: state}, DefaultProfile: profile, Profileless: profileless, TokenInBody: true}}, nil
 	}
 	Register(reg, op(http.MethodGet, "/invitations/capabilities", "getInvitationCapabilities", true), capabilities)
 	Register(reg, op(http.MethodGet, "/admin/invitations/capabilities", "getAdminInvitationCapabilities", false), func(ctx context.Context, in *CapabilityInput) (*AdminInvitationCapabilitiesOutput, error) {
@@ -262,32 +280,26 @@ func registerInvitations(reg *Registry) {
 		}
 		return out, nil
 	})
-	Register(reg, op(http.MethodGet, "/invitations/{token}", "lookupInvitation", true), func(ctx context.Context, in *InvitationTokenInput) (*InvitationLookupOutput, error) {
+	lookup := func(ctx context.Context, token string) (*InvitationLookupOutput, error) {
 		svc, p := reg.invitationService()
 		if p != nil {
 			return nil, p
 		}
-		view, err := svc.Lookup(ctx, in.Token)
+		view, err := svc.Lookup(ctx, token)
 		if err != nil {
 			return nil, invitationProblem(err, true)
 		}
 		return &InvitationLookupOutput{Body: InvitationLookup{Email: view.Email, EmailRequired: view.EmailRequired, Note: view.Note, InviterName: view.InviterName, ServerName: view.ServerName, ExpiresAt: NewInstant(view.ExpiresAt), ShowTour: view.ShowTour, AcceptanceAvailable: !view.CreateProfile || svc.SupportsDefaultProfile()}}, nil
-	})
-	accept := op(http.MethodPost, "/invitations/{token}/accept", "acceptInvitation", true)
-	accept.DefaultStatus = http.StatusCreated
-	// An invitation creates a local-password account: while the server
-	// turns local password sign-in off it is refused, unspent, with 403
-	// local_login_disabled.
-	accept.Errors = append(accept.Errors, http.StatusForbidden)
-	Register(reg, accept, func(ctx context.Context, in *InvitationAcceptInput) (*InvitationAcceptOutput, error) {
-		if len([]byte(in.Body.Password)) > 72 {
+	}
+	accept := func(ctx context.Context, token, email, password, userAgent string) (*InvitationAcceptOutput, error) {
+		if len([]byte(password)) > 72 {
 			return nil, NewProblem(TypeValidationFailed, "Password must not exceed 72 bytes.")
 		}
 		svc, p := reg.invitationService()
 		if p != nil {
 			return nil, p
 		}
-		view, err := svc.AcceptInvitation(withClientDevice(ctx), in.Token, in.Body.Email, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
+		view, err := svc.AcceptInvitation(withClientDevice(ctx), token, email, password, userAgent, clientip.FromContext(ctx))
 		if err != nil && !errors.Is(err, invitations.ErrSessionStart) {
 			return nil, invitationProblem(err, true)
 		}
@@ -297,6 +309,47 @@ func registerInvitations(reg *Registry) {
 			out.Tokens = new(tokenPairFromView(*view.Tokens))
 		}
 		return &InvitationAcceptOutput{Body: out}, nil
+	}
+	acceptOp := func(path, id string) Operation {
+		o := op(http.MethodPost, path, id, true)
+		o.DefaultStatus = http.StatusCreated
+		// An invitation creates a local-password account: while the server
+		// turns local password sign-in off it is refused, unspent, with 403
+		// local_login_disabled.
+		o.Errors = append(o.Errors, http.StatusForbidden)
+		return o
+	}
+
+	// The claim screen's operations take the token in the body: a URL would
+	// leave it in proxy and CDN access logs.
+	lookupLink := op(http.MethodPost, "/invitations/lookup", "lookupInvitationLink", true)
+	lookupLink.Summary = "Describe an invitation link for the claim screen."
+	lookupLink.RetrySafety = RetrySafetyNaturalIdempotent
+	lookupLink.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
+	Register(reg, lookupLink, func(ctx context.Context, in *InvitationLinkInput) (*InvitationLookupOutput, error) {
+		return lookup(ctx, in.Body.Token)
+	})
+	acceptLink := acceptOp("/invitations/accept", "acceptInvitationLink")
+	acceptLink.Summary = "Create the invited account through an invitation link."
+	Register(reg, acceptLink, func(ctx context.Context, in *InvitationLinkAcceptInput) (*InvitationAcceptOutput, error) {
+		return accept(ctx, in.Body.Token, in.Body.Email, in.Body.Password, in.UserAgent)
+	})
+
+	// Released Android builds still claim through these path forms. They
+	// leave /api/v2 before the lock, once a shipped Android build uses the
+	// body operations above.
+	pathTokenDeprecation := &Deprecation{At: time.Date(2026, time.October, 22, 0, 0, 0, 0, time.UTC), Link: DocsOrigin + "api/"}
+	lookupPath := op(http.MethodGet, "/invitations/{token}", "lookupInvitation", true)
+	lookupPath.Description = "Deprecated: the token in the path reaches proxy and CDN access logs. Use lookupInvitationLink."
+	lookupPath.Deprecation = pathTokenDeprecation
+	Register(reg, lookupPath, func(ctx context.Context, in *InvitationTokenInput) (*InvitationLookupOutput, error) {
+		return lookup(ctx, in.Token)
+	})
+	acceptPath := acceptOp("/invitations/{token}/accept", "acceptInvitation")
+	acceptPath.Description = "Deprecated: the token in the path reaches proxy and CDN access logs. Use acceptInvitationLink."
+	acceptPath.Deprecation = pathTokenDeprecation
+	Register(reg, acceptPath, func(ctx context.Context, in *InvitationAcceptInput) (*InvitationAcceptOutput, error) {
+		return accept(ctx, in.Token, in.Body.Email, in.Body.Password, in.UserAgent)
 	})
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, op(http.MethodGet, "/admin/invitations", listAdminInvitationsOperation, false), func(ctx context.Context, in *CursorListInput) (*AdminInvitationListOutput, error) {

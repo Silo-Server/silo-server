@@ -63,7 +63,7 @@ describe.each([
     restartRejects: true,
     created: {
       invitation: key,
-      claim_url: "https://example.invalid/invite/creation-secret",
+      claim_url: "https://example.invalid/invite#creation-secret",
       delivery_status: "sent",
     },
     capture: captureInvitationAuthority,

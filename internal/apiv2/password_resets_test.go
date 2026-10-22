@@ -59,7 +59,7 @@ func (f *fakePasswordResets) IssuePasswordReset(_ context.Context, in passwordre
 	}
 	result := &passwordreset.IssueResult{ExpiresAt: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}
 	if in.Delivery == passwordreset.DeliveryLink {
-		result.URL = "https://server.example.invalid/reset-password/synthetic-token"
+		result.URL = "https://server.example.invalid/reset-password#synthetic-token"
 		return result, nil
 	}
 	// Account 8 stands for a mail server that did not confirm delivery.
@@ -105,7 +105,7 @@ func TestAdminPasswordResetDelivery(t *testing.T) {
 	path := Prefix + "/admin/users/7/password-reset"
 
 	link := do(t, h, http.MethodPost, path, `{"delivery":"link"}`, actingRequestAdmin)
-	if link.Code != http.StatusCreated || !strings.Contains(link.Body.String(), "/reset-password/synthetic-token") || !strings.Contains(link.Body.String(), `"delivery_status":"not_requested"`) {
+	if link.Code != http.StatusCreated || !strings.Contains(link.Body.String(), "/reset-password#synthetic-token") || !strings.Contains(link.Body.String(), `"delivery_status":"not_requested"`) {
 		t.Fatal(link.Code, link.Body.String())
 	}
 	if f.issued == nil || f.issued.UserID != 7 || f.issued.IssuedBy == 0 || f.issued.Delivery != passwordreset.DeliveryLink {
@@ -139,25 +139,29 @@ func TestAdminPasswordResetDelivery(t *testing.T) {
 func TestPublicPasswordReset(t *testing.T) {
 	f := fixturePasswordResets()
 	h := passwordResetTestHandler(f)
+	lookup := Prefix + "/password-resets/lookup"
+	complete := Prefix + "/password-resets/complete"
 
-	lookup := do(t, h, http.MethodGet, Prefix+"/password-resets/live", "", nil)
-	if lookup.Code != http.StatusOK || !strings.Contains(lookup.Body.String(), `"username":"reset-user"`) {
-		t.Fatal(lookup.Code, lookup.Body.String())
+	found := do(t, h, http.MethodPost, lookup, `{"token":"live"}`, nil)
+	if found.Code != http.StatusOK || !strings.Contains(found.Body.String(), `"username":"reset-user"`) {
+		t.Fatal(found.Code, found.Body.String())
 	}
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/password-resets/spent", "", nil), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodPost, lookup, `{"token":"spent"}`, nil), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodPost, lookup, `{}`, nil), TypeValidationFailed)
 
-	done := do(t, h, http.MethodPost, Prefix+"/password-resets/live/complete", `{"password":"password123"}`, nil)
+	done := do(t, h, http.MethodPost, complete, `{"token":"live","password":"password123"}`, nil)
 	if done.Code != http.StatusOK || !strings.Contains(done.Body.String(), `"login_status":"signed_in"`) || !strings.Contains(done.Body.String(), "fixture-access") {
 		t.Fatal(done.Code, done.Body.String())
 	}
 	// The reset committed even though sign-in did not: no tokens, and the
 	// caller must not replay it.
-	signIn := do(t, h, http.MethodPost, Prefix+"/password-resets/sign-in-required/complete", `{"password":"password123"}`, nil)
+	signIn := do(t, h, http.MethodPost, complete, `{"token":"sign-in-required","password":"password123"}`, nil)
 	if signIn.Code != http.StatusOK || !strings.Contains(signIn.Body.String(), `"login_status":"sign_in_required"`) || strings.Contains(signIn.Body.String(), "tokens") {
 		t.Fatal(signIn.Code, signIn.Body.String())
 	}
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/password-resets/spent/complete", `{"password":"password123"}`, nil), TypeNotFound)
-	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/password-resets/live/complete", `{"password":"short"}`, nil), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, complete, `{"token":"spent","password":"password123"}`, nil), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodPost, complete, `{"token":"live","password":"short"}`, nil), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodPost, complete, `{"password":"password123"}`, nil), TypeValidationFailed)
 	if f.completed != 2 {
 		t.Fatalf("completed %d resets, want 2", f.completed)
 	}
@@ -165,7 +169,7 @@ func TestPublicPasswordReset(t *testing.T) {
 
 func TestPasswordResetsNotConfigured(t *testing.T) {
 	h := NewHandler(requestDeps(fixtureRequests()))
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/password-resets/live", "", nil), TypeCapabilityNotConfigured)
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/password-resets/lookup", `{"token":"live"}`, nil), TypeCapabilityNotConfigured)
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/admin/users/7/password-reset", `{"delivery":"link"}`, actingRequestAdmin), TypeCapabilityNotConfigured)
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/password-resets", `{"login":"alice"}`, nil), TypeCapabilityNotConfigured)
 	if r := do(t, h, http.MethodGet, Prefix+"/capabilities/password-reset", "", nil); r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `"state":"not_configured"`) {

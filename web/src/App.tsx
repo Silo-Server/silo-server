@@ -459,7 +459,11 @@ function AppRoutes() {
       <Route path="/activate" element={<ActivateDevice />} />
       <Route path="/setup" element={<SetupWizard />} />
       <Route path="/signup" element={<Signup />} />
+      {/* Links carry their token in the fragment; the :token forms serve
+          links issued before that and stay while any can still be live. */}
+      <Route path="/invite" element={<InviteClaim />} />
       <Route path="/invite/:token" element={<InviteClaim />} />
+      <Route path="/reset-password" element={<PasswordReset />} />
       <Route path="/reset-password/:token" element={<PasswordReset />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path={CHANGE_PASSWORD_PATH} element={<ChoosePassword />} />

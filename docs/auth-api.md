@@ -205,11 +205,17 @@ because those clients cannot run the change; the account signs in to Silo first.
 
 An administrator can issue a single-use link that lets the account holder choose a
 new password (see [administrator accounts](admin-users-api.md#passwords)). The link
-opens `/reset-password/{token}` in the web client, which uses two public operations:
+opens `/reset-password#{token}` in the web client. The token is the URL fragment, which
+browsers never send to the server, so it stays out of proxy and CDN access logs and
+`Referer` headers. The web client moves it out of the address bar at once and uses two
+public operations that take it in the request body:
 
-- `GET /password-resets/{token}` returns `username`, `server_name`, and `expires_at`.
-- `POST /password-resets/{token}/complete` with `{ "password": "..." }` sets the new
-  password and returns 200.
+- `POST /password-resets/lookup` with `{ "token": "..." }` returns `username`,
+  `server_name`, and `expires_at`.
+- `POST /password-resets/complete` with `{ "token": "...", "password": "..." }` sets the
+  new password and returns 200.
+
+The web client still opens links issued in the older `/reset-password/{token}` form.
 
 Every unusable link returns the same `404 not_found`, whether it is unknown, expired,
 used, replaced, or outdated by a password or recovery email change, or its account
@@ -226,8 +232,7 @@ in, using the same shape as invitation acceptance: `status: "completed"`, `usern
 `sign_in_required`, the password is set but no session was opened; sign in normally.
 Never replay a completion, since the link is already spent.
 
-Links are stored only as SHA-256 digests, and the request log redacts the `{token}`
-path segment.
+Links are stored only as SHA-256 digests. No operation takes the token in its URL.
 
 ### Self-service password reset
 
@@ -249,7 +254,7 @@ client IP by default).
 
 The server emails a link only to an enabled account that signs in with a local
 password and has a valid email address. The link opens the same
-`/reset-password/{token}` screen as an administrator's link and expires after an
+`/reset-password#{token}` screen as an administrator's link and expires after an
 hour. An account gets at most one requested link every five minutes. A requested
 link replaces the account's earlier requested link, but never a live link an
 administrator issued; while one exists, requests send nothing.

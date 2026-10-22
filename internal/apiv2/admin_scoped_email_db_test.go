@@ -198,13 +198,13 @@ func TestScopedAdminKeyCannotRedirectRecoveryDB(t *testing.T) {
 				if len(message.To) != 1 || message.To[0] != originalEmail {
 					t.Errorf("reset delivered to %v, want original address %q", message.To, originalEmail)
 				}
-				token := regexp.MustCompile(`/reset-password/([A-Za-z0-9_-]+)`).FindStringSubmatch(message.TextBody)
+				token := regexp.MustCompile(`/reset-password#([A-Za-z0-9_-]+)`).FindStringSubmatch(message.TextBody)
 				if len(token) != 2 {
 					t.Fatal("recovery message has no reset link")
 				}
 				// Complete the captured link to prove recovery can issue a full
 				// admin session; its delivery address is the security boundary.
-				completed := do(t, router, http.MethodPost, Prefix+"/password-resets/"+token[1]+"/complete", `{"password":"replacement-password"}`, nil)
+				completed := do(t, router, http.MethodPost, Prefix+"/password-resets/complete", `{"token":"`+token[1]+`","password":"replacement-password"}`, nil)
 				var body PasswordResetCompletion
 				if err := json.Unmarshal(completed.Body.Bytes(), &body); err != nil || completed.Code != http.StatusOK || body.LoginStatus != "signed_in" || body.Tokens == nil {
 					t.Fatalf("recovery completion: %d %s (%v)", completed.Code, completed.Body, err)

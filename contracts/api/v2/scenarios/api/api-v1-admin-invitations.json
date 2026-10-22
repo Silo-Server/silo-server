@@ -1121,7 +1121,7 @@
               {
                 "pointer": "/claim_url",
                 "op": "matches",
-                "value": "^https://silo\\.example\\.test/invite/[A-Za-z0-9_-]{43}$"
+                "value": "^https://silo\\.example\\.test/invite#[A-Za-z0-9_-]{43}$"
               },
               {
                 "pointer": "/invitation/status",
@@ -1179,7 +1179,7 @@
                 {
                   "pointer": "/claim_url",
                   "op": "matches",
-                  "value": "^https://silo\\.example\\.test/invite/[A-Za-z0-9_-]{43}$"
+                  "value": "^https://silo\\.example\\.test/invite#[A-Za-z0-9_-]{43}$"
                 },
                 {
                   "pointer": "/invitation/status",
@@ -1242,7 +1242,7 @@
               {
                 "pointer": "/claim_url",
                 "op": "matches",
-                "value": "^https://silo\\.example\\.test/invite/"
+                "value": "^https://silo\\.example\\.test/invite#"
               }
             ]
           },
@@ -1267,7 +1267,7 @@
                 {
                   "pointer": "/claim_url",
                   "op": "matches",
-                  "value": "^https://silo\\.example\\.test/invite/"
+                  "value": "^https://silo\\.example\\.test/invite#"
                 },
                 {
                   "pointer": "/delivery_status",

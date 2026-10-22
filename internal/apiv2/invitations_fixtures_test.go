@@ -4,6 +4,9 @@ func invitationFixtureCases() []fixtureCase {
 	cases := []fixtureCase{
 		{name: "invitation_capabilities", operationID: "getInvitationCapabilities", method: "GET", path: "/api/v2/invitations/capabilities", status: 200, schema: "InvitationCapabilities"},
 		{name: "admin_invitation_capabilities", operationID: "getAdminInvitationCapabilities", method: "GET", path: "/api/v2/admin/invitations/capabilities", headers: actingRequestAdmin, status: 200, schema: "AdminInvitationCapabilities"},
+		{name: "invitation_link_lookup", operationID: "lookupInvitationLink", method: "POST", path: "/api/v2/invitations/lookup", body: `{"token":"pending"}`, status: 200, schema: "InvitationLookup"},
+		{name: "invitation_link_accepted", operationID: "acceptInvitationLink", method: "POST", path: "/api/v2/invitations/accept", body: `{"token":"pending","password":"synthetic-password"}`, status: 201, schema: "InvitationAcceptance"},
+		{name: "invitation_link_accepted_sign_in_required", operationID: "acceptInvitationLink", method: "POST", path: "/api/v2/invitations/accept", body: `{"token":"sign-in-required","password":"synthetic-password"}`, status: 201, schema: "InvitationAcceptance"},
 		{name: "invitation_lookup", operationID: "lookupInvitation", method: "GET", path: "/api/v2/invitations/pending", status: 200, schema: "InvitationLookup"},
 		{name: "invitation_accepted", operationID: "acceptInvitation", method: "POST", path: "/api/v2/invitations/pending/accept", body: `{"password":"synthetic-password"}`, status: 201, schema: "InvitationAcceptance"},
 		{name: "invitation_accepted_sign_in_required", operationID: "acceptInvitation", method: "POST", path: "/api/v2/invitations/sign-in-required/accept", body: `{"password":"synthetic-password"}`, status: 201, schema: "InvitationAcceptance"},
@@ -24,6 +27,9 @@ func invitationFixtureCases() []fixtureCase {
 		}
 		if c.operationID == "createAdminInvitation" || c.operationID == "resendAdminInvitation" {
 			c.assertHeaders = append(c.assertHeaders, "Location")
+		}
+		if c.operationID == "lookupInvitation" || c.operationID == "acceptInvitation" {
+			c.assertHeaders = append(c.assertHeaders, "Deprecation", "Link")
 		}
 	}
 	return cases

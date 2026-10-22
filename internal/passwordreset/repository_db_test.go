@@ -215,7 +215,7 @@ func TestResetIssuanceRejectsChangedRecoveryEmailDB(t *testing.T) {
 			if len(sender.sent) != 1 || len(sender.sent[0].To) != 1 || sender.sent[0].To[0] != "changed@example.test" {
 				t.Fatalf("fresh issue did not deliver to current email: %+v", sender.sent)
 			}
-			_, token, ok := strings.Cut(sender.sent[0].TextBody, "https://silo.example.test/reset-password/")
+			_, token, ok := strings.Cut(sender.sent[0].TextBody, "https://silo.example.test/reset-password#")
 			token, _, _ = strings.Cut(token, "\n")
 			if !ok {
 				t.Fatal("email has no reset link")

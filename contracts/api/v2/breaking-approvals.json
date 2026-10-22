@@ -1,3 +1,18 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "lookupPasswordReset",
+      "change_id": "api-path-removed-without-deprecation",
+      "fingerprint": "044f5d4b80aac7c761bc17571030c0e0a2cc7286c706016eb02e91a3663009c5",
+      "reason": "Pre-lock removal: the reset token in the path reached proxy and CDN access logs. lookupPasswordResetLink takes it in the body. Only the bundled web client called this operation and it moves in the same change; silo-apple and silo-android never called it.",
+      "approved_in": "#2900"
+    },
+    {
+      "operation_id": "completePasswordReset",
+      "change_id": "api-path-removed-without-deprecation",
+      "fingerprint": "9e0d8e23a9fed94435d05f2ea95da482184dbc000f0abd92b4e2598cc7c1ef66",
+      "reason": "Pre-lock removal: the reset token in the path reached proxy and CDN access logs. completePasswordResetLink takes it in the body. Only the bundled web client called this operation and it moves in the same change; silo-apple and silo-android never called it.",
+      "approved_in": "#2900"
+    }
+  ]
 }

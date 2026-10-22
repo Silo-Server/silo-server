@@ -51,7 +51,7 @@ type AdminPasswordResetInput struct {
 type AdminPasswordReset struct {
 	Delivery       string  `json:"delivery" enum:"email,link" example:"link"`
 	DeliveryStatus string  `json:"delivery_status" enum:"sent,failed_or_unknown,not_requested" doc:"For email: sent, or failed_or_unknown when the mail server did not confirm delivery (the link is still live; send again or share a link). For link: not_requested" example:"not_requested"`
-	ResetURL       string  `json:"reset_url,omitempty" doc:"Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder" example:"https://silo.example.test/reset-password/3f2b47eb7b36dd2d"`
+	ResetURL       string  `json:"reset_url,omitempty" doc:"Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder. The token is the URL's fragment, which browsers never send to the server" example:"https://silo.example.test/reset-password#3f2b47eb7b36dd2d"`
 	ExpiresAt      Instant `json:"expires_at" doc:"When the link stops working"`
 }
 
@@ -83,9 +83,13 @@ type PasswordResetRequestInput struct {
 	}
 }
 
-// PasswordResetTokenInput names a link by its token.
-type PasswordResetTokenInput struct {
-	Token string `path:"token" minLength:"1" maxLength:"128"`
+// PasswordResetLinkInput names a link by its token. The token travels in the
+// body, never the URL, so proxies and access logs in front of the server do
+// not record it.
+type PasswordResetLinkInput struct {
+	Body struct {
+		Token string `json:"token" minLength:"1" maxLength:"128" doc:"The token from the reset link's fragment"`
+	}
 }
 
 // PasswordResetLookup is the reset screen's view of a usable link.
@@ -95,16 +99,16 @@ type PasswordResetLookup struct {
 	ExpiresAt  Instant `json:"expires_at"`
 }
 
-// PasswordResetLookupOutput is the lookupPasswordReset response.
+// PasswordResetLookupOutput is the lookupPasswordResetLink response.
 type PasswordResetLookupOutput struct {
 	Body PasswordResetLookup
 }
 
 // PasswordResetCompleteInput sets the new password through a link.
 type PasswordResetCompleteInput struct {
-	Token     string `path:"token" minLength:"1" maxLength:"128"`
 	UserAgent string `header:"User-Agent"`
 	Body      struct {
+		Token    string `json:"token" minLength:"1" maxLength:"128" doc:"The token from the reset link's fragment"`
 		Password string `json:"password" minLength:"8" maxLength:"72" doc:"The new password" example:"margin fossil quench hollow"`
 	}
 }
@@ -119,7 +123,7 @@ type PasswordResetCompletion struct {
 	Tokens      *TokenPair `json:"tokens,omitempty"`
 }
 
-// PasswordResetCompleteOutput is the completePasswordReset response.
+// PasswordResetCompleteOutput is the completePasswordResetLink response.
 type PasswordResetCompleteOutput struct {
 	Body PasswordResetCompletion
 }
@@ -172,12 +176,11 @@ func registerPasswordResets(reg *Registry) {
 	issue.Errors = []int{http.StatusConflict}
 	Register(reg, issue, reg.createAdminUserPasswordReset)
 
-	public := func(method, path, id, summary string) Operation {
-		op := Operation{Operation: humaOp(method, Prefix+path, id, "auth", summary), Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketPasswordReset}
+	// The reset screen's operations take the link's token in the body: a URL
+	// would leave it in proxy and CDN access logs.
+	public := func(path, id, summary string, safety RetrySafety) Operation {
+		op := Operation{Operation: humaOp(http.MethodPost, Prefix+path, id, "auth", summary), Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketPasswordReset, RetrySafety: safety}
 		op.Errors = []int{http.StatusTooManyRequests}
-		if method == http.MethodPost {
-			op.RetrySafety = RetrySafetyNonRetryable
-		}
 		return op
 	}
 	Register(reg, Operation{
@@ -192,10 +195,10 @@ func registerPasswordResets(reg *Registry) {
 	// capability state (409) or the rate limit (429) refuses one.
 	request.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
 	Register(reg, Operation{Operation: request, RetrySafety: RetrySafetyNonRetryable, Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketPasswordResetRequest}, reg.requestPasswordReset)
-	Register(reg, public(http.MethodGet, "/password-resets/{token}", "lookupPasswordReset",
-		"Describe a usable password reset link for the reset screen."), reg.lookupPasswordReset)
-	Register(reg, public(http.MethodPost, "/password-resets/{token}/complete", "completePasswordReset",
-		"Set a new password through a reset link, sign out everywhere, and sign in."), reg.completePasswordReset)
+	Register(reg, public("/password-resets/lookup", "lookupPasswordResetLink",
+		"Describe a usable password reset link for the reset screen.", RetrySafetyNaturalIdempotent), reg.lookupPasswordResetLink)
+	Register(reg, public("/password-resets/complete", "completePasswordResetLink",
+		"Set a new password through a reset link, sign out everywhere, and sign in.", RetrySafetyNonRetryable), reg.completePasswordResetLink)
 }
 
 func (reg *Registry) createAdminUserPasswordReset(ctx context.Context, in *AdminPasswordResetInput) (*AdminPasswordResetOutput, error) {
@@ -252,24 +255,24 @@ func (reg *Registry) requestPasswordReset(ctx context.Context, in *PasswordReset
 	}
 }
 
-func (reg *Registry) lookupPasswordReset(ctx context.Context, in *PasswordResetTokenInput) (*PasswordResetLookupOutput, error) {
+func (reg *Registry) lookupPasswordResetLink(ctx context.Context, in *PasswordResetLinkInput) (*PasswordResetLookupOutput, error) {
 	svc, p := reg.passwordResets()
 	if p != nil {
 		return nil, p
 	}
-	view, err := svc.LookupPasswordReset(ctx, in.Token)
+	view, err := svc.LookupPasswordReset(ctx, in.Body.Token)
 	if err != nil {
 		return nil, passwordResetProblem(err)
 	}
 	return &PasswordResetLookupOutput{Body: PasswordResetLookup{Username: view.Username, ServerName: view.ServerName, ExpiresAt: NewInstant(view.ExpiresAt)}}, nil
 }
 
-func (reg *Registry) completePasswordReset(ctx context.Context, in *PasswordResetCompleteInput) (*PasswordResetCompleteOutput, error) {
+func (reg *Registry) completePasswordResetLink(ctx context.Context, in *PasswordResetCompleteInput) (*PasswordResetCompleteOutput, error) {
 	svc, p := reg.passwordResets()
 	if p != nil {
 		return nil, p
 	}
-	view, err := svc.CompletePasswordReset(withClientDevice(ctx), in.Token, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
+	view, err := svc.CompletePasswordReset(withClientDevice(ctx), in.Body.Token, in.Body.Password, in.UserAgent, clientip.FromContext(ctx))
 	if err != nil && !errors.Is(err, passwordreset.ErrSessionStart) {
 		return nil, passwordResetProblem(err)
 	}

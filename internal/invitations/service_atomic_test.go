@@ -20,7 +20,7 @@ func TestInvitationServiceCommittedOutcomesDB(t *testing.T) {
 	if err == nil || sent == nil || sent.EmailSent || len(sender.sent) != 1 {
 		t.Fatalf("committed delivery result=%v err=%v sends=%d", sent, err, len(sender.sent))
 	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://server.example.invalid/invite/")
+	token := strings.TrimPrefix(sent.ClaimURL, "https://server.example.invalid/invite#")
 	pair, user, err := svc.Accept(t.Context(), token, "", "test-password", "test-device", "")
 	if !errors.Is(err, ErrSessionStart) || pair != nil || user == nil {
 		t.Fatalf("pair=%v user=%v err=%v", pair, user, err)
@@ -78,7 +78,7 @@ func TestLinkInvitationLifecycleDB(t *testing.T) {
 		t.Fatalf("link invitation = %+v sends=%d", first.Invitation, len(sender.sent))
 	}
 	tokenOf := func(r *SendResult) string {
-		return strings.TrimPrefix(r.ClaimURL, "https://server.example.invalid/invite/")
+		return strings.TrimPrefix(r.ClaimURL, "https://server.example.invalid/invite#")
 	}
 
 	if _, user, err := svc.Accept(t.Context(), tokenOf(first), "Sam@Example.invalid", "test-password", "d", ""); err != nil || user == nil {
@@ -158,7 +158,7 @@ func TestEmailedInvitationLinkReplacementDB(t *testing.T) {
 	sender := &fakeMail{configured: true}
 	svc := NewService(f.repo, users, auth.NewAccountProvisioner(users, pgstore.NewPostgresProvider(f.pool)), &fakeSessions{}, sender, nil, nil, "https://server.example.invalid")
 	tokenOf := func(r *SendResult) string {
-		return strings.TrimPrefix(r.ClaimURL, "https://server.example.invalid/invite/")
+		return strings.TrimPrefix(r.ClaimURL, "https://server.example.invalid/invite#")
 	}
 
 	emailed, err := svc.Send(t.Context(), SendInput{Email: "kai@example.invalid", Role: models.RoleUser, InvitedBy: 1})

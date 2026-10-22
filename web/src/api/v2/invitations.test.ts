@@ -11,7 +11,7 @@ import {
 const row = { id: "9007199254740993", email: "invitee@example.invalid", status: "pending" };
 const result = {
   invitation: row,
-  claim_url: "https://example.invalid/invite/synthetic",
+  claim_url: "https://example.invalid/invite#synthetic",
   delivery_status: "failed_or_unknown",
 };
 function json(body: unknown, status = 200) {

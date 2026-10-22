@@ -604,7 +604,9 @@ GET /api/v2/home/layout	non-media
 GET /api/v2/home/sections	non-media
 GET /api/v2/home/sections/{id}/items	non-media
 GET /api/v2/images/capabilities	non-media
+POST /api/v2/invitations/accept	non-media
 GET /api/v2/invitations/capabilities	non-media
+POST /api/v2/invitations/lookup	non-media
 GET /api/v2/invitations/{token}	non-media
 POST /api/v2/invitations/{token}/accept	non-media
 GET /api/v2/libraries	non-media
@@ -702,8 +704,8 @@ PUT /api/v2/onboarding/progress	non-media
 GET /api/v2/onboarding/state	non-media
 GET /api/v2/openapi.json	non-media
 POST /api/v2/password-resets	non-media
-GET /api/v2/password-resets/{token}	non-media
-POST /api/v2/password-resets/{token}/complete	non-media
+POST /api/v2/password-resets/complete	non-media
+POST /api/v2/password-resets/lookup	non-media
 GET /api/v2/playback/bandwidth-probe	media	transfer	viewer_egress	false	true
 GET /api/v2/playback/capabilities	non-media
 POST /api/v2/playback/route-events	non-media
@@ -1889,7 +1891,9 @@ GET /api/v2/home/layout	non-media
 GET /api/v2/home/sections	non-media
 GET /api/v2/home/sections/{id}/items	non-media
 GET /api/v2/images/capabilities	non-media
+POST /api/v2/invitations/accept	non-media
 GET /api/v2/invitations/capabilities	non-media
+POST /api/v2/invitations/lookup	non-media
 GET /api/v2/invitations/{token}	non-media
 POST /api/v2/invitations/{token}/accept	non-media
 GET /api/v2/libraries	non-media
@@ -1987,8 +1991,8 @@ PUT /api/v2/onboarding/progress	non-media
 GET /api/v2/onboarding/state	non-media
 GET /api/v2/openapi.json	non-media
 POST /api/v2/password-resets	non-media
-GET /api/v2/password-resets/{token}	non-media
-POST /api/v2/password-resets/{token}/complete	non-media
+POST /api/v2/password-resets/complete	non-media
+POST /api/v2/password-resets/lookup	non-media
 GET /api/v2/playback/bandwidth-probe	media	transfer	viewer_egress	false	true
 GET /api/v2/playback/capabilities	non-media
 POST /api/v2/playback/route-events	non-media
