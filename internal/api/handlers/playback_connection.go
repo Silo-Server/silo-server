@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"net/http"
+	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -166,10 +168,13 @@ func withoutObservedEstimateV3(req playback.StartRequestV3) playback.StartReques
 }
 
 // An Auto budget, whatever set it (a speed test, the connection's reading, a
-// stall or a learned limit), first tries the existing, authorized edition
-// order: a lower original costs the server nothing and keeps its picture.
-// Candidate planning proves that the client can copy the video, including HDR,
-// audio and subtitle constraints; a matching bitrate alone is insufficient.
+// stall or a learned limit), first tries a lower original of the same edition:
+// it costs the server nothing and keeps its picture. Of the versions within
+// the budget it tries those that keep the source's dynamic range first, so an
+// HDR source stays HDR when a lower HDR version plays as it is, then the
+// highest bitrate. Candidate planning proves that the client can copy the
+// video, including HDR, audio and subtitle constraints; a matching bitrate
+// alone is insufficient.
 func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.StartRequestV3, base *models.MediaFile, audio int, settings playback.PlannerSettingsV3) (*models.MediaFile, playback.StartRequestV3, int) {
 	if req.QualityPreference != playback.QualityAutoV3 || req.BandwidthEstimateKbps == nil || !req.AllowsAlternateVersions() {
 		return base, req, audio
@@ -181,7 +186,8 @@ func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.Sta
 	if serverCap := serverBitrateCapV3(r.Context()); serverCap > 0 {
 		budget = min(budget, serverCap)
 	}
-	if source := playback.SourceDescriptorFromFileV3(base, audio); source.BitrateKbps <= budget {
+	source := playback.SourceDescriptorFromFileV3(base, audio)
+	if source.BitrateKbps <= budget {
 		return base, req, audio
 	}
 	filter := requestAccessFilter(r)
@@ -189,15 +195,35 @@ func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.Sta
 	if err != nil {
 		return base, req, audio
 	}
+	type fittingVersion struct {
+		file       *models.MediaFile
+		keepsRange bool
+		bitrate    int
+	}
+	var fitting []fittingVersion
 	for _, candidate := range alternates {
 		if candidate.PresentationPartIndex != base.PresentationPartIndex {
 			continue
 		}
 		candidate = h.ensurePlaybackProbe(r.Context(), candidate)
-		bitrate := playback.SourceDescriptorFromFileV3(candidate, 0).BitrateKbps
-		if bitrate <= 0 || bitrate > budget || !catalog.FileAllowedByAccess(candidate, filter) {
+		descriptor := playback.SourceDescriptorFromFileV3(candidate, 0)
+		if descriptor.BitrateKbps <= 0 || descriptor.BitrateKbps > budget || !catalog.FileAllowedByAccess(candidate, filter) {
 			continue
 		}
+		keepsRange := isHDRRangeV3(descriptor.DynamicRange) == isHDRRangeV3(source.DynamicRange)
+		fitting = append(fitting, fittingVersion{file: candidate, keepsRange: keepsRange, bitrate: descriptor.BitrateKbps})
+	}
+	slices.SortStableFunc(fitting, func(a, b fittingVersion) int {
+		if a.keepsRange != b.keepsRange {
+			if a.keepsRange {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Compare(b.bitrate, a.bitrate)
+	})
+	for _, version := range fitting {
+		candidate := version.file
 		next := req
 		dropped, err := h.remapSubtitleSelectionV3(r.Context(), base, candidate, &next)
 		if err != nil || dropped {
@@ -218,6 +244,10 @@ func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.Sta
 		}
 	}
 	return base, req, audio
+}
+
+func isHDRRangeV3(dynamicRange string) bool {
+	return dynamicRange != "" && dynamicRange != playback.DynamicRangeSDRV3
 }
 
 func (h *PlaybackHandler) ReportPlaybackProbe(ctx context.Context, device string, result connectionstore.ProbeResult) error {

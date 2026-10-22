@@ -279,6 +279,53 @@ func TestBufferedAutoPrefersCopyVersion(t *testing.T) {
 	}
 }
 
+// TestBufferedAutoPicksTheBestFittingVersion: of the versions within an Auto
+// budget, one that keeps the source's dynamic range plays first, then the
+// highest bitrate, whatever order the catalog lists them in (SDR and non-4K
+// first). A version the client would have to encode is passed over for the
+// 1080p SDR one.
+func TestBufferedAutoPicksTheBestFittingVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		codec     string
+		hdr       bool
+		wantLower bool
+	}{
+		{"a lower HDR version keeps the picture HDR", "hevc", true, true},
+		{"a 4K SDR version beats a lower 1080p one", "h264", false, true},
+		{"a version the client cannot copy is passed over", "av1", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, source, sdr, req := subtitleBlockedHDRFixtureV3(t)
+			lowerValue := *source
+			lower := &lowerValue
+			lower.ID, lower.FilePath, lower.CodecVideo, lower.Bitrate, lower.SubtitleTracks = 85, writePlaybackTestMediaFile(t, "movie-4k-lower.mkv"), tc.codec, 30_000, nil
+			track := source.VideoTracks[0]
+			track.Codec, track.Bitrate = tc.codec, 30_000
+			if !tc.hdr {
+				track.Profile, track.Level, track.BitDepth, track.VideoRange, track.VideoRangeType = "high", 51, 8, "SDR", "SDR"
+			}
+			lower.VideoTracks = []models.VideoTrack{track}
+			handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, sdr, lower}}}
+			req.ClientFeatures = append(req.ClientFeatures, playback.FeatureBufferingQualityV1)
+			req.Capabilities.VideoDecode = append(req.Capabilities.VideoDecode, playback.VideoDecodeCapabilityV3{
+				Codec: "h264", Profiles: []string{"high"}, Levels: []int{41, 51}, BitDepths: []int{8},
+				MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true,
+			})
+			req.BandwidthEstimateKbps, req.BandwidthEstimateSource = new(44100), playback.BandwidthEstimateProbeV3
+			r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(newAuthorizedPlaybackContext())
+			chosen, _, _ := handler.lowerBufferedVersion(r, req, source, 0, handler.plannerSettingsV3(r.Context()))
+			want := sdr.ID
+			if tc.wantLower {
+				want = lower.ID
+			}
+			if chosen.ID != want {
+				t.Fatalf("selected %d, want %d", chosen.ID, want)
+			}
+		})
+	}
+}
+
 func TestLearnedLimitAnnotationRequiresAdditionalReduction(t *testing.T) {
 	source := v3HandlerFixtureFile(t)
 	source.Bitrate = 63000
