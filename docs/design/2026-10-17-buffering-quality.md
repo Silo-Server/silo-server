@@ -69,7 +69,7 @@ answers where they differ:
 | How long a learned limit lasts | 24 hours from the latest observation, not 7 days. A **Test speed** result above the limit clears it. |
 | A plan that never shows a frame? | On Auto in `always` mode, a plan whose start deadline passes while it waits for media, a first plan or a replacement, lowers as a long stall would, instead of failing at the same quality, but only when it measurably received its media more slowly than its delivered bitrate. An outage, a renderer wait, a decoder failure, no such measurement, a pending change or nothing lower keeps the failure path, and a deadline lowering that is refused, fails or is never adopted falls back to it. |
 | When is a replacement a source reload? | Only when it replaces a source that has played. A replacement adopted before any plan of the attempt has played continues the attempt's start wait, under the attempt's original grace. |
-| Can an outage end playback? | No. The client waits for media data or the network, sends no failure recovery during it, and resends a replan that got no response. After it reopens the source, it sends failure recovery only while no outage is in progress and the network is connected. |
+| Can an outage end playback? | No. The client waits for media data or the network, sends no failure recovery during it, and resends a replan that got no response. After it reopens the source, it sends failure recovery only while the network is connected and the server answers. |
 
 ## Motivation
 
@@ -390,7 +390,7 @@ The prompt has a title, **"Playback keeps buffering"**, a primary action,
 | The plan adopted after a lowering is no lower, or carries `quality_reduction_unavailable` | Show **"Can't lower quality for this video"**. Leave this plan alone for `NO_LOWER_COOLDOWN_MS = 300000`. |
 | The replan fails, or its plan is never adopted | Keep playing the current plan. Watch it again after `REARM_AFTER_UNADOPTED_MS = 60000`. Rearming starts fresh stall history without startup grace; an in-progress stall is timed from the rearm. If the player cannot send the replan now, because another replan is in flight, the replan fails: the client does not queue it. |
 | A replan gets no response (a timeout or a dropped connection) | Resend it with its original body, `replan_request_id` included, so the server replays its decision. It stays the replan in flight until it is answered; it never leaves the session refusing later replans. |
-| An outage | It never ends playback by itself. While it lasts, the client sends no `failure_recovery` replan: it waits for media data or the network to return, then reopens the source or replans. If the source fails after that reopen, the client sends `failure_recovery` only while no outage is in progress and the network is connected; otherwise it keeps waiting. |
+| An outage | It never ends playback by itself. While it lasts, the client sends no `failure_recovery` replan: it waits for media data or the network to return, then reopens the source or replans. If the source fails after that reopen, the client sends `failure_recovery` only while the network is connected and the server answers (the failed request itself marks an outage, so that cannot be the test); otherwise it keeps waiting. |
 
 Presentation rules:
 
