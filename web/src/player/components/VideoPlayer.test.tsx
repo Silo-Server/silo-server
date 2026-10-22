@@ -5567,36 +5567,6 @@ describe("VideoPlayer buffering pill", () => {
     return { ...rendered, video };
   }
 
-  // N6: the player applies a resume position before the first frame, and the
-  // seek that fires must not end the plan's slow start (D5/D10 addendum). The
-  // lowering resumes from the resume position, not the element's 0.
-  it("keeps timing a resumed start's wait through the player's own resume seek", () => {
-    const onQualitySelect = vi.fn();
-    const rendered = renderPlayer({
-      onQualitySelect,
-      bufferingMode: "ask",
-      qualityPreference: "auto",
-      plan: fixturePlanV3({
-        ...directPlan,
-        timeline: { ...directPlan.timeline, player_start_seconds: 1300 },
-        available_qualities: [
-          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
-          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
-        ],
-        source: { ...directPlan.source, bitrate_kbps: 20_000 },
-      }),
-    });
-    const video = rendered.container.querySelector("video");
-    if (!video) throw new Error("expected video element");
-    // Metadata arrives and the player seeks to the resume position; nothing plays.
-    fireEvent.loadedMetadata(video);
-    fireEvent.seeking(video);
-    fireEvent.waiting(video);
-    act(() => vi.advanceTimersByTime(16_200));
-    fireEvent.click(screen.getByRole("button", { name: "Lower quality" }));
-    expect(onQualitySelect.mock.calls.map(([, position]) => position)).toEqual([1300]);
-  });
-
   function setVisibility(state: "visible" | "hidden") {
     Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
     act(() => {
@@ -6007,6 +5977,46 @@ describe("VideoPlayer hls.js request timeouts", () => {
     expect(
       onQualitySelect.mock.calls.map(([, , request]) => request.observed_throughput_kbps),
     ).toEqual([kbps]);
+  });
+
+  // N6: the player applies a resume position before the first frame, and the
+  // seek that fires must not end the plan's slow start (D5/D10 addendum). The
+  // lowering resumes from the resume position, not the element's 0. The
+  // start's media arrives slowly: before the first frame, a wait prompts only
+  // with that evidence (C12).
+  it("keeps timing a resumed start's wait through the player's own resume seek", async () => {
+    hlsJS.supported = true;
+    const onQualitySelect = vi.fn();
+    const rendered = renderPlayer({
+      onQualitySelect,
+      bufferingMode: "ask",
+      qualityPreference: "auto",
+      plan: fixturePlanV3({
+        timeline: { ...directPlan.timeline, player_start_seconds: 1300 },
+        stream: {
+          url: "/playback/transcode/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+        available_qualities: [
+          { label: "original", preserves_source: true, bitrate_kbps: 20_000 },
+          { label: "1080p-high", preserves_source: false, height: 1080, bitrate_kbps: 10_000 },
+        ],
+        source: { ...directPlan.source, bitrate_kbps: 20_000 },
+      }),
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    const video = rendered.container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    loadingFragment(2_000);
+    // Metadata arrives and the player seeks to the resume position; nothing plays.
+    fireEvent.loadedMetadata(video);
+    fireEvent.seeking(video);
+    fireEvent.waiting(video);
+    act(() => vi.advanceTimersByTime(16_200));
+    fireEvent.click(prompt()!);
+    expect(onQualitySelect.mock.calls.map(([, position]) => position)).toEqual([1300]);
   });
 
   // C1: a wait is an outage once no media data has arrived for 4 s on the

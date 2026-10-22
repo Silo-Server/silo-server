@@ -9,6 +9,9 @@ const plan: BufferingPlan = {
   quality: "auto",
   available_qualities: [{ label: "1080p", bitrate_kbps: 10000 }],
 };
+// The plan's media measured arriving below its 63000 kbps: before the attempt
+// first plays, a wait lowers only with this evidence.
+const slowMedia = () => 3000;
 beforeEach(() => {
   vi.useFakeTimers();
 });
@@ -17,7 +20,12 @@ afterEach(() => vi.useRealTimers());
 function setup({
   paused = false,
   playIntent,
-}: { paused?: boolean; playIntent?: () => boolean } = {}) {
+  throughputKbps,
+}: {
+  paused?: boolean;
+  playIntent?: () => boolean;
+  throughputKbps?: () => number | undefined;
+} = {}) {
   const video = document.createElement("video");
   Object.defineProperty(video, "paused", { value: paused, configurable: true });
   const options = {
@@ -28,6 +36,7 @@ function setup({
     mode: "always" as const,
     obscured: false,
     playIntent,
+    throughputKbps,
     transportTrouble: vi.fn(() => false),
     onReplan: vi.fn(),
     onNotice: vi.fn(),
@@ -211,20 +220,26 @@ it("does not count a wait that begins with media buffered until the buffer runs 
   expect(h.options.onReplan).toHaveBeenCalledTimes(1);
 });
 
-it("times a plan's slow start as a wait, from adoption", () => {
+// C12: before the attempt first plays, the wait lowers only when the plan's
+// media was measured arriving more slowly than it plays.
+it.each<[string, (() => number | undefined) | undefined, number]>([
+  ["lowers when its media arrived slowly", slowMedia, 1],
+  ["does not lower when nothing measured its media", undefined, 0],
+])("times a plan's slow start as a wait, from adoption: %s", (_name, throughputKbps, lowerings) => {
   // A new plan's element starts paused and plays once enough data arrives.
-  const h = setup({ paused: true, playIntent: () => true });
+  const h = setup({ paused: true, playIntent: () => true, throughputKbps });
   const onReplan = h.options.onReplan;
   // The transport empties the element as it attaches; the start still counts.
   h.send("emptied");
   h.advance(15_900);
   expect(onReplan).not.toHaveBeenCalled();
-  h.advance(200);
-  expect(onReplan).toHaveBeenCalledTimes(1);
-  expect(onReplan.mock.calls[0]![0]).toMatchObject({
-    bandwidth_estimate_kbps: 44100,
-    bandwidth_estimate_source: "observed_rebuffer",
-  });
+  h.advance(30_000);
+  expect(onReplan).toHaveBeenCalledTimes(lowerings);
+  if (lowerings)
+    expect(onReplan.mock.calls[0]![0]).toMatchObject({
+      bandwidth_estimate_kbps: 44100,
+      bandwidth_estimate_source: "observed_rebuffer",
+    });
 });
 
 // Only the attempt's first plan is a start. A slow track change on Auto
@@ -244,13 +259,31 @@ it("does not lower while a replacement plan loads slowly", () => {
 // A plan that replaces one before any played, here a failure recovery 3 s
 // in, continues the attempt's start: timed, under the start's own grace.
 it("times a replacement adopted before the start played as the start's wait", () => {
-  const h = setup({ paused: true, playIntent: () => true });
+  const h = setup({ paused: true, playIntent: () => true, throughputKbps: slowMedia });
   h.advance(3_000);
   h.rerender({ ...h.options, planRevision: 2, plan: { ...plan, plan_id: "p2" } });
   h.send("emptied");
   h.advance(12_900);
   expect(h.options.onReplan).not.toHaveBeenCalled();
   h.advance(200);
+  expect(h.options.onReplan).toHaveBeenCalledTimes(1);
+});
+
+// C12, the Apple TV cascade: a lowering adopted before the start played
+// continues its wait, and lowers again only on evidence of its own.
+it("does not lower a lowered start again when nothing measured its media", () => {
+  let measured: number | undefined = 3000;
+  const h = setup({ paused: true, playIntent: () => true, throughputKbps: () => measured });
+  h.advance(16_100);
+  expect(h.options.onReplan).toHaveBeenCalledTimes(1);
+  act(() => h.options.onReplan.mock.calls[0]![1](2));
+  measured = undefined;
+  h.rerender({
+    ...h.options,
+    planRevision: 2,
+    plan: { ...plan, plan_id: "p2", delivered_kbps: 31600 },
+  });
+  h.advance(60_000);
   expect(h.options.onReplan).toHaveBeenCalledTimes(1);
 });
 
@@ -269,6 +302,7 @@ it("keeps timing a slow start through the waiting that follows its reload", () =
       playIntent: () => true,
       onReplan,
       onNotice: vi.fn(),
+      throughputKbps: slowMedia,
     },
   });
   // The transport empties the element, which then reports it is waiting.
@@ -331,10 +365,10 @@ it("does not lower a start whose buffer fills but never plays", () => {
 });
 
 it("does not fail a plan that replaced one whose deadline lowering failed", () => {
-  const h = setup();
+  const h = setup({ throughputKbps: slowMedia });
   h.rerender({ ...h.options, planRevision: 2, plan: { ...plan, plan_id: "p2" } });
   const fail = vi.fn();
-  act(() => h.result.current.startDeadlinePassed(fail, 3000));
+  act(() => h.result.current.startDeadlinePassed(fail));
   const [, settle] = h.options.onReplan.mock.calls[0]!;
   h.rerender({ ...h.options, planRevision: 3, plan: { ...plan, plan_id: "p3" } });
   act(() => settle(undefined));
@@ -356,6 +390,7 @@ it("keeps timing a slow start through a seek before its first frame", () => {
       playIntent: () => true,
       onReplan,
       onNotice: vi.fn(),
+      throughputKbps: slowMedia,
     },
   });
   // The player applies the resume position before anything has played.
@@ -383,6 +418,7 @@ it("counts the wait after a seek made before a paused plan first played", () => 
       playIntent: () => false,
       onReplan,
       onNotice: vi.fn(),
+      throughputKbps: slowMedia,
     },
   });
   // Opened paused: the viewer seeks, then plays, and nothing arrives.

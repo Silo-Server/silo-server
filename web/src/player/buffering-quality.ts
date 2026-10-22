@@ -297,6 +297,12 @@ export class BufferingQualityController {
   private suspended = false;
   /** The latest Auto lowering's step-down estimate, for this playback attempt. */
   private keptEstimate?: number;
+  /**
+   * A plan of this playback attempt has played. Until one has, a wait may be
+   * a stream that cannot start for another reason, so lowering needs
+   * evidence that the plan's media arrived too slowly.
+   */
+  private attemptPlayed = false;
 
   constructor(
     public mode: BufferingMode,
@@ -304,6 +310,11 @@ export class BufferingQualityController {
     now: number,
     private onSummary?: (plan: BufferingPlan, summary: BufferingSummary) => void,
     private onKeptEstimate?: (kbps: number | undefined) => void,
+    /**
+     * The current plan's measured throughput, or undefined where the player
+     * cannot measure it.
+     */
+    private measuredKbps?: () => number | undefined,
   ) {
     this.lastTick = now;
   }
@@ -364,19 +375,14 @@ export class BufferingQualityController {
    * Restore answer for the title, a Watch Party room and a pending lowering
    * or pick leave the failure to the usual recovery. So does an outage in
    * progress or one that ended less than LONG_STALL_MS before: the start
-   * never had a fair run on a working network.
-   *
-   * `observedKbps`, the plan's measured throughput, is the evidence that its
-   * media arrived more slowly than it plays. Without a measurement, or with
-   * one at the delivered bitrate or above, the start fails as before: the
-   * link may be silent, or the stream failing for another reason.
+   * never had a fair run on a working network. So does a start whose media
+   * did not arrive too slowly (see mediaArrivedSlowly).
    */
-  startDeadlinePassed(now: number, observedKbps?: number): boolean {
+  startDeadlinePassed(now: number): boolean {
     this.tick(now, false);
     if (
       this.plan?.quality !== "auto" ||
-      observedKbps === undefined ||
-      observedKbps >= this.plan.delivered_kbps ||
+      !this.mediaArrivedSlowly() ||
       this.mode !== "always" ||
       this.answered ||
       this.suspended ||
@@ -422,7 +428,10 @@ export class BufferingQualityController {
         this.paused = false;
         this.playing = true;
         this.graceEndsAt ??= now + STARTUP_GRACE_MS;
-        this.finishStall(now);
+        // The attempt's first frame ends its start's wait, which counts
+        // toward a trigger only with the evidence it needed while it lasted.
+        this.finishStall(now, this.stallsCount());
+        this.attemptPlayed = true;
         this.waiting = false;
         this.check(now);
         break;
@@ -538,6 +547,7 @@ export class BufferingQualityController {
         break;
       case "new_attempt":
         this.keep(undefined);
+        this.attemptPlayed = false;
         break;
       case "client_replan":
         if (this.plan && event.operation) {
@@ -696,8 +706,9 @@ export class BufferingQualityController {
     this.stall = this.waiting && !this.outage ? Math.max(now, this.graceEndsAt ?? now) : undefined;
   }
 
-  private finishStall(now: number) {
-    if (this.stall !== undefined) {
+  /** Ends the stall in progress; one that does not `count` stays out of the trigger history. */
+  private finishStall(now: number, count = true) {
+    if (this.stall !== undefined && count) {
       const counted = Math.max(0, now - this.stall);
       if (counted >= STALL_MIN_MS) this.stalls.push(now);
       if (counted >= LONG_STALL_MS) this.longStallEnded = now;
@@ -739,6 +750,22 @@ export class BufferingQualityController {
     return best;
   }
 
+  /**
+   * The evidence a lowering needs before the attempt has played, and a start
+   * deadline's always: the plan's media arrived more slowly than it plays.
+   * Without a measurement, or with one at the delivered bitrate or above, the
+   * link may be silent, or the stream failing for another reason.
+   */
+  private mediaArrivedSlowly() {
+    const kbps = this.measuredKbps?.();
+    return kbps !== undefined && this.plan !== undefined && kbps < this.plan.delivered_kbps;
+  }
+
+  /** Whether stalls count toward a trigger: once the attempt has played, or on that evidence. */
+  private stallsCount() {
+    return this.attemptPlayed || this.mediaArrivedSlowly();
+  }
+
   /** Whether this plan has a lower rung and, on Auto, a usable step-down estimate. */
   private canLower() {
     const plan = this.plan;
@@ -777,7 +804,7 @@ export class BufferingQualityController {
       now < this.blockedUntil
     )
       return;
-    if (!this.triggered(now)) return;
+    if (!this.triggered(now) || !this.stallsCount()) return;
     if (this.mode === "never") {
       this.setAction("ignored");
       return;

@@ -85,6 +85,12 @@ interface Options {
    */
   mediaData?: () => { at: number; segmented: boolean } | undefined;
   /**
+   * The current plan's measured throughput, or undefined where the player
+   * cannot measure it. A start deadline, and any stall before the attempt
+   * first plays, lowers only when it is below the plan's bitrate.
+   */
+  throughputKbps?: () => number | undefined;
+  /**
    * Whether a newly adopted plan's transport will start playing on its own.
    * Its element starts paused and plays once enough data has arrived, so until
    * then the start is a wait the controller times, like a stall.
@@ -203,6 +209,7 @@ export function useAutoQualityDownshift(options: Options) {
       now(),
       (plan, summary) => latest.current.onSummary?.(plan, summary, pageEnding.current),
       (kbps) => latest.current.onKeptEstimate?.(kbps),
+      () => latest.current.throughputKbps?.(),
     );
     controller.current = c;
     // A closed tab, a reload or a navigation away ends the playing plan, and
@@ -474,20 +481,20 @@ export function useAutoQualityDownshift(options: Options) {
   );
   /**
    * The player's start deadline passed before the plan's first frame. When
-   * Auto lowers on its own and `observedKbps`, the plan's measured
-   * throughput, is below its bitrate, the controller lowers instead (see its
-   * startDeadlinePassed); `fail` reports the plan's failure when it does not,
-   * or when its lowering is not adopted. A start held up by the renderer,
-   * not the network, fails without lowering.
+   * Auto lowers on its own and the plan's measured throughput is below its
+   * bitrate, the controller lowers instead (see its startDeadlinePassed);
+   * `fail` reports the plan's failure when it does not, or when its lowering
+   * is not adopted. A start held up by the renderer, not the network, fails
+   * without lowering.
    */
   const startDeadlinePassed = useCallback(
-    (fail: () => void, observedKbps?: number) => {
+    (fail: () => void) => {
       if (rendererWait.current) {
         fail();
         return;
       }
       deadlineFailure.current = fail;
-      const lowered = controller.current?.startDeadlinePassed(now(), observedKbps) ?? false;
+      const lowered = controller.current?.startDeadlinePassed(now()) ?? false;
       deadlineFailure.current = undefined;
       refresh();
       if (!lowered) fail();

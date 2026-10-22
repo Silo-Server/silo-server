@@ -19,6 +19,11 @@ describe("buffering-quality wire vectors", () => {
         (output, t) => outputs.push({ t, ...output }),
         0,
         (plan, summary) => summaries.set(plan.adoption_id ?? plan.plan_id, summary),
+        undefined,
+        // The vectors leave out the player's measurement. A stall before the
+        // attempt first plays lowers only on evidence that the plan's media
+        // arrived more slowly than it plays, so every vector has it.
+        () => 100,
       );
       // The clock moves one millisecond at a time, so every timer fires at
       // exactly the time it is due.
@@ -173,7 +178,7 @@ it.each<{
   },
   {
     name: "lowers again when the lowered plan does not start either",
-    before: (c) => expect(c.startDeadlinePassed(60000, 3000)).toBe(true),
+    before: (c) => expect(c.startDeadlinePassed(60000)).toBe(true),
     later: {
       delivered_kbps: 10000,
       available_qualities: [
@@ -206,13 +211,20 @@ it.each<{
   "a start that misses its deadline: $name",
   ({ mode = "always", quality = "auto", before, later, during, observed = 3000, estimate }) => {
     const outputs: unknown[] = [];
-    const c = new BufferingQualityController(mode, (output) => outputs.push(output), 0);
+    const c = new BufferingQualityController(
+      mode,
+      (output) => outputs.push(output),
+      0,
+      undefined,
+      undefined,
+      () => observed ?? undefined,
+    );
     c.event({ type: "plan_adopted", plan: { ...plan, quality } }, 0);
     before?.(c);
     c.event({ type: "plan_adopted", plan: { ...plan, plan_id: "p2", quality, ...later } }, 100000);
     during?.(c);
     outputs.length = 0;
-    expect(c.startDeadlinePassed(160000, observed ?? undefined)).toBe(estimate !== undefined);
+    expect(c.startDeadlinePassed(160000)).toBe(estimate !== undefined);
     expect(outputs).toEqual(
       estimate === undefined
         ? []
@@ -230,6 +242,90 @@ it.each<{
     );
   },
 );
+
+// C12: until a plan of the attempt plays, a wait may be a stream that cannot
+// start for another reason. A stall then lowers only when the plan's media was
+// measured (`measured` kbps) arriving below its 63000 kbps; after the attempt
+// has played the usual rules apply. Each row adopts the plan at 0, then plays
+// its events; a row that lowers names when.
+it.each<{
+  name: string;
+  measured?: number;
+  events: [number, BufferingEvent["type"]][];
+  lowersAt?: number;
+}>([
+  {
+    name: "a start's long wait lowers when its media arrived slowly",
+    measured: 3000,
+    events: [[0, "waiting"]],
+    lowersAt: 16000,
+  },
+  {
+    name: "a start's long wait does not lower when nothing measured its media",
+    events: [[0, "waiting"]],
+  },
+  {
+    name: "a start's long wait does not lower when its media arrived at its bitrate",
+    measured: 63000,
+    events: [[0, "waiting"]],
+  },
+  {
+    name: "a start's wait without evidence does not count after its first frame",
+    events: [
+      [0, "waiting"],
+      [14000, "playing"],
+      [20000, "waiting"],
+      [21500, "playing"],
+    ],
+  },
+  {
+    name: "a long stall after the first frame lowers without a measurement",
+    events: [
+      [0, "playing"],
+      [20000, "waiting"],
+    ],
+    lowersAt: 26000,
+  },
+  {
+    name: "a new attempt needs evidence again until it plays",
+    events: [
+      [0, "playing"],
+      [5000, "new_attempt"],
+      [5000, "waiting"],
+    ],
+  },
+])("before the attempt first plays: $name", ({ measured, events, lowersAt }) => {
+  const outputs: unknown[] = [];
+  const c = new BufferingQualityController(
+    "always",
+    (output, t) => outputs.push({ t, ...output }),
+    0,
+    undefined,
+    undefined,
+    () => measured,
+  );
+  c.event({ type: "plan_adopted", plan }, 0);
+  for (let t = 0; t <= 60000; t += 100) {
+    for (const [at, type] of events) if (at === t) c.event({ type }, t);
+    c.tick(t);
+  }
+  expect(outputs).toEqual(
+    lowersAt === undefined
+      ? []
+      : [
+          {
+            t: lowersAt,
+            type: "replan",
+            body: {
+              operation: "quality_change",
+              quality_preference: "auto",
+              bandwidth_estimate_kbps: 44100,
+              bandwidth_estimate_source: "observed_rebuffer",
+            },
+          },
+        ],
+  );
+});
 
 it("omits an unknown delivered bitrate from the summary", () => {
   const summaries: BufferingSummary[] = [];

@@ -4527,6 +4527,7 @@ export function VideoPlayer({
         ? { at: current.meter.lastDataAt(performance.now()), segmented: current.segmented }
         : undefined;
     },
+    throughputKbps: () => planThroughputKbps(String(planRevision)),
     onReplan: (request, onAdopt) => {
       // A lowering also says what this plan's media arrived at: the server
       // plans with the lower figure, so one lowering reaches a link far
@@ -4562,10 +4563,7 @@ export function VideoPlayer({
     },
     onKeptEstimate,
   });
-  // A start that missed its deadline lowers only when its media was measured
-  // arriving more slowly than it plays.
-  startDeadlinePassedRef.current = (fail) =>
-    bufferingQuality.startDeadlinePassed(fail, planThroughputKbps(String(planRevision)));
+  startDeadlinePassedRef.current = bufferingQuality.startDeadlinePassed;
   const bufferingPill = bufferingQuality.pill;
   // An outage shows the buffering spinner too, and says so: the browser
   // decoder keeps sending timeupdate while it waits, which clears `buffering`.
