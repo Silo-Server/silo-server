@@ -103,19 +103,23 @@ func TestPlayingFileUsesLatestUnambiguousNegotiation(t *testing.T) {
 	store.PutNegotiated(PlaybackSession{ID: "other-token", CompatToken: "another-token", ItemID: "movie-1", MediaSources: []PlaybackMediaSource{{FileID: 44}}})
 	store.PutNegotiated(PlaybackSession{ID: "other-item", CompatToken: "token", ItemID: "movie-2", MediaSources: []PlaybackMediaSource{{FileID: 44}}})
 	handler := &PlaybackHandler{playbackStore: store}
-	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "movie-1"); got != 42 {
+	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "movie-1", ""); got != 42 {
 		t.Fatalf("latest selected file=%d want42", got)
 	}
-	if got := handler.playingFile(t.Context(), &Session{Token: "missing-token"}, "movie-1"); got != 0 {
+	// A play the request names wins over a more recent one.
+	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "movie-1", "playing"); got != 43 {
+		t.Fatalf("named play selected file=%d want 43", got)
+	}
+	if got := handler.playingFile(t.Context(), &Session{Token: "missing-token"}, "movie-1", ""); got != 0 {
 		t.Fatalf("unrelated token selected file=%d", got)
 	}
-	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "missing-item"); got != 0 {
+	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "missing-item", ""); got != 0 {
 		t.Fatalf("unrelated item selected file=%d", got)
 	}
 	store = NewPlaybackSessionStore(time.Hour, func() time.Time { return now })
 	store.PutNegotiated(PlaybackSession{ID: "ambiguous", CompatToken: "token", ItemID: "movie-1", MediaSources: []PlaybackMediaSource{{FileID: 43}, {FileID: 44}}})
 	handler.playbackStore = store
-	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "movie-1"); got != 0 {
+	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "movie-1", ""); got != 0 {
 		t.Fatalf("guessed a file from an unselected negotiation: %d", got)
 	}
 }

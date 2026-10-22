@@ -449,7 +449,7 @@ func TestMediaSourceDTOOmitsTranscodingURLOnDirectPlaySources(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
 			source.SupportsDirectPlay, source.SupportsDirectStream = tc.directPlay, tc.directStream
-			dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", source)
+			dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", source)
 			if (dto.TranscodingURL != "") != tc.wantTranscodingURL {
 				t.Fatalf("TranscodingURL = %q, want present=%v", dto.TranscodingURL, tc.wantTranscodingURL)
 			}
