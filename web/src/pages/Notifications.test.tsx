@@ -147,15 +147,9 @@ it("does not describe failed initial loading as an empty inbox or permit an unbo
 const prefs = {
   profile_id: "owner",
   enabled: true,
-  notify_favorites: true,
-  notify_watchlist: false,
-  notify_continue_watching: true,
   notify_next_up: true,
 };
 const reasons = (set: Partial<Record<string, boolean>>) => ({
-  favorite: false,
-  watchlist: false,
-  continue_watching: false,
   next_up: false,
   ...set,
 });
@@ -173,20 +167,17 @@ it("offers the Series view only when the server lists notified series", () => {
   expect(screen.queryByRole("button", { name: "Series" })).not.toBeInTheDocument();
   expect(screen.getByText("Displayed episode")).toBeInTheDocument();
 });
-it("searches, filters, and sorts the Series view from the URL", async () => {
+it("searches and sorts the Series view from the URL", async () => {
   state.capability = { series: { available: true } };
   state.series = { active: seriesQuery([]), inactive: seriesQuery([]) };
-  renderAt("/notifications?view=series&reason=watchlist&sort=-year");
-  expect(state.seriesOptions.at(-1)).toEqual({ q: "", reason: "watchlist", sort: "-year" });
-  expect(screen.getByRole("combobox", { name: "Filter by reason" })).toHaveTextContent("Watchlist");
+  renderAt("/notifications?view=series&q=bear&sort=-year");
+  expect(state.seriesOptions.at(-1)).toEqual({ q: "bear", sort: "-year" });
   expect(screen.getByRole("combobox", { name: "Sort" })).toHaveTextContent("Release year");
-  expect(screen.getByText("No series match. Try another search or reason.")).toBeInTheDocument();
+  expect(screen.getByText("No series match. Try another search.")).toBeInTheDocument();
   fireEvent.change(screen.getByRole("searchbox", { name: "Search series" }), {
-    target: { value: " bear " },
+    target: { value: " slow " },
   });
-  await waitFor(() =>
-    expect(state.seriesOptions.at(-1)).toEqual({ q: "bear", reason: "watchlist", sort: "-year" }),
-  );
+  await waitFor(() => expect(state.seriesOptions.at(-1)).toEqual({ q: "slow", sort: "-year" }));
 });
 it("pages the notifying series before showing the silenced ones", () => {
   state.capability = { series: { available: true } };
@@ -194,8 +185,8 @@ it("pages the notifying series before showing the silenced ones", () => {
   const active = {
     ...seriesQuery([
       seriesEntry("series:bear", "The Bear", {
-        reasons: reasons({ favorite: true }),
-        active_reasons: reasons({ favorite: true }),
+        reasons: reasons({ next_up: true }),
+        active_reasons: reasons({ next_up: true }),
         notifies: true,
       }),
     ]),
@@ -205,7 +196,7 @@ it("pages the notifying series before showing the silenced ones", () => {
   const inactive = {
     ...seriesQuery([
       seriesEntry("series:slow", "Slow Horses", {
-        reasons: reasons({ watchlist: true }),
+        reasons: reasons({ next_up: true }),
         active_reasons: reasons({}),
         notifies: false,
       }),
@@ -236,16 +227,16 @@ it("mutes a series from its row and lists muted series under Won't notify with U
   state.series = {
     active: seriesQuery([
       seriesEntry("series:andor", "Andor", {
-        reasons: reasons({ favorite: true }),
-        active_reasons: reasons({ favorite: true }),
+        reasons: reasons({ next_up: true }),
+        active_reasons: reasons({ next_up: true }),
         notifies: true,
         muted: false,
       }),
     ]),
     inactive: seriesQuery([
       seriesEntry("series:wire", "The Wire", {
-        reasons: reasons({ favorite: true }),
-        active_reasons: reasons({ favorite: true }),
+        reasons: reasons({ next_up: true }),
+        active_reasons: reasons({ next_up: true }),
         notifies: false,
         muted: true,
       }),
@@ -260,7 +251,7 @@ it("mutes a series from its row and lists muted series under Won't notify with U
   });
   const wire = screen.getByRole("link", { name: /The Wire/ });
   expect(wire).toHaveTextContent("Muted");
-  expect(wire).toHaveTextContent("Favorite (off)");
+  expect(wire).toHaveTextContent("Next Up (off)");
   expect(screen.queryByRole("button", { name: "Mute The Wire" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Unmute The Wire" }));
   expect(state.mute.mutate).toHaveBeenLastCalledWith({
@@ -274,8 +265,8 @@ it("offers no Mute when the server cannot mute a series", () => {
   state.series = {
     active: seriesQuery([
       seriesEntry("series:andor", "Andor", {
-        reasons: reasons({ favorite: true }),
-        active_reasons: reasons({ favorite: true }),
+        reasons: reasons({ next_up: true }),
+        active_reasons: reasons({ next_up: true }),
         notifies: true,
       }),
     ]),

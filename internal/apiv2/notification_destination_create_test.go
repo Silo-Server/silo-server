@@ -65,7 +65,7 @@ func TestNotificationDestinationCreate(t *testing.T) {
 			if rec.Header().Get("Cache-Control") != "no-store" {
 				t.Fatal("one-time secret response must not be cached")
 			}
-			if tc.profile != "" && (fake.webhook.URL == nil || *fake.webhook.URL != "https://example.test/private-hook" || fake.webhook.NotifyFavorites != nil) {
+			if tc.profile != "" && (fake.webhook.URL == nil || *fake.webhook.URL != "https://example.test/private-hook" || fake.webhook.NotifyNextUp != nil) {
 				t.Fatal("personal input/defaults changed")
 			}
 			if tc.profile == "" && (fake.channel.URL == nil || *fake.channel.URL != "https://example.test/private-hook" || fake.channel.Enabled != nil) {

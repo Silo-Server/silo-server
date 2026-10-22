@@ -16,35 +16,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
-func TestHomeHidesContinueWatching(t *testing.T) {
-	stamp := "2026-09-01T10:00:00Z"
-	inProgress := []userstore.WatchProgress{{MediaItemID: "ep-2", PositionSeconds: 30, UpdatedAt: stamp}}
-	dismissed := func(progressUpdatedAt string) catalog.HomeDismissalIndex {
-		return catalog.NewHomeDismissalIndex([]userstore.HomeItemDismissal{{
-			Surface: userstore.HomeSurfaceContinueWatching, MediaItemID: "ep-2", ProgressUpdatedAt: &progressUpdatedAt,
-		}})
-	}
-
-	for _, tc := range []struct {
-		name       string
-		hides      homeHides
-		inProgress []userstore.WatchProgress
-		want       bool
-	}{
-		{name: "nothing in progress", want: false},
-		{name: "in progress, not removed", inProgress: inProgress, want: true},
-		{name: "removed at the current progress", hides: homeHides{continueWatching: dismissed(stamp)}, inProgress: inProgress, want: false},
-		{name: "resumed after removal", hides: homeHides{continueWatching: dismissed("2026-08-01T10:00:00Z")}, inProgress: inProgress, want: true},
-		{name: "series dropped", hides: homeHides{dropped: true}, inProgress: inProgress, want: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.hides.continueWatchingVisible(tc.inProgress); got != tc.want {
-				t.Fatalf("continueWatchingVisible = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func newSQLiteUserStore(t *testing.T) userstore.UserStore {
 	t.Helper()
 	db := openUserDB(t)
@@ -343,35 +314,32 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 	}
 	setProgress(episodes[0], true, watchedAt)
 	setProgress(episodes[1], false, watchedAt)
-	if _, err := store.AddFavorite(ctx, profileID, seriesID); err != nil {
-		t.Fatalf("AddFavorite: %v", err)
-	}
 
 	system := &System{}
 	updater := NewInterestUpdater(pool, NewInterestRepository(pool), provider, allLibrariesScope{})
 	system.Interest = updater
 
-	type flags struct{ favorite, continueWatching, nextUp bool }
-	recompute := func(stage string, want flags, wantNextExpected int) {
+	type cursor struct {
+		next int
+		open bool
+	}
+	recompute := func(stage string, wantNextUp bool, want cursor) {
 		t.Helper()
 		if err := updater.RecomputeSeries(ctx, userID, profileID, seriesID); err != nil {
 			t.Fatalf("%s: RecomputeSeries: %v", stage, err)
 		}
-		var got flags
-		var nextExpected *int
+		var nextUp bool
+		var got cursor
 		if err := pool.QueryRow(ctx, `
-			SELECT favorite, continue_watching, next_up_candidate, next_expected_episode_key
+			SELECT next_up_candidate, next_expected_episode_key, next_expected_open
 			FROM profile_series_interest
 			WHERE profile_id = $1 AND library_id = $2 AND series_id = $3`,
 			profileID, libraryID, seriesID,
-		).Scan(&got.favorite, &got.continueWatching, &got.nextUp, &nextExpected); err != nil {
+		).Scan(&nextUp, &got.next, &got.open); err != nil {
 			t.Fatalf("%s: read interest: %v", stage, err)
 		}
-		if got != want {
-			t.Fatalf("%s: interest = %+v, want %+v", stage, got, want)
-		}
-		if nextExpected == nil || *nextExpected != wantNextExpected {
-			t.Fatalf("%s: next_expected_episode_key = %v, want %d", stage, nextExpected, wantNextExpected)
+		if nextUp != wantNextUp || got != want {
+			t.Fatalf("%s: next_up_candidate = %v, cursor = %+v; want %v, %+v", stage, nextUp, got, wantNextUp, want)
 		}
 	}
 	requireQueued := func(action string) {
@@ -383,46 +351,28 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 		}
 		clear(updater.pending)
 	}
-	afterE1, afterE2, afterE4 := EpisodeKey(1, 2), EpisodeKey(1, 3), EpisodeKey(1, 5)
+	// E3 has no file yet but is in the catalog, so it holds the cursor.
+	waitE3 := cursor{next: EpisodeKey(1, 3)}
+	afterE4 := cursor{next: EpisodeKey(1, 5), open: true}
 
-	recompute("before any removal", flags{favorite: true, continueWatching: true, nextUp: true}, afterE1)
+	// E2 is partly watched: the next episode will be waiting when it ends.
+	recompute("E2 partly watched", false, waitE3)
 
-	progress, err := store.ListProgressByMediaItems(ctx, profileID, []string{episodes[1]})
-	if err != nil {
-		t.Fatalf("ListProgressByMediaItems: %v", err)
-	}
-	progressStamp := progress[episodes[1]].UpdatedAt
+	// Home's Next Up card after E2 skips the file-less E3, so it shows E4.
 	dismissedAt := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
-		ProfileID: profileID, Surface: userstore.HomeSurfaceContinueWatching, MediaItemID: episodes[1],
-		ProgressUpdatedAt: &progressStamp, DismissedAt: dismissedAt,
-	}); err != nil {
-		t.Fatalf("dismiss from Continue Watching: %v", err)
-	}
-	recompute("removed from Continue Watching", flags{favorite: true, nextUp: true}, afterE1)
-
-	// Home's Next Up card after E1 skips the started E2 and the file-less E3,
-	// so it shows E4.
 	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
 		ProfileID: profileID, Surface: userstore.HomeSurfaceNextUp, MediaItemID: episodes[3],
 		SeriesID: &seriesID, DismissedAt: dismissedAt,
 	}); err != nil {
 		t.Fatalf("dismiss from Next Up: %v", err)
 	}
-	recompute("removed from Next Up too", flags{favorite: true}, afterE1)
-
-	// Resuming E2 brings its Continue Watching card back; the Next Up card is
-	// still E4, so it stays dismissed.
-	setProgress(episodes[1], false, time.Now().Add(-3*time.Minute).UTC().Truncate(time.Second))
-	recompute("resumed E2", flags{favorite: true, continueWatching: true}, afterE1)
-
-	// Finishing E2 leaves E4 as the Next Up card.
 	setProgress(episodes[1], true, time.Now().Add(-2*time.Minute).UTC().Truncate(time.Second))
-	recompute("finished E2", flags{favorite: true}, afterE2)
+	recompute("finished E2 with the E4 card removed", false, waitE3)
 
-	// Finishing E4 moves Next Up past the dismissed card.
+	// Finishing E4 moves Next Up past the dismissed card, and past the end of
+	// the catalog: the cursor is open.
 	setProgress(episodes[3], true, time.Now().Add(-time.Minute).UTC().Truncate(time.Second))
-	recompute("finished E4", flags{favorite: true, nextUp: true}, afterE4)
+	recompute("finished E4", true, afterE4)
 
 	drops := TrackDroppedSeries(catalog.NewDroppedSeriesRepo(pool), system)
 	if err := drops.Drop(ctx, userID, profileID, seriesID); err != nil {
@@ -435,13 +385,13 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 	if !deferred {
 		t.Fatal("dropping the series deferred no second recompute")
 	}
-	recompute("series dropped", flags{favorite: true}, afterE4)
+	recompute("series dropped", false, afterE4)
 
 	if err := drops.Undrop(ctx, userID, profileID, seriesID); err != nil {
 		t.Fatalf("Undrop: %v", err)
 	}
 	requireQueued("undropping the series")
-	recompute("series undropped", flags{favorite: true, nextUp: true}, afterE4)
+	recompute("series undropped", true, afterE4)
 
 	// Drops imported from, and removed by, a watch provider.
 	droppedAt := time.Now().UTC().Truncate(time.Microsecond)
@@ -449,30 +399,30 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 		t.Fatalf("ImportDrop = %v, %v", applied, err)
 	}
 	requireQueued("importing a drop")
-	recompute("drop imported", flags{favorite: true}, afterE4)
+	recompute("drop imported", false, afterE4)
 
 	if removed, err := drops.DeleteIfUnchanged(ctx, userID, profileID, seriesID, droppedAt); err != nil || !removed {
 		t.Fatalf("DeleteIfUnchanged = %v, %v", removed, err)
 	}
 	requireQueued("removing an imported drop")
-	recompute("imported drop removed", flags{favorite: true, nextUp: true}, afterE4)
+	recompute("imported drop removed", true, afterE4)
 
 	// Home anchors Next Up on the most recently completed episode. E3 gets a
-	// file and the profile rewatches E1, so Home's card becomes E3 even though
-	// E4 is the highest episode watched.
+	// file and the profile rewatches E1, so Home's card, and the cursor,
+	// become E3 even though E4 is the highest episode watched.
 	if _, err := pool.Exec(ctx, `INSERT INTO media_files (id, media_folder_id, file_path, episode_id) VALUES ($1, $2, $3 || '/e3.mkv', $4)`,
 		nonce%1_000_000_000_000+3, libraryID, "/"+prefix, episodes[2]); err != nil {
 		t.Fatalf("add E3 file: %v", err)
 	}
 	setProgress(episodes[0], true, time.Now().UTC().Truncate(time.Second))
-	recompute("Next Up moved to E3 despite the old E4 dismissal", flags{favorite: true, nextUp: true}, afterE4)
+	recompute("rewatched E1", true, waitE3)
 	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
 		ProfileID: profileID, Surface: userstore.HomeSurfaceNextUp, MediaItemID: episodes[2],
 		SeriesID: &seriesID, DismissedAt: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		t.Fatalf("dismiss E3 from Next Up: %v", err)
 	}
-	recompute("E3 card dismissed after a rewatch", flags{favorite: true}, afterE4)
+	recompute("E3 card dismissed after a rewatch", false, waitE3)
 
 	// Home's Next Up counts any progress row as started, even one a history
 	// hide covers. Starting E3 and hiding it leaves no card after E1.
@@ -483,7 +433,7 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 		VALUES ($1, $2, $3, $4, $4)`, userID, profileID, episodes[2], startedAt.Add(time.Second)); err != nil {
 		t.Fatalf("hide E3: %v", err)
 	}
-	recompute("E3 started and hidden", flags{favorite: true, nextUp: true}, afterE4)
+	recompute("E3 started and hidden", true, waitE3)
 }
 
 // TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres pins that the Next
@@ -568,14 +518,18 @@ func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
 		t.Fatalf("RecomputeSeries: %v", err)
 	}
 	var nextUp bool
+	var next int
 	if err := pool.QueryRow(ctx, `
-		SELECT next_up_candidate FROM profile_series_interest
+		SELECT next_up_candidate, next_expected_episode_key FROM profile_series_interest
 		WHERE profile_id = $1 AND library_id = $2 AND series_id = $3`,
 		profileID, libraryID, seriesID,
-	).Scan(&nextUp); err != nil {
+	).Scan(&nextUp, &next); err != nil {
 		t.Fatalf("read interest: %v", err)
 	}
 	if nextUp {
 		t.Fatal("next_up_candidate = true; the dismissed S02E05 is Home's Next Up card, so want false")
+	}
+	if next != EpisodeKey(2, 5) {
+		t.Fatalf("next_expected_episode_key = %d, want S02E05 after the regular anchor", next)
 	}
 }

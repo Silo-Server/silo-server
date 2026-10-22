@@ -260,6 +260,50 @@ func (r *Repository) ListRequestFollowers(ctx context.Context, req Request) ([]F
 	return out, rows.Err()
 }
 
+// AwaitingFulfillment reports which of the profiles a request of the title
+// will still tell it arrived: they requested or follow an open request whose
+// fulfilled notification has not gone out, and the notify pass has not given
+// it up (ListFulfilledUnnotified's horizon). tmdbIDs are every TMDB ID the
+// title has held. The watchlist arrival notice leaves these profiles to the
+// request.
+func (r *Repository) AwaitingFulfillment(ctx context.Context, mediaType MediaType, tmdbIDs []int, profiles []Follower) (map[Follower]bool, error) {
+	out := map[Follower]bool{}
+	if len(tmdbIDs) == 0 || len(profiles) == 0 {
+		return out, nil
+	}
+	userIDs := make([]int, len(profiles))
+	profileIDs := make([]string, len(profiles))
+	for i, f := range profiles {
+		userIDs[i], profileIDs[i] = f.UserID, f.ProfileID
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT p.user_id, p.profile_id
+		FROM unnest($3::int[], $4::text[]) AS p(user_id, profile_id)
+		WHERE EXISTS (
+			SELECT 1 FROM media_requests mr
+			WHERE mr.media_type = $1 AND mr.provider = 'tmdb' AND mr.tmdb_id = ANY($2)
+			  AND mr.outcome = 'active'
+			  AND mr.fulfilled_notified_at IS NULL
+			  AND (mr.status <> 'completed' OR mr.completed_at > now() - interval '30 days')
+			  AND ((mr.requested_by_user_id = p.user_id AND mr.requested_by_profile_id = p.profile_id)
+			       OR EXISTS (
+			           SELECT 1 FROM media_request_follows f
+			           WHERE f.request_id = mr.id AND f.user_id = p.user_id AND f.profile_id = p.profile_id)))
+	`, mediaType, tmdbIDs, userIDs, profileIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list profiles awaiting fulfillment: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var f Follower
+		if err := rows.Scan(&f.UserID, &f.ProfileID); err != nil {
+			return nil, err
+		}
+		out[f] = true
+	}
+	return out, rows.Err()
+}
+
 // ClearRequestFollowers removes the listed follows once the request's
 // notification has gone out. A profile that unfollowed and followed again
 // since, for a newer request, keeps its new follow.

@@ -13,7 +13,9 @@ import (
 
 // webhookResponse is the API view of a webhook. It never includes the
 // destination URL (Discord webhook tokens are bearer credentials in the URL
-// path) or the signing secret — only url_host for identification.
+// path) or the signing secret — only url_host for identification. The
+// favorites, watchlist and Continue Watching switches stay in the frozen v1
+// shape and always read false: those reasons no longer notify.
 type webhookResponse struct {
 	ID                     string     `json:"id"`
 	Name                   string     `json:"name"`
@@ -37,25 +39,24 @@ type webhookResponse struct {
 
 func webhookToResponse(hook notifications.Webhook) webhookResponse {
 	return webhookResponse{
-		ID:                     hook.ID,
-		Name:                   hook.Name,
-		Type:                   hook.Type,
-		URLHost:                hook.URLHost,
-		Enabled:                hook.Enabled,
-		NotifyFavorites:        hook.NotifyFavorites,
-		NotifyWatchlist:        hook.NotifyWatchlist,
-		NotifyContinueWatching: hook.NotifyContinueWatching,
-		NotifyNextUp:           hook.NotifyNextUp,
-		NotifyRequests:         hook.NotifyRequests,
-		ConsecutiveFailures:    hook.ConsecutiveFailures,
-		DisabledReason:         hook.DisabledReason,
-		LastSuccessAt:          hook.LastSuccessAt,
-		LastFailureAt:          hook.LastFailureAt,
-		LastFailureStatus:      hook.LastFailureStatus,
-		LastFailureMessage:     hook.LastFailureMessage,
+		ID:                  hook.ID,
+		Name:                hook.Name,
+		Type:                hook.Type,
+		URLHost:             hook.URLHost,
+		Enabled:             hook.Enabled,
+		NotifyNextUp:        hook.NotifyNextUp,
+		NotifyRequests:      hook.NotifyRequests,
+		ConsecutiveFailures: hook.ConsecutiveFailures,
+		DisabledReason:      hook.DisabledReason,
+		LastSuccessAt:       hook.LastSuccessAt,
+		LastFailureAt:       hook.LastFailureAt,
+		LastFailureStatus:   hook.LastFailureStatus,
+		LastFailureMessage:  hook.LastFailureMessage,
 	}
 }
 
+// webhookRequest is the frozen v1 body; the favorites, watchlist and Continue
+// Watching switches are accepted and ignored.
 type webhookRequest struct {
 	Name                   *string `json:"name"`
 	URL                    *string `json:"url"`
@@ -70,15 +71,12 @@ type webhookRequest struct {
 
 func (r webhookRequest) toInput() notifications.WebhookInput {
 	return notifications.WebhookInput{
-		Name:                   r.Name,
-		URL:                    r.URL,
-		Type:                   r.Type,
-		Enabled:                r.Enabled,
-		NotifyFavorites:        r.NotifyFavorites,
-		NotifyWatchlist:        r.NotifyWatchlist,
-		NotifyContinueWatching: r.NotifyContinueWatching,
-		NotifyNextUp:           r.NotifyNextUp,
-		NotifyRequests:         r.NotifyRequests,
+		Name:           r.Name,
+		URL:            r.URL,
+		Type:           r.Type,
+		Enabled:        r.Enabled,
+		NotifyNextUp:   r.NotifyNextUp,
+		NotifyRequests: r.NotifyRequests,
 	}
 }
 

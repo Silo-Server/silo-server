@@ -1,30 +1,41 @@
 package notifications
 
 import (
-	"sort"
+	"cmp"
+	"slices"
+	"strings"
 )
 
 // EvaluateRecipient applies the eligibility rules for one candidate recipient
 // of one release event. Returns the matched reason flags and whether a
 // delivery should be created.
 //
-// Rules (docs/architecture/notifications.md, "Eligibility rules"):
-//   - favorite / watchlist / continue_watching notify on any newly available
-//     episode of the series
-//   - next_up notifies only when the episode is at or beyond the profile's
-//     next_expected_episode_key
-//   - suppress when last_notified_episode_key >= episode_key
-//   - profile preferences are a hard gate: disabled reasons cannot match
+// Rules (docs/architecture/notifications.md, "Eligibility rules"): a new
+// episode notifies only when it becomes the profile's Next Up.
+//   - the row must be a Next Up candidate: the series shows in Next Up on
+//     Home and no episode of it is partly watched
+//   - the episode must be the exact next expected episode; when the catalog
+//     knew no unstarted episode after the anchor (an open cursor), the first
+//     episode keyed at or past the cursor counts
+//   - suppress once last_notified_episode_key reaches the cursor: one
+//     notification per Next Up position, so a batch drop of E06-E08 notifies
+//     for E06 only
+//   - profile preferences are a hard gate
+//
+// Favorites, the watchlist and Continue Watching never notify for episodes.
 func EvaluateRecipient(interest SeriesInterest, prefs Preferences, episodeKey int) (ReasonFlags, bool) {
-	if !prefs.Enabled {
-		return ReasonFlags{}, false
-	}
-	if interest.LastNotifiedEpisodeKey != nil && *interest.LastNotifiedEpisodeKey >= episodeKey {
-		return ReasonFlags{}, false
-	}
 	flags := ActiveReasons(interest, prefs)
-	flags.NextUp = flags.NextUp && episodeKey >= *interest.NextExpectedEpisodeKey
-	return flags, flags.Any()
+	if !flags.NextUp {
+		return ReasonFlags{}, false
+	}
+	next := *interest.NextExpectedEpisodeKey
+	if interest.LastNotifiedEpisodeKey != nil && *interest.LastNotifiedEpisodeKey >= next {
+		return ReasonFlags{}, false
+	}
+	if episodeKey != next && (!interest.NextExpectedOpen || episodeKey < next) {
+		return ReasonFlags{}, false
+	}
+	return flags, true
 }
 
 // ActiveReasons is the part of the eligibility rules that does not depend on
@@ -36,10 +47,7 @@ func ActiveReasons(interest SeriesInterest, prefs Preferences) ReasonFlags {
 		return ReasonFlags{}
 	}
 	return ReasonFlags{
-		Favorite:         interest.Favorite && prefs.NotifyFavorites,
-		Watchlist:        interest.Watchlist && prefs.NotifyWatchlist,
-		ContinueWatching: interest.ContinueWatching && prefs.NotifyContinueWatching,
-		NextUp:           interest.NextUpCandidate && prefs.NotifyNextUp && interest.NextExpectedEpisodeKey != nil,
+		NextUp: interest.NextUpCandidate && prefs.NotifyNextUp && interest.NextExpectedEpisodeKey != nil,
 	}
 }
 
@@ -71,46 +79,16 @@ func PartitionEventsByKind(events []ReleaseEvent) (episodes, others []ReleaseEve
 	return episodes, others
 }
 
-// ApplyBurstCap groups claimed events by (library, series) and bounds fanout
-// per group: only the maxPerSeries events with the highest episode_key fan
-// out; the rest are suppressed (processed without deliveries). This bounds
-// the blast radius of bulk additions (back-catalog season packs) to seeded
-// libraries. The cap is per claim batch and therefore approximate across
-// batches, which is acceptable.
-func ApplyBurstCap(events []ReleaseEvent, maxPerSeries int) (fanout, suppressed []ReleaseEvent) {
-	if maxPerSeries <= 0 {
-		maxPerSeries = 1
-	}
-	type groupKey struct {
-		libraryID int
-		seriesID  string
-	}
-	groups := make(map[groupKey][]ReleaseEvent)
-	order := make([]groupKey, 0)
-	for _, event := range events {
-		key := groupKey{event.LibraryID, event.SeriesID}
-		if _, ok := groups[key]; !ok {
-			order = append(order, key)
-		}
-		groups[key] = append(groups[key], event)
-	}
-
-	fanout = make([]ReleaseEvent, 0, len(events))
-	suppressed = make([]ReleaseEvent, 0)
-	for _, key := range order {
-		group := groups[key]
-		sort.Slice(group, func(i, j int) bool {
-			return group[i].EpisodeKey > group[j].EpisodeKey
-		})
-		keep := min(maxPerSeries, len(group))
-		suppressed = append(suppressed, group[keep:]...)
-		// Emit the kept events in ascending key order: fanout raises
-		// last_notified_episode_key as it processes each event, so a higher
-		// key processed first would make EvaluateRecipient suppress every
-		// remaining lower-key event in the group.
-		for i := keep - 1; i >= 0; i-- {
-			fanout = append(fanout, group[i])
-		}
-	}
-	return fanout, suppressed
+// SortFanoutEvents orders claimed episode events by library, series and
+// ascending episode key. Fanout raises last_notified_episode_key as it
+// processes each event, so with an open Next Up cursor the lowest arriving
+// episode must be evaluated first: it is the one that becomes Next Up.
+func SortFanoutEvents(events []ReleaseEvent) {
+	slices.SortStableFunc(events, func(a, b ReleaseEvent) int {
+		return cmp.Or(
+			cmp.Compare(a.LibraryID, b.LibraryID),
+			strings.Compare(a.SeriesID, b.SeriesID),
+			cmp.Compare(a.EpisodeKey, b.EpisodeKey),
+		)
+	})
 }

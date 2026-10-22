@@ -9349,7 +9349,7 @@ export interface paths {
     };
     /**
      * List the series whose new episodes can notify the acting profile.
-     * @description Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Series the viewer may not see are omitted.
+     * @description Every series that shows in the profile's Next Up with no episode partly watched, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Favorites, the watchlist and Continue Watching do not make a series notify. Series the viewer may not see are omitted.
      */
     get: operations["listNotificationSeries"];
     put?: never;
@@ -26241,10 +26241,8 @@ export interface components {
     };
     NotificationPreferences: {
       enabled: boolean;
-      notify_continue_watching: boolean;
-      notify_favorites: boolean;
+      /** @description A new episode that becomes the profile's Next Up notifies */
       notify_next_up: boolean;
-      notify_watchlist: boolean;
       /**
        * @description Opaque identifier
        * @example 1
@@ -26253,10 +26251,7 @@ export interface components {
     };
     NotificationPreferencesPatch: {
       enabled?: boolean;
-      notify_continue_watching?: boolean;
-      notify_favorites?: boolean;
       notify_next_up?: boolean;
-      notify_watchlist?: boolean;
     };
     NotificationPushCapability: {
       available: boolean;
@@ -26306,7 +26301,7 @@ export interface components {
       item: components["schemas"]["CatalogItem"];
       /** @description The profile muted the series: it gets no new-episode notification for it, whatever the reasons, until it unmutes. active_reasons still names the reasons that would notify once unmuted. */
       muted: boolean;
-      /** @description With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies */
+      /** @description With an active Next Up reason, the episode the profile finished most recently: only the first episode after it that the profile has not started notifies */
       next_up_after?: components["schemas"]["NotificationEpisodeRef"];
       /** @description True when at least one reason is active and the profile has not muted the series */
       notifies: boolean;
@@ -26326,14 +26321,8 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
     };
     NotificationSeriesReasons: {
-      /** @description The profile is partway through the series */
-      continue_watching: boolean;
-      /** @description The series is one of the profile's favorites */
-      favorite: boolean;
-      /** @description The profile finished an episode and waits for the next */
+      /** @description The series shows in the profile's Next Up and no episode of it is partly watched: the next episode notifies when it arrives */
       next_up: boolean;
-      /** @description The series is on the profile's watchlist */
-      watchlist: boolean;
     };
     NotificationServerChannel: {
       /** Format: int64 */
@@ -26422,11 +26411,8 @@ export interface components {
     };
     NotificationWebhookCreateInputBody: {
       name: string;
-      notify_continue_watching?: boolean;
-      notify_favorites?: boolean;
       notify_next_up?: boolean;
       notify_requests?: boolean;
-      notify_watchlist?: boolean;
       /** @enum {string} */
       type?: "discord" | "generic";
       url: string;
@@ -26457,11 +26443,8 @@ export interface components {
        */
       last_success_at: string | null;
       name: string;
-      notify_continue_watching: boolean;
-      notify_favorites: boolean;
       notify_next_up: boolean;
       notify_requests: boolean;
-      notify_watchlist: boolean;
       /** @enum {string} */
       type: "discord" | "generic";
       url_host: string;
@@ -26472,11 +26455,8 @@ export interface components {
     NotificationWebhookUpdateInputBody: {
       enabled?: boolean;
       name?: string;
-      notify_continue_watching?: boolean;
-      notify_favorites?: boolean;
       notify_next_up?: boolean;
       notify_requests?: boolean;
-      notify_watchlist?: boolean;
       url?: string;
     };
     NotificationWebPushCapability: {
@@ -115502,7 +115482,7 @@ export interface operations {
         /** @description Keeps the series whose title or sort title contains this text, case-insensitively */
         q?: string;
         /** @description Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason */
-        reason?: "favorite" | "watchlist" | "continue_watching" | "next_up";
+        reason?: "next_up";
         /** @description One field, descending with a leading '-'. added_at is when the series joined the catalog; latest_episode_added when it last gained an episode. A series without a year or an episode sorts last either way; ties order by title. */
         sort?:
           | "title"

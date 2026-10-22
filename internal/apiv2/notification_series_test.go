@@ -6,8 +6,6 @@ import (
 	"net/url"
 	"slices"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
 type notificationSeriesPage struct {
@@ -48,13 +46,12 @@ func notificationSeriesIDs(items []NotificationSeries) []string {
 func TestNotificationSeriesSearchAndReasonFilter(t *testing.T) {
 	h, _ := notificationSeriesHandler(t)
 	for query, want := range map[string][]string{
-		"?q=BEAR":                        {"series:bear"},
-		"?q=+horses+":                    {"series:slow-horses"},
-		"?reason=watchlist":              {"series:slow-horses"},
-		"?reason=favorite":               {"series:bear", "series:wire"},
-		"?reason=favorite&status=active": {"series:bear"},
-		"?reason=next_up&status=active":  {"series:andor"},
-		"?q=zzz":                         {},
+		"?q=BEAR":                       {"series:bear"},
+		"?q=+horses+":                   {"series:slow-horses"},
+		"?reason=next_up":               {"series:andor", "series:bear", "series:slow-horses", "series:wire"},
+		"?reason=next_up&status=active": {"series:andor", "series:bear"},
+		"?status=inactive":              {"series:slow-horses", "series:wire"},
+		"?q=zzz":                        {},
 	} {
 		if got := notificationSeriesIDs(getNotificationSeries(t, h, query).Items); !slices.Equal(got, want) {
 			t.Errorf("%s = %v, want %v", query, got, want)
@@ -94,7 +91,7 @@ func TestNotificationSeriesSorts(t *testing.T) {
 		}
 	}
 	first := getNotificationSeries(t, h, "?limit=1&sort=-year")
-	for _, changed := range []string{"&sort=year", "&sort=-year&q=a", "&sort=-year&reason=favorite"} {
+	for _, changed := range []string{"&sort=year", "&sort=-year&q=a", "&sort=-year&reason=next_up"} {
 		requireProblem(t, do(t, h, http.MethodGet, Prefix+"/notifications/series?limit=1"+changed+"&cursor="+url.QueryEscape(first.Page.NextCursor), "", profileOwner()), TypeInvalidCursor)
 	}
 }
@@ -147,15 +144,5 @@ func notificationSeriesMuteFixtureCases() []fixtureCase {
 			scenario: "The acting profile unmutes a series; it notifies again from the next new episode. Unmuting a series that is not muted changes nothing.",
 			method:   http.MethodDelete, path: "/api/v2/notifications/series/series:wire/mute", headers: profileOwner(),
 			status: http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
-	}
-}
-
-// Next Up waits for any episode past the last finished one; after a season
-// finale that is the next season's first, so the response names the finale.
-func TestNotificationSeriesNextUpNamesTheFinishedEpisode(t *testing.T) {
-	expected := notifications.EpisodeKey(1, 10) + 1
-	got := notificationSeriesOf(notifications.NotifiedSeries{Active: notifications.ReasonFlags{NextUp: true}, NextExpectedEpisodeKey: &expected}, CatalogItem{})
-	if got.NextUpAfter == nil || *got.NextUpAfter != (NotificationEpisodeRef{SeasonNumber: 1, EpisodeNumber: 10}) {
-		t.Fatalf("next_up_after = %+v, want S1E10", got.NextUpAfter)
 	}
 }

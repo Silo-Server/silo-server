@@ -213,6 +213,7 @@
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
 ./internal/notifications TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences
+./internal/notifications TestWatchlistArrivalTellsEachWatcherOnce
 ./internal/notifications TestFanoutSkipsProfilesThatMutedTheSeries
 ./internal/notifications TestSeriesMutesList
 ./internal/notifications TestSeriesMutesUnmuteAndPurge

@@ -143,7 +143,7 @@ func webhookTestRow() DeliveryRow {
 			SeriesID:    &seriesID,
 			EpisodeID:   &episodeID,
 			Type:        DeliveryTypeEpisodeAvailable,
-			ReasonFlags: []byte(`{"favorite":true,"continue_watching":true}`),
+			ReasonFlags: []byte(`{"next_up":true}`),
 			CreatedAt:   time.Date(2026, 4, 28, 12, 34, 56, 0, time.UTC),
 		},
 		SeriesTitle:     "Severance",
@@ -183,8 +183,8 @@ func TestBuildDiscordWebhookPayload(t *testing.T) {
 	if embed.Title != "Severance — S2 E1: Hello, Ms. Cobel" {
 		t.Fatalf("unexpected title %q", embed.Title)
 	}
-	if embed.Color != discordColorFavorite {
-		t.Fatalf("favorite reason must pick the favorite color, got %d", embed.Color)
+	if embed.Color != discordColorNextUp {
+		t.Fatalf("next up reason must pick the next up color, got %d", embed.Color)
 	}
 	if embed.Author == nil || embed.Author.Name != "New episode on Silo" {
 		t.Fatalf("unexpected author %+v", embed.Author)
@@ -203,7 +203,7 @@ func TestBuildDiscordWebhookPayload(t *testing.T) {
 		t.Fatalf("unexpected description %q", embed.Description)
 	}
 	if len(embed.Fields) != 3 ||
-		embed.Fields[0].Name != "Reason" || embed.Fields[0].Value != "Favorited & Continue Watching" ||
+		embed.Fields[0].Name != "Reason" || embed.Fields[0].Value != "Next Up" ||
 		embed.Fields[1].Value != "★ 8.7 IMDb" ||
 		embed.Fields[2].Value != "Drama, Sci-Fi & Fantasy" {
 		t.Fatalf("unexpected fields: %+v", embed.Fields)
@@ -483,7 +483,7 @@ func digestEpisodeRows(n int, overview func(i int) string) []DeliveryRow {
 		row.SeriesTitle = fmt.Sprintf("%02d %s", i, strings.Repeat("Series Title ", 6))
 		row.EpisodeTitle = strings.Repeat("Episode Title ", 6)
 		row.SeasonNumber, row.EpisodeNumber = &season, &episode
-		row.ReasonFlags = []byte(`{"favorite":true,"watchlist":true,"continue_watching":true,"next_up":true}`)
+		row.ReasonFlags = []byte(`{"next_up":true}`)
 		row.SeriesOverview, row.EpisodeOverview = overview(i), overview(i)
 		row.Genres = digestGenres
 		row.TVDBID = "123456789"
@@ -690,19 +690,6 @@ func TestRetryableHTTPStatus(t *testing.T) {
 		if retryableHTTPStatus(status) {
 			t.Errorf("status %d must not be retryable", status)
 		}
-	}
-}
-
-func TestWebhookMatchesReasons(t *testing.T) {
-	hook := Webhook{NotifyFavorites: true, NotifyWatchlist: false, NotifyContinueWatching: false, NotifyNextUp: false}
-	if !hook.MatchesReasons(ReasonFlags{Favorite: true, Watchlist: true}) {
-		t.Fatal("favorite reason must match a favorites-enabled webhook")
-	}
-	if hook.MatchesReasons(ReasonFlags{Watchlist: true}) {
-		t.Fatal("watchlist-only delivery must not match a favorites-only webhook")
-	}
-	if hook.MatchesReasons(ReasonFlags{}) {
-		t.Fatal("no reasons must never match")
 	}
 }
 

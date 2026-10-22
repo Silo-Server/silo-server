@@ -15,7 +15,7 @@ import (
 )
 
 // WrapUserStoreProvider decorates the shared user-store provider so every
-// favorites, watchlist, watch-progress, and watch-history mutation —
+// watch-progress, watch-history, and Home removal mutation —
 // regardless of which path performed it (REST handlers, jellycompat, history
 // imports, playback stop, watch sync) — queues an interest recompute. Hooking
 // the lowest shared layer keeps the seven-plus mutation call sites hook-free
@@ -345,59 +345,6 @@ func (s *interestTrackingStore) queueOnTransition(profileID, mediaItemID string,
 	if before != after || resumed {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
-}
-
-// --- Favorites & watchlist: a mutation that changed a row queues.
-
-func (s *interestTrackingStore) AddFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.AddFavorite(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
-}
-
-func (s *interestTrackingStore) AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
-	inserted, err := s.UserStore.AddFavoriteAt(ctx, profileID, mediaItemID, addedAt)
-	if err == nil && inserted {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return inserted, err
-}
-
-func (s *interestTrackingStore) RemoveFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.RemoveFavorite(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
-}
-
-func (s *interestTrackingStore) AddToWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.AddToWatchlist(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
-}
-
-// AddToWatchlistAt is the add that keeps an earlier added_at: watch-provider
-// and Plex imports, and promotion of a watchlisted title that has since
-// reached the library, all write through it.
-func (s *interestTrackingStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
-	inserted, err := s.UserStore.AddToWatchlistAt(ctx, profileID, mediaItemID, addedAt)
-	if err == nil && inserted {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return inserted, err
-}
-
-func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
 }
 
 // --- Home dismissals: a card removed from Continue Watching or Next Up stops

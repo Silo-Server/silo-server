@@ -724,6 +724,13 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
               : "Your media request has arrived in the library.",
           },
         );
+      } else if (notification.type === "watchlist.available") {
+        toast(
+          notification.series_title
+            ? `${notification.series_title} is now available`
+            : "A title on your watchlist is now available",
+          { description: "A title on your watchlist has arrived in the library." },
+        );
       } else if (
         notification.type === "request.approved" ||
         notification.type === "request.declined"
