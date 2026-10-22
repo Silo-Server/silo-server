@@ -81,8 +81,13 @@ func (c *probeTargetCache) finish(key string, kbps int, failed bool) {
 	delete(c.reading, key)
 	now := time.Now()
 	entry := probeTargetEntry{kbps: kbps, expires: now.Add(probeTargetCacheTTL)}
-	if failed {
+	switch {
+	case failed:
 		entry = probeTargetEntry{kbps: c.entries[key].kbps, expires: now.Add(probeTargetErrorTTL)}
+	case kbps <= 0:
+		// No bitrates yet, as while a first scan runs: read again as soon
+		// as after a failure.
+		entry.expires = now.Add(probeTargetErrorTTL)
 	}
 	if c.entries == nil {
 		c.entries = map[string]probeTargetEntry{}

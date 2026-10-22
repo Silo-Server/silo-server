@@ -129,7 +129,8 @@ func TestBandwidthProbeTargetNeverWaitsForTheRead(t *testing.T) {
 }
 
 // The percentile is read once per library scope and cached; another scope
-// reads its own, and a failed read sends no target.
+// reads its own. A failed read sends no target, and a read that found no
+// bitrates yet is retried after the error lifetime, not the cache lifetime.
 func TestBandwidthProbeTargetCachesPerLibraryScope(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		source := &countingPercentiles{kbps: 40000}
@@ -152,6 +153,17 @@ func TestBandwidthProbeTargetCachesPerLibraryScope(t *testing.T) {
 		failing := &PlaybackHandler{SourceBitrates: &countingPercentiles{err: errors.New("down")}}
 		if got := settledProbeTarget(failing, all); got != 0 {
 			t.Fatalf("failed read sent target %d", got)
+		}
+
+		scanning := &countingPercentiles{}
+		empty := &PlaybackHandler{SourceBitrates: scanning}
+		if got := settledProbeTarget(empty, all); got != 0 {
+			t.Fatalf("no bitrates sent target %d", got)
+		}
+		scanning.set(40000, nil, false)
+		advanceFakeClock(probeTargetErrorTTL + time.Second)
+		if got := settledProbeTarget(empty, all); got != 50000 {
+			t.Fatalf("after the error lifetime: target = %d, want 50000", got)
 		}
 	})
 }
