@@ -1060,9 +1060,11 @@ func (m *SessionManager) SetPaused(sessionID string, paused bool, acceptedSequen
 	m.touchSessionLocked(s)
 	// A confirmation carries no position of its own, so s.Position can predate
 	// the pause. Measuring a pause there would drop the viewing since the last
-	// report; the next report measures it instead. A resume starts from where
-	// the pause held the player.
-	if !paused {
+	// report; the pause is marked and the next report measures up to it. A
+	// resume starts from where the pause held the player.
+	if paused {
+		s.Watch.Pause(s.UpdatedAt)
+	} else {
 		s.Watch.Observe(s.Position, s.IsPaused, s.UpdatedAt)
 	}
 	return true, nil

@@ -11,6 +11,7 @@ func TestWatchTimeObserve(t *testing.T) {
 		at       float64 // seconds after the first sample
 		position float64
 		paused   bool
+		confirm  bool // a confirmed pause, which carries no position
 	}
 	cases := []struct {
 		name          string
@@ -26,28 +27,39 @@ func TestWatchTimeObserve(t *testing.T) {
 		},
 		{
 			name:       "resume an hour in credits only the viewing",
-			samples:    []sample{{0, 3600, false}, {60, 3660, false}, {120, 3720, false}},
+			samples:    []sample{{0, 3600, false, false}, {60, 3660, false, false}, {120, 3720, false, false}},
 			wantStart:  3600,
 			wantPlayed: 120,
 		},
 		{
 			name: "a pause counts as paused, not watched",
 			samples: []sample{
-				{0, 0, false}, {10, 10, true}, {310, 10, false}, {320, 20, false},
+				{0, 0, false, false}, {10, 10, true, false}, {310, 10, false, false}, {320, 20, false, false},
 			},
 			wantPlayed: 20,
 			wantPaused: 300,
 		},
 		{
 			name:       "a seek forward is not watched",
-			samples:    []sample{{0, 0, false}, {10, 10, false}, {20, 1800, false}, {30, 1810, false}},
+			samples:    []sample{{0, 0, false, false}, {10, 10, false, false}, {20, 1800, false, false}, {30, 1810, false, false}},
 			wantPlayed: 20,
 		},
 		{
 			name:       "a rewind, buffering or a replayed sample credits nothing until play moves on",
-			samples:    []sample{{0, 600, false}, {10, 610, false}, {20, 300, false}, {30, 310, false}},
+			samples:    []sample{{0, 600, false, false}, {10, 610, false, false}, {20, 300, false, false}, {30, 310, false, false}},
 			wantStart:  600,
 			wantPlayed: 20,
+		},
+		{
+			name:       "a confirmed pause keeps the viewing before it",
+			samples:    []sample{{0, 0, false, false}, {8, 0, true, true}, {40, 8, true, false}},
+			wantPlayed: 8,
+			wantPaused: 32,
+		},
+		{
+			name:       "a seek while paused after a confirmed pause is not watched",
+			samples:    []sample{{0, 0, false, false}, {10, 0, true, true}, {100, 100, true, false}},
+			wantPaused: 90,
 		},
 	}
 
@@ -56,7 +68,12 @@ func TestWatchTimeObserve(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var w WatchTime
 			for _, s := range tc.samples {
-				w.Observe(s.position, s.paused, base.Add(time.Duration(s.at*float64(time.Second))))
+				at := base.Add(time.Duration(s.at * float64(time.Second)))
+				if s.confirm {
+					w.Pause(at)
+				} else {
+					w.Observe(s.position, s.paused, at)
+				}
 			}
 			if w.Measured == tc.wantUnmeasure {
 				t.Fatalf("Measured = %v, want %v", w.Measured, !tc.wantUnmeasure)

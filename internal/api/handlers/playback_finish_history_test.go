@@ -330,20 +330,24 @@ func TestAdminPlaybackWatchTimeDB(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	started, ended := now.Add(-15*time.Minute), now.Add(-time.Minute)
 	store := NewPGPlaybackAdminStore(pool, nil)
-	finalize := func(position float64, watch playback.WatchTime) {
+	finalize := func(position float64, completed bool, watch playback.WatchTime) {
 		t.Helper()
 		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
 			SessionID: "resumed-" + suffix, UserID: account, ProfileID: "p-1", PlayMethod: "direct_play",
 			StartedAt: started.Format(time.RFC3339Nano), EndedAt: ended.Format(time.RFC3339Nano),
-			WatchedSeconds: position, Watch: watch,
+			WatchedSeconds: position, Completed: completed, Watch: watch,
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Resumed at 1:30:00, watched two minutes; then a copy on another replica
-	// that only served media finalizes further along with no measurement.
-	finalize(5520, playback.WatchTime{Measured: true, StartPosition: 5400, PlayedSeconds: 120, PausedSeconds: 30})
-	finalize(5600, playback.WatchTime{})
+	// that only served media finalizes further along with no measurement. A
+	// copy that recorded completion short of that position marks the play
+	// completed without moving it back, and an incomplete copy can't clear it.
+	finalize(5520, false, playback.WatchTime{Measured: true, StartPosition: 5400, PlayedSeconds: 120, PausedSeconds: 30})
+	finalize(5600, false, playback.WatchTime{})
+	finalize(5500, true, playback.WatchTime{})
+	finalize(5590, false, playback.WatchTime{})
 	// A one-minute play recorded before measurement, ending at 100 seconds.
 	if _, err = pool.Exec(ctx, `INSERT INTO admin_playback_history(session_id,user_id,profile_id,media_file_id,play_method,started_at,ended_at,watched_seconds)
 		VALUES($1,$2,'p-1',0,'direct_play',$3,$4,100)`, "legacy-"+suffix, account, now.Add(-2*time.Hour), now.Add(-2*time.Hour+time.Minute)); err != nil {
@@ -351,12 +355,12 @@ func TestAdminPlaybackWatchTimeDB(t *testing.T) {
 	}
 
 	var watched, played float64
-	var measured bool
-	if err = pool.QueryRow(ctx, `SELECT watched_seconds, played_seconds, measured FROM admin_playback_history WHERE session_id=$1`, "resumed-"+suffix).Scan(&watched, &played, &measured); err != nil {
+	var measured, completed bool
+	if err = pool.QueryRow(ctx, `SELECT watched_seconds, played_seconds, measured, completed FROM admin_playback_history WHERE session_id=$1`, "resumed-"+suffix).Scan(&watched, &played, &measured, &completed); err != nil {
 		t.Fatal(err)
 	}
-	if watched != 5600 || played != 120 || !measured {
-		t.Fatalf("resumed row = watched %v, played %v, measured %v; want 5600, 120, measured", watched, played, measured)
+	if watched != 5600 || played != 120 || !measured || !completed {
+		t.Fatalf("resumed row = watched %v, played %v, measured %v, completed %v; want 5600, 120, measured, completed", watched, played, measured, completed)
 	}
 	got, err := (&AdminHandler{pool: pool}).ReadAdminWatchSummary(ctx, AdminWatchSummaryQuery{UserID: account, Days: 7, Now: now})
 	if err != nil {
