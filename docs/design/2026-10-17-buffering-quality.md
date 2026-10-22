@@ -60,15 +60,16 @@ answers where they differ:
 | Question | Decision |
 | --- | --- |
 | When is playback in an outage? | When a media request fails or cannot connect, the device is offline, or the player waits while no media request has received data for `OUTAGE_NO_DATA_MS = 4000` on progressive delivery, or `OUTAGE_NO_DATA_SEGMENTED_MS = 15000` on segmented (HLS) delivery, where the server holds a segment request silent while it produces the segment. A request that keeps receiving data never fails, however slow. A client's player or engine timeouts no longer decide it. |
-| When is a wait with media buffered a stall? | A renderer wait whose buffer stays under the player's own resume amount becomes a stall after `RENDERER_WAIT_MAX_MS = 3000`. A wait with more than `RENDERER_WAIT_AMPLE_MS = 5000` buffered is a renderer wait from that moment: the device, not the network, is behind. |
+| When is a wait with media buffered a stall? | A renderer wait whose buffer stays under the player's own resume amount becomes a stall after `RENDERER_WAIT_MAX_MS = 3000`. On a player that resumes at an explicit buffered amount (Media3, tunneled or not) or as soon as data reaches the playhead (browsers), a wait with more buffered than its ample threshold is a renderer wait from that moment: the device, not the network, is behind. The threshold is 5000 ms in browsers and twice the resume amount on Media3 (10000 ms). AVPlayer has none. |
 | What does a lowering send? | The step-down estimate, as before, plus `observed_throughput_kbps`, the throughput the plan that kept buffering measured. The server plans with, and learns, the lower figure. |
 | How low can Auto go? | Until a stream fits a 500 kbps link. The `/api/v2` menu gains 480p Low (800 kbps) and 360p (300 kbps); the frozen `/api/v1` menu does not. An Auto encode fits video and audio together within its budget, in stereo once the audio share drops below 192 kbps. |
 | What if a start or replan sends no estimate? | On Auto, the server uses the connection's current reading in its place. It replaces "the server plans only from the estimate a request carries". |
 | When does Auto try a lower version? | Under any Auto budget, not only after buffering. Of the versions that fit, one that keeps the source's dynamic range comes first, then the highest bitrate. |
 | What does an Auto encode target? | Its budget, up to the bitrate of its class's highest menu rung, and never more than that rung even without an estimate, except on the local network with neither an estimate nor a cap. |
 | How long a learned limit lasts | 24 hours from the latest observation, not 7 days. A **Test speed** result above the limit clears it. |
-| A plan that never shows a frame? | On Auto in `always` mode, a plan whose start deadline passes, a first plan or a replacement, lowers as a long stall would, instead of failing at the same quality. An outage, a renderer wait, a pending change or nothing lower keeps the failure path. |
-| Can an outage end playback? | No. The client waits for media data or the network, sends no failure recovery during it, and resends a replan that got no response. |
+| A plan that never shows a frame? | On Auto in `always` mode, a plan whose start deadline passes while it waits for media, a first plan or a replacement, lowers as a long stall would, instead of failing at the same quality, but only when it measurably received its media more slowly than its delivered bitrate. An outage, a renderer wait, a decoder failure, no such measurement, a pending change or nothing lower keeps the failure path, and a deadline lowering that is refused, fails or is never adopted falls back to it. |
+| When is a replacement a source reload? | Only when it replaces a source that has played. A replacement adopted before any plan of the attempt has played continues the attempt's start wait, under the attempt's original grace. |
+| Can an outage end playback? | No. The client waits for media data or the network, sends no failure recovery during it, and resends a replan that got no response. After it reopens the source, it sends failure recovery only while no outage is in progress and the network is connected. |
 
 ## Motivation
 
@@ -149,6 +150,13 @@ measured and where it came from, and never do Auto's arithmetic.
     a seek or reload happened since playback last ran. A source reload begins
     when the client replaces or reopens the playing source, not when it sends
     the replan that leads to one; until then the current plan is still playing.
+    Only a replacement of a source that has played, such as a slow
+    audio-track switch, is a source reload. A replacement adopted before any
+    plan of the attempt has played, such as a failure recovery before the
+    first frame or a lowering made during the start wait, continues the
+    attempt's start wait: its buffering is timed like the start's, under the
+    attempt's original grace. An attempt has started once one of its plans
+    first plays, not when its first plan is adopted.
   - playback the platform stops when the app leaves the foreground. If the
     platform stops or tears down playback then, a stall in progress ends
     uncounted, as for a pause. If playback continues in the background, its
@@ -199,17 +207,33 @@ measured and where it came from, and never do Auto's arithmetic.
       the buffer it waits for before it plays again after a rebuffer (Media3's
       `bufferForPlaybackAfterRebufferMs`). A player without an explicit resume
       amount (AVPlayer, browsers) has only the first rule.
-  - a wait with ample media buffered. Any wait, a start's included, becomes a
-    renderer wait once the media buffered past the playhead exceeds
-    `RENDERER_WAIT_AMPLE_MS = 5000`: a player that holds that much and still
-    does not play is behind, not starved. The stall so far ends uncounted, it
-    cannot trigger, and the wait stays a renderer wait until playback runs.
-    The player's own start and decoder failure handling owns it.
+  - a wait with ample media buffered, on a player that resumes at an explicit
+    buffered amount or as soon as data reaches the playhead. Any wait on such
+    a player, a start's included, becomes a renderer wait once the media
+    buffered past the playhead exceeds its ample threshold: a player that holds
+    that much and still does not play is behind, not starved. The stall so far
+    ends uncounted, it cannot trigger, and the wait stays a renderer wait until
+    playback runs. The player's own start and decoder failure handling owns
+    it. The threshold is:
+    - in browsers, which play as soon as data reaches the playhead,
+      `RENDERER_WAIT_AMPLE_MS = 5000`;
+    - on Media3, which resumes at its own resume amount, at least twice that
+      amount: 10000 ms with the 5000 ms resume amount the Android player
+      sets. A network wait that ends at the resume amount is then never taken
+      for the renderer's. A tunneled Media3 player follows the same rule.
+
+    AVPlayer has no ample threshold. With
+    `automaticallyWaitsToMinimizeStalling`, it waits on a link slightly slower
+    than the bitrate until it has buffered enough to play through, which
+    legitimately exceeds 5000 ms, and the rule would stop Auto from lowering
+    exactly there.
   - stall time inside the startup grace: the first `STARTUP_GRACE_MS = 10000` of
     a plan, counted from whichever comes first after adoption: when its playback
     first runs, or a wait before that. A plan opened paused starts its grace when
     the viewer plays it. A first frame that follows a wait does not restart the
     grace. A stall that begins in the grace counts from the end of the grace.
+    A replacement adopted before any plan of the attempt has played has no
+    grace of its own: it keeps the one the attempt's start began.
 - **Counted stall**: a stall that lasted at least `STALL_MIN_MS = 1000` when
   playback resumed.
 - **Trigger**: either of these, using the web constants:
@@ -305,11 +329,42 @@ a higher-priority notice holds the slot.
 | Event | Outcome |
 | --- | --- |
 | Trigger fires on Auto | Send a `quality_change` replan with `quality_preference: "auto"`, `bandwidth_estimate_kbps` set to the step-down estimate, and `bandwidth_estimate_source: "observed_rebuffer"`. Add `observed_throughput_kbps`, the throughput the plan has received so far, measured as `plan_summary` `throughput_kbps` (see *Playback samples*), and omit it when the plan has not measured one or the network changed while it played. Nothing shows yet. |
-| A plan fails before its first frame because the client's own start deadline passed, whether it is the attempt's first plan or an adopted replacement still loading | On Auto in `always` mode, send the replan of the row above instead of a `failure_recovery` replan at the same quality. A replacement's load is still a source reload: its buffering never counts as a stall, and only this deadline lowers it. The plan keeps the platform's failure path when the mode is `ask` or `never`; the title is answered (**Keep quality** or **Restore quality**); the viewer picked the quality; the player is in a Watch Party room; an outage is in progress, or ended less than `LONG_STALL_MS` before the deadline, so the plan never had a fair run on a working network; the wait is a renderer wait; there is no lower rung; the no-lower cooldown runs; a lowering or a pick is pending; or a lowering was refused or never adopted. |
+| A plan fails before its first frame because the client's own start deadline passed while the player waited for media, whether it is the attempt's first plan or an adopted replacement still loading | On Auto in `always` mode, when the plan's media measurably arrived more slowly than its delivered bitrate, send the replan of the row above instead of a `failure_recovery` replan at the same quality. Otherwise, and in the cases listed under this table, the plan keeps the platform's failure path. |
 | The adopted plan is lower | Show the undo pill: the caption **"Quality lowered to stop buffering"** over the action **"Restore quality"**, with its timer running. Focus-driven platforms move focus to **Restore quality**, unless the viewer is mid-scrub or has a menu open (the intro-skip rule). A plan is lower when its delivered bitrate is below the delivered bitrate of the plan the lowering left. A plan with no delivered bitrate counts as lower unless it carries `quality_reduction_unavailable`. |
 | **Restore quality** | Send a `quality_change` replan with `quality_preference: "auto"`, no estimate, and `learned_limit: "clear"`. The title is answered at the restored quality. |
 | The undo timer runs out, or Back | The pill hides, and the lower plan keeps playing. Back is consumed, so a second Back behaves normally. |
 | The lower plan keeps buffering | It is a new plan, with its own grace. Its trigger lowers again from its own delivered bitrate. |
+
+A missed start deadline lowers only under these rules:
+
+- The client has evidence that the link is too slow: it measured the plan's
+  throughput, as for `throughput_kbps` (see *Playback samples*) or with the
+  platform's closest equivalent, such as AVPlayer's access log on the relay
+  hop, and it is below the delivered bitrate. The lowering carries it as
+  `observed_throughput_kbps`. Without that evidence the failure path runs,
+  and its `failure_recovery` keeps the server's exclusion of the failed route.
+  A plan that received no bytes is in an outage; one that received them at
+  or above its delivered bitrate is failing for another reason, such as a
+  stream the device cannot play; and a plan the client cannot measure gives
+  no evidence.
+- Only a transport stall lowers: the player was waiting for media. A start
+  that fails in the decoder or renderer keeps the failure path; on Android,
+  `transport_stall` lowers, and `decoder_no_output`, `render_startup_failure`
+  and `dv7_transform_stall` do not.
+- A replacement of a source that has played is still a source reload: its
+  buffering never counts as a stall, and only this deadline lowers it. A
+  replacement adopted before the attempt has played is part of the start
+  wait (see *Stall*).
+- The plan also keeps the failure path when the mode is `ask` or `never`; the
+  title is answered (**Keep quality** or **Restore quality**); the viewer
+  picked the quality; the player is in a Watch Party room; an outage is in
+  progress, or ended less than `LONG_STALL_MS` before the deadline, so the
+  plan never had a fair run on a working network; the wait is a renderer
+  wait; there is no lower rung; the no-lower cooldown runs; or a lowering or a
+  pick is pending.
+- If the controller refuses the lowering, the replan fails, or its plan is
+  never adopted while the failed load is still current, the client runs the
+  failure path then. A start never ends on a dead player.
 
 ### Ask first
 
@@ -335,7 +390,7 @@ The prompt has a title, **"Playback keeps buffering"**, a primary action,
 | The plan adopted after a lowering is no lower, or carries `quality_reduction_unavailable` | Show **"Can't lower quality for this video"**. Leave this plan alone for `NO_LOWER_COOLDOWN_MS = 300000`. |
 | The replan fails, or its plan is never adopted | Keep playing the current plan. Watch it again after `REARM_AFTER_UNADOPTED_MS = 60000`. Rearming starts fresh stall history without startup grace; an in-progress stall is timed from the rearm. If the player cannot send the replan now, because another replan is in flight, the replan fails: the client does not queue it. |
 | A replan gets no response (a timeout or a dropped connection) | Resend it with its original body, `replan_request_id` included, so the server replays its decision. It stays the replan in flight until it is answered; it never leaves the session refusing later replans. |
-| An outage | It never ends playback by itself. While it lasts, the client sends no `failure_recovery` replan: it waits for media data or the network to return, then reopens the source or replans. |
+| An outage | It never ends playback by itself. While it lasts, the client sends no `failure_recovery` replan: it waits for media data or the network to return, then reopens the source or replans. If the source fails after that reopen, the client sends `failure_recovery` only while no outage is in progress and the network is connected; otherwise it keeps waiting. |
 
 Presentation rules:
 
@@ -952,12 +1007,16 @@ events are:
   renderer wait means it became a stall: its buffer fell to
   `RENDERER_WAIT_BUFFER_MS`, or it outlasted `RENDERER_WAIT_MAX_MS` under the
   player's resume amount. A `waiting` with the `renderer` cause during a stall
-  means its buffer passed `RENDERER_WAIT_AMPLE_MS`, which ends the stall
-  uncounted. `transport_error_start` is the moment the adapter finds an outage
+  means its buffer passed the player's ample threshold, which ends the stall
+  uncounted; an AVPlayer adapter never sends it for that reason.
+  `transport_error_start` is the moment the adapter finds an outage
   (a failed media request, the device offline, or the plan's silence limit,
   `OUTAGE_NO_DATA_MS` or `OUTAGE_NO_DATA_SEGMENTED_MS`, passing while it
   waits), and `transport_error_end` the moment it ends. These
   are adapter rules: the 2026-10-22 changes left the vectors unchanged.
+  The vectors have no case with a replacement adopted before the attempt has
+  played, and no event for a missed start deadline. Each client covers those
+  rules, and the deadline's evidence and fallback, in its own tests.
 - The pill answers `select_lower`, `select_keep`, `select_restore` and `back`.
 - `pick_sent` and `pick_refused`: the viewer's quality pick is sent, or the
   player refuses it. An adopted pick arrives as `quality_changed`, then its

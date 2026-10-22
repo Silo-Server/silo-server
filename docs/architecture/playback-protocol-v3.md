@@ -1748,7 +1748,9 @@ own. A client on `auto` whose playback keeps rebuffering sends a
 when every client does this: after two stalls of at least a second within two
 minutes, or one stall of six seconds. Stall time in the first ten seconds of a
 plan does not count, and buffering caused by a seek, pause or source reload is
-not a stall. Clients send 70% of the delivered bitrate, so the next stream
+not a stall. A replacement adopted before the attempt has played is not a
+reload: it is part of the start, under the start's ten seconds. Clients send
+70% of the delivered bitrate, so the next stream
 targets about 56% of the one that stalled, with the throughput the stalled plan
 measured as `observed_throughput_kbps` when they have it (the server takes the
 lower figure), and repeat that estimate on their own later Auto replans for the
