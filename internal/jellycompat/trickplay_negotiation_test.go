@@ -110,6 +110,10 @@ func TestPlayingFileUsesLatestUnambiguousNegotiation(t *testing.T) {
 	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "movie-1", "playing"); got != 43 {
 		t.Fatalf("named play selected file=%d want 43", got)
 	}
+	// A named play without a selection does not borrow another play's file.
+	if got := handler.playingFile(t.Context(), &Session{Token: "token"}, "movie-1", "unselected"); got != 0 {
+		t.Fatalf("named unselected play selected file=%d want 0", got)
+	}
 	if got := handler.playingFile(t.Context(), &Session{Token: "missing-token"}, "movie-1", ""); got != 0 {
 		t.Fatalf("unrelated token selected file=%d", got)
 	}

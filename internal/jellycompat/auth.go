@@ -473,17 +473,21 @@ func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool
 	return playbackGrantCovers(session, itemID, sourceID)
 }
 
-// queryMediaSourceID is the MediaSourceId query value in any spelling, and
+// queryMediaSourceID is the MediaSourceId query value in any spelling the
+// handlers read (newCaseInsensitiveQuery also takes "MediaSourceId[]"), and
 // false when spellings carry different sources: the grant check and the
 // handler each read the key case-insensitively, and the lookup would pick one
-// arbitrarily.
+// arbitrarily. Empty values name no source.
 func queryMediaSourceID(query url.Values) (string, bool) {
 	sourceID := ""
 	for key, values := range query {
-		if !strings.EqualFold(key, "MediaSourceId") {
+		if !strings.EqualFold(strings.TrimSuffix(key, "[]"), "MediaSourceId") {
 			continue
 		}
 		for _, value := range values {
+			if value == "" {
+				continue
+			}
 			if sourceID != "" && !mediaSourceIDsEqual(sourceID, value) {
 				return "", false
 			}
