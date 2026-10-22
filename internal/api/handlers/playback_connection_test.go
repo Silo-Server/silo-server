@@ -583,7 +583,8 @@ func TestLearnedLimitMarksOnlyAReplanItLoweredDB(t *testing.T) {
 // TestConnectionReadingsDB: a plan summary's throughput becomes the
 // connection's playback sample, a nonsense figure does not, a probe keeps its
 // lower bound, and only readings within their lifetime count toward the
-// budget, though both are still returned.
+// budget, though both are still returned. Only current readings stand in for
+// a missing Auto estimate.
 func TestConnectionReadingsDB(t *testing.T) {
 	pool := connectionTestPool(t)
 	ctx := t.Context()
@@ -617,6 +618,30 @@ func TestConnectionReadingsDB(t *testing.T) {
 	if err != nil || state.PlaybackSample == nil || state.PlaybackSample.Kbps != 60000 || state.AutoBudgetKbps == nil || *state.AutoBudgetKbps != 48000 {
 		t.Fatalf("with a 60000 sample: %+v (%v)", state, err)
 	}
+	// An Auto start or replan without an estimate plans under that reading, as
+	// a probe estimate; one that carries an estimate or ignores the learned
+	// limit (as a Cast start does) keeps what it sent.
+	r := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(context.WithValue(WithNativeAPIV2(remote), playbackConnectionDeviceContextKey{}, "tv-1"))
+	estimated := func(estimate *int, control string) *int {
+		t.Helper()
+		req := playback.StartRequestV3{QualityPreference: playback.QualityAutoV3, ClientFeatures: []string{playback.FeatureBufferingQualityV1}, BandwidthEstimateKbps: estimate, LearnedLimit: control}
+		if err := h.applyConnectionReading(r, &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.BandwidthEstimateKbps != nil && estimate == nil && req.BandwidthEstimateSource != playback.BandwidthEstimateProbeV3 {
+			t.Fatalf("reading sent as %q, want a probe estimate", req.BandwidthEstimateSource)
+		}
+		return req.BandwidthEstimateKbps
+	}
+	if got := estimated(nil, ""); got == nil || *got != 60000 {
+		t.Fatalf("missing estimate planned under %v, want the 60000 reading", got)
+	}
+	if got := estimated(new(20000), ""); *got != 20000 {
+		t.Fatalf("sent estimate replaced by %d", *got)
+	}
+	if got := estimated(nil, playback.LearnedLimitIgnoreV3); got != nil {
+		t.Fatalf("ignore planned under %d, want no estimate", *got)
+	}
 	// Past the 7-day lifetime the probe is still shown but no longer counts.
 	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET measured_at = now() - interval '8 days', sample_at = now() - interval '8 days' WHERE user_id = $1`, user); err != nil {
 		t.Fatal(err)
@@ -624,5 +649,8 @@ func TestConnectionReadingsDB(t *testing.T) {
 	state, err = h.PlaybackConnection(remote, "tv-1", false)
 	if err != nil || state.Probe == nil || state.PlaybackSample == nil || state.AutoBudgetKbps != nil {
 		t.Fatalf("expired readings: %+v (%v)", state, err)
+	}
+	if got := estimated(nil, ""); got != nil {
+		t.Fatalf("expired readings planned under %d, want no estimate", *got)
 	}
 }

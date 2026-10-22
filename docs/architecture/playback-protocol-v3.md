@@ -2029,8 +2029,15 @@ client repeats its kept step-down estimate on later replans, records nothing.
 A seek reanchor reuses the playing recipe and a seek failure recovery replays
 the stored start request; neither records nor clears a limit.
 
-Auto plans with the lower of the request estimate and the unexpired limit, or
-the limit alone when the request has none. Fixed qualities ignore the limit.
+An Auto start or replan without `bandwidth_estimate_kbps` plans with the
+connection's current reading, the one `GET /api/v2/playback/connection`
+reports, as a `probe` estimate, so a client that starts before it has read its
+reading still plans under it. A seek replay keeps the stored request, a
+request with `learned_limit: "ignore"` gets no reading (a Cast start sends
+`ignore` and no estimate, and the sender's reading is not the receiver's
+link), and the reading is never recorded. Auto plans with the lower of the
+request estimate and the unexpired limit, or the limit alone when the request
+has none. Fixed qualities ignore the limit.
 `ignore` plans without the limit, records nothing and leaves the limit
 stored; `clear` deletes it before planning. The 80% margin and the
 administrator and client caps still apply. When any estimate or learned limit

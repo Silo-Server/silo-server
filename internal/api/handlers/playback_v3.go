@@ -1942,6 +1942,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if effectiveFile.PresentationPartTotal > 1 && effectiveFile.PresentationPartIndex > 0 {
 		alternateBase = effectiveFile
 	}
+	if err := h.applyConnectionReading(r, &req); err != nil {
+		return playback.DecisionResponseV3{}, playbackStoreOperationError()
+	}
 	// The start without the limit, planned only when the plan would carry the
 	// limit's label, to check that the limit lowered it.
 	unlimitedReq, unlimitedFile, unlimitedAudioIndex := withoutObservedEstimateV3(req), effectiveFile, audioIndex
@@ -5503,6 +5506,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	var plannerSettingsErr error
 	var lowerVersion *playback.LowerVersionV3
 	var learnedLimit *playback.BandwidthLimitV3
+	if !seekScopedRecovery {
+		if err := h.applyConnectionReading(r, &start); err != nil {
+			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: err}
+		}
+	}
 	// The replan without the learned limit, planned again only when the plan
 	// would carry the limit's label, to check that the limit lowered it.
 	unlimitedStart, unlimitedFile, unlimitedAudioIndex := withoutObservedEstimateV3(start), effectiveFile, audioIndex

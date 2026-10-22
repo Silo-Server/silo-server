@@ -38,16 +38,46 @@ func (h *PlaybackHandler) PlaybackConnection(ctx context.Context, device string,
 	state.Probe, state.PlaybackSample, state.LearnedLimit = c.Probe, c.PlaybackSample, c.LearnedLimit
 	// Both readings are returned for display whatever their age; only those
 	// within the reading lifetime count toward the budget.
+	probe, sample := h.currentReadings(state.Probe, state.PlaybackSample)
+	state.AutoBudgetKbps = connectionstore.Budget(probe, sample, state.LearnedLimit, requestBitrateCapV3(ctx))
+	return state, nil
+}
+
+// currentReadings keeps the readings younger than the reading lifetime.
+func (h *PlaybackHandler) currentReadings(probe *connectionstore.Probe, sample *connectionstore.Sample) (*connectionstore.Probe, *connectionstore.Sample) {
 	maxAge := h.playbackConfig().BandwidthProbeMaxAge()
-	probe, sample := state.Probe, state.PlaybackSample
 	if probe != nil && time.Since(probe.MeasuredAt) > maxAge {
 		probe = nil
 	}
 	if sample != nil && time.Since(sample.MeasuredAt) > maxAge {
 		sample = nil
 	}
-	state.AutoBudgetKbps = connectionstore.Budget(probe, sample, state.LearnedLimit, requestBitrateCapV3(ctx))
-	return state, nil
+	return probe, sample
+}
+
+// applyConnectionReading gives an Auto request without an estimate the
+// connection's current reading, the one GET /api/v2/playback/connection
+// reports, as a probe estimate: a client that starts before it has read its
+// reading still plans under it. Call it only for the request the client sent;
+// a seek replay keeps the stored request. A request that ignores the learned
+// limit gets none, because a Cast start sends ignore and no estimate on
+// purpose: the sender's reading is not the receiver's link. Nothing is
+// recorded.
+func (h *PlaybackHandler) applyConnectionReading(r *http.Request, req *playback.StartRequestV3) error {
+	if !isNativeAPIV2(r.Context()) || !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) ||
+		req.QualityPreference != playback.QualityAutoV3 || req.BandwidthEstimateKbps != nil || req.LearnedLimit == playback.LearnedLimitIgnoreV3 {
+		return nil
+	}
+	key, _ := connectionstore.Key(r.Context(), h.JWTSecret)
+	device, _ := r.Context().Value(playbackConnectionDeviceContextKey{}).(string)
+	c, err := h.Connections.Connection(r.Context(), apimw.GetUserID(r.Context()), connectionDeviceV3(device), key)
+	if err != nil || c == nil {
+		return err
+	}
+	if kbps := connectionstore.Reading(h.currentReadings(c.Probe, c.PlaybackSample)); kbps > 0 {
+		req.BandwidthEstimateKbps, req.BandwidthEstimateSource = &kbps, playback.BandwidthEstimateProbeV3
+	}
+	return nil
 }
 
 // applyLearnedLimit plans Auto under the device's learned limit and returns the
