@@ -10,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 // The external sign-in domain (docs/architecture/external-sign-in.md): the
@@ -251,6 +252,10 @@ func adminUserIdentityOf(v handlers.ExternalIdentityView) AdminUserIdentity {
 // each refusal has its own, shared with the other linking operations
 // (linkingRefusalProblem).
 func credentialsLinkProblem(err error) error {
+	if throttled, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+		return NewProblem(TypeRateLimited, "Too many failed sign-ins for this directory username. Try again later.").
+			WithRetryAfter(ratelimit.RetryAfterSeconds(throttled.RetryAfter))
+	}
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return validationProblem(locationBody+".directory_password", codeInvalid, "The directory username or password is incorrect.")
@@ -402,7 +407,7 @@ func registerExternalSignIn(reg *Registry) {
 
 	credentials := humaOp(http.MethodPost, Prefix+"/account/identities/link-credentials", "linkAccountIdentityWithCredentials", "account",
 		"Link a directory (LDAP) identity to the caller's account with the directory username and password.")
-	credentials.Description = "The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking."
+	credentials.Description = "The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 429 rate_limited with Retry-After (the directory username has used its sign-in attempt budget); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking."
 	credentials.DefaultStatus = http.StatusCreated
 	credentials.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}
 	Register(reg, Operation{Operation: credentials, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, RateLimitBucket: loginDomain},

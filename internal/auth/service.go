@@ -117,6 +117,9 @@ type Service struct {
 	// previews caches network providers' answers about request peers for
 	// discovery (networkPreview).
 	previews networkPreviews
+	// signInAttempts bounds password attempts per sign-in name; nil allows
+	// every attempt (SetSignInAttempts).
+	signInAttempts SignInAttemptLimiter
 }
 
 // PluginProviderSource supplies the current auth-plugin providers. The
@@ -197,7 +200,7 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, ip 
 // a login without a provider (see routePasswordLogin): directory users of a
 // credentials plugin sign in with their directory password.
 func (s *Service) CompatLogin(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
-	pair, user, _, err := s.CompatLoginWithLocalFallback(ctx, username, password, "", deviceName, ip)
+	pair, user, _, err := s.CompatLoginWithLocalFallback(ctx, username, password, "", deviceName, ip, "")
 	return pair, user, err
 }
 
@@ -209,7 +212,30 @@ func (s *Service) CompatLogin(ctx context.Context, username, password, deviceNam
 // own, and bcrypt compares only its first 72 bytes, so such a password goes
 // straight to the fallback: otherwise a 72-byte password followed by "#pin"
 // would match as the full password and lose its PIN.
-func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, password, fallback, deviceName, ip string) (*TokenPair, *models.User, bool, error) {
+//
+// The call spends one attempt of a name's budget, as LoginWithProvider does,
+// and a second one when it has a fallback to try. The name is budgetName, or
+// username when budgetName is empty: a caller that resolved username from
+// what was typed by looking accounts up passes a name that depends only on
+// the typed text, so the budget cannot tell a stranger what the lookup
+// found. A success clears the same budget.
+func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, password, fallback, deviceName, ip, budgetName string) (pair *TokenPair, user *models.User, usedFallback bool, err error) {
+	if budgetName == "" {
+		budgetName = username
+	}
+	if err = s.reserveSignIn(ctx, budgetName); err != nil {
+		return nil, nil, false, err
+	}
+	defer func() { s.finishSignIn(ctx, budgetName, err) }()
+	if fallback != "" {
+		// A fallback is a second password that may be checked, so it spends a
+		// second attempt up front, for every name: charging it only where the
+		// fallback runs (local accounts) would tell names apart by how soon
+		// they lock.
+		if err = s.reserveSignIn(ctx, budgetName); err != nil {
+			return nil, nil, false, err
+		}
+	}
 	providerID, err := s.routePasswordLogin(ctx, username)
 	if err != nil {
 		return nil, nil, false, err
@@ -218,7 +244,7 @@ func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, pa
 		pair, user, err := s.loginWithProvider(ctx, LocalProviderID, username, fallback, deviceName, ip, true)
 		return pair, user, err == nil, err
 	}
-	pair, user, err := s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, true)
+	pair, user, err = s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, true)
 	if providerID != LocalProviderID || fallback == "" || !errors.Is(err, ErrInvalidCredentials) {
 		return pair, user, false, err
 	}
@@ -238,6 +264,11 @@ func SplitPasswordPIN(password string) (basePw, pin string) {
 	return password[:idx], password[idx+1:]
 }
 
+// LoginWithProvider is a password sign-in through providerID, or the
+// provider routePasswordLogin picks for the name when it is empty. Every call
+// spends one attempt of the name's budget (SetSignInAttempts) before any
+// lookup or password check; a locked name is a *SignInThrottledError. A
+// successful sign-in clears the count.
 func (s *Service) LoginWithProvider(
 	ctx context.Context,
 	providerID string,
@@ -245,7 +276,11 @@ func (s *Service) LoginWithProvider(
 	password string,
 	deviceName string,
 	ip string,
-) (*TokenPair, *models.User, error) {
+) (pair *TokenPair, user *models.User, err error) {
+	if err = s.reserveSignIn(ctx, username); err != nil {
+		return nil, nil, err
+	}
+	defer func() { s.finishSignIn(ctx, username, err) }()
 	if providerID == "" {
 		routed, err := s.routePasswordLogin(ctx, username)
 		if err != nil {

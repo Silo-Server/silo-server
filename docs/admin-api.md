@@ -1344,15 +1344,15 @@ season binge reads as one show and a title's `media_item_id` is a series
 content id for TV.
 
 `total_seconds` is **watched time**, summed from finalized playback sessions
-(`admin_playback_history.watched_seconds`) that *ended* inside the same window
+(`admin_playback_history`) that *ended* inside the same window
 — the same stop instant `watched_at` records, so plays and watch time see the
 same sessions — not the runtime of what was played. Watch history records the media's full duration,
 so summing that would report three hours for a movie someone abandoned after a
-minute. An entry with no finalized session in the window reports `0`. Because
-`watched_seconds` records a session's final absolute position, a resumed
-session would claim the already-watched stretch again, so each
-session's contribution is capped at its wall-clock length; the figure is an
-estimate until playback records true elapsed viewing time.
+minute. An entry with no finalized session in the window reports `0`. Each
+session contributes its measured watch time (`played_seconds`, below). A
+session recorded before watch time was measured only knows where it ended
+(`watched_seconds`), so its end position is capped at its wall-clock length;
+that estimate still counts pauses and seeks.
 
 Profile display names live in the per-user stores rather than in watch history,
 so they are read back from that profile's most recent `admin_playback_history`
@@ -1505,6 +1505,20 @@ like the other filters, so a cursor from one window is refused under another. Ea
 also carries `series_title`, `season_number` and `episode_number`: for an episode attempt
 they come from the catalog episode and its series (`series_title` is empty when the series
 left the catalog); for anything else they are empty and null.
+
+`watched_seconds` is where the attempt ended, not how long it was watched: an attempt
+resumed partway through reports the resume point plus what was watched. `played_seconds`
+is the measured watch time: media advanced through by normal playback, without pauses,
+seeks or buffering. The playback session measures it from its progress reports
+(`playback.WatchTime`): a position advance between two reports counts as watched when it
+fits playback at up to twice normal speed plus a short allowance for report jitter, and
+anything larger is a seek. Time after the last progress report before the stop is not
+counted. It is null for an attempt with no measurement, which includes every attempt
+recorded before measurement existed. A session finalized more than once keeps the largest
+measurement when the copies overlap in time (copies on several replicas), and adds them when
+one began measuring after the other ended (a session rebuilt under the same id after it was
+finalized). The history row also stores the first reported
+position and the time spent paused; the route does not expose them.
 
 The administrator history page and the user detail watch-history tab read this route
 under the authority captured when the query was created, keyed by an opaque authority

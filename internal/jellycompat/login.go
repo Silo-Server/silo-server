@@ -106,7 +106,7 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 	basePw, pinCandidate := auth.SplitPasswordPIN(password)
 	// CompatLogin refuses a temporary password: Jellyfin clients cannot run the
 	// password change it requires.
-	tokenPair, user, usedFallback, err := r.authService.CompatLoginWithLocalFallback(ctx, accountUsername, password, basePw, userAgent, remoteIP)
+	tokenPair, user, usedFallback, err := r.authService.CompatLoginWithLocalFallback(ctx, accountUsername, password, basePw, userAgent, remoteIP, signInBudgetName(combinedUsername))
 	if err != nil {
 		return nil, mapAuthError(err)
 	}
@@ -302,6 +302,20 @@ func (r *LoginResolver) parseLogin(ctx context.Context, combinedUsername string)
 	return accountUsername, profileName, true, nil
 }
 
+// signInBudgetName is the name whose sign-in budget a Jellyfin sign-in
+// spends: the account part before the last '#' of what was typed. parseLogin
+// may sign in to an account named with the whole text instead, after looking
+// accounts up; keying on the typed text alone keeps the budget from telling a
+// stranger which account exists. Such an account's native sign-ins spend the
+// budget of its whole name.
+func signInBudgetName(combinedUsername string) string {
+	accountUsername, _, _, err := parseProfileLogin(combinedUsername)
+	if err != nil {
+		return strings.TrimSpace(combinedUsername)
+	}
+	return accountUsername
+}
+
 func parseProfileLogin(username string) (accountUsername string, profileName string, hasExplicitProfile bool, err error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
@@ -440,6 +454,10 @@ func mapAuthError(err error) error {
 	if errors.Is(err, auth.ErrPasswordChangeRequired) {
 		// Kept as the sentinel, like the PIN errors, so the client sees why.
 		return fmt.Errorf("%w: sign in to Silo to replace your temporary password", err)
+	}
+	if _, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+		// Kept as is: the handler answers 429 with its Retry-After.
+		return err
 	}
 	switch {
 	case errors.Is(err, passwordhash.ErrBusy):

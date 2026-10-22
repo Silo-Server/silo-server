@@ -30,10 +30,14 @@ func (f *fakeAdminPlaybackHistory) ListAdminPlaybackHistoryPage(_ context.Contex
 		return handlers.AdminPlaybackHistoryPage{}, f.err
 	}
 	duration := 5400.5
+	// A play resumed near its end: watched_seconds is the end position, the
+	// measurement is the two minutes actually watched.
+	played := 120.0
 	rows := []handlers.AdminPlaybackHistoryRow{{
 		SessionID: "sess-9007199254740993", UserID: 9007199254740993, Username: "laura", ProfileID: "p-owner", ProfileName: "Laura",
 		MediaItemID: "movie-1", MediaFileID: 42, MediaTitle: "Synthetic Movie", MediaType: "movie", PlayMethod: "direct_play",
 		StartedAt: fixedTime().Add(-time.Hour), EndedAt: fixedTime().Add(123456 * time.Nanosecond), WatchedSeconds: 3600, DurationSeconds: &duration, Completed: true,
+		PlayedSeconds: &played,
 	}}
 	if f.episode {
 		season, episode := 2, 4
@@ -61,7 +65,7 @@ func TestAdminPlaybackHistoryContract(t *testing.T) {
 		t.Fatalf("filters: %+v limit=%d", fake.filter, fake.limit)
 	}
 	body := first.Body.String()
-	for _, want := range []string{`"user_id":"9007199254740993"`, `"media_file_id":"42"`, `"duration_seconds":5400.5`, `"ended_at":"2026-01-02T03:04:05.678Z"`, `"has_more":true`} {
+	for _, want := range []string{`"user_id":"9007199254740993"`, `"media_file_id":"42"`, `"duration_seconds":5400.5`, `"ended_at":"2026-01-02T03:04:05.678Z"`, `"has_more":true`, `"watched_seconds":3600`, `"played_seconds":120`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %s in %s", want, body)
 		}

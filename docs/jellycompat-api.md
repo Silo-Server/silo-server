@@ -612,10 +612,13 @@ connection's shared budget, as described in
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
   the global budget, like native `POST /api/v1/auth/login`. Both routes count
-  against the same per-IP `login` counter. It reads at most 64 KiB of the
-  body: when decoding the JSON value needs more, it answers 413 with
-  `{"Error":"PayloadTooLarge",...}` before any credential check. Only the
-  first JSON value is decoded; data after it is ignored, not rejected. A
+  against the same per-IP `login` counter. The account name also spends its
+  sign-in attempt budget, shared with native sign-in on every node
+  ([Sign-in attempts per name](auth-api.md#sign-in-attempts-per-name)); a
+  locked name answers 429 `TooManyRequests` with `Retry-After`. It reads at
+  most 64 KiB of the body: when decoding the JSON value needs more, it answers
+  413 with `{"Error":"PayloadTooLarge",...}` before any credential check. Only
+  the first JSON value is decoded; data after it is ignored, not rejected. A
   server too busy to check the password answers 503 `ServiceUnavailable`
   with `Retry-After`, not a wrong password (see
   [When the server is too busy to check a password](auth-api.md#when-the-server-is-too-busy-to-check-a-password)).

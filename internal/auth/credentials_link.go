@@ -49,8 +49,10 @@ func (s *Service) findCredentialsInstallation(installationID int) *PluginProvide
 // directory credentials are ErrInvalidCredentials; a directory account that
 // is disabled, locked or expired is ErrProviderAccountDisabled; the plugin's
 // other refusals keep their sign-in errors (ErrNotPermitted,
-// ErrProviderPasswordExpired, ErrProviderUnavailable).
-func (s *Service) LinkCredentialsIdentity(ctx context.Context, in CredentialsLinkInput) (*LinkedIdentity, error) {
+// ErrProviderPasswordExpired, ErrProviderUnavailable). The directory check
+// spends the directory username's sign-in budget, so linking cannot guess a
+// directory password past it (*SignInThrottledError).
+func (s *Service) LinkCredentialsIdentity(ctx context.Context, in CredentialsLinkInput) (_ *LinkedIdentity, err error) {
 	provider := s.findCredentialsInstallation(in.InstallationID)
 	if provider == nil {
 		return nil, ErrUnknownAuthInstallation
@@ -65,6 +67,10 @@ func (s *Service) LinkCredentialsIdentity(ctx context.Context, in CredentialsLin
 	if username == "" || in.DirectoryPassword == "" {
 		return nil, ErrInvalidCredentials
 	}
+	if err = s.reserveSignIn(ctx, username); err != nil {
+		return nil, err
+	}
+	defer func() { s.finishSignIn(ctx, username, err) }()
 	_, identityID, err := provider.authenticateCredentials(ctx, Credentials{Username: username, Password: in.DirectoryPassword}, in.UserID)
 	if err != nil {
 		return nil, err

@@ -1180,6 +1180,7 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 		DurationSeconds: durationPtr,
 		Completed:       completed,
 		ClientIP:        clientip.FromContext(ctx),
+		Watch:           session.Watch,
 	}
 	return entry, nil
 }

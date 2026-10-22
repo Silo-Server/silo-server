@@ -319,7 +319,9 @@ empty when the profile no longer exists.
 The watch summary accepts `days` from 1 to 365 (default 30) and an optional
 `profile_id`. It totals the finalized attempts that ended at or after `since` (now
 minus `days`): `plays`, `completed_plays`, `watched_seconds` and `last_played_at`
-(null when none). Those are the attempts `listAdminPlaybackHistory` lists with the
+(null when none). `watched_seconds` here is watch time: each attempt's measured
+`played_seconds`, or, for an attempt recorded before measurement, its end position
+capped at its wall-clock length. Those are the attempts `listAdminPlaybackHistory` lists with the
 same `user_id`, `profile_id` and `ended_after` set to `since`.
 
 The request usage read reports the account's effective request policy as the
