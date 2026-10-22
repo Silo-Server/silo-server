@@ -335,17 +335,24 @@ carry no `contains`.
 `library_id` on `getCatalogItem`, `listCatalogItemVersions`, `listCatalogItemEpisodes`,
 `listSeriesSeasons`, `getSeriesSeason`, and `listSeasonEpisodes` names the library the
 viewer opened the item from. It always validates that the item is a member of that
-library and picks the library's metadata language as the presentation fallback. It
-does not, by default, change which files come back: an item stored in several
-libraries lists every version the viewer may access, so a "Movies" and "Movies 4K"
-split still shows both files from either library.
+library and picks the library's metadata language as the presentation fallback. A
+season, and the season and episode lists, are members through their series. An
+episode is a member when it or its series is in the library: the series' lists name
+every episode under any library that holds the series, so an episode with no file in
+that library still opens from it. The check does not, by default, change which files
+come back: an item stored in several libraries lists every version the viewer may
+access, so a "Movies" and "Movies 4K" split still shows both files from either
+library.
 
 The administrator setting `catalog.scope_versions_to_library` (default `false`)
-makes those reads answer only the versions stored in the named library. A read
-without `library_id` is unaffected, and so is `getWatchDetail`, watch-together
-selection, and the Jellyfin compatibility surface: an item always plays from its
-full accessible version list. No client change is needed: the setting only
-changes what an existing `library_id` request returns.
+makes those reads answer only the versions stored in the named library, so an
+episode with no file there lists no versions. A read without `library_id` is
+unaffected, and so is `getWatchDetail`, watch-together selection, and the Jellyfin
+compatibility surface: an item always plays from its full accessible version list.
+`getWatchDetail` still requires an episode itself to be in a named library. No
+client change is needed: the setting only changes what an existing `library_id`
+request returns. The web app keeps the library on links from a series to its
+seasons and episodes, but not on Play links.
 
 ## Device-scoped playback answers
 

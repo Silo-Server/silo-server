@@ -275,6 +275,23 @@ describe("EpisodeContent", () => {
     expect(markup).toContain(">Season 1<");
   });
 
+  it("keeps the page's library on the season reads and breadcrumbs but not on Play", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/episode-1?libraryId=4"]}>
+        <EpisodeContent item={makeEpisodeItem()} libraryId={4} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.useSeasonDetail).toHaveBeenLastCalledWith("series-1", 1, 4);
+    expect(mocks.useSeasonEpisodes).toHaveBeenLastCalledWith("series-1", 1, 4);
+    expect(countOccurrences(markup, 'href="/item/series-1?libraryId=4"')).toBe(1);
+    expect(countOccurrences(markup, 'href="/item/season-1?libraryId=4"')).toBe(1);
+    // Playback always sees every version, so Play carries no library.
+    expect(mocks.capturedActionBarProps.value?.playHref).toBe(
+      `/watch/${makeEpisodeItem().content_id}`,
+    );
+  });
+
   it("uses season navigation state before season detail finishes loading", () => {
     mocks.useSeasonDetail.mockReturnValue({
       data: undefined,

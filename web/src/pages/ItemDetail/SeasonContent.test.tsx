@@ -207,6 +207,21 @@ describe("SeasonContent", () => {
     );
   });
 
+  it("keeps the page's library on the episode read and links but not on Play", () => {
+    const item = makeSeasonItem();
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1?libraryId=4"]}>
+        <SeasonContent item={item} libraryId={4} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.useItemEpisodes).toHaveBeenLastCalledWith(item.content_id, 4);
+    expect(markup).toContain('href="/item/episode-1?libraryId=4"');
+    expect(markup).not.toContain('href="/item/episode-1"');
+    // Playback always sees every version, so Play carries no library.
+    expect(mocks.capturedActionBarProps.value?.playHref).toBe("/watch/episode-1");
+  });
+
   it("passes partial-progress restart eligibility to episode menus", () => {
     mocks.useItemEpisodes.mockReturnValue({
       data: {

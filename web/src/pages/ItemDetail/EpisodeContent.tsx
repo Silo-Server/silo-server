@@ -49,12 +49,23 @@ import {
   canEditMarkers as canEditMarkersForUser,
 } from "@/lib/permissions";
 import { isEpisodeUnwatched } from "@/lib/episodeSpoilers";
+import { buildItemHref } from "@/lib/mediaNavigation";
 import { formatDate } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
 import { hasMachineTranslation } from "./components/machineTranslation";
 
-export default function EpisodeContent({ item }: { item: ItemDetail & { type: "episode" } }) {
+export default function EpisodeContent({
+  item,
+  libraryId,
+}: {
+  item: ItemDetail & { type: "episode" };
+  /**
+   * The page's ?libraryId= scope. Series, season and episode links keep it;
+   * Play does not, because playback always sees every version.
+   */
+  libraryId?: number;
+}) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
@@ -257,12 +268,14 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const { data: currentSeason } = useSeasonDetail(
     siblingSeason?.seriesId,
     siblingSeason?.seasonNumber ?? -1,
+    libraryId,
   );
 
   // Sibling episodes now come from the season collection, not the current episode ID.
   const { data: episodesData, isLoading: siblingsLoading } = useSeasonEpisodes(
     siblingSeason?.seriesId,
     siblingSeason?.seasonNumber ?? -1,
+    libraryId,
   );
   const siblingEpisodes = episodesData?.episodes ?? [];
   const seasonLabel =
@@ -276,7 +289,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
           : "Season");
   const seasonHref =
     navigationState?.parentSeasonHref ??
-    (currentSeason ? `/item/${currentSeason.content_id}` : undefined);
+    (currentSeason ? buildItemHref({ contentId: currentSeason.content_id, libraryId }) : undefined);
   const episodeLinkState =
     seasonHref || seasonLabel
       ? {
@@ -287,7 +300,10 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
 
   // Build breadcrumb segments
   const breadcrumbSegments = [
-    { label: seriesTitle, href: seriesId ? `/item/${seriesId}` : "/" },
+    {
+      label: seriesTitle,
+      href: seriesId ? buildItemHref({ contentId: seriesId, libraryId }) : "/",
+    },
   ] as Array<{ label: string; href?: string }>;
   if (seasonNum != null) {
     breadcrumbSegments.push({ label: seasonLabel, href: seasonHref });
@@ -369,7 +385,9 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
                         item,
                         mode,
                         onReplaced: (contentID) =>
-                          navigate(`/item/${contentID}`, { replace: true }),
+                          navigate(buildItemHref({ contentId: contentID, libraryId }), {
+                            replace: true,
+                          }),
                       })
                   : undefined
               }
@@ -438,6 +456,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
                   episodes={siblingEpisodes}
                   currentEpisodeNumber={episodeNum ?? -1}
                   episodeLinkState={episodeLinkState}
+                  libraryId={libraryId}
                 />
               </div>
             )}

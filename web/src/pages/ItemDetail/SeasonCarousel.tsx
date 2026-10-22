@@ -3,17 +3,20 @@ import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Season } from "@/api/types";
 import { usePrefetchCatalogSeason } from "@/hooks/queries/catalogRead";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
+import { buildItemHref } from "@/lib/mediaNavigation";
 import { formatSeasonMeta, formatSeasonProgress, getSeasonDisplayTitle } from "./itemDetailLayout";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 
 interface SeasonCarouselProps {
   seasons: Season[];
+  /** The series page's library scope, kept on each season link. */
+  libraryId?: number;
 }
 
-export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
+export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselProps) {
   const sorted = seasons.slice().sort((a, b) => a.season_number - b.season_number);
-  const prefetchSeason = usePrefetchCatalogSeason();
+  const prefetchSeason = usePrefetchCatalogSeason(libraryId);
 
   if (sorted.length === 0) {
     return null;
@@ -32,6 +35,7 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
           hasProgress && season.episode_count > 0
             ? Math.round((userData.watched_count / season.episode_count) * 100)
             : 0;
+        const seasonHref = buildItemHref({ contentId: season.content_id, libraryId });
 
         return (
           <li key={season.content_id} className="embla__slide shrink-0">
@@ -44,7 +48,7 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
               {/* Poster */}
               <div className="group/media relative">
                 <ViewTransitionLink
-                  to={`/item/${season.content_id}`}
+                  to={seasonHref}
                   className="media-card-image relative block aspect-[2/3] overflow-hidden rounded-xl"
                 >
                   {season.poster_url ? (
@@ -92,7 +96,7 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
               </div>
 
               {/* Info — always the same height */}
-              <ViewTransitionLink to={`/item/${season.content_id}`} className="block px-0.5 pt-2.5">
+              <ViewTransitionLink to={seasonHref} className="block px-0.5 pt-2.5">
                 <div className="truncate text-[0.8125rem] font-semibold">
                   {getSeasonDisplayTitle(season)}
                 </div>

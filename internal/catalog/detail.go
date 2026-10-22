@@ -1808,10 +1808,29 @@ func (s *DetailService) resolveDetailTarget(ctx context.Context, contentID strin
 	if err := s.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
 		return nil, err
 	}
-	if err := s.validatePresentationItemAccess(ctx, filter, episode.ContentID); err != nil {
+	if err := s.validatePresentationEpisodeAccess(ctx, filter, episode); err != nil {
 		return nil, err
 	}
 	return &detailTarget{episode: episode}, nil
+}
+
+// validatePresentationEpisodeAccess accepts an episode under a presentation
+// library that holds the episode or its series. The series' season and episode
+// lists validate the series alone and list every episode, so a library that
+// holds the series but no file of one episode still links to it. That episode
+// opens, and a read scoped to the library lists no versions for it.
+func (s *DetailService) validatePresentationEpisodeAccess(ctx context.Context, filter AccessFilter, episode *models.Episode) error {
+	if filter.PresentationLibraryID == nil {
+		return nil
+	}
+	membership, err := s.itemRepo.GetItemsInLibrary(ctx, []string{episode.ContentID, episode.SeriesID}, *filter.PresentationLibraryID)
+	if err != nil {
+		return err
+	}
+	if !membership[episode.ContentID] && !membership[episode.SeriesID] {
+		return ErrItemNotFound
+	}
+	return nil
 }
 
 // buildExtraItemDetail resolves a local extra as a minimal ItemDetail:

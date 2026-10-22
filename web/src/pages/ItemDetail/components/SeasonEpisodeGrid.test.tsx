@@ -21,13 +21,19 @@ vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
   useEpisodeSpoilerPrefs: () => spoilerPrefs,
 }));
 
+const prefetchLibraries: (number | undefined)[] = [];
+
 vi.mock("@/hooks/queries/catalogRead", () => ({
-  usePrefetchCatalogItemDetail: () => vi.fn(),
+  usePrefetchCatalogItemDetail: (libraryId?: number) => {
+    prefetchLibraries.push(libraryId);
+    return vi.fn();
+  },
 }));
 
 describe("SeasonEpisodeGrid", () => {
   beforeEach(() => {
     capturedMenuProps.length = 0;
+    prefetchLibraries.length = 0;
     spoilerPrefs.hideImages = false;
     spoilerPrefs.hideOverviews = false;
   });
@@ -129,5 +135,39 @@ describe("SeasonEpisodeGrid", () => {
     const card = screen.getByText("S01E03 · Episode title 3").closest(".media-card");
     expect(card).not.toBeNull();
     expect(card).toHaveTextContent("Damaged file");
+  });
+
+  it("keeps the page's library on episode links and prefetches", () => {
+    render(
+      <MemoryRouter>
+        <SeasonEpisodeGrid
+          isLoading={false}
+          libraryId={4}
+          episodes={[
+            {
+              content_id: "ep-1",
+              season_number: 1,
+              episode_number: 1,
+              title: "Episode title 1",
+              overview: "",
+              air_date: null,
+              runtime: 42,
+              still_url: "",
+              still_thumbhash: "",
+              files: [],
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    const hrefs = screen
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href"))
+      .filter((href) => href?.startsWith("/item/"));
+    expect(hrefs).toEqual(["/item/ep-1?libraryId=4", "/item/ep-1?libraryId=4"]);
+    expect(prefetchLibraries).toEqual([4]);
+    // The card menu builds Play links, and playback stays unscoped.
+    expect(capturedMenuProps[0]).not.toHaveProperty("libraryId");
   });
 });

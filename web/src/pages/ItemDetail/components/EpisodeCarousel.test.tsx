@@ -11,8 +11,13 @@ const capturedMenuProps: Record<string, unknown>[] = [];
 const prefetchEpisodeDetail = vi.hoisted(() => vi.fn());
 const spoilerPrefs = vi.hoisted(() => ({ hideImages: false, hideOverviews: false }));
 
+const prefetchLibraries = vi.hoisted((): (number | undefined)[] => []);
+
 vi.mock("@/hooks/queries/catalogRead", () => ({
-  usePrefetchCatalogItemDetail: () => prefetchEpisodeDetail,
+  usePrefetchCatalogItemDetail: (libraryId?: number) => {
+    prefetchLibraries.push(libraryId);
+    return prefetchEpisodeDetail;
+  },
 }));
 
 vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
@@ -109,7 +114,26 @@ it("suppresses a protected still placeholder until the image loads", () => {
 describe("EpisodeCarousel", () => {
   beforeEach(() => {
     capturedMenuProps.length = 0;
+    prefetchLibraries.length = 0;
     prefetchEpisodeDetail.mockClear();
+  });
+
+  it("keeps the page's library on episode links and prefetches", () => {
+    render(
+      <MemoryRouter>
+        <EpisodeCarousel
+          currentEpisodeNumber={1}
+          episodes={[episode(1, { title: "Pilot" }), episode(2, { title: "Next" })]}
+          libraryId={4}
+        />
+      </MemoryRouter>,
+    );
+
+    const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
+    expect(new Set(hrefs)).toEqual(new Set(["/item/ep-1?libraryId=4", "/item/ep-2?libraryId=4"]));
+    expect(prefetchLibraries).toEqual([4]);
+    // The card menus build Play links, and playback stays unscoped.
+    expect(capturedMenuProps.every((props) => !("libraryId" in props))).toBe(true);
   });
 
   it("prefetches only after a card shows sustained navigation intent", () => {
