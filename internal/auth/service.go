@@ -210,19 +210,26 @@ func (s *Service) CompatLogin(ctx context.Context, username, password, deviceNam
 // would match as the full password and lose its PIN.
 //
 // The call spends one attempt of the name's budget, as LoginWithProvider
-// does, and a second one when it has a fallback to try.
-func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, password, fallback, deviceName, ip string) (pair *TokenPair, user *models.User, usedFallback bool, err error) {
-	key, err := s.reserveSignIn(ctx, username)
+// does, and a second one when it has a fallback to try. budgetNames, when
+// given, are the names whose budgets it spends in place of username's: a
+// caller that resolved username from what was typed by looking accounts up
+// passes names that depend only on the typed text, so which budget refuses
+// the sign-in cannot tell a stranger what the lookup found.
+func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, password, fallback, deviceName, ip string, budgetNames ...string) (pair *TokenPair, user *models.User, usedFallback bool, err error) {
+	if len(budgetNames) == 0 {
+		budgetNames = []string{username}
+	}
+	keys, err := s.reserveSignIn(ctx, budgetNames...)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	defer func() { s.finishSignIn(ctx, key, err) }()
+	defer func() { s.finishSignIn(ctx, keys, err) }()
 	if fallback != "" {
 		// A fallback is a second password that may be checked, so it spends a
 		// second attempt up front, for every name: charging it only where the
 		// fallback runs (local accounts) would tell names apart by how soon
 		// they lock.
-		if _, err = s.reserveSignIn(ctx, username); err != nil {
+		if _, err = s.reserveSignIn(ctx, budgetNames...); err != nil {
 			return nil, nil, false, err
 		}
 	}
@@ -267,11 +274,11 @@ func (s *Service) LoginWithProvider(
 	deviceName string,
 	ip string,
 ) (pair *TokenPair, user *models.User, err error) {
-	key, err := s.reserveSignIn(ctx, username)
+	keys, err := s.reserveSignIn(ctx, username)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer func() { s.finishSignIn(ctx, key, err) }()
+	defer func() { s.finishSignIn(ctx, keys, err) }()
 	if providerID == "" {
 		routed, err := s.routePasswordLogin(ctx, username)
 		if err != nil {

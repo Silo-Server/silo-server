@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -124,5 +126,25 @@ func TestLoginAccountNameWithHashDB(t *testing.T) {
 	}
 	if len(directory.passwords) != 1 || directory.passwords[0] != "directory-secret" {
 		t.Fatalf("%s#Kids: directory asked %q, want one attempt for the unprovisioned name", unprovisioned, directory.passwords)
+	}
+
+	// The sign-in budget counts the whole typed name and the part before its
+	// '#', whichever account the name resolves to. A lock on either refuses an
+	// existing literal '#' account and a name with no account alike, so the
+	// lock does not reveal which one exists.
+	missing := fmt.Sprintf("jfnohash-%d#1234", suffix)
+	defer svc.SetSignInAttempts(nil)
+	for _, part := range []string{"whole", "prefix"} {
+		svc.SetSignInAttempts(ratelimit.NewMemoryAttemptLimiter(ratelimit.AttemptPolicy{MaxAttempts: 1, Window: time.Minute}))
+		for _, name := range []string{single.Username, missing} {
+			lock := name
+			if part == "prefix" {
+				lock, _, _ = strings.Cut(name, "#")
+			}
+			_, _, _ = svc.LoginWithProvider(ctx, "", lock, "wrong", "test", "")
+			if _, err := resolver.Resolve(ctx, name, password, "test", ""); !errors.As(err, new(*auth.SignInThrottledError)) {
+				t.Fatalf("%s with the %s name locked: error = %v, want the sign-in refused as throttled", name, part, err)
+			}
+		}
 	}
 }

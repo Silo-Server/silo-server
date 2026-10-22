@@ -105,7 +105,7 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 	basePw, pinCandidate := auth.SplitPasswordPIN(password)
 	// CompatLogin refuses a temporary password: Jellyfin clients cannot run the
 	// password change it requires.
-	tokenPair, user, usedFallback, err := r.authService.CompatLoginWithLocalFallback(ctx, accountUsername, password, basePw, userAgent, remoteIP)
+	tokenPair, user, usedFallback, err := r.authService.CompatLoginWithLocalFallback(ctx, accountUsername, password, basePw, userAgent, remoteIP, signInBudgetNames(combinedUsername)...)
 	if err != nil {
 		return nil, mapAuthError(err)
 	}
@@ -297,6 +297,20 @@ func (r *LoginResolver) parseLogin(ctx context.Context, combinedUsername string)
 		return whole, "", false, nil
 	}
 	return accountUsername, profileName, true, nil
+}
+
+// signInBudgetNames are the names whose sign-in budgets a Jellyfin sign-in
+// spends: the whole typed name and the account part before its last '#'.
+// parseLogin signs in as one of the two after looking accounts up; spending
+// both, whichever it picks, keeps the lock from telling a stranger which
+// account exists.
+func signInBudgetNames(combinedUsername string) []string {
+	whole := strings.TrimSpace(combinedUsername)
+	accountUsername, _, _, err := parseProfileLogin(combinedUsername)
+	if err != nil {
+		return []string{whole}
+	}
+	return []string{accountUsername, whole}
 }
 
 func parseProfileLogin(username string) (accountUsername string, profileName string, hasExplicitProfile bool, err error) {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 )
@@ -49,30 +50,42 @@ func signInAttemptKey(name string) string {
 	return "signin_name:" + hex.EncodeToString(sum[:])
 }
 
-// reserveSignIn counts one password attempt for name. On a locked name it
-// returns a *SignInThrottledError and the caller must not check the password;
-// a request whose context is done gets the context's error instead. The
-// caller passes the returned key to finishSignIn.
-func (s *Service) reserveSignIn(ctx context.Context, name string) (string, error) {
+// reserveSignIn counts one password attempt against the budget of each of
+// names, in order, skipping repeats. When a name is locked it returns a
+// *SignInThrottledError and the caller must not check the password; a request
+// whose context is done gets the context's error instead. The caller passes
+// the returned keys to finishSignIn.
+func (s *Service) reserveSignIn(ctx context.Context, names ...string) ([]string, error) {
 	if s.signInAttempts == nil {
-		return "", nil
+		return nil, nil
 	}
-	key := signInAttemptKey(name)
-	if retryAfter, ok := s.signInAttempts.Reserve(ctx, key); !ok {
-		if err := ctx.Err(); err != nil {
-			return "", err
+	keys := make([]string, 0, len(names))
+	for _, name := range names {
+		key := signInAttemptKey(name)
+		if slices.Contains(keys, key) {
+			continue
 		}
-		return "", &SignInThrottledError{RetryAfter: retryAfter}
+		if retryAfter, ok := s.signInAttempts.Reserve(ctx, key); !ok {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, &SignInThrottledError{RetryAfter: retryAfter}
+		}
+		keys = append(keys, key)
 	}
-	return key, nil
+	return keys, nil
 }
 
-// finishSignIn clears the name's count once a password matched: the sign-in
+// finishSignIn clears the names' counts once a password matched: the sign-in
 // succeeded, or a compatibility sign-in found a temporary password it cannot
 // change. Every other outcome, outages included, keeps the attempt counted.
-// The count is cleared even when the client has already hung up.
-func (s *Service) finishSignIn(ctx context.Context, key string, err error) {
-	if key != "" && (err == nil || errors.Is(err, ErrPasswordChangeRequired)) {
-		s.signInAttempts.Reset(context.WithoutCancel(ctx), key)
+// The counts are cleared even when the client has already hung up.
+func (s *Service) finishSignIn(ctx context.Context, keys []string, err error) {
+	if err != nil && !errors.Is(err, ErrPasswordChangeRequired) {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	for _, key := range keys {
+		s.signInAttempts.Reset(ctx, key)
 	}
 }

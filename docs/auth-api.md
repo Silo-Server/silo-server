@@ -380,8 +380,10 @@ many addresses the attempts come from: v1 and v2 `login`, Jellyfin
 `linkAccountIdentityWithCredentials`, which spends the budget of the directory username
 it checks. Names are trimmed and compared without regard to case, as sign-in looks up
 accounts, so ` Alice` and `alice` share one budget; a username and the same account's
-email address are two names. A name with no account has a budget like any other and is
-refused the same way, so the budget does not reveal which names exist.
+email address are two names. A Jellyfin name with a `#`, such as `alice#Kids`, spends the
+budgets of the whole name and of the part before the `#`, whichever account it signs in
+to. A name with no account has a budget like any other and is refused the same way, so
+the budget does not reveal which names exist.
 
 The limit is `ratelimit.SignInNamePolicy`: ten attempts per name. The first attempt
 starts a 15-minute window, and the tenth locks the name for 15 minutes from that attempt.
