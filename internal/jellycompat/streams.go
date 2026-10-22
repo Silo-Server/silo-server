@@ -3954,7 +3954,8 @@ func compatMasterVideoCodec(video models.VideoTrack) string {
 func compatAV1CodecString(video models.VideoTrack) string {
 	bitDepth := models.NormalizeVideoBitDepth(video.BitDepth, video.PixelFormat, video.Profile)
 	if !strings.EqualFold(strings.TrimSpace(video.Profile), "main") ||
-		video.Level <= 0 || video.Level > 31 || (bitDepth != 8 && bitDepth != 10) {
+		video.Level <= 0 || video.Level > 31 || (bitDepth != 8 && bitDepth != 10) ||
+		!compatShortCodecStringColor(video) {
 		return ""
 	}
 	return fmt.Sprintf("av01.0.%02dM.%02d", video.Level, bitDepth)
@@ -3977,7 +3978,7 @@ func compatVP9CodecString(video models.VideoTrack) string {
 		return ""
 	}
 	bitDepth := models.NormalizeVideoBitDepth(video.BitDepth, video.PixelFormat, video.Profile)
-	if bitDepth != 8 && bitDepth != 10 && bitDepth != 12 {
+	if (bitDepth != 8 && bitDepth != 10 && bitDepth != 12) || !compatShortCodecStringColor(video) {
 		return ""
 	}
 	if video.Level > 0 {
@@ -3993,6 +3994,25 @@ func compatVP9CodecString(video models.VideoTrack) string {
 		}
 	}
 	return ""
+}
+
+// compatShortCodecStringColor reports whether the track has the color the
+// short av01 and vp09 forms imply when their optional fields are left out:
+// not monochrome, limited range, and BT.709 or untagged primaries, transfer
+// and matrix. HDR, full-range and monochrome streams get no CODECS entry
+// rather than one that declares BT.709 SDR.
+func compatShortCodecStringColor(video models.VideoTrack) bool {
+	if strings.HasPrefix(strings.ToLower(video.PixelFormat), "gray") || strings.EqualFold(strings.TrimSpace(video.ColorRange), "pc") {
+		return false
+	}
+	for _, value := range []string{video.ColorPrimaries, video.ColorTransfer, video.ColorSpace} {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "", "unknown", "bt709": //nolint:goconst // ffprobe color names
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // compatVP9Levels lists each VP9 level, coded as vpcC writes it, with its

@@ -1550,11 +1550,20 @@ func TestGenerateCompatCopyVideoMasterManifestCodecsListEveryFormat(t *testing.T
 		// The catalog drops a zero level, so level 2.0 reads like an unknown one.
 		{"av1 level 0", models.VideoTrack{Codec: "av1", Profile: "Main", Level: 0, BitDepth: 8, Width: 3840, Height: 2160}, aac, false, ""},
 		{"av1 unknown level", models.VideoTrack{Codec: "av1", Profile: "Main", Level: -99, BitDepth: 8, Width: 640, Height: 360}, aac, false, ""},
+		{"av1 hdr10", models.VideoTrack{
+			Codec: "av1", Profile: "Main", Level: 12, BitDepth: 10, Width: 3840, Height: 2160,
+			ColorPrimaries: "bt2020", ColorTransfer: "smpte2084", ColorSpace: "bt2020nc", ColorRange: "tv",
+		}, aac, false, ""},
+		{"av1 monochrome", models.VideoTrack{Codec: "av1", Profile: "Main", Level: 1, BitDepth: 10, PixelFormat: "gray10le", Width: 640, Height: 360}, aac, false, ""},
 		{"av1 high profile", models.VideoTrack{Codec: "av1", Profile: "High", Level: 8, BitDepth: 8, Width: 1920, Height: 1080}, aac, false, ""},
 		{"vp9 profile 0", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: -99, BitDepth: 8, Width: 640, Height: 360, FrameRate: "24.000"}, aac, false, "vp09.00.21.08,mp4a.40.2"},
 		// FFmpeg's vpcC level ignores the frame rate; 1080p60 stays level 4.
 		{"vp9 profile 2", models.VideoTrack{Codec: "vp9", Profile: "Profile 2", Level: -99, BitDepth: 10, Width: 1920, Height: 1080, FrameRate: "60.000"}, aac, false, "vp09.02.40.10,mp4a.40.2"},
 		{"vp9 probed level", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: 41, BitDepth: 8, Width: 1920, Height: 1080}, aac, false, "vp09.00.41.08,mp4a.40.2"},
+		{"vp9 hlg", models.VideoTrack{
+			Codec: "vp9", Profile: "Profile 2", Level: -99, BitDepth: 10, Width: 1920, Height: 1080,
+			ColorPrimaries: "bt2020", ColorTransfer: "arib-std-b67", ColorSpace: "bt2020nc", ColorRange: "tv",
+		}, aac, false, ""},
 		{"vp9 profile 1", models.VideoTrack{Codec: "vp9", Profile: "Profile 1", Level: -99, BitDepth: 8, Width: 640, Height: 360}, aac, false, ""},
 		{"vp9 unknown size", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: -99, BitDepth: 8}, aac, false, ""},
 		{"h264 unknown level", models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080}, aac, false, ""},
