@@ -224,6 +224,11 @@ func TestMetadataAICapabilityAndTranslate(t *testing.T) {
 	if job.ID != "42" || job.TargetLanguage != "de" || job.Status != "pending" || fake.lastLang != "de" || fake.lastUser != 1 || fake.lastFilter.UserID != 1 {
 		t.Fatalf("job = %+v fake = %+v", job, fake)
 	}
+	// Native episode pages open under a library that holds only the series,
+	// so the native translate request checks those libraries too.
+	if !fake.lastFilter.SeriesLibraryCoversEpisodes {
+		t.Fatalf("filter = %+v, want SeriesLibraryCoversEpisodes", fake.lastFilter)
+	}
 	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/items/movie:heat-1995/translate-description", `{"target_language":""}`, viewerHeaders()), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.target_language" {
 		t.Fatalf("errors = %+v", p.Errors)

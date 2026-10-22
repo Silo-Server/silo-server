@@ -203,12 +203,15 @@ func (h *MetadataAIHandler) viewerPendingLanguage(ctx context.Context, target me
 	if matches(pending) || h.ItemLibraries == nil {
 		return pending, nil
 	}
-	// An episode page opens under a library that holds the episode or its
-	// series (catalog.AccessFilter.SeriesLibraryCoversEpisodes), so both sets
-	// count; seasons and items use the item the request authorizes.
-	libraryIDs, err := h.ItemLibraries.LibraryIDsForItem(ctx, target.accessContentID)
-	if err != nil {
-		return "", err
+	// An episode page opens under the episode's own libraries, and on the
+	// native reads (catalog.AccessFilter.SeriesLibraryCoversEpisodes) also under
+	// its series'; seasons and items use the item the request authorizes.
+	var libraryIDs []int
+	if target.episode == nil || filter.SeriesLibraryCoversEpisodes {
+		libraryIDs, err = h.ItemLibraries.LibraryIDsForItem(ctx, target.accessContentID)
+		if err != nil {
+			return "", err
+		}
 	}
 	if target.episode != nil {
 		episodeLibraryIDs, err := h.ItemLibraries.LibraryIDsForItem(ctx, target.episode.ContentID)
