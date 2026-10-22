@@ -395,6 +395,9 @@ already created when its sign-in was refused answers as before (`500`, or
 first OAuth sign-in that has to create the account fails with `login_failed`, and the
 person starts it again.
 
+A refused sign-in still spends an attempt of the name's budget, like any other failed
+one ([Sign-in attempts per name](#sign-in-attempts-per-name)).
+
 Profile PIN checks wait in a queue of their own that takes every other turn, so a burst
 of sign-ins does not keep a signed-in household from switching profiles; see
 [Profile PINs](#profile-pins). A Jellyfin or Audiobookshelf sign-in with `password#PIN`
@@ -420,7 +423,8 @@ While a name is locked every attempt is refused before any password is checked, 
 right password included. A successful sign-in while the name is not locked clears the
 count, and so does the right temporary password on a Jellyfin or Audiobookshelf sign-in,
 which is refused only because those apps cannot change it. Every other failure counts,
-including one caused by an unavailable directory or database. A count that never reaches
+including one caused by an unavailable directory or database, or by a server too busy to
+check the password ([`503`](#when-the-server-is-too-busy-to-check-a-password)). A count that never reaches
 ten expires 15 minutes after its first attempt. A Jellyfin or Audiobookshelf sign-in whose
 password ends in a `#PIN` part counts twice, whether or not the name has a local account,
 because it may check the password both with and without that part.
