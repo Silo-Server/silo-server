@@ -47,7 +47,7 @@ func TestBuildPlaybackSourceHEVCEncodingRequiresFlagAndFMP4Profile(t *testing.T)
 				if !source.SupportsTranscoding {
 					t.Fatal("HEVC fMP4 route not advertised")
 				}
-				dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", source)
+				dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", source)
 				if dto.TranscodingContainer != "mp4" {
 					t.Fatalf("TranscodingContainer = %q, want mp4", dto.TranscodingContainer)
 				}

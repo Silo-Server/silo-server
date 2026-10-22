@@ -22,10 +22,11 @@ type TrickplaySheets interface {
 
 // The Jellyfin trickplay routes. Clients read the Trickplay member of an item
 // for the layout and fetch sheets by position; the playlist form serves
-// players that read HLS image playlists.
+// players that read HLS image playlists. The item parameter is {id}, as on the
+// other media routes, so a PlaySessionId grant can authorize a sheet.
 const (
-	compatTrickplaySheetRoute    = "/Videos/{itemId}/Trickplay/{width}/{index}.jpg"
-	compatTrickplayPlaylistRoute = "/Videos/{itemId}/Trickplay/{width}/tiles.m3u8"
+	compatTrickplaySheetRoute    = "/Videos/{id}/Trickplay/{width}/{index}.jpg"
+	compatTrickplayPlaylistRoute = "/Videos/{id}/Trickplay/{width}/tiles.m3u8"
 	// compatMediaSourceIDQuery names the media source a trickplay request is
 	// for; clients spell it in either case.
 	compatMediaSourceIDQuery = "MediaSourceId"
@@ -79,8 +80,10 @@ func (h *PlaybackHandler) HandleTrickplaySheet(w http.ResponseWriter, r *http.Re
 }
 
 // HandleTrickplayPlaylist serves an HLS image playlist of an item's sheets,
-// in the form Jellyfin writes: one segment per sheet, each tiled
-// EXT-X-TILES, sheet URLs carrying the caller's token.
+// in the form Jellyfin writes: one segment per sheet, each tiled EXT-X-TILES.
+// Jellyfin puts the caller's token on each sheet URL; Silo puts the
+// PlaySessionId of the caller's live play of that source instead, or nothing
+// when there is none, so a logged playlist never carries the login token.
 func (h *PlaybackHandler) HandleTrickplayPlaylist(w http.ResponseWriter, r *http.Request) {
 	session := SessionFromContext(r.Context())
 	if session == nil {
@@ -101,9 +104,16 @@ func (h *PlaybackHandler) HandleTrickplayPlaylist(w http.ResponseWriter, r *http
 		writeError(w, http.StatusNotFound, "NotFound", "Trickplay playlist not found")
 		return
 	}
-	query := url.Values{compatMediaSourceIDQuery: {h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))}}
-	if token, ok := ExtractToken(r); ok {
-		query.Set("ApiKey", token)
+	sourceID := h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
+	query := url.Values{compatMediaSourceIDQuery: {sourceID}}
+	grant, err := h.trickplayGrant(r.Context(), session, chiURLParam(r, "id"), sourceID)
+	if err != nil {
+		slog.WarnContext(r.Context(), "jellycompat: listing plays for a trickplay playlist failed", "component", "jellycompat", "error", err)
+		writeSessionCheckUnavailable(w)
+		return
+	}
+	if grant != "" {
+		query.Set("PlaySessionId", grant)
 	}
 	w.Header().Set("Content-Type", "application/x-mpegURL")
 	w.Header().Set("Cache-Control", "private, no-cache")
@@ -134,14 +144,14 @@ func trickplayPlaylist(grid catalog.TrickplayGrid, query string) string {
 // the item's versions this account can see, and answers the request itself
 // when there is none. The file is the mediaSourceId query's, else the route's
 // when it names a media source, else the one this token is playing for the
-// item (Swiftfin and Findroid send no mediaSourceId), else the item's default
-// version.
+// item (Swiftfin and Findroid send no mediaSourceId), preferring the play the
+// request's PlaySessionId names, else the item's default version.
 func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Request, session *Session) (catalog.FileVersion, bool) {
 	if h.content == nil {
 		writeError(w, http.StatusServiceUnavailable, "Unavailable", "Catalog unavailable")
 		return catalog.FileVersion{}, false
 	}
-	contentID, fileID, err := decodeItemOrMediaSourceID(r.Context(), h.codec, chiURLParam(r, "itemId"))
+	contentID, fileID, err := decodeItemOrMediaSourceID(r.Context(), h.codec, chiURLParam(r, "id"))
 	if err != nil {
 		writeItemIDError(w, r, err)
 		return catalog.FileVersion{}, false
@@ -164,7 +174,7 @@ func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Reques
 		return catalog.FileVersion{}, false
 	}
 	if fileID == 0 {
-		fileID = int64(h.playingFile(r.Context(), session, contentID))
+		fileID = int64(h.playingFile(r.Context(), session, contentID, newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")))
 	}
 	if fileID == 0 {
 		return detail.Versions[0], true
@@ -178,12 +188,40 @@ func (h *PlaybackHandler) trickplayVersion(w http.ResponseWriter, r *http.Reques
 	return catalog.FileVersion{}, false
 }
 
+// activePlayLister lists a token's live negotiations.
+type activePlayLister interface {
+	ListActiveForToken(context.Context, string) ([]PlaybackSession, error)
+}
+
+// trickplayGrant is the PlaySessionId a sheet URL can carry in place of the
+// caller's token: the caller's most recent live play that PlaybackSessionAuth
+// accepts for a sheet of routeItemID (the item as the request path names it)
+// and sourceID. It is empty when there is none, and an error only when the
+// plays could not be read.
+func (h *PlaybackHandler) trickplayGrant(ctx context.Context, session *Session, routeItemID, sourceID string) (string, error) {
+	lister, ok := h.playbackStore.(activePlayLister)
+	if !ok {
+		return "", nil
+	}
+	plays, err := lister.ListActiveForToken(ctx, session.Token)
+	if err != nil {
+		return "", err
+	}
+	var grant PlaybackSession
+	for _, play := range plays {
+		if playbackGrantCovers(&play, routeItemID, sourceID) && (grant.ID == "" || play.UpdatedAt.After(grant.UpdatedAt)) {
+			grant = play
+		}
+	}
+	return grant.ID, nil
+}
+
 // playingFile is the file this token most recently selected for contentID,
 // either during negotiation or playback, or zero when no source is selected.
-func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, contentID string) int {
-	lister, ok := h.playbackStore.(interface {
-		ListActiveForToken(context.Context, string) ([]PlaybackSession, error)
-	})
+// A play named by playSessionID wins over a more recent one, so a sheet
+// request authorized by that play's grant stays on its source.
+func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, contentID, playSessionID string) int {
+	lister, ok := h.playbackStore.(activePlayLister)
 	if !ok {
 		return 0
 	}
@@ -194,7 +232,8 @@ func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, con
 	fileID := 0
 	var latest PlaybackSession
 	for _, play := range plays {
-		if play.ItemID != contentID || (fileID != 0 && !play.UpdatedAt.After(latest.UpdatedAt)) {
+		named := playSessionID != "" && play.ID == playSessionID
+		if play.ItemID != contentID || (!named && fileID != 0 && !play.UpdatedAt.After(latest.UpdatedAt)) {
 			continue
 		}
 		selected := play.UpstreamMediaFileID
@@ -211,9 +250,13 @@ func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, con
 				selected = native.MediaFileID
 			}
 		}
-		if selected != 0 {
-			fileID, latest = selected, play
+		if selected == 0 {
+			continue
 		}
+		if named {
+			return selected
+		}
+		fileID, latest = selected, play
 	}
 	return fileID
 }

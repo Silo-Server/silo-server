@@ -458,14 +458,21 @@ func touchStaticStreamGrant(store CompatPlaybackStore, playSession *PlaybackSess
 }
 
 func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool {
-	if session == nil || session.Terminal || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}
 	itemID := firstNonEmpty(chi.URLParam(r, "id"), chi.URLParam(r, "routeItemId"))
-	if itemID == "" || !mediaSourceIDsEqual(itemID, session.RouteItemID) {
+	sourceID := firstNonEmpty(chi.URLParam(r, "routeMediaSourceId"), newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId"))
+	return playbackGrantCovers(session, itemID, sourceID)
+}
+
+// playbackGrantCovers reports whether a live negotiation authorizes media
+// requests for routeItemID, the item as the request path names it, and for
+// sourceID when the request names one.
+func playbackGrantCovers(session *PlaybackSession, routeItemID, sourceID string) bool {
+	if session == nil || session.Terminal || routeItemID == "" || !mediaSourceIDsEqual(routeItemID, session.RouteItemID) {
 		return false
 	}
-	sourceID := firstNonEmpty(chi.URLParam(r, "routeMediaSourceId"), newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId"))
 	if sourceID == "" {
 		return true
 	}

@@ -351,11 +351,14 @@ without previews is absent. `GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`
 proxies a sheet (Roku does not follow image redirects) with an `ETag` and
 `private, no-cache`, requiring revalidation after a source switch or
 regeneration, and `…/tiles.m3u8` writes Jellyfin's HLS image
-playlist with the caller's token on each sheet URL. Both pick the version
+playlist. Where Jellyfin puts the caller's token on each sheet URL, Silo puts
+the `PlaySessionId` of the caller's most recent live play of that item and
+source, or no credential when there is none. Sheets are media requests (see
+below); the playlist requires a login/API token. Both pick the version
 from `mediaSourceId`, else from a media-source id in the item position, else
 the version this token is playing for the item (Swiftfin and Findroid send
-no `mediaSourceId`), else the default version, and serve only versions the
-account can see. The selected playback file is persisted in compat session
+no `mediaSourceId`), preferring the play a `PlaySessionId` names, else the
+default version, and serve only versions the account can see. The selected playback file is persisted in compat session
 state, so previews follow that source across API replicas and restarts.
 An index past the last sheet answers `404`.
 
@@ -415,6 +418,12 @@ Media requests require a login/API token or an unexpired `PlaySessionId` grant.
 A grant authorizes GET/HEAD for its negotiated item and source; catalog item and
 source IDs alone are not credentials. An invalid explicit token does not fall
 back to a playback grant. Revoked owner credentials invalidate the grant.
+Media URLs that Silo builds (`DirectStreamUrl`, `TranscodingUrl`, subtitle
+`DeliveryUrl`, attachment URLs, trickplay playlist sheets) carry only
+`PlaySessionId`, never the login token, so a URL recorded by a proxy or player
+log grants that media only until the play session ends. A client that fetches
+one after the play session expired or stopped, or after a newer negotiation
+from the same device replaced an unstarted one, must send its own token.
 
 Copied-video HLS master playlists name copied audio as Jellyfin 12 does:
 HE-AAC as `mp4a.40.5`, TrueHD as `mlpa`, and DTS as `dtsc`, `dtsh` (DTS-HD HRA

@@ -142,7 +142,7 @@ func TestBuildPlaybackSourceHonorsProgressiveRemuxRoutingPolicy(t *testing.T) {
 				t.Fatal("SupportsTranscoding = false, want negotiated HLS fallback")
 			}
 
-			dto := handler.mediaSourceDTO("item", "play", "token", source)
+			dto := handler.mediaSourceDTO("item", "play", source)
 			if (dto.DirectStreamURL != "") != test.wantDirectStream {
 				t.Fatalf("DirectStreamURL = %q, advertised direct stream = %v", dto.DirectStreamURL, test.wantDirectStream)
 			}

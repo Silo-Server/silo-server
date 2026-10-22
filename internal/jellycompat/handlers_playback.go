@@ -2373,7 +2373,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		}
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
-		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
+		dto := h.mediaSourceDTO(routeItemID, playSessionID, source)
 		// Jellyfin Web stops retrying a failed stream with copy refused once the
 		// stream URL names both refusals; append them the way Jellyfin does.
 		if dto.TranscodingURL != "" {
@@ -2412,7 +2412,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 					IsHearingImpaired:      dl.HearingImpaired,
 					IsTextSubtitleStream:   true,
 					SupportsExternalStream: true,
-					DeliveryURL:            subtitleDeliveryURL(routeItemID, source.ID, streamIndex, format, session.Token, playSessionID),
+					DeliveryURL:            subtitleDeliveryURL(routeItemID, source.ID, streamIndex, format, playSessionID),
 					DeliveryMethod:         "External",
 					Path:                   downloadedSubtitlePath(source.Version, dl),
 					IsExternalURL:          boolPtr(false),
@@ -2714,7 +2714,7 @@ func supportedHLSRemuxAudioStreamIndexes(version catalog.FileVersion, profile De
 	return indexes
 }
 
-func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken string, source PlaybackMediaSource) mediaSourceDTO {
+func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID string, source PlaybackMediaSource) mediaSourceDTO {
 	selectedAudioStreamIndex := effectiveCompatAudioStreamIndex(source)
 	dto := mediaSourceDTO{
 		SiloSeekReanchor:                    source.SiloSeekReanchor,
@@ -2749,7 +2749,7 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 		Bitrate:                             source.Version.Bitrate * 1000,
 		DefaultAudioStreamIndex:             selectedAudioStreamIndex,
 		DefaultSubtitleStreamIndex:          effectiveCompatSubtitleStreamIndex(source),
-		MediaStreams:                        buildMediaStreamsWithSelection(routeItemID, source.ID, source.Version, selectedAudioStreamIndex, compatStreamSubtitleSelection(source), compatToken, playSessionID),
+		MediaStreams:                        buildMediaStreamsWithSelection(routeItemID, source.ID, source.Version, selectedAudioStreamIndex, compatStreamSubtitleSelection(source), playSessionID),
 	}
 	for i := range dto.MediaStreams {
 		stream := &dto.MediaStreams[i]
@@ -2766,7 +2766,7 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 			stream.DeliveryMethod = "External"
 		}
 		if delivery.Format != "" {
-			stream.DeliveryURL = subtitleDeliveryURL(routeItemID, source.ID, stream.Index, delivery.Format, compatToken, playSessionID)
+			stream.DeliveryURL = subtitleDeliveryURL(routeItemID, source.ID, stream.Index, delivery.Format, playSessionID)
 			if stream.IsExternal {
 				stream.Path = fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, source.ID, stream.Index, delivery.Format)
 			}
@@ -2786,12 +2786,12 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 	}
 	if source.SupportsDirectPlay || source.SupportsDirectStream {
 		// Only direct play serves the original file; direct stream executes remux.
+		// PlaySessionId authorizes the URL, as for subtitleDeliveryURL.
 		basePath := compatVideoPath(routeItemID, false)
 		dto.DirectStreamURL = fmt.Sprintf(
-			"%s/stream?static=%t&mediaSourceId=%s&api_key=%s&PlaySessionId=%s",
+			"%s/stream?static=%t&mediaSourceId=%s&PlaySessionId=%s",
 			basePath, source.SupportsDirectPlay,
 			url.QueryEscape(source.ID),
-			url.QueryEscape(compatToken),
 			url.QueryEscape(playSessionID),
 		)
 	}
@@ -2818,10 +2818,10 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 }
 
 func buildMediaStreams(routeItemID, mediaSourceID string, version catalog.FileVersion) []mediaStreamDTO {
-	return buildMediaStreamsWithSelection(routeItemID, mediaSourceID, version, nil, nil, "", "")
+	return buildMediaStreamsWithSelection(routeItemID, mediaSourceID, version, nil, nil, "")
 }
 
-func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version catalog.FileVersion, selectedAudioStreamIndex, selectedSubtitleStreamIndex *int, compatToken, playSessionID string) []mediaStreamDTO {
+func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version catalog.FileVersion, selectedAudioStreamIndex, selectedSubtitleStreamIndex *int, playSessionID string) []mediaStreamDTO {
 	streams := make([]mediaStreamDTO, 0, len(version.VideoTracks)+len(version.AudioTracks)+len(version.SubtitleTracks))
 	effectiveAudioStreamIndex := selectedAudioStreamIndex
 	if effectiveAudioStreamIndex != nil && !isValidCompatAudioStreamIndex(version, *effectiveAudioStreamIndex) {
@@ -2902,6 +2902,13 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 		})
 	}
 
+	return append(streams, subtitleMediaStreams(routeItemID, mediaSourceID, version, selectedSubtitleStreamIndex, playSessionID)...)
+}
+
+// subtitleMediaStreams describes version's subtitle tracks, with delivery URLs
+// authorized by playSessionID.
+func subtitleMediaStreams(routeItemID, mediaSourceID string, version catalog.FileVersion, selectedSubtitleStreamIndex *int, playSessionID string) []mediaStreamDTO {
+	streams := make([]mediaStreamDTO, 0, len(version.SubtitleTracks))
 	for index, track := range version.SubtitleTracks {
 		streamIndex := subtitleTrackIndex(version, track, index)
 		format := subtitleRouteFormat(track.Codec)
@@ -2929,13 +2936,12 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			IsTextSubtitleStream:   !playback.NeedsBurnIn(track.Codec),
 			SupportsExternalStream: subtitleTrackStreamable(track.Codec, track.External),
 			AudioSpatialFormat:     "None",
-			DeliveryURL:            compatSubtitleExtractionURL(track, routeItemID, mediaSourceID, streamIndex, format, compatToken, playSessionID),
+			DeliveryURL:            compatSubtitleExtractionURL(track, routeItemID, mediaSourceID, streamIndex, format, playSessionID),
 			DeliveryMethod:         subtitleDeliveryMethod(track.External),
 			Path:                   subtitlePath(track, routeItemID, mediaSourceID, streamIndex, format),
 			IsExternalURL:          subtitleExternalURL(track),
 		})
 	}
-
 	return streams
 }
 
@@ -3645,19 +3651,16 @@ func compatVideoPath(routeItemID string, audioV2 bool) string {
 	return base
 }
 
-func subtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex int, format, compatToken, playSessionID string) string {
+// subtitleDeliveryURL is a subtitle stream URL authorized by its
+// PlaySessionId. It never carries the caller's token: the token authorizes the
+// whole account for as long as the login lasts, and a logged URL must grant at
+// most this play's media.
+func subtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex int, format, playSessionID string) string {
 	base := fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, mediaSourceID, streamIndex, format)
-	query := url.Values{}
-	if compatToken != "" {
-		query.Set("api_key", compatToken)
+	if playSessionID == "" {
+		return base
 	}
-	if playSessionID != "" {
-		query.Set("PlaySessionId", playSessionID)
-	}
-	if encoded := query.Encode(); encoded != "" {
-		return base + "?" + encoded
-	}
-	return base
+	return base + "?" + url.Values{"PlaySessionId": {playSessionID}}.Encode()
 }
 
 func subtitlePath(track catalog.VersionSubtitleTrack, routeItemID, mediaSourceID string, streamIndex int, format string) string {
@@ -3814,11 +3817,11 @@ func (h *PlaybackHandler) playbackUnavailable(w http.ResponseWriter, err error) 
 	}
 }
 
-func compatSubtitleExtractionURL(track catalog.VersionSubtitleTrack, item, source string, index int, format, token, session string) string {
+func compatSubtitleExtractionURL(track catalog.VersionSubtitleTrack, item, source string, index int, format, session string) string {
 	if !subtitleTrackStreamable(track.Codec, track.External) {
 		return ""
 	}
-	return subtitleDeliveryURL(item, source, index, format, token, session)
+	return subtitleDeliveryURL(item, source, index, format, session)
 }
 
 // Persist delivery for every text track so clients can enable tracks later.
