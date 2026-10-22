@@ -172,6 +172,7 @@ vi.mock("hls.js", () => ({
       BUFFER_EOS: "bufferEos",
     };
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
+    static ErrorDetails = { FRAG_LOAD_ERROR: "fragLoadError" };
     static isSupported = () => hlsJS.supported;
 
     handlers = new Map<string, (event: string, data: unknown) => void>();

@@ -2666,7 +2666,13 @@ export function VideoPlayer({
               },
             });
 
+            // A fragment load that errors is neither aborted nor given an
+            // end, so the meter is told it is done; hls.js retries it as a
+            // new load.
+            const failedLoads = new WeakSet<object>();
             hls.on(Hls.Events.ERROR, (_event, data) => {
+              if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR && data.stats)
+                failedLoads.add(data.stats);
               // A load error (refused, reset, HTTP failure) is the transport
               // failing, and so is a timeout with no data received. hls.js
               // times the whole load, so a timeout on a request that was
@@ -2765,7 +2771,7 @@ export function VideoPlayer({
               meter.watch(stats, () => ({
                 bytes: stats.loaded,
                 first: stats.loading.first,
-                done: stats.aborted || stats.loading.end > 0,
+                done: stats.aborted || stats.loading.end > 0 || failedLoads.has(stats),
               }));
             });
             hls.on(Hls.Events.FRAG_LOADED, (_event, { frag }) => {
@@ -2849,12 +2855,16 @@ export function VideoPlayer({
             const surface = engineSurfaceRef.current;
             if (destroyed || !surface) return;
             const meter = meterMedia(false);
+            // The engine numbers its reads from 0 on each attach, and a
+            // transport rebuilt for the plan measures into the same meter, so
+            // this attach's reads get keys of their own.
+            const reads: object[] = [];
             engineSession = attachBrowserEngine({
               video,
               surface,
               source: route.source,
               onMediaData: (request, bytes, first, last) => {
-                if (!destroyed) meter.received(request, bytes, first, last);
+                if (!destroyed) meter.received((reads[request] ??= {}), bytes, first, last);
               },
               onFailure: (failure) => {
                 if (destroyed) return;
