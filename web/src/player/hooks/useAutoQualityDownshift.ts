@@ -139,8 +139,14 @@ export function useAutoQualityDownshift(options: Options) {
   const requestedPlan = useRef<number | undefined>(undefined);
   const adoptedPlan = useRef<number | undefined>(undefined);
   const attempt = useRef<string | null | undefined>(undefined);
-  // The adopted plan is starting with play intent and has not played yet.
+  // A plan of the current attempt has been adopted. Only the attempt's first
+  // plan is a start; a later one replaces a source.
+  const attemptStarted = useRef(false);
+  // The attempt's first plan is starting with play intent and has not played yet.
   const starting = useRef(false);
+  // A source reload: the transport was emptied or replaced, and playback has
+  // not run since. Buffering meanwhile is the reload's, never a stall.
+  const reloading = useRef(false);
   // The adopted plan has played. Until it has, a seek, the player's own
   // start-position seek included, does not end the start's wait.
   const planRan = useRef(false);
@@ -221,6 +227,7 @@ export function useAutoQualityDownshift(options: Options) {
     window.addEventListener("pageshow", pageshow);
     adoptedPlan.current = undefined;
     attempt.current = latest.current.attemptId;
+    attemptStarted.current = false;
     return () => {
       window.removeEventListener("pagehide", pagehide);
       window.removeEventListener("pageshow", pageshow);
@@ -235,6 +242,7 @@ export function useAutoQualityDownshift(options: Options) {
     const c = controller.current;
     if (!c || options.attemptId === attempt.current) return;
     attempt.current = options.attemptId;
+    attemptStarted.current = false;
     c.event({ type: "new_attempt" }, now());
   }, [options.attemptId, options.sessionId]);
   useEffect(() => {
@@ -255,9 +263,11 @@ export function useAutoQualityDownshift(options: Options) {
     );
     if (isNewPlan) requestedPlan.current = undefined;
     const video = options.videoRef.current;
+    const firstOfAttempt = isNewPlan && !attemptStarted.current;
     if (isNewPlan) {
       starting.current = false;
       planRan.current = false;
+      attemptStarted.current = true;
     }
     if (isNewPlan && video) {
       // A plan adopted while the element is already playing fires no `playing`.
@@ -268,10 +278,17 @@ export function useAutoQualityDownshift(options: Options) {
         latest.current.playIntent?.() &&
         video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
       ) {
-        // The element waits for data before it plays, and fires no `waiting`.
-        starting.current = true;
-        c.event({ type: "play" }, now());
-        c.event({ type: "waiting" }, now());
+        if (firstOfAttempt) {
+          // The element waits for data before it plays, and fires no `waiting`.
+          starting.current = true;
+          c.event({ type: "play" }, now());
+          c.event({ type: "waiting" }, now());
+        } else {
+          // A replacement (a track or quality change, a lowering) replaces
+          // the source that played: its load is a source reload until it
+          // plays. One that never starts is the start deadline's.
+          reloading.current = true;
+        }
       }
     }
   }, [
@@ -298,7 +315,7 @@ export function useAutoQualityDownshift(options: Options) {
     // Buffering after a seek or a source reload is theirs until playback runs
     // again, including a seek made while paused.
     let seekSincePlaying = false;
-    let reloadSincePlaying = false;
+    reloading.current = false;
     let lastPosition = video.currentTime;
     const syncTrouble = () => {
       // A wait on a link that has gone silent is an outage too; one whose
@@ -325,7 +342,7 @@ export function useAutoQualityDownshift(options: Options) {
       stalledAt = undefined;
       rendererWait = false;
       seekSincePlaying = false;
-      reloadSincePlaying = false;
+      reloading.current = false;
       starting.current = false;
       planRan.current = true;
       send("playing");
@@ -339,7 +356,7 @@ export function useAutoQualityDownshift(options: Options) {
       // start. A renderer that is behind is still not the network.
       if (starting.current) return rendererBusy() ? "renderer" : undefined;
       if (planRan.current && (video.seeking || seekSincePlaying)) return "seek";
-      if (reloadSincePlaying) return "reload";
+      if (reloading.current) return "reload";
       if (video.paused) return "pause";
       if (rendererBusy()) return "renderer";
       return undefined;
@@ -370,7 +387,7 @@ export function useAutoQualityDownshift(options: Options) {
     const reload = () => {
       stalledAt = undefined;
       rendererWait = false;
-      reloadSincePlaying = true;
+      reloading.current = true;
       send("reload");
       // The new transport empties the element as it attaches; its start is
       // still the plan's wait.

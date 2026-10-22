@@ -211,6 +211,20 @@ it("times a plan's slow start as a wait, from adoption", () => {
   });
 });
 
+// Only the attempt's first plan is a start. A slow track change on Auto
+// replaces a source that played: its load is a source reload, which never
+// lowers, however long it takes.
+it("does not lower while a replacement plan loads slowly", () => {
+  const h = setup({ paused: true, playIntent: () => true });
+  h.send("playing");
+  h.advance(20_000);
+  h.rerender({ ...h.options, planRevision: 2, plan: { ...plan, plan_id: "p2" } });
+  h.send("emptied");
+  h.send("waiting");
+  h.advance(30_000);
+  expect(h.options.onReplan).not.toHaveBeenCalled();
+});
+
 it("keeps timing a slow start through the waiting that follows its reload", () => {
   const video = document.createElement("video");
   Object.defineProperty(video, "paused", { value: true, configurable: true });
