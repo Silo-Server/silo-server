@@ -136,16 +136,25 @@ it("does not keep the estimate of a lowering the player refused to send", () => 
 });
 
 // C9: the adapter reports a start that showed no frame by its own deadline.
-it.each<[string, BufferingMode, string, (c: BufferingQualityController) => void, boolean]>([
-  ["lowers on Auto in the always mode", "always", "auto", () => {}, true],
-  ["fails in the ask mode", "ask", "auto", () => {}, false],
-  ["fails in the never mode", "never", "auto", () => {}, false],
-  ["fails for a picked quality", "always", "4k", () => {}, false],
-  [
-    "fails after a Keep answer for the title",
-    "ask",
-    "auto",
-    (c) => {
+// After `before`, a later plan is adopted at 100 s; after `during`, its start,
+// it misses its deadline at 160 s. A row that lowers names its estimate.
+it.each<{
+  name: string;
+  mode?: BufferingMode;
+  quality?: string;
+  before?: (c: BufferingQualityController) => void;
+  later?: Partial<typeof plan>;
+  during?: (c: BufferingQualityController) => void;
+  estimate?: number;
+}>([
+  { name: "lowers on Auto in the always mode", estimate: 44100 },
+  { name: "fails in the ask mode", mode: "ask" },
+  { name: "fails in the never mode", mode: "never" },
+  { name: "fails for a picked quality", quality: "4k" },
+  {
+    name: "fails after a Keep answer for the title",
+    mode: "ask",
+    before: (c) => {
       c.event({ type: "playing" }, 0);
       c.event({ type: "waiting" }, 20000);
       c.tick(26000);
@@ -153,33 +162,70 @@ it.each<[string, BufferingMode, string, (c: BufferingQualityController) => void,
       // The viewer switches to always afterwards.
       c.mode = "always";
     },
-    false,
-  ],
-])("a start that misses its deadline %s", (_name, mode, quality, answer, lowers) => {
-  const outputs: unknown[] = [];
-  const c = new BufferingQualityController(mode, (output) => outputs.push(output), 0);
-  c.event({ type: "plan_adopted", plan: { ...plan, quality } }, 0);
-  answer(c);
-  // A later plan of the same quality shows no frame by its deadline.
-  c.event({ type: "plan_adopted", plan: { ...plan, plan_id: "p2", quality } }, 100000);
-  outputs.length = 0;
-  expect(c.startDeadlinePassed(160000)).toBe(lowers);
-  expect(outputs).toEqual(
-    lowers
-      ? [
-          {
-            type: "replan",
-            body: {
-              operation: "quality_change",
-              quality_preference: "auto",
-              bandwidth_estimate_kbps: 44100,
-              bandwidth_estimate_source: "observed_rebuffer",
+  },
+  {
+    name: "fails while the viewer's pick is pending",
+    during: (c) => c.event({ type: "pick_sent" }, 150000),
+  },
+  {
+    name: "lowers again when the lowered plan does not start either",
+    before: (c) => expect(c.startDeadlinePassed(60000)).toBe(true),
+    later: {
+      delivered_kbps: 10000,
+      available_qualities: [
+        { label: "1080p", bitrate_kbps: 10000 },
+        { label: "720p", bitrate_kbps: 4000 },
+      ],
+    },
+    estimate: 7000,
+  },
+  {
+    name: "fails during an outage",
+    during: (c) => c.event({ type: "transport_error_start" }, 150000),
+  },
+  {
+    name: "fails when an outage ended 3 s before",
+    during: (c) => {
+      c.event({ type: "transport_error_start" }, 150000);
+      c.event({ type: "transport_error_end" }, 157000);
+    },
+  },
+  {
+    name: "lowers when an outage ended 6 s before",
+    during: (c) => {
+      c.event({ type: "transport_error_start" }, 140000);
+      c.event({ type: "transport_error_end" }, 154000);
+    },
+    estimate: 44100,
+  },
+])(
+  "a start that misses its deadline: $name",
+  ({ mode = "always", quality = "auto", before, later, during, estimate }) => {
+    const outputs: unknown[] = [];
+    const c = new BufferingQualityController(mode, (output) => outputs.push(output), 0);
+    c.event({ type: "plan_adopted", plan: { ...plan, quality } }, 0);
+    before?.(c);
+    c.event({ type: "plan_adopted", plan: { ...plan, plan_id: "p2", quality, ...later } }, 100000);
+    during?.(c);
+    outputs.length = 0;
+    expect(c.startDeadlinePassed(160000)).toBe(estimate !== undefined);
+    expect(outputs).toEqual(
+      estimate === undefined
+        ? []
+        : [
+            {
+              type: "replan",
+              body: {
+                operation: "quality_change",
+                quality_preference: "auto",
+                bandwidth_estimate_kbps: estimate,
+                bandwidth_estimate_source: "observed_rebuffer",
+              },
             },
-          },
-        ]
-      : [],
-  );
-});
+          ],
+    );
+  },
+);
 
 it("omits an unknown delivered bitrate from the summary", () => {
   const summaries: BufferingSummary[] = [];

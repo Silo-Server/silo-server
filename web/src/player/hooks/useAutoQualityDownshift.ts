@@ -323,10 +323,12 @@ export function useAutoQualityDownshift(options: Options) {
     const syncTrouble = () => {
       // A wait on a link that has gone silent is an outage too; one whose
       // data keeps arriving, however slowly, is a stall. The server holds a
-      // segment silent while it produces it, so segments get longer.
+      // segment silent while it produces it, so segments get longer. A source
+      // reload's wait is not timed, but a silent one is an outage all the
+      // same, which the start deadline needs to know.
       const data = latest.current.mediaData?.();
       const silent =
-        c.waitingForData &&
+        (c.waitingForData || reloading.current) &&
         data !== undefined &&
         now() - data.at >= (data.segmented ? OUTAGE_NO_DATA_SEGMENTED_MS : OUTAGE_NO_DATA_MS);
       const next = (latest.current.transportTrouble?.() ?? false) || silent;

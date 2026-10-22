@@ -7,7 +7,7 @@ import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext"
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
-import type { AvailableQualityV3 } from "../protocol-v3";
+import type { AvailableQualityV3, PlanV3 } from "../protocol-v3";
 import type {
   PlaybackRealtimeCommandEnvelope,
   PlaybackRealtimeEventEnvelope,
@@ -5829,6 +5829,25 @@ describe("VideoPlayer hls.js request timeouts", () => {
     hlsJS.latest = null;
   });
 
+  /** A main fragment hls.js is loading, whose data keeps arriving until `silence`. */
+  function loadingFragment() {
+    // hls.js fills in a loading fragment's stats as its data arrives.
+    let receiving = true;
+    let loaded = 0;
+    const stats = {
+      aborted: false,
+      loading: { start: 0, first: 1, end: 0 },
+      get loaded() {
+        if (receiving) loaded = Math.floor(performance.now());
+        return loaded;
+      },
+    };
+    act(() => hlsJS.latest?.emit("fragLoading", { frag: { type: "main", stats } }));
+    return () => {
+      receiving = false;
+    };
+  }
+
   /**
    * A player that has played, met `beforeWait` and is waiting, with too
    * little buffered to be the renderer's wait. Its media keeps receiving data
@@ -5892,31 +5911,23 @@ describe("VideoPlayer hls.js request timeouts", () => {
       configurable: true,
       get: () => ({ length: 1, start: () => 0, end: () => end }),
     });
-    let receiving = true;
+    let silence: () => void;
     if (transport === "engine") {
       const { onMediaData } = attachBrowserEngine.mock.calls.at(-1)![0];
+      let receiving = true;
       setInterval(() => {
         const at = Math.floor(performance.now());
         if (receiving) onMediaData?.(0, at, 0, at);
       }, 250);
-    } else {
-      // hls.js fills in a loading fragment's stats as its data arrives.
-      let loaded = 0;
-      const stats = {
-        aborted: false,
-        loading: { start: 0, first: 1, end: 0 },
-        get loaded() {
-          if (receiving) loaded = Math.floor(performance.now());
-          return loaded;
-        },
+      silence = () => {
+        receiving = false;
       };
-      act(() => hlsJS.latest?.emit("fragLoading", { frag: { type: "main", stats } }));
-    }
+    } else silence = loadingFragment();
     markPlaying(video);
     fireEvent.playing(video);
     act(() => vi.advanceTimersByTime(20_000));
     if (silentFor !== undefined) {
-      receiving = false;
+      silence();
       act(() => vi.advanceTimersByTime(silentFor));
     }
     act(beforeWait);
@@ -5972,20 +5983,24 @@ describe("VideoPlayer hls.js request timeouts", () => {
     expect(prompt() !== null).toBe(prompts);
   });
 
-  // C9: on Auto in the always mode, a start that misses the player's own
-  // deadline lowers as a long stall would. Its wait was silent, an outage the
-  // controller does not time. It fails at the same quality only when nothing
-  // is lower, or when the session refuses the lowering. The controller's
-  // tests cover the modes and answers that keep the failure.
+  // C9: on Auto in the always mode, a plan that misses the player's own start
+  // deadline lowers as a long stall would. A first start's wait is timed as a
+  // stall and lowers sooner, so this is mostly a replacement's, whose load is
+  // a source reload: here one that receives data slowly and never starts. It
+  // fails at the same quality when its link is silent (an outage), when
+  // nothing is lower, or when the session refuses the lowering. The
+  // controller's tests cover the other cases that keep the failure.
   const original = { label: "original", preserves_source: true, bitrate_kbps: 20_000 };
-  const lower = { label: "1080p-high", preserves_source: false, bitrate_kbps: 10_000 };
-  it.each<[string, AvailableQualityV3[], boolean, boolean]>([
-    ["with a lower rung", [original, lower], false, false],
-    ["with a lower rung the session refuses", [original, lower], true, true],
-    ["with nothing lower", [original], false, true],
+  const high = { label: "1080p-high", preserves_source: false, bitrate_kbps: 10_000 };
+  const low = { label: "720p", preserves_source: false, bitrate_kbps: 4_000 };
+  it.each<[string, boolean, AvailableQualityV3[], boolean, boolean]>([
+    ["with a lower rung", false, [original, high, low], false, true],
+    ["with a lower rung the session refuses", true, [original, high, low], true, true],
+    ["with nothing lower", true, [original, high], false, true],
+    ["on a silent link", true, [original, high, low], false, false],
   ])(
-    "on Auto, a start that misses its deadline %s fails: %s",
-    async (_name, rungs, refused, fails) => {
+    "on Auto, a replacement that misses its start deadline %s fails: %s",
+    async (_name, fails, rungs, refused, receiving) => {
       hlsJS.supported = true;
       const onPlanFailure = vi.fn((_failure: unknown, _position?: number) => true);
       const onQualitySelect = vi.fn(
@@ -5998,12 +6013,8 @@ describe("VideoPlayer hls.js request timeouts", () => {
           if (refused) onAdopt?.(undefined, false);
         },
       );
-      renderPlayer({
-        bufferingMode: "always",
-        qualityPreference: "auto",
-        onPlanFailure,
-        onQualitySelect,
-        plan: fixturePlanV3({
+      const hlsPlan = (overrides: Partial<PlanV3> = {}) =>
+        fixturePlanV3({
           stream: {
             url: "/playback/transcode/session-1/master.m3u8",
             protocol: "hls",
@@ -6012,17 +6023,45 @@ describe("VideoPlayer hls.js request timeouts", () => {
           },
           available_qualities: rungs,
           source: { ...directPlan.source, bitrate_kbps: 20_000 },
+          ...overrides,
+        });
+      const { container, rerenderPlayer } = renderPlayer({
+        bufferingMode: "always",
+        qualityPreference: "auto",
+        onPlanFailure,
+        onQualitySelect,
+        plan: hlsPlan(),
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected a video element");
+      markPlaying(video);
+      fireEvent.playing(video);
+      // A 1080p plan replaces the one that played, and its element waits
+      // paused for data.
+      Object.defineProperty(video, "paused", { configurable: true, value: true });
+      Object.defineProperty(video, "readyState", {
+        configurable: true,
+        value: HTMLMediaElement.HAVE_NOTHING,
+      });
+      rerenderPlayer({
+        planRevision: 2,
+        plan: hlsPlan({
+          active_quality: "1080p-high",
+          effective_recipe: { video_codec: "h264", audio_codec: "aac", bitrate_kbps: 10_000 },
         }),
       });
       await act(async () => vi.advanceTimersByTimeAsync(0));
+      if (receiving) loadingFragment();
       act(() => vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS));
+      const lowers = receiving && rungs.length > 2;
       expect(onQualitySelect.mock.calls.map(([, , request]) => request)).toEqual(
-        rungs.length > 1
+        lowers
           ? [
               {
                 operation: "quality_change",
                 quality_preference: "auto",
-                bandwidth_estimate_kbps: 14_000,
+                bandwidth_estimate_kbps: 7_000,
                 bandwidth_estimate_source: "observed_rebuffer",
               },
             ]

@@ -246,6 +246,8 @@ export class BufferingQualityController {
   private paused = false;
   /** Media requests are failing or the device is offline: the reconnect path's stall. */
   private outage = false;
+  /** When the last outage ended. */
+  private outageEndedAt = -Infinity;
   /** When each counted stall in the window ended. */
   private stalls: number[] = [];
   /** When the last long stall ended; it qualifies on its own for a window. */
@@ -346,12 +348,15 @@ export class BufferingQualityController {
   }
 
   /**
-   * The client's own start deadline passed before the plan's first frame. On
-   * Auto in the "always" mode that lowers as a long stall would, with an
-   * undo, and answers true; the start then fails only when there is nothing
-   * lower, including a plan a lowering just found could go no lower. A picked
-   * quality, the "ask" and "never" modes, a Keep or Restore answer for the
-   * title and a Watch Party room leave the failure to the usual recovery.
+   * The client's own start deadline passed before the plan's first frame, a
+   * replacement's included. On Auto in the "always" mode that lowers as a long
+   * stall would, with an undo, and answers true; the start then fails only
+   * when there is nothing lower, including a plan a lowering just found could
+   * go no lower. A picked quality, the "ask" and "never" modes, a Keep or
+   * Restore answer for the title, a Watch Party room and a pending lowering
+   * or pick leave the failure to the usual recovery. So does an outage in
+   * progress or one that ended less than LONG_STALL_MS before: the start
+   * never had a fair run on a working network.
    */
   startDeadlinePassed(now: number): boolean {
     this.tick(now, false);
@@ -361,6 +366,9 @@ export class BufferingQualityController {
       this.answered ||
       this.suspended ||
       this.pending ||
+      this.pickPending ||
+      this.outage ||
+      now - this.outageEndedAt < LONG_STALL_MS ||
       now < this.blockedUntil ||
       !this.canLower()
     )
@@ -438,6 +446,7 @@ export class BufferingQualityController {
         break;
       case "transport_error_end":
         this.outage = false;
+        this.outageEndedAt = now;
         if (this.waiting) this.beginStall(now);
         break;
       case "pick_sent":
