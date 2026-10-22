@@ -51,7 +51,7 @@ func New(cfg Config) *Provider {
 		base = defaultBaseURL
 	}
 	return &Provider{
-		client:  &http.Client{Timeout: 15 * time.Second},
+		client:  &http.Client{Timeout: 15 * time.Second, CheckRedirect: subtitles.SameOriginRedirects},
 		baseURL: base,
 		apiKey:  cfg.APIKey,
 		limiter: subtitles.NewRateLimiter(subtitles.RateLimiterConfig{

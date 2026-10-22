@@ -301,9 +301,11 @@ fixed observation window and deterministic last-seen ties. Newer events do not
 move earlier groups across that cursor. Addresses are returned without CIDR masks.
 Each address carries `location`, `local` or `remote`, classified from the address
 alone: private, loopback and link-local addresses are local, everything else is
-remote. Request logs do not record the network-access route, so a request that
-reached the server through a network-access provider from a private address reads
-as `local` here even though playback treats that path as remote.
+remote. Request logs do not record the network-access route or whether the
+address was a forwarder's, so a request from a private address that reached the
+server through a network-access provider, or through a forwarder outside
+`clientip.trusted_proxies`, reads as `local` here even though playback treats it
+as remote.
 
 A profile's `last_seen_at` is the latest time any device registration reported the
 profile, and null when none has. The device collection lists every device the

@@ -6,9 +6,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
+// serveDownload fakes the provider API and a file host on loopback. Callers
+// that expect the file to arrive pass netguard.WithPrivateAccess, since a
+// download link is only trusted with public addresses.
 func serveDownload(t *testing.T, file []byte) *Provider {
 	t.Helper()
 	var server *httptest.Server
@@ -30,7 +34,7 @@ func serveDownload(t *testing.T, file []byte) *Provider {
 
 func TestDownloadReturnsSubtitle(t *testing.T) {
 	srt := "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
-	data, format, err := serveDownload(t, []byte(srt)).Download(t.Context(), "7")
+	data, format, err := serveDownload(t, []byte(srt)).Download(netguard.WithPrivateAccess(t.Context()), "7")
 	if err != nil {
 		t.Fatalf("Download() error = %v", err)
 	}
@@ -42,7 +46,17 @@ func TestDownloadReturnsSubtitle(t *testing.T) {
 func TestDownloadRejectsOversizedFile(t *testing.T) {
 	p := serveDownload(t, make([]byte, subtitles.MaxProviderResponseSize+1))
 
-	if _, _, err := p.Download(t.Context(), "7"); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
+	if _, _, err := p.Download(netguard.WithPrivateAccess(t.Context()), "7"); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
 		t.Fatalf("Download() error = %v, want ErrSubtitleTooLarge", err)
+	}
+}
+
+func TestDownloadRefusesLinkOnTheServersNetwork(t *testing.T) {
+	p := serveDownload(t, []byte("1\n00:00:01,000 --> 00:00:02,000\nprivate\n"))
+
+	// The dialer refuses the address before connecting, so the file host
+	// never sees the request.
+	if _, _, err := p.Download(t.Context(), "7"); !errors.Is(err, netguard.ErrPrivateDestination) {
+		t.Fatalf("Download() error = %v, want ErrPrivateDestination", err)
 	}
 }

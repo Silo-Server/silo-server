@@ -190,7 +190,10 @@ display names come from `/api/v2/network-access/capabilities`.
 `stream_location` on each v2 admin session row reports `local` or `remote` using
 the same trusted client-IP and provider-path classification as the bitrate
 policy. Private, loopback, and link-local clients on the default path are local;
-provider paths and public or unknown client addresses are remote. The web
+provider paths and public or unknown client addresses are remote. A client is
+also unknown, and so remote, when its request came through a forwarder outside
+`clientip.trusted_proxies`, or a trusted proxy's forwarding headers name no
+usable client address: the resolved address is then the forwarder's own. The web
 Activity panel shows this separately from the access-network badge.
 `GET /api/v2/admin/sessions/capabilities` advertises `stream_location` for client
 feature detection. The displayed location is fixed at playback negotiation,
