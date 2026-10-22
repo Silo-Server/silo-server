@@ -98,3 +98,32 @@ func TestWatchTimeObserve(t *testing.T) {
 		})
 	}
 }
+
+// A resume confirmation can carry a paused seek that another replica
+// accepted. It is measured as paused time, not credited as viewing.
+func TestSessionManagerResumeAdoptsPausedSeek(t *testing.T) {
+	m := NewSessionManager(0, 0)
+	s := startPlaybackTestSession(t, m, 1, "profile-1", 100, PlayDirect)
+	if err := m.UpdateProgressSample(s.ID, ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SetPaused(s.ID, true, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Paused for half an hour.
+	m.mu.Lock()
+	w := &m.sessions[s.ID].Watch
+	w.Until = w.Until.Add(-30 * time.Minute)
+	w.pausedAt = w.pausedAt.Add(-30 * time.Minute)
+	m.mu.Unlock()
+	if _, err := m.SetPaused(s.ID, false, 2, &ProgressSampleV3{Sequence: 2, Position: 1230, IsPaused: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.GetSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Watch.PlayedSeconds != 0 || got.Watch.PausedSeconds < 30*60 {
+		t.Fatalf("played %v, paused %v; want 0 played and the half hour paused", got.Watch.PlayedSeconds, got.Watch.PausedSeconds)
+	}
+}

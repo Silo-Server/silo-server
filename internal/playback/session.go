@@ -1047,11 +1047,14 @@ func (m *SessionManager) SetPaused(sessionID string, paused bool, acceptedSequen
 		s.positionSequence = latest.Sequence
 		moved = s.Position != latest.Position
 		s.Position = latest.Position
+		// This session never measured the adopted report. Measuring it at
+		// the pause state it reported keeps a seek made while paused, then
+		// confirmed as a resume, from being credited as viewing.
+		s.Watch.Observe(latest.Position, latest.IsPaused, time.Now())
 	}
 	if s.IsPaused == paused {
 		if moved {
 			s.streamRevision++
-			s.Watch.Observe(s.Position, s.IsPaused, time.Now())
 		}
 		return false, nil
 	}
