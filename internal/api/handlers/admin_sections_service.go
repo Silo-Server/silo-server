@@ -446,6 +446,7 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 		}
 		originalConfig := append(json.RawMessage(nil), existing.Config...)
 		originalType := existing.SectionType
+		originalFeatured := existing.Featured
 		if req.Position != nil {
 			existing.Position = *req.Position
 		}
@@ -467,10 +468,15 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 		if req.Enabled != nil {
 			existing.Enabled = *req.Enabled
 		}
-		if req.WebOnly != nil {
+		// Only a hero row can be kept off the apps, and a row that becomes the
+		// hero starts on every client unless this request says otherwise, so
+		// a flag an older server left on a demoted row never comes back.
+		switch {
+		case req.WebOnly != nil:
 			existing.WebOnly = *req.WebOnly
+		case !originalFeatured:
+			existing.WebOnly = false
 		}
-		// Only a hero row can be kept off the apps.
 		existing.WebOnly = existing.WebOnly && existing.Featured
 		if !sections.ValidSectionTypes[existing.SectionType] {
 			return none, apiError(400, "bad_request", "Invalid section_type")

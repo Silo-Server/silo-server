@@ -16117,7 +16117,7 @@
             "type": "string"
           },
           "web_only": {
-            "description": "Only the web app receives this featured section: a viewer section read answers it only to a caller whose X-Silo-Client-Family is web, so the native apps, which show a featured section as a regular row, never get it. Always false on a section that is not featured.",
+            "description": "Only the web app receives this section while it is its page's first featured section, the one the web shows as the banner: a viewer section read answers it only to a caller whose X-Silo-Client-Family is web, so the native apps, which show a featured section as a regular row, never get it. Always false on a section that is not featured.",
             "type": "boolean"
           }
         },
@@ -16500,7 +16500,7 @@
             "type": "string"
           },
           "web_only": {
-            "description": "Keep the featured section off every client but the web app. Absent keeps the saved value; a section that is not featured after the update always saves false. Send it only when getAdminSectionCapabilities reports web_only",
+            "description": "Keep the featured section off every client but the web app. Absent keeps the saved value, except that an update making the section featured saves false; a section that is not featured after the update always saves false. Send it only when getAdminSectionCapabilities reports web_only",
             "type": "boolean"
           }
         },

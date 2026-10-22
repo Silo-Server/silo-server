@@ -256,11 +256,15 @@ function rowUpdateConfig(draft: RowDraft): Record<string, unknown> {
 }
 
 /**
- * The admin save's web_only: sent only when the form offered the choice (a
- * server that predates it refuses the member), and only a hero keeps it.
+ * The admin save's web_only, sent only when a hero row's choice differs from
+ * `saved` (false for a new row). A server that predates web_only refuses the
+ * member, so other saves leave it out; the server clears it on a row that is
+ * not a hero.
  */
-function webOnlyMember(draft: RowDraft): { web_only?: boolean } {
-  return draft.webOnly === undefined ? {} : { web_only: draft.hero && draft.webOnly };
+function webOnlyMember(draft: RowDraft, saved = false): { web_only?: boolean } {
+  return draft.hero && draft.webOnly !== undefined && draft.webOnly !== saved
+    ? { web_only: draft.webOnly }
+    : {};
 }
 
 /**
@@ -285,7 +289,7 @@ export function buildRowUpdateRequest(
     section_type: draft.sectionType,
     item_limit: draft.itemLimit,
     featured: draft.hero,
-    ...webOnlyMember(draft),
+    ...webOnlyMember(draft, section.featured && section.web_only === true),
     enabled: section.enabled,
     config: rowUpdateConfig(draft),
   };

@@ -210,6 +210,7 @@ export function AddRowDialog({
             titleFollowsVariant: draft.titleFollowsVariant,
             itemLimit: draft.itemLimit,
             hero: draft.hero,
+            webOnly: draft.webOnly,
           }
         : fresh,
     );

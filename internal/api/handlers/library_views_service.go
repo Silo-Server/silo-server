@@ -31,7 +31,7 @@ type SectionViewer struct {
 	ImageWidths imagesize.Widths
 	// Web is true when the caller declared the web client family
 	// (X-Silo-Client-Family: web). Only the web app receives a hero row an
-	// admin kept off the apps (sections.ResolvedSection.WebOnlyHero).
+	// admin kept off the apps (sections.ForClient).
 	Web bool
 }
 

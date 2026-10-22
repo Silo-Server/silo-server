@@ -161,28 +161,18 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 	return result
 }
 
-// WebOnlyHero reports whether only the web app receives the section: the
-// admin limited the row to the web, and it is this profile's hero banner. The
-// apps show a hero as a regular row, so an admin may keep it off them; once
-// the row is no longer a hero it goes to every client again.
-func (s ResolvedSection) WebOnlyHero() bool {
-	return s.Featured && s.WebOnly
-}
-
-// ForClient returns the sections a client receives. The web app receives
-// every section; any other client loses the web-only hero rows. The input
-// slice is never modified.
+// ForClient returns the sections a client receives, in display order. The
+// web app receives every section. Any other client loses the page's hero
+// banner when the admin limited it to the web: the web shows the first
+// featured section as the banner and any later one as a regular row, and the
+// apps show every section as a regular row, so only that first one is the
+// web's alone. The input slice is never modified.
 func ForClient(resolved []ResolvedSection, web bool) []ResolvedSection {
-	if web || !slices.ContainsFunc(resolved, ResolvedSection.WebOnlyHero) {
+	hero := slices.IndexFunc(resolved, func(s ResolvedSection) bool { return s.Featured })
+	if web || hero < 0 || !resolved[hero].WebOnly {
 		return resolved
 	}
-	out := make([]ResolvedSection, 0, len(resolved)-1)
-	for _, s := range resolved {
-		if !s.WebOnlyHero() {
-			out = append(out, s)
-		}
-	}
-	return out
+	return slices.Delete(slices.Clone(resolved), hero, hero+1)
 }
 
 // resolveUserAdded converts a user-added ProfileSectionOverride into a

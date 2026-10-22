@@ -21,7 +21,7 @@ type AdminSection struct {
 	ItemLimit   int           `json:"item_limit"`
 	Config      SectionConfig `json:"config"`
 	Enabled     bool          `json:"enabled"`
-	WebOnly     bool          `json:"web_only" doc:"Only the web app receives this featured section: a viewer section read answers it only to a caller whose X-Silo-Client-Family is web, so the native apps, which show a featured section as a regular row, never get it. Always false on a section that is not featured."`
+	WebOnly     bool          `json:"web_only" doc:"Only the web app receives this section while it is its page's first featured section, the one the web shows as the banner: a viewer section read answers it only to a caller whose X-Silo-Client-Family is web, so the native apps, which show a featured section as a regular row, never get it. Always false on a section that is not featured."`
 	CreatedAt   Instant       `json:"created_at"`
 	UpdatedAt   Instant       `json:"updated_at"`
 }
@@ -45,7 +45,7 @@ type AdminSectionUpdate struct {
 	ItemLimit   *int          `json:"item_limit,omitempty" nullable:"false" minimum:"1" maximum:"500"`
 	Config      SectionConfig `json:"config,omitzero"`
 	Enabled     *bool         `json:"enabled,omitempty" nullable:"false"`
-	WebOnly     *bool         `json:"web_only,omitempty" nullable:"false" doc:"Keep the featured section off every client but the web app. Absent keeps the saved value; a section that is not featured after the update always saves false. Send it only when getAdminSectionCapabilities reports web_only"`
+	WebOnly     *bool         `json:"web_only,omitempty" nullable:"false" doc:"Keep the featured section off every client but the web app. Absent keeps the saved value, except that an update making the section featured saves false; a section that is not featured after the update always saves false. Send it only when getAdminSectionCapabilities reports web_only"`
 }
 type AdminSectionOrder struct {
 	Scope      string `json:"scope" enum:"home,library"`

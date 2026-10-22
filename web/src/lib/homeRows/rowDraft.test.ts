@@ -220,29 +220,34 @@ describe("reloading after a conflict", () => {
 
 describe("a hero banner kept off the apps", () => {
   const hero = draftFromRow(row({ hero: true, webOnly: false }), recipeCatalogFixture);
-  const update = (draft: RowDraft) =>
+  const update = (draft: RowDraft, saved: Partial<PageSectionConfig> = {}) =>
     sentBody(() =>
       updateAdminSection({
-        ...buildRowUpdateRequest(stored(draft), draft, draft.title),
+        ...buildRowUpdateRequest(stored(draft, saved), draft, draft.title),
         id: "row-1",
         etag: '"1"',
       }),
     );
 
-  it("sends web_only only where the form offered the choice", async () => {
-    // A server that predates web_only answers no value and refuses the member.
+  // A server that predates web_only refuses the member, so only a change to a
+  // hero row's choice sends it.
+  it("sends web_only only when a hero row's choice changes", async () => {
     expect(
       await update(draftFromRow(row({ hero: true }), recipeCatalogFixture)),
     ).not.toHaveProperty("web_only");
+    expect(await update(hero)).not.toHaveProperty("web_only");
     expect(await update({ ...hero, webOnly: true })).toMatchObject({
       featured: true,
       web_only: true,
     });
-    // Turning the hero banner off sends the row to the apps again.
-    expect(await update({ ...hero, hero: false, webOnly: true })).toMatchObject({
-      featured: false,
-      web_only: false,
-    });
+    expect(await update(hero, { web_only: true })).toMatchObject({ web_only: false });
+    // Turning the hero banner off is enough: the server clears web_only.
+    const off = await update(
+      { ...hero, hero: false, webOnly: true },
+      { featured: true, web_only: true },
+    );
+    expect(off).toMatchObject({ featured: false });
+    expect(off).not.toHaveProperty("web_only");
     const page: PageRef = { kind: "home" };
     const created = (draft: RowDraft) =>
       sentBody(() => createAdminSection(buildRowCreateRequest(draft, draft.title, page, 1)));

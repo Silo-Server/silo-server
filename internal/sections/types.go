@@ -100,8 +100,9 @@ type PageSection struct {
 	ItemLimit   int             `json:"item_limit"`
 	Config      json.RawMessage `json:"config"`
 	Enabled     bool            `json:"enabled"`
-	// WebOnly keeps a featured row on the web app alone: see
-	// ResolvedSection.WebOnlyHero. Saving a row that is not featured clears it.
+	// WebOnly keeps a featured row on the web app alone while it is the
+	// page's hero banner: see ForClient. Saving a row that is not featured
+	// clears it.
 	WebOnly   bool      `json:"web_only"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

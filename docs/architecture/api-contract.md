@@ -2534,11 +2534,15 @@ administrator section operations after a conflict or a partial multi-request flo
 `web_only` keeps a featured row (a hero banner) on the web app alone. Create and PATCH accept it
 once the capabilities report `web_only`, and every definition answers it. Only a featured row
 keeps it: a save that leaves the row not featured stores `false`, and so does another row taking
-the page's hero spot (`ClearFeaturedForSurface`). The viewer section reads (`getHomeLayout`,
+the page's hero spot (`ClearFeaturedForSurface`). A PATCH that makes a row featured stores `false`
+unless it sends `web_only`, so a value an older server left on a demoted row never returns. The
+web shows a page's first featured section as its banner and any later one as a regular row, so
+`web_only` applies to that first featured section only. The viewer section reads (`getHomeLayout`,
 `listHomeSections`, `getHomeSectionItems`, and the three library page equivalents, on v2 and the
-frozen v1 routes alike) answer the row only to a caller whose `X-Silo-Client-Family` is `web`. Any
+frozen v1 routes alike) answer it only to a caller whose `X-Silo-Client-Family` is `web`. Any
 other caller, including one that sends no family, never gets it: layouts and lists leave it out and
-its single-section read answers `404`. The rule is a positive match because some native callers,
+its single-section read answers `404`. Dropping the row from the frozen v1 reads changes no shape;
+the v1 bridge exists for the same apps the switch is meant for. The rule is a positive match because some native callers,
 such as the tvOS Top Shelf extension, send no client headers at all. A profile that turns the
 row's hero banner off gets a regular row, which every client receives. The profile layout editor
 reads and the catalog browse of a section (`source=section`) are not filtered, so the web's See
