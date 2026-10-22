@@ -196,7 +196,7 @@ func (s *Service) Login(ctx context.Context, username, password, deviceName, ip 
 // a login without a provider (see routePasswordLogin): directory users of a
 // credentials plugin sign in with their directory password.
 func (s *Service) CompatLogin(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
-	pair, user, _, err := s.CompatLoginWithLocalFallback(ctx, username, password, "", deviceName, ip)
+	pair, user, _, err := s.CompatLoginWithLocalFallback(ctx, username, password, "", deviceName, ip, "")
 	return pair, user, err
 }
 
@@ -209,26 +209,26 @@ func (s *Service) CompatLogin(ctx context.Context, username, password, deviceNam
 // straight to the fallback: otherwise a 72-byte password followed by "#pin"
 // would match as the full password and lose its PIN.
 //
-// The call spends one attempt of the name's budget, as LoginWithProvider
-// does, and a second one when it has a fallback to try. budgetNames, when
-// given, are the names whose budgets it spends in place of username's: a
-// caller that resolved username from what was typed by looking accounts up
-// passes names that depend only on the typed text, so which budget refuses
-// the sign-in cannot tell a stranger what the lookup found.
-func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, password, fallback, deviceName, ip string, budgetNames ...string) (pair *TokenPair, user *models.User, usedFallback bool, err error) {
-	if len(budgetNames) == 0 {
-		budgetNames = []string{username}
+// The call spends one attempt of a name's budget, as LoginWithProvider does,
+// and a second one when it has a fallback to try. The name is budgetName, or
+// username when budgetName is empty: a caller that resolved username from
+// what was typed by looking accounts up passes a name that depends only on
+// the typed text, so the budget cannot tell a stranger what the lookup
+// found. A success clears the same budget.
+func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, password, fallback, deviceName, ip, budgetName string) (pair *TokenPair, user *models.User, usedFallback bool, err error) {
+	if budgetName == "" {
+		budgetName = username
 	}
-	if err = s.reserveSignIn(ctx, budgetNames...); err != nil {
+	if err = s.reserveSignIn(ctx, budgetName); err != nil {
 		return nil, nil, false, err
 	}
-	defer func() { s.finishSignIn(ctx, username, err) }()
+	defer func() { s.finishSignIn(ctx, budgetName, err) }()
 	if fallback != "" {
 		// A fallback is a second password that may be checked, so it spends a
 		// second attempt up front, for every name: charging it only where the
 		// fallback runs (local accounts) would tell names apart by how soon
 		// they lock.
-		if err = s.reserveSignIn(ctx, budgetNames...); err != nil {
+		if err = s.reserveSignIn(ctx, budgetName); err != nil {
 			return nil, nil, false, err
 		}
 	}

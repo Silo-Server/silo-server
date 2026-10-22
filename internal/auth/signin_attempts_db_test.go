@@ -52,7 +52,7 @@ func TestSignInNameBudgetDB(t *testing.T) {
 	}
 	compat := func(name, password string) error {
 		basePw, _ := SplitPasswordPIN(password)
-		_, _, _, err := svc.CompatLoginWithLocalFallback(t.Context(), name, password, basePw, "test", "192.0.2.10")
+		_, _, _, err := svc.CompatLoginWithLocalFallback(t.Context(), name, password, basePw, "test", "192.0.2.10", "")
 		return err
 	}
 	wantInvalid := func(t *testing.T, err error) {

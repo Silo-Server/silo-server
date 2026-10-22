@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"slices"
 	"strings"
 	"time"
 )
@@ -50,37 +49,27 @@ func signInAttemptKey(name string) string {
 	return "signin_name:" + hex.EncodeToString(sum[:])
 }
 
-// reserveSignIn counts one password attempt against the budget of each of
-// names, in order, skipping repeats. When a name is locked it returns a
-// *SignInThrottledError and the caller must not check the password; a request
-// whose context is done gets the context's error instead.
-func (s *Service) reserveSignIn(ctx context.Context, names ...string) error {
+// reserveSignIn counts one password attempt against name's budget. When the
+// name is locked it returns a *SignInThrottledError and the caller must not
+// check the password; a request whose context is done gets the context's
+// error instead.
+func (s *Service) reserveSignIn(ctx context.Context, name string) error {
 	if s.signInAttempts == nil {
 		return nil
 	}
-	keys := make([]string, 0, len(names))
-	for _, name := range names {
-		key := signInAttemptKey(name)
-		if slices.Contains(keys, key) {
-			continue
+	if retryAfter, ok := s.signInAttempts.Reserve(ctx, signInAttemptKey(name)); !ok {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		if retryAfter, ok := s.signInAttempts.Reserve(ctx, key); !ok {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			return &SignInThrottledError{RetryAfter: retryAfter}
-		}
-		keys = append(keys, key)
+		return &SignInThrottledError{RetryAfter: retryAfter}
 	}
 	return nil
 }
 
-// finishSignIn clears the budget of name, the name whose password was
-// checked, once that password matched: the sign-in succeeded, or a
-// compatibility sign-in found a temporary password it cannot change. Other
-// names the attempt was charged to stay counted, since their passwords were
-// not checked. Every other outcome, outages included, keeps the attempt
-// counted. The count is cleared even when the client has already hung up.
+// finishSignIn clears name's budget once the password matched: the sign-in
+// succeeded, or a compatibility sign-in found a temporary password it cannot
+// change. Every other outcome, outages included, keeps the attempt counted.
+// The count is cleared even when the client has already hung up.
 func (s *Service) finishSignIn(ctx context.Context, name string, err error) {
 	if s.signInAttempts == nil || (err != nil && !errors.Is(err, ErrPasswordChangeRequired)) {
 		return

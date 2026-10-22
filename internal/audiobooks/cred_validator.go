@@ -73,7 +73,7 @@ func (v *SiloCredValidator) Validate(
 	// CompatLogin refuses a temporary password: Audiobookshelf clients cannot
 	// run the password change it requires.
 	basePw, pin := auth.SplitPasswordPIN(password)
-	_, user, usedFallback, err := v.Auth.CompatLoginWithLocalFallback(ctx, authName, password, basePw, "abs-compat", "")
+	_, user, usedFallback, err := v.Auth.CompatLoginWithLocalFallback(ctx, authName, password, basePw, "abs-compat", "", "")
 	if err != nil {
 		// Propagate auth sentinel errors as-is so callers can distinguish
 		// "bad credentials" (ErrInvalidCredentials) from "service down".

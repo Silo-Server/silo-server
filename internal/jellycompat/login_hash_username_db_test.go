@@ -128,33 +128,42 @@ func TestLoginAccountNameWithHashDB(t *testing.T) {
 		t.Fatalf("%s#Kids: directory asked %q, want one attempt for the unprovisioned name", unprovisioned, directory.passwords)
 	}
 
-	// The sign-in budget counts the whole typed name and the part before its
-	// '#', whichever account the name resolves to. A lock on either refuses an
-	// existing literal '#' account and a name with no account alike, so the
-	// lock does not reveal which one exists.
+	// A Jellyfin sign-in spends the budget of the part before the '#' of what
+	// was typed, whichever account the name resolves to. With either name
+	// locked, a wrong password gets the same answer for an existing literal
+	// '#' account and for a name with no account, so the budget does not
+	// reveal which one exists.
 	missing := fmt.Sprintf("jfnohash-%d#1234", suffix)
 	defer svc.SetSignInAttempts(nil)
 	for _, part := range []string{"whole", "prefix"} {
 		svc.SetSignInAttempts(ratelimit.NewMemoryAttemptLimiter(ratelimit.AttemptPolicy{MaxAttempts: 1, Window: time.Minute}))
+		var throttled []bool
 		for _, name := range []string{single.Username, missing} {
 			lock := name
 			if part == "prefix" {
 				lock, _, _ = strings.Cut(name, "#")
 			}
 			_, _, _ = svc.LoginWithProvider(ctx, "", lock, "wrong", "test", "")
-			if _, err := resolver.Resolve(ctx, name, password, "test", ""); !errors.As(err, new(*auth.SignInThrottledError)) {
-				t.Fatalf("%s with the %s name locked: error = %v, want the sign-in refused as throttled", name, part, err)
-			}
+			_, err := resolver.Resolve(ctx, name, "wrong", "test", "")
+			throttled = append(throttled, errors.As(err, new(*auth.SignInThrottledError)))
+		}
+		if throttled[0] != throttled[1] {
+			t.Fatalf("with the %s name locked: existing account throttled = %v, missing account throttled = %v", part, throttled[0], throttled[1])
 		}
 	}
 
-	// A success clears only the budget of the account it signed in to. The
-	// sign-in as owner#Kids above signs in to owner, so it leaves the count of
-	// the account named owner#Kids, whose password it did not check.
 	svc.SetSignInAttempts(ratelimit.NewMemoryAttemptLimiter(ratelimit.AttemptPolicy{MaxAttempts: 2, Window: time.Minute}))
+	// Successful profile sign-ins clear what they spend, so they never lock.
+	for range 3 {
+		signIn(plain.Username+"#Kid", plain, "Kid")
+	}
+	// The sign-in as owner#Kids signs in to owner and spends owner's budget,
+	// so it leaves the count of the account named owner#Kids, whose password
+	// it did not check.
 	_, _, _ = svc.LoginWithProvider(ctx, "", squatter.Username, "wrong", "test", "")
 	signIn(squatter.Username, owner, "Kids")
+	_, _, _ = svc.LoginWithProvider(ctx, "", squatter.Username, "wrong", "test", "")
 	if _, _, err := svc.LoginWithProvider(ctx, "", squatter.Username, password, "test", ""); !errors.As(err, new(*auth.SignInThrottledError)) {
-		t.Fatalf("%s after a sign-in to %s: error = %v, want its own count kept and the name locked", squatter.Username, owner.Username, err)
+		t.Fatalf("%s after a sign-in to %s and two wrong passwords: error = %v, want the name locked", squatter.Username, owner.Username, err)
 	}
 }

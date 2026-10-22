@@ -381,8 +381,9 @@ many addresses the attempts come from: v1 and v2 `login`, Jellyfin
 it checks. Names are trimmed and compared without regard to case, as sign-in looks up
 accounts, so ` Alice` and `alice` share one budget; a username and the same account's
 email address are two names. A Jellyfin name with a `#`, such as `alice#Kids`, spends the
-budgets of the whole name and of the part before the `#`, whichever account it signs in
-to; a successful sign-in clears only the budget of the account it signed in to. A name with no account has a budget like any other and is refused the same way, so
+budget of the part before the `#`, even when it signs in to an account whose own name
+contains the `#`, so the budget does not depend on which accounts exist. Such an account's
+native sign-ins spend the budget of its whole name, so it has two budgets. A name with no account has a budget like any other and is refused the same way, so
 the budget does not reveal which names exist.
 
 The limit is `ratelimit.SignInNamePolicy`: ten attempts per name. The first attempt
