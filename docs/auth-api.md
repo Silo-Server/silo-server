@@ -363,7 +363,8 @@ connection's own address. A public IPv6 address counts by its /64, because one h
 server usually holds a whole /64; this applies to every per-address budget, including the
 per-address request budget of authenticated routes. Every other address counts on its own:
 IPv4, unique local and link-local IPv6 (which only come from the local network, like
-private IPv4 addresses), and the NAT64 addresses `64:ff9b::/96` that stand for IPv4 clients.
+private IPv4 addresses), and the NAT64 addresses (`64:ff9b::/96` and the local-use `64:ff9b:1::/48`) that stand
+for IPv4 clients.
 
 When the client IP came from those headers, the request also spends a budget keyed on the
 connection's own address: ten times the per-client one, shared by every client behind that

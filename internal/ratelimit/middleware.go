@@ -293,9 +293,13 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 	}
 }
 
-// nat64Prefix holds the IPv6 addresses that NAT64 and SIIT translators give
-// IPv4 clients (RFC 6052): each one is a separate IPv4 client.
-var nat64Prefix = netip.MustParsePrefix("64:ff9b::/96")
+// nat64Prefixes hold the IPv6 addresses that NAT64 and SIIT translators give
+// IPv4 clients: the well-known prefix (RFC 6052) and the local-use range
+// (RFC 8215). Each address there is a separate IPv4 client.
+var nat64Prefixes = []netip.Prefix{
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+}
 
 // SourceKey is the part of a client address that the per-address budgets
 // count. A public IPv6 client counts by its /64: one home line or server
@@ -306,11 +310,20 @@ var nat64Prefix = netip.MustParsePrefix("64:ff9b::/96")
 // parse as an address.
 func SourceKey(ip string) string {
 	addr, err := netip.ParseAddr(ip)
-	if err != nil || !addr.Is6() || addr.Is4In6() || !addr.IsGlobalUnicast() || addr.IsPrivate() || nat64Prefix.Contains(addr) {
+	if err != nil || !addr.Is6() || addr.Is4In6() || !addr.IsGlobalUnicast() || addr.IsPrivate() || isNAT64(addr) {
 		return ip
 	}
 	prefix, _ := addr.Prefix(64) // cannot fail: an IPv6 address has 128 bits
 	return prefix.String()
+}
+
+func isNAT64(addr netip.Addr) bool {
+	for _, prefix := range nat64Prefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 // allowAccount uses an authenticated account identity, independent of forwarding

@@ -176,6 +176,7 @@ func TestSourceKey(t *testing.T) {
 		// their own, as IPv4 addresses do.
 		{"::ffff:203.0.113.7", "::ffff:203.0.113.7"},
 		{"64:ff9b::cb00:7107", "64:ff9b::cb00:7107"},
+		{"64:ff9b:1:abcd::cb00:7107", "64:ff9b:1:abcd::cb00:7107"},
 		{"fd12:3456:789a:1::5", "fd12:3456:789a:1::5"},
 		{"fe80::1", "fe80::1"},
 		{"::1", "::1"},
