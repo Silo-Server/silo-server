@@ -106,6 +106,7 @@ func (h *SectionHandler) CreateAdminSection(ctx context.Context, req AdminSectio
 		ItemLimit:   req.ItemLimit,
 		Config:      req.Config,
 		Enabled:     req.Enabled,
+		WebOnly:     req.Featured && req.WebOnly,
 	}
 	if sec.Scope == "" {
 		sec.Scope = adminSectionScopeHome
@@ -466,6 +467,11 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 		if req.Enabled != nil {
 			existing.Enabled = *req.Enabled
 		}
+		if req.WebOnly != nil {
+			existing.WebOnly = *req.WebOnly
+		}
+		// Only a hero row can be kept off the apps.
+		existing.WebOnly = existing.WebOnly && existing.Featured
 		if !sections.ValidSectionTypes[existing.SectionType] {
 			return none, apiError(400, "bad_request", "Invalid section_type")
 		}

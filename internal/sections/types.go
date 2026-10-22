@@ -100,8 +100,11 @@ type PageSection struct {
 	ItemLimit   int             `json:"item_limit"`
 	Config      json.RawMessage `json:"config"`
 	Enabled     bool            `json:"enabled"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	// WebOnly keeps a featured row on the web app alone: see
+	// ResolvedSection.WebOnlyHero. Saving a row that is not featured clears it.
+	WebOnly   bool      `json:"web_only"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ProfileSectionOverride is a per-profile customization stored in the user store.
@@ -144,6 +147,11 @@ type ResolvedSection struct {
 	IsCustom    bool            `json:"is_custom"`
 	Customized  bool            `json:"customized"`
 	Hidden      bool            `json:"hidden,omitempty"`
+
+	// WebOnly is the admin section's web_only flag. A profile cannot change
+	// it, and a profile-built section never has it. Not serialized: v1
+	// bodies embed this struct.
+	WebOnly bool `json:"-"`
 
 	// DefaultTitle is the admin section's own title, before the profile's
 	// title override. Only ResolveForSettings fills it, and it is empty for a

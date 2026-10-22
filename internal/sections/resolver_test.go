@@ -253,3 +253,48 @@ func TestResolveForSettings_RawKeyAdminTitleIsNotARename(t *testing.T) {
 		}
 	}
 }
+
+// A web-only hero row reaches the web app alone. It goes to every client
+// again while it is not this profile's hero, and a row a profile built itself
+// is never web-only, even when that profile makes it its hero.
+func TestForClientKeepsWebOnlyHeroesOffTheApps(t *testing.T) {
+	admin := []*PageSection{
+		{ID: "hero", Position: 0, SectionType: SectionTrendingDiscover, Title: "Discover", Featured: true, WebOnly: true, ItemLimit: 10, Config: json.RawMessage(`{}`)},
+		{ID: "recent", Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
+	}
+	featured, plain := true, false
+	own := ProfileSectionOverride{ID: "own", SectionType: SectionFavorites, Title: "Mine", Featured: &featured, Position: new(2)}
+	ids := func(resolved []ResolvedSection) []string {
+		var out []string
+		for _, s := range resolved {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name      string
+		overrides []ProfileSectionOverride
+		web, app  []string
+	}{
+		{"admin hero", nil, []string{"hero", "recent"}, []string{"recent"}},
+		{"profile turned the hero off", []ProfileSectionOverride{{SectionID: "hero", Featured: &plain}}, []string{"hero", "recent"}, []string{"hero", "recent"}},
+		{"profile's own hero", []ProfileSectionOverride{own}, []string{"hero", "recent", "own"}, []string{"recent", "own"}},
+	} {
+		resolved := Resolve(admin, tc.overrides)
+		before := ids(resolved)
+		if got := ids(ForClient(resolved, true)); !slices.Equal(got, tc.web) {
+			t.Errorf("%s: web gets %v, want %v", tc.name, got, tc.web)
+		}
+		if got := ids(ForClient(resolved, false)); !slices.Equal(got, tc.app) {
+			t.Errorf("%s: apps get %v, want %v", tc.name, got, tc.app)
+		}
+		if !slices.Equal(ids(resolved), before) {
+			t.Errorf("%s: ForClient changed its input", tc.name)
+		}
+	}
+	// Settings list the row, flag included, so the web editor can show it.
+	settings := ResolveForSettings(admin, nil)
+	if len(settings) != 2 || !settings[0].WebOnly || settings[1].WebOnly {
+		t.Fatalf("settings rows = %+v", settings)
+	}
+}

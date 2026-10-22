@@ -132,7 +132,7 @@ func (reg *Registry) listHistory(ctx context.Context, cursors *Cursors, in *Hist
 			return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
 		}
 	}
-	cards, err := reg.deps.History.HistoryPageCards(ctx, sectionViewer(ctx, in.Artwork()), entries)
+	cards, err := reg.deps.History.HistoryPageCards(ctx, sectionViewer(ctx, in.Artwork(), SectionClient{}), entries)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

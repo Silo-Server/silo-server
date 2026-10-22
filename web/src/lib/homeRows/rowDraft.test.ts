@@ -218,6 +218,57 @@ describe("reloading after a conflict", () => {
   });
 });
 
+describe("a hero banner kept off the apps", () => {
+  const hero = draftFromRow(row({ hero: true, webOnly: false }), recipeCatalogFixture);
+  const update = (draft: RowDraft) =>
+    sentBody(() =>
+      updateAdminSection({
+        ...buildRowUpdateRequest(stored(draft), draft, draft.title),
+        id: "row-1",
+        etag: '"1"',
+      }),
+    );
+
+  it("sends web_only only where the form offered the choice", async () => {
+    // A server that predates web_only answers no value and refuses the member.
+    expect(
+      await update(draftFromRow(row({ hero: true }), recipeCatalogFixture)),
+    ).not.toHaveProperty("web_only");
+    expect(await update({ ...hero, webOnly: true })).toMatchObject({
+      featured: true,
+      web_only: true,
+    });
+    // Turning the hero banner off sends the row to the apps again.
+    expect(await update({ ...hero, hero: false, webOnly: true })).toMatchObject({
+      featured: false,
+      web_only: false,
+    });
+    const page: PageRef = { kind: "home" };
+    const created = (draft: RowDraft) =>
+      sentBody(() => createAdminSection(buildRowCreateRequest(draft, draft.title, page, 1)));
+    const preset = {
+      ...draftForPreset(findRecipe(recipeCatalogFixture, "trending_on_server")!, undefined),
+      hero: true,
+    };
+    expect(await created(preset)).not.toHaveProperty("web_only");
+    expect(await created({ ...preset, webOnly: true })).toMatchObject({
+      featured: true,
+      web_only: true,
+    });
+  });
+
+  it("reloads the apps choice together with the hero banner", () => {
+    const edited = { ...hero, webOnly: true };
+    const upstream = { ...hero, hero: false };
+    const kept = mergeReloadedDraft(hero, edited, upstream);
+    expect(kept.draft).toMatchObject({ hero: true, webOnly: true });
+    expect(kept.changedUpstream).toEqual(["hero"]);
+    const taken = mergeReloadedDraft(hero, hero, edited);
+    expect(taken.draft.webOnly).toBe(true);
+    expect(taken.changedUpstream).toEqual(["hero"]);
+  });
+});
+
 describe("saving a draft", () => {
   const seasonal = (config: Record<string, unknown>): RowDraft => ({
     sectionType: "seasonal_themed",

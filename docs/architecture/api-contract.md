@@ -2531,6 +2531,19 @@ config. The frozen `/api/v1` single create and update routes do not run this che
 service, preview, and atomic profile reset are available. Clients do not automatically replay
 administrator section operations after a conflict or a partial multi-request flow.
 
+`web_only` keeps a featured row (a hero banner) on the web app alone. Create and PATCH accept it
+once the capabilities report `web_only`, and every definition answers it. Only a featured row
+keeps it: a save that leaves the row not featured stores `false`, and so does another row taking
+the page's hero spot (`ClearFeaturedForSurface`). The viewer section reads (`getHomeLayout`,
+`listHomeSections`, `getHomeSectionItems`, and the three library page equivalents, on v2 and the
+frozen v1 routes alike) answer the row only to a caller whose `X-Silo-Client-Family` is `web`. Any
+other caller, including one that sends no family, never gets it: layouts and lists leave it out and
+its single-section read answers `404`. The rule is a positive match because some native callers,
+such as the tvOS Top Shelf extension, send no client headers at all. A profile that turns the
+row's hero banner off gets a regular row, which every client receives. The profile layout editor
+reads and the catalog browse of a section (`source=section`) are not filtered, so the web's See
+all keeps working. The frozen `/api/v1` admin bodies neither accept nor answer the field.
+
 ### Administrator policy document storage
 
 Policy documents have a per-document revision independent of `policy_generation`. The revision

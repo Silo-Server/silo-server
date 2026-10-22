@@ -129,6 +129,7 @@ export function RowForm({
   collectionChoices,
   libraryPages,
   contentLocked = false,
+  webOnlyChoice = false,
 }: {
   draft: RowDraft;
   onChange: (draft: RowDraft) => void;
@@ -151,6 +152,8 @@ export function RowForm({
    * no collection picker, rules or title list, and no rule order.
    */
   contentLocked?: boolean;
+  /** A hero row may be kept off the apps (admin, on a server that supports it). */
+  webOnlyChoice?: boolean;
 }) {
   const nameId = useId();
   const family = variantLocked ? undefined : variantFamily(draft.sectionType);
@@ -257,6 +260,8 @@ export function RowForm({
       <MoreOptions
         itemLimit={draft.itemLimit}
         hero={draft.hero}
+        webOnly={webOnlyChoice && draft.webOnly === true}
+        onWebOnlyChange={webOnlyChoice ? (webOnly) => onChange({ ...draft, webOnly }) : undefined}
         summary={rules ? ruleSortSummary(draft.config) : undefined}
         onItemLimitChange={(itemLimit) => onChange({ ...draft, itemLimit })}
         // A hero row stays on this page alone, so turning it on drops the other pages.

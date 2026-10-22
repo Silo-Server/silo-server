@@ -3,6 +3,7 @@ package sections
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -44,6 +45,7 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 			ItemLimit:   s.ItemLimit,
 			Config:      s.Config,
 			Position:    s.Position,
+			WebOnly:     s.WebOnly,
 		}
 
 		if hasOverride {
@@ -114,6 +116,7 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 			ItemLimit:   s.ItemLimit,
 			Config:      s.Config,
 			Position:    s.Position,
+			WebOnly:     s.WebOnly,
 		}
 
 		if hasOverride {
@@ -156,6 +159,30 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 	})
 
 	return result
+}
+
+// WebOnlyHero reports whether only the web app receives the section: the
+// admin limited the row to the web, and it is this profile's hero banner. The
+// apps show a hero as a regular row, so an admin may keep it off them; once
+// the row is no longer a hero it goes to every client again.
+func (s ResolvedSection) WebOnlyHero() bool {
+	return s.Featured && s.WebOnly
+}
+
+// ForClient returns the sections a client receives. The web app receives
+// every section; any other client loses the web-only hero rows. The input
+// slice is never modified.
+func ForClient(resolved []ResolvedSection, web bool) []ResolvedSection {
+	if web || !slices.ContainsFunc(resolved, ResolvedSection.WebOnlyHero) {
+		return resolved
+	}
+	out := make([]ResolvedSection, 0, len(resolved)-1)
+	for _, s := range resolved {
+		if !s.WebOnlyHero() {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // resolveUserAdded converts a user-added ProfileSectionOverride into a

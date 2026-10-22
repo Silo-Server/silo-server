@@ -70,7 +70,7 @@ export function RowLine({
           {row.hero ? (
             <span className="bg-warning/15 text-warning ring-warning/30 inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset max-sm:hidden">
               <Star className="size-3" aria-hidden />
-              Hero banner
+              {row.webOnly ? "Hero banner · Web only" : "Hero banner"}
             </span>
           ) : null}
           {row.own ? (
@@ -86,7 +86,7 @@ export function RowLine({
             // Phones have no room for the tag next to the name.
             <span className="text-warning font-semibold sm:hidden">
               <Star className="mr-1 inline size-3 align-[-1px]" aria-hidden />
-              Hero banner
+              {row.webOnly ? "Hero banner · Web only" : "Hero banner"}
               <MetaDot />
             </span>
           ) : null}

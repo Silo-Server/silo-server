@@ -24,6 +24,7 @@ type fakeAdminSections struct {
 	previewPosters                                                        map[string]string
 	previewRequest                                                        handlers.AdminSectionPreviewRequest
 	recipeChecks                                                          []bool
+	lastWebOnly                                                           *bool
 }
 
 func newFakeAdminSections() *fakeAdminSections {
@@ -60,6 +61,8 @@ func (f *fakeAdminSections) CreateAdminSection(_ context.Context, in handlers.Ad
 	f.view.LibraryID = in.LibraryID
 	f.view.Title = in.Title
 	f.view.Config = in.Config
+	f.view.Featured = in.Featured
+	f.view.WebOnly = in.WebOnly
 	return f.view, nil
 }
 func (f *fakeAdminSections) UpdateAdminSection(_ context.Context, _ string, in handlers.AdminSectionUpdate) (handlers.AdminSection, error) {
@@ -82,6 +85,10 @@ func (f *fakeAdminSections) UpdateAdminSection(_ context.Context, _ string, in h
 	}
 	if in.Config != nil {
 		f.view.Config = in.Config
+	}
+	f.lastWebOnly = in.WebOnly
+	if in.WebOnly != nil {
+		f.view.WebOnly = *in.WebOnly
 	}
 	return f.view, nil
 }
@@ -218,11 +225,40 @@ func TestAdminSectionsWritesRunTheRecipeCheck(t *testing.T) {
 		t.Fatalf("recipe checks requested = %v, want create and update", f.recipeChecks)
 	}
 }
+
+// web_only travels both ways on v2: create and PATCH hand it to the service
+// (an absent PATCH member as nil, which keeps the saved value), every read
+// answers it, and the capability advertises it.
+func TestAdminSectionsCarryWebOnly(t *testing.T) {
+	f := newFakeAdminSections()
+	h := adminSectionsTestHandler(t, f)
+	created := do(t, h, http.MethodPost, Prefix+"/admin/sections", `{"scope":"home","section_type":"trending_discover","title":"Discover","featured":true,"web_only":true,"config":{}}`, bearer(adminToken))
+	if created.Code != 201 || !strings.Contains(created.Body.String(), `"web_only":true`) || !f.view.WebOnly {
+		t.Fatalf("create %d %s", created.Code, created.Body)
+	}
+	path := Prefix + "/admin/sections/s1"
+	if read := do(t, h, http.MethodGet, path, "", bearer(adminToken)); !strings.Contains(read.Body.String(), `"web_only":true`) {
+		t.Fatalf("read %s", read.Body)
+	}
+	renamed := do(t, h, http.MethodPatch, path, `{"title":"Renamed"}`, with(bearer(adminToken), "If-Match", "*"))
+	if renamed.Code != 200 || f.lastWebOnly != nil || !strings.Contains(renamed.Body.String(), `"web_only":true`) {
+		t.Fatalf("patch without web_only %d %s, service got %v", renamed.Code, renamed.Body, f.lastWebOnly)
+	}
+	cleared := do(t, h, http.MethodPatch, path, `{"web_only":false}`, with(bearer(adminToken), "If-Match", "*"))
+	if cleared.Code != 200 || f.lastWebOnly == nil || *f.lastWebOnly || !strings.Contains(cleared.Body.String(), `"web_only":false`) {
+		t.Fatalf("patch web_only false %d %s", cleared.Code, cleared.Body)
+	}
+	caps := do(t, h, http.MethodGet, Prefix+"/admin/sections/capabilities", "", bearer(adminToken))
+	if caps.Code != 200 || !strings.Contains(caps.Body.String(), `"web_only":true`) {
+		t.Fatalf("capabilities %d %s", caps.Code, caps.Body)
+	}
+}
+
 func TestAdminSectionsNullsScopeAndConfig(t *testing.T) {
 	f := newFakeAdminSections()
 	h := adminSectionsTestHandler(t, f)
 	path := Prefix + "/admin/sections/s1"
-	for _, field := range []string{"position", "section_type", "title", "featured", "item_limit", "enabled", "config"} {
+	for _, field := range []string{"position", "section_type", "title", "featured", "item_limit", "enabled", "config", "web_only"} {
 		response := do(t, h, http.MethodPatch, path, `{"`+field+`":null}`, with(bearer(adminToken), "If-Match", "*"))
 		if response.Code != 422 {
 			t.Fatalf("null %s: %d %s", field, response.Code, response.Body)

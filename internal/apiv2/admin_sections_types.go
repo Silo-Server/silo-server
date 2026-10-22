@@ -21,6 +21,7 @@ type AdminSection struct {
 	ItemLimit   int           `json:"item_limit"`
 	Config      SectionConfig `json:"config"`
 	Enabled     bool          `json:"enabled"`
+	WebOnly     bool          `json:"web_only" doc:"Only the web app receives this featured section: a viewer section read answers it only to a caller whose X-Silo-Client-Family is web, so the native apps, which show a featured section as a regular row, never get it. Always false on a section that is not featured."`
 	CreatedAt   Instant       `json:"created_at"`
 	UpdatedAt   Instant       `json:"updated_at"`
 }
@@ -34,6 +35,7 @@ type AdminSectionCreate struct {
 	ItemLimit   int           `json:"item_limit,omitempty" minimum:"0" maximum:"500"`
 	Config      SectionConfig `json:"config,omitzero"`
 	Enabled     bool          `json:"enabled,omitempty"`
+	WebOnly     bool          `json:"web_only,omitempty" doc:"Keep the featured section off every client but the web app; ignored unless featured is true. Send it only when getAdminSectionCapabilities reports web_only"`
 }
 type AdminSectionUpdate struct {
 	Position    *int          `json:"position,omitempty" nullable:"false" minimum:"0"`
@@ -43,6 +45,7 @@ type AdminSectionUpdate struct {
 	ItemLimit   *int          `json:"item_limit,omitempty" nullable:"false" minimum:"1" maximum:"500"`
 	Config      SectionConfig `json:"config,omitzero"`
 	Enabled     *bool         `json:"enabled,omitempty" nullable:"false"`
+	WebOnly     *bool         `json:"web_only,omitempty" nullable:"false" doc:"Keep the featured section off every client but the web app. Absent keeps the saved value; a section that is not featured after the update always saves false. Send it only when getAdminSectionCapabilities reports web_only"`
 }
 type AdminSectionOrder struct {
 	Scope      string `json:"scope" enum:"home,library"`
@@ -107,6 +110,7 @@ type AdminSectionCapabilities struct {
 	Available     bool `json:"available"`
 	ResetProfiles bool `json:"reset_profiles"`
 	Preview       bool `json:"preview"`
+	WebOnly       bool `json:"web_only" doc:"Admin sections accept and answer web_only, and viewer section reads honor it"`
 }
 type AdminSectionCapabilitiesOutput struct {
 	Status       int
@@ -150,7 +154,7 @@ type AdminSectionPreviewResult struct {
 type AdminSectionPreviewOutput struct{ Body AdminSectionPreviewResult }
 
 func adminSectionOf(v handlers.AdminSection) (AdminSection, *Problem) {
-	out := AdminSection{ID: ID(v.ID), Scope: v.Scope, Position: v.Position, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, Enabled: v.Enabled, Config: SectionConfig{}}
+	out := AdminSection{ID: ID(v.ID), Scope: v.Scope, Position: v.Position, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, Enabled: v.Enabled, WebOnly: v.WebOnly, Config: SectionConfig{}}
 	if v.LibraryID != nil {
 		out.LibraryID = new(ID(strconv.Itoa(*v.LibraryID)))
 	}

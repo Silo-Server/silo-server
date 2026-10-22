@@ -469,6 +469,7 @@ export function AddRowDialog({
             onVariant={(presetKey) => setDraft(withVariant(draft, def, presetKey))}
             libraryPages={copyPages}
             contentLocked={session?.kindLocked}
+            webOnlyChoice={adapter.capabilities.webOnlyHero === true}
           />
         </div>
       ) : null}

@@ -120,7 +120,8 @@ func (f *fakeLibraryAdmin) SetLibraryProviders(_ context.Context, id int, levels
 // --- viewer fakes ---
 
 type fakeLibraryViews struct {
-	err error
+	err        error
+	lastViewer handlers.SectionViewer
 }
 
 func fakeCard() handlers.SectionItemView {
@@ -132,10 +133,11 @@ func fakeCard() handlers.SectionItemView {
 		OverlaySummary: &models.OverlaySummary{Resolution: "4K", HDR: "Dolby Vision"}, UserState: &handlers.ItemUserStateView{InWatchlist: true}, ItemSource: "in_progress"}
 }
 
-func (f *fakeLibraryViews) LibraryLayout(_ context.Context, libraryID int) (handlers.SectionLayoutView, error) {
+func (f *fakeLibraryViews) LibraryLayout(_ context.Context, libraryID int, viewer handlers.SectionViewer) (handlers.SectionLayoutView, error) {
 	if f.err != nil {
 		return handlers.SectionLayoutView{}, f.err
 	}
+	f.lastViewer = viewer
 	return handlers.SectionLayoutView{Sections: []handlers.SectionLayoutEntryView{{ID: "continue_watching", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20}, {ID: "recently_added", SectionType: "recently_added", Title: "Recently Added", ItemLimit: 20, Customized: true}}}, nil
 }
 
@@ -143,6 +145,7 @@ func (f *fakeLibraryViews) LibrarySections(_ context.Context, libraryID int, vie
 	if f.err != nil {
 		return handlers.SectionsView{}, f.err
 	}
+	f.lastViewer = viewer
 	return handlers.SectionsView{Sections: []handlers.SectionView{{ID: "continue_watching", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}}}, nil
 }
 
@@ -150,6 +153,7 @@ func (f *fakeLibraryViews) LibrarySectionItems(_ context.Context, libraryID int,
 	if f.err != nil {
 		return handlers.SectionView{}, f.err
 	}
+	f.lastViewer = viewer
 	if sectionID != "continue_watching" {
 		return handlers.SectionView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Section not found"}
 	}
@@ -432,6 +436,48 @@ func TestLibraryLayoutAndSections(t *testing.T) {
 	deps := libraryViewDeps(t)
 	deps.LibrarySections = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/library/1/layout", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+// TestSectionReadsDeclareTheWebClient pins that every viewer section read
+// tells the service whether the caller declared the web client family, the
+// one client that receives a web-only hero row. Any other family, an unknown
+// one included, is answered as an app rather than refused.
+func TestSectionReadsDeclareTheWebClient(t *testing.T) {
+	home, homeFake := homeDeps(t)
+	library := libraryViewDeps(t)
+	libraryFake := &fakeLibraryViews{}
+	library.LibrarySections = libraryFake
+	reads := []struct {
+		deps Dependencies
+		path string
+		last func() handlers.SectionViewer
+	}{
+		{home, "/api/v2/home/layout", func() handlers.SectionViewer { return homeFake.lastViewer }},
+		{home, "/api/v2/home/sections", func() handlers.SectionViewer { return homeFake.lastViewer }},
+		{home, "/api/v2/home/sections/continue_watching/items", func() handlers.SectionViewer { return homeFake.lastViewer }},
+		{library, "/api/v2/library/1/layout", func() handlers.SectionViewer { return libraryFake.lastViewer }},
+		{library, "/api/v2/library/1/sections", func() handlers.SectionViewer { return libraryFake.lastViewer }},
+		{library, "/api/v2/library/1/sections/continue_watching/items", func() handlers.SectionViewer { return libraryFake.lastViewer }},
+	}
+	for _, read := range reads {
+		h := newTestHandler(t, read.deps)
+		for _, tc := range []struct {
+			family string
+			web    bool
+		}{{"web", true}, {"tv", false}, {"mobile", false}, {"watch", false}, {"", false}} {
+			headers := viewerHeaders()
+			if tc.family != "" {
+				headers = with(headers, "X-Silo-Client-Family", tc.family)
+			}
+			rec := do(t, h, http.MethodGet, read.path, "", headers)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s with family %q = %d %s", read.path, tc.family, rec.Code, rec.Body.String())
+			}
+			if got := read.last().Web; got != tc.web {
+				t.Errorf("%s with family %q: viewer.Web = %v, want %v", read.path, tc.family, got, tc.web)
+			}
+		}
+	}
 }
 
 func TestLibraryCollections(t *testing.T) {
