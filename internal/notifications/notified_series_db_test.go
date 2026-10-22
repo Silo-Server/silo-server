@@ -7,7 +7,7 @@ import (
 
 // TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences covers the
 // notified-series list over the fanout index: a series in two libraries is one
-// entry with both libraries' reasons, an inert row and a series the catalog no
+// entry, a row that is not a Next Up candidate and a series the catalog no
 // longer has are left out, entries sort by sort title then title, and a reason
 // the profile turned off stays listed but inactive.
 func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
@@ -29,16 +29,16 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 			('series:bear', 'series', 'The Bear', 'Bear', '{}', 2022, '2026-03-04T05:06:07Z'),
 			('series:andor', 'series', 'Andor', '', '{}', 0, NULL),
 			('series:inert', 'series', 'Inert', '', '{}', 0, NULL)`, nil},
-		{`INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, favorite, watchlist, next_up_candidate, next_expected_episode_key) VALUES
-			(1, 'p1', 1, 'series:bear', true, false, false, NULL),
-			(1, 'p1', 2, 'series:bear', false, false, true, $1),
-			(1, 'p1', 3, 'series:bear', false, false, true, $2),
-			(1, 'p1', 1, 'series:andor', false, true, false, NULL),
-			(1, 'p1', 1, 'series:inert', false, false, false, $1),
-			(1, 'p1', 1, 'series:gone', true, false, false, NULL),
-			(1, 'p2', 1, 'series:andor', true, false, false, NULL)`, []any{nextUp, laterNextUp}},
-		{`INSERT INTO notification_preferences (user_id, profile_id, enabled, notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up)
-			VALUES (1, 'p1', true, true, false, true, true)`, nil},
+		{`INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, next_up_candidate, last_completed_episode_key, next_expected_episode_key) VALUES
+			(1, 'p1', 1, 'series:bear', false, $1 - 1, $1),
+			(1, 'p1', 2, 'series:bear', true, $1 - 1, $1),
+			(1, 'p1', 3, 'series:bear', true, $2 - 1, $2),
+			(1, 'p1', 1, 'series:andor', true, $1 - 1, $1),
+			(1, 'p1', 1, 'series:inert', false, $1 - 1, $1),
+			(1, 'p1', 1, 'series:gone', true, $1 - 1, $1),
+			(1, 'p2', 1, 'series:andor', true, $1 - 1, $1)`, []any{nextUp, laterNextUp}},
+		{`INSERT INTO notification_preferences (user_id, profile_id, enabled, notify_next_up)
+			VALUES (1, 'p1', true, true)`, nil},
 	} {
 		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -54,11 +54,11 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 		t.Fatalf("series = %+v, want andor then bear", got)
 	}
 	andor, bear := got[0], got[1]
-	if andor.Reasons != (ReasonFlags{Watchlist: true}) || andor.Active.Any() || andor.NextExpectedEpisodeKey != nil {
-		t.Errorf("andor = %+v, want an inactive watchlist entry", andor)
+	if andor.Reasons != (ReasonFlags{NextUp: true}) || andor.Active != andor.Reasons {
+		t.Errorf("andor = %+v, want active next up", andor)
 	}
-	if bear.Reasons != (ReasonFlags{Favorite: true, NextUp: true}) || bear.Active != bear.Reasons {
-		t.Errorf("bear = %+v, want active favorite and next up", bear)
+	if bear.Reasons != (ReasonFlags{NextUp: true}) || bear.Active != bear.Reasons {
+		t.Errorf("bear = %+v, want active next up", bear)
 	}
 	if bear.Title != "The Bear" || bear.Year != 2022 || bear.AddedAt.IsZero() ||
 		bear.LatestEpisodeAddedAt == nil || !bear.LatestEpisodeAddedAt.Equal(time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)) {
@@ -67,8 +67,8 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	if andor.Year != 0 || andor.LatestEpisodeAddedAt != nil {
 		t.Errorf("andor catalog fields = %+v, want no year or latest episode", andor.SeriesSortFields)
 	}
-	if bear.NextExpectedEpisodeKey == nil || *bear.NextExpectedEpisodeKey != nextUp {
-		t.Errorf("bear waits for %v, want the earliest expected episode %d", bear.NextExpectedEpisodeKey, nextUp)
+	if bear.LastCompletedEpisodeKey == nil || *bear.LastCompletedEpisodeKey != nextUp-1 {
+		t.Errorf("bear waits after %v, want the earliest anchor %d", bear.LastCompletedEpisodeKey, nextUp-1)
 	}
 
 	// Turning notifications off silences every reason but lists the same series.
@@ -79,7 +79,7 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListNotifiedSeries: %v", err)
 	}
-	if len(got) != 2 || got[0].Active.Any() || got[1].Active.Any() || got[1].NextExpectedEpisodeKey != nil {
+	if len(got) != 2 || got[0].Active.Any() || got[1].Active.Any() || got[1].LastCompletedEpisodeKey != nil {
 		t.Fatalf("disabled = %+v, want both listed and inactive", got)
 	}
 }

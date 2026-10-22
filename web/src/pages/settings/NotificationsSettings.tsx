@@ -89,18 +89,14 @@ import {
   webPushSupport,
 } from "@/lib/webPush";
 
-const REASON_FIELDS = [
-  { key: "notify_favorites", label: "Favorites" },
-  { key: "notify_watchlist", label: "Watchlist" },
-  { key: "notify_continue_watching", label: "Continue Watching" },
-  { key: "notify_next_up", label: "Next Up" },
-] as const;
+const REASON_FIELDS = [{ key: "notify_next_up", label: "Next Up" }] as const;
 
-// Webhooks additionally carry the request.fulfilled toggle; it is not an
-// episode reason, so the profile preferences section keeps REASON_FIELDS.
+// Webhooks additionally carry the toggle for requested and watchlisted titles
+// arriving; it is not an episode reason, so the profile preferences section
+// keeps REASON_FIELDS.
 const WEBHOOK_NOTIFY_FIELDS = [
   ...REASON_FIELDS,
-  { key: "notify_requests", label: "Requests" },
+  { key: "notify_requests", label: "Requests and watchlist" },
 ] as const;
 
 type WebhookNotifyKey = (typeof WEBHOOK_NOTIFY_FIELDS)[number]["key"];
@@ -123,7 +119,8 @@ function PreferencesSection() {
       title="New Episode Notifications"
       description={
         <>
-          Choose which series relationships notify this profile when a new episode arrives.
+          A new episode notifies this profile when it is the next one to watch in a series. Titles
+          you watchlisted or requested notify when they arrive.
           {capability?.series?.available && (
             <>
               {" "}
@@ -752,9 +749,6 @@ function WebhookFormDialog({
   const [name, setName] = useState(webhook?.name ?? "");
   const [url, setUrl] = useState("");
   const [reasons, setReasons] = useState<Record<WebhookNotifyKey, boolean>>({
-    notify_favorites: webhook?.notify_favorites ?? true,
-    notify_watchlist: webhook?.notify_watchlist ?? true,
-    notify_continue_watching: webhook?.notify_continue_watching ?? true,
     notify_next_up: webhook?.notify_next_up ?? true,
     notify_requests: webhook?.notify_requests ?? true,
   });

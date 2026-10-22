@@ -58,6 +58,9 @@ function notificationTitle(notification: AppNotification): string {
   if (notification.type === "request.fulfilled") {
     return notification.series_title || "Request available";
   }
+  if (notification.type === "watchlist.available") {
+    return notification.series_title || "Watchlist title available";
+  }
   if (notification.type === "request.approved" || notification.type === "request.declined") {
     return notification.reason_flags?.title || "Media request";
   }
@@ -87,6 +90,14 @@ function notificationDescription(notification: AppNotification): string {
       : mediaType === "series"
         ? "Your requested series is now available"
         : "Your request is now available";
+  }
+  if (notification.type === "watchlist.available") {
+    const mediaType = notification.reason_flags?.media_type;
+    return mediaType === "movie"
+      ? "A movie on your watchlist is now available"
+      : mediaType === "series"
+        ? "A series on your watchlist is now available"
+        : "A title on your watchlist is now available";
   }
   if (notification.type === "request.approved") {
     return "Your request was approved";
@@ -219,12 +230,7 @@ function NotificationPreferencesPopover({
   const updatePrefs = useUpdateNotificationPreferences();
 
   const toggles: Array<{
-    key:
-      | "enabled"
-      | "notify_favorites"
-      | "notify_watchlist"
-      | "notify_continue_watching"
-      | "notify_next_up";
+    key: "enabled" | "notify_next_up";
     label: string;
     description: string;
   }> = [
@@ -234,24 +240,9 @@ function NotificationPreferencesPopover({
       description: "Master switch for this profile",
     },
     {
-      key: "notify_favorites",
-      label: "Favorites",
-      description: "New episodes of favorited series",
-    },
-    {
-      key: "notify_watchlist",
-      label: "Watchlist",
-      description: "New episodes of watchlisted series",
-    },
-    {
-      key: "notify_continue_watching",
-      label: "Continue Watching",
-      description: "Series you are actively watching",
-    },
-    {
       key: "notify_next_up",
       label: "Next Up",
-      description: "The next episode after your progress",
+      description: "A new episode that is next for you",
     },
   ];
 
@@ -448,8 +439,8 @@ function NotificationsInbox() {
                 {statusFilter === "unread" ? "No unread notifications" : "No notifications yet"}
               </div>
               <div className="max-w-sm text-xs">
-                You will be notified here when new episodes arrive for series you favorite,
-                watchlist, or are watching.
+                You will be notified here when the next episode of a series you are watching
+                arrives, or when a title you watchlisted or requested becomes available.
               </div>
               {openSeries && (
                 <Button variant="link" size="sm" onClick={openSeries}>

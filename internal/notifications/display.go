@@ -60,6 +60,17 @@ func BuildNotificationDisplay(row DeliveryRow) NotificationDisplay {
 		if row.SeriesID != nil && *row.SeriesID != "" {
 			display.URL = "/item/" + *row.SeriesID
 		}
+	case DeliveryTypeWatchlistAvailable:
+		display.Category = "watchlist_available"
+		display.Title = "A title on your watchlist is now available"
+		display.Body = "A title on your watchlist has arrived in the library."
+		if row.SeriesTitle != "" {
+			display.Title = row.SeriesTitle + " is now available"
+		}
+		if row.SeriesID != nil && *row.SeriesID != "" {
+			display.ThreadID = "item:" + *row.SeriesID
+			display.URL = "/item/" + *row.SeriesID
+		}
 	case DeliveryTypeRequestApproved:
 		flags := parseRequestFlags(row.ReasonFlags)
 		display.Category = "request_approved"

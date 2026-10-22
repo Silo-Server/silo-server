@@ -3053,12 +3053,9 @@ export type EventChannel =
   | "download_preparations";
 
 export interface NotificationReasonFlags {
-  // episode.available reasons
-  favorite?: boolean;
-  watchlist?: boolean;
-  continue_watching?: boolean;
+  // episode.available reason
   next_up?: boolean;
-  // request.* operational payload (title/year/reason ride on
+  // request.* and watchlist.available payload (title/year/reason ride on
   // request.approved / request.declined, which have no catalog item yet)
   request_id?: string;
   tmdb_id?: number;
@@ -3107,9 +3104,6 @@ export interface NotificationUnreadCountResponse {
 export interface NotificationPreferences {
   profile_id: string;
   enabled: boolean;
-  notify_favorites: boolean;
-  notify_watchlist: boolean;
-  notify_continue_watching: boolean;
   notify_next_up: boolean;
 }
 
@@ -3128,9 +3122,6 @@ export interface NotificationWebhook {
   type: NotificationWebhookType;
   url_host: string;
   enabled: boolean;
-  notify_favorites: boolean;
-  notify_watchlist: boolean;
-  notify_continue_watching: boolean;
   notify_next_up: boolean;
   notify_requests: boolean;
   consecutive_failures: number;
@@ -3148,9 +3139,6 @@ export interface NotificationWebhookInput {
   url?: string;
   type?: NotificationWebhookType;
   enabled?: boolean;
-  notify_favorites?: boolean;
-  notify_watchlist?: boolean;
-  notify_continue_watching?: boolean;
   notify_next_up?: boolean;
   notify_requests?: boolean;
 }

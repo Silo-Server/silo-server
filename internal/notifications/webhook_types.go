@@ -50,9 +50,6 @@ type Webhook struct {
 	URLHost                 string
 	SigningSecretCiphertext *string
 	Enabled                 bool
-	NotifyFavorites         bool
-	NotifyWatchlist         bool
-	NotifyContinueWatching  bool
 	NotifyNextUp            bool
 	NotifyRequests          bool
 	ConsecutiveFailures     int
@@ -70,10 +67,7 @@ type Webhook struct {
 // what fires for a destination; they can never re-enable a reason the profile
 // disabled globally (those deliveries are never created).
 func (w Webhook) MatchesReasons(flags ReasonFlags) bool {
-	return (flags.Favorite && w.NotifyFavorites) ||
-		(flags.Watchlist && w.NotifyWatchlist) ||
-		(flags.ContinueWatching && w.NotifyContinueWatching) ||
-		(flags.NextUp && w.NotifyNextUp)
+	return flags.NextUp && w.NotifyNextUp
 }
 
 // DeliveryAttempt is one row of a per-target dispatch outbox / retry log.
@@ -105,16 +99,7 @@ func parseReasonFlags(raw []byte) ReasonFlags {
 // reasonLabelList renders matched reasons as display labels, in stable
 // precedence order.
 func reasonLabelList(flags ReasonFlags) []string {
-	labels := make([]string, 0, 4)
-	if flags.Favorite {
-		labels = append(labels, "Favorited")
-	}
-	if flags.Watchlist {
-		labels = append(labels, "Watchlisted")
-	}
-	if flags.ContinueWatching {
-		labels = append(labels, "Continue Watching")
-	}
+	labels := make([]string, 0, 1)
 	if flags.NextUp {
 		labels = append(labels, "Next Up")
 	}

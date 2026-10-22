@@ -193,8 +193,6 @@ type TitleTMDB interface {
 }
 
 // promotionStore is the slice of the user store promotion writes through.
-// Pass the notification-wrapped provider so a promoted series queues an
-// interest recompute.
 type promotionStore interface {
 	AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
 	GetWatchlistEntry(ctx context.Context, profileID, mediaItemID string) (*userstore.WatchlistEntry, error)
@@ -255,8 +253,8 @@ type Titles struct {
 	promoteSlots chan struct{}
 }
 
-// NewTitles builds the service. stores should be the notification-wrapped
-// provider. tmdbClient may be nil, which disables repair; effects may be nil.
+// NewTitles builds the service. tmdbClient may be nil, which disables repair;
+// effects may be nil.
 func NewTitles(pool *pgxpool.Pool, items TitleCatalog, stores userstore.UserStoreProvider, tmdbClient TitleTMDB, effects Effects) *Titles {
 	t := &Titles{
 		repo:       &titlesRepo{pool: pool},
