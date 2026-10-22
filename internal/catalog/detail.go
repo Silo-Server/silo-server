@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -2605,7 +2606,7 @@ func (s *DetailService) personCredits(ctx context.Context, people []models.ItemP
 			PhotoPath: p.PhotoPath,
 		}
 		if strings.HasPrefix(p.PhotoPath, "http://") || strings.HasPrefix(p.PhotoPath, "https://") {
-			pc.PhotoURL = p.PhotoPath
+			pc.PhotoURL = ImageURLOrEmpty(p.PhotoPath)
 		} else if photoPaths[i] != "" {
 			pc.PhotoURL = photoURLs[photoPaths[i]].URL
 		}
@@ -4585,6 +4586,18 @@ func (s *DetailService) PresignURL(ctx context.Context, path string, variant str
 	return s.PresignURLWithExpiry(ctx, path, variant).URL
 }
 
+// ImageURLOrEmpty returns u when it parses as a URL reference and "" when it
+// does not. Image URLs stored as entered (admin edits, NFO and catalog
+// imports) and those a plugin resolver returns pass through presigning, so a
+// malformed one reads as no image rather than a value the API's uri-reference
+// format refuses.
+func ImageURLOrEmpty(u string) string {
+	if _, err := url.Parse(u); err != nil || strings.Contains(u, `\`) {
+		return ""
+	}
+	return u
+}
+
 // PresignURLWithExpiry resolves an image path and returns expiry metadata when
 // the underlying resolver can state the resolved URL validity window.
 func (s *DetailService) PresignURLWithExpiry(ctx context.Context, path string, variant string) ResolvedImageURL {
@@ -4592,14 +4605,16 @@ func (s *DetailService) PresignURLWithExpiry(ctx context.Context, path string, v
 		return ResolvedImageURL{}
 	}
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return ResolvedImageURL{URL: path}
+		return ResolvedImageURL{URL: ImageURLOrEmpty(path)}
 	}
 
 	if s.imageResolver != nil {
 		if resolver, ok := s.imageResolver.(expiringImageResolver); ok {
-			return resolver.ResolveImageURLWithExpiry(ctx, path, variant)
+			resolved := resolver.ResolveImageURLWithExpiry(ctx, path, variant)
+			resolved.URL = ImageURLOrEmpty(resolved.URL)
+			return resolved
 		}
-		return ResolvedImageURL{URL: s.imageResolver.ResolveImageURL(ctx, path, variant)}
+		return ResolvedImageURL{URL: ImageURLOrEmpty(s.imageResolver.ResolveImageURL(ctx, path, variant))}
 	}
 
 	slog.WarnContext(ctx, "image path could not be resolved", "component", "catalog", "path", path)
@@ -4678,7 +4693,7 @@ func (s *DetailService) PresignURLsWithExpiry(ctx context.Context, paths []strin
 			continue
 		}
 		if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-			resolved[path] = ResolvedImageURL{URL: path}
+			resolved[path] = ResolvedImageURL{URL: ImageURLOrEmpty(path)}
 			continue
 		}
 		resolverPaths = append(resolverPaths, path)
@@ -4686,11 +4701,12 @@ func (s *DetailService) PresignURLsWithExpiry(ctx context.Context, paths []strin
 	if s.imageResolver != nil && len(resolverPaths) > 0 {
 		if resolver, ok := s.imageResolver.(expiringImageResolver); ok {
 			for path, value := range resolver.ResolveImageURLsWithExpiry(ctx, resolverPaths, variant) {
+				value.URL = ImageURLOrEmpty(value.URL)
 				resolved[path] = value
 			}
 		} else {
-			for path, url := range s.imageResolver.ResolveImageURLs(ctx, resolverPaths, variant) {
-				resolved[path] = ResolvedImageURL{URL: url}
+			for path, resolvedURL := range s.imageResolver.ResolveImageURLs(ctx, resolverPaths, variant) {
+				resolved[path] = ResolvedImageURL{URL: ImageURLOrEmpty(resolvedURL)}
 			}
 		}
 	}
@@ -4753,7 +4769,7 @@ func (s *DetailService) PresignImageURLWithExpiry(ctx context.Context, path, ima
 	}
 	// HTTP URLs pass through.
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return ResolvedImageURL{URL: path}
+		return ResolvedImageURL{URL: ImageURLOrEmpty(path)}
 	}
 
 	return s.PresignURLWithExpiry(ctx, cachedImageVariantPath(path, imageType, size), sizeToVariant(size))

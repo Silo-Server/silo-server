@@ -136,3 +136,26 @@ func TestAttachExtraBackdropsKeepsExtendedArtOffTheBackdropWidth(t *testing.T) {
 		t.Fatalf("banner URL = %q, want %q", movie.BannerURL, want)
 	}
 }
+
+// An image URL that passes through presigning as stored, or comes back from a
+// plugin resolver, is left out when it does not parse as a URL.
+func TestPresignDropsMalformedImageURLs(t *testing.T) {
+	const good, bad = "https://images.example.test/poster.jpg", "https://images.example.test/poster%zz.jpg"
+	s := &DetailService{imageResolver: echoImageResolver{}}
+	ctx := context.Background()
+	for _, tc := range []struct{ in, want string }{{good, good}, {bad, ""}} {
+		if got := s.PresignImageURL(ctx, tc.in, "poster", ""); got != tc.want {
+			t.Errorf("PresignImageURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if got := s.PresignURL(ctx, tc.in, "card"); got != tc.want {
+			t.Errorf("PresignURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if got := s.PresignURLsWithExpiry(ctx, []string{tc.in}, "card")[tc.in].URL; got != tc.want {
+			t.Errorf("PresignURLsWithExpiry(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// The resolver echoes a key under its CDN; a key that makes a malformed URL is dropped too.
+	if got := s.PresignURL(ctx, "plugin://p/%zz", "card"); got != "" {
+		t.Errorf("resolved malformed URL = %q, want empty", got)
+	}
+}
