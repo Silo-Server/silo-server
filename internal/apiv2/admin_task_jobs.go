@@ -79,9 +79,9 @@ type AdminTaskJob struct {
 	ItemResult              *AdminTaskJobItemResult              `json:"item_result,omitempty"`
 	StorageTransitionResult *AdminTaskJobStorageTransitionResult `json:"storage_transition_result,omitempty"`
 	ArtifactSizeBytes       int64                                `json:"artifact_size_bytes"`
-	DownloadURL             string                               `json:"download_url,omitempty"`
+	DownloadURL             string                               `json:"download_url,omitempty" format:"uri-reference"`
 	DownloadExpiresAt       *Instant                             `json:"download_expires_at,omitempty"`
-	PublicURL               string                               `json:"public_url,omitempty"`
+	PublicURL               string                               `json:"public_url,omitempty" format:"uri-reference"`
 	PublicLinkSupported     bool                                 `json:"public_link_supported" doc:"Whether this server can mint a shareable seven-day link. False when exports are stored locally, because only storage-side presigning produces a URL usable off this server."`
 }
 type AdminTaskJobsInput struct {

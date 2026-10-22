@@ -51,7 +51,7 @@ type AdminPasswordResetInput struct {
 type AdminPasswordReset struct {
 	Delivery       string  `json:"delivery" enum:"email,link" example:"link"`
 	DeliveryStatus string  `json:"delivery_status" enum:"sent,failed_or_unknown,not_requested" doc:"For email: sent, or failed_or_unknown when the mail server did not confirm delivery (the link is still live; send again or share a link). For link: not_requested" example:"not_requested"`
-	ResetURL       string  `json:"reset_url,omitempty" doc:"Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder" example:"https://silo.example.test/reset-password/3f2b47eb7b36dd2d"`
+	ResetURL       string  `json:"reset_url,omitempty" format:"uri" doc:"Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder" example:"https://silo.example.test/reset-password/3f2b47eb7b36dd2d"`
 	ExpiresAt      Instant `json:"expires_at" doc:"When the link stops working"`
 }
 

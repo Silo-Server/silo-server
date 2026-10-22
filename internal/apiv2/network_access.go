@@ -62,7 +62,7 @@ type NetworkAccessHostStatus struct {
 	Hostname        string               `json:"hostname,omitempty" doc:"Overlay DNS name"`
 	Origin          string               `json:"origin,omitempty" doc:"scheme://host[:port] clients reach the API listener at over the overlay"`
 	Addresses       []string             `json:"addresses" doc:"Overlay IP addresses"`
-	AuthURL         string               `json:"auth_url,omitempty" doc:"Interactive enrollment URL, only while awaiting_authorization; admin-only, never logged"`
+	AuthURL         string               `json:"auth_url,omitempty" doc:"Interactive enrollment URL as the network access plugin reported it, only while awaiting_authorization; admin-only, never logged; not validated as a URI"`
 	Error           string               `json:"error,omitempty"`
 	ProviderVersion string               `json:"provider_version,omitempty"`
 	UpdatedAt       *Instant             `json:"updated_at,omitempty" doc:"When the host last heard from the provider; absent while unavailable"`

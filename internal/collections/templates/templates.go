@@ -51,14 +51,14 @@ type TMDBSpec struct {
 
 // MDBListSpec is the MDBList-specific portion of a template.
 type MDBListSpec struct {
-	URL string `json:"url"`
+	URL string `json:"url" format:"uri-reference"`
 }
 
 // TMDBListSpec is the portion of a template that follows a public TMDB list.
 // An empty URL is a "bring your own list" placeholder: the admin UI asks for
 // the list URL before creating the collection.
 type TMDBListSpec struct {
-	URL string `json:"url"`
+	URL string `json:"url" format:"uri-reference"`
 }
 
 // TMDBCollectionSpec is the TMDB `/collection/{id}` portion of a template.
@@ -89,7 +89,7 @@ type TMDBDiscoverSpec struct {
 	CertificationLte string   `json:"certification_lte,omitempty"`
 	WithRuntimeGte   int      `json:"with_runtime_gte,omitempty"`
 	WithRuntimeLte   int      `json:"with_runtime_lte,omitempty"`
-	OriginalLanguage string   `json:"original_language,omitempty"`
+	OriginalLanguage string   `json:"original_language,omitempty" doc:"TMDB original-language code (ISO 639-1)"`
 }
 
 // Template is a single pre-configured collection blueprint.

@@ -100,7 +100,7 @@ type AccountIdentityCollectionOutput struct {
 type AdminUserIdentity struct {
 	AccountIdentity
 	ExternalSubject string `json:"external_subject" doc:"The provider's exact subject (OIDC issuer|sub, LDAP unique id)" example:"https://id.example.test/realms/silo|8f14e45f"`
-	Issuer          string `json:"issuer" doc:"Who asserted the subject, as the provider last said; may be empty" example:"https://id.example.test"`
+	Issuer          string `json:"issuer" doc:"Who asserted the subject, as the provider last said; may be empty; not validated as a URI" example:"https://id.example.test"`
 	LastCheckStatus string `json:"last_check_status" enum:"none,active,not_found,disabled,not_permitted,unsupported,unavailable" doc:"That answer: active; not_found, disabled or not_permitted (the account's sessions were revoked); unsupported (the provider cannot re-check this identity, so its sessions end an absolute age after sign-in, and the account's API keys and Audiobookshelf sessions are revoked once the person has not signed in through the provider for that long); unavailable (the provider could not be reached; retried at the next refresh or scheduled pass); none before the first" example:"active"`
 }
 
@@ -207,7 +207,7 @@ type AuthConnectionTestResult struct {
 	Steps []AuthConnectionTestStep `json:"steps" doc:"Checks in the order they ran"`
 	// CallbackURL is the redirect URI an OAuth provider must have
 	// registered for this installation.
-	CallbackURL string `json:"callback_url" doc:"Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
+	CallbackURL string `json:"callback_url" format:"uri-reference" doc:"Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
 }
 
 // AuthConnectionTestOutput is the testAdminPluginAuthBinding response.

@@ -46,7 +46,7 @@ func destinationInstant(t *time.Time) NullableInstant {
 
 type NotificationWebPushSubscription struct {
 	ID            ID              `json:"id"`
-	Endpoint      string          `json:"endpoint"`
+	Endpoint      string          `json:"endpoint" format:"uri-reference"`
 	DeviceName    string          `json:"device_name,omitempty"`
 	Enabled       bool            `json:"enabled"`
 	CreatedAt     Instant         `json:"created_at"`
@@ -174,13 +174,13 @@ type NotificationWebPushDeleteInput struct {
 
 type NotificationWebPushUnsubscribeInput struct {
 	Body struct {
-		Endpoint string `json:"endpoint" minLength:"1" maxLength:"2048" writeOnly:"true"`
+		Endpoint string `json:"endpoint" format:"uri" minLength:"1" maxLength:"2048" writeOnly:"true"`
 	}
 }
 
 type NotificationWebPushSubscribeInput struct {
 	Body struct {
-		Endpoint string `json:"endpoint" minLength:"1" maxLength:"2048" writeOnly:"true"`
+		Endpoint string `json:"endpoint" format:"uri" minLength:"1" maxLength:"2048" writeOnly:"true"`
 		Keys     struct {
 			P256dh string `json:"p256dh" minLength:"1" writeOnly:"true"`
 			Auth   string `json:"auth" minLength:"1" writeOnly:"true"`

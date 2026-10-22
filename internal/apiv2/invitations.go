@@ -130,7 +130,7 @@ type AdminInvitationCreateInput struct {
 }
 type InvitationDelivery struct {
 	Invitation     AdminInvitation `json:"invitation"`
-	ClaimURL       string          `json:"claim_url" doc:"One-time disclosure; never retained for replay. Contains the bearer claim token."`
+	ClaimURL       string          `json:"claim_url" format:"uri" doc:"One-time disclosure; never retained for replay. Contains the bearer claim token."`
 	DeliveryStatus string          `json:"delivery_status" enum:"sent,not_configured,failed_or_unknown,not_requested" doc:"not_requested: a link invitation; nothing was emailed."`
 }
 type InvitationDeliveryOutput struct {

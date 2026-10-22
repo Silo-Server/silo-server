@@ -42,7 +42,7 @@ type AdminHistoryImportSource struct {
 	ID                   ID     `json:"id"`
 	Name                 string `json:"name"`
 	SourceType           string `json:"source_type" enum:"emby,jellyfin,plex"`
-	BaseURL              string `json:"base_url"`
+	BaseURL              string `json:"base_url" format:"uri-reference"`
 	SystemID             string `json:"system_id"`
 	Enabled              bool   `json:"enabled"`
 	SortOrder            int    `json:"sort_order"`
@@ -160,7 +160,7 @@ type AdminHistoryImportSourceCreateInput struct {
 	Body struct {
 		Name       string `json:"name" minLength:"1"`
 		SourceType string `json:"source_type" enum:"emby,jellyfin,plex"`
-		BaseURL    string `json:"base_url" minLength:"1"`
+		BaseURL    string `json:"base_url" format:"uri" minLength:"1"`
 		SystemID   string `json:"system_id,omitempty"`
 		Enabled    bool   `json:"enabled"`
 		SortOrder  int    `json:"sort_order"`
@@ -174,7 +174,7 @@ type AdminHistoryImportSourceUpdateInput struct {
 	IfNoneMatch string `header:"If-None-Match"`
 	Body        struct {
 		Name       *string `json:"name,omitempty" nullable:"false" minLength:"1"`
-		BaseURL    *string `json:"base_url,omitempty" nullable:"false" minLength:"1"`
+		BaseURL    *string `json:"base_url,omitempty" format:"uri" nullable:"false" minLength:"1"`
 		SystemID   *string `json:"system_id,omitempty" nullable:"false"`
 		Enabled    *bool   `json:"enabled,omitempty" nullable:"false"`
 		SortOrder  *int    `json:"sort_order,omitempty" nullable:"false"`

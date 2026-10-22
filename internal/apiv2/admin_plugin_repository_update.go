@@ -13,7 +13,7 @@ type AdminPluginRepositoryUpdateService interface {
 	GetByID(context.Context, int) (*plugins.Repository, error)
 }
 type AdminPluginRepositoryUpdateBody struct {
-	URL         string `json:"url,omitempty" maxLength:"8192"`
+	URL         string `json:"url,omitempty" format:"uri-reference" maxLength:"8192"`
 	DisplayName string `json:"display_name,omitempty" maxLength:"1024"`
 	Enabled     *bool  `json:"enabled,omitempty"`
 }

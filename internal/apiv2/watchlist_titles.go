@@ -82,7 +82,7 @@ type WatchlistTitle struct {
 	TMDBID        int               `json:"tmdb_id" doc:"The title's current TMDB identifier (external, not a Silo ID)" example:"949"`
 	Title         string            `json:"title" example:"Heat"`
 	Year          int               `json:"year,omitempty" example:"1995"`
-	ReleaseDate   string            `json:"release_date,omitempty" doc:"Calendar date, YYYY-MM-DD: the release date of a movie, the first air date of a series" example:"1995-12-15"`
+	ReleaseDate   string            `json:"release_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD: the release date of a movie, the first air date of a series" example:"1995-12-15"`
 	PosterPath    string            `json:"poster_path,omitempty" doc:"TMDB image path" example:"/abc.jpg"`
 	VoteAverage   *float64          `json:"vote_average,omitempty" doc:"TMDB rating out of 10; absent while the title has no votes" example:"7.9"`
 	ContentRating string            `json:"content_rating,omitempty" doc:"US certification" example:"R"`

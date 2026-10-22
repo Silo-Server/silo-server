@@ -30,7 +30,7 @@ type AdminItemMetadataUpdate struct {
 	Genres           *[]string `json:"genres,omitempty" nullable:"true"`
 	Studios          *[]string `json:"studios,omitempty" nullable:"true"`
 	Networks         *[]string `json:"networks,omitempty" nullable:"true"`
-	Countries        *[]string `json:"countries,omitempty" nullable:"true"`
+	Countries        *[]string `json:"countries,omitempty" nullable:"true" doc:"Country codes, ISO 3166-1 alpha-2 by convention (US); stored as sent; null clears"`
 	ReleaseDate      *string   `json:"release_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
 	FirstAirDate     *string   `json:"first_air_date,omitempty" nullable:"true" doc:"Null clears the stored date"`
 	LastAirDate      *string   `json:"last_air_date,omitempty" nullable:"true" doc:"Null clears the stored date"`

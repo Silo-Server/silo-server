@@ -14,7 +14,7 @@ type AdminAutoscanConnectionCreationService interface {
 type AdminAutoscanConnectionCreateBody struct {
 	Name                 string  `json:"name" minLength:"1" maxLength:"1024"`
 	Kind                 string  `json:"kind" maxLength:"256"`
-	BaseURL              string  `json:"base_url,omitempty" maxLength:"8192"`
+	BaseURL              string  `json:"base_url,omitempty" format:"uri-reference" maxLength:"8192"`
 	APIKeyRef            string  `json:"api_key_ref,omitempty" maxLength:"8192" writeOnly:"true"`
 	RequestIntegrationID *string `json:"request_integration_id,omitempty" maxLength:"256"`
 }
