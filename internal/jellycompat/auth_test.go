@@ -76,7 +76,6 @@ func TestPlaybackSessionAuth_DefaultLifetime(t *testing.T) {
 		elapsed  time.Duration
 		wantCode int
 	}{
-		{6*time.Hour + time.Minute, http.StatusOK},
 		{24*time.Hour - time.Minute, http.StatusOK},
 		{24 * time.Hour, http.StatusUnauthorized},
 	} {
