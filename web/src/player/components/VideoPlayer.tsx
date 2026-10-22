@@ -882,6 +882,13 @@ export function VideoPlayer({
   const isHlsStream = plan.stream.protocol === "hls";
   const effectiveStreamUrl = streamUrl;
   const isPlayerReady = effectiveStreamUrl !== "";
+  // Where a replan resumes. Until this transport has played, the player's
+  // position is the previous route's or 0, so it is where this one was
+  // heading: the plan's start (a resume point) or a seek made meanwhile.
+  const replanPosition = useCallback(
+    () => (streamPlayedRef.current ? currentTimeRef.current : subtitleFetchAnchorRef.current),
+    [],
+  );
   const reportCurrentPlanFailure = useCallback(
     (failure: FailureV3): boolean => {
       if (!onPlanFailure) return false;
@@ -895,20 +902,17 @@ export function VideoPlayer({
       reportedPlanFailureKeyRef.current = failureKey;
       transportFailedForPlanRevisionRef.current = planRevision;
       setError(null);
-      // Until this transport has played, the player's position is the
-      // previous route's or 0; recovery resumes where this one was heading,
-      // which for a member of a playing room is where the room is now.
-      let resumeAt = subtitleFetchAnchorRef.current;
+      // A transport that never played, in a playing room, resumes where the
+      // room is now.
       const roomReference = roomReferenceRef.current;
-      if (streamPlayedRef.current) {
-        resumeAt = currentTimeRef.current;
-      } else if (roomReference?.playing) {
-        resumeAt = roomPositionAt(roomReference, Date.now(), serverTimeOffsetRef.current);
-      }
+      const resumeAt =
+        !streamPlayedRef.current && roomReference?.playing
+          ? roomPositionAt(roomReference, Date.now(), serverTimeOffsetRef.current)
+          : replanPosition();
       onPlanFailure(failure, resumeAt);
       return true;
     },
-    [onPlanFailure, plan.plan_attempt_key, planRevision, sessionId],
+    [onPlanFailure, plan.plan_attempt_key, planRevision, replanPosition, sessionId],
   );
 
   useEffect(() => {
@@ -4439,10 +4443,10 @@ export function VideoPlayer({
       roomReloadBudgetRef.current = createRoomReloadBudget();
       roomIssuedSeekRef.current = null;
       roomSeekCorrectorRef.current = createRoomSeekCorrector();
-      if (onQualitySelect) onQualitySelect(id, currentTime, undefined, onAdopt);
+      if (onQualitySelect) onQualitySelect(id, replanPosition(), undefined, onAdopt);
       else onAdopt?.(undefined);
     },
-    [currentTime, onQualitySelect],
+    [onQualitySelect, replanPosition],
   );
 
   const handlePlayPauseRef = useRef(handlePlayPause);
@@ -4533,7 +4537,7 @@ export function VideoPlayer({
           : undefined;
       onQualitySelect?.(
         request.quality_preference,
-        currentTime,
+        replanPosition(),
         observed !== undefined ? { ...request, observed_throughput_kbps: observed } : request,
         onAdopt,
       );
@@ -4837,7 +4841,7 @@ export function VideoPlayer({
           const replaced = await onPlanInvalidated(
             invalidated.plan_id,
             invalidated.reason,
-            currentTimeRef.current,
+            replanPosition(),
           );
           if (!replaced) {
             throw new Error("plan_invalidation_replan_failed");
@@ -4864,7 +4868,7 @@ export function VideoPlayer({
           throw new Error("unsupported");
       }
     },
-    [handleExit, handleVolumeChange, onPlanInvalidated, performPlayerSeek],
+    [handleExit, handleVolumeChange, onPlanInvalidated, performPlayerSeek, replanPosition],
   );
 
   const realtime = usePlaybackRealtime({
@@ -5447,7 +5451,9 @@ export function VideoPlayer({
               ? (fileId) => {
                   // A version the viewer chooses is a quality change, counted
                   // like a quality pick: pending until its plan is adopted.
-                  sendBufferingPick((onAdopt) => onSwitchVersion(fileId, currentTime, onAdopt));
+                  sendBufferingPick((onAdopt) =>
+                    onSwitchVersion(fileId, replanPosition(), onAdopt),
+                  );
                 }
               : undefined
           }

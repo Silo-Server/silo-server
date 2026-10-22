@@ -5568,9 +5568,12 @@ describe("VideoPlayer buffering pill", () => {
   }
 
   // N6: the player applies a resume position before the first frame, and the
-  // seek that fires must not end the plan's slow start (D5/D10 addendum).
+  // seek that fires must not end the plan's slow start (D5/D10 addendum). The
+  // lowering resumes from the resume position, not the element's 0.
   it("keeps timing a resumed start's wait through the player's own resume seek", () => {
+    const onQualitySelect = vi.fn();
     const rendered = renderPlayer({
+      onQualitySelect,
       bufferingMode: "ask",
       qualityPreference: "auto",
       plan: fixturePlanV3({
@@ -5590,7 +5593,8 @@ describe("VideoPlayer buffering pill", () => {
     fireEvent.seeking(video);
     fireEvent.waiting(video);
     act(() => vi.advanceTimersByTime(16_200));
-    expect(screen.getByRole("button", { name: "Lower quality" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Lower quality" }));
+    expect(onQualitySelect.mock.calls.map(([, position]) => position)).toEqual([1300]);
   });
 
   function setVisibility(state: "visible" | "hidden") {
