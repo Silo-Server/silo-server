@@ -501,7 +501,11 @@ export default function PlaybackSettings() {
             )}
           />
         )}
-        {supportsBuffering && <LearnedLimitRow />}
+        {/* Never sends learned_limit: "ignore" on every start, so no limit applies. */}
+        {supportsBuffering &&
+          read<string>(SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE) !== "never" && (
+            <LearnedLimitRow />
+          )}
       </SettingsGroup>
       {supportsBuffering && <PlaybackConnection />}
 
