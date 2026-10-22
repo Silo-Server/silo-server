@@ -499,7 +499,8 @@ limit, then capped by the administrator limit, where the reading is the higher
 of the probe and the sample within their lifetime. Without either observation
 the budget is absent.
 `DELETE /api/v2/playback/connection/learned-limit` clears that connection's
-limit and returns 204.
+limit and returns 204. It requires `X-Silo-Device-Id`; a reset without one is
+a `422` validation problem, since it would clear nothing.
 
 `POST /api/v2/playback/bandwidth-probe/results` (`connection_speed_v1`)
 accepts `{kbps, bytes, duration_ms, transport, lower_bound, manual}` and

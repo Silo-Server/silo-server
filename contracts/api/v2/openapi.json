@@ -182021,8 +182021,10 @@
           {
             "in": "header",
             "name": "X-Silo-Device-Id",
+            "required": true,
             "schema": {
               "maxLength": 128,
+              "minLength": 1,
               "type": "string"
             }
           }

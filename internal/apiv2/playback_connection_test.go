@@ -54,6 +54,10 @@ func TestPlaybackConnectionUsesDeclaredDevice(t *testing.T) {
 	if response.Code != 200 || fake.device != "declared-device" || !strings.Contains(response.Body.String(), `"learned_limit":null`) {
 		t.Fatalf("get %d %s device=%s", response.Code, response.Body.String(), fake.device)
 	}
+	response = do(t, h, http.MethodDelete, Prefix+"/playback/connection/learned-limit", "", viewerHeaders())
+	if response.Code != 422 || fake.clear {
+		t.Fatalf("reset without a device %d %s", response.Code, response.Body.String())
+	}
 	response = do(t, h, http.MethodDelete, Prefix+"/playback/connection/learned-limit", "", headers)
 	if response.Code != 204 || !fake.clear {
 		t.Fatalf("reset %d %s", response.Code, response.Body.String())

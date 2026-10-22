@@ -17,6 +17,12 @@ type playbackConnectionService interface {
 type PlaybackConnectionInput struct {
 	DeviceID string `header:"X-Silo-Device-Id" maxLength:"128"`
 }
+
+// PlaybackLearnedLimitResetInput names the device whose limit is reset: a
+// reset without one would clear nothing and still report success.
+type PlaybackLearnedLimitResetInput struct {
+	DeviceID string `header:"X-Silo-Device-Id" required:"true" minLength:"1" maxLength:"128"`
+}
 type PlaybackLearnedLimit struct {
 	Kbps       int     `json:"kbps"`
 	ObservedAt Instant `json:"observed_at"`
@@ -71,7 +77,7 @@ func registerPlaybackConnection(reg *Registry) {
 		body := PlaybackConnection{Connection: state.Connection, Probe: playbackProbeOf(state.Probe), PlaybackSample: playbackSampleOf(state.PlaybackSample), AutoBudgetKbps: state.AutoBudgetKbps, LearnedLimit: NullableObject[PlaybackLearnedLimit]{playbackLimitOf(state.LearnedLimit)}}
 		return &PlaybackConnectionOutput{CacheControl: playbackCacheControl, Body: body}, nil
 	})
-	Register(reg, op(http.MethodDelete, "/learned-limit", "resetPlaybackLearnedLimit"), func(ctx context.Context, in *PlaybackConnectionInput) (*PlaybackConnectionResetOutput, error) {
+	Register(reg, op(http.MethodDelete, "/learned-limit", "resetPlaybackLearnedLimit"), func(ctx context.Context, in *PlaybackLearnedLimitResetInput) (*PlaybackConnectionResetOutput, error) {
 		service, ok := reg.deps.Playback.(playbackConnectionService)
 		if !ok {
 			return nil, NewProblem(TypeCapabilityNotConfigured, "Connection observations are unavailable.")
