@@ -27323,6 +27323,7 @@ export interface components {
       /** Format: int64 */
       protocol_version: number;
       server_features: string[];
+      /** @description Present only when outcome is playable. A terminal decision (adaptation_unavailable), from start or replan, carries none; read outcome before comparing sessions. */
       session_id?: string;
       terminal?: components["schemas"]["TerminalV3"];
     };
@@ -27426,7 +27427,7 @@ export interface components {
       kbps: number;
       /** @description The test proved only that the link carries at least kbps: a quick test that reached its target, or a rate above the bound. */
       lower_bound?: boolean;
-      /** @description The viewer started this test with Test speed in Settings; never set for the automatic quick test. A result above the stored learned limit clears it. */
+      /** @description The viewer started this test with Test speed; never set for the automatic test. A manual result above the device's learned limit on this connection clears the limit, as a reset does. */
       manual?: boolean;
       /** @enum {string} */
       transport: "wifi" | "ethernet" | "cellular" | "other";
@@ -27476,7 +27477,7 @@ export interface components {
       metered?: boolean;
       /**
        * Format: int64
-       * @description The current plan's measured throughput so far, sent only with bandwidth_estimate_source observed_rebuffer. The server plans with, and records as the learned limit, the lower of it and bandwidth_estimate_kbps.
+       * @description What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps.
        */
       observed_throughput_kbps?: number;
       /** @enum {string} */
@@ -27959,7 +27960,7 @@ export interface components {
       metered?: boolean;
       /**
        * Format: int64
-       * @description The current plan's measured throughput so far, sent only with bandwidth_estimate_source observed_rebuffer. The server plans with, and records as the learned limit, the lower of it and bandwidth_estimate_kbps.
+       * @description What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps.
        */
       observed_throughput_kbps?: number;
       playback_attempt_id: string;
@@ -119262,7 +119263,7 @@ export interface operations {
         "X-Profile-Id": string;
         /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
         "X-Profile-Token"?: string;
-        "X-Silo-Device-Id"?: string;
+        "X-Silo-Device-Id": string;
       };
       path?: never;
       cookie?: never;
