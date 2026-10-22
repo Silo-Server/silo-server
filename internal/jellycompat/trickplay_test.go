@@ -279,9 +279,14 @@ func TestTrickplayPlaylistGrantsSheetsByPlaySession(t *testing.T) {
 			t.Errorf("playlist%s: %d %s, want grant %s", query, rec.Code, rec.Body.String(), want)
 		}
 	}
+	// An empty duplicate names no source.
+	if rec := get(base+"0.jpg?MediaSourceId="+wide+"&mediaSourceId=&PlaySessionId=play-1", ""); rec.Code != http.StatusOK {
+		t.Errorf("empty duplicate source: %d", rec.Code)
+	}
 	for _, path := range []string{
 		base + "0.jpg?MediaSourceId=" + narrow + "&PlaySessionId=play-1",
 		base + "0.jpg?MediaSourceId=" + wide + "&mediasourceid=" + narrow + "&PlaySessionId=play-1",
+		base + "0.jpg?MediaSourceId%5B%5D=" + narrow + "&PlaySessionId=play-1",
 		"/Videos/" + codec.EncodeStringID(EncodedIDItem, "movie-2") + "/Trickplay/300/0.jpg?PlaySessionId=play-1",
 		base + "0.jpg?MediaSourceId=" + wide,
 	} {

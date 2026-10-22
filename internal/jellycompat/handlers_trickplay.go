@@ -222,7 +222,9 @@ func (h *PlaybackHandler) trickplayGrant(ctx context.Context, session *Session, 
 // playingFile is the file this token most recently selected for contentID,
 // either during negotiation or playback, or zero when no source is selected.
 // A play named by playSessionID wins over a more recent one, so a sheet
-// request authorized by that play's grant stays on its source.
+// request authorized by that play's grant stays on its sources: when the named
+// play has not selected a file, the answer is zero (the default version, which
+// a negotiation of every version includes), not another play's file.
 func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, contentID, playSessionID string) int {
 	lister, ok := h.playbackStore.(activePlayLister)
 	if !ok {
@@ -253,11 +255,11 @@ func (h *PlaybackHandler) playingFile(ctx context.Context, session *Session, con
 				selected = native.MediaFileID
 			}
 		}
-		if selected == 0 {
-			continue
-		}
 		if named {
 			return selected
+		}
+		if selected == 0 {
+			continue
 		}
 		fileID, latest = selected, play
 	}
