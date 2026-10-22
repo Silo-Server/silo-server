@@ -7,6 +7,7 @@ import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext"
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
+import type { AvailableQualityV3 } from "../protocol-v3";
 import type {
   PlaybackRealtimeCommandEnvelope,
   PlaybackRealtimeEventEnvelope,
@@ -5970,6 +5971,66 @@ describe("VideoPlayer hls.js request timeouts", () => {
     act(() => vi.advanceTimersByTime(8_000));
     expect(prompt() !== null).toBe(prompts);
   });
+
+  // C9: on Auto in the always mode, a start that misses the player's own
+  // deadline lowers as a long stall would. Its wait was silent, an outage the
+  // controller does not time. It fails at the same quality only when nothing
+  // is lower, or when the session refuses the lowering. The controller's
+  // tests cover the modes and answers that keep the failure.
+  const original = { label: "original", preserves_source: true, bitrate_kbps: 20_000 };
+  const lower = { label: "1080p-high", preserves_source: false, bitrate_kbps: 10_000 };
+  it.each<[string, AvailableQualityV3[], boolean, boolean]>([
+    ["with a lower rung", [original, lower], false, false],
+    ["with a lower rung the session refuses", [original, lower], true, true],
+    ["with nothing lower", [original], false, true],
+  ])(
+    "on Auto, a start that misses its deadline %s fails: %s",
+    async (_name, rungs, refused, fails) => {
+      hlsJS.supported = true;
+      const onPlanFailure = vi.fn((_failure: unknown, _position?: number) => true);
+      const onQualitySelect = vi.fn(
+        (
+          _label: string,
+          _position: number,
+          _request?: unknown,
+          onAdopt?: (revision?: number, sent?: boolean) => void,
+        ) => {
+          if (refused) onAdopt?.(undefined, false);
+        },
+      );
+      renderPlayer({
+        bufferingMode: "always",
+        qualityPreference: "auto",
+        onPlanFailure,
+        onQualitySelect,
+        plan: fixturePlanV3({
+          stream: {
+            url: "/playback/transcode/session-1/master.m3u8",
+            protocol: "hls",
+            headers: {},
+            header_refresh: "none",
+          },
+          available_qualities: rungs,
+          source: { ...directPlan.source, bitrate_kbps: 20_000 },
+        }),
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      act(() => vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS));
+      expect(onQualitySelect.mock.calls.map(([, , request]) => request)).toEqual(
+        rungs.length > 1
+          ? [
+              {
+                operation: "quality_change",
+                quality_preference: "auto",
+                bandwidth_estimate_kbps: 14_000,
+                bandwidth_estimate_source: "observed_rebuffer",
+              },
+            ]
+          : [],
+      );
+      expect(onPlanFailure).toHaveBeenCalledTimes(fails ? 1 : 0);
+    },
+  );
 
   it("ends the outage when hls.js appends media without a progress event", async () => {
     const { setEnd } = await waitingAfterError({ details: "fragLoadError" });

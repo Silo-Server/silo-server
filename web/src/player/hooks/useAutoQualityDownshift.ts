@@ -146,6 +146,8 @@ export function useAutoQualityDownshift(options: Options) {
   const planRan = useRef(false);
   // The page is closing, so the playing plan's summary is its last word.
   const pageEnding = useRef(false);
+  // The failure a start deadline's lowering stands in for, while it is sent.
+  const deadlineFailure = useRef<(() => void) | undefined>(undefined);
   const [pill, setPill] = useState<BufferingPillState | null>(null);
   // The pill state changes only when it shows, hides, freezes or resumes; the
   // pill counts down from its deadline itself.
@@ -169,10 +171,14 @@ export function useAutoQualityDownshift(options: Options) {
         // are sent from here.
         if (output.type === "replan" && output.body.operation === "quality_change") {
           requestedPlan.current = undefined;
+          const fail = deadlineFailure.current;
           latest.current.onReplan(output.body, (revision, sent) => {
             if (controller.current !== c) return;
             requestedPlan.current = revision;
             if (sent === false) c.event({ type: "replan_failed", unsent: true }, now());
+            // The plan that missed its deadline is dead; without a lower
+            // plan to replace it, it fails as it would have.
+            if (revision === undefined) fail?.();
           });
         }
         if (output.type === "notice") latest.current.onNotice(output.key);
@@ -410,7 +416,26 @@ export function useAutoQualityDownshift(options: Options) {
     },
     [refresh],
   );
+  /**
+   * The player's start deadline passed before the plan's first frame. When
+   * Auto lowers on its own, the controller lowers instead (see its
+   * startDeadlinePassed); `fail` reports the plan's failure when it does not,
+   * or when its lowering is not adopted.
+   */
+  const startDeadlinePassed = useCallback(
+    (fail: () => void) => {
+      deadlineFailure.current = fail;
+      const lowered = controller.current?.startDeadlinePassed(now()) ?? false;
+      deadlineFailure.current = undefined;
+      refresh();
+      if (!lowered) fail();
+    },
+    [refresh],
+  );
   const visiblePill =
     !options.obscured && pill?.planRevision === options.planRevision ? pill : null;
-  return useMemo(() => ({ pill: visiblePill, answer }), [visiblePill, answer]);
+  return useMemo(
+    () => ({ pill: visiblePill, answer, startDeadlinePassed }),
+    [visiblePill, answer, startDeadlinePassed],
+  );
 }

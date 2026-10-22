@@ -22,7 +22,7 @@ describe("HlsStartupGuard", () => {
     expect(guard.hasFailed()).toBe(false);
 
     vi.advanceTimersByTime(1);
-    expect(onFailure).toHaveBeenCalledOnce();
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith("deadline");
     expect(guard.hasFailed()).toBe(true);
     guard.dispose();
   });

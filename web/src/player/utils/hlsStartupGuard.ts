@@ -9,8 +9,9 @@ export class HlsStartupGuard {
   private fatalNetworkRecoveries = 0;
   private timeoutId: ReturnType<typeof setTimeout> | null;
 
-  constructor(private readonly onFailure: () => void) {
-    this.timeoutId = setTimeout(() => this.fail(), HLS_STARTUP_TIMEOUT_MS);
+  /** `onFailure` hears whether the deadline passed or fatal network errors ran out. */
+  constructor(private readonly onFailure: (cause: "deadline" | "network") => void) {
+    this.timeoutId = setTimeout(() => this.fail("deadline"), HLS_STARTUP_TIMEOUT_MS);
   }
 
   handleFatalNetworkError(): boolean {
@@ -22,7 +23,7 @@ export class HlsStartupGuard {
       return true;
     }
 
-    this.fail();
+    this.fail("network");
     return false;
   }
 
@@ -42,12 +43,12 @@ export class HlsStartupGuard {
     this.clearTimeout();
   }
 
-  private fail() {
+  private fail(cause: "deadline" | "network") {
     if (this.state !== "starting") return;
 
     this.state = "failed";
     this.clearTimeout();
-    this.onFailure();
+    this.onFailure(cause);
   }
 
   private clearTimeout() {

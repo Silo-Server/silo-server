@@ -338,6 +338,32 @@ export class BufferingQualityController {
     }
   }
 
+  /**
+   * The client's own start deadline passed before the plan's first frame. On
+   * Auto in the "always" mode that lowers as a long stall would, with an
+   * undo, and answers true; the start then fails only when there is nothing
+   * lower, including a plan a lowering just found could go no lower. A picked
+   * quality, the "ask" and "never" modes, a Keep or Restore answer for the
+   * title and a Watch Party room leave the failure to the usual recovery.
+   */
+  startDeadlinePassed(now: number): boolean {
+    this.tick(now, false);
+    if (
+      this.plan?.quality !== "auto" ||
+      this.mode !== "always" ||
+      this.answered ||
+      this.suspended ||
+      this.pending ||
+      now < this.blockedUntil ||
+      !this.canLower()
+    )
+      return false;
+    this.pill = null;
+    this.deferredPill = null;
+    this.lower(now, true);
+    return true;
+  }
+
   /** The player stops: report the plan that was playing. */
   stop(now: number) {
     this.tick(now, false);

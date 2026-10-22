@@ -7,6 +7,9 @@ import type { EngineSourceSpec } from "./source";
  */
 export const ENGINE_READ_FAILED = "browser_engine_read_failed";
 
+/** The engine's start deadline passed before the position became playable. */
+export const ENGINE_STARTUP_TIMEOUT = "browser_engine_startup_timeout";
+
 /**
  * The video decoder reported an error. A hardware decoder also fails this way
  * when the GPU process restarts under it, so the page retries a new decode run

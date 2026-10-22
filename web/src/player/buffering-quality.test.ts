@@ -135,6 +135,52 @@ it("does not keep the estimate of a lowering the player refused to send", () => 
   });
 });
 
+// C9: the adapter reports a start that showed no frame by its own deadline.
+it.each<[string, BufferingMode, string, (c: BufferingQualityController) => void, boolean]>([
+  ["lowers on Auto in the always mode", "always", "auto", () => {}, true],
+  ["fails in the ask mode", "ask", "auto", () => {}, false],
+  ["fails in the never mode", "never", "auto", () => {}, false],
+  ["fails for a picked quality", "always", "4k", () => {}, false],
+  [
+    "fails after a Keep answer for the title",
+    "ask",
+    "auto",
+    (c) => {
+      c.event({ type: "playing" }, 0);
+      c.event({ type: "waiting" }, 20000);
+      c.tick(26000);
+      c.event({ type: "select_keep" }, 27000);
+      // The viewer switches to always afterwards.
+      c.mode = "always";
+    },
+    false,
+  ],
+])("a start that misses its deadline %s", (_name, mode, quality, answer, lowers) => {
+  const outputs: unknown[] = [];
+  const c = new BufferingQualityController(mode, (output) => outputs.push(output), 0);
+  c.event({ type: "plan_adopted", plan: { ...plan, quality } }, 0);
+  answer(c);
+  // A later plan of the same quality shows no frame by its deadline.
+  c.event({ type: "plan_adopted", plan: { ...plan, plan_id: "p2", quality } }, 100000);
+  outputs.length = 0;
+  expect(c.startDeadlinePassed(160000)).toBe(lowers);
+  expect(outputs).toEqual(
+    lowers
+      ? [
+          {
+            type: "replan",
+            body: {
+              operation: "quality_change",
+              quality_preference: "auto",
+              bandwidth_estimate_kbps: 44100,
+              bandwidth_estimate_source: "observed_rebuffer",
+            },
+          },
+        ]
+      : [],
+  );
+});
+
 it("omits an unknown delivered bitrate from the summary", () => {
   const summaries: BufferingSummary[] = [];
   const c = new BufferingQualityController(

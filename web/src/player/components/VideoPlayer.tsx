@@ -38,7 +38,7 @@ import { usePGSSubtitles } from "../hooks/usePGSSubtitles";
 import type { EngineCapabilities } from "../engine/capabilities";
 import { resolveOriginalPlaybackRoute, type NativeOriginalSupport } from "../engine/routing";
 import type { BrowserEngineSession } from "../engine";
-import { ENGINE_READ_FAILED } from "../engine/protocol";
+import { ENGINE_READ_FAILED, ENGINE_STARTUP_TIMEOUT } from "../engine/protocol";
 import { useSubtitleSync } from "../hooks/useSubtitleSync";
 import { useSubtitleSyncFeedback } from "../hooks/useSubtitleSyncFeedback";
 import { syncKeyOf } from "../utils/subtitleSync";
@@ -936,6 +936,10 @@ export function VideoPlayer({
   // never tears the transport down.
   const reportConnectionLostRef = useRef(reportConnectionLost);
   reportConnectionLostRef.current = reportConnectionLost;
+  // A start that missed the player's own deadline goes to the buffering
+  // controller, which lowers when Auto lowers on its own and otherwise calls
+  // back to fail the plan. Set once the controller's hook has run below.
+  const startDeadlinePassedRef = useRef<(fail: () => void) => void>((fail) => fail());
 
   // While the session reconnects, nothing plays: the element is paused (so
   // progress reports say so), and hls.js stops hammering the server. The
@@ -951,27 +955,36 @@ export function VideoPlayer({
     setBuffering(false);
   }, [connectionStatus]);
 
-  const failHlsStartup = useCallback(() => {
-    console.error("[hls.js] Playback startup timed out or exhausted recovery attempts");
+  const failHlsStartup = useCallback(
+    (cause: "deadline" | "network") => {
+      console.error("[hls.js] Playback startup timed out or exhausted recovery attempts");
 
-    const activeHls = hlsRef.current;
-    hlsRef.current = null;
-    activeHls?.destroy();
+      const activeHls = hlsRef.current;
+      hlsRef.current = null;
+      activeHls?.destroy();
 
-    const video = videoRef.current;
-    if (video) {
-      video.removeAttribute("src");
-      video.load();
-    }
-    if (
-      !reportCurrentPlanFailure({
-        classification: "startup_timeout",
-        message: "HLS playback exhausted its startup recovery budget.",
-      })
-    ) {
-      setError("Playback failed. The media could not be loaded.");
-    }
-  }, [reportCurrentPlanFailure]);
+      const video = videoRef.current;
+      if (video) {
+        video.removeAttribute("src");
+        video.load();
+      }
+      const fail = () => {
+        if (
+          !reportCurrentPlanFailure({
+            classification: "startup_timeout",
+            message: "HLS playback exhausted its startup recovery budget.",
+          })
+        ) {
+          setError("Playback failed. The media could not be loaded.");
+        }
+      };
+      // When Auto lowers on its own, a start that missed its deadline lowers, as
+      // a long stall would.
+      if (cause === "deadline") startDeadlinePassedRef.current(fail);
+      else fail();
+    },
+    [reportCurrentPlanFailure],
+  );
 
   useEffect(() => {
     if (!isHlsStream || !isPlayerReady) return;
@@ -2845,6 +2858,17 @@ export function VideoPlayer({
               },
               onFailure: (failure) => {
                 if (destroyed) return;
+                const fail = () => {
+                  if (!reportCurrentPlanFailure(failure)) {
+                    setError(`Playback error: ${failure.message ?? failure.classification}`);
+                  }
+                };
+                // When Auto lowers on its own, a start that missed its deadline
+                // lowers, as a long stall would.
+                if (failure.classification === ENGINE_STARTUP_TIMEOUT) {
+                  startDeadlinePassedRef.current(fail);
+                  return;
+                }
                 // Like MEDIA_ERR_NETWORK on the element: a read that fails
                 // after the stream played reconnects on the same route.
                 if (
@@ -2853,9 +2877,7 @@ export function VideoPlayer({
                 ) {
                   return;
                 }
-                if (!reportCurrentPlanFailure(failure)) {
-                  setError(`Playback error: ${failure.message ?? failure.classification}`);
-                }
+                fail();
               },
             });
             setBrowserEngineActive(true);
@@ -4526,6 +4548,7 @@ export function VideoPlayer({
     },
     onKeptEstimate,
   });
+  startDeadlinePassedRef.current = bufferingQuality.startDeadlinePassed;
   const bufferingPill = bufferingQuality.pill;
   const { answer: answerBufferingPill } = bufferingQuality;
   // The viewer's latest quality pick while it is pending. A pick that a newer

@@ -4,6 +4,7 @@ import { EngineAudioOutput } from "./audioOutput";
 import { EngineClock } from "./clock";
 import {
   ENGINE_READ_FAILED,
+  ENGINE_STARTUP_TIMEOUT,
   ENGINE_VIDEO_DECODE_FAILED,
   type EngineMediaInfo,
   type PageToWorkerMessage,
@@ -54,7 +55,7 @@ export const DECODER_RESTART_DELAY_MS = 750;
 /** Typed failures the server records against the plan (see routing.ts). */
 export const ENGINE_PAGE_FAILURES = {
   worker: "browser_engine_worker_failed",
-  startup: "browser_engine_startup_timeout",
+  startup: ENGINE_STARTUP_TIMEOUT,
   presentation: "browser_engine_presentation_failed",
   audioOutput: "browser_engine_audio_output_failed",
 } as const;
