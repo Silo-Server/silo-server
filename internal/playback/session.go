@@ -1042,35 +1042,40 @@ func (m *SessionManager) SetPaused(sessionID string, paused bool, acceptedSequen
 		return false, ErrSessionNotFound
 	}
 	s.confirmedPauseSequence = max(s.confirmedPauseSequence, acceptedSequence)
-	moved := false
+	now := time.Now()
+	adopted, moved := false, false
 	if latest != nil && latest.Sequence > s.positionSequence {
+		adopted = true
 		s.positionSequence = latest.Sequence
 		moved = s.Position != latest.Position
 		s.Position = latest.Position
 		// This session never measured the adopted report. Measuring it at
 		// the pause state it reported keeps a seek made while paused, then
 		// confirmed as a resume, from being credited as viewing.
-		s.Watch.Observe(latest.Position, latest.IsPaused, time.Now())
+		s.Watch.Observe(latest.Position, latest.IsPaused, now)
 	}
-	if s.IsPaused == paused {
-		if moved {
-			s.streamRevision++
+	changed := s.IsPaused != paused
+	if changed {
+		s.IsPaused = paused
+		m.touchSessionLocked(s)
+	}
+	if changed || moved {
+		s.streamRevision++
+	}
+	if changed || adopted {
+		// The measurement then follows the confirmed state, which the adopted
+		// report may not share. A confirmation carries no position of its
+		// own, so s.Position can predate the pause. Measuring a pause there
+		// would drop the viewing since the last report; the pause is marked
+		// and the next report measures up to it. A resume starts from where
+		// the pause held the player.
+		if paused {
+			s.Watch.Pause(now)
+		} else {
+			s.Watch.Observe(s.Position, false, now)
 		}
-		return false, nil
 	}
-	s.IsPaused = paused
-	s.streamRevision++
-	m.touchSessionLocked(s)
-	// A confirmation carries no position of its own, so s.Position can predate
-	// the pause. Measuring a pause there would drop the viewing since the last
-	// report; the pause is marked and the next report measures up to it. A
-	// resume starts from where the pause held the player.
-	if paused {
-		s.Watch.Pause(s.UpdatedAt)
-	} else {
-		s.Watch.Observe(s.Position, s.IsPaused, s.UpdatedAt)
-	}
-	return true, nil
+	return changed, nil
 }
 
 // MarkStopReported records that a client reported this session stopped

@@ -127,3 +127,32 @@ func TestSessionManagerResumeAdoptsPausedSeek(t *testing.T) {
 		t.Fatalf("played %v, paused %v; want 0 played and the half hour paused", got.Watch.PlayedSeconds, got.Watch.PausedSeconds)
 	}
 }
+
+// A resume confirmed while the session already plays can carry an older
+// paused report. Measurement follows the confirmed state, so the playback
+// after it is still credited as viewing.
+func TestSessionManagerConfirmedStateOverridesAdoptedPause(t *testing.T) {
+	m := NewSessionManager(0, 0)
+	s := startPlaybackTestSession(t, m, 1, "profile-1", 100, PlayDirect)
+	if err := m.UpdateProgressSample(s.ID, ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SetPaused(s.ID, false, 2, &ProgressSampleV3{Sequence: 2, Position: 40, IsPaused: true}); err != nil {
+		t.Fatal(err)
+	}
+	// Ten seconds of playback before the next report.
+	m.mu.Lock()
+	w := &m.sessions[s.ID].Watch
+	w.Until = w.Until.Add(-10 * time.Second)
+	m.mu.Unlock()
+	if err := m.UpdateProgressSample(s.ID, ProgressSampleV3{Sequence: 3, Position: 50}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.GetSession(s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Watch.PlayedSeconds != 10 || got.Watch.PausedSeconds != 0 {
+		t.Fatalf("played %v, paused %v; want 10 played and none paused", got.Watch.PlayedSeconds, got.Watch.PausedSeconds)
+	}
+}
