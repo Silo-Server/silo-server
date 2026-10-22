@@ -101,6 +101,11 @@ export interface BufferingEvent {
   /** Whether a `plan_adopted` answers this controller's own replan. */
   controllerInitiated?: boolean;
   /**
+   * On `plan_adopted`: the plan replaces one of the same attempt before any
+   * of them played, so it continues the attempt's start under its grace.
+   */
+  continuesStart?: boolean;
+  /**
    * On `replan_failed`: the player refused the replan before sending it, so
    * its estimate is not kept. It still rearms like a failed replan.
    */
@@ -232,7 +237,10 @@ export class BufferingQualityController {
   remainingMs = BUFFERING_PILL_MS;
   private plan?: BufferingPlan;
   private summary?: BufferingSummary;
-  /** When the plan's startup grace ends; set by its first frame or first wait. */
+  /**
+   * When the plan's startup grace ends; set by its first frame or first wait.
+   * A plan that continues the attempt's start keeps the one it had.
+   */
   private graceEndsAt?: number;
   /**
    * When the stall in progress started counting toward a trigger. A prompt
@@ -397,7 +405,8 @@ export class BufferingQualityController {
         this.setObscured(false, now);
         break;
       case "plan_adopted":
-        if (event.plan) this.adopt(event.plan, event.controllerInitiated, now);
+        if (event.plan)
+          this.adopt(event.plan, event.controllerInitiated, event.continuesStart, now);
         break;
       case "play":
         this.paused = false;
@@ -575,7 +584,12 @@ export class BufferingQualityController {
     return this.waiting && this.stall !== undefined && now - this.stall >= LONG_STALL_MS;
   }
 
-  private adopt(plan: BufferingPlan, controllerInitiated: boolean | undefined, now: number) {
+  private adopt(
+    plan: BufferingPlan,
+    controllerInitiated: boolean | undefined,
+    continuesStart: boolean | undefined,
+    now: number,
+  ) {
     // An in-place update of the same adoption keeps its history.
     if (adoptionOf(plan) === adoptionOf(this.plan)) return;
     const previousQuality = this.lastQuality;
@@ -603,7 +617,7 @@ export class BufferingQualityController {
     this.deferredPill = null;
     this.waiting = false;
     this.playing = false;
-    this.graceEndsAt = undefined;
+    if (!continuesStart) this.graceEndsAt = undefined;
     this.clearStall();
     this.stalls = [];
     this.longStallEnded = undefined;

@@ -140,10 +140,12 @@ export function useAutoQualityDownshift(options: Options) {
   const requestedPlan = useRef<number | undefined>(undefined);
   const adoptedPlan = useRef<number | undefined>(undefined);
   const attempt = useRef<string | null | undefined>(undefined);
-  // A plan of the current attempt has been adopted. Only the attempt's first
-  // plan is a start; a later one replaces a source.
-  const attemptStarted = useRef(false);
-  // The attempt's first plan is starting with play intent and has not played yet.
+  // How far the current attempt has got. A plan adopted before any of its
+  // plans played (a failure recovery, or a lowering during the start wait)
+  // continues the attempt's start; one adopted after replaces a source that
+  // played, and its load is a source reload.
+  const attemptStage = useRef<"new" | "adopted" | "played">("new");
+  // The attempt is starting with play intent and has not played yet.
   const starting = useRef(false);
   // A source reload: the transport was emptied or replaced, and playback has
   // not run since. Buffering meanwhile is the reload's, never a stall.
@@ -232,7 +234,7 @@ export function useAutoQualityDownshift(options: Options) {
     window.addEventListener("pageshow", pageshow);
     adoptedPlan.current = undefined;
     attempt.current = latest.current.attemptId;
-    attemptStarted.current = false;
+    attemptStage.current = "new";
     return () => {
       window.removeEventListener("pagehide", pagehide);
       window.removeEventListener("pageshow", pageshow);
@@ -247,7 +249,7 @@ export function useAutoQualityDownshift(options: Options) {
     const c = controller.current;
     if (!c || options.attemptId === attempt.current) return;
     attempt.current = options.attemptId;
-    attemptStarted.current = false;
+    attemptStage.current = "new";
     c.event({ type: "new_attempt" }, now());
   }, [options.attemptId, options.sessionId]);
   useEffect(() => {
@@ -258,33 +260,35 @@ export function useAutoQualityDownshift(options: Options) {
     c.setObscured(options.obscured, now());
     const isNewPlan = adoptedPlan.current !== options.planRevision;
     adoptedPlan.current = options.planRevision;
+    const stage = attemptStage.current;
     c.event(
       {
         type: "plan_adopted",
         plan: { ...options.plan, adoption_id: String(options.planRevision) },
         controllerInitiated: requestedPlan.current === options.planRevision,
+        continuesStart: isNewPlan && stage === "adopted",
       },
       now(),
     );
     if (isNewPlan) requestedPlan.current = undefined;
     const video = options.videoRef.current;
-    const firstOfAttempt = isNewPlan && !attemptStarted.current;
     if (isNewPlan) {
       starting.current = false;
       planRan.current = false;
       rendererWait.current = undefined;
-      attemptStarted.current = true;
+      if (stage === "new") attemptStage.current = "adopted";
     }
     if (isNewPlan && video) {
       // A plan adopted while the element is already playing fires no `playing`.
       if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
         planRan.current = true;
+        attemptStage.current = "played";
         c.event({ type: "playing" }, now());
       } else if (
         latest.current.playIntent?.() &&
         video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
       ) {
-        if (firstOfAttempt) {
+        if (stage !== "played") {
           // The element waits for data before it plays, and fires no `waiting`.
           starting.current = true;
           c.event({ type: "play" }, now());
@@ -350,6 +354,7 @@ export function useAutoQualityDownshift(options: Options) {
       reloading.current = false;
       starting.current = false;
       planRan.current = true;
+      attemptStage.current = "played";
       send("playing");
     };
     const rendererBusy = () =>

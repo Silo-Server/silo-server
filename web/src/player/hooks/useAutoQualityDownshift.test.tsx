@@ -225,6 +225,19 @@ it("does not lower while a replacement plan loads slowly", () => {
   expect(h.options.onReplan).not.toHaveBeenCalled();
 });
 
+// A plan that replaces one before any played, here a failure recovery 3 s
+// in, continues the attempt's start: timed, under the start's own grace.
+it("times a replacement adopted before the start played as the start's wait", () => {
+  const h = setup({ paused: true, playIntent: () => true });
+  h.advance(3_000);
+  h.rerender({ ...h.options, planRevision: 2, plan: { ...plan, plan_id: "p2" } });
+  h.send("emptied");
+  h.advance(12_900);
+  expect(h.options.onReplan).not.toHaveBeenCalled();
+  h.advance(200);
+  expect(h.options.onReplan).toHaveBeenCalledTimes(1);
+});
+
 it("keeps timing a slow start through the waiting that follows its reload", () => {
   const video = document.createElement("video");
   Object.defineProperty(video, "paused", { value: true, configurable: true });
