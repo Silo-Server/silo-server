@@ -1293,18 +1293,18 @@ open: clients show unknown codes generically.
 | Code | When | Figures |
 | --- | --- | --- |
 | `original` | The video plays at the source's resolution and bitrate: direct play, remux, or a video copy. Only ever entry 0 | — |
-| `user_selected` | A fixed rung or plain resolution in `quality_preference`, or a version the viewer pinned (`allow_alternate_versions: false`) that plays as it is | — |
+| `user_selected` | A fixed rung or plain resolution in `quality_preference`. A version pin (`allow_alternate_versions: false`) is not one | — |
 | `server_cap` | An administrator's bitrate limit lowered the plan | `kbps` (the limit) |
 | `client_cap` | The request's `bandwidth_cap_kbps` lowered the plan | `kbps` (the cap) |
 | `network_learned_limit` | The device's learned limit lowered the plan (`bandwidth_limit` is present) | `kbps`, `expires_at` |
 | `network_estimate` | Auto planned below the source because the estimate's budget cannot carry it | `kbps` (the estimate) |
 | `device_resolution_limit` | The device's maximum resolution, or the tallest class an attested H.264 decoder takes, lowered the plan | `height` |
-| `alternate_version` | Another version of the requested part plays | `media_file_id` (a string, as every v2 identifier) |
+| `alternate_version` | Another version of the title plays, of the same part for a multi-part title | `media_file_id` (a string, as every v2 identifier) |
 | `video_codec_unsupported` | The device cannot decode the source video, or its evidence tier cannot validate it, so the video is encoded | `from` (source codec) |
 | `subtitle_burn_in` | The selected subtitle is burned into the video | — |
 | `dynamic_range_converted` | The video is delivered in another dynamic range: tone mapping, a Dolby Vision strip, or a client playing the HDR10 or HLG base layer | `from`, `to` |
 | `compatibility_conversion` | The video is encoded for none of the reasons above, such as a source whose video cannot be copied safely or copy routes that already failed on this output | — |
-| `audio_converted` | The audio is re-encoded to another codec or fewer channels | `from`, `to` |
+| `audio_converted` | The audio is re-encoded to another codec or fewer channels | `from`, `to`; `channels` (the delivered count) when channels drop |
 | `container_unsupported` | A remux changed only the packaging | — |
 
 Codec figures are lower-case tokens such as `hevc`, `h264`, `av1`, `vp9`,
@@ -1318,18 +1318,22 @@ Entries follow this order, so the first that applies is entry 0:
 `video_codec_unsupported`, `subtitle_burn_in`, `dynamic_range_converted`,
 `compatibility_conversion`, `original`, `audio_converted`,
 `container_unsupported`. `original` appears only when nothing before it does.
-A version pin that plays as it is takes its place as `user_selected`.
+A pinned version that plays as it is is `original`; a pinned version that
+something lowered names that cause.
 
 - A cap is named when it is the lower of the two caps (the administrator's on
-  a tie) and it bounded the encode. A cap looser than the estimate's choice is
-  not named.
+  a tie) and it set the encode's bitrate or class, or nothing else forced the
+  encode. A cap looser than the estimate's budget is not named, even when the
+  source is over the cap.
 - `alternate_version` follows the limit the requested version exceeded: the
   tightest of the caps and the estimate's 80% budget, and the device's maximum
   resolution. A version chosen because the requested one was refused has no
   limit before it.
 - A learned limit is named after the server has decided that the limit lowered
   the plan, exactly when `bandwidth_limit` is present; it replaces the
-  `network_estimate` entry for the same rate.
+  `network_estimate` entry for the same rate. A learned limit that lowered
+  nothing removes that entry: the request's own estimate, never below the
+  limit, lowered nothing either.
 - A remux lists `container_unsupported` only when it changes nothing else.
 - A client Dolby Vision Profile 7 to 8.1 conversion keeps the Dolby Vision
   range and is not listed.

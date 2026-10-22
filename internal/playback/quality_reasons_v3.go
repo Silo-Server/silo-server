@@ -47,6 +47,7 @@ type QualityReasonV3 struct {
 	From        string `json:"from,omitempty"`
 	To          string `json:"to,omitempty"`
 	MediaFileID int    `json:"media_file_id,omitempty"`
+	Channels    int    `json:"channels,omitempty"`
 }
 
 // qualityReasonRankV3 orders the codes. The first entry is the one that
@@ -86,7 +87,6 @@ type qualityFactsV3 struct {
 	// encode's quality.
 	capEncode        bool
 	videoUnsupported bool
-	versionPinned    bool
 	// requested is the version the viewer asked for when another version
 	// plays; nil otherwise.
 	requested *SourceDescriptorV3
@@ -101,16 +101,18 @@ func qualityReasonsV3(facts qualityFactsV3, result PlannerResultV3) []QualityRea
 	reasons := qualityDecisionReasonsV3(facts, result)
 	add := func(reason QualityReasonV3) { reasons = appendQualityReasonV3(reasons, reason) }
 	if len(reasons) == 0 {
-		code := QualityReasonOriginalV3
-		if facts.versionPinned {
-			code = QualityReasonUserSelectedV3
-		}
-		add(QualityReasonV3{Code: code})
+		add(QualityReasonV3{Code: QualityReasonOriginalV3})
 	}
 	audioChanged := false
-	if from, to := audioCodecTokenV3(plan.Source.AudioCodec), audioCodecTokenV3(plan.EffectiveRecipe.AudioCodec); result.TranscodeAudio && from != "" &&
-		(from != to || optionalValueV3(plan.EffectiveRecipe.AudioChannels) > 0 && optionalValueV3(plan.EffectiveRecipe.AudioChannels) < plan.Source.AudioChannels) {
-		add(QualityReasonV3{Code: QualityReasonAudioConvertedV3, From: from, To: to})
+	from, to := audioCodecTokenV3(plan.Source.AudioCodec), audioCodecTokenV3(plan.EffectiveRecipe.AudioCodec)
+	// channels is the delivered channel count when the conversion drops
+	// channels, 0 otherwise.
+	channels := optionalValueV3(plan.EffectiveRecipe.AudioChannels)
+	if channels >= plan.Source.AudioChannels {
+		channels = 0
+	}
+	if result.TranscodeAudio && from != "" && (from != to || channels > 0) {
+		add(QualityReasonV3{Code: QualityReasonAudioConvertedV3, From: from, To: to, Channels: channels})
 		audioChanged = true
 	}
 	remux := plan.Delivery == DeliveryRemuxProgressiveV3 || plan.Delivery == DeliveryRemuxHLSV3

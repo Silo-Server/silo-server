@@ -223,7 +223,6 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		clientCapKbps: optionalValueV3(input.Request.BandwidthCapKbps),
 		serverCapKbps: input.ServerBitrateCapKbps,
 		estimateKbps:  optionalValueV3(input.Request.BandwidthEstimateKbps),
-		versionPinned: !input.Request.AllowsAlternateVersions(),
 		maxHeight:     resolutionHeightV3(input.Request.Capabilities.MaxResolution),
 	}
 	// Registered first so it runs last, after any rewrite of the result.

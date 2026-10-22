@@ -39138,8 +39138,13 @@
       "PlaybackQualityReason": {
         "additionalProperties": false,
         "properties": {
+          "channels": {
+            "description": "The delivered audio channel count when audio_converted drops channels (2 for a stereo downmix); absent when the channel count is kept.",
+            "format": "int64",
+            "type": "integer"
+          },
           "code": {
-            "description": "Why the plan delivers this quality. Open set; clients must accept codes they do not know. original: the source's own resolution and bitrate (only ever the first entry). user_selected: the viewer chose a fixed quality or pinned this version. server_cap: an administrator's bitrate limit. client_cap: the request's bandwidth_cap_kbps. network_learned_limit: the device's learned limit (bandwidth_limit). network_estimate: the bandwidth estimate cannot carry the source. device_resolution_limit: the device's maximum resolution. alternate_version: another version of the title plays. video_codec_unsupported: the device cannot decode the source video. subtitle_burn_in: the selected subtitle is burned into the video. dynamic_range_converted: the video is delivered in another dynamic range. compatibility_conversion: the video is converted for none of the other reasons, such as a source that cannot be copied safely or copy routes that already failed. audio_converted: the audio is re-encoded. container_unsupported: only the packaging changed.",
+            "description": "Why the plan delivers this quality. Open set; clients must accept codes they do not know. Entries follow this order, so the first that applies is entry 0. user_selected: the viewer chose a fixed quality (a version pin is not one). server_cap: an administrator's bitrate limit. client_cap: the request's bandwidth_cap_kbps. network_learned_limit: the device's learned limit (bandwidth_limit). network_estimate: the bandwidth estimate cannot carry the source. device_resolution_limit: the device's maximum resolution. alternate_version: another version of the title plays. video_codec_unsupported: the device cannot decode the source video. subtitle_burn_in: the selected subtitle is burned into the video. dynamic_range_converted: the video is delivered in another dynamic range. compatibility_conversion: the video is converted for none of the reasons above, such as a source that cannot be copied safely or copy routes that already failed. original: the source's own resolution and bitrate, only as entry 0 when nothing above applies. audio_converted: the audio is re-encoded. container_unsupported: only the packaging changed.",
             "type": "string"
           },
           "expires_at": {

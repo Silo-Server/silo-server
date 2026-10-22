@@ -46,7 +46,14 @@ var qualityReasonCasesV3 = []qualityReasonCaseV3{
 	{name: "original with its audio converted", edit: func(_ *StartRequestV3, file *models.MediaFile) {
 		file.CodecAudio, file.AudioChannels = "truehd", 6
 		file.AudioTracks = []models.AudioTrack{{Codec: "truehd", Channels: 6, Layout: "5.1"}}
-	}, want: []QualityReasonV3{{Code: QualityReasonOriginalV3}, {Code: QualityReasonAudioConvertedV3, From: "truehd", To: "aac"}}},
+	}, want: []QualityReasonV3{{Code: QualityReasonOriginalV3}, {Code: QualityReasonAudioConvertedV3, From: "truehd", To: "aac", Channels: 2}}},
+	{name: "a same-codec downmix", edit: func(req *StartRequestV3, file *models.MediaFile) {
+		hevcSource(file)
+		file.AudioChannels, file.AudioTracks[0].Channels, file.AudioTracks[0].Layout = 6, 6, "5.1"
+		hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+		hls.MaxChannels = new(2)
+		req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	}, want: []QualityReasonV3{{Code: QualityReasonVideoCodecUnsupportedV3, From: "hevc"}, {Code: QualityReasonAudioConvertedV3, From: "aac", To: "aac", Channels: 2}}},
 	{name: "a fixed rung", edit: func(req *StartRequestV3, _ *models.MediaFile) {
 		req.QualityPreference = QualityRung720pMediumV3
 	}, want: []QualityReasonV3{{Code: QualityReasonUserSelectedV3}}},
@@ -54,9 +61,14 @@ var qualityReasonCasesV3 = []qualityReasonCaseV3{
 		req.QualityPreference = QualityRung1080pMediumV3
 		req.BandwidthCapKbps = new(4_500)
 	}, want: []QualityReasonV3{{Code: QualityReasonUserSelectedV3}, {Code: QualityReasonClientCapV3, Kbps: 4_500}}},
+	// A version pin is not a quality pick.
 	{name: "a pinned version played as it is", edit: func(req *StartRequestV3, _ *models.MediaFile) {
 		req.AllowAlternateVersions = new(false)
-	}, want: []QualityReasonV3{{Code: QualityReasonUserSelectedV3}}},
+	}, want: []QualityReasonV3{{Code: QualityReasonOriginalV3}}},
+	{name: "a pinned version over the estimate", edit: func(req *StartRequestV3, _ *models.MediaFile) {
+		req.AllowAlternateVersions = new(false)
+		req.BandwidthEstimateKbps = new(5_100)
+	}, want: []QualityReasonV3{{Code: QualityReasonNetworkEstimateV3, Kbps: 5_100}}},
 	{name: "the request's cap", edit: func(req *StartRequestV3, _ *models.MediaFile) {
 		req.BandwidthCapKbps = new(3_000)
 	}, want: []QualityReasonV3{{Code: QualityReasonClientCapV3, Kbps: 3_000}}},
