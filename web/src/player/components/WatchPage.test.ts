@@ -77,6 +77,7 @@ function playbackSession(
 ): UsePlaybackSessionResult {
   return {
     plan: fixturePlanV3(),
+    serverFeatures: [],
     planRevision: 1,
     streamUrl: "/stream/session-1",
     sessionId: "session-1",

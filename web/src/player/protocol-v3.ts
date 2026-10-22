@@ -127,6 +127,9 @@ export const FEATURE_NEUTRAL_PLAYBACK_V3_CONTRACT = "neutral_playback_v3_contrac
 /** Server accepts output-capability refreshes without treating the route as failed. */
 export const FEATURE_OUTPUT_CHANGE_V3 = "output_change_v1";
 
+/** Every playable plan names why it delivers its quality in `quality_reasons`. */
+export const FEATURE_PLAN_QUALITY_REASONS_V3 = "plan_quality_reasons_v1";
+
 /**
  * The client can be told mid-session that the plan it is playing is no longer
  * valid, over the realtime `plan_invalidated` command.
@@ -585,6 +588,20 @@ export interface AvailableQualityV3 {
   preserves_source: boolean;
 }
 
+/**
+ * One reason a plan delivers the quality it does: a code from an open set and
+ * the figures that code carries.
+ */
+export interface QualityReasonV3 {
+  code: string;
+  kbps?: number;
+  expires_at?: string;
+  height?: number;
+  from?: string;
+  to?: string;
+  media_file_id?: string;
+}
+
 export interface PlanV3 {
   bandwidth_limit?: { kbps: number; source: "observed_rebuffer"; expires_at: string };
   protocol_version: number;
@@ -609,6 +626,12 @@ export interface PlanV3 {
    * source played unchanged or an encode between two rungs.
    */
   active_quality?: string;
+  /**
+   * Why the plan delivers this quality: the first entry decided it, later
+   * entries are its other changes. Present on servers that advertise
+   * `plan_quality_reasons_v1`.
+   */
+  quality_reasons?: QualityReasonV3[];
   degradation_warnings: DegradationWarningV3[];
   decision_reason: string;
   requested_media_file_id: number;

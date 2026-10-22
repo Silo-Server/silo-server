@@ -62,6 +62,8 @@ interface PlaybackSessionState {
    * the quality menu — the client derives none of those itself any more.
    */
   plan: PlanV3 | null;
+  /** The features the server advertised with the adopted plan. */
+  serverFeatures: readonly string[];
   /**
    * Bumped every time a new plan is adopted. Consumers key stream-reload
    * effects on it rather than on object identity.
@@ -321,6 +323,7 @@ function mapSubtitleInventory(
  */
 function planToSessionState(
   plan: PlanV3,
+  serverFeatures: readonly string[],
   sessionId: string | null,
   playbackAttemptId: string,
   planRevision: number,
@@ -330,6 +333,7 @@ function planToSessionState(
 ): PlaybackSessionState {
   return {
     plan,
+    serverFeatures,
     planRevision,
     streamUrl: buildPlayerStreamUrl(config.apiBaseUrl, plan.stream.url, config.getAccessToken()),
     sessionId,
@@ -465,6 +469,7 @@ export function usePlaybackSession(
 
   const [state, setState] = useState<PlaybackSessionState>({
     plan: null,
+    serverFeatures: [],
     planRevision: 0,
     streamUrl: null,
     sessionId: null,
@@ -827,6 +832,7 @@ export function usePlaybackSession(
       setState((current) => ({
         ...planToSessionState(
           plan,
+          decision.server_features,
           sessionId ?? null,
           playbackAttemptIdRef.current ?? "",
           planRevisionRef.current,

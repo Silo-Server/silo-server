@@ -679,6 +679,7 @@ function WatchPagePlayer({
       year={year}
       streamUrl={session.streamUrl}
       plan={session.plan}
+      serverFeatures={session.serverFeatures}
       planRevision={session.planRevision}
       browserEngine={session.browserEngine}
       nativeOriginalSupport={session.nativeOriginalSupport}

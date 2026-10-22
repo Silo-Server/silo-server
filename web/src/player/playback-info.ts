@@ -17,6 +17,7 @@ import {
   TRANSFORMATION_AUDIO_TO_AAC_V3,
   TRANSFORMATION_VIDEO_TO_H264_V3,
 } from "./protocol-v3";
+import { formatQualityBitrate, qualityReasonStatsLine } from "./quality-reasons";
 import type { PlayerAudioTrack, PlayerFileVersion, PlayerVideoTrack, QualityOption } from "./types";
 
 export interface RuntimePlaybackStats {
@@ -46,6 +47,8 @@ interface BuildPlaybackInfoSectionsInput {
   runtimeStats: RuntimePlaybackStats;
   /** True while the browser decode engine plays the stream instead of the media element. */
   browserEngine?: boolean;
+  /** The features the server advertised with the plan. */
+  serverFeatures?: readonly string[];
 }
 
 export function buildPlaybackInfoSections({
@@ -55,6 +58,7 @@ export function buildPlaybackInfoSections({
   requestedVersion,
   runtimeStats,
   browserEngine = false,
+  serverFeatures = [],
 }: BuildPlaybackInfoSectionsInput): PlaybackInfoSection[] {
   const videoTrack = currentSourceVersion ? pickVideoTrack(currentSourceVersion) : undefined;
   const audioTrack = currentSourceVersion ? pickAudioTrack(currentSourceVersion) : undefined;
@@ -64,6 +68,7 @@ export function buildPlaybackInfoSections({
     requestedVersion.file_id !== currentSourceVersion.file_id
       ? formatRequestedSourceVersion(requestedVersion)
       : null;
+  const reason = qualityReasonStatsLine(plan, serverFeatures);
 
   return [
     {
@@ -71,6 +76,7 @@ export function buildPlaybackInfoSections({
       rows: [
         { label: "Player", value: browserEngine ? "Browser decoder" : "HTML Video Player" },
         { label: "Play method", value: formatDelivery(plan.delivery) },
+        ...(reason ? [{ label: "Reason", value: reason }] : []),
         { label: "Protocol", value: formatProtocol(streamUrl) },
         { label: "Stream type", value: formatStreamType(plan) },
         ...(requestedSource ? [{ label: "Auto-switched from", value: requestedSource }] : []),
@@ -273,18 +279,6 @@ function qualityPreferenceHeight(preference: string): number | null {
     default:
       return null;
   }
-}
-
-// Quality-menu bitrate label: Mbps with collapsed integers ("8 Mbps", not
-// "8.0 Mbps") — a deliberately different display policy than the canonical
-// formatBitrate/formatMbpsFromKbps in @/lib/mediaFormat.
-function formatQualityBitrate(kbps?: number): string {
-  if (!isPositive(kbps)) return "";
-  if (kbps >= 1000) {
-    const mbps = kbps / 1000;
-    return mbps % 1 === 0 ? `${mbps} Mbps` : `${mbps.toFixed(1)} Mbps`;
-  }
-  return `${kbps} kbps`;
 }
 
 function formatRequestedSourceVersion(version: PlayerFileVersion): string {

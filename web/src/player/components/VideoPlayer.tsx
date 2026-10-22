@@ -56,6 +56,7 @@ import { getPersistedVolume, persistVolume } from "./VolumeControl";
 import { playerV2 } from "../player-v2";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { lowerQualityOption, qualityOptionsFromPlanV3 } from "../playback-info";
+import { autoQualityLabel, qualityReasonMenuLine } from "../quality-reasons";
 import { preconnectToStreamOrigin } from "../stream-url";
 import { WatchTogetherPanel } from "./WatchTogetherPanel";
 import { readPlanInvalidatedPayload, VIDEO_PLAYBACK_COMMANDS } from "../realtime-protocol";
@@ -218,6 +219,8 @@ interface VideoPlayerProps {
    * here rather than derived locally.
    */
   plan: PlanV3;
+  /** The features the server advertised with the plan. */
+  serverFeatures: readonly string[];
   /** Bumped on every adopted plan; stream-reload effects key on it. */
   planRevision: number;
   /**
@@ -482,6 +485,7 @@ export function VideoPlayer({
   year,
   streamUrl,
   plan,
+  serverFeatures,
   planRevision,
   browserEngine = null,
   nativeOriginalSupport,
@@ -1025,6 +1029,10 @@ export function VideoPlayer({
   const activeQuality = plan.active_quality;
   const deliveredBitrateKbps = plan.effective_recipe.bitrate_kbps;
   const qualityOptions = useMemo(() => qualityOptionsFromPlanV3(plan), [plan]);
+  const qualityReasonLine = useMemo(
+    () => qualityReasonMenuLine(plan, serverFeatures),
+    [plan, serverFeatures],
+  );
 
   // The file the server actually planned against, which is not necessarily the
   // one that was asked for — a fallback to an alternate version shows up here.
@@ -5435,6 +5443,8 @@ export function VideoPlayer({
           qualityOptions={qualityOptions}
           activeQualityId={activeQualityId}
           activeQuality={plan.active_quality}
+          autoQualityLabel={autoQualityLabel(plan)}
+          qualityReasonLine={qualityReasonLine}
           isTranscoding={replanning}
           qualityError={replanError}
           onQualitySelect={(id) => {
@@ -5502,6 +5512,7 @@ export function VideoPlayer({
           containerRef={containerRef}
           streamUrl={effectiveStreamUrl}
           plan={plan}
+          serverFeatures={serverFeatures}
           currentSourceVersion={effectiveVersion}
           requestedVersion={selectedVersion}
           browserEngine={browserEngineActive}

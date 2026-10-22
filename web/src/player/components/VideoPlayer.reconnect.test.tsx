@@ -208,6 +208,7 @@ function Harness({
     title: "Test episode",
     streamUrl: playback.streamUrl,
     plan: playback.plan,
+    serverFeatures: playback.serverFeatures,
     planRevision: playback.planRevision,
     shouldAutoPlay: playback.shouldAutoPlay,
     replanning: playback.replanning,

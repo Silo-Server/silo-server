@@ -94,6 +94,10 @@ interface PlayerControlsProps {
   activeQualityId: string;
   /** The plan's `active_quality`, the menu entry it delivers. */
   activeQuality?: string;
+  /** The control's label while Auto is lit, naming what Auto delivers. */
+  autoQualityLabel?: string;
+  /** Why the plan delivers its quality, under the checked menu row. */
+  qualityReasonLine?: string | null;
   isTranscoding: boolean;
   qualityError: string | null;
   onQualitySelect: (id: string) => void;
@@ -171,6 +175,8 @@ export function PlayerControls({
   qualityOptions,
   activeQualityId,
   activeQuality,
+  autoQualityLabel,
+  qualityReasonLine,
   isTranscoding,
   qualityError,
   onQualitySelect,
@@ -367,6 +373,8 @@ export function PlayerControls({
               options={qualityOptions}
               activeId={activeQualityId}
               activeQuality={activeQuality}
+              autoLabel={autoQualityLabel}
+              reasonLine={qualityReasonLine}
               isTranscoding={isTranscoding}
               error={qualityError}
               onSelect={onQualitySelect}
@@ -549,6 +557,8 @@ export function PlayerControls({
                 options={qualityOptions}
                 activeId={activeQualityId}
                 activeQuality={activeQuality}
+                autoLabel={autoQualityLabel}
+                reasonLine={qualityReasonLine}
                 isTranscoding={isTranscoding}
                 error={qualityError}
                 onSelect={onQualitySelect}

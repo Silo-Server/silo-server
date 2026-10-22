@@ -18,6 +18,10 @@ interface QualityMenuProps {
   activeId: string;
   /** The plan's `active_quality`: the entry it delivers, lit unless the preference is Auto. */
   activeQuality?: string;
+  /** The trigger's label while Auto is lit, naming what Auto delivers. */
+  autoLabel?: string;
+  /** Why the plan delivers its quality, shown under the checked row. */
+  reasonLine?: string | null;
   isTranscoding: boolean;
   error: string | null;
   onSelect: (id: string) => void;
@@ -33,6 +37,8 @@ export function QualityMenu({
   options,
   activeId,
   activeQuality,
+  autoLabel,
+  reasonLine,
   isTranscoding,
   error,
   onSelect,
@@ -118,9 +124,11 @@ export function QualityMenu({
   const activeOption = options.find((option) => option.id === resolvedActiveId);
   let sourceLabel: string | null = null;
   if (showQuality) {
+    // The Auto row keeps its own wording; the trigger names what Auto plays.
+    const activeLabel = resolvedActiveId === "auto" && autoLabel ? autoLabel : activeOption?.label;
     sourceLabel = isTranscoding
       ? "…"
-      : (activeOption?.label ?? plainResolutionLabel(activeId) ?? "Quality");
+      : (activeLabel ?? plainResolutionLabel(activeId) ?? "Quality");
   } else if (showVersions) sourceLabel = "Version";
   // A speed other than 1x stays on the gear in every layout: inline after the
   // quality label, or on the gear's corner where the label is hidden.
@@ -247,7 +255,12 @@ export function QualityMenu({
                     aria-current={opt.id === resolvedActiveId ? "true" : undefined}
                     onClick={() => handleSelect(opt.id)}
                   >
-                    <span>{opt.label}</span>
+                    <span className="flex min-w-0 flex-col">
+                      <span>{opt.label}</span>
+                      {opt.id === resolvedActiveId && reasonLine && (
+                        <span className="max-w-56 text-xs text-white/50">{reasonLine}</span>
+                      )}
+                    </span>
                     <span className="flex items-center gap-2">
                       <span className="text-xs text-white/40">{opt.sublabel}</span>
                       {opt.id === resolvedActiveId && (

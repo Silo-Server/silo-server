@@ -10,6 +10,8 @@ interface PlaybackInfoOverlayProps {
   streamUrl: string;
   /** The route the server chose, and the only description of what is on the wire. */
   plan: PlanV3;
+  /** The features the server advertised with the plan. */
+  serverFeatures: readonly string[];
   currentSourceVersion?: PlayerFileVersion;
   requestedVersion?: PlayerFileVersion;
   /** True while the browser decode engine plays the stream. */
@@ -22,6 +24,7 @@ export function PlaybackInfoOverlay({
   containerRef,
   streamUrl,
   plan,
+  serverFeatures,
   currentSourceVersion,
   requestedVersion,
   browserEngine = false,
@@ -64,8 +67,17 @@ export function PlaybackInfoOverlay({
         requestedVersion,
         runtimeStats,
         browserEngine,
+        serverFeatures,
       }),
-    [streamUrl, plan, currentSourceVersion, requestedVersion, runtimeStats, browserEngine],
+    [
+      streamUrl,
+      plan,
+      currentSourceVersion,
+      requestedVersion,
+      runtimeStats,
+      browserEngine,
+      serverFeatures,
+    ],
   );
 
   return (
