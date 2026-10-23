@@ -2,9 +2,11 @@ package markers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -394,5 +396,74 @@ func TestContributionStoreAmendResubmitsChangedMarkers(t *testing.T) {
 	}
 	if want := fmt.Sprintf("episode|tmdb:1396|2|4|file:%d", file.ID); active != 1 || targetKey != want {
 		t.Fatalf("active amend claims = %d on %q, want 1 on %q", active, targetKey, want)
+	}
+}
+
+// signalingStore reports each claim that found another submission in flight.
+type signalingStore struct {
+	*ContributionStore
+	inFlight chan struct{}
+}
+
+func (s signalingStore) Claim(ctx context.Context, row ContributionRow, staleAfter time.Duration) (ContributionClaim, bool, error) {
+	claim, claimed, err := s.ContributionStore.Claim(ctx, row, staleAfter)
+	if errors.Is(err, errContributionInFlight) {
+		select {
+		case s.inFlight <- struct{}{}:
+		default:
+		}
+	}
+	return claim, claimed, err
+}
+
+// A manual correction saved while an earlier submission to an amend provider
+// is in flight is held until that one settles, then sent; nothing would offer
+// the manual marker again. Without WaitInFlight it is skipped.
+func TestContributionStoreAmendWaitsOutAnInFlightSubmission(t *testing.T) {
+	fixture := newContributionStoreFixture(t)
+	ctx := context.Background()
+	sub := &fakeSubmitter{id: fixture.provider, amend: true}
+	ids := ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 1, EpisodeNumber: 3}
+	store := signalingStore{ContributionStore: fixture.store, inFlight: make(chan struct{}, 16)}
+	reg := NewRegistry(nil)
+	_ = reg.Register(sub)
+	cfg := fakeConfig{sub.id: {Provider: sub.id, ContributeEnabled: true}}
+	svc := NewContributionService(reg, fakeResolver{ids: ids}, cfg, store, nil)
+
+	file := newContribIntroFile(models.MarkerSourceManual)
+	file.ID = fixture.fileIDs[0]
+	earlier := ContributionRow{
+		MediaFileID: file.ID, Provider: sub.id, SegmentKind: models.MarkerSegmentIntro, Source: models.MarkerSourceManual,
+		ContentHash: "earlier", TargetKey: contributionTargetKey(ids, nil) + "|file:" + strconv.Itoa(file.ID),
+		Status: contributionStatusClaim, Amend: true,
+	}
+	claim, claimed, err := fixture.store.Claim(ctx, earlier, time.Minute)
+	if err != nil || !claimed {
+		t.Fatalf("claim the earlier submission: claimed=%v err=%v", claimed, err)
+	}
+	opts := ContributeOptions{Segments: []MarkerKind{MarkerKindIntro}}
+	outcomes, err := svc.ContributeFile(ctx, file, opts)
+	if err != nil || len(outcomes) != 1 || outcomes[0].Reason != contributionInFlightReason || len(sub.submitted) != 0 {
+		t.Fatalf("without waiting: outcomes %+v, err %v, %d submitted; want one in-flight skip", outcomes, err, len(sub.submitted))
+	}
+
+	<-store.inFlight
+	opts.WaitInFlight = true
+	done := make(chan []ContributionOutcome, 1)
+	go func() {
+		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		outcomes, _ := svc.ContributeFile(waitCtx, file, opts)
+		done <- outcomes
+	}()
+	// The first pass and the first try after it both find the target held.
+	<-store.inFlight
+	<-store.inFlight
+	earlier.ID, earlier.ClaimToken, earlier.Status = claim.ID, claim.Token, SubmissionStatusPending
+	if err := fixture.store.Record(ctx, earlier); err != nil {
+		t.Fatalf("settle the earlier submission: %v", err)
+	}
+	if outcomes := <-done; len(outcomes) != 1 || outcomes[0].Status != SubmissionStatusPending || len(sub.submitted) != 1 {
+		t.Fatalf("after waiting: outcomes %+v, %d submitted; want the correction sent", outcomes, len(sub.submitted))
 	}
 }

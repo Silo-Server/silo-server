@@ -587,7 +587,8 @@ func (h *MarkersHandler) reloadAndNotify(ctx context.Context, fileID int) (*mode
 // the marker was already submitted. confirmed names the kinds whose save kept
 // an online provider's marker (markers.ConfirmedProvider). It runs in the
 // background so the save responds immediately and is never blocked by provider
-// rate limits.
+// rate limits, and waits out an earlier in-flight submission to a provider
+// that supports amend, so a quick correction replaces it.
 func (h *MarkersHandler) maybeContribute(file *models.MediaFile, segments []string, confirmed map[markers.MarkerKind]string) {
 	if h == nil || h.Contributor == nil || file == nil || len(segments) == 0 {
 		return
@@ -608,7 +609,7 @@ func (h *MarkersHandler) maybeContribute(file *models.MediaFile, segments []stri
 	go func() {
 		ctx, cancel := context.WithTimeout(base, markerContributeTimeout)
 		defer cancel()
-		if _, err := h.Contributor.ContributeFile(ctx, file, markers.ContributeOptions{Segments: kinds, Confirmed: confirmed}); err != nil {
+		if _, err := h.Contributor.ContributeFile(ctx, file, markers.ContributeOptions{Segments: kinds, Confirmed: confirmed, WaitInFlight: true}); err != nil {
 			h.logger.Warn("markers: background contribution failed", "file_id", file.ID, "error", err)
 		}
 	}()

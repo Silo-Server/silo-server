@@ -33,6 +33,14 @@ const (
 	contributionInvalidRecheck = 30 * 24 * time.Hour
 )
 
+// contributionInFlightReason is the skip reason for a target another worker's
+// submission holds; a WaitInFlight run tries that claim again every
+// contributionInFlightPoll.
+const (
+	contributionInFlightReason = "another submission for this item is in flight"
+	contributionInFlightPoll   = 500 * time.Millisecond
+)
+
 // ContributeOptions scopes a contribution run.
 type ContributeOptions struct {
 	// Provider restricts the run to a single provider id ("" = all enabled).
@@ -48,6 +56,13 @@ type ContributeOptions struct {
 	// kept (see ConfirmedProvider). The manual marker repeats that provider's
 	// data, so it goes to that provider alone, as a human check of its marker.
 	Confirmed map[MarkerKind]string
+	// WaitInFlight makes a provider that supports amend wait, until ctx ends,
+	// for another worker's in-flight submission of a different marker for the
+	// same target, then send this one. The waits come after every other
+	// provider and segment. A manual save needs it: nothing offers a manual
+	// marker again, so skipping it would leave the provider with the earlier
+	// one.
+	WaitInFlight bool
 }
 
 // ContributionOutcome is the per (provider, segment) result of a run.
@@ -228,6 +243,18 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 		return false
 	}
 
+	// A target held by an in-flight submission is waited out only after every
+	// other provider and segment has had its turn, so one slow submission does
+	// not use up the run's time.
+	type heldTarget struct {
+		index int
+		sub   Submitter
+		cfg   ProviderConfig
+		seg   segmentData
+	}
+	var held []heldTarget
+	first := opts
+	first.WaitInFlight = false
 	var outcomes []ContributionOutcome
 	for _, sub := range s.submitters() {
 		providerID := sub.ID()
@@ -242,12 +269,22 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 			if !want(seg.kind) {
 				continue
 			}
-			if outcome, attempted := s.contributeSegment(ctx, sub, providerID, cfg, file, ids, seg, opts); attempted {
+			if outcome, attempted := s.contributeSegment(ctx, sub, providerID, cfg, file, ids, seg, first); attempted {
+				if opts.WaitInFlight && outcome.Reason == contributionInFlightReason {
+					held = append(held, heldTarget{len(outcomes), sub, cfg, seg})
+				}
 				outcomes = append(outcomes, outcome)
 				if outcome.Status == OutcomeStatusRateLimited {
 					return outcomes, nil
 				}
 			}
+		}
+	}
+	for _, h := range held {
+		outcome, _ := s.contributeSegment(ctx, h.sub, h.sub.ID(), h.cfg, file, ids, h.seg, opts)
+		outcomes[h.index] = outcome
+		if outcome.Status == OutcomeStatusRateLimited {
+			return outcomes, nil
 		}
 	}
 	return outcomes, nil
@@ -341,7 +378,10 @@ func (s *ContributionService) contributeSegment(
 		Status:           contributionStatusClaim,
 		Amend:            reqs.SupportsAmend,
 	}
-	claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
+	claim, claimed, err := s.claim(ctx, row, opts.WaitInFlight)
+	if errors.Is(err, errContributionInFlight) {
+		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: contributionInFlightReason}, true
+	}
 	if err != nil {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: err.Error()}, true
 	}
@@ -418,6 +458,22 @@ func (s *ContributionService) contributeSegment(
 	}
 	s.recordContribution(ctx, row)
 	return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: row.Status, SubmissionID: result.ID}, true
+}
+
+// claim claims row's target. With wait set, it tries again while another
+// worker's submission for an amend target is in flight, until ctx ends.
+func (s *ContributionService) claim(ctx context.Context, row ContributionRow, wait bool) (ContributionClaim, bool, error) {
+	for {
+		claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
+		if !wait || !errors.Is(err, errContributionInFlight) {
+			return claim, claimed, err
+		}
+		select {
+		case <-ctx.Done():
+			return claim, claimed, err
+		case <-time.After(contributionInFlightPoll):
+		}
+	}
 }
 
 func (s *ContributionService) recordContribution(ctx context.Context, row ContributionRow) {

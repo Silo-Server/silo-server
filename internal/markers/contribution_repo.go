@@ -82,14 +82,21 @@ func ptrIntStr(v *int64) string {
 	return strconv.FormatInt(*v, 10)
 }
 
+// errContributionInFlight is Claim's answer when row.Amend is set and another
+// worker is still submitting a different marker for the target. The target
+// can be claimed once that submission settles.
+var errContributionInFlight = errors.New("another marker submission for this target is in flight")
+
 // Claim atomically reserves a provider target before the network call. An
 // active row for the same provider, segment, and target blocks the claim,
 // whatever times it carried, unless row.Amend is set and the row is settled
 // with a different content hash: the provider then replaces its earlier
-// submission. A stale in-flight row, or an invalid refusal older than
-// contributionInvalidRecheck, can be reclaimed; recording a retryable error
-// releases the claim. The advisory lock and partial unique index serialize
-// claims across local media files and server workers.
+// submission. A fresh in-flight row with a different hash returns
+// errContributionInFlight for an amend row. A stale in-flight row, or an
+// invalid refusal older than contributionInvalidRecheck, can be reclaimed;
+// recording a retryable error releases the claim. The advisory lock and
+// partial unique index serialize claims across local media files and server
+// workers.
 func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, staleAfter time.Duration) (ContributionClaim, bool, error) {
 	if s == nil || s.pool == nil {
 		return ContributionClaim{}, false, fmt.Errorf("contribution store unavailable")
@@ -120,12 +127,13 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 	}
 	recheckSeconds := int64(contributionInvalidRecheck / time.Second)
 	var activeID string
-	var reclaimable bool
+	var reclaimable, replaceable bool
 	err = tx.QueryRow(ctx, `
 		SELECT id,
 		       (status = $4 AND updated_at < now() - ($5 * interval '1 second'))
 		       OR (status = $6 AND updated_at < now() - ($7 * interval '1 second'))
-		       OR ($8 AND status <> $4 AND content_hash <> $9)
+		       OR ($8 AND status <> $4 AND content_hash <> $9),
+		       $8 AND content_hash <> $9
 		FROM marker_contributions
 		WHERE provider = $1 AND segment_kind = $2 AND target_key = $3
 		  AND claim_active`,
@@ -133,11 +141,14 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 		contributionStatusClaim, leaseSeconds,
 		OutcomeStatusInvalid, recheckSeconds,
 		row.Amend, row.ContentHash,
-	).Scan(&activeID, &reclaimable)
+	).Scan(&activeID, &reclaimable, &replaceable)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return ContributionClaim{}, false, fmt.Errorf("find marker contribution claim: %w", err)
 	}
 	if err == nil {
+		if replaceable && !reclaimable {
+			return ContributionClaim{}, false, errContributionInFlight
+		}
 		if !reclaimable {
 			return ContributionClaim{}, false, nil
 		}
