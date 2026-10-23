@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -311,5 +312,42 @@ func TestMarkerMutationChecksCreditsAgainstTheIntroItLeaves(t *testing.T) {
 	}
 	if !changed.credits || state.credits.start == nil || *state.credits.start != 1350 {
 		t.Fatalf("credits not written: changed=%v start=%v", changed.credits, state.credits.start)
+	}
+}
+
+// A provider's absent answer replaces a local intro with a tombstone carrying
+// the provider's provenance, and leaves with the answer once the refreshed
+// provider stops giving it.
+func TestMarkerUpdateWritesAndWithdrawsAbsentAnswer(t *testing.T) {
+	scannerSource, algorithm := models.MarkerSourceScanner, "chromaprint:v4"
+	state := markerMutationState{duration: 1800, file: models.MediaFile{EpisodeID: "episode"}, intro: segmentState{
+		start: floatPtr(10), end: floatPtr(70), source: &scannerSource, confidence: floatPtr(0.9), algorithm: &algorithm,
+		ranges: []models.MarkerSegment{{Kind: models.MarkerSegmentIntro, StartSeconds: 10, EndSeconds: 70}},
+	}}
+	const provider = "plugin:1:markers"
+	absent := MarkerUpdateFromPayload(markers.BuildUpdatePayload(markers.Result{
+		SourceClass: models.MarkerSourceOnline, RefreshedProviders: []string{provider},
+		Markers: []markers.Marker{{Kind: markers.MarkerKindIntro, Absent: true, Confidence: 0.9,
+			SourceClass: models.MarkerSourcePlugin, ProviderID: provider, Algorithm: "consensus:v1"}},
+	}))
+
+	applied, err := applyMarkerUpdateToMutationState(&absent, &state, time.Now())
+	if err != nil {
+		t.Fatalf("apply absent: %v", err)
+	}
+	intro := state.intro
+	if !applied.intro || intro.start != nil || intro.end != nil || len(intro.ranges) != 0 ||
+		intro.source == nil || *intro.source != models.MarkerSourcePlugin || intro.provider == nil || *intro.provider != provider ||
+		intro.algorithm == nil || *intro.algorithm != "consensus:v1" || intro.confidence == nil || *intro.confidence != 0.9 {
+		t.Fatalf("absent answer not stored as a plugin tombstone: applied=%v state=%+v", applied.intro, intro)
+	}
+
+	miss := MarkerUpdateFromPayload(markers.BuildUpdatePayload(markers.Result{RefreshedProviders: []string{provider}}))
+	applied, err = applyMarkerUpdateToMutationState(&miss, &state, time.Now())
+	if err != nil {
+		t.Fatalf("apply refresh: %v", err)
+	}
+	if !applied.intro || !segmentEqual(state.intro, segmentState{}) {
+		t.Fatalf("withdrawn absent answer kept: applied=%v state=%+v", applied.intro, state.intro)
 	}
 }

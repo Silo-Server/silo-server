@@ -137,6 +137,13 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 			{Kind: MarkerKindCredits, Start: start, End: end, Confidence: 0.9},
 		}}}
 	}
+	absent := func(id string, confidence float64) *fakeProvider {
+		return &fakeProvider{id: id, result: Result{ProviderID: id, Markers: []Marker{
+			{Kind: MarkerKindIntro, Absent: true, Confidence: confidence},
+		}}}
+	}
+	both := absent("both", 0.9)
+	both.result.Markers = append(both.result.Markers, Marker{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.5})
 	for _, tc := range []struct {
 		name       string
 		providers  []*fakeProvider
@@ -145,6 +152,24 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 		winner     string
 		wantEnd    time.Duration // zero: not checked
 	}{
+		{
+			name:       "an absent answer competes like a marker",
+			providers:  []*fakeProvider{absent("a", 0.9), intro("b", 25*time.Second, 0.6, 1)},
+			priorities: map[string]int{"a": 10, "b": 20},
+			winner:     "a",
+		},
+		{
+			name:       "a marker beats a weaker absent answer",
+			providers:  []*fakeProvider{intro("a", 25*time.Second, 0.9, 1), absent("b", 0.6)},
+			priorities: map[string]int{"a": 10, "b": 20},
+			winner:     "a", wantEnd: 25 * time.Second,
+		},
+		{
+			name:       "a provider's range outweighs its own absent answer",
+			providers:  []*fakeProvider{both},
+			priorities: map[string]int{"both": 10},
+			winner:     "both", wantEnd: 30 * time.Second,
+		},
 		{
 			name:       "lower fetch_priority wins",
 			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 500), intro("b", 25*time.Second, 0.6, 1)},

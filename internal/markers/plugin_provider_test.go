@@ -40,12 +40,11 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	start10, end60 := 10.0, 60.0
 	negativeStart, endPastDuration := -1.0, 1801.0
 	creditsStart := 1700.0
-	previewStart := 1750.0
 	client := &fakePluginMarkerClient{fetchResp: &pluginv1.FetchMarkersResponse{Markers: []*pluginv1.MarkerSegment{
 		{Segment: "intro", StartSeconds: &start10, EndSeconds: &end60, Confidence: 0.8, SubmissionCount: 2, Algorithm: "intro:v1"},
 		{Segment: "credits", StartSeconds: &creditsStart, Confidence: 0.9, SubmissionCount: 3},
 		{Segment: "recap", EndSeconds: &start10, Confidence: 0.7},
-		{Segment: "preview", StartSeconds: &previewStart, Confidence: 0.6},
+		{Segment: "preview", Absent: true, Confidence: 0.95, Algorithm: "consensus:v1"},
 		{Segment: "intro", StartSeconds: &negativeStart},
 		{Segment: "intro", StartSeconds: &start10, EndSeconds: &endPastDuration},
 	}}}
@@ -87,8 +86,7 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 		client.fetchReq.GetEpisodeTitle() != "Second Episode" || client.fetchReq.GetEpisodeNumbering() != "tvdb" {
 		t.Fatalf("fetch episode identity = %+v %q", episode, client.fetchReq.GetEpisodeTitle())
 	}
-	// The host does not read absent segments yet, so it must not ask for them.
-	if client.fetchReq.GetFileHash() != "8e245d9679d31e12" || client.fetchReq.GetFileSize() != 734003200 || client.fetchReq.GetAcceptsAbsent() {
+	if client.fetchReq.GetFileHash() != "8e245d9679d31e12" || client.fetchReq.GetFileSize() != 734003200 || !client.fetchReq.GetAcceptsAbsent() {
 		t.Fatalf("fetch file facts = %q %d accepts_absent=%v", client.fetchReq.GetFileHash(), client.fetchReq.GetFileSize(), client.fetchReq.GetAcceptsAbsent())
 	}
 	if res.SourceClass != models.MarkerSourcePlugin || res.ProviderID != "plugin:12:markers" {
@@ -109,6 +107,17 @@ func TestPluginProviderFetchMapsAllSegments(t *testing.T) {
 	}
 	if got := byKind[MarkerKindRecap]; got.Start != 0 {
 		t.Fatalf("recap start = %s, want zero default", got.Start)
+	}
+	// An absent answer has no bounds, which must not default to the whole
+	// file: it is stored as a tombstone with the provider's provenance.
+	if got := byKind[MarkerKindPreview]; !got.Absent || got.Start != 0 || got.End != 0 {
+		t.Fatalf("absent preview = %+v, want an absent answer without bounds", got)
+	}
+	preview := BuildUpdatePayload(res).Preview
+	if preview.Present() || !preview.Absent() || preview.Source != models.MarkerSourcePlugin ||
+		preview.Provider == nil || *preview.Provider != "plugin:12:markers" || preview.Algorithm != "consensus:v1" ||
+		preview.Confidence == nil || *preview.Confidence != 0.95 {
+		t.Fatalf("absent preview payload = %+v, want a plugin tombstone", preview)
 	}
 }
 

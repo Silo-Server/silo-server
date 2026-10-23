@@ -238,6 +238,7 @@ func (p *PluginProvider) FetchMarkers(ctx context.Context, req Request) (Result,
 		EpisodeTitle:       req.EpisodeTitle,
 		FileHash:           req.FileHash,
 		FileSize:           req.FileSize,
+		AcceptsAbsent:      true,
 	})
 	if err != nil {
 		return Result{}, pluginProviderError(p.ID(), err)
@@ -289,6 +290,7 @@ func (p *PluginProvider) SubmitMarker(ctx context.Context, req SubmissionRequest
 		Source:             req.Source,
 		Algorithm:          req.Algorithm,
 		Confidence:         req.Confidence,
+		Absent:             req.Absent,
 	}
 	if req.Start != nil {
 		start := req.Start.Seconds()
@@ -345,6 +347,17 @@ func markerFromPluginSegment(segment *pluginv1.MarkerSegment, duration time.Dura
 	kind, ok := markerKindFromName(segment.GetSegment())
 	if !ok {
 		return Marker{}, false
+	}
+	// An absent answer has no bounds. Read as a segment, the missing bounds
+	// would default to the whole file.
+	if segment.GetAbsent() {
+		return Marker{
+			Kind:            kind,
+			Absent:          true,
+			Confidence:      segment.GetConfidence(),
+			SubmissionCount: int(segment.GetSubmissionCount()),
+			Algorithm:       strings.TrimSpace(segment.GetAlgorithm()),
+		}, true
 	}
 	start := time.Duration(0)
 	end := duration
