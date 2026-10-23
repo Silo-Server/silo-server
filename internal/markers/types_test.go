@@ -146,9 +146,21 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 		wantEnd    time.Duration // zero: not checked
 	}{
 		{
-			name:       "lower fetch_priority wins",
-			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 500), intro("b", 25*time.Second, 0.6, 1)},
+			name:       "higher confidence beats a better priority",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 1), intro("b", 25*time.Second, 0.6, 500)},
 			priorities: map[string]int{"a": 20, "b": 10},
+			winner:     "a", wantEnd: 30 * time.Second,
+		},
+		{
+			name:       "equal confidence falls back to lower fetch_priority",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.8, 500), intro("b", 25*time.Second, 0.8, 1)},
+			priorities: map[string]int{"a": 20, "b": 10},
+			winner:     "b", wantEnd: 25 * time.Second,
+		},
+		{
+			name:       "a marker without confidence loses to a rated one",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0, 500), intro("b", 25*time.Second, 0.1, 1)},
+			priorities: map[string]int{"a": 10, "b": 20},
 			winner:     "b", wantEnd: 25 * time.Second,
 		},
 		{
@@ -165,8 +177,8 @@ func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 			winner:     "late", wantEnd: 2000 * time.Second,
 		},
 		{
-			name:       "same priority tie-breaks by submission count",
-			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.7, 1), intro("b", 25*time.Second, 0.9, 2)},
+			name:       "same confidence and priority tie-breaks by submission count",
+			providers:  []*fakeProvider{intro("a", 30*time.Second, 0.9, 1), intro("b", 25*time.Second, 0.9, 2)},
 			priorities: map[string]int{"a": 10, "b": 10},
 			winner:     "b",
 		},
