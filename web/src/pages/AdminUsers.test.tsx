@@ -375,11 +375,65 @@ describe("AdminUsers user dialog policy hints", () => {
     await user.type(within(dialog).getByLabelText("Username"), "newbie");
     await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
     await user.type(within(dialog).getByLabelText(/^Password/), "a-long-password");
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
     await user.click(within(dialog).getByRole("button", { name: /create|save/i }));
 
     const alert = await within(dialog).findByRole("alert");
     expect(alert).toHaveTextContent("password: expected length >= 8");
     expect(alert).not.toHaveTextContent("see errors");
+    expect(within(dialog).getByRole("tab", { name: "Account" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const password = within(dialog).getByLabelText(/^Password/);
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveAttribute("aria-errormessage", alert.id);
+
+    await user.type(password, "x");
+    expect(password).not.toHaveAttribute("aria-invalid", "true");
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+  });
+
+  it("returns to the Account tab when the username, email, or password is missing", async () => {
+    mocks.accessGroupsLoaded = true;
+    mocks.create.mockReset();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: /Add User/ }));
+    const dialog = await screen.findByRole("dialog");
+
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Enter a username.");
+    expect(within(dialog).getByRole("tab", { name: "Account" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    await user.type(within(dialog).getByLabelText("Username"), "newbie");
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Enter a valid email address",
+    );
+    expect(within(dialog).getByRole("tab", { name: "Account" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    await user.type(within(dialog).getByLabelText("Email"), "newbie@example.test");
+    await user.type(within(dialog).getByLabelText(/^Password/), "short");
+    await user.click(within(dialog).getByRole("tab", { name: "Limits" }));
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Use at least 8 characters.",
+    );
+    expect(within(dialog).getByRole("tab", { name: "Account" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(dialog).getByLabelText(/^Password/)).toHaveAttribute("aria-invalid", "true");
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("explains a short password before asking the server", async () => {

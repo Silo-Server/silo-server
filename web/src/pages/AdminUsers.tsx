@@ -723,6 +723,16 @@ function createUserErrorMessage(err: unknown): string {
   return message;
 }
 
+// The displayed message is a sentence ("password: expected length >= 8"), so it
+// cannot be compared with the local password check. The field location is what
+// ties that refusal to the password input.
+function refusesPassword(err: unknown): boolean {
+  return (
+    err instanceof V2ProblemError &&
+    (err.problem.errors ?? []).some((item) => item.location === "body.password")
+  );
+}
+
 // The form uses novalidate so a field on a hidden tab cannot swallow Save
 // before the password and username checks run. novalidate also makes
 // checkValidity() ignore every control, so read the validity flags directly:
@@ -755,6 +765,8 @@ function CreateUserForm({
   const [authority] = useState(captureAdminUserAuthority);
   const busy = useRef(false);
   const [error, setError] = useState("");
+  // Set when the API refused the password, independent of the alert text.
+  const [passwordRefused, setPasswordRefused] = useState(false);
   const capabilities = useAdminUserCapabilities();
   // Only the server Owner may grant the admin role; the server refuses anyone else.
   const viewerId = useAuth().user?.id;
@@ -792,7 +804,7 @@ function CreateUserForm({
   const passwordId = useId();
   const errorId = useId();
   const passwordProblem = newPasswordProblem(password, password);
-  const passwordAlert = error !== "" && error === passwordProblem;
+  const passwordAlert = passwordRefused || (error !== "" && error === passwordProblem);
   const requireChangeId = useId();
   const roleId = useId();
   const markerEditId = useId();
@@ -841,14 +853,17 @@ function CreateUserForm({
     )
       return;
     if (username.trim() === "") {
+      setDialogTab("account");
       setError("Enter a username.");
       return;
     }
     if (!isValidEmail(email)) {
+      setDialogTab("account");
       setError(INVALID_EMAIL_MESSAGE);
       return;
     }
     if (passwordProblem) {
+      setDialogTab("account");
       setError(passwordProblem);
       return;
     }
@@ -881,6 +896,7 @@ function CreateUserForm({
     busy.current = true;
     onBusy(true);
     setError("");
+    setPasswordRefused(false);
     try {
       const body: CreateUserRequest = {
         username,
@@ -897,6 +913,9 @@ function CreateUserForm({
       createMutation.reset();
       onClose();
     } catch (err) {
+      const refusedPassword = refusesPassword(err);
+      setPasswordRefused(refusedPassword);
+      if (refusedPassword) setDialogTab("account");
       setError(createUserErrorMessage(err));
     } finally {
       busy.current = false;
@@ -962,6 +981,14 @@ function CreateUserForm({
                   onChange={(e) => {
                     const next = e.target.value;
                     setPassword(next);
+                    // A server refusal describes the previous value, so any edit
+                    // drops it. The local length check stays until the new value
+                    // is long enough.
+                    if (passwordRefused) {
+                      setPasswordRefused(false);
+                      setError("");
+                      return;
+                    }
                     setError((current) =>
                       current !== "" &&
                       current === passwordProblem &&
