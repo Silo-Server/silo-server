@@ -30,7 +30,7 @@ const providerConfigColumns = `provider, fetch_enabled, fetch_priority, fetch_mi
 
 // ProviderConfigStore is a cached read/write facade over marker_provider_config.
 // Reads serve from an in-memory snapshot; call Reload at startup and after a
-// settings-changed event. Update writes through and refreshes the snapshot.
+// settings-changed event. Patch writes through and refreshes the snapshot.
 type ProviderConfigStore struct {
 	pool  *pgxpool.Pool
 	mu    sync.RWMutex
@@ -80,36 +80,56 @@ func (s *ProviderConfigStore) Reload(ctx context.Context) error {
 	if s == nil || s.pool == nil {
 		return nil
 	}
+	_, err := s.Load(ctx)
+	return err
+}
+
+// Load reads every provider config row, replaces the snapshot with them, and
+// returns what it read. Callers that must not act on a stale snapshot use the
+// returned rows, which a concurrent reload cannot replace. Do not modify the
+// returned map.
+func (s *ProviderConfigStore) Load(ctx context.Context) (map[string]ProviderConfig, error) {
+	if s == nil || s.pool == nil {
+		return nil, errors.New("marker provider config store unavailable")
+	}
 	rows, err := s.pool.Query(ctx, `SELECT `+providerConfigColumns+` FROM marker_provider_config`)
 	if err != nil {
-		return fmt.Errorf("load marker provider config: %w", err)
+		return nil, fmt.Errorf("load marker provider config: %w", err)
 	}
 	defer rows.Close()
 
 	next := make(map[string]ProviderConfig)
 	for rows.Next() {
-		var c ProviderConfig
-		if err := rows.Scan(
-			&c.Provider,
-			&c.FetchEnabled,
-			&c.FetchPriority,
-			&c.FetchMinConfidence,
-			&c.ContributeEnabled,
-			&c.ContributeAutoLocal,
-			&c.ContributeMinConfidence,
-		); err != nil {
-			return fmt.Errorf("scan marker provider config: %w", err)
+		c, err := scanProviderConfig(rows)
+		if err != nil {
+			return nil, err
 		}
 		next[c.Provider] = c
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate marker provider config: %w", err)
+		return nil, fmt.Errorf("iterate marker provider config: %w", err)
 	}
 
 	s.mu.Lock()
 	s.cache = next
 	s.mu.Unlock()
-	return nil
+	return next, nil
+}
+
+func scanProviderConfig(row pgx.Row) (ProviderConfig, error) {
+	var c ProviderConfig
+	if err := row.Scan(
+		&c.Provider,
+		&c.FetchEnabled,
+		&c.FetchPriority,
+		&c.FetchMinConfidence,
+		&c.ContributeEnabled,
+		&c.ContributeAutoLocal,
+		&c.ContributeMinConfidence,
+	); err != nil {
+		return ProviderConfig{}, fmt.Errorf("scan marker provider config: %w", err)
+	}
+	return c, nil
 }
 
 // Get returns the config for a provider id from the snapshot.
@@ -150,31 +170,48 @@ func (s *ProviderConfigStore) EnabledForFetch() []ProviderConfig {
 	return out
 }
 
-// Update upserts a provider config row and refreshes the snapshot.
-func (s *ProviderConfigStore) Update(ctx context.Context, c ProviderConfig) error {
+// ProviderConfigPatch holds the fields an admin edit sets. A nil field keeps
+// the stored value.
+type ProviderConfigPatch struct {
+	FetchEnabled            *bool
+	FetchPriority           *int
+	FetchMinConfidence      *float64
+	ContributeEnabled       *bool
+	ContributeAutoLocal     *bool
+	ContributeMinConfidence *float64
+}
+
+// Patch writes only the fields p sets onto the stored row, refreshes the
+// snapshot, and returns the row. ok is false when the provider has no row.
+// Omitted fields keep their stored values, not this node's cached ones, so an
+// edit to one setting cannot restore sharing that an opt-out turned off,
+// whether this node missed the change event or the opt-out commits while the
+// edit waits on its lock.
+func (s *ProviderConfigStore) Patch(ctx context.Context, provider string, p ProviderConfigPatch) (ProviderConfig, bool, error) {
 	if s == nil || s.pool == nil {
-		return fmt.Errorf("marker provider config store unavailable")
+		return ProviderConfig{}, false, errors.New("marker provider config store unavailable")
 	}
-	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO marker_provider_config (
-			provider, fetch_enabled, fetch_priority, fetch_min_confidence,
-			contribute_enabled, contribute_auto_local, contribute_min_confidence, updated_at
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-		ON CONFLICT (provider) DO UPDATE SET
-			fetch_enabled = EXCLUDED.fetch_enabled,
-			fetch_priority = EXCLUDED.fetch_priority,
-			fetch_min_confidence = EXCLUDED.fetch_min_confidence,
-			contribute_enabled = EXCLUDED.contribute_enabled,
-			contribute_auto_local = EXCLUDED.contribute_auto_local,
-			contribute_min_confidence = EXCLUDED.contribute_min_confidence,
-			updated_at = now()`,
-		c.Provider, c.FetchEnabled, c.FetchPriority, c.FetchMinConfidence,
-		c.ContributeEnabled, c.ContributeAutoLocal, c.ContributeMinConfidence,
-	); err != nil {
-		return fmt.Errorf("update marker provider config: %w", err)
+	c, err := scanProviderConfig(s.pool.QueryRow(ctx, `
+		UPDATE marker_provider_config SET
+			fetch_enabled = COALESCE($2::boolean, fetch_enabled),
+			fetch_priority = COALESCE($3::integer, fetch_priority),
+			fetch_min_confidence = COALESCE($4::double precision, fetch_min_confidence),
+			contribute_enabled = COALESCE($5::boolean, contribute_enabled),
+			contribute_auto_local = COALESCE($6::boolean, contribute_auto_local),
+			contribute_min_confidence = COALESCE($7::double precision, contribute_min_confidence),
+			updated_at = now()
+		WHERE provider = $1
+		RETURNING `+providerConfigColumns,
+		provider, p.FetchEnabled, p.FetchPriority, p.FetchMinConfidence,
+		p.ContributeEnabled, p.ContributeAutoLocal, p.ContributeMinConfidence,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ProviderConfig{}, false, nil
 	}
-	return s.Reload(ctx)
+	if err != nil {
+		return ProviderConfig{}, false, fmt.Errorf("update marker provider config: %w", err)
+	}
+	return c, true, s.Reload(ctx)
 }
 
 // Ensure inserts a default provider config row if one does not already exist.

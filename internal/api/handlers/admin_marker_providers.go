@@ -142,8 +142,7 @@ func (h *AdminMarkerProvidersHandler) HandleUpdateProvider(w http.ResponseWriter
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider ID")
 		return
 	}
-	existing, ok := h.Config.Get(provider)
-	if !ok {
+	if _, ok := h.Config.Get(provider); !ok {
 		writeError(w, http.StatusNotFound, "not_found", "Unknown marker provider")
 		return
 	}
@@ -152,7 +151,7 @@ func (h *AdminMarkerProvidersHandler) HandleUpdateProvider(w http.ResponseWriter
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	out, err := h.updateMarkerProvider(r.Context(), provider, existing, body)
+	out, err := h.updateMarkerProvider(r.Context(), provider, body)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -229,42 +228,40 @@ func (h *AdminMarkerProvidersHandler) UpdateMarkerProvider(ctx context.Context, 
 	if h == nil || h.Config == nil {
 		return MarkerProviderConfigView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
 	}
-	existing, ok := h.Config.Get(provider)
-	if !ok {
-		return MarkerProviderConfigView{}, apiError(http.StatusNotFound, "not_found", "Unknown marker provider")
+	if _, ok := h.Config.Get(provider); !ok {
+		return MarkerProviderConfigView{}, errUnknownMarkerProvider()
 	}
-	return h.updateMarkerProvider(ctx, provider, existing, body)
+	return h.updateMarkerProvider(ctx, provider, body)
 }
-func (h *AdminMarkerProvidersHandler) updateMarkerProvider(ctx context.Context, provider string, existing markers.ProviderConfig, body MarkerProviderUpdate) (MarkerProviderConfigView, error) {
-	if body.FetchEnabled != nil {
-		existing.FetchEnabled = *body.FetchEnabled
+
+func errUnknownMarkerProvider() error {
+	return apiError(http.StatusNotFound, "not_found", "Unknown marker provider")
+}
+
+// updateMarkerProvider writes only the fields the body sets. The stored row,
+// not this node's cache, supplies the rest, so a partial edit cannot undo a
+// sharing opt-out this node has not seen yet.
+func (h *AdminMarkerProvidersHandler) updateMarkerProvider(ctx context.Context, provider string, body MarkerProviderUpdate) (MarkerProviderConfigView, error) {
+	if v := body.FetchMinConfidence; v != nil && (*v < 0 || *v > 1) {
+		return MarkerProviderConfigView{}, apiError(http.StatusBadRequest, "bad_request", "fetch_min_confidence must be between 0 and 1")
 	}
-	if body.FetchPriority != nil {
-		existing.FetchPriority = *body.FetchPriority
+	if v := body.ContributeMinConfidence; v != nil && (*v < 0 || *v > 1) {
+		return MarkerProviderConfigView{}, apiError(http.StatusBadRequest, "bad_request", "contribute_min_confidence must be between 0 and 1")
 	}
-	if body.FetchMinConfidence != nil {
-		v := *body.FetchMinConfidence
-		if v < 0 || v > 1 {
-			return MarkerProviderConfigView{}, apiError(http.StatusBadRequest, "bad_request", "fetch_min_confidence must be between 0 and 1")
-		}
-		existing.FetchMinConfidence = v
-	}
-	if body.ContributeEnabled != nil {
-		existing.ContributeEnabled = *body.ContributeEnabled
-	}
-	if body.ContributeAutoLocal != nil {
-		existing.ContributeAutoLocal = *body.ContributeAutoLocal
-	}
-	if body.ContributeMinConfidence != nil {
-		v := *body.ContributeMinConfidence
-		if v < 0 || v > 1 {
-			return MarkerProviderConfigView{}, apiError(http.StatusBadRequest, "bad_request", "contribute_min_confidence must be between 0 and 1")
-		}
-		existing.ContributeMinConfidence = v
-	}
-	if err := h.Config.Update(ctx, existing); err != nil {
+	updated, ok, err := h.Config.Patch(ctx, provider, markers.ProviderConfigPatch{
+		FetchEnabled:            body.FetchEnabled,
+		FetchPriority:           body.FetchPriority,
+		FetchMinConfidence:      body.FetchMinConfidence,
+		ContributeEnabled:       body.ContributeEnabled,
+		ContributeAutoLocal:     body.ContributeAutoLocal,
+		ContributeMinConfidence: body.ContributeMinConfidence,
+	})
+	if err != nil {
 		h.logger.ErrorContext(ctx, "admin markers: update provider config failed", "provider", provider, "error", err)
 		return MarkerProviderConfigView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update provider")
+	}
+	if !ok {
+		return MarkerProviderConfigView{}, errUnknownMarkerProvider()
 	}
 	if h.EventBus != nil {
 		_ = h.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{
@@ -272,7 +269,7 @@ func (h *AdminMarkerProvidersHandler) updateMarkerProvider(ctx context.Context, 
 			Payload: provider,
 		})
 	}
-	return toProviderConfigResponse(existing, h.submitterIDs()[provider], h.providerDescriptions()[provider]), nil
+	return toProviderConfigResponse(updated, h.submitterIDs()[provider], h.providerDescriptions()[provider]), nil
 }
 
 type MarkerProviderValidationView struct {

@@ -62,24 +62,13 @@ func (f fakeResolver) ResolveForFile(context.Context, *models.MediaFile) (Extern
 
 type fakeConfig map[string]ProviderConfig
 
-func (f fakeConfig) Get(p string) (ProviderConfig, bool) { c, ok := f[p]; return c, ok }
+func (f fakeConfig) Load(context.Context) (map[string]ProviderConfig, error) { return f, nil }
 
-func (fakeConfig) Reload(context.Context) error { return nil }
+// unreadableConfig is provider config whose stored rows cannot be read.
+type unreadableConfig struct{}
 
-// reloadingConfig is one node's cached provider config. Reload replaces the
-// cache with stored, the database's rows, or fails with err.
-type reloadingConfig struct {
-	fakeConfig
-	stored fakeConfig
-	err    error
-}
-
-func (c *reloadingConfig) Reload(context.Context) error {
-	if c.err != nil {
-		return c.err
-	}
-	c.fakeConfig = c.stored
-	return nil
+func (unreadableConfig) Load(context.Context) (map[string]ProviderConfig, error) {
+	return nil, errors.New("database unavailable")
 }
 
 type fakeRecorder struct {
@@ -467,22 +456,32 @@ func TestContributeStopsOnRetryAfterError(t *testing.T) {
 	}
 }
 
+// A provider whose stored config has contribution off, or whose config cannot
+// be read, receives nothing, including from the background run a manual save
+// starts.
 func TestContributeDisabledProviderNoop(t *testing.T) {
-	sub := &fakeSubmitter{id: "introdb"}
-	file := newContribIntroFile(models.MarkerSourceManual)
-	// contribute_enabled defaults false
-	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb"}}, &fakeRecorder{})
+	for name, config := range map[string]providerConfigReader{
+		"contribution off":  fakeConfig{"introdb": {Provider: "introdb"}},
+		"config unreadable": unreadableConfig{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sub := &fakeSubmitter{id: "introdb"}
+			reg := NewRegistry(nil)
+			_ = reg.Register(sub)
+			resolver := fakeResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 1, EpisodeNumber: 3}}
+			svc := NewContributionService(reg, resolver, config, &fakeRecorder{}, nil)
 
-	outcomes, _ := svc.ContributeFile(context.Background(), file, ContributeOptions{})
-	if len(sub.submitted) != 0 || len(outcomes) != 0 {
-		t.Errorf("disabled provider must be a no-op, submitted=%d outcomes=%d", len(sub.submitted), len(outcomes))
+			outcomes, _ := svc.ContributeFile(context.Background(), newContribIntroFile(models.MarkerSourceManual), ContributeOptions{Segments: []MarkerKind{MarkerKindIntro}})
+			if len(sub.submitted) != 0 || len(outcomes) != 0 {
+				t.Errorf("submitted=%d outcomes=%d, want a no-op", len(sub.submitted), len(outcomes))
+			}
+		})
 	}
 }
 
 // AutoContributors lists only registered submitters with automatic sharing on,
-// carrying each one's own minimum and required IDs. It reads the stored
-// config, so a node that missed the change event for an opt-out saved on
-// another node stops sharing, and it lists none when that read fails.
+// carrying each one's own minimum and required IDs, and lists none when the
+// stored config cannot be read.
 func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 	reg := NewRegistry(nil)
 	for _, sub := range []*fakeSubmitter{
@@ -499,22 +498,20 @@ func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 		// A configured provider whose plugin is not loaded cannot submit.
 		"unregistered": {Provider: "unregistered", ContributeEnabled: true, ContributeAutoLocal: true},
 	}
-	// This node's cache predates an opt-out saved elsewhere.
-	stale := fakeConfig{"manual-only": {Provider: "manual-only", ContributeEnabled: true, ContributeAutoLocal: true}}
 	tests := []struct {
 		name    string
-		config  *reloadingConfig
+		config  providerConfigReader
 		want    []AutoContributor
 		wantErr bool
 	}{
 		{
 			name:   "stored config",
-			config: &reloadingConfig{fakeConfig: stale, stored: stored},
+			config: stored,
 			want:   []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}}},
 		},
 		{
-			name:    "reload fails",
-			config:  &reloadingConfig{fakeConfig: stale, err: errors.New("database unavailable")},
+			name:    "config unreadable",
+			config:  unreadableConfig{},
 			wantErr: true,
 		},
 	}

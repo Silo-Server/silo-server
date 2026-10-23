@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -55,10 +56,11 @@ type ContributionOutcome struct {
 }
 
 // providerConfigReader is the read surface ContributionService needs from the
-// provider config store (satisfied by *ProviderConfigStore).
+// provider config store (satisfied by *ProviderConfigStore). Load reads the
+// stored rows, so a node that missed the change event for a sharing opt-out
+// saved elsewhere does not share on its cached flags.
 type providerConfigReader interface {
-	Get(provider string) (ProviderConfig, bool)
-	Reload(ctx context.Context) error
+	Load(ctx context.Context) (map[string]ProviderConfig, error)
 }
 
 // contributionRecorder is the audit surface ContributionService needs
@@ -133,19 +135,18 @@ func (s *ContributionService) submitters() []Submitter {
 
 // AutoContributors lists the registered submitters that share local markers
 // automatically, with the settings ContributeFile applies to an automatic run.
-// It reloads provider config from the database first: a node that missed the
-// change event for a sharing opt-out saved elsewhere would otherwise keep
-// sharing on its cached flags. A failed reload lists none.
+// It reads the stored provider config; a failed read lists none.
 func (s *ContributionService) AutoContributors(ctx context.Context) ([]AutoContributor, error) {
 	if s == nil || s.config == nil {
 		return nil, nil
 	}
-	if err := s.config.Reload(ctx); err != nil {
+	configs, err := s.config.Load(ctx)
+	if err != nil {
 		return nil, err
 	}
 	var out []AutoContributor
 	for _, sub := range s.submitters() {
-		cfg, ok := s.config.Get(sub.ID())
+		cfg, ok := configs[sub.ID()]
 		if !ok || !cfg.ContributeEnabled || !cfg.ContributeAutoLocal {
 			continue
 		}
@@ -159,7 +160,10 @@ func (s *ContributionService) AutoContributors(ctx context.Context) ([]AutoContr
 }
 
 // ContributeFile submits the file's eligible markers and returns one outcome
-// per (provider, segment) attempted (including explicit skips).
+// per (provider, segment) attempted (including explicit skips). It reads the
+// stored provider config for each call, so an opt-out saved on another node
+// applies to the next save or file even if this node missed its change event;
+// a failed read shares nothing.
 func (s *ContributionService) ContributeFile(ctx context.Context, file *models.MediaFile, opts ContributeOptions) ([]ContributionOutcome, error) {
 	if s == nil || file == nil || s.registry == nil || s.resolver == nil || s.config == nil || s.store == nil {
 		return nil, nil
@@ -170,6 +174,10 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 	}
 	if !ids.HasAnyID() {
 		return nil, nil
+	}
+	configs, err := s.config.Load(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load marker sharing settings: %w", err)
 	}
 
 	want := func(k MarkerKind) bool {
@@ -190,7 +198,7 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 		if opts.Provider != "" && opts.Provider != providerID {
 			continue
 		}
-		cfg, ok := s.config.Get(providerID)
+		cfg, ok := configs[providerID]
 		if !ok || !cfg.ContributeEnabled {
 			continue
 		}

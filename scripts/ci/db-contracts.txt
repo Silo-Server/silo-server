@@ -203,6 +203,7 @@
 ./internal/markers TestContributionStoreBlocksSameTargetWithDifferentTimes
 ./internal/markers TestContributionStoreCandidatesApplyEachProvidersRules
 ./internal/markers TestProviderConfigDefaultSharingDB
+./internal/markers TestProviderConfigPatchKeepsConcurrentOptOutDB
 ./cmd/silo TestStopDefaultMarkerSharingInTxDB
 ./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB

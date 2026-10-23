@@ -61,7 +61,7 @@ func TestProviderConfigDefaultSharingDB(t *testing.T) {
 		}
 	}
 	for _, id := range []string{sharing, other} {
-		if err := store.Update(ctx, on(id)); err != nil {
+		if err := store.Ensure(ctx, on(id)); err != nil {
 			t.Fatalf("seed %s: %v", id, err)
 		}
 	}
@@ -131,6 +131,72 @@ func TestProviderConfigDefaultSharingDB(t *testing.T) {
 	}
 	if got, ok := store.Get(seeded); !ok || got.ContributeEnabled || got.ContributeAutoLocal || got.ContributeMinConfidence != 0.9 {
 		t.Fatalf("seeded provider = %+v (exists %v), want a row with sharing off", got, ok)
+	}
+}
+
+// An admin edit to one setting keeps the stored value of every other one, so
+// an edit that waits on a sharing opt-out cannot turn sharing back on.
+func TestProviderConfigPatchKeepsConcurrentOptOutDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	provider := PluginProviderID(int(time.Now().UnixNano()%1_000_000_000), "markers")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM marker_provider_config WHERE provider = $1`, provider)
+	})
+	store := NewProviderConfigStore(pool)
+	if err := store.Ensure(ctx, ProviderConfig{
+		Provider: provider, FetchEnabled: true, FetchPriority: 5,
+		ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.9,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := StopDefaultSharingInTx(ctx, tx, func(context.Context, pgx.Tx) ([]string, error) {
+		return []string{provider}, nil
+	}); err != nil {
+		t.Fatalf("StopDefaultSharingInTx: %v", err)
+	}
+	type result struct {
+		config ProviderConfig
+		ok     bool
+		err    error
+	}
+	patched := make(chan result, 1)
+	errs := make(chan error, 1)
+	go func() {
+		c, ok, err := store.Patch(ctx, provider, ProviderConfigPatch{FetchPriority: new(7)})
+		patched <- result{c, ok, err}
+		errs <- err
+	}()
+	waitForProviderConfigLockWaiter(ctx, t, pool, errs, "edit")
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit opt-out: %v", err)
+	}
+
+	got := <-patched
+	want := ProviderConfig{
+		Provider: provider, FetchEnabled: true, FetchPriority: 7, ContributeMinConfidence: 0.9,
+	}
+	if got.err != nil || !got.ok || got.config != want {
+		t.Fatalf("Patch = %+v, %v, %v; want %+v", got.config, got.ok, got.err, want)
+	}
+	if missing, ok, err := store.Patch(ctx, provider+"-missing", ProviderConfigPatch{FetchEnabled: new(false)}); err != nil || ok {
+		t.Fatalf("Patch of a missing provider = %+v, %v, %v; want not found", missing, ok, err)
 	}
 }
 

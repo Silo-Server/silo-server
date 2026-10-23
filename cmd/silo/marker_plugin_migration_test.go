@@ -372,7 +372,7 @@ func TestStopDefaultMarkerSharingInTxDB(t *testing.T) {
 		t.Cleanup(func() {
 			_, _ = pool.Exec(context.Background(), `DELETE FROM marker_provider_config WHERE provider = $1`, provider)
 		})
-		if err := configs.Update(ctx, markers.ProviderConfig{
+		if err := configs.Ensure(ctx, markers.ProviderConfig{
 			Provider: provider, FetchEnabled: true, ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.9,
 		}); err != nil {
 			t.Fatalf("seed %s config: %v", name, err)
