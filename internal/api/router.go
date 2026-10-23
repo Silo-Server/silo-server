@@ -45,6 +45,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/invitations"
+	"github.com/Silo-Server/silo-server/internal/jellycompat"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/logstream"
@@ -1186,6 +1187,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 			profileHandler.RecommendationsPurger = recommendations.NewRepo(deps.DB)
 			// Ebook reading data lives there too.
 			profileHandler.EbookReaderPurger = handlers.NewPGEbookReaderProgressStore(deps.DB)
+			// And Jellyfin-compatible sessions.
+			profileHandler.JellyfinSessionPurger = jellycompat.NewSessionRepository(deps.DB, deps.SecretCipher)
 		}
 		if watchlistRequestWithdrawer != nil {
 			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer

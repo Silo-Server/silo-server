@@ -12,6 +12,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // TestRevokedCompatSessionStaysDeletedPostgres: a replica that still caches
@@ -95,4 +97,132 @@ func TestRevokedCompatSessionStaysDeletedPostgres(t *testing.T) {
 	if rows != 0 {
 		t.Fatalf("revoked account has %d stored compat sessions, want 0", rows)
 	}
+}
+
+// TestDeletedProfileCompatSessionsEndPostgres: deleting a profile from the
+// Postgres user store ends the compat sessions signed in as it, and a lookup
+// through a store that already loaded the session refuses it. The account's
+// other profile keeps its session.
+func TestDeletedProfileCompatSessionsEndPostgres(t *testing.T) {
+	pool, suffix := jellyfin12CompatPool(t)
+	ctx := context.Background()
+	name := fmt.Sprintf("jfprofiledelete-%d", suffix)
+	user, err := auth.NewUserRepository(pool).Create(ctx, models.CreateUserInput{Username: name,
+		Email: name + "@example.test", Password: "correct horse battery", Role: models.RoleUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID) })
+	cipher, err := secret.New([]byte("jellycompat-profile-delete-key-0123456789"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridgedRefresh, err := auth.NewJWTService("jellycompat-profile-delete-secret-0123456789", time.Hour, 24*time.Hour).GenerateRefreshToken(user.ID, models.RoleUser, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPersistentSessionStore(24*time.Hour, time.Now, NewSessionRepository(pool, cipher))
+	const deletedProfile, keptProfile = "kid", "parent"
+	tokens := map[string]string{}
+	for _, profileID := range []string{deletedProfile, keptProfile} {
+		if err := profiles.CreateProfile(ctx, userstore.Profile{ID: profileID, Name: profileID}); err != nil {
+			t.Fatal(err)
+		}
+		tokens[profileID] = name + "-" + profileID
+		if err := store.Put(Session{Token: tokens[profileID], ProfileID: profileID, StreamAppUserID: user.ID, PseudoUserID: uuid.New(),
+			StreamAppAccessToken: "access", StreamAppRefreshToken: bridgedRefresh, StreamAppTokenExpiry: time.Now().Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Lookup(ctx, tokens[profileID]); err != nil {
+			t.Fatalf("session of %s before the delete: %v", profileID, err)
+		}
+	}
+
+	if err := profiles.DeleteProfile(ctx, deletedProfile); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.Lookup(ctx, tokens[deletedProfile]); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("session of the deleted profile = %v, want ErrSessionNotFound", err)
+	}
+	if _, err := store.Lookup(ctx, tokens[keptProfile]); err != nil {
+		t.Fatalf("session of the other profile: %v", err)
+	}
+}
+
+// TestSignInRacingProfileDeleteKeepsNoSessionPostgres: a password sign-in
+// that read the profile list before the profile was deleted, and stores its
+// session after the delete purged the profile's sessions, is refused and
+// keeps no session.
+func TestSignInRacingProfileDeleteKeepsNoSessionPostgres(t *testing.T) {
+	pool, suffix := jellyfin12CompatPool(t)
+	ctx := context.Background()
+	users := auth.NewUserRepository(pool)
+	loginSessions := auth.NewSessionRepository(pool)
+	svc := auth.NewService(auth.NewLocalProvider(users, loginSessions), auth.NewJWTService("jellycompat-login-test-secret-0123456789", time.Minute, time.Hour),
+		loginSessions, users, nil, nil, nil)
+	const password = "correct horse battery"
+	name := fmt.Sprintf("jfdeleteracing-%d", suffix)
+	user, err := users.Create(ctx, models.CreateUserInput{Username: name, Email: name + "@example.test", Password: password, Role: models.RoleUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID) })
+	stores := pgstore.NewPostgresProvider(pool)
+	profiles, err := stores.ForUser(ctx, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kid := uuid.NewString()
+	for _, p := range []userstore.Profile{{ID: uuid.NewString(), Name: "Main", IsPrimary: true}, {ID: kid, Name: "Kid"}} {
+		if err := profiles.CreateProfile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cipher, err := secret.New([]byte("jellycompat-profile-delete-key-0123456789"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewLoginResolver(svc, deleteAfterListing{UserStoreProvider: stores, profileID: kid},
+		NewPersistentSessionStore(time.Hour, nil, NewSessionRepository(pool, cipher)), nil, nil)
+
+	if _, err := resolver.Resolve(ctx, name+"#Kid", password, "test", ""); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("sign-in racing the delete = %v, want ErrProfileNotFound", err)
+	}
+	var rows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM jellycompat_sessions WHERE streamapp_user_id = $1`, user.ID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Fatalf("deleted profile has %d stored compat sessions, want 0", rows)
+	}
+}
+
+// deleteAfterListing deletes a profile right after a sign-in lists the
+// account's profiles, as a delete landing mid sign-in would.
+type deleteAfterListing struct {
+	userstore.UserStoreProvider
+	profileID string
+}
+
+func (p deleteAfterListing) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
+	store, err := p.UserStoreProvider.ForUser(ctx, userID)
+	return deletingAfterListStore{UserStore: store, profileID: p.profileID}, err
+}
+
+type deletingAfterListStore struct {
+	userstore.UserStore
+	profileID string
+}
+
+func (s deletingAfterListStore) ListProfiles(ctx context.Context) ([]userstore.Profile, error) {
+	profiles, err := s.UserStore.ListProfiles(ctx)
+	if err == nil {
+		err = s.DeleteProfile(ctx, s.profileID)
+	}
+	return profiles, err
 }
