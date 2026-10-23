@@ -123,9 +123,9 @@ func TestPopulationRegistryReturnsLastProviderErrorAsMiss(t *testing.T) {
 	}
 }
 
-// With fetch priorities configured, the lowest priority that answers wins,
-// a failing preferred provider falls back with its error reported, and equal
-// priorities break the tie by marker quality.
+// Confidence picks the winner across providers; equal confidence falls back to
+// the lower fetch_priority, then submission count, and a failing provider
+// falls back to the next with its error reported.
 func TestPopulationRegistryUsesConfiguredProviderPriority(t *testing.T) {
 	intro := func(id string, end time.Duration, confidence float64, submissions int) *fakeProvider {
 		return &fakeProvider{id: id, result: Result{ProviderID: id, Markers: []Marker{

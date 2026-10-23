@@ -88,15 +88,17 @@ these values with each provider's minimum confidence.
 
 ### Chapters and online markers
 
-Between online providers, `markers.mergeCandidate.better` picks one marker per
-kind: the highest confidence, then the lower `fetch_priority`, then the higher
-submission count, then the provider ID. A marker without a confidence counts as
-0 and loses to any rated one, but is still used when no other provider has that
-kind. Confidences are compared as each provider reports them, on their own
-scales; a marker below its provider's `fetch_min_confidence` is left out before
-the comparison. `selectResults` applies
-the current settings to fetched and cached answers alike, so a settings change
-applies without a refetch.
+Between online providers, `markers.mergeProviderResults` picks one provider per
+kind and keeps every range that provider returned for the kind. Each provider
+is ranked by its best marker of that kind, compared with
+`markers.mergeCandidate.better`: the highest confidence, then the lower
+`fetch_priority`, then the higher submission count, then the provider ID. A
+marker without a confidence counts as 0 and loses to any rated one, but is
+still used when no other provider has that kind. Confidences are compared as
+each provider reports them, on their own scales; a marker below its provider's
+`fetch_min_confidence` is left out before the comparison. `selectResults`
+applies the current settings to fetched and cached answers alike, so a
+settings change applies without a refetch.
 
 Source priority puts online and plugin markers above every local one. The
 marker writer, `markers.CanWriteMarkerUpdate`, makes one exception for markers
