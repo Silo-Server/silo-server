@@ -313,3 +313,48 @@ func TestDirectUserDataServiceFilterResumeProgressDropsDismissedEntries(t *testi
 		t.Fatalf("filtered = %+v, want only movie-2", got)
 	}
 }
+
+// A ParentId must scope Resume. Moonfin for Roku resumes a series by asking
+// for one resumable item under it; ignoring ParentId answered with whatever
+// the profile played last, so Resume started the wrong title.
+func TestLoadProgressPage_ResumeHonorsParentID(t *testing.T) {
+	items := map[string]*models.MediaItem{
+		"movie-1": {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
+	}
+	userData := &resumeFilteringUserData{entries: []upstreamProgress{
+		{MediaItemID: "movie-1", PositionSeconds: 10, DurationSeconds: 100},
+	}}
+	h := resumeTestHandler(userData, items)
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	dtos, _, err := h.loadProgressPage(context.Background(), session, "in_progress", itemsQuery{limit: 1, parentItemID: "series-1"}, nil, nil)
+	if err != nil {
+		t.Fatalf("loadProgressPage: %v", err)
+	}
+	if got := dtoNames(dtos); len(got) != 0 {
+		t.Fatalf("resume under series-1 = %v, want none", got)
+	}
+}
+
+func TestProgressItemInParent(t *testing.T) {
+	episode := progressHydratedItem{contentID: "ep-1", target: &compatEpisodeTarget{Item: upstreamListItem{SeriesID: "series-1"}, SeasonID: "season-1"}}
+	movie := progressHydratedItem{contentID: "movie-1"}
+	for _, tc := range []struct {
+		name  string
+		item  progressHydratedItem
+		query itemsQuery
+		want  bool
+	}{
+		{"no parent", movie, itemsQuery{}, true},
+		{"a movie under itself", movie, itemsQuery{parentItemID: "movie-1"}, false},
+		{"an episode under itself", episode, itemsQuery{parentItemID: "ep-1"}, false},
+		{"episode of the series", episode, itemsQuery{parentItemID: "series-1"}, true},
+		{"episode of another series", episode, itemsQuery{parentItemID: "series-2"}, false},
+		{"episode of the season", episode, itemsQuery{parentSeasonID: "season-1"}, true},
+		{"episode of another season", episode, itemsQuery{parentSeasonID: "season-2"}, false},
+		{"movie under a season", movie, itemsQuery{parentSeasonID: "season-1"}, false},
+	} {
+		if got := tc.item.inParent(tc.query); got != tc.want {
+			t.Errorf("%s: inParent = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

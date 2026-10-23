@@ -1074,6 +1074,9 @@ func (h *PlaybackHandler) resolveCompatHLSRouteOnNodeWithPolicy(
 	if compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC {
 		eligible, excludedShapes = h.compatHEVCRouting(ctx, source, eligible, excludedShapes)
 	}
+	if codec := compatSourceEncodedAudio(source); codec != "" {
+		eligible, excludedShapes = h.compatAudioEncodeRouting(ctx, codec, videoTranscode, eligible, excludedShapes)
+	}
 	currentTranscodeURL := session.TranscodeNodeURL
 	if requiredTranscodeURL != "" {
 		requiredTranscodeURL = strings.TrimRight(requiredTranscodeURL, "/")
@@ -1390,6 +1393,9 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		sourceAudioChannels = compatSourceAudioChannels(source)
 	}
 	targetAudioCodec := compatTargetAudioCodec
+	if method == string(playback.PlayTranscode) {
+		targetAudioCodec = compatSourceTargetAudioCodec(source)
+	}
 	if method == string(playback.PlayTranscode) && !compatHLSTranscodesAudio(source) {
 		targetAudioCodec = compatCopyCodec
 	}
@@ -1597,7 +1603,8 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	}
 	sourceAudioChannels := compatHLSRecipeSourceAudioChannels(source)
 	hevcEncoding := compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
-	if sourceAudioChannels > 0 || hevcEncoding {
+	audioEncoding := compatSourceEncodedAudio(source)
+	if sourceAudioChannels > 0 || hevcEncoding || audioEncoding != "" {
 		capabilityCtx, cancelCapabilityFetch := context.WithTimeout(ctx, h.toneMapCapabilityTimeout())
 		info, capabilityErr := h.remoteToneMapCapabilityInfo(capabilityCtx, transcodeNodeURL)
 		cancelCapabilityFetch()
@@ -1612,6 +1619,10 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			// exclude this node and try another executor without sending it a
 			// recipe it cannot run or silently replacing HEVC with H.264.
 			return fmt.Errorf("transcode node does not support %s recipe %s", playback.TransformationVideoToHEVCV3, playback.TransformationVideoToHEVCRecipeVersionV3)
+		}
+		if audioEncoding != "" && !compatSupportsAudioEncode(info.Transformations, audioEncoding) {
+			name, version, _ := compatAudioEncodeRecipe(audioEncoding)
+			return fmt.Errorf("transcode node does not support %s recipe %s", name, version)
 		}
 	}
 	if source.DVStripToHDR10 && compatHLSCopiesVideo(source) && !h.compatTranscodeNodeCanStrip(transcodeNodeURL) {
@@ -1716,7 +1727,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		TargetResolution:       source.TargetResolution,
 		TargetAudioChannels:    source.TargetAudioChannels,
 		TargetCodecVideo:       compatSourceTargetVideoCodec(source),
-		TargetCodecAudio:       compatTargetAudioCodec,
+		TargetCodecAudio:       compatSourceTargetAudioCodec(source),
 		VideoSampleEntry:       compatSourceVideoSampleEntry(source),
 		SegmentDuration:        segmentDuration,
 		HWAccel:                h.remoteDispatchHWAccel(transcodeNodeURL),
@@ -2208,11 +2219,19 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 
 	req, profile, err := h.parsePlaybackRequest(r, session.Token)
 	if err != nil {
+		slog.InfoContext(r.Context(), "jellycompat playback info request rejected", "component", "jellycompat", "error", err)
 		writeDeviceProfileRequestError(w, err, "Invalid playback request")
 		return
 	}
 	if req.MediaSourceID == "" {
 		req.MediaSourceID = pathMediaSourceID
+	}
+	// Only a profile that refuses AAC encodes and lists AC-3 or MP3 pays for
+	// the executor check.
+	for _, codec := range profile.alternateAudioOutputs() {
+		if h.compatAudioEncodeExecutable(r.Context(), codec) {
+			profile.extraAudioOutputs = append(profile.extraAudioOutputs, codec)
+		}
 	}
 	req.serverBitrateCapKbps, err = h.serverBitrateCap(r.Context(), session)
 	if err != nil {
@@ -2327,7 +2346,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "Subtitle metadata is temporarily unavailable")
 			return
 		}
-		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source)
+		source.HLSRemuxMPEGTS = compatWebOSDVMPEGTS(r.UserAgent(), source) || compatRokuMPEGTS(r.UserAgent(), profile, source)
 		applyCompatSubtitleDelivery(&source, profile, req.AlwaysBurnInSubtitleWhenTranscoding)
 		applyCompatDownloadedSubtitleDelivery(&source, profile, downloaded)
 		// Only a copy stream is served from a keyframe playlist; subtitle
@@ -2369,7 +2388,12 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		if source.SupportsTranscoding && compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC &&
 			!h.compatHEVCExecutable(r.Context(), source) {
 			source.TargetVideoCodec = compatTargetVideoCodec
-			source.SupportsTranscoding = profile.supportsTranscodingOutput(version, source.TargetAudioChannels, source.TargetBitrateKbps, source.TargetResolution)
+			audioCodec := profile.transcodingOutputAudioCodec(version, source.TargetAudioChannels, source.TargetBitrateKbps, source.TargetResolution)
+			source.SupportsTranscoding = audioCodec != ""
+			source.TargetAudioCodec = ""
+			if audioCodec != compatTargetAudioCodec {
+				source.TargetAudioCodec = audioCodec
+			}
 		}
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
@@ -2445,6 +2469,17 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		message := "No media source supports the requested playback constraints"
 		if req.serverBitrateCapKbps > 0 {
 			message = "This stream exceeds the server bitrate limit, and no compliant transcoding route is available"
+		}
+		// Clients rarely surface this body, so record why each version was
+		// refused (issue #2683).
+		for _, source := range sources {
+			slog.InfoContext(r.Context(), "jellycompat playback info found no route", "component", "jellycompat",
+				"content_id", detail.ContentID, "media_source_id", source.ID, "message", message,
+				"profile", profile.Name, "container", source.Version.Container,
+				"video_codec", source.Version.CodecVideo, "audio_codec", compatSourceAudioCodec(source),
+				"source_bitrate_kbps", source.Version.Bitrate, "max_streaming_bitrate", req.MaxStreamingBitrate,
+				"server_bitrate_cap_kbps", req.serverBitrateCapKbps, "audio_outputs", profile.outputAudioCodecs(),
+			)
 		}
 		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", message)
 		return
@@ -2609,11 +2644,14 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		allowAudioCopy &&
 		!supportsDirectPlay &&
 		profile.SupportsHLSRemuxForAudioStream(version, selectedAudioIndex)
-	hlsAudioTranscode := req.serverBitrateCapKbps == 0 && !bitrateRequiresEncode && !hlsAudioCopy &&
+	remuxAudioCodec := ""
+	if req.serverBitrateCapKbps == 0 && !bitrateRequiresEncode && !hlsAudioCopy &&
 		enableTranscoding &&
 		!supportsDirectPlay &&
-		(!allowAudioCopy || !audioSupported) &&
-		profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, selectedAudioIndex, targetAudioChannels)
+		(!allowAudioCopy || !audioSupported) {
+		remuxAudioCodec = profile.hlsRemuxAudioTranscodeCodec(version, selectedAudioIndex, targetAudioChannels)
+	}
+	hlsAudioTranscode := remuxAudioCodec != ""
 	transcodeAudio := !hlsAudioCopy &&
 		enableDirectStream &&
 		allowVideoCopy &&
@@ -2638,24 +2676,51 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	}
 	// Copy and audio-transcode remuxes must match the fMP4 output profile;
 	// full video encodes independently match the MPEG-TS output profile.
-	targetBitrateKbps := 0
-	if maxBitrate > 0 {
-		// Reserve audio and mux overhead; copied video cannot satisfy a lower
-		// bandwidth setting. Match profiles against this actual encoder output.
-		_, audioBitrateKbps := playback.ResolveAACOutputV3(targetAudioChannels, 0)
-		targetBitrateKbps = int(maxBitrate*95/100/1000) - audioBitrateKbps
+	// An encode targets the client's ceiling, less audio and mux overhead,
+	// and the profile's own video bitrate and frame size limits.
+	maxVideoBitrate, maxHeight, maxWidth := profile.encodeLimits(compatTargetVideoCodec)
+	sourceVideo := compatPrimaryVideoTrack(version)
+	encodeBudget := func(audioBitrateKbps int) int {
+		budget := 0
+		if maxBitrate > 0 {
+			budget = int(maxBitrate*95/100/1000) - audioBitrateKbps
+		}
+		if limit := int(maxVideoBitrate / 1000); limit > 0 && (maxBitrate <= 0 || limit < budget) {
+			budget = limit
+		}
+		return budget
 	}
 	// The class follows the video's share of the ceiling, the same budget the
 	// encode targets, so a limit near a class floor does not earn a class its
 	// video bitrate cannot fill.
-	targetResolution := compatTargetResolutionForBitrate(int64(max(targetBitrateKbps, 0)), compatPrimaryVideoTrack(version))
+	encodeResolution := func(videoBitrateKbps int) string {
+		return compatFitResolution(compatTargetResolutionForBitrate(int64(max(videoBitrateKbps, 0)), sourceVideo), sourceVideo, maxHeight, maxWidth)
+	}
+	_, aacBitrateKbps := playback.ResolveAACOutputV3(targetAudioChannels, 0)
+	targetBitrateKbps := encodeBudget(aacBitrateKbps)
+	targetResolution := encodeResolution(targetBitrateKbps)
 	targetVideoCodec := compatTargetVideoCodec
-	canEncodeOutput := profile.supportsTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution)
+	encodeAudioCodec := profile.transcodingOutputAudioCodec(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution)
+	canEncodeOutput := encodeAudioCodec != ""
 	// HEVC needs server opt-in and an explicit compatible HLS fMP4 profile.
-	if len(allowHEVCEncoding) > 0 && allowHEVCEncoding[0] &&
-		profile.supportsHEVCTranscodingOutput(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution) {
-		targetVideoCodec = compatVideoCodecHEVC
-		canEncodeOutput = true
+	if len(allowHEVCEncoding) > 0 && allowHEVCEncoding[0] {
+		if hevcAudioCodec := profile.hevcTranscodingOutputAudioCodec(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution); hevcAudioCodec != "" {
+			targetVideoCodec = compatVideoCodecHEVC
+			encodeAudioCodec = hevcAudioCodec
+			canEncodeOutput = true
+		}
+	}
+	if encodeAudioCodec != "" && encodeAudioCodec != compatTargetAudioCodec && maxBitrate > 0 {
+		// AC-3 and MP3 take their own share of the ceiling, not the AAC
+		// reserve above, so fit the video to what remains and match again.
+		targetBitrateKbps = encodeBudget(compatEncodedAudioTrack(encodeAudioCodec, targetAudioChannels).Bitrate / 1000)
+		targetResolution = encodeResolution(targetBitrateKbps)
+		if targetVideoCodec == compatVideoCodecHEVC {
+			encodeAudioCodec = profile.hevcTranscodingOutputAudioCodec(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution)
+		} else {
+			encodeAudioCodec = profile.transcodingOutputAudioCodec(version, targetAudioChannels, max(targetBitrateKbps, 0), targetResolution)
+		}
+		canEncodeOutput = encodeAudioCodec != ""
 	}
 	supportsTranscoding := enableTranscoding &&
 		(hlsAudioCopy || transcodeAudio || canEncodeOutput)
@@ -2669,6 +2734,18 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	if maxBitrate > 0 && targetBitrateKbps < 64 {
 		supportsTranscoding = false
 	}
+	// An audio-transcoding remux encodes the codec its own profile matched.
+	// Every other source keeps the full encode's codec: an audio-copy remux
+	// becomes that encode when a subtitle must be burned in. Only a non-AAC
+	// codec is recorded, so AAC sessions stay readable by binaries that
+	// predate the field.
+	targetAudioCodec := encodeAudioCodec
+	if hlsRemux && transcodeAudio {
+		targetAudioCodec = remuxAudioCodec
+	}
+	if targetAudioCodec == compatTargetAudioCodec {
+		targetAudioCodec = ""
+	}
 	return PlaybackMediaSource{
 		ServerBitrateCapKbps:       req.serverBitrateCapKbps,
 		StreamLocation:             req.streamLocation,
@@ -2677,6 +2754,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		TargetResolution:           targetResolution,
 		TargetAudioChannels:        targetAudioChannels,
 		TargetVideoCodec:           targetVideoCodec,
+		TargetAudioCodec:           targetAudioCodec,
 		ID:                         sourceID,
 		FileID:                     version.FileID,
 		Version:                    version,
@@ -2808,7 +2886,7 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 		if routePathSegment := compatHLSRoutePathSegment(source); routePathSegment != "" {
 			basePath += "/" + routePathSegment
 		}
-		dto.TranscodingURL = fmt.Sprintf("%s/master.m3u8?PlaySessionId=%s&MediaSourceId=%s", basePath, playSessionID, source.ID)
+		dto.TranscodingURL = fmt.Sprintf("%s/master.m3u8?PlaySessionId=%s&MediaSourceId=%s&TranscodeReasons=%s", basePath, playSessionID, source.ID, strings.Join(compatTranscodeReasons(source), ","))
 		if compatHLSCopiesVideo(source) {
 			if source.HLSRemuxMPEGTS {
 				dto.TranscodingContainer = "ts"
@@ -2822,6 +2900,35 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 		}
 	}
 	return dto
+}
+
+// compatTranscodeReasons names, in Jellyfin's TranscodeReason values, why the
+// HLS stream differs from the file. Clients read them from the TranscodingUrl:
+// Moonfin for Roku treats a stream whose reasons are all audio or container
+// reasons as a video copy, and shows a text subtitle itself instead of asking
+// for it to be burned in, which would turn the copy into a full encode.
+func compatTranscodeReasons(source PlaybackMediaSource) []string {
+	if compatHLSCopiesVideo(source) {
+		reasons := []string{"ContainerNotSupported"}
+		if source.TranscodeAudio {
+			if compatAudioTrack(source.Version, source.SelectedAudioStreamIndex).Channels > source.TargetAudioChannels && source.TargetAudioChannels > 0 {
+				reasons = append(reasons, "AudioChannelsNotSupported")
+			} else {
+				reasons = append(reasons, "AudioCodecNotSupported")
+			}
+		}
+		return reasons
+	}
+	switch {
+	case source.SubtitleBurnIn:
+		return []string{"SubtitleCodecNotSupported"}
+	case source.TargetBitrateKbps > 0 && source.Version.Bitrate > source.TargetBitrateKbps:
+		return []string{"VideoBitrateNotSupported"}
+	case source.TargetResolution != "":
+		return []string{"VideoResolutionNotSupported"}
+	default:
+		return []string{"VideoCodecNotSupported"}
+	}
 }
 
 func buildMediaStreams(routeItemID, mediaSourceID string, version catalog.FileVersion) []mediaStreamDTO {
@@ -3882,7 +3989,10 @@ func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProf
 		if !text || !external || alwaysBurn {
 			source.SupportsDirectStream = false
 			source.SupportsTranscoding = source.CanBurnSubtitle && !track.External
+			// A burn-in is a full encode. TranscodeAudio also marks a video-copy
+			// remux (compatHLSCopiesVideo), so it is cleared with HLSRemux.
 			source.HLSRemux = false
+			source.TranscodeAudio = false
 			source.HLSRemuxAudioStreamIndexes = nil
 			source.HLSRemuxMPEGTS = false
 			source.DVStripToHDR10 = false

@@ -899,7 +899,7 @@ func TestAudioTranscodeRemuxTriesLaterProfileConditions(t *testing.T) {
 	}{{"later stereo output matches", []TranscodingProfile{rejected, accepted}, true}, {"only incompatible output", []TranscodingProfile{rejected}, false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			profile := DeviceProfile{TranscodingProfiles: tc.profiles}
-			if got := profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, nil, 2); got != tc.want {
+			if got := profile.hlsRemuxAudioTranscodeCodec(version, nil, 2) != ""; got != tc.want {
 				t.Fatalf("supports remux=%v want %v", got, tc.want)
 			}
 		})

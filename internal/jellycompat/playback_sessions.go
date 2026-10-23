@@ -120,7 +120,10 @@ type PlaybackMediaSource struct {
 	TargetAudioChannels      int
 	// TargetVideoCodec fixes encoded HLS codec during PlaybackInfo negotiation.
 	// Empty values are legacy H.264 sessions.
-	TargetVideoCodec     string
+	TargetVideoCodec string
+	// TargetAudioCodec fixes the encoded audio codec the same way. Empty values
+	// are legacy AAC sessions.
+	TargetAudioCodec     string
 	ID                   string
 	FileID               int
 	Version              catalog.FileVersion

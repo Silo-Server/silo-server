@@ -558,7 +558,7 @@ func TestProgressiveAndHLSCodecContainerScopes(t *testing.T) {
 	version := catalog.FileVersion{Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}}}
 	for _, container := range []string{"hls", "mp4"} {
 		t.Run(container, func(t *testing.T) {
-			profile := DeviceProfile{TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}}, CodecProfiles: []CodecProfile{{Type: "Video", Codec: "h264", Container: container, SubContainer: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}}}}}
+			profile := DeviceProfile{DirectPlayProfiles: []DirectPlayProfile{{Type: "Video"}}, TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}}, CodecProfiles: []CodecProfile{{Type: "Video", Codec: "h264", Container: container, SubContainer: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}}}}}
 			if got := profile.SupportsVideoCodecForDirectStream(version); got != (container == "hls") {
 				t.Fatalf("progressive support=%v for codec container=%s", got, container)
 			}

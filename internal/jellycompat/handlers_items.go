@@ -3175,7 +3175,10 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 	// narrower requests are still honored. Requests scoped only to types the
 	// watching scope cannot serve (e.g. Series/Season-only) fall through to
 	// loadProgressPage below.
-	if h.sectionsFetcher != nil && (len(typeSet) == 0 || typeSet["episode"] || typeSet["movie"]) {
+	// A ParentId scopes the row to one library, series, season or movie; the
+	// Continue Watching fetcher serves the whole profile, so a scoped request
+	// takes the progress scan, which filters by parent.
+	if h.sectionsFetcher != nil && !query.scopesProgressToParent() && (len(typeSet) == 0 || typeSet["episode"] || typeSet["movie"]) {
 		items, total, err := h.loadResumeViaSections(r.Context(), session, query, typeSet)
 		if err == nil {
 			h.applyListFileFields(r.Context(), session, items, query)
@@ -3190,7 +3193,7 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 		slog.WarnContext(r.Context(), "jellycompat: resume via sections failed, falling back to progress scan", "component", "jellycompat", "error", err)
 	}
 
-	items, total, err := h.loadProgressPage(r.Context(), session, "in_progress", query, typeSet, nil)
+	items, total, err := h.loadProgressPage(r.Context(), session, "in_progress", query, typeSet, libraryIDPtr(query.parentLibraryID))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -3266,7 +3269,8 @@ func (h *ItemsHandler) loadResumeViaSections(ctx context.Context, session *Sessi
 		SuppressNextUp: true,
 	}
 
-	result, err := h.sectionsFetcher.FetchOne(ctx, resolved, nil, filter.AllowedLibraryIDs, session.StreamAppUserID, session.ProfileID, filter)
+	libraryID := libraryIDPtr(query.parentLibraryID)
+	result, err := h.sectionsFetcher.FetchOne(ctx, resolved, libraryID, filter.AllowedLibraryIDs, session.StreamAppUserID, session.ProfileID, filter)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -3315,11 +3319,11 @@ func (h *ItemsHandler) loadResumeViaSections(ctx context.Context, session *Sessi
 		entries = entries[:pageSize]
 	}
 
-	hydrated, err := h.hydrateProgressItems(ctx, session, entries, query.requestedFields, nil)
+	hydrated, err := h.hydrateProgressItems(ctx, session, entries, query.requestedFields, libraryID)
 	if err != nil {
 		return nil, 0, err
 	}
-	dtos := h.finishProgressPage(ctx, session, hydrated, query, nil)
+	dtos := h.finishProgressPage(ctx, session, hydrated, query, libraryID)
 	return dtos, len(dtos), nil
 }
 
@@ -3330,6 +3334,29 @@ type progressHydratedItem struct {
 	entry      upstreamProgress
 	target     *compatEpisodeTarget
 	dto        baseItemDTO
+}
+
+// scopesProgressToParent reports whether ParentId names a series, season or
+// item, which a progress listing must filter by. A library ParentId is
+// applied through the libraryID argument instead.
+func (q itemsQuery) scopesProgressToParent() bool {
+	return q.parentItemID != "" || q.parentSeasonID != ""
+}
+
+// inParent reports whether the progress item is an episode of the ParentId
+// series or season. As in Jellyfin, ParentId names the items under it, so a
+// movie or episode ParentId matches nothing. Moonfin for Roku resumes a series
+// by asking for one resumable item under it, so ignoring ParentId resumed
+// whatever the profile had played last.
+func (item progressHydratedItem) inParent(q itemsQuery) bool {
+	switch {
+	case q.parentSeasonID != "":
+		return item.target != nil && item.target.SeasonID == q.parentSeasonID
+	case q.parentItemID != "":
+		return item.target != nil && item.target.Item.SeriesID == q.parentItemID
+	default:
+		return true
+	}
 }
 
 // sortedTypeSet returns the (already lowercased) keys of a type set in a stable
@@ -3349,7 +3376,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 	// only safe for the first page; deeper StartIndex values must go through
 	// the scan-from-zero branch, which paginates over visible entries.
 	resumeFiltered := status == "in_progress"
-	if len(typeSet) == 0 && libraryID == nil && !query.enableTotalRecordCount && (!resumeFiltered || query.startIndex == 0) {
+	if len(typeSet) == 0 && libraryID == nil && !query.scopesProgressToParent() && !query.enableTotalRecordCount && (!resumeFiltered || query.startIndex == 0) {
 		batchSize := min(max(query.limit*2, 48), 200)
 		if batchSize <= 0 {
 			batchSize = 48
@@ -3450,6 +3477,9 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		}
 		for _, item := range hydrated {
 			if len(typeSet) > 0 && !typeSet[item.itemType] {
+				continue
+			}
+			if !item.inParent(query) {
 				continue
 			}
 			if matchedCount >= query.startIndex && len(items) < query.limit {

@@ -779,6 +779,44 @@ func TestTranscodesAudioMatchesFFmpegDefault(t *testing.T) {
 	}
 }
 
+// audio_to_ac3 recipe 1: an AC-3 encode gets the channel count its caller
+// names, capped at the encoder's 5.1, and keeps the source layout otherwise.
+func TestAppendAudioArgsAC3HonorsChannelTarget(t *testing.T) {
+	for _, tc := range []struct {
+		target int
+		wantAC string
+	}{{target: 2, wantAC: "2"}, {target: 6, wantAC: "6"}, {target: 8, wantAC: "6"}, {target: 0}} {
+		args := strings.Join(appendAudioArgs(nil, TranscodeOpts{TargetCodecAudio: "ac3", SourceAudioChannels: 8, TargetAudioChannels: tc.target}), " ")
+		want := "-c:a ac3 -b:a 448k"
+		if tc.wantAC != "" {
+			want += " -ac " + tc.wantAC
+		}
+		if args != want {
+			t.Errorf("target %d: args = %q, want %q", tc.target, args, want)
+		}
+	}
+}
+
+// audio_to_mp3 recipe 1: an MP3 encode needs a channel count and is at most
+// stereo. Without one, an mp3 target keeps the AAC fallback.
+func TestAppendAudioArgsMP3NeedsAChannelTarget(t *testing.T) {
+	for _, tc := range []struct {
+		target int
+		want   string
+	}{
+		{target: 2, want: "-c:a libmp3lame -b:a 192k -ac 2"},
+		{target: 6, want: "-c:a libmp3lame -b:a 192k -ac 2"},
+		{target: 1, want: "-c:a libmp3lame -b:a 192k -ac 1"},
+	} {
+		if got := strings.Join(appendAudioArgs(nil, TranscodeOpts{TargetCodecAudio: "mp3", SourceAudioChannels: 6, TargetAudioChannels: tc.target}), " "); got != tc.want {
+			t.Errorf("target %d: args = %q, want %q", tc.target, got, tc.want)
+		}
+	}
+	if got := strings.Join(appendAudioArgs(nil, TranscodeOpts{TargetCodecAudio: "mp3"}), " "); !strings.Contains(got, "-c:a aac") {
+		t.Errorf("mp3 without a channel target = %q, want the AAC fallback", got)
+	}
+}
+
 func TestAppendAudioArgsNormalizesEveryAACEncodeAndBoostsOnlySurroundToStereo(t *testing.T) {
 	const boostFilter = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
 	const normalizeFilter = "aresample=async=1"
@@ -802,7 +840,7 @@ func TestAppendAudioArgsNormalizesEveryAACEncodeAndBoostsOnlySurroundToStereo(t 
 		{name: "noncanonical target resolves to ordinary AAC stereo", codec: "aac", sourceChannels: 6, targetChannels: 3, wantFilter: normalizeFilter},
 		{name: "surround AAC preserved", codec: "aac", sourceChannels: 6, targetChannels: 6, wantFilter: normalizeFilter},
 		{name: "copy", codec: "copy", sourceChannels: 6, targetChannels: 2},
-		{name: "ac3 preserves source layout", codec: "ac3", sourceChannels: 6, targetChannels: 2},
+		{name: "ac3 has no AAC filter", codec: "ac3", sourceChannels: 6, targetChannels: 2},
 		{name: "eac3 preserves source layout", codec: "eac3", sourceChannels: 6, targetChannels: 2},
 		{name: "stereo opus encode", codec: "opus", sourceChannels: 2, targetChannels: 2},
 	}

@@ -228,6 +228,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	registerQuickConnectRoutes(r, deps, authHandler)
 	r.Get(compatItemImageRoute, imagesHandler.HandleItemImage)
 	r.Get(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
+	// Roku clients probe for artwork with HEAD before showing it.
+	r.Head(compatItemImageRoute, imagesHandler.HandleItemImage)
+	r.Head(compatItemImageIndexRoute, imagesHandler.HandleItemImage)
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
 	// <img> tags that carry no auth, so the route is registered top-level rather
 	// than inside the session-auth group.
@@ -287,6 +290,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Users/{userId}/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
 			r.Get("/Items/{id}", itemsHandler.HandleItem)
+			r.Get("/Items/{id}/Images", itemsHandler.HandleItemImageInfos)
 			r.Get("/Users/{userId}/Items/Resume", itemsHandler.HandleResume)
 			r.Get("/Users/{userId}/Items/{id}", itemsHandler.HandleItem)
 			r.Get("/Studios", itemsHandler.HandleStudios)
@@ -379,6 +383,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		r.Get("/Videos/{id}/audio-v2/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/master.m3u8", playbackHandler.HandleAudioV2MasterManifest))
 		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", playbackHandler.HandleAudioV2HLSManifest))
 		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleAudioV2HLSSegment))
+		r.Get("/Videos/{id}/audio-codec-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-codec-v1/master.m3u8", playbackHandler.HandleAudioCodecV1MasterManifest))
+		r.Get("/Videos/{id}/audio-codec-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-codec-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleAudioCodecV1HLSManifest))
+		r.Get("/Videos/{id}/audio-codec-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-codec-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleAudioCodecV1HLSSegment))
 		r.Get("/Videos/{id}/hevc-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/master.m3u8", playbackHandler.HandleHEVCV1MasterManifest))
 		r.Get("/Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleHEVCV1HLSManifest))
 		r.Get("/Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hevc-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleHEVCV1HLSSegment))
@@ -447,7 +454,7 @@ func skipCompatMediaCompression(r *http.Request) bool {
 	case len(p) == 5 && p[0] == videosSegment && p[1] != "" && p[2] == compatHLSPathSegment && p[3] != "" && p[4] != "":
 		return p[4] != hlsManifest && strings.Contains(p[4], ".")
 	case len(p) == 6 && p[0] == videosSegment && p[1] != "" &&
-		(p[2] == compatAudioV2PathSegment || p[2] == compatRemuxV1PathSegment || p[2] == compatRemuxTSV1PathSegment || p[2] == compatRemuxDVV1PathSegment) &&
+		(p[2] == compatAudioV2PathSegment || p[2] == compatRemuxV1PathSegment || p[2] == compatRemuxTSV1PathSegment || p[2] == compatRemuxDVV1PathSegment || p[2] == compatAudioCodecV1PathSegment) &&
 		p[3] == compatHLSPathSegment && p[4] != "" && p[5] != "":
 		return p[5] != hlsManifest && strings.Contains(p[5], ".")
 	case len(p) == 3 && p[0] == "Items" && p[1] != "" && p[2] == "Download":
