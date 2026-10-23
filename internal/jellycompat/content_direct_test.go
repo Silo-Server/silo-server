@@ -590,7 +590,7 @@ func TestEnrichSeriesUserDataUsesSQLRollup(t *testing.T) {
 
 // TestEnrichSeriesUserDataRollupFailure: a failed rollup query falls back to
 // the per-episode rollup while the request is live. Once the request is
-// cancelled the fallback would fail on the same context, so it does not run,
+// canceled the fallback would fail on the same context, so it does not run,
 // and only a failure that is not the cancellation itself logs a warning.
 func TestEnrichSeriesUserDataRollupFailure(t *testing.T) {
 	rollupErr := errors.New("rollup unavailable")
@@ -602,7 +602,7 @@ func TestEnrichSeriesUserDataRollupFailure(t *testing.T) {
 		wantWarn     bool
 	}{
 		{name: "live request", err: rollupErr, wantFallback: true, wantWarn: true},
-		{name: "cancelled request", cancel: true, err: context.Canceled},
+		{name: "canceled request", cancel: true, err: context.Canceled},
 		{name: "real failure after cancel", cancel: true, err: rollupErr, wantWarn: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

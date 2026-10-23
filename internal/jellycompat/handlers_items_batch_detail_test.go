@@ -162,7 +162,7 @@ func TestHandleBrowseItems_BatchDetailMatchesPerItem(t *testing.T) {
 }
 
 // TestBatchListItemDetailsSkipsPerItemFallbackAfterCancel: once the request is
-// cancelled, a failed batch is not retried one item at a time on the same
+// canceled, a failed batch is not retried one item at a time on the same
 // context. TestHandleBrowseItems_BatchDetailMatchesPerItem covers the
 // fallback on a live request.
 func TestBatchListItemDetailsSkipsPerItemFallbackAfterCancel(t *testing.T) {
