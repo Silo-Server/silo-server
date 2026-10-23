@@ -144,6 +144,12 @@ func canonicalizeCompatPath(path string) string {
 		if part == "" {
 			continue
 		}
+		// The {displayPreferencesId} in /DisplayPreferences/{id} is a
+		// case-sensitive storage key, so it keeps its case even when it reads
+		// like a route word.
+		if i == 2 && strings.EqualFold(parts[1], "displaypreferences") {
+			continue
+		}
 		// LocalTrailers is matched only in its route position,
 		// /Items/{id}/LocalTrailers, so a DisplayPreferences id or other
 		// opaque value that happens to read "localtrailers" keeps its case.
