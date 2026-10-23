@@ -323,7 +323,10 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		return
 	}
-	h.authenticator.sessions.Delete(token)
+	if err := h.authenticator.sessions.Delete(token); err != nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "Could not sign out")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

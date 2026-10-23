@@ -5231,6 +5231,7 @@ export type MarkerProviderConfig =
 export interface MarkerProviderUpdateRequest {
   fetch_enabled?: boolean;
   fetch_priority?: number;
+  fetch_min_confidence?: number;
   contribute_enabled?: boolean;
   contribute_auto_local?: boolean;
   contribute_min_confidence?: number;

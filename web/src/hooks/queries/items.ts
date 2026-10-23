@@ -303,7 +303,6 @@ export interface UpdateItemMetadataRequest {
   air_time?: string | null;
   air_timezone?: string | null;
   air_date?: string | null;
-  status?: string;
   rating_imdb?: number | null;
   rating_tmdb?: number | null;
   rating_rt_critic?: number | null;

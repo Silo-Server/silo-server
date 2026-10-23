@@ -8960,6 +8960,12 @@
             ]
           },
           "status": {
+            "description": "Match status; null leaves it unchanged",
+            "enum": [
+              "pending",
+              "matched",
+              "unmatched"
+            ],
             "type": [
               "string",
               "null"
@@ -10034,6 +10040,13 @@
           "fetch_enabled": {
             "type": "boolean"
           },
+          "fetch_min_confidence": {
+            "description": "Markers the provider rates below this confidence are left out of lookups, so another provider or local detection can fill their kind. 0 keeps every marker.",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
           "fetch_priority": {
             "format": "int64",
             "type": "integer"
@@ -10064,6 +10077,7 @@
           "is_submitter",
           "fetch_enabled",
           "fetch_priority",
+          "fetch_min_confidence",
           "contribute_enabled",
           "contribute_auto_local",
           "contribute_min_confidence"
@@ -10097,6 +10111,15 @@
           "fetch_enabled": {
             "type": [
               "boolean",
+              "null"
+            ]
+          },
+          "fetch_min_confidence": {
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": [
+              "number",
               "null"
             ]
           },
@@ -13023,6 +13046,7 @@
             "type": "string"
           },
           "updates_paused": {
+            "description": "True while the installation's repository is disabled. Silo does not check it for new versions or install from it, so available_version cannot be applied until the repository is enabled again.",
             "type": "boolean"
           },
           "user_config_schema": {

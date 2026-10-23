@@ -35,6 +35,9 @@
 # A watched special does not anchor Next Up for a series with regular seasons.
 ./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
 
+# A finished regular episode does not push a half-watched special off Continue Watching.
+./internal/catalog TestSupersededSpecialsNeedALaterSpecialPostgres
+
 # Series air-date sort keys advance when a known episode airs.
 ./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
 

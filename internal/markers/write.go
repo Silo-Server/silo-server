@@ -29,6 +29,10 @@ func (s SegmentPayload) Present() bool { return len(s.Ranges) > 0 || s.Start != 
 // CanWriteMarkerUpdate applies source precedence and local detector refinement.
 // Online provider selection has already happened in the registry; a refreshed
 // selection is authoritative even when a provider's confidence has not risen.
+// A marker placed from the file's own chapters and a provider marker are
+// weighed by confidence instead: the chapters were authored for this file,
+// while a provider answers from other copies, so a provider marker rated
+// below the chapter's does not replace it, and the chapter replaces one.
 func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
 	// Manual provenance also represents a deliberate absence: clearing a kind
 	// keeps it suppressed until another manual write supplies a range.
@@ -37,6 +41,13 @@ func CanWriteMarkerUpdate(existing, incoming SegmentPayload) bool {
 	}
 	if !existing.Present() {
 		return true
+	}
+	// A tie goes to the provider, as source priority would have it.
+	if fromFileChapters(existing) && isProviderMarker(incoming) {
+		return !confidenceGreater(existing.Confidence, incoming.Confidence)
+	}
+	if fromFileChapters(incoming) && isProviderMarker(existing) {
+		return confidenceGreater(incoming.Confidence, existing.Confidence)
 	}
 	existingPriority := models.MarkerSourcePriority(existing.Source)
 	incomingPriority := models.MarkerSourcePriority(incoming.Source)
@@ -175,6 +186,27 @@ func sameSeasonScoredVersion(a, b string) bool {
 	return false
 }
 
+// fromFileChapters reports whether p is a local result placed from the file's
+// own chapters. A copy from another version of the episode is not.
+func fromFileChapters(p SegmentPayload) bool {
+	if p.Source != models.MarkerSourceScanner {
+		return false
+	}
+	switch p.Algorithm {
+	case chapterAlgorithm, legacyChapterSilenceAlgorithm, chapterSilenceAlgorithm, creditsChapterAlgorithm:
+		return true
+	default:
+		return false
+	}
+}
+
+// Intro chapter detector identifiers, as local analysis persists them.
+const (
+	chapterAlgorithm              = "chapter:v1"
+	chapterSilenceAlgorithm       = "chapter:silence:v2"
+	legacyChapterSilenceAlgorithm = "chapter:silence:v1"
+)
+
 // Credits detector identifiers, as local analysis persists them.
 const (
 	creditsChapterAlgorithm     = "credits-chapter:v1"
@@ -188,11 +220,11 @@ const (
 // ranks below its replacement so re-analysis can overwrite what it wrote.
 func scannerAlgorithmPriority(algorithm string) int {
 	switch algorithm {
-	case "chapter:silence:v2":
+	case chapterSilenceAlgorithm:
 		return 40
-	case "chapter:v1":
+	case chapterAlgorithm:
 		return 30
-	case "chapter:silence:v1": // Extended chapter ends too far; below chapter:v1.
+	case legacyChapterSilenceAlgorithm: // Extended chapter ends too far; below chapter:v1.
 		return 25
 	case "episode-version-copy:v1":
 		return 24
@@ -368,6 +400,11 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 	for _, target := range fileSegmentFields(&next) {
 		existing := target.payload(file, byKind[target.kind])
 		incoming := incomingByKind[target.kind]
+		if target.kind == models.MarkerSegmentCredits {
+			// Intro is projected first, so this checks against the intro
+			// the projection is left with.
+			incoming = placedCredits(incoming, &next)
+		}
 		if !incoming.Present() {
 			if existing.Source != models.MarkerSourceManual && existing.Provider != nil && slices.Contains(result.RefreshedProviders, *existing.Provider) {
 				delete(byKind, target.kind)
@@ -392,6 +429,20 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 	setSegments(&next, byKind)
 	summarizeSources(&next, file.MarkersSource, file.MarkersConfidence)
 	return &next
+}
+
+// placedCredits drops the credits in incoming that fail
+// CheckCreditsPlacement for file. Dropping them before precedence lets a
+// refresh that returns only misplaced credits clear the provider's stored ones
+// like any other withdrawn range.
+func placedCredits(incoming SegmentPayload, file *models.MediaFile) SegmentPayload {
+	kept := CreditsLimitsForFile(file).KeepPlaced(incoming.Ranges, float64(file.Duration), file.IntroEnd)
+	if len(kept) == 0 {
+		return SegmentPayload{}
+	}
+	incoming.Ranges = kept
+	incoming.Start, incoming.End = &kept[0].StartSeconds, &kept[0].EndSeconds
+	return incoming
 }
 
 func markerSource(m Marker, result Result) string {

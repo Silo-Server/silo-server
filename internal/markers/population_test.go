@@ -295,15 +295,15 @@ func TestPopulationDoesNotMarkFailedStorageFresh(t *testing.T) {
 func TestRegistryPreservesEveryRangeFromWinningProvider(t *testing.T) {
 	registry := NewRegistry(nil)
 	_ = registry.Register(&fakeProvider{id: "preferred", result: Result{Markers: []Marker{
-		{Kind: MarkerKindCredits, Start: 900 * time.Second, End: 950 * time.Second},
-		{Kind: MarkerKindCredits, Start: 800 * time.Second, End: 850 * time.Second},
+		{Kind: MarkerKindCredits, Start: 1900 * time.Second, End: 1950 * time.Second},
+		{Kind: MarkerKindCredits, Start: 1800 * time.Second, End: 1850 * time.Second},
 	}}})
-	_ = registry.Register(&fakeProvider{id: "fallback", result: Result{Markers: []Marker{{Kind: MarkerKindCredits, Start: 600 * time.Second, End: 999 * time.Second, Confidence: 1}}}})
+	_ = registry.Register(&fakeProvider{id: "fallback", result: Result{Markers: []Marker{{Kind: MarkerKindCredits, Start: 1600 * time.Second, End: 1999 * time.Second, Confidence: 1}}}})
 	result, ok, err := populateRegistryForTest(t.Context(), registry)
 	if err != nil || !ok || len(result.Markers) != 2 {
 		t.Fatalf("multi-range merge: %+v, %v", result, err)
 	}
-	if result.Markers[0].Start != 800*time.Second || result.Markers[1].Start != 900*time.Second || result.Markers[0].ProviderID != "preferred" {
+	if result.Markers[0].Start != 1800*time.Second || result.Markers[1].Start != 1900*time.Second || result.Markers[0].ProviderID != "preferred" {
 		t.Fatalf("merged ranges: %+v", result.Markers)
 	}
 }

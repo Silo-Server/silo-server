@@ -1818,29 +1818,13 @@ func (r *FileRepository) upsertAndClearMarkers(ctx context.Context, fileID int, 
 	if update != nil && !update.DetectedAt.IsZero() {
 		mutationAt = update.DetectedAt.UTC()
 	}
-	changed := markerSegmentFlags{}
-
+	var applyUpdate *MarkerUpdate
 	if hasUpdate {
-		applied, err := applyMarkerUpdateToMutationState(update, &state, mutationAt)
-		if err != nil {
-			return false, err
-		}
-		changed.intro = changed.intro || applied.intro
-		changed.credits = changed.credits || applied.credits
-		changed.recap = changed.recap || applied.recap
-		changed.preview = changed.preview || applied.preview
+		applyUpdate = update
 	}
-	if clearFlags.intro {
-		changed.intro = clearManualSegmentState(&state.intro, mutationAt) || changed.intro
-	}
-	if clearFlags.credits {
-		changed.credits = clearManualSegmentState(&state.credits, mutationAt) || changed.credits
-	}
-	if clearFlags.recap {
-		changed.recap = clearManualSegmentState(&state.recap, mutationAt) || changed.recap
-	}
-	if clearFlags.preview {
-		changed.preview = clearManualSegmentState(&state.preview, mutationAt) || changed.preview
+	changed, err := applyMarkerMutation(applyUpdate, clearFlags, &state, mutationAt)
+	if err != nil {
+		return false, err
 	}
 	if !changed.any() {
 		if err := tx.Commit(ctx); err != nil {
@@ -1983,9 +1967,15 @@ func applyMarkerUpdateToMutationState(update *MarkerUpdate, state *markerMutatio
 		{"recap", &state.recap, update.RecapStart, update.RecapEnd, update.RecapProvenance, &applied.recap},
 		{"preview", &state.preview, update.PreviewStart, update.PreviewEnd, update.PreviewProvenance, &applied.preview},
 	} {
+		start, end, kindRanges := patch.start, patch.end, ranges[patch.kind]
+		if patch.kind == models.MarkerSegmentCredits {
+			// The intro has already been patched, so this checks against the
+			// intro the file is left with.
+			start, end, kindRanges = placedCredits(state, start, end, kindRanges)
+		}
 		source, provider, confidence, algorithm := resolveSegmentProvenance(*update, patch.provenance)
 		changed, err := applySegmentRanges(patch.state, state.existingSource, source, provider, confidence, algorithm,
-			patch.start, patch.end, ranges[patch.kind], state.duration, patch.kind, mutationAt)
+			start, end, kindRanges, state.duration, patch.kind, mutationAt)
 		if err != nil {
 			return markerSegmentFlags{}, err
 		}
@@ -1994,13 +1984,67 @@ func applyMarkerUpdateToMutationState(update *MarkerUpdate, state *markerMutatio
 		if existingSource == nil {
 			existingSource = state.existingSource
 		}
-		if patch.start == nil && patch.end == nil && len(ranges[patch.kind]) == 0 && patch.state.provider != nil &&
+		if start == nil && end == nil && len(kindRanges) == 0 && patch.state.provider != nil &&
 			(existingSource == nil || *existingSource != models.MarkerSourceManual) &&
 			slices.Contains(update.RefreshedProviders, *patch.state.provider) {
 			*patch.changed = clearSegmentState(patch.state)
 		}
 	}
 	return applied, nil
+}
+
+// applyMarkerMutation applies the manual clears in clearFlags, then update
+// (nil for a clear-only request), to state, and reports which kinds changed.
+// Clears go first so the credits in update are checked against the intro the
+// request leaves the file with.
+func applyMarkerMutation(update *MarkerUpdate, clearFlags markerSegmentFlags, state *markerMutationState, mutationAt time.Time) (markerSegmentFlags, error) {
+	changed := markerSegmentFlags{}
+	if clearFlags.intro {
+		changed.intro = clearManualSegmentState(&state.intro, mutationAt)
+	}
+	if clearFlags.credits {
+		changed.credits = clearManualSegmentState(&state.credits, mutationAt)
+	}
+	if clearFlags.recap {
+		changed.recap = clearManualSegmentState(&state.recap, mutationAt)
+	}
+	if clearFlags.preview {
+		changed.preview = clearManualSegmentState(&state.preview, mutationAt)
+	}
+	if update != nil {
+		applied, err := applyMarkerUpdateToMutationState(update, state, mutationAt)
+		if err != nil {
+			return markerSegmentFlags{}, err
+		}
+		changed.intro = changed.intro || applied.intro
+		changed.credits = changed.credits || applied.credits
+		changed.recap = changed.recap || applied.recap
+		changed.preview = changed.preview || applied.preview
+	}
+	return changed, nil
+}
+
+// placedCredits drops the credits in an update that fail the placement every
+// marker source shares (markers.CheckCreditsPlacement), from its ranges and
+// from its singular bounds. Dropping them before the write lets a refresh that
+// returns only misplaced credits clear the provider's stored ones like any
+// other withdrawn range.
+func placedCredits(state *markerMutationState, start, end *float64, ranges []models.MarkerSegment) (*float64, *float64, []models.MarkerSegment) {
+	limits := markers.CreditsLimitsForFile(&state.file)
+	kept := limits.KeepPlaced(ranges, state.duration, state.intro.end)
+	if start != nil || end != nil {
+		s, e := state.credits.start, state.credits.end
+		if start != nil {
+			s = start
+		}
+		if end != nil {
+			e = end
+		}
+		if s != nil && e != nil && limits.CheckCreditsPlacement(*s, *e, state.duration, state.intro.end) != nil {
+			start, end = nil, nil
+		}
+	}
+	return start, end, kept
 }
 
 func writeMarkerMutationState(

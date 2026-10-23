@@ -3,6 +3,7 @@ package intromarkers
 import (
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -86,6 +87,24 @@ func (c Candidate) hasHigherPriority(kind markerKind, source string) bool {
 		return false
 	}
 	return models.MarkerSourcePriority(c.effectiveSource(kind)) > models.MarkerSourcePriority(source)
+}
+
+// yieldsToChapter reports whether the candidate's marker of kind came from a
+// higher-priority source that the marker writer lets the chapter result
+// segment replace: an online provider that rated it below the chapter.
+func (c Candidate) yieldsToChapter(kind markerKind, segment Segment) bool {
+	if !c.hasHigherPriority(kind, models.MarkerSourceScanner) {
+		return false
+	}
+	stored := c.marker(kind)
+	existing := markers.SegmentPayload{Start: stored.Start, End: stored.End, Source: c.effectiveSource(kind), Confidence: stored.Confidence}
+	if stored.Algorithm != nil {
+		existing.Algorithm = *stored.Algorithm
+	}
+	return markers.CanWriteMarkerUpdate(existing, markers.SegmentPayload{
+		Start: &segment.Start, End: &segment.End, Source: models.MarkerSourceScanner,
+		Confidence: &segment.Confidence, Algorithm: segment.Algorithm,
+	})
 }
 
 // ownsMarker reports whether local analysis may write the candidate's marker

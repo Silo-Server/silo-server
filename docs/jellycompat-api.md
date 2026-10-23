@@ -525,6 +525,15 @@ whose authority read preceded a concurrent logout may finish. Already issued sig
 node stream URLs retain their existing lifetime; logout does not withdraw them or
 cancel a transfer already authorized. Socket re-check timing is unchanged.
 
+`POST /Sessions/Logout` drops this node's cached copy of the compat session and
+deletes its stored row, returning `204` when the row is deleted or was already
+gone. When the delete fails it returns `500` with `Error: "ServerError"` and
+`Message: "Could not sign out"`. The stored row normally survives that failure,
+so the token keeps working until a later sign-out succeeds or the session
+expires; jellyfin-web clears its saved token whatever the status. The route
+authenticates first, so retrying after a delete that completed despite the error
+returns `401`.
+
 ### Quick Connect
 
 Jellyfin apps sign in with Quick Connect on top of Silo's device sign-in

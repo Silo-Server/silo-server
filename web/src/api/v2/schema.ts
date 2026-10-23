@@ -15870,7 +15870,11 @@ export interface components {
       /** Format: int64 */
       season_number?: number | null;
       sort_title?: string | null;
-      status?: string | null;
+      /**
+       * @description Match status; null leaves it unchanged
+       * @enum {string|null}
+       */
+      status?: "pending" | "matched" | "unmatched" | null;
       studios?: string[] | null;
       tagline?: string | null;
       title?: string | null;
@@ -16226,6 +16230,11 @@ export interface components {
       contribute_min_confidence: number;
       display_name?: string;
       fetch_enabled: boolean;
+      /**
+       * Format: double
+       * @description Markers the provider rates below this confidence are left out of lookups, so another provider or local detection can fill their kind. 0 keeps every marker.
+       */
+      fetch_min_confidence: number;
       /** Format: int64 */
       fetch_priority: number;
       is_submitter: boolean;
@@ -16247,6 +16256,8 @@ export interface components {
       /** Format: double */
       contribute_min_confidence?: number | null;
       fetch_enabled?: boolean | null;
+      /** Format: double */
+      fetch_min_confidence?: number | null;
       /** Format: int64 */
       fetch_priority?: number | null;
     };
@@ -17327,6 +17338,7 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       updated_at: string;
+      /** @description True while the installation's repository is disabled. Silo does not check it for new versions or install from it, so available_version cannot be applied until the repository is enabled again. */
       updates_paused: boolean;
       user_config_schema: components["schemas"]["AdminPluginConfigSchema"][];
       version: string;

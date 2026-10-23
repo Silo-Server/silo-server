@@ -26,3 +26,32 @@ func TestPluginCatalogEntryViewProjection(t *testing.T) {
 		t.Fatal("index repo URL must win over presentation source")
 	}
 }
+
+// Silo checks a repository for new versions only while it is enabled, and
+// refuses installs from a disabled one, so an installation from any disabled
+// repository reports its updates paused.
+func TestPluginInstallationSource(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		repository *plugins.Repository
+		wantKind   string
+		wantName   string
+		wantPaused bool
+	}{
+		{name: "no repository", wantKind: plugins.RepositorySourceExternal},
+		{name: "enabled external", repository: &plugins.Repository{SourceKind: plugins.RepositorySourceExternal, DisplayName: "Mine", Enabled: true}, wantKind: plugins.RepositorySourceExternal, wantName: "Mine"},
+		{name: "disabled external", repository: &plugins.Repository{SourceKind: plugins.RepositorySourceExternal, DisplayName: "Mine"}, wantKind: plugins.RepositorySourceExternal, wantName: "Mine", wantPaused: true},
+		{name: "hidden approved community", repository: &plugins.Repository{SourceKind: plugins.RepositorySourceApprovedCommunity, DisplayName: "Approved community"}, wantKind: plugins.RepositorySourceApprovedCommunity, wantName: "Approved community", wantPaused: true},
+		{name: "enabled silo", repository: &plugins.Repository{SourceKind: plugins.RepositorySourceSilo, DisplayName: "Silo maintained", Enabled: true}, wantKind: plugins.RepositorySourceSilo, wantName: "Silo maintained"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			kind, name, paused := installationSource(tt.repository)
+			if kind != tt.wantKind || name != tt.wantName || paused != tt.wantPaused {
+				t.Fatalf("installationSource() = (%q, %q, %v), want (%q, %q, %v)", kind, name, paused, tt.wantKind, tt.wantName, tt.wantPaused)
+			}
+		})
+	}
+}

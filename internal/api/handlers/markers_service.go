@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
@@ -108,18 +109,32 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 	}
 	update := scanner.MarkerUpdate{MarkersSource: models.MarkerSourceManual, MarkersConfidence: &manualMarkerConfidence, MarkersAlgorithm: manualMarkerAlgorithm}
 	var clears, sets []string
+	// Intro comes before credits in markerSegmentNames, so by the credits
+	// check this is the intro the change leaves the file with.
+	introEnd := file.IntroEnd
 	for _, segment := range markerSegmentNames {
 		value, present := changes[segment]
 		if !present {
 			continue
 		}
 		if value == nil {
+			if segment == models.MarkerSegmentIntro {
+				introEnd = nil
+			}
 			clears = append(clears, segment)
 			continue
 		}
 		start, end, err := normalizeManualSegment(segment, *value, float64(file.Duration))
 		if err != nil {
 			return FileMarkersView{}, apiError(http.StatusBadRequest, "bad_request", err.Error())
+		}
+		switch segment {
+		case models.MarkerSegmentIntro:
+			introEnd = &end
+		case models.MarkerSegmentCredits:
+			if err := markers.CreditsLimitsForFile(file).CheckCreditsPlacement(start, end, float64(file.Duration), introEnd); err != nil {
+				return FileMarkersView{}, apiError(http.StatusBadRequest, "bad_request", errSegment(segment, err.Error()).Error())
+			}
 		}
 		applyManualSegment(&update, segment, start, end)
 		sets = append(sets, segment)

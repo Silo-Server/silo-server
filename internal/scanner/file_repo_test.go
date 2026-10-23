@@ -209,3 +209,107 @@ func TestSortPresentationFilesOrdersLegacyRowsNaturally(t *testing.T) {
 		}
 	}
 }
+
+func TestMarkerUpdateDropsCreditsOutsideCreditsWindow(t *testing.T) {
+	// A 40-minute episode, whose credits window opens at 32:30, from a
+	// provider that copied its intro into the credits.
+	for _, tc := range []struct {
+		name        string
+		update      MarkerUpdate
+		wantCredits []models.MarkerSegment
+	}{
+		{
+			name: "singular bounds",
+			update: MarkerUpdate{
+				IntroStart: floatPtr(94), IntroEnd: floatPtr(114),
+				CreditsStart: floatPtr(94), CreditsEnd: floatPtr(112),
+				MarkersSource: models.MarkerSourcePlugin,
+			},
+		},
+		{
+			name: "ranges",
+			update: MarkerUpdate{
+				Segments: []models.MarkerSegment{
+					{Kind: models.MarkerSegmentIntro, StartSeconds: 94, EndSeconds: 114},
+					{Kind: models.MarkerSegmentCredits, StartSeconds: 94, EndSeconds: 112},
+					{Kind: models.MarkerSegmentCredits, StartSeconds: 1300, EndSeconds: 1400},
+					{Kind: models.MarkerSegmentCredits, StartSeconds: 2300, EndSeconds: 2400},
+				},
+				MarkersSource: models.MarkerSourceOnline,
+			},
+			wantCredits: []models.MarkerSegment{{Kind: models.MarkerSegmentCredits, StartSeconds: 2300, EndSeconds: 2400}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := markerMutationState{duration: 2400, file: models.MediaFile{EpisodeID: "episode"}}
+
+			applied, err := applyMarkerUpdateToMutationState(&tc.update, &state, time.Now())
+			if err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+
+			if !applied.intro || state.intro.start == nil || *state.intro.start != 94 {
+				t.Fatalf("intro not written: applied=%v start=%v", applied.intro, state.intro.start)
+			}
+			if tc.wantCredits == nil {
+				if applied.credits || state.credits.start != nil || len(state.credits.ranges) != 0 {
+					t.Fatalf("early credits written: start=%v ranges=%v", state.credits.start, state.credits.ranges)
+				}
+				return
+			}
+			if !applied.credits || len(state.credits.ranges) != len(tc.wantCredits) || state.credits.ranges[0] != tc.wantCredits[0] {
+				t.Fatalf("credits ranges = %v, want %v", state.credits.ranges, tc.wantCredits)
+			}
+			if state.credits.start == nil || *state.credits.start != tc.wantCredits[0].StartSeconds {
+				t.Fatalf("credits start = %v, want %v", state.credits.start, tc.wantCredits[0].StartSeconds)
+			}
+		})
+	}
+}
+
+func TestMarkerRefreshClearsProviderCreditsWhenOnlyEarlyCreditsReturn(t *testing.T) {
+	plugin := models.MarkerSourcePlugin
+	provider := "provider"
+	state := markerMutationState{duration: 2400, file: models.MediaFile{EpisodeID: "episode"}, credits: segmentState{
+		start: floatPtr(94), end: floatPtr(112), source: &plugin, provider: &provider,
+		ranges: []models.MarkerSegment{{Kind: models.MarkerSegmentCredits, StartSeconds: 94, EndSeconds: 112}},
+	}}
+	update := MarkerUpdate{
+		Segments:           []models.MarkerSegment{{Kind: models.MarkerSegmentCredits, StartSeconds: 94, EndSeconds: 112}},
+		MarkersSource:      models.MarkerSourcePlugin,
+		MarkersProvider:    &provider,
+		RefreshedProviders: []string{provider},
+	}
+
+	applied, err := applyMarkerUpdateToMutationState(&update, &state, time.Now())
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if !applied.credits || state.credits.start != nil || len(state.credits.ranges) != 0 {
+		t.Fatalf("early credits survived the refresh: applied=%v start=%v ranges=%v", applied.credits, state.credits.start, state.credits.ranges)
+	}
+}
+
+func TestMarkerMutationChecksCreditsAgainstTheIntroItLeaves(t *testing.T) {
+	// A 25-minute episode whose wrong intro runs into the credits window: the
+	// edit clears it and sets the credits in one request.
+	manual := models.MarkerSourceManual
+	state := markerMutationState{duration: 1500, file: models.MediaFile{EpisodeID: "episode"}, intro: segmentState{
+		start: floatPtr(60), end: floatPtr(1400), source: &manual,
+		ranges: []models.MarkerSegment{{Kind: models.MarkerSegmentIntro, StartSeconds: 60, EndSeconds: 1400}},
+	}}
+	update := MarkerUpdate{CreditsStart: floatPtr(1350), CreditsEnd: floatPtr(1500), MarkersSource: models.MarkerSourceManual}
+
+	changed, err := applyMarkerMutation(&update, markerSegmentFlags{intro: true}, &state, time.Now())
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if !changed.intro || state.intro.end != nil {
+		t.Fatalf("intro not cleared: changed=%v end=%v", changed.intro, state.intro.end)
+	}
+	if !changed.credits || state.credits.start == nil || *state.credits.start != 1350 {
+		t.Fatalf("credits not written: changed=%v start=%v", changed.credits, state.credits.start)
+	}
+}

@@ -155,7 +155,7 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 					"token_prefix", safeTokenPrefix(token),
 					"error", logredact.SanitizeText(err.Error()),
 				)
-				a.sessions.Delete(token)
+				_ = a.sessions.Delete(token)
 				writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
 				return
 			}

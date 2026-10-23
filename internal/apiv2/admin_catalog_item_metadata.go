@@ -37,7 +37,7 @@ type AdminItemMetadataUpdate struct {
 	AirTime          *string   `json:"air_time,omitempty" nullable:"true" doc:"Null clears the stored time"`
 	AirTimezone      *string   `json:"air_timezone,omitempty" nullable:"true" doc:"IANA time zone; null clears it"`
 	AirDate          *string   `json:"air_date,omitempty" nullable:"true" doc:"Season or episode air date; null clears it"`
-	Status           *string   `json:"status,omitempty" nullable:"true"`
+	Status           *string   `json:"status,omitempty" nullable:"true" enum:"pending,matched,unmatched" doc:"Match status; null leaves it unchanged"`
 	RatingIMDB       *float64  `json:"rating_imdb,omitempty" nullable:"true" doc:"Null clears it, along with any IMDb score a metadata plugin stored"`
 	RatingTMDB       *float64  `json:"rating_tmdb,omitempty" nullable:"true" doc:"Null clears it, along with any TMDB score a metadata plugin stored"`
 	RatingRTCritic   *int      `json:"rating_rt_critic,omitempty" nullable:"true" doc:"Null clears it, along with any Rotten Tomatoes critic score a metadata plugin stored"`

@@ -10,18 +10,20 @@ import (
 )
 
 // ProviderConfig is the per-provider behavior row from marker_provider_config.
-// fetch_* control multi-source read dispatch; contribute_* gate submission and
+// fetch_* control multi-source read dispatch, including the confidence below
+// which a provider's markers are left out; contribute_* gate submission and
 // default off so contribution is opt-in per provider.
 type ProviderConfig struct {
 	Provider                string
 	FetchEnabled            bool
 	FetchPriority           int
+	FetchMinConfidence      float64
 	ContributeEnabled       bool
 	ContributeAutoLocal     bool
 	ContributeMinConfidence float64
 }
 
-const providerConfigColumns = `provider, fetch_enabled, fetch_priority, contribute_enabled, contribute_auto_local, contribute_min_confidence`
+const providerConfigColumns = `provider, fetch_enabled, fetch_priority, fetch_min_confidence, contribute_enabled, contribute_auto_local, contribute_min_confidence`
 
 // ProviderConfigStore is a cached read/write facade over marker_provider_config.
 // Reads serve from an in-memory snapshot; call Reload at startup and after a
@@ -88,6 +90,7 @@ func (s *ProviderConfigStore) Reload(ctx context.Context) error {
 			&c.Provider,
 			&c.FetchEnabled,
 			&c.FetchPriority,
+			&c.FetchMinConfidence,
 			&c.ContributeEnabled,
 			&c.ContributeAutoLocal,
 			&c.ContributeMinConfidence,
@@ -151,18 +154,19 @@ func (s *ProviderConfigStore) Update(ctx context.Context, c ProviderConfig) erro
 	}
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO marker_provider_config (
-			provider, fetch_enabled, fetch_priority,
+			provider, fetch_enabled, fetch_priority, fetch_min_confidence,
 			contribute_enabled, contribute_auto_local, contribute_min_confidence, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, now())
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
 		ON CONFLICT (provider) DO UPDATE SET
 			fetch_enabled = EXCLUDED.fetch_enabled,
 			fetch_priority = EXCLUDED.fetch_priority,
+			fetch_min_confidence = EXCLUDED.fetch_min_confidence,
 			contribute_enabled = EXCLUDED.contribute_enabled,
 			contribute_auto_local = EXCLUDED.contribute_auto_local,
 			contribute_min_confidence = EXCLUDED.contribute_min_confidence,
 			updated_at = now()`,
-		c.Provider, c.FetchEnabled, c.FetchPriority,
+		c.Provider, c.FetchEnabled, c.FetchPriority, c.FetchMinConfidence,
 		c.ContributeEnabled, c.ContributeAutoLocal, c.ContributeMinConfidence,
 	); err != nil {
 		return fmt.Errorf("update marker provider config: %w", err)
@@ -182,12 +186,12 @@ func (s *ProviderConfigStore) Ensure(ctx context.Context, c ProviderConfig) erro
 	}
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO marker_provider_config (
-			provider, fetch_enabled, fetch_priority,
+			provider, fetch_enabled, fetch_priority, fetch_min_confidence,
 			contribute_enabled, contribute_auto_local, contribute_min_confidence, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, now())
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
 		ON CONFLICT (provider) DO NOTHING`,
-		c.Provider, c.FetchEnabled, c.FetchPriority,
+		c.Provider, c.FetchEnabled, c.FetchPriority, c.FetchMinConfidence,
 		c.ContributeEnabled, c.ContributeAutoLocal, c.ContributeMinConfidence,
 	); err != nil {
 		return fmt.Errorf("ensure marker provider config: %w", err)
