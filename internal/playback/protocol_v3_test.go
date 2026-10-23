@@ -1929,7 +1929,9 @@ func TestResolveQualityPolicyV3HonorsBandwidthCapInAllModes(t *testing.T) {
 
 	req.QualityPreference = "1080p"
 	result = ResolveQualityPolicyV3(req, source)
-	if result.Height != 720 || result.Reason != "quality_bandwidth_cap" || !result.ExplicitRung || !result.RequiresTranscode {
+	// The cap reaches 1080p Low, so the resolution stays and only the
+	// bitrate drops to the cap.
+	if result.Height != 1080 || result.BitrateKbps != cap || result.Reason != "quality_bandwidth_cap" || !result.ExplicitRung || !result.RequiresTranscode {
 		t.Fatalf("fixed rung over cap = %#v", result)
 	}
 	if !hasDegradationWarningV3(result.Warnings, "bandwidth_cap_applied") {

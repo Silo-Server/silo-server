@@ -46,6 +46,7 @@ type Resolver interface {
 	Resolve(ctx context.Context, req scantrigger.Request) (*scantrigger.Target, error)
 	ResolveMissingSubtree(ctx context.Context, subtreePath, trigger string) (*scantrigger.Target, error)
 	ResolveVanishedPath(ctx context.Context, path, trigger string) (*scantrigger.Target, error)
+	ResolveVanishedFile(ctx context.Context, path, trigger string) (*scantrigger.Target, error)
 }
 
 // Queuer enqueues resolved scan targets.
@@ -994,7 +995,7 @@ func (s *Service) resolveChange(ctx context.Context, change Change, stats *resol
 			// to a reconciling scan so the stale row is marked missing
 			// promptly instead of lingering until the next full library scan.
 			primaryErr = err
-			target, err = s.resolver.ResolveVanishedPath(ctx, change.SourcePath, scanTrigger)
+			target, err = s.resolver.ResolveVanishedFile(ctx, change.SourcePath, scanTrigger)
 			fallbackErr = err
 		}
 	default:

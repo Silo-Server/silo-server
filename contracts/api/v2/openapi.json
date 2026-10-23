@@ -311,7 +311,7 @@
         "additionalProperties": false,
         "properties": {
           "authorize_url": {
-            "description": "Provider sign-in URL; navigate the same browser there",
+            "description": "Provider sign-in URL as the sign-in plugin returned it; navigate the same browser there; not validated as a URI",
             "examples": [
               "https://id.example.test/authorize?client_id=silo\u0026state=..."
             ],
@@ -1799,6 +1799,7 @@
         "additionalProperties": false,
         "properties": {
           "base_url": {
+            "description": "Base URL as entered; not validated as a URI",
             "type": "string"
           },
           "has_api_key": {
@@ -1834,6 +1835,7 @@
             "writeOnly": true
           },
           "base_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           },
@@ -1866,6 +1868,7 @@
             "writeOnly": true
           },
           "base_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           },
@@ -2608,6 +2611,7 @@
             "type": "string"
           },
           "webhook_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -2861,6 +2865,7 @@
           },
           "url": {
             "description": "Stable public asset path with the ref as cache-buster",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -2974,6 +2979,7 @@
             "type": "array"
           },
           "remote_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -3002,6 +3008,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -3250,6 +3257,7 @@
         "additionalProperties": false,
         "properties": {
           "href": {
+            "format": "uri-reference",
             "type": "string"
           },
           "key": {
@@ -3471,6 +3479,7 @@
             "type": "string"
           },
           "backdrop_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "collection_type": {
@@ -3578,6 +3587,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {},
@@ -3597,6 +3607,7 @@
           },
           "source_config": {},
           "source_url": {
+            "description": "Where an imported collection came from (a list URL or a tmdb:// source); empty when not imported; not validated as a URI",
             "type": "string"
           },
           "sync_schedule": {
@@ -3656,6 +3667,7 @@
             "type": "string"
           },
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -3671,6 +3683,7 @@
             "type": "string"
           },
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -3773,6 +3786,7 @@
         "additionalProperties": false,
         "properties": {
           "backdrop_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "collection_type": {
@@ -3825,6 +3839,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {},
@@ -3838,6 +3853,7 @@
           },
           "source_config": {},
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sync_schedule": {
@@ -4113,6 +4129,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -4299,6 +4316,7 @@
         "additionalProperties": false,
         "properties": {
           "backdrop_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "collection_type": {
@@ -4343,6 +4361,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {},
@@ -4356,6 +4375,7 @@
           },
           "source_config": {},
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sync_schedule": {
@@ -6124,6 +6144,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag",
             "type": "string"
           }
         },
@@ -7484,6 +7505,7 @@
             "type": "boolean"
           },
           "node_url": {
+            "description": "Configured address of the node that answered, with credentials removed, or [invalid URL] when it does not parse; not validated as a URI",
             "type": "string"
           },
           "nodes": {
@@ -8026,6 +8048,7 @@
         "additionalProperties": false,
         "properties": {
           "base_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "enabled": {
@@ -8085,6 +8108,7 @@
             "type": "string"
           },
           "base_url": {
+            "format": "uri",
             "minLength": 1,
             "type": "string"
           },
@@ -8128,6 +8152,7 @@
             "type": "string"
           },
           "base_url": {
+            "format": "uri",
             "minLength": 1,
             "type": "string"
           },
@@ -8210,6 +8235,7 @@
             "type": "string"
           },
           "image_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "revision": {
@@ -8233,6 +8259,7 @@
         "additionalProperties": false,
         "properties": {
           "original_url": {
+            "description": "An original_url from this item's image list, sent back unchanged; not validated as a URI",
             "maxLength": 8192,
             "minLength": 1,
             "type": "string"
@@ -8797,6 +8824,7 @@
             ]
           },
           "countries": {
+            "description": "Country codes, ISO 3166-1 alpha-2 by convention (US); stored as sent; null clears",
             "items": {
               "type": "string"
             },
@@ -9006,6 +9034,7 @@
             "type": "boolean"
           },
           "public_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "server_name": {
@@ -9093,6 +9122,7 @@
             "type": "boolean"
           },
           "public_url": {
+            "description": "Public URL Jellyfin clients are told to use, as configured; not validated as a URI",
             "type": "string"
           },
           "restart_required": {
@@ -9102,6 +9132,7 @@
             "type": "string"
           },
           "source_url": {
+            "format": "uri",
             "type": "string"
           },
           "tag": {
@@ -9148,6 +9179,7 @@
         "properties": {
           "source_url": {
             "description": "Official jellyfin-web source; empty uses the stored source URL",
+            "format": "uri-reference",
             "maxLength": 2048,
             "type": "string"
           },
@@ -9636,6 +9668,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sort_config": {},
@@ -9651,6 +9684,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri",
             "type": "string"
           }
         },
@@ -10436,6 +10470,7 @@
             "type": "array"
           },
           "public_url": {
+            "description": "Client-facing node address as configured; not validated as a URI",
             "type": "string"
           },
           "type": {
@@ -10446,6 +10481,7 @@
             "type": "string"
           },
           "url": {
+            "description": "Node address as configured; not validated as a URI",
             "type": "string"
           }
         },
@@ -10533,6 +10569,7 @@
             "type": "string"
           },
           "public_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           },
@@ -10544,6 +10581,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "minLength": 1,
             "type": "string"
@@ -10779,6 +10817,7 @@
             "type": "string"
           },
           "node_url": {
+            "description": "Address the node reported for itself; not validated as a URI",
             "type": "string"
           },
           "profile_id": {
@@ -10923,6 +10962,7 @@
             "type": "string"
           },
           "public_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": [
               "string",
@@ -10930,6 +10970,7 @@
             ]
           },
           "url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "minLength": 1,
             "type": "string"
@@ -11136,6 +11177,7 @@
             "examples": [
               "https://silo.example.test/reset-password/3f2b47eb7b36dd2d"
             ],
+            "format": "uri",
             "type": "string"
           }
         },
@@ -11176,7 +11218,8 @@
             ]
           },
           "birth_date": {
-            "description": "YYYY-MM-DD; empty clears; null or omission preserves.",
+            "description": "Calendar date, YYYY-MM-DD; empty clears; null or omission preserves.",
+            "pattern": "^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
             "type": [
               "string",
               "null"
@@ -11189,7 +11232,8 @@
             ]
           },
           "death_date": {
-            "description": "YYYY-MM-DD; empty clears; null or omission preserves.",
+            "description": "Calendar date, YYYY-MM-DD; empty clears; null or omission preserves.",
+            "pattern": "^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
             "type": [
               "string",
               "null"
@@ -11427,6 +11471,14 @@
           "play_method": {
             "type": "string"
           },
+          "played_seconds": {
+            "description": "Seconds of the media watched by normal playback, excluding pauses, seeks and buffering; null when the play has no watch-time measurement, which includes every play recorded before it existed",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "profile_id": {
             "type": "string"
           },
@@ -11470,6 +11522,7 @@
             "type": "string"
           },
           "watched_seconds": {
+            "description": "Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time",
             "format": "double",
             "type": "number"
           }
@@ -11490,6 +11543,7 @@
           "watched_seconds",
           "duration_seconds",
           "completed",
+          "played_seconds",
           "series_title",
           "season_number",
           "episode_number"
@@ -11688,6 +11742,7 @@
             "type": "number"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "profile_id": {
@@ -11769,6 +11824,7 @@
             "type": "string"
           },
           "source_audio_language": {
+            "description": "Language of the source audio track as the file tags it (BCP 47; older scans may carry an ISO 639-2 code or the raw tag); empty when unknown",
             "type": "string"
           },
           "source_audio_layout": {
@@ -12200,6 +12256,7 @@
             "examples": [
               "https://silo.example.test/api/v2/auth/oauth/3/callback"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "capability_id": {
@@ -12227,6 +12284,7 @@
             "examples": [
               "https://silo.example.test/login"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "updated_at": {
@@ -12310,6 +12368,7 @@
             "examples": [
               "https://silo.example.test/api/v2/auth/oauth/3/callback"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "config_schema": {
@@ -12337,6 +12396,7 @@
             "examples": [
               "https://silo.example.test/login"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "request_router": {
@@ -12380,6 +12440,7 @@
         "additionalProperties": false,
         "properties": {
           "archive_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "assets": {
@@ -12412,6 +12473,7 @@
             "$ref": "#/components/schemas/AdminPluginPresentation"
           },
           "repo_url": {
+            "description": "Source repository the catalog lists for the plugin; not validated as a URI",
             "type": "string"
           },
           "repository_id": {
@@ -12913,6 +12975,7 @@
             "$ref": "#/components/schemas/AdminPluginPresentation"
           },
           "repo_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "repository_id": {
@@ -13019,6 +13082,7 @@
         "additionalProperties": false,
         "properties": {
           "changelog_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "description_markdown": {
@@ -13028,6 +13092,7 @@
             "type": "string"
           },
           "homepage_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "license_spdx": {
@@ -13037,18 +13102,21 @@
             "type": "string"
           },
           "publisher_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "setup_markdown": {
             "type": "string"
           },
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "summary": {
             "type": "string"
           },
           "support_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -13107,6 +13175,7 @@
             "type": "string"
           },
           "url": {
+            "description": "Repository index URL as entered; not validated as a URI",
             "type": "string"
           }
         },
@@ -13134,6 +13203,7 @@
             "type": "boolean"
           },
           "url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "minLength": 1,
             "type": "string"
@@ -13156,6 +13226,7 @@
             "type": "boolean"
           },
           "url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           }
@@ -14702,6 +14773,7 @@
         "additionalProperties": false,
         "properties": {
           "base_url": {
+            "description": "Service base URL as stored; not validated as a URI",
             "type": "string"
           },
           "capability_id": {
@@ -14795,6 +14867,7 @@
             "writeOnly": true
           },
           "base_url": {
+            "description": "Service base URL; a host[:port] without a scheme gets http://; not validated as a URI",
             "type": "string"
           },
           "capability_id": {
@@ -14911,6 +14984,7 @@
             "writeOnly": true
           },
           "base_url": {
+            "description": "Service base URL; a host[:port] without a scheme gets http://, and empty clears it; not validated as a URI",
             "type": "string"
           },
           "capability_id": {
@@ -15088,20 +15162,22 @@
             "type": "array"
           },
           "exclude_origin_countries": {
-            "description": "Match titles from none of these ISO 3166-1 countries",
+            "description": "Match titles from none of these upper-case ISO 3166-1 alpha-2 countries",
             "items": {
+              "pattern": "^[A-Z]{2}$",
               "type": "string"
             },
             "type": "array"
           },
           "exclude_original_languages": {
-            "description": "Match titles whose original language is none of these ISO 639-1 codes",
+            "description": "Match titles whose original language is none of these TMDB codes (lowercase ISO 639-1; TMDB also uses cn and xx)",
             "examples": [
               [
                 "en"
               ]
             ],
             "items": {
+              "pattern": "^[a-z]{2,3}$",
               "type": "string"
             },
             "type": "array"
@@ -15146,25 +15222,27 @@
             "type": "array"
           },
           "origin_countries": {
-            "description": "ISO 3166-1 country codes",
+            "description": "Upper-case ISO 3166-1 alpha-2 country codes (TMDB origin_country)",
             "examples": [
               [
                 "JP"
               ]
             ],
             "items": {
+              "pattern": "^[A-Z]{2}$",
               "type": "string"
             },
             "type": "array"
           },
           "original_languages": {
-            "description": "ISO 639-1 codes of the original language",
+            "description": "TMDB original-language codes: lowercase ISO 639-1 (TMDB also uses cn and xx)",
             "examples": [
               [
                 "ja"
               ]
             ],
             "items": {
+              "pattern": "^[a-z]{2,3}$",
               "type": "string"
             },
             "type": "array"
@@ -15254,12 +15332,14 @@
             "type": "array"
           },
           "origin_countries": {
+            "description": "The title's TMDB origin countries, ISO 3166-1 alpha-2",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "original_language": {
+            "description": "The title's TMDB original-language code (ISO 639-1; TMDB also uses cn and xx)",
             "type": "string"
           },
           "year": {
@@ -15914,6 +15994,7 @@
             "type": "boolean"
           },
           "icon_url": {
+            "description": "Icon as the scan source plugin reported it; not validated as a URI",
             "type": "string"
           },
           "summary": {
@@ -17298,6 +17379,8 @@
             "type": "string"
           },
           "language": {
+            "description": "BCP 47 tag, ISO 639-1 where one exists (en, pt-BR)",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$",
             "type": "string"
           },
           "media_content_id": {
@@ -17419,6 +17502,8 @@
             "type": "string"
           },
           "language": {
+            "description": "BCP 47 tag, ISO 639-1 where one exists (en, pt-BR)",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$",
             "type": "string"
           },
           "media_file_id": {
@@ -17460,8 +17545,10 @@
             "type": "boolean"
           },
           "language": {
+            "description": "BCP 47 tag or ISO 639 code, any case; stored in canonical form",
             "maxLength": 128,
             "minLength": 1,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "release_name": {
@@ -17748,6 +17835,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "preset": {
@@ -17818,6 +17906,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sort_config": {},
@@ -17837,6 +17926,7 @@
             "examples": [
               "https://www.themoviedb.org/list/310-my-movie-list"
             ],
+            "format": "uri-reference",
             "minLength": 1,
             "type": "string"
           }
@@ -18144,6 +18234,7 @@
             "type": "string"
           },
           "download_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "failure": {
@@ -18198,6 +18289,7 @@
             "type": "boolean"
           },
           "public_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "refresh_result": {
@@ -19147,12 +19239,13 @@
         "additionalProperties": false,
         "properties": {
           "target_language": {
-            "description": "BCP 47 tag of the language to fill in",
+            "description": "BCP 47 tag or ISO 639 code of the language to fill in (de, pt-BR); stored in canonical form",
             "examples": [
               "de"
             ],
             "maxLength": 16,
             "minLength": 1,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -19176,8 +19269,10 @@
             ]
           },
           "target_language": {
+            "description": "BCP 47 tag or ISO 639 code of the language to fill in (de, pt-BR); stored in canonical form",
             "maxLength": 16,
             "minLength": 1,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -20257,7 +20352,7 @@
             "type": "string"
           },
           "issuer": {
-            "description": "Who asserted the subject, as the provider last said; may be empty",
+            "description": "Who asserted the subject, as the provider last said; may be empty; not validated as a URI",
             "examples": [
               "https://id.example.test"
             ],
@@ -20629,6 +20724,28 @@
         ],
         "type": "object"
       },
+      "AndroidPushRetirementReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "description": "The retirement's generation, which is now the installation's newest intent.",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "removed": {
+            "description": "Always true: the server delivers nothing to this installation until it registers again with a higher generation.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "generation",
+          "removed"
+        ],
+        "type": "object"
+      },
       "ApplePushRegistrationBody": {
         "additionalProperties": false,
         "properties": {
@@ -20769,6 +20886,42 @@
         ],
         "type": "object"
       },
+      "ApplePushRetirementBody": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_id"
+        ],
+        "type": "object"
+      },
+      "ApplePushRetirementReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "description": "The retirement's generation, which is now the installation's newest intent.",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "removed": {
+            "description": "Always true: the server delivers nothing to this installation until it registers again with a higher generation.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "generation",
+          "removed"
+        ],
+        "type": "object"
+      },
       "AppliedQuirkV3": {
         "additionalProperties": false,
         "properties": {
@@ -20876,10 +21029,11 @@
         "additionalProperties": false,
         "properties": {
           "audio_language": {
-            "description": "Preferred audio language; empty means no language preference",
+            "description": "Preferred audio language for the series: BCP 47 tag (en, pt-BR) or x-silo-original; empty means no language preference",
             "examples": [
-              "eng"
+              "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "audio_track_index": {
@@ -20934,10 +21088,11 @@
         "additionalProperties": false,
         "properties": {
           "audio_language": {
-            "description": "Preferred audio language; empty or omitted means no language preference",
+            "description": "Preferred audio language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks the original language; empty or omitted means no language preference",
             "examples": [
-              "eng"
+              "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "audio_track_index": {
@@ -20984,6 +21139,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag",
             "type": "string"
           },
           "layout": {
@@ -21037,9 +21193,9 @@
             "type": "string"
           },
           "language": {
-            "description": "Track language (ISO 639)",
+            "description": "Track language as the client recorded it, normally the track's language (BCP 47); stored as sent",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -21132,6 +21288,7 @@
           "poster_urls": {
             "description": "Up to four presigned covers for a stack; empty, never null",
             "items": {
+              "format": "uri-reference",
               "type": "string"
             },
             "type": "array"
@@ -21229,6 +21386,7 @@
             "type": "string"
           },
           "photo_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -21266,6 +21424,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "series_index": {
@@ -21312,6 +21471,7 @@
             "examples": [
               "https://silo.example.test/api/v2/auth/oauth/3/callback"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "ok": {
@@ -21394,6 +21554,7 @@
             "examples": [
               "https://plugins.example.test/icon.svg"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "id": {
@@ -21582,15 +21743,18 @@
             "type": "string"
           },
           "favicon_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "login_bg_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "login_subtitle": {
             "type": "string"
           },
           "mark_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "server_name": {
@@ -21600,6 +21764,7 @@
             "type": "boolean"
           },
           "wordmark_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -21709,6 +21874,7 @@
             "examples": [
               "2026-01-10"
             ],
+            "format": "date",
             "type": "string"
           },
           "items": {
@@ -21740,6 +21906,7 @@
             "examples": [
               "2026-01-09"
             ],
+            "format": "date",
             "type": "string"
           },
           "air_time": {
@@ -21784,6 +21951,7 @@
             "examples": [
               "2026-01-10"
             ],
+            "format": "date",
             "type": "string"
           },
           "poster_thumbhash": {
@@ -21793,6 +21961,7 @@
             "examples": [
               "https://s3.example.test/poster.jpg"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "season_number": {
@@ -21908,6 +22077,7 @@
             "type": "string"
           },
           "photo_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "plex_guid": {
@@ -22073,6 +22243,7 @@
             "type": "array"
           },
           "countries": {
+            "description": "Distinct countries in scope, normally ISO 3166-1 alpha-2 codes; NFO files and manual edits can store country names",
             "items": {
               "type": "string"
             },
@@ -22098,6 +22269,7 @@
             "type": "array"
           },
           "original_languages": {
+            "description": "Distinct original languages in scope, normally ISO 639-1 codes (ISO 639-3 when none exists); provider codes such as TMDB's xx pass through",
             "items": {
               "type": "string"
             },
@@ -22187,6 +22359,7 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "badges": {
@@ -22237,10 +22410,12 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "logo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "machine_translated_fields": {
@@ -22269,6 +22444,7 @@
             "type": "array"
           },
           "original_language": {
+            "description": "Original language, normally an ISO 639-1 code (ISO 639-3 when none exists, such as fil); provider codes such as TMDB's xx pass through, and audiobook and ebook items can carry the file's raw tag",
             "examples": [
               "en"
             ],
@@ -22282,7 +22458,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -22303,6 +22479,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "progress_updated_at": {
@@ -22335,6 +22512,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "runtime": {
@@ -22480,6 +22658,7 @@
           },
           "air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "air_time": {
@@ -22500,11 +22679,13 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "backdrop_urls": {
             "description": "Presigned, short-lived. Every backdrop in display order, backdrop_url first. Movies and series only; absent when there is none",
             "items": {
+              "format": "uri-reference",
               "type": "string"
             },
             "type": "array"
@@ -22521,6 +22702,7 @@
           },
           "banner_url": {
             "description": "Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork",
+            "format": "uri-reference",
             "type": "string"
           },
           "cast": {
@@ -22532,6 +22714,7 @@
           },
           "clearart_url": {
             "description": "Presigned, short-lived. Transparent cut-out art. Movies and series only",
+            "format": "uri-reference",
             "type": "string"
           },
           "content_id": {
@@ -22548,6 +22731,7 @@
             "type": "string"
           },
           "countries": {
+            "description": "Production countries, normally ISO 3166-1 alpha-2 codes (US); NFO files and manual edits can store country names",
             "items": {
               "type": "string"
             },
@@ -22565,6 +22749,7 @@
           },
           "disc_url": {
             "description": "Presigned, short-lived. Transparent disc art. Movies only",
+            "format": "uri-reference",
             "type": "string"
           },
           "duration_seconds": {
@@ -22579,7 +22764,8 @@
             "type": "boolean"
           },
           "effective_subtitle_language": {
-            "description": "The subtitle language the viewer's preferences resolve to for this item",
+            "description": "The subtitle language the viewer's preferences resolve to for this item: BCP 47 tag; empty when the preference is None",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "effective_subtitle_mode": {
@@ -22617,6 +22803,7 @@
           },
           "first_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "folder_paths": {
@@ -22655,6 +22842,7 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "locked_fields": {
@@ -22667,6 +22855,7 @@
           },
           "logo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "machine_translated_fields": {
@@ -22698,6 +22887,7 @@
             "type": "array"
           },
           "original_language": {
+            "description": "Original language, normally an ISO 639-1 code (ISO 639-3 when none exists, such as fil); provider codes such as TMDB's xx pass through, and audiobook and ebook items can carry the file's raw tag",
             "examples": [
               "en"
             ],
@@ -22714,7 +22904,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -22746,6 +22936,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "preview": {
@@ -22798,6 +22989,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "runtime": {
@@ -22865,6 +23057,7 @@
           },
           "thumb_url": {
             "description": "Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only",
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -23039,6 +23232,7 @@
           },
           "release_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "resolution": {
@@ -23066,6 +23260,7 @@
             "examples": [
               "2026-01-09"
             ],
+            "format": "date",
             "type": "string"
           },
           "air_time": {
@@ -23644,6 +23839,7 @@
         "additionalProperties": false,
         "properties": {
           "audio_languages": {
+            "description": "Distinct audio track languages in scope as lowercase BCP 47 tags (en, pt-br); older scans may carry an ISO 639-2 code or the raw tag",
             "items": {
               "type": "string"
             },
@@ -23657,6 +23853,7 @@
             "type": "array"
           },
           "subtitle_languages": {
+            "description": "Distinct subtitle languages in scope as BCP 47 tags; a stored value that is not a recognizable language passes through",
             "items": {
               "type": "string"
             },
@@ -23785,6 +23982,7 @@
         "additionalProperties": false,
         "properties": {
           "callback_url": {
+            "format": "uri",
             "maxLength": 32768,
             "minLength": 1,
             "type": "string"
@@ -23814,9 +24012,11 @@
             "type": "string"
           },
           "authorization_url": {
+            "format": "uri",
             "type": "string"
           },
           "callback_uri": {
+            "format": "uri",
             "type": "string"
           },
           "expires_at": {
@@ -26101,6 +26301,7 @@
             "type": "boolean"
           },
           "public_url": {
+            "description": "Public URL Jellyfin clients are told to use, as configured; not validated as a URI",
             "type": "string"
           },
           "server_name": {
@@ -26202,6 +26403,7 @@
             "type": "string"
           },
           "photo_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "plex_guid": {
@@ -26228,6 +26430,7 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived; empty when none",
+            "format": "uri-reference",
             "type": "string"
           },
           "collection_type": {
@@ -26340,6 +26543,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived; empty when none",
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {
@@ -26365,7 +26569,7 @@
             "description": "Import source configuration; null when not imported"
           },
           "source_url": {
-            "description": "Where an imported collection came from; empty otherwise",
+            "description": "Where an imported collection came from (a list URL or a tmdb:// source); empty when not imported; not validated as a URI",
             "type": "string"
           },
           "sync_schedule": {
@@ -26428,12 +26632,15 @@
         "additionalProperties": false,
         "properties": {
           "backdrop_url": {
+            "description": "Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI",
             "type": "string"
           },
           "logo_url": {
+            "description": "Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI",
             "type": "string"
           },
           "poster_url": {
+            "description": "Stored artwork reference (storage key, plugin path, or URL), not a fetchable URL; not validated as a URI",
             "type": "string"
           }
         },
@@ -27362,10 +27569,12 @@
           },
           "proxy_url": {
             "description": "The same link for /api/v2/direct-download-proxy; use it only when the download capability reports proxy_delivery.",
+            "format": "uri-reference",
             "type": "string"
           },
           "url": {
             "description": "Server-relative GET/HEAD URL for /api/v2/direct-download that carries the link token as dl. Treat it as a secret until it expires.",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -27415,6 +27624,7 @@
             "type": "string"
           },
           "logo_url": {
+            "format": "uri",
             "type": [
               "string",
               "null"
@@ -27482,6 +27692,7 @@
             "type": "string"
           },
           "logo_url": {
+            "format": "uri",
             "type": [
               "string",
               "null"
@@ -29649,6 +29860,7 @@
         "properties": {
           "air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "content_id": {
@@ -29687,7 +29899,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here (its metadata language, or the library's when it sets none) when the episode's description is not available in it yet; translating the episode's season fills it",
             "type": "string"
           },
           "ratings": {
@@ -29715,6 +29927,7 @@
           },
           "still_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -30312,6 +30525,7 @@
             "type": "string"
           },
           "effective_audio_language": {
+            "description": "Language of the audio track playback will pick (BCP 47, from the file), or the item's original language (normally ISO 639-1) when the preference is original; absent when unknown",
             "type": "string"
           },
           "effective_audio_track_index": {
@@ -30562,6 +30776,7 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "badges": {
@@ -30612,10 +30827,12 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "logo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "machine_translated_fields": {
@@ -30644,6 +30861,7 @@
             "type": "array"
           },
           "original_language": {
+            "description": "Original language, normally an ISO 639-1 code (ISO 639-3 when none exists, such as fil); provider codes such as TMDB's xx pass through, and audiobook and ebook items can carry the file's raw tag",
             "examples": [
               "en"
             ],
@@ -30657,7 +30875,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -30678,6 +30896,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "progress_updated_at": {
@@ -30710,6 +30929,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "runtime": {
@@ -31095,6 +31315,7 @@
             "examples": [
               "https://jellyfin.example.test"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "jellyfin_password": {
@@ -31115,6 +31336,7 @@
           },
           "plex_base_url": {
             "description": "Plex: a server address when the client holds its own token",
+            "format": "uri-reference",
             "type": "string"
           },
           "plex_base_urls": {
@@ -31125,6 +31347,7 @@
               ]
             ],
             "items": {
+              "format": "uri-reference",
               "type": "string"
             },
             "maxItems": 31,
@@ -31193,6 +31416,7 @@
             "examples": [
               "https://emby.example.test"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "created_at": {
@@ -31835,6 +32059,7 @@
         "properties": {
           "claim_url": {
             "description": "One-time disclosure; never retained for replay. Contains the bearer claim token.",
+            "format": "uri",
             "type": "string"
           },
           "delivery_status": {
@@ -31927,6 +32152,7 @@
           },
           "still_url": {
             "description": "Presigned, short-lived. 16:9 image of the extra; absent when it has none",
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -31947,9 +32173,11 @@
             "type": "integer"
           },
           "language": {
+            "description": "Language of text in the image as the provider reports it, usually ISO 639-1 (TMDB uses xx for none); empty when textless or unknown",
             "type": "string"
           },
           "original_url": {
+            "description": "The provider's image URL, or file:// and the unescaped path of a local image; not validated as a URI. Send it unchanged to apply the image",
             "type": "string"
           },
           "provider_id": {
@@ -31963,6 +32191,7 @@
             "type": "string"
           },
           "url": {
+            "description": "Preview of the image: a fetchable URL, a data: URI, or the provider's value as given; not validated as a URI",
             "type": "string"
           },
           "width": {
@@ -31992,6 +32221,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Language of the video as the provider reports it, usually ISO 639-1",
             "type": "string"
           },
           "name": {
@@ -32129,10 +32359,11 @@
             "type": "string"
           },
           "metadata_language": {
-            "description": "ISO 639-1 code metadata is fetched in",
+            "description": "Lowercase ISO 639-1 code metadata is fetched in; empty when an update cleared it, and fetches then use en",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2})?$",
             "type": "string"
           },
           "name": {
@@ -32155,6 +32386,7 @@
           },
           "poster_url": {
             "description": "Presigned poster URL; absent when the library has no poster",
+            "format": "uri-reference",
             "type": "string"
           },
           "realtime_monitoring": {
@@ -32359,6 +32591,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived; empty when none",
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -32506,10 +32739,11 @@
             "type": "boolean"
           },
           "metadata_language": {
-            "description": "ISO 639-1 code; default en",
+            "description": "Lowercase ISO 639-1 code from the supported list; empty or omitted means en",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2})?$",
             "type": "string"
           },
           "name": {
@@ -32749,10 +32983,11 @@
         "additionalProperties": false,
         "properties": {
           "audio_language": {
-            "description": "Audio language override (BCP 47 language tag); empty means none",
+            "description": "Audio language override: BCP 47 tag (en, pt-BR) or x-silo-original; empty means none",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "library_id": {
@@ -32778,10 +33013,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Subtitle language override (BCP 47 language tag); empty means none",
+            "description": "Subtitle language override: BCP 47 tag (en, pt-BR); empty means none",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -32833,10 +33069,11 @@
         "additionalProperties": false,
         "properties": {
           "audio_language": {
-            "description": "Audio language override (BCP 47 language tag); null or empty clears it",
+            "description": "Audio language override: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks the original language; null or empty clears it",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -32853,10 +33090,11 @@
             ]
           },
           "subtitle_language": {
-            "description": "Subtitle language override (BCP 47 language tag); null or empty clears it",
+            "description": "Subtitle language override: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; null or empty clears it",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -33299,10 +33537,11 @@
             "type": "boolean"
           },
           "metadata_language": {
-            "description": "ISO 639-1 code; a change queues a quick metadata refresh",
+            "description": "Lowercase ISO 639-1 code from the supported list; a change queues a quick metadata refresh",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2})?$",
             "type": "string"
           },
           "name": {
@@ -33382,6 +33621,7 @@
             "$ref": "#/components/schemas/LiteraryWorkMetadata"
           },
           "primary_cover_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "work_id": {
@@ -33511,6 +33751,7 @@
           },
           "published_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "publisher": {
@@ -33903,6 +34144,7 @@
             "examples": [
               ""
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "sort_config": {
@@ -33928,6 +34170,7 @@
             "examples": [
               "https://mdblist.com/lists/linaspurinis/top-watched-movies-of-the-week"
             ],
+            "format": "uri",
             "minLength": 1,
             "type": "string"
           }
@@ -33993,6 +34236,7 @@
             "examples": [
               "https://mdblist.com/lists/linaspurinis/top-watched-movies-of-the-week"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "user_id": {
@@ -34056,6 +34300,7 @@
         "additionalProperties": false,
         "properties": {
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -34075,6 +34320,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "progress": {
@@ -34229,6 +34475,7 @@
             "type": "string"
           },
           "thumbnail_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -34406,6 +34653,7 @@
             "type": "string"
           },
           "image_url": {
+            "description": "Image for the candidate as the metadata plugin returned it; not validated as a URI",
             "type": "string"
           },
           "match_reasons": {
@@ -34446,6 +34694,7 @@
             "type": "boolean"
           },
           "title_language": {
+            "description": "Language of the title as the provider reports it, usually ISO 639-1",
             "type": "string"
           },
           "year": {
@@ -35108,6 +35357,8 @@
             "type": "string"
           },
           "source_language": {
+            "description": "Language of the base metadata (ISO 639-1); empty until the job reads it",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "status": {
@@ -35119,6 +35370,8 @@
             "type": "string"
           },
           "target_language": {
+            "description": "BCP 47 tag of the language being filled in",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$",
             "type": "string"
           },
           "updated_at": {
@@ -35411,7 +35664,7 @@
             "type": "array"
           },
           "auth_url": {
-            "description": "Interactive enrollment URL, only while awaiting_authorization; admin-only, never logged",
+            "description": "Interactive enrollment URL as the network access plugin reported it, only while awaiting_authorization; admin-only, never logged; not validated as a URI",
             "type": "string"
           },
           "error": {
@@ -35521,6 +35774,7 @@
             "type": "string"
           },
           "node_url": {
+            "description": "Configured node address with credentials removed, or [invalid URL] when it does not parse; not validated as a URI",
             "type": "string"
           },
           "render_device_details": {
@@ -36039,6 +36293,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "profile_id": {
@@ -36226,6 +36481,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -36254,6 +36510,7 @@
         "additionalProperties": false,
         "properties": {
           "relay_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -36293,6 +36550,7 @@
             "type": "string"
           },
           "relay_url": {
+            "format": "uri",
             "type": "string"
           }
         },
@@ -36576,6 +36834,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri",
             "minLength": 1,
             "type": "string"
           }
@@ -36620,6 +36879,7 @@
             "type": "boolean"
           },
           "url": {
+            "format": "uri",
             "type": "string"
           }
         },
@@ -36680,6 +36940,7 @@
             "type": "string"
           },
           "endpoint": {
+            "format": "uri",
             "maxLength": 2048,
             "minLength": 1,
             "type": "string",
@@ -36712,6 +36973,7 @@
             "type": "boolean"
           },
           "endpoint": {
+            "format": "uri-reference",
             "type": "string"
           },
           "id": {
@@ -36757,6 +37019,7 @@
         "additionalProperties": false,
         "properties": {
           "endpoint": {
+            "format": "uri",
             "maxLength": 2048,
             "minLength": 1,
             "type": "string",
@@ -36822,6 +37085,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri",
             "minLength": 1,
             "type": "string"
           }
@@ -36980,6 +37244,7 @@
             "type": "boolean"
           },
           "url": {
+            "format": "uri",
             "type": "string"
           }
         },
@@ -37105,6 +37370,7 @@
             "type": "integer"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag",
             "type": "string"
           },
           "layout": {
@@ -37209,6 +37475,7 @@
             "type": "boolean"
           },
           "fetch_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "file_size": {
@@ -37225,6 +37492,7 @@
             "type": "boolean"
           },
           "language": {
+            "description": "Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value",
             "type": "string"
           },
           "revision": {
@@ -37740,6 +38008,7 @@
             "examples": [
               "1940-04-25"
             ],
+            "format": "date",
             "type": "string"
           },
           "birthplace": {
@@ -37747,6 +38016,7 @@
           },
           "death_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "homepage": {
@@ -37774,6 +38044,7 @@
           },
           "photo_url": {
             "description": "Presigned photo URL; absent when the person has no photo",
+            "format": "uri-reference",
             "type": "string"
           },
           "plex_guid": {
@@ -38084,6 +38355,7 @@
             "examples": [
               ""
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "profile_id": {
@@ -38112,7 +38384,7 @@
             "description": "Import source document; absent for a manual or smart collection"
           },
           "source_url": {
-            "description": "Where an imported collection is synced from; empty otherwise",
+            "description": "Where an imported collection is synced from; empty otherwise; not validated as a URI",
             "examples": [
               ""
             ],
@@ -38270,6 +38542,7 @@
             "examples": [
               ""
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {
@@ -38358,6 +38631,7 @@
             "type": "string"
           },
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -38394,6 +38668,7 @@
           },
           "poster_url": {
             "description": "Card-size poster URL; omitted when the item has none",
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -38481,11 +38756,13 @@
             "type": "string"
           },
           "poster_source_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "query_definition": {},
           "sort_config": {},
           "source_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sync_schedule": {
@@ -38573,6 +38850,7 @@
             "type": "integer"
           },
           "bandwidth_probe_url": {
+            "format": "uri",
             "type": "string"
           },
           "deliveries": {
@@ -39674,6 +39952,7 @@
             "examples": [
               "https://media.example/poster.jpg"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "profile_id": {
@@ -39817,9 +40096,9 @@
             "type": "string"
           },
           "source_audio_language": {
-            "description": "Empty when unknown",
+            "description": "Language of the source audio track as the file tags it (BCP 47; older scans may carry an ISO 639-2 code or the raw tag); empty when unknown",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -40449,6 +40728,7 @@
             "examples": [
               "https://app.plex.tv/auth#?code=ABCD"
             ],
+            "format": "uri",
             "type": "string"
           },
           "expires_at": {
@@ -41222,6 +41502,7 @@
             "examples": [
               "/avatars/presets/fox.png"
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "created_at": {
@@ -41262,10 +41543,11 @@
             "type": "boolean"
           },
           "language": {
-            "description": "Preferred audio language (ISO 639-1); empty inherits",
+            "description": "Preferred audio language: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR), or x-silo-original for each item's original language; empty inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "library_restrictions_enabled": {
@@ -41308,10 +41590,11 @@
             "type": "string"
           },
           "preferred_metadata_language": {
-            "description": "Metadata language (ISO 639-1); empty inherits the library's",
+            "description": "Metadata language: BCP 47 tag (en, pt-BR), or x-silo-original for each item's original language; empty inherits the library's",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "quality_preference": {
@@ -41335,10 +41618,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Preferred subtitle language (ISO 639-1); empty inherits",
+            "description": "Preferred subtitle language: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); empty inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -41507,10 +41791,11 @@
             "type": "boolean"
           },
           "language": {
-            "description": "Preferred audio language (ISO 639-1)",
+            "description": "Preferred audio language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; omitted or empty inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "library_restrictions_enabled": {
@@ -41566,10 +41851,11 @@
             "type": "string"
           },
           "preferred_metadata_language": {
-            "description": "Metadata language (ISO 639-1)",
+            "description": "Metadata language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; omitted or empty inherits the library's",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "quality_preference": {
@@ -41595,10 +41881,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Preferred subtitle language (ISO 639-1)",
+            "description": "Preferred subtitle language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; omitted or empty inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -41824,10 +42111,11 @@
             "type": "boolean"
           },
           "language": {
-            "description": "Preferred audio language (ISO 639-1); null inherits",
+            "description": "Preferred audio language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; null inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -41898,10 +42186,11 @@
             ]
           },
           "preferred_metadata_language": {
-            "description": "Metadata language (ISO 639-1); null inherits the library's",
+            "description": "Metadata language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks each item's original language; null inherits the library's",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -41929,10 +42218,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Preferred subtitle language (ISO 639-1); null inherits",
+            "description": "Preferred subtitle language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; null inherits",
             "examples": [
               "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -42600,6 +42890,7 @@
             "examples": [
               "https://id.example.test/logout?id_token_hint=eyJhbGciOi..."
             ],
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -43332,6 +43623,7 @@
           },
           "first_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "genres": {
@@ -43359,6 +43651,7 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "library_content_id": {
@@ -43413,6 +43706,7 @@
           },
           "release_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "request": {
@@ -43589,6 +43883,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "request": {
@@ -43638,6 +43933,7 @@
             "examples": [
               "2025-01-17"
             ],
+            "format": "date",
             "type": "string"
           },
           "availability": {
@@ -44000,6 +44296,7 @@
         "additionalProperties": false,
         "properties": {
           "webhook_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -44172,6 +44469,7 @@
         "properties": {
           "air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "content_id": {
@@ -44209,6 +44507,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "season_number": {
@@ -44357,6 +44656,7 @@
             "examples": [
               "https://mdblist.com/lists/purple_smurf/halloween-family2"
             ],
+            "format": "uri",
             "type": "string"
           },
           "name": {
@@ -45163,6 +45463,7 @@
           },
           "url": {
             "description": "scheme://host[:port] clients reach the API at over the overlay; present only while connected",
+            "format": "uri",
             "type": "string"
           }
         },
@@ -45186,6 +45487,7 @@
           },
           "url": {
             "description": "scheme://host[:port] clients reach the API at",
+            "format": "uri",
             "type": "string"
           }
         },
@@ -45226,6 +45528,7 @@
             "examples": [
               "http://192.168.1.20:8080"
             ],
+            "format": "uri",
             "type": "string"
           }
         },
@@ -46262,6 +46565,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri",
             "type": "string"
           }
         },
@@ -46296,6 +46600,8 @@
             "type": "string"
           },
           "language": {
+            "description": "BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); empty when the stored value is not a recognizable language",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "media_file_id": {
@@ -46362,6 +46668,7 @@
             "type": "string"
           },
           "header_refresh_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "headers": {
@@ -46377,6 +46684,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -46417,6 +46725,7 @@
             "type": "integer"
           },
           "source_language": {
+            "description": "BCP 47 tag of the source language; empty or unrecognized means detect",
             "maxLength": 64,
             "type": "string"
           },
@@ -46426,7 +46735,9 @@
             "type": "number"
           },
           "target_language": {
+            "description": "BCP 47 tag or ISO 639 code to produce; empty only for kind transcribe",
             "maxLength": 64,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -46517,12 +46828,15 @@
             "type": "integer"
           },
           "source_language": {
+            "description": "BCP 47 tag of the source language; empty when not given",
             "type": "string"
           },
           "status": {
             "type": "string"
           },
           "target_language": {
+            "description": "BCP 47 tag to produce; empty for transcribe jobs",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "updated_at": {
@@ -46645,6 +46959,7 @@
             "type": "number"
           },
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -46720,6 +47035,7 @@
             "type": "string"
           },
           "language": {
+            "description": "BCP 47 tag or ISO 639 code, used as a hint; omitted means detect",
             "maxLength": 64,
             "type": "string"
           }
@@ -46733,6 +47049,8 @@
         "additionalProperties": false,
         "properties": {
           "language": {
+            "description": "BCP 47 tag detected from the file name, embedded metadata, or speech",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$",
             "type": "string"
           },
           "source": {
@@ -46758,8 +47076,10 @@
             "type": "boolean"
           },
           "language": {
+            "description": "Language of the chosen result exactly as searchSubtitles returned it (BCP 47)",
             "maxLength": 64,
             "minLength": 1,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "media_file_id": {
@@ -46828,6 +47148,7 @@
             "type": "boolean"
           },
           "language": {
+            "description": "Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value",
             "type": "string"
           },
           "source": {
@@ -46862,6 +47183,7 @@
             "type": "string"
           },
           "font_bundle_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "forced": {
@@ -46874,6 +47196,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value",
             "type": "string"
           },
           "source": {
@@ -46886,6 +47209,7 @@
             "type": "string"
           },
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -46934,10 +47258,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Preferred subtitle language; empty means no language preference",
+            "description": "Preferred subtitle language for the series: BCP 47 tag (en, pt-BR); empty means no language preference",
             "examples": [
-              "eng"
+              "en"
             ],
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -46998,10 +47323,11 @@
             "type": "boolean"
           },
           "subtitle_language": {
-            "description": "Preferred subtitle language; empty or omitted means no language preference",
+            "description": "Preferred subtitle language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; empty or omitted means no language preference",
             "examples": [
-              "eng"
+              "en"
             ],
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -47094,6 +47420,7 @@
         "additionalProperties": false,
         "properties": {
           "languages": {
+            "description": "BCP 47 tags or ISO 639 codes, any case; recognized English language names are also accepted",
             "items": {
               "type": "string"
             },
@@ -47137,6 +47464,8 @@
             "type": "string"
           },
           "language": {
+            "description": "BCP 47 tag, ISO 639-1 where one exists (en, pt-BR)",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$",
             "type": "string"
           },
           "provider": {
@@ -47444,6 +47773,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Language tag (BCP 47 for current data); may be empty or a legacy value",
             "type": "string"
           },
           "media_file_id": {
@@ -47601,9 +47931,9 @@
             "type": "string"
           },
           "language": {
-            "description": "Track language (ISO 639)",
+            "description": "Track language as the client recorded it, normally the track's language (BCP 47); stored as sent",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -47630,6 +47960,7 @@
             "type": "boolean"
           },
           "language": {
+            "description": "BCP 47 tag or ISO 639 code; omitted means detect",
             "maxLength": 64,
             "type": "string"
           },
@@ -47779,6 +48110,7 @@
             "examples": [
               ""
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "preset": {
@@ -47850,6 +48182,7 @@
             "type": "string"
           },
           "original_language": {
+            "description": "TMDB original-language code (ISO 639-1)",
             "type": "string"
           },
           "release_date_gte": {
@@ -47948,6 +48281,7 @@
             "examples": [
               ""
             ],
+            "format": "uri-reference",
             "type": "string"
           },
           "sort_config": {
@@ -47973,6 +48307,7 @@
             "examples": [
               "https://www.themoviedb.org/list/310-my-movie-list"
             ],
+            "format": "uri-reference",
             "minLength": 1,
             "type": "string"
           }
@@ -47987,6 +48322,7 @@
         "additionalProperties": false,
         "properties": {
           "url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -48163,6 +48499,7 @@
           },
           "url": {
             "description": "Short-lived credential; do not log, persist, or share. Relative to this server, or an absolute URL on a proxy node's origin",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -48336,6 +48673,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Language of the alias as the provider reports it, usually ISO 639-1",
             "type": "string"
           },
           "provider": {
@@ -48521,6 +48859,7 @@
             ],
             "maxLength": 16,
             "minLength": 1,
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -48697,6 +49036,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "updated_at": {
@@ -48757,6 +49097,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "sort_order": {
@@ -48858,6 +49199,7 @@
             "type": "string"
           },
           "thumbnail_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -48902,6 +49244,7 @@
             "type": "integer"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag; an external track's comes from its file name",
             "type": "string"
           },
           "resolution": {
@@ -49139,8 +49482,9 @@
             "type": "string"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -49186,6 +49530,7 @@
             "type": "string"
           },
           "thumbnail_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "title": {
@@ -49209,6 +49554,7 @@
           },
           "backdrop_url": {
             "description": "The item's backdrop, an episode's series backdrop, or an extra's parent backdrop, sized by image_size",
+            "format": "uri-reference",
             "type": "string"
           },
           "content_id": {
@@ -49224,7 +49570,8 @@
             "type": "boolean"
           },
           "effective_subtitle_language": {
-            "description": "The subtitle language the profile's preferences resolve to",
+            "description": "The subtitle language the profile's preferences resolve to: BCP 47 tag; empty when the preference is None",
+            "pattern": "^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$",
             "type": "string"
           },
           "effective_subtitle_mode": {
@@ -49269,6 +49616,7 @@
           },
           "poster_url": {
             "description": "The item's poster, an episode's still, or a local extra's still (its parent's poster when it has none), sized by image_size; for system media controls",
+            "format": "uri-reference",
             "type": "string"
           },
           "preview": {
@@ -49401,6 +49749,7 @@
             "type": "string"
           },
           "effective_audio_language": {
+            "description": "Language of the audio track playback will pick (BCP 47, from the file), or the item's original language (normally ISO 639-1) when the preference is original; absent when unknown",
             "type": "string"
           },
           "effective_audio_track_index": {
@@ -49910,6 +50259,7 @@
             "type": "string"
           },
           "verification_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -50305,8 +50655,9 @@
             "type": "boolean"
           },
           "language": {
+            "description": "Subtitle language: BCP 47 tag (en, pt-BR), empty when unknown; older rows may carry a legacy value",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -50345,6 +50696,7 @@
             "type": "string"
           },
           "language": {
+            "description": "Track language as the client recorded it, normally the track's language (BCP 47); stored as sent",
             "type": "string"
           },
           "source": {
@@ -50386,8 +50738,9 @@
             "type": "integer"
           },
           "language": {
+            "description": "Track language from the file: BCP 47 tag, ISO 639-1 where one exists (en, pt-BR); und when the file marks it undetermined. Older scans may carry an ISO 639-2 code or the file's raw tag; an external track's comes from its file name",
             "examples": [
-              "eng"
+              "en"
             ],
             "type": "string"
           },
@@ -51136,6 +51489,7 @@
             "type": "string"
           },
           "poster_url": {
+            "description": "Poster the suggesting member's client sent; not validated as a URI",
             "type": "string"
           },
           "room_id": {
@@ -51213,6 +51567,7 @@
             "type": "string"
           },
           "poster_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           },
@@ -51331,6 +51686,7 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "badges": {
@@ -51388,10 +51744,12 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "logo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "machine_translated_fields": {
@@ -51420,6 +51778,7 @@
             "type": "array"
           },
           "original_language": {
+            "description": "Original language, normally an ISO 639-1 code (ISO 639-3 when none exists, such as fil); provider codes such as TMDB's xx pass through, and audiobook and ebook items can carry the file's raw tag",
             "examples": [
               "en"
             ],
@@ -51433,7 +51792,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -51454,6 +51813,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "progress_updated_at": {
@@ -51486,6 +51846,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "runtime": {
@@ -51651,6 +52012,7 @@
           },
           "photo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -51697,6 +52059,7 @@
           },
           "backdrop_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "badges": {
@@ -51747,10 +52110,12 @@
           },
           "last_air_date": {
             "description": "Calendar date, YYYY-MM-DD",
+            "format": "date",
             "type": "string"
           },
           "logo_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "machine_translated_fields": {
@@ -51779,6 +52144,7 @@
             "type": "array"
           },
           "original_language": {
+            "description": "Original language, normally an ISO 639-1 code (ISO 639-3 when none exists, such as fil); provider codes such as TMDB's xx pass through, and audiobook and ebook items can carry the file's raw tag",
             "examples": [
               "en"
             ],
@@ -51792,7 +52158,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "The language this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
+            "description": "The language (BCP 47 tag, such as en or pt-BR) this profile reads here when the descriptions this item's page shows are not available in it yet. That is the profile's metadata language after its per-language exceptions, or, when it sets none, the library's for a library's rows or a detail opened in that library. It is pending for the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view. Set only on item details, the cards built from them (shuffles, the Watch Together picker), and Home and library section cards; other listings never carry it, so its absence there says nothing about the language.",
             "type": "string"
           },
           "play_content_id": {
@@ -51813,6 +52179,7 @@
           },
           "poster_url": {
             "description": "Presigned, short-lived",
+            "format": "uri-reference",
             "type": "string"
           },
           "progress_updated_at": {
@@ -51845,6 +52212,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "runtime": {
@@ -52053,6 +52421,7 @@
           },
           "url": {
             "description": "A JPEG image; the URL carries its own authorization",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -52327,6 +52696,7 @@
             "examples": [
               "1995-12-15"
             ],
+            "format": "date",
             "type": "string"
           },
           "request": {
@@ -52548,6 +52918,7 @@
           },
           "webhook_url": {
             "description": "Relative URL of the external webhook receiver; resolve against the server origin.",
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -52593,6 +52964,7 @@
             "type": "string"
           },
           "base_url": {
+            "format": "uri-reference",
             "maxLength": 8192,
             "type": "string"
           },
@@ -52636,6 +53008,7 @@
             "$ref": "#/components/schemas/WebhookConnection"
           },
           "webhook_url": {
+            "format": "uri-reference",
             "type": "string"
           }
         },
@@ -53172,7 +53545,7 @@
     },
     "/api/v2/account/identities/link-credentials": {
       "post": {
-        "description": "The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking.",
+        "description": "The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 429 rate_limited with Retry-After (the directory username has used its sign-in attempt budget); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking.",
         "operationId": "linkAccountIdentityWithCredentials",
         "requestBody": {
           "content": {
@@ -86025,7 +86398,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Request cancellation of a cancellable administrator job. Completed effects and verified storage-copy checkpoints are retained.",
+        "summary": "Request cancellation of a job that reports cancelable: library refresh, storage transition, or image cache cleanup. Completed effects and verified storage-copy checkpoints are retained.",
         "tags": [
           "admin-tasks"
         ],
@@ -119047,10 +119420,12 @@
             }
           },
           {
+            "description": "BCP 47 tag or ISO 639 code; legacy spellings of the same language also match",
             "explode": false,
             "in": "query",
             "name": "language",
             "schema": {
+              "description": "BCP 47 tag or ISO 639 code; legacy spellings of the same language also match",
               "maxLength": 128,
               "type": "string"
             }
@@ -131037,6 +131412,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "500": {
             "content": {
@@ -148338,6 +148723,175 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/devices/push/apple/retire": {
+      "post": {
+        "operationId": "retireApplePushInstallation",
+        "parameters": [
+          {
+            "description": "Secret 32-byte base64url installation credential. Persist privately; never rotate on retry or account switch.",
+            "in": "header",
+            "name": "X-Push-Installation-Key",
+            "required": true,
+            "schema": {
+              "description": "Secret 32-byte base64url installation credential. Persist privately; never rotate on retry or account switch.",
+              "maxLength": 43,
+              "minLength": 43,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Positive decimal int64, persisted and incremented for each new installation intent across account/profile switches. Reuse exactly after uncertainty.",
+            "in": "header",
+            "name": "X-Push-Generation",
+            "required": true,
+            "schema": {
+              "description": "Positive decimal int64, persisted and incremented for each new installation intent across account/profile switches. Reuse exactly after uncertainty.",
+              "maxLength": 19,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplePushRetirementBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplePushRetirementReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Stop delivery to an Apple installation without a login session, proved by its installation key. Send it after removing this server, when the session is already gone.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
     },
@@ -176870,6 +177424,153 @@
         ],
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "domain_identity",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/push/devices/{device_id}/retire": {
+      "post": {
+        "operationId": "retirePushDevice",
+        "parameters": [
+          {
+            "description": "Secret 32-byte base64url installation credential. Persist privately; never rotate on retry or account switch.",
+            "in": "header",
+            "name": "X-Push-Installation-Key",
+            "required": true,
+            "schema": {
+              "description": "Secret 32-byte base64url installation credential. Persist privately; never rotate on retry or account switch.",
+              "maxLength": 43,
+              "minLength": 43,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Positive decimal int64, persisted and incremented for each new installation intent across account/profile switches. Reuse exactly after uncertainty.",
+            "in": "header",
+            "name": "X-Push-Generation",
+            "required": true,
+            "schema": {
+              "description": "Positive decimal int64, persisted and incremented for each new installation intent across account/profile switches. Reuse exactly after uncertainty.",
+              "maxLength": 19,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AndroidPushRetirementReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Stop delivery to an Android installation without a login session, proved by its installation key. Send it after removing this server or signing out, when the login is already gone.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "public",
         "x-silo-retry-safety": "domain_identity",
         "x-silo-service-backed": true
       }
@@ -222104,9 +222805,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Value 0 skips the reconstruction fence; any other value or none installs it.",
+            "in": "query",
+            "name": "fence",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
-        "description": "Stop a transport under its lifecycle lock. Progressive cancellation installs a process-local token-lifetime fence; stored recipe deletion is required when configured. Local teardown may precede a 503 authority-deletion or shutdown failure. A missing session/recipe returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
+        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; stored recipe deletion is required when configured. Local teardown may precede a 503 authority-deletion or shutdown failure. A missing session/recipe returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "DELETE",
@@ -223169,7 +223878,7 @@
             }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/remux/{token}",
@@ -223305,7 +224014,7 @@
             }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/remux/{token}",
@@ -223360,7 +224069,7 @@
             }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/remux/audio-v2/{token}",
@@ -223496,7 +224205,7 @@
             }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/remux/audio-v2/{token}",
@@ -223913,7 +224622,7 @@
             }
           }
         ],
-        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/v3/{session_id}",
@@ -224070,7 +224779,7 @@
             }
           }
         ],
-        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/v3/{session_id}",

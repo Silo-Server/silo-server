@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -89,6 +90,29 @@ func newProfileTestStoreWithSeed(t *testing.T, seedProfile bool) userstore.UserS
 	}
 
 	return store
+}
+
+// TestCreateProfileWithSettingsSyncRecountsLimit pins the in-transaction
+// re-count on the SQLite store: a household that filled up after the
+// handler's early check is refused inside the creating transaction, and
+// nothing is written. The Postgres store is pinned by
+// TestCreateProfileLimitConcurrentDB.
+func TestCreateProfileWithSettingsSyncRecountsLimit(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	err := handler.createProfileWithSettingsSync(context.Background(), store, 1,
+		userstore.Profile{ID: "profile-2", Name: "Late"}, 1, nil)
+	if !errors.Is(err, errProfileLimitReached) {
+		t.Fatalf("err = %v, want errProfileLimitReached", err)
+	}
+	profiles, err := store.ListProfiles(context.Background())
+	if err != nil {
+		t.Fatalf("list profiles: %v", err)
+	}
+	if len(profiles) != 1 {
+		t.Fatalf("profile count = %d, want 1", len(profiles))
+	}
 }
 
 // profileLimitGroups serves one access group's policy for every account.

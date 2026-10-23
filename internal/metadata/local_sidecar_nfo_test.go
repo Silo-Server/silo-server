@@ -85,6 +85,13 @@ const sidecarFolderID = 10
 
 func newMovieFixture(t *testing.T, storedTmdbID string) *movieFixture {
 	t.Helper()
+	return newMovieFixtureWith(t, storedTmdbID, nil)
+}
+
+// newMovieFixtureWith is newMovieFixture with the seeded item adjusted by
+// seed first.
+func newMovieFixtureWith(t *testing.T, storedTmdbID string, seed func(*models.MediaItem)) *movieFixture {
+	t.Helper()
 	root := filepath.Join(t.TempDir(), "movies")
 	dir := filepath.Join(root, "Film (2020)")
 	video := filepath.Join(dir, "Film (2020).mkv")
@@ -101,14 +108,18 @@ func newMovieFixture(t *testing.T, storedTmdbID string) *movieFixture {
 		video:     video,
 		contentID: "movie-tmdb-" + storedTmdbID,
 	}
-	if err := f.x.SeedMatchedItem(models.MediaItem{
+	item := models.MediaItem{
 		ContentID:               f.contentID,
 		Type:                    "movie",
 		Title:                   "Film NFO v1",
 		Overview:                "Plot v1",
 		TmdbID:                  storedTmdbID,
 		DefaultMetadataLanguage: "en",
-	}); err != nil {
+	}
+	if seed != nil {
+		seed(&item)
+	}
+	if err := f.x.SeedMatchedItem(item); err != nil {
 		t.Fatalf("seed item: %v", err)
 	}
 	f.x.SeedSeriesFile(1, sidecarFolderID, video, dir, f.contentID)
@@ -363,6 +374,40 @@ func TestLocalSidecarCheck_PosterReplacedUnderTheSameNameGetsANewSource(t *testi
 	}
 	if after := f.item(t).PosterSourcePath; after == before || !strings.HasPrefix(after, "file://"+filepath.Join(f.dir, "poster.jpg")+"?v=") {
 		t.Fatalf("poster source = %q after the replacement (was %q), want a new source for the same file", after, before)
+	}
+}
+
+// A movie serving its provider's poster and backdrop keeps serving them when
+// an edited NFO re-applies its local metadata and moves both slots to the
+// folder's sidecars. The re-apply asks no remote provider, so the served
+// images are the only stand-ins until the sidecar copies land, and a copy
+// that never lands must not leave the movie blank.
+func TestLocalSidecarCheck_ReapplyKeepsServedRemoteArtworkAsStandIn(t *testing.T) {
+	const poster, backdrop = "tmdb://poster/served.jpg", "tmdb://backdrop/served.jpg"
+	f := newMovieFixtureWith(t, "100", func(item *models.MediaItem) {
+		item.PosterPath, item.PosterSourcePath, item.PosterThumbhash = poster, poster, "poster-hash"
+		item.BackdropPath, item.BackdropSourcePath, item.BackdropThumbhash = backdrop, backdrop, "backdrop-hash"
+	})
+	fanart := filepath.Join(f.dir, "fanart.jpg")
+	writeFixtureFile(t, fanart, "fanart")
+	f.scan(t)
+
+	writeNewerFile(t, filepath.Join(f.dir, "movie.nfo"), movieNFO("Film NFO v2", "Plot v2", tmdbID("100")))
+	if n := f.scan(t); n != 1 {
+		t.Fatalf("check after editing the NFO re-applied %d items, want 1", n)
+	}
+	item := f.item(t)
+	if !strings.HasPrefix(item.PosterSourcePath, "file://"+filepath.Join(f.dir, "poster.jpg")+"?v=") ||
+		!strings.HasPrefix(item.BackdropSourcePath, "file://"+fanart+"?v=") {
+		t.Fatalf("sources = %q, %q, want the folder's sidecars", item.PosterSourcePath, item.BackdropSourcePath)
+	}
+	if item.PosterPath != poster || item.PosterThumbhash != "poster-hash" ||
+		item.BackdropPath != backdrop || item.BackdropThumbhash != "backdrop-hash" {
+		t.Fatalf("served poster = %q (thumbhash %q), backdrop = %q (thumbhash %q), want the provider images kept until the copies land",
+			item.PosterPath, item.PosterThumbhash, item.BackdropPath, item.BackdropThumbhash)
+	}
+	if calls := f.remote.calls.Load(); calls != 0 {
+		t.Fatalf("remote provider called %d times", calls)
 	}
 }
 

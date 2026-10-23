@@ -56,7 +56,8 @@ function isEntry(value: unknown): value is AdminPlaybackHistoryEntry {
     typeof entry.ended_at === "string" &&
     typeof entry.watched_seconds === "number" &&
     (entry.duration_seconds === null || typeof entry.duration_seconds === "number") &&
-    typeof entry.completed === "boolean"
+    typeof entry.completed === "boolean" &&
+    (entry.played_seconds === null || typeof entry.played_seconds === "number")
   );
 }
 
@@ -80,6 +81,10 @@ export function adminPlaybackHistoryItemFromV2(
     watched_seconds: entry.watched_seconds,
     duration_seconds: entry.duration_seconds,
     completed: entry.completed,
+    played_seconds: entry.played_seconds,
+    series_title: entry.series_title,
+    season_number: entry.season_number,
+    episode_number: entry.episode_number,
   };
 }
 

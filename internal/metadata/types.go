@@ -218,7 +218,7 @@ type SearchResult struct {
 // TitleAlias is a provider-confirmed title for the same work.
 type TitleAlias struct {
 	Title    string `json:"title"`
-	Language string `json:"language,omitempty"`
+	Language string `json:"language,omitempty" doc:"Language of the alias as the provider reports it, usually ISO 639-1"`
 	Kind     string `json:"kind"`
 	Provider string `json:"provider,omitempty"`
 }

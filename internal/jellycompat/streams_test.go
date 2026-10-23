@@ -567,6 +567,47 @@ func TestBuildProxyRedirectURLCarriesMPEGTSForRemoteCopyRecipe(t *testing.T) {
 	}
 }
 
+// The proxy remux adds aac_adtstoasc for a copied AAC track, and that filter
+// rejects every other codec, so the token names the copied track's codec.
+func TestBuildProxyRedirectURLCarriesCopiedRemuxAudioCodec(t *testing.T) {
+	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	for _, test := range []struct {
+		name           string
+		codec          string
+		transcodeAudio bool
+		want           string
+	}{
+		{name: "copied ac3", codec: "ac3", want: "ac3"},
+		{name: "copied aac", codec: "aac", want: "aac"},
+		{name: "ac3 encoded to aac", codec: "ac3", transcodeAudio: true, want: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := PlaybackMediaSource{
+				TranscodeAudio: test.transcodeAudio,
+				Version: catalog.FileVersion{
+					VideoTracks: []models.VideoTrack{{Codec: "h264"}},
+					AudioTracks: []models.AudioTrack{{Codec: test.codec, Channels: 2, Default: true}},
+				},
+			}
+			redirectURL, err := h.buildProxyRedirectURL(
+				"play-1", "upstream-1", string(playback.PlayRemux),
+				&models.MediaFile{FilePath: "/media/movie.ts"}, source, nil, time.Time{},
+				"", 0, &nodepool.Node{URL: "http://proxy-1"}, netaccess.Path{},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claims, err := streamtoken.Verify(proxyTokenFromRedirect(t, redirectURL, string(playback.PlayRemux)), h.JWTSecret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if claims.CopyAudioCodec != test.want {
+				t.Fatalf("remux proxy token copied audio codec = %q, want %q", claims.CopyAudioCodec, test.want)
+			}
+		})
+	}
+}
+
 // The keyframe playlist only applies to copy streams; an encoded stream's
 // recipe and live session must match whatever the flag says.
 func TestKeyframePlaylistOnlyComparedForCopyStreams(t *testing.T) {
@@ -1489,6 +1530,78 @@ func TestGenerateCompatCopyVideoMasterManifestJellyfin12DolbyVisionVariant(t *te
 	source.HLSRemuxMPEGTS = true
 	if ts := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", "")); strings.Contains(ts, "dvh1") {
 		t.Fatalf("MPEG-TS remuxes cannot carry the Dolby Vision variant:\n%s", ts)
+	}
+}
+
+// A copy master's CODECS must list every format the variant carries or be
+// absent: Media3's chunkless preparation and AVPlayer build their tracks from
+// it, so an audio-only list plays sound over a black screen.
+func TestGenerateCompatCopyVideoMasterManifestCodecsListEveryFormat(t *testing.T) {
+	aac := []models.AudioTrack{{Codec: "aac", Profile: "LC", Default: true}}
+	cases := []struct {
+		name   string
+		video  models.VideoTrack
+		audio  []models.AudioTrack
+		dovi   bool
+		codecs string // "" means no CODECS or SUPPLEMENTAL-CODECS at all
+	}{
+		{"av1 8-bit", models.VideoTrack{Codec: "av1", Profile: "Main", Level: 1, BitDepth: 8, Width: 640, Height: 360}, aac, false, "av01.0.01M.08,mp4a.40.2"},
+		{"av1 10-bit", models.VideoTrack{Codec: "av1", Profile: "Main", Level: 8, BitDepth: 10, Width: 1920, Height: 1080}, aac, false, "av01.0.08M.10,mp4a.40.2"},
+		// The catalog drops a zero level, so level 2.0 reads like an unknown one.
+		{"av1 level 0", models.VideoTrack{Codec: "av1", Profile: "Main", Level: 0, BitDepth: 8, Width: 3840, Height: 2160}, aac, false, ""},
+		{"av1 unknown level", models.VideoTrack{Codec: "av1", Profile: "Main", Level: -99, BitDepth: 8, Width: 640, Height: 360}, aac, false, ""},
+		{"av1 hdr10", models.VideoTrack{
+			Codec: "av1", Profile: "Main", Level: 12, BitDepth: 10, Width: 3840, Height: 2160,
+			ColorPrimaries: "bt2020", ColorTransfer: "smpte2084", ColorSpace: "bt2020nc", ColorRange: "tv",
+		}, aac, false, ""},
+		{"av1 monochrome", models.VideoTrack{Codec: "av1", Profile: "Main", Level: 1, BitDepth: 10, PixelFormat: "gray10le", Width: 640, Height: 360}, aac, false, ""},
+		{"av1 high profile", models.VideoTrack{Codec: "av1", Profile: "High", Level: 8, BitDepth: 8, Width: 1920, Height: 1080}, aac, false, ""},
+		{"vp9 profile 0", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: -99, BitDepth: 8, Width: 640, Height: 360, FrameRate: "24.000"}, aac, false, "vp09.00.21.08,mp4a.40.2"},
+		// FFmpeg's vpcC level ignores the frame rate; 1080p60 stays level 4.
+		{"vp9 profile 2", models.VideoTrack{Codec: "vp9", Profile: "Profile 2", Level: -99, BitDepth: 10, Width: 1920, Height: 1080, FrameRate: "60.000"}, aac, false, "vp09.02.40.10,mp4a.40.2"},
+		{"vp9 probed level", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: 41, BitDepth: 8, Width: 1920, Height: 1080}, aac, false, "vp09.00.41.08,mp4a.40.2"},
+		{"vp9 hlg", models.VideoTrack{
+			Codec: "vp9", Profile: "Profile 2", Level: -99, BitDepth: 10, Width: 1920, Height: 1080,
+			ColorPrimaries: "bt2020", ColorTransfer: "arib-std-b67", ColorSpace: "bt2020nc", ColorRange: "tv",
+		}, aac, false, ""},
+		{"vp9 profile 1", models.VideoTrack{Codec: "vp9", Profile: "Profile 1", Level: -99, BitDepth: 8, Width: 640, Height: 360}, aac, false, ""},
+		{"vp9 unknown size", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: -99, BitDepth: 8}, aac, false, ""},
+		{"h264 unknown level", models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080}, aac, false, ""},
+		{"hevc unknown level", models.VideoTrack{
+			Codec: "hevc", Profile: "Main 10", Width: 3840, Height: 2160,
+			DVProfile: 8, DVLevel: 6, VideoRangeType: compatRangeDOVIWithHDR,
+		}, aac, false, ""},
+		{"no audio track", models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, nil, false, "avc1.640028"},
+		{"audio without an entry", models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, []models.AudioTrack{{Codec: "vorbis", Default: true}}, false, ""},
+		{"audio without a codec name", models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, []models.AudioTrack{{Default: true}}, false, ""},
+		{"dolby vision audio without an entry", models.VideoTrack{
+			Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
+			DVProfile: 5, DVLevel: 6, VideoRangeType: compatRangeDOVI,
+		}, []models.AudioTrack{{Codec: "vorbis", Default: true}}, true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := PlaybackMediaSource{
+				ID: "source-1",
+				Version: catalog.FileVersion{
+					Bitrate:     8_000,
+					VideoTracks: []models.VideoTrack{tc.video},
+					AudioTracks: tc.audio,
+				},
+				HLSRemux:    true,
+				DOVIVariant: tc.dovi,
+			}
+			got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", ""))
+			if tc.codecs == "" {
+				if strings.Contains(got, "CODECS=") || strings.Count(got, "#EXT-X-STREAM-INF:") != 1 {
+					t.Fatalf("want one variant and no CODECS:\n%s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, fmt.Sprintf(",CODECS=%q", tc.codecs)) {
+				t.Fatalf("want CODECS=%q:\n%s", tc.codecs, got)
+			}
+		})
 	}
 }
 

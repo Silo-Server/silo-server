@@ -117,21 +117,13 @@ func TestAPIKeyVerifierUpgrade(t *testing.T) {
 			t.Fatal("stored verifier was accepted as a bearer")
 		}
 	}
-	// The existing unique B-tree must still support a bounded lookup.
-	tx, err := repo.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan=off`); err != nil {
-		t.Fatal(err)
-	}
-	var plan string
-	if err := tx.QueryRow(ctx, `EXPLAIN (FORMAT JSON) SELECT `+apiKeyColumns+` FROM api_keys WHERE key_hash=$1`, HashLinkToken(generated)).Scan(&plan); err != nil || !strings.Contains(plan, "Index") {
+	// The existing unique B-tree must still support a bounded lookup. Read
+	// pg_index rather than a plan: the migration rewrites key_hash in HOT
+	// updates, so the rebuilt index has indcheckxmin set and the planner skips
+	// it while any older transaction on the server is still open.
+	var indexed bool
+	if err := repo.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_am am ON am.oid=c.relam WHERE i.indrelid='api_keys'::regclass AND i.indisunique AND i.indisvalid AND i.indpred IS NULL AND am.amname='btree' AND i.indnkeyatts=1 AND i.indkey[0]=(SELECT attnum FROM pg_attribute WHERE attrelid='api_keys'::regclass AND attname='key_hash'))`).Scan(&indexed); err != nil || !indexed {
 		t.Fatal("verifier lookup has no usable index")
-	}
-	if err := tx.Rollback(ctx); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := repo.pool.Exec(ctx, down); err == nil {
 		t.Fatal("nonempty verifier table allowed an irreversible downgrade")

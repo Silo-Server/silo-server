@@ -16,7 +16,7 @@ import (
 // AudioTrackSignature identifies an audio track independently of its index.
 // Every member is optional; absent and the zero value mean the same thing.
 type AudioTrackSignature struct {
-	Language      string `json:"language,omitempty" doc:"Track language (ISO 639)" example:"eng"`
+	Language      string `json:"language,omitempty" doc:"Track language as the client recorded it, normally the track's language (BCP 47); stored as sent" example:"en"`
 	Title         string `json:"title,omitempty" doc:"Display title the client showed" example:"English 5.1"`
 	EmbeddedTitle string `json:"embedded_title,omitempty" doc:"Title embedded in the container" example:"Surround"`
 	Codec         string `json:"codec,omitempty" example:"eac3"`
@@ -30,7 +30,7 @@ type AudioPreference struct {
 	ProfileID       ID                   `json:"profile_id" example:"p-1"`
 	SeriesID        ID                   `json:"series_id" doc:"The series content id" example:"series-8f2c1a"`
 	AudioTrackIndex int                  `json:"audio_track_index" doc:"Zero-based index of the chosen track, or -1 for no track" example:"1"`
-	AudioLanguage   string               `json:"audio_language" doc:"Preferred audio language; empty means no language preference" example:"eng"`
+	AudioLanguage   string               `json:"audio_language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"Preferred audio language for the series: BCP 47 tag (en, pt-BR) or x-silo-original; empty means no language preference" example:"en"`
 	TrackSignature  *AudioTrackSignature `json:"track_signature,omitempty" nullable:"false" doc:"Absent when the client stored none"`
 	UpdatedAt       Instant              `json:"updated_at" doc:"Last update; Unix epoch when an older SQLite track preference has no recorded timestamp" example:"2026-01-02T03:04:05.000Z"`
 }
@@ -40,7 +40,7 @@ type AudioPreference struct {
 // stored as none.
 type AudioPreferenceUpdate struct {
 	AudioTrackIndex int                  `json:"audio_track_index" minimum:"-1" doc:"Zero-based index of the chosen track, or -1 for no track" example:"1"`
-	AudioLanguage   string               `json:"audio_language,omitempty" doc:"Preferred audio language; empty or omitted means no language preference" example:"eng"`
+	AudioLanguage   string               `json:"audio_language,omitempty" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$" doc:"Preferred audio language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks the original language; empty or omitted means no language preference" example:"en"`
 	TrackSignature  *AudioTrackSignature `json:"track_signature,omitempty" nullable:"false" doc:"How playback recognizes the track when indexes shift"`
 }
 
@@ -65,7 +65,7 @@ type AudioPreferenceOutput struct {
 // thing.
 type SubtitleTrackSignature struct {
 	Source          string `json:"source,omitempty" doc:"Where the track comes from, e.g. embedded or external" example:"embedded"`
-	Language        string `json:"language,omitempty" doc:"Track language (ISO 639)" example:"eng"`
+	Language        string `json:"language,omitempty" doc:"Track language as the client recorded it, normally the track's language (BCP 47); stored as sent" example:"en"`
 	Codec           string `json:"codec,omitempty" example:"subrip"`
 	Label           string `json:"label,omitempty" doc:"Display label the client showed" example:"English (SDH)"`
 	Forced          *bool  `json:"forced,omitempty" nullable:"false" doc:"Whether the track carried the forced flag" example:"false"`
@@ -77,7 +77,7 @@ type SubtitleTrackSignature struct {
 type SubtitlePreference struct {
 	ProfileID            ID                      `json:"profile_id" example:"p-1"`
 	SeriesID             ID                      `json:"series_id" doc:"The series content id" example:"series-8f2c1a"`
-	SubtitleLanguage     string                  `json:"subtitle_language" doc:"Preferred subtitle language; empty means no language preference" example:"eng"`
+	SubtitleLanguage     string                  `json:"subtitle_language" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"Preferred subtitle language for the series: BCP 47 tag (en, pt-BR); empty means no language preference" example:"en"`
 	SubtitleTrackIndex   int                     `json:"subtitle_track_index" doc:"Zero-based index of the chosen track, or -1 for subtitles off" example:"0"`
 	ExternalSubtitlePath string                  `json:"external_subtitle_path,omitempty" doc:"Path of the chosen external subtitle file; absent for an embedded track" example:"Show.S01E01.eng.srt"`
 	SubtitleMode         string                  `json:"subtitle_mode" doc:"Subtitle mode. Canonical values: auto, always, off; empty means no mode preference" example:"always"`
@@ -92,7 +92,7 @@ type SubtitlePreference struct {
 // stored, so a client changing only the track does not reset it.
 type SubtitlePreferenceUpdate struct {
 	SubtitleTrackIndex   int                     `json:"subtitle_track_index" minimum:"-1" doc:"Zero-based index of the chosen track, or -1 for subtitles off" example:"0"`
-	SubtitleLanguage     string                  `json:"subtitle_language,omitempty" doc:"Preferred subtitle language; empty or omitted means no language preference" example:"eng"`
+	SubtitleLanguage     string                  `json:"subtitle_language,omitempty" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$" doc:"Preferred subtitle language: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; empty or omitted means no language preference" example:"en"`
 	ExternalSubtitlePath string                  `json:"external_subtitle_path,omitempty" doc:"Path of the chosen external subtitle file, when the track is external" example:"Show.S01E01.eng.srt"`
 	SubtitleMode         string                  `json:"subtitle_mode,omitempty" doc:"Subtitle mode: auto, always or off; empty or omitted means no mode preference" example:"always"`
 	TrackSignature       *SubtitleTrackSignature `json:"track_signature,omitempty" nullable:"false" doc:"How playback recognizes the track when indexes shift"`
@@ -120,8 +120,8 @@ type SubtitlePreferenceOutput struct {
 type LibraryPlaybackPreference struct {
 	ProfileID           ID      `json:"profile_id" example:"p-1"`
 	LibraryID           ID      `json:"library_id" example:"1"`
-	AudioLanguage       *string `json:"audio_language,omitempty" nullable:"false" doc:"Audio language override (BCP 47 language tag); empty means none" example:"en"`
-	SubtitleLanguage    *string `json:"subtitle_language,omitempty" nullable:"false" doc:"Subtitle language override (BCP 47 language tag); empty means none" example:"en"`
+	AudioLanguage       *string `json:"audio_language,omitempty" nullable:"false" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"Audio language override: BCP 47 tag (en, pt-BR) or x-silo-original; empty means none" example:"en"`
+	SubtitleLanguage    *string `json:"subtitle_language,omitempty" nullable:"false" pattern:"^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$" doc:"Subtitle language override: BCP 47 tag (en, pt-BR); empty means none" example:"en"`
 	SubtitleMode        *string `json:"subtitle_mode,omitempty" nullable:"false" doc:"Subtitle mode override. Canonical values: auto, always, off; empty means none" example:"auto"`
 	ShowForcedSubtitles *bool   `json:"show_forced_subtitles,omitempty" nullable:"false" example:"false"`
 	UpdatedAt           Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
@@ -150,8 +150,8 @@ type LibraryPlaybackPreferenceInput struct {
 // unchanged; explicit null (or "" on a string member) clears that override;
 // a value sets it. Clearing every override removes the library's row.
 type LibraryPlaybackPreferenceUpdate struct {
-	AudioLanguage       Patch[string] `json:"audio_language,omitzero" doc:"Audio language override (BCP 47 language tag); null or empty clears it" example:"en"`
-	SubtitleLanguage    Patch[string] `json:"subtitle_language,omitzero" doc:"Subtitle language override (BCP 47 language tag); null or empty clears it" example:"en"`
+	AudioLanguage       Patch[string] `json:"audio_language,omitzero" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$" doc:"Audio language override: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; x-silo-original picks the original language; null or empty clears it" example:"en"`
+	SubtitleLanguage    Patch[string] `json:"subtitle_language,omitzero" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$" doc:"Subtitle language override: BCP 47 tag or ISO 639 code, any case (en, eng, pt-BR), stored in canonical form; null or empty clears it" example:"en"`
 	SubtitleMode        Patch[string] `json:"subtitle_mode,omitzero" doc:"Subtitle mode override: auto, always or off; null or empty clears it" example:"always"`
 	ShowForcedSubtitles Patch[bool]   `json:"show_forced_subtitles,omitzero" doc:"Forced-subtitle override; null clears it" example:"true"`
 }

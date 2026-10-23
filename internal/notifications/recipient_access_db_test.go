@@ -130,6 +130,91 @@ func TestFanoutSkipsRecipientsWithoutAccess(t *testing.T) {
 	}
 }
 
+// TestFanoutSkipsSecondLibraryCopy adds an episode to one library, then to a
+// second library that holds the same series (a 4K library beside an HD one).
+// The copy is no news to a profile that can open the episode in the first
+// library, whether or not retention has since removed that delivery. Once the
+// first library's copy is gone, the second one is news again. A profile that
+// sees only the second library is told when the copy arrives.
+func TestFanoutSkipsSecondLibraryCopy(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		agedOut, gone   bool
+		secondRecipient []string
+	}{
+		{name: "first delivery kept", secondRecipient: []string{"copy-only"}},
+		{name: "first delivery aged out", agedOut: true, secondRecipient: []string{"copy-only"}},
+		{name: "first copy gone", agedOut: true, gone: true, secondRecipient: []string{"both", "copy-only"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := inboxPageDB(t)
+			ctx := t.Context()
+			c := seedAccessCatalog(t, pool)
+			if _, err := pool.Exec(ctx, `
+				CREATE TABLE release_events (LIKE public.release_events INCLUDING ALL);
+				CREATE TABLE profile_series_interest (LIKE public.profile_series_interest INCLUDING ALL);
+				CREATE TABLE profile_series_notification_mutes (LIKE public.profile_series_notification_mutes INCLUDING ALL);
+				CREATE TABLE episode_availability (LIKE public.episode_availability INCLUDING ALL);
+				CREATE TABLE episode_libraries (LIKE public.episode_libraries INCLUDING ALL);
+				CREATE TABLE notification_library_seed_state (LIKE public.notification_library_seed_state INCLUDING ALL)`); err != nil {
+				t.Fatalf("create fanout tables: %v", err)
+			}
+			if _, err := pool.Exec(ctx, `INSERT INTO notification_library_seed_state (library_id) VALUES ($1), ($2)`,
+				c.library, c.otherLibrary); err != nil {
+				t.Fatalf("seed libraries: %v", err)
+			}
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, favorite)
+				VALUES (1, 'both', $1, $3, true), (1, 'both', $2, $3, true), (1, 'copy-only', $2, $3, true)`,
+				c.library, c.otherLibrary, c.series); err != nil {
+				t.Fatalf("seed interest: %v", err)
+			}
+			releases := NewReleaseRepository(pool)
+			worker := newAccessFanoutWorker(pool, scopeByProfile{
+				"both":      {},
+				"copy-only": {AllowedLibraryIDs: []int{c.otherLibrary}},
+			})
+			arrive := func(libraryID int) {
+				t.Helper()
+				if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries (episode_id, media_folder_id) VALUES ($1, $2)`,
+					c.episode, libraryID); err != nil {
+					t.Fatalf("link episode: %v", err)
+				}
+				if _, events, err := releases.RecordAvailabilityForLibrary(ctx, libraryID, true); err != nil || events != 1 {
+					t.Fatalf("RecordAvailabilityForLibrary(%d) = %d events, %v; want 1", libraryID, events, err)
+				}
+				if _, err := worker.processBatch(ctx); err != nil {
+					t.Fatalf("processBatch: %v", err)
+				}
+			}
+			recipients := func(libraryID int) []string {
+				t.Helper()
+				return deliveryRecipients(t, pool, fmt.Sprintf("library_id = %d", libraryID))
+			}
+
+			arrive(c.library)
+			if got := recipients(c.library); !slices.Equal(got, []string{"both"}) {
+				t.Fatalf("first library recipients = %v, want [both]", got)
+			}
+			if tc.agedOut {
+				later := time.Now().Add(time.Hour)
+				if _, err := NewDeliveryRepository(pool).DeleteOld(ctx, later, later); err != nil {
+					t.Fatalf("DeleteOld: %v", err)
+				}
+			}
+			if tc.gone {
+				if _, err := pool.Exec(ctx, `DELETE FROM episode_libraries WHERE media_folder_id = $1`, c.library); err != nil {
+					t.Fatalf("remove first copy: %v", err)
+				}
+			}
+			arrive(c.otherLibrary)
+			if got := recipients(c.otherLibrary); !slices.Equal(got, tc.secondRecipient) {
+				t.Fatalf("second library recipients = %v, want %v", got, tc.secondRecipient)
+			}
+		})
+	}
+}
+
 // TestNotifyFulfilledSkipsRecipientWithoutAccess sends request.fulfilled for
 // a title the follower's content-rating ceiling hides. The requester is told;
 // the follower is not, and the request still counts as handled.

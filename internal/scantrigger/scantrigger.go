@@ -175,7 +175,7 @@ func (r *Resolver) ResolveMissingSubtree(ctx context.Context, subtreePath, trigg
 	if filepath.Clean(cleanPath) == filepath.Clean(matchedRoot) {
 		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Subtree path must be below a library root", Reason: ReasonSubtreeOutsideLibrary}
 	}
-	return &Target{Folder: folder, Mode: ModeSubtree, Path: cleanPath, Trigger: normalizeTrigger(trigger)}, nil
+	return &Target{Folder: folder, Mode: ModeSubtree, Path: subtitleFolderScope(cleanPath, matchedRoot, folder.Type), Trigger: normalizeTrigger(trigger)}, nil
 }
 
 // matchEnabledFolder lists the configured libraries and returns the enabled
@@ -216,6 +216,20 @@ func normalizeTrigger(trigger string) string {
 // Resolve), and the matched library root must still exist on disk so an
 // unmounted share never resolves to a reconciling scan.
 func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string) (*Target, error) {
+	return r.resolveVanished(ctx, path, trigger, false)
+}
+
+// ResolveVanishedFile is ResolveVanishedPath for a path the caller knows was
+// a file. A file that is neither media nor a sidecar of the library's videos
+// (a tool's temp or backup copy, such as Tdarr's *.partial.old) is rejected
+// with ReasonUnsupportedExtension: no scan catalogs it, and a subtree scan of
+// a file that is gone only fails to read its own root and warns that the
+// scan was partial.
+func (r *Resolver) ResolveVanishedFile(ctx context.Context, path, trigger string) (*Target, error) {
+	return r.resolveVanished(ctx, path, trigger, true)
+}
+
+func (r *Resolver) resolveVanished(ctx context.Context, path, trigger string, file bool) (*Target, error) {
 	if r == nil || r.folders == nil {
 		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: codeUnavailable, Message: msgScannerUnavailable, Reason: ReasonScannerUnavailable}
 	}
@@ -252,7 +266,10 @@ func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string
 	if dir, ok := localSidecarScope(cleanPath, matchedRoot, folder.Type); ok {
 		return &Target{Folder: folder, Mode: ModeSubtree, Path: dir, Trigger: trigger}, nil
 	}
-	scope := cleanPath
+	if file {
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgUnsupportedExt, Reason: ReasonUnsupportedExtension}
+	}
+	scope := subtitleFolderScope(cleanPath, matchedRoot, folder.Type)
 	if filepath.Clean(scope) == filepath.Clean(matchedRoot) {
 		// A vanished entry directly under the root reconciles via a full
 		// library scan, which keeps the empty-root guard in play.
@@ -340,6 +357,8 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 	switch mode {
 	case ModeLibrary:
 		targetPath = ""
+	case ModeSubtree:
+		targetPath = subtitleFolderScope(cleanPath, matchedRoot, folder.Type)
 	case ModeFile:
 		mode, targetPath, err = mediaFileTarget(cleanPath, matchedRoot, folder.Type)
 		if err != nil {
@@ -400,20 +419,45 @@ func mediaFileTarget(cleanPath, matchedRoot, folderType string) (string, string,
 }
 
 // localSidecarScope maps a local metadata sidecar (an .nfo document or sidecar
-// artwork) in a video library to a subtree scan of its directory: the scan
-// lists the directory's sidecars, and metadata re-applies the items there whose
-// sidecars changed. A sidecar directly under the library root is not mapped,
-// so one edit in a flat library never becomes a full library scan; the next
-// library scan picks it up.
+// artwork) or a subtitle in a video library to a subtree scan of the directory
+// of the videos it belongs to: the scan lists the directory's sidecars, and
+// metadata re-applies the items there whose sidecars changed. A subtitle in a
+// Subs/ folder belongs to the videos beside that folder. A sidecar directly
+// under the library root is not mapped, so one edit in a flat library never
+// becomes a full library scan; the next library scan picks it up.
 func localSidecarScope(cleanPath, matchedRoot, folderType string) (string, bool) {
-	if !scansVideoFiles(folderType) || !scanner.IsLocalMetadataSidecar(cleanPath) {
+	if !scansVideoFiles(folderType) {
 		return "", false
 	}
 	dir := filepath.Dir(cleanPath)
+	switch {
+	case scanner.IsLocalMetadataSidecar(cleanPath):
+	case scanner.IsSubtitleSidecar(cleanPath):
+		if owner, ok := scanner.SubtitleFolderOwner(dir); ok {
+			dir = owner
+		}
+	default:
+		return "", false
+	}
 	if filepath.Clean(dir) == filepath.Clean(matchedRoot) || !PathWithinRoot(dir, matchedRoot) {
 		return "", false
 	}
 	return dir, true
+}
+
+// subtitleFolderScope widens a subtree scan of a Subs/ or Subtitles/ folder,
+// or of a folder inside one, to the directory of the videos that read it: the
+// subtitle folder holds no video, so scanning it alone changes nothing. The
+// widening stops below the library root, as localSidecarScope does.
+func subtitleFolderScope(dir, matchedRoot, folderType string) string {
+	if !scansVideoFiles(folderType) {
+		return dir
+	}
+	owner, ok := scanner.SubtitleFolderOwner(dir)
+	if !ok || filepath.Clean(owner) == filepath.Clean(matchedRoot) || !PathWithinRoot(owner, matchedRoot) {
+		return dir
+	}
+	return owner
 }
 
 // scansVideoFiles reports whether a library kind is served by the video

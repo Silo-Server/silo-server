@@ -380,6 +380,9 @@ func (s *Service) process(run *models.ScanRun) {
 	case errors.Is(err, catalog.ErrFolderNotFound):
 		observation.Finish(s.cancelRun(run.ID))
 		return
+	case err != nil && s.shuttingDown():
+		observation.Finish(s.requeueRun(run))
+		return
 	case err != nil:
 		observation.Finish(s.failRun(run.ID, fmt.Errorf("load library for scan: %w", err)))
 		return
@@ -400,6 +403,8 @@ func (s *Service) process(run *models.ScanRun) {
 		err = fmt.Errorf("unsupported scan mode %q", run.Mode)
 	}
 	switch {
+	case err != nil && s.shuttingDown():
+		observation.Finish(s.requeueRun(run))
 	case errors.Is(err, context.Canceled):
 		observation.Finish(s.cancelRun(run.ID))
 	case err != nil:
@@ -520,6 +525,38 @@ func (s *Service) cancelRun(runID string) string {
 	}
 	if changed {
 		s.publish(context.Background(), "scan.cancelled", run)
+	}
+	if run == nil {
+		return scanRunUnknown
+	}
+	return run.Status
+}
+
+// shuttingDown reports whether the process is stopping. Shutdown cancels every
+// running scan through the app context, so a run that ends with an error
+// after that was cut short, not stopped by a cancel or a failure of its own.
+func (s *Service) shuttingDown() bool {
+	return s.appCtx.Err() != nil
+}
+
+// requeueRun returns a run interrupted by shutdown to the queue, with its owed
+// follow-up, so the next process (or another replica) scans it again. Ending it
+// there would lose it for good: the stale-run requeue only revives
+// running rows, and only a finished run enqueues its follow-up. If the write
+// does not land before the process exits, the row stays running and the
+// stale-run requeue recovers it instead.
+func (s *Service) requeueRun(claimed *models.ScanRun) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	run, changed, err := s.repo.Requeue(ctx, claimed.ID, claimed.StartedAt)
+	if err != nil {
+		slog.Warn("scan queue: failed to requeue scan interrupted by shutdown", "scan_id", claimed.ID, "error", err)
+		return scanRunUnknown
+	}
+	if changed {
+		slog.Info("scan queue: requeued scan interrupted by shutdown", "scan_id", run.ID, "library_id", run.MediaFolderID)
+		s.publish(context.Background(), "scan.accepted", run)
 	}
 	if run == nil {
 		return scanRunUnknown

@@ -1900,7 +1900,46 @@ func (h *ItemsHandler) leafUserData(ctx context.Context, userID int, profileID, 
 	if err != nil {
 		return nil
 	}
-	return leafUserDataFromProgress(progress)
+	userData := leafUserDataFromProgress(progress)
+	if itemType == itemTypeMovie {
+		// A failed read keeps the progress row's hints, which is what the
+		// detail page showed before the version choice was stored apart.
+		if choice, err := store.GetSeriesPlaybackPreference(ctx, profileID, contentID); err == nil {
+			userData = applyVersionChoice(userData, choice)
+		}
+	}
+	return userData
+}
+
+// applyVersionChoice reports the version a movie was last started on, from the
+// row playback start keeps under the movie's content ID. That row exists even
+// when the play was too short to leave progress, so a picked version is not
+// forgotten. It wins over the progress row's hints whenever it names a file:
+// marking watched or clearing the resume point moves the progress timestamp
+// without a new version being played. A Jellyfin-protocol play records no
+// choice, so its file shows only for a movie never started natively.
+func applyVersionChoice(userData *catalog.SeasonUserData, choice *userstore.SeriesPlaybackPreference) *catalog.SeasonUserData {
+	if choice == nil || choice.FileID == 0 {
+		return userData
+	}
+	if userData == nil {
+		userData = &catalog.SeasonUserData{}
+	}
+	fileID := choice.FileID
+	userData.LastFileID = &fileID
+	userData.LastResolution = stringPtrOrNil(choice.Resolution)
+	hdr := choice.HDR
+	userData.LastHDR = &hdr
+	userData.LastCodecVideo = stringPtrOrNil(choice.CodecVideo)
+	userData.LastEditionKey = stringPtrOrNil(choice.EditionKey)
+	return userData
+}
+
+func stringPtrOrNil(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 // listLeafUserData batch-fetches watch progress for the given content IDs in a

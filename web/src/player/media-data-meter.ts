@@ -16,21 +16,6 @@ export interface MediaRequestProgress {
   done: boolean;
 }
 
-/** Adds `[start, end]` to sorted, disjoint spans, merging any it overlaps. */
-function mergeSpan(spans: [number, number][], span: [number, number]): [number, number][] {
-  const merged: [number, number][] = [];
-  let [start, end] = span;
-  for (const [a, b] of spans) {
-    if (b < start || a > end) merged.push([a, b]);
-    else {
-      start = Math.min(start, a);
-      end = Math.max(end, b);
-    }
-  }
-  merged.push([start, end]);
-  return merged.sort((x, y) => x[0] - y[0]);
-}
-
 /**
  * What a player sees of one plan's media requests: video and audio segments,
  * or the reads of a progressive file, never subtitles. It answers when media
@@ -88,13 +73,22 @@ export class MediaDataMeter {
   throughputKbps(now: number): number | undefined {
     this.lastDataAt(now);
     let bytes = 0;
-    let spans: [number, number][] = [];
+    const spans: [number, number][] = [];
     for (const { first, last, bytes: received } of this.requests.values()) {
       if (last - first < MIN_THROUGHPUT_SAMPLE_MS) continue;
       bytes += received;
-      spans = mergeSpan(spans, [first, last]);
+      spans.push([first, last]);
     }
-    const ms = spans.reduce((total, [a, b]) => total + (b - a), 0);
+    // A long plan keeps thousands of segment requests, so sort them once and
+    // count overlapping time in one pass.
+    spans.sort((a, b) => a[0] - b[0]);
+    let ms = 0;
+    let end = -Infinity;
+    for (const [first, last] of spans) {
+      if (last <= end) continue;
+      ms += last - Math.max(first, end);
+      end = last;
+    }
     if (ms < MIN_THROUGHPUT_SAMPLE_MS) return undefined;
     const kbps = Math.min(Math.floor((bytes * 8) / ms), MAX_PROBE_KBPS);
     return kbps >= MIN_PROBE_KBPS ? kbps : undefined;

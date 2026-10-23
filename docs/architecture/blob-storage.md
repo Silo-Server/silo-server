@@ -185,6 +185,15 @@ Listings use lexical keys and a cursor equal to the last returned key. Local
 pagination skips completed subtrees and stops after a page plus one object;
 each visited directory's entries are read and sorted in memory.
 
+`Matches` lets the image cache skip rewriting an immutable object whose bytes
+are already stored. It is only an optimization, so on S3 a `HeadObject` 403
+reports no match instead of an error and the object is rewritten. A HEAD
+response has no body, so the 403 cannot say whether the key is missing (AWS S3
+answers 403 for a missing key when the credential lacks `s3:ListBucket`) or the
+credential is denied. The `PutObject` that follows reports a real denial with
+the backend's error code. Other reads (`Stat`, `ObjectExists`, delivery
+verification) still return a 403 as an error.
+
 Keys are relative, non-empty, and at most 1024 bytes. Empty segments, dot
 segments, backslashes, and control characters are rejected. Local storage
 refuses symlinks and non-regular files below its root. MIME types come from key

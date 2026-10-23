@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -37,6 +38,9 @@ var (
 	// ErrSourceUnsupported is returned when the chosen source track cannot be
 	// translated (bitmap track, or a styled/unsupported format in this version).
 	ErrSourceUnsupported = errors.New("subtitle source is not supported for translation")
+	// errSourceChanged is returned when a queued translation's source index
+	// names a different track by the time the job runs.
+	errSourceChanged = errors.New("the selected subtitle track changed while the job was queued")
 )
 
 // MediaFileResolver loads a media file (path + subtitle metadata) by ID.
@@ -227,11 +231,20 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	}
 	req.SourceLanguage = normalizeOptionalLanguageCode(req.SourceLanguage)
 
-	key := idempotencyKey(req.MediaFileID, req.Kind, req.SourceIndex, req.TargetLanguage, jobModel)
+	source, stable := strconv.Itoa(req.SourceIndex), false
+	if req.Kind == JobKindTranslate {
+		source, stable = s.translationSource(ctx, req.MediaFileID, req.SourceIndex)
+	}
+	key := idempotencyKey(req.MediaFileID, req.Kind, source, req.TargetLanguage, jobModel)
 	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, key); err != nil {
 		return nil, err
 	} else if existing != nil {
-		return existing, nil
+		return asRequested(existing, req.SourceIndex), nil
+	}
+	if stable {
+		if existing, err := s.findTranslationByIndexOrReuse(ctx, req, key, jobModel); err != nil || existing != nil {
+			return existing, err
+		}
 	}
 
 	// Quota gates only the creation of a new job: collapsing onto an existing
@@ -261,7 +274,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		// The same lookup also covers a quota rejection that raced an identical
 		// request: collapsing onto the winner is free, so it stays allowed.
 		if existing, lookupErr := s.repo.GetActiveJobByIdempotencyKey(ctx, key); lookupErr == nil && existing != nil {
-			return existing, nil
+			return asRequested(existing, req.SourceIndex), nil
 		}
 		return nil, err
 	}
@@ -341,6 +354,10 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		s.logger.WarnContext(ctx, "failed to mark subtitle ai job running", "job", job.ID, "error", err)
 	}
 
+	if s.sourceChanged(ctx, job) {
+		s.finishWithError(ctx, job, errSourceChanged)
+		return
+	}
 	cues, sourceLang, err := s.loadSource(ctx, job)
 	if err != nil {
 		s.finishWithError(ctx, job, err)

@@ -67,6 +67,7 @@ GET /Shows/{id}/Seasons	non-media
 GET /Shows/{id}/Similar	non-media
 GET /Studios	non-media
 GET /SyncPlay/List	non-media
+GET /System/Configuration/{key}	non-media
 GET /System/Endpoint	non-media
 GET /System/Info	non-media
 GET /System/Info/Public	non-media
@@ -116,6 +117,7 @@ DELETE /Users/{userId}/PlayedItems/{itemId}	non-media
 POST /Users/{userId}/PlayedItems/{itemId}	non-media
 GET /Users/{userId}/Views	non-media
 DELETE /Videos/ActiveEncodings	non-media
+GET /Videos/{id}/AdditionalParts	non-media
 GET /Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
@@ -229,6 +231,7 @@ GET /Shows/{id}/Seasons	non-media
 GET /Shows/{id}/Similar	non-media
 GET /Studios	non-media
 GET /SyncPlay/List	non-media
+GET /System/Configuration/{key}	non-media
 GET /System/Endpoint	non-media
 GET /System/Info	non-media
 GET /System/Info/Public	non-media
@@ -278,6 +281,7 @@ DELETE /Users/{userId}/PlayedItems/{itemId}	non-media
 POST /Users/{userId}/PlayedItems/{itemId}	non-media
 GET /Users/{userId}/Views	non-media
 DELETE /Videos/ActiveEncodings	non-media
+GET /Videos/{id}/AdditionalParts	non-media
 GET /Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
 GET /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true

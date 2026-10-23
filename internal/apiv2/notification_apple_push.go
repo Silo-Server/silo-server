@@ -39,6 +39,25 @@ type ApplePushRegistrationReceipt struct {
 	ServerID              string `json:"server_id,omitempty" doc:"This deployment's identity, the server_id getServerIdentity reports. Key this registration's push credentials by it and the registering profile: pushes name both. Absent when unavailable." example:"3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35"`
 }
 type ApplePushRegistrationOutput struct{ Body ApplePushRegistrationReceipt }
+
+// ApplePushRetirementService stops delivery to an Apple installation on the
+// authority of its installation key alone.
+type ApplePushRetirementService interface {
+	ApplePushRetirementAvailable() bool
+	RetireApplePush(context.Context, notifications.ApplePushRetirement) (notifications.ApplePushReceipt, error)
+}
+type ApplePushRetirementBody struct {
+	DeviceID string `json:"device_id" minLength:"1" maxLength:"128"`
+}
+type ApplePushRetirementInput struct {
+	AndroidPushAuthority
+	Body ApplePushRetirementBody
+}
+type ApplePushRetirementReceipt struct {
+	Generation ID   `json:"generation" doc:"The retirement's generation, which is now the installation's newest intent."`
+	Removed    bool `json:"removed" doc:"Always true: the server delivers nothing to this installation until it registers again with a higher generation."`
+}
+type ApplePushRetirementOutput struct{ Body ApplePushRetirementReceipt }
 type ApplePushRegistrationCapability struct {
 	Capability
 	RegistrationAvailable bool `json:"registration_available" doc:"Local ordered storage and current-login validation are configured; not provider delivery or cluster rollout readiness."`
@@ -80,9 +99,9 @@ func registerOrderedApplePush(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		generation, err := strconv.ParseInt(in.Generation, 10, 64)
-		if err != nil || generation <= 0 || strconv.FormatInt(generation, 10) != in.Generation {
-			return nil, NewProblem(TypeValidationFailed, "X-Push-Generation must be a positive canonical decimal int64.")
+		generation, err := pushGeneration(in.Generation)
+		if err != nil {
+			return nil, err
 		}
 		cmd := notifications.ApplePushCommand{UserID: user, ProfileID: profile, InstallationKey: in.InstallationKey, Generation: generation, ApplePushRegistrationInput: notifications.ApplePushRegistrationInput{DeviceID: in.Body.DeviceID, APNsToken: in.Body.APNsToken, APNsEnvironment: in.Body.APNsEnvironment, APNsTopic: in.Body.APNsTopic, PushMode: in.Body.PushMode}}
 		identity := evt.SocketIdentity{UserID: user, ProfileID: profile, SessionID: claims.SessionID, Role: claims.Role, ImpersonatorUserID: claims.ImpersonatorUserID, AccessExpiresAt: claims.ExpiresAt.Time}
@@ -100,6 +119,35 @@ func registerOrderedApplePush(reg *Registry) {
 		}
 		return &ApplePushRegistrationOutput{Body: out}, nil
 	})
+	retire := Operation{Operation: humaOp(http.MethodPost, Prefix+"/devices/push/apple/retire", "retireApplePushInstallation", "notifications", "Stop delivery to an Apple installation without a login session, proved by its installation key. Send it after removing this server, when the session is already gone."), Class: ClassPublic, ServiceBacked: true, RetrySafety: RetrySafetyDomainIdentity, RateLimitBucket: bucketApplePushRetire}
+	retire.Errors = []int{http.StatusForbidden, http.StatusConflict, http.StatusTooManyRequests}
+	retire.MaxBodyBytes = 1024
+	Register(reg, retire, func(ctx context.Context, in *ApplePushRetirementInput) (*ApplePushRetirementOutput, error) {
+		if reg.deps.ApplePushRetirement == nil || !reg.deps.ApplePushRetirement.ApplePushRetirementAvailable() {
+			return nil, unavailable("Apple push retirement")
+		}
+		generation, err := pushGeneration(in.Generation)
+		if err != nil {
+			return nil, err
+		}
+		receipt, err := reg.deps.ApplePushRetirement.RetireApplePush(ctx, notifications.ApplePushRetirement{DeviceID: in.Body.DeviceID, InstallationKey: in.InstallationKey, Generation: generation})
+		if err != nil {
+			return nil, applePushProblem(err)
+		}
+		return &ApplePushRetirementOutput{Body: ApplePushRetirementReceipt{Generation: ID(strconv.FormatInt(receipt.Generation, 10)), Removed: receipt.Removed}}, nil
+	})
+}
+
+// bucketApplePushRetire names the per-IP budget for session-less retirement.
+// The 256-bit installation key is the guard; the budget is anti-probe hygiene.
+const bucketApplePushRetire = "apple_push_retire"
+
+func pushGeneration(value string) (int64, error) {
+	generation, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || generation <= 0 || strconv.FormatInt(generation, 10) != value {
+		return 0, NewProblem(TypeValidationFailed, "X-Push-Generation must be a positive canonical decimal int64.")
+	}
+	return generation, nil
 }
 
 func (c ApplePushRegistrationCapability) capabilityState() string {

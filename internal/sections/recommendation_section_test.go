@@ -223,9 +223,19 @@ func TestRecommendationSectionsTakeTheServedRowTitlePostgres(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	id := "recs-title-" + uuid.NewString()[:8]
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, id) })
+	var library int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, id+"-lib").Scan(&library); err != nil {
+		t.Fatalf("seed library: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, id)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, library)
+	})
 	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'movie', $1, 'matched', '{}'::text[])`, id); err != nil {
 		t.Fatalf("seed item: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, $3)`, id, library, time.Now()); err != nil {
+		t.Fatalf("seed membership: %v", err)
 	}
 	fetcher := NewFetcher(pool)
 	for _, tc := range []struct {

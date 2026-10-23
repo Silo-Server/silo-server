@@ -109,7 +109,7 @@ func NewClient(cfg BucketConfig) *Client {
 
 	role := telemetry.Role(cfg.Role)
 	s3Client := s3.New(s3.Options{
-		APIOptions:   []func(*middleware.Stack) error{observeS3(role)},
+		APIOptions:   []func(*middleware.Stack) error{observeS3(role), markThrottled},
 		HTTPClient:   observedHTTPClient{inner: sharedHTTPClient(), role: role},
 		Region:       region,
 		BaseEndpoint: aws.String(cfg.Endpoint),
@@ -119,6 +119,7 @@ func NewClient(cfg BucketConfig) *Client {
 			"",
 		),
 		UsePathStyle: cfg.PathStyle,
+		Retryer:      newRetryer(),
 	})
 
 	// URL signing is local work, so it must not appear as a storage call.
@@ -619,6 +620,12 @@ func (c *Client) ObjectAvailable(ctx context.Context, bucket, key string) (bool,
 // ObjectMatches checks that an immutable object exists with the expected
 // length and application-recorded SHA-256. Objects written before checksums
 // were recorded return false and are safely rewritten by the caller.
+//
+// A 403 also returns false. A HEAD response has no body, so it cannot say
+// whether the key is missing (AWS S3 answers 403 for a missing key when the
+// credential lacks s3:ListBucket) or access is denied. The caller's rewrite
+// settles it: a credential that may write succeeds, and a real denial fails
+// the PUT with the backend's error code.
 func (c *Client) ObjectMatches(ctx context.Context, bucket, key string, data []byte) (bool, error) {
 	objectKey := c.prefixedKey(key)
 	out, err := c.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
@@ -626,7 +633,7 @@ func (c *Client) ObjectMatches(ctx context.Context, bucket, key string, data []b
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
-		if isNotFoundErr(err) {
+		if isNotFoundErr(err) || httpStatusCode(err) == http.StatusForbidden {
 			return false, nil
 		}
 		return false, fmt.Errorf("s3 HeadObject %s/%s: %w", bucket, key, err)
@@ -848,15 +855,9 @@ func isBatchDeleteUnsupported(err error) bool {
 			return true
 		}
 	}
-	type httpResponseError interface {
-		HTTPStatusCode() int
-	}
-	var httpErr httpResponseError
-	if errors.As(err, &httpErr) {
-		switch httpErr.HTTPStatusCode() {
-		case http.StatusNotImplemented, http.StatusMethodNotAllowed:
-			return true
-		}
+	switch httpStatusCode(err) {
+	case http.StatusNotImplemented, http.StatusMethodNotAllowed:
+		return true
 	}
 	return false
 }
@@ -931,19 +932,21 @@ func isNotFoundErr(err error) bool {
 	}
 
 	// Some S3-compatible backends return a generic error with "NotFound" or
-	// "NoSuchKey" in the message, or an HTTP 404 status. Check the smithy
-	// response error interface.
+	// "NoSuchKey" in the message, or an HTTP 404 status.
+	return httpStatusCode(err) == http.StatusNotFound
+}
+
+// httpStatusCode returns the HTTP status of the S3 response behind err, or 0
+// when err did not come from a response.
+func httpStatusCode(err error) int {
 	type httpResponseError interface {
 		HTTPStatusCode() int
 	}
 	var httpErr httpResponseError
 	if errors.As(err, &httpErr) {
-		if httpErr.HTTPStatusCode() == 404 {
-			return true
-		}
+		return httpErr.HTTPStatusCode()
 	}
-
-	return false
+	return 0
 }
 
 // bytesReadSeeker wraps a byte slice to implement io.ReadSeeker for PutObject.

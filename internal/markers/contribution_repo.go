@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 const contributionClaimIndex = "marker_contributions_provider_target_active_uidx"
@@ -228,41 +230,61 @@ type ContributionCandidate struct {
 	Confidence float64
 }
 
-// episodeTargetKeySQL derives contributionTargetKey in SQL for an episode row
-// e and its series row series.
-const episodeTargetKeySQL = `'episode|' ||
-	CASE
-		WHEN COALESCE(series.tmdb_id, '') <> '' THEN 'tmdb:' || series.tmdb_id
-		WHEN COALESCE(series.tvdb_id, '') <> '' THEN 'tvdb:' || series.tvdb_id
-		WHEN COALESCE(series.imdb_id, '') <> '' THEN 'imdb:' || series.imdb_id
-		ELSE ''
-	END || '|' || e.season_number || '|' || e.episode_number`
+// AutoContributor is a provider with automatic sharing enabled, with the
+// settings that decide which local markers it accepts.
+type AutoContributor struct {
+	Provider      string
+	MinConfidence float64
+	// RequiredExternalIDs are the series IDs the provider requires, in the
+	// order it keys submissions by them.
+	RequiredExternalIDs []string
+}
 
 // CandidateLocalMarkerFiles returns episode files carrying a local (scanner)
-// marker of kind, an intro or credits, at or above minConfidence, highest
-// confidence first. A file is skipped while every listed provider holds a
-// claim on its current target for that segment, from this file or another
-// version of the episode, that Claim would not hand over; a claim on an older
-// target, a stale in-flight claim, and an invalid refusal due for its recheck
-// leave the file eligible.
+// marker of kind, an intro or credits, that at least one of providers would
+// submit, highest confidence first. A provider would submit a file when the
+// marker meets its minimum confidence, the series carries every external ID it
+// requires, and it holds no claim on the file's current target for that
+// segment, from this file or another version of the episode, that Claim would
+// not hand over; a claim on an older target, a stale in-flight claim, and an
+// invalid refusal due for its recheck leave the file eligible. A file every
+// provider declines is not returned, and returns once a provider's reason no
+// longer holds.
 // Paging is by keyset: pass the last candidate returned (nil for the first
 // page).
-func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind MarkerKind, minConfidence float64, providers []string, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {
+func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind MarkerKind, providers []AutoContributor, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {
 	if s == nil || s.pool == nil || len(providers) == 0 {
 		return nil, nil
 	}
 	if !autoContributedKind(kind) {
 		return nil, fmt.Errorf("automatic contribution does not share %q markers", markerKindName(kind))
 	}
+	ids := make([]string, len(providers))
+	minimums := make([]float64, len(providers))
+	required := make([]string, len(providers))
+	minConfidence := providers[0].MinConfidence
+	for i, p := range providers {
+		ids[i], minimums[i] = p.Provider, p.MinConfidence
+		required[i] = strings.Join(normalizeExternalIDKeys(p.RequiredExternalIDs), ",")
+		minConfidence = min(minConfidence, p.MinConfidence)
+	}
 	afterConfidence, afterID := 2.0, 0
 	if after != nil {
 		afterConfidence, afterID = after.Confidence, after.FileID
 	}
+	// series_ids holds the series' non-blank external IDs. The target key
+	// follows contributionTargetKey: the provider's first required ID, or else
+	// TMDB, TVDB, then IMDb.
 	rows, err := s.pool.Query(ctx, `
 		SELECT mf.id, seg.confidence
 		FROM media_files mf
 		JOIN episodes e ON e.content_id = mf.episode_id
 		LEFT JOIN media_items series ON series.content_id = e.series_id
+		CROSS JOIN LATERAL (SELECT jsonb_strip_nulls(jsonb_build_object(
+		    'tmdb', NULLIF(BTRIM(series.tmdb_id), ''),
+		    'tvdb', NULLIF(BTRIM(series.tvdb_id), ''),
+		    'imdb', NULLIF(BTRIM(series.imdb_id), '')
+		)) AS ids) AS series_ids
 		CROSS JOIN LATERAL (VALUES
 		    ('intro', mf.intro_markers_source, mf.intro_start, mf.intro_end, COALESCE(mf.intro_markers_confidence, 0)),
 		    ('credits', mf.credits_markers_source, mf.credits_start, mf.credits_end, COALESCE(mf.credits_markers_confidence, 0))
@@ -273,23 +295,36 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		  AND seg.start_s IS NOT NULL AND seg.end_s IS NOT NULL
 		  AND seg.confidence >= $2
 		  AND e.season_number > 0 AND e.episode_number > 0
+		  AND series_ids.ids <> '{}'::jsonb
 		  AND (seg.confidence, -mf.id) < ($3::double precision, -$4::integer)
-		  AND (
-		      SELECT COUNT(DISTINCT mc.provider)
-		      FROM marker_contributions mc
-		      WHERE mc.segment_kind = seg.kind
-		        AND mc.claim_active
-		        AND mc.provider = ANY($5::text[])
-		        AND mc.target_key = `+episodeTargetKeySQL+`
-		        AND NOT (mc.status = $7 AND mc.updated_at < now() - ($8 * interval '1 second'))
-		        AND NOT (mc.status = $9 AND mc.updated_at < now() - ($10 * interval '1 second'))
-		  ) < cardinality($5::text[])
+		  AND EXISTS (
+		      SELECT 1
+		      FROM unnest($5::text[], $12::double precision[], $13::text[]) AS p(provider, min_confidence, required)
+		      CROSS JOIN LATERAL (SELECT string_to_array(NULLIF(p.required, ''), ',') AS keys) AS req
+		      WHERE seg.confidence >= p.min_confidence
+		        AND series_ids.ids ?& COALESCE(req.keys, '{}')
+		        AND NOT EXISTS (
+		            SELECT 1
+		            FROM marker_contributions mc
+		            WHERE mc.provider = p.provider
+		              AND mc.segment_kind = seg.kind
+		              AND mc.claim_active
+		              AND mc.target_key = 'episode|' || COALESCE(
+		                  req.keys[1] || ':' || (series_ids.ids ->> req.keys[1]),
+		                  'tmdb:' || (series_ids.ids ->> 'tmdb'),
+		                  'tvdb:' || (series_ids.ids ->> 'tvdb'),
+		                  'imdb:' || (series_ids.ids ->> 'imdb')
+		              ) || '|' || e.season_number || '|' || e.episode_number
+		              AND NOT (mc.status = $7 AND mc.updated_at < now() - ($8 * interval '1 second'))
+		              AND NOT (mc.status = $9 AND mc.updated_at < now() - ($10 * interval '1 second'))
+		        )
+		  )
 		ORDER BY seg.confidence DESC, mf.id
 		LIMIT $6`,
-		models.MarkerSourceScanner, minConfidence, afterConfidence, afterID, providers, limit,
+		models.MarkerSourceScanner, minConfidence, afterConfidence, afterID, ids, limit,
 		contributionStatusClaim, int64(contributionClaimLease/time.Second),
 		OutcomeStatusInvalid, int64(contributionInvalidRecheck/time.Second),
-		markerKindName(kind),
+		markerKindName(kind), minimums, required,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query contribution candidates: %w", err)

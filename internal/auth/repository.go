@@ -9,9 +9,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -32,10 +32,15 @@ func IsDuplicate(err error) bool {
 }
 
 // CheckPassword verifies a plaintext password against the user's bcrypt hash.
-// This is a standalone function, not a repository method.
-func CheckPassword(user *models.User, password string) bool {
-	err := comparePasswordHash([]byte(user.PasswordHash), []byte(password))
-	return err == nil
+// This is a standalone function, not a repository method. The error is
+// passwordhash.ErrBusy when the server was too busy to check: the password
+// is then neither right nor wrong.
+func CheckPassword(ctx context.Context, user *models.User, password string) (bool, error) {
+	err := comparePasswordHash(ctx, []byte(user.PasswordHash), []byte(password))
+	if errors.Is(err, passwordhash.ErrBusy) {
+		return false, err
+	}
+	return err == nil, nil
 }
 
 // UserRepository provides CRUD operations for the users table.
@@ -149,7 +154,7 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 func createUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, input models.CreateUserInput) (*models.User, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), passwordHashCost)
+	hash, err := passwordhash.Generate(ctx, []byte(input.Password), passwordHashCost)
 	if err != nil {
 		return nil, fmt.Errorf("hashing password: %w", err)
 	}
@@ -340,21 +345,42 @@ func accessGroupSetClause(input models.UpdateUserInput, argIndex int) (setClause
 // It runs in its own transaction, so a promotion and the credential cleanup
 // it implies commit together.
 func (r *UserRepository) Update(ctx context.Context, id int, input models.UpdateUserInput) error {
+	passwordHash, err := hashUpdatePassword(ctx, &input)
+	if err != nil {
+		return err
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if err := updateUser(ctx, tx, id, input); err != nil {
+	if err := updateUser(ctx, tx, id, input, passwordHash); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
+// hashUpdatePassword hashes the new password an update sets before the
+// caller opens its transaction, so the transaction never waits for a hashing
+// turn while it holds locks; nil when the update sets none.
+func hashUpdatePassword(ctx context.Context, input *models.UpdateUserInput) (*string, error) {
+	if input == nil || input.Password == nil {
+		return nil, nil
+	}
+	hash, err := passwordhash.Generate(ctx, []byte(*input.Password), passwordHashCost)
+	if err != nil {
+		return nil, fmt.Errorf("hashing password: %w", err)
+	}
+	hashed := string(hash)
+	return &hashed, nil
+}
+
+// updateUser writes input's fields. passwordHash is input.Password prepared by
+// hashUpdatePassword before the transaction; input.Password itself is not read.
 func updateUser(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, id int, input models.UpdateUserInput) error {
+}, id int, input models.UpdateUserInput, passwordHash *string) error {
 	currentRole, err := updateCurrentRole(ctx, db, id, input)
 	if err != nil {
 		return err
@@ -370,15 +396,6 @@ func updateUser(ctx context.Context, db interface {
 	if input.Username != nil {
 		normalized := NormalizeUsername(*input.Username)
 		username = &normalized
-	}
-	var passwordHash *string
-	if input.Password != nil {
-		hash, err := bcrypt.GenerateFromPassword([]byte(*input.Password), passwordHashCost)
-		if err != nil {
-			return fmt.Errorf("hashing password: %w", err)
-		}
-		hashed := string(hash)
-		passwordHash = &hashed
 	}
 	var permissions []string
 	if input.Permissions != nil {
@@ -585,7 +602,7 @@ func (r *UserRepository) ReplaceTemporaryPassword(ctx context.Context, id int, e
 }
 
 func (r *UserRepository) compareAndSwapPassword(ctx context.Context, id int, expectedHash, newPassword string, keepSessionID *string) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), passwordHashCost)
+	hash, err := passwordhash.Generate(ctx, []byte(newPassword), passwordHashCost)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
 	}

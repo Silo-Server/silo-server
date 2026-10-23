@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -92,4 +93,26 @@ type zeros struct{}
 func (zeros) Read(p []byte) (int, error) {
 	clear(p)
 	return len(p), nil
+}
+
+func TestDownloadRefusesRedirectOffTheAPIHost(t *testing.T) {
+	var otherHits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		otherHits.Add(1)
+		_, _ = w.Write([]byte("1\n00:00:01,000 --> 00:00:02,000\noff host\n"))
+	}))
+	defer other.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.RequestURI(), http.StatusFound)
+	}))
+	defer api.Close()
+
+	if _, _, err := New(Config{APIKey: "synthetic", BaseURL: api.URL}).Download(t.Context(), "42"); err == nil {
+		t.Fatal("download followed an off-host redirect")
+	}
+	// The key travels in a header that Go keeps on a redirect to another
+	// host, so the other host must never be asked.
+	if n := otherHits.Load(); n != 0 {
+		t.Fatalf("off-host server received %d requests", n)
+	}
 }

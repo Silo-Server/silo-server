@@ -51,3 +51,34 @@ Silo does not assume it is the only media server on the box. Run Jellyfin, Plex,
 tuner/IPTV backend alongside it for live TV, and use Silo for the on-disk library. That
 separation also keeps the risk where it belongs, on software whose distribution model can absorb
 it.
+
+## Deleting or managing media files
+
+**Out of scope permanently.** Silo is a media server, not a media manager. It reads the files in
+a library; it does not delete, move, rename, or reorganize them. This covers, at minimum:
+
+- Deleting a media file or item from disk, through any API, admin option, or client action.
+- Moving, renaming, or sorting files into a folder layout.
+- Automatic cleanup, such as removing an episode once it has been watched.
+
+### Why
+
+**The library belongs to the operator.** Silo only needs read access to media; the shipped Compose file mounts libraries read-only. A server that can
+delete files needs write access to every library, and then one bug, compromised account, or
+mistaken tap can destroy media that may not be backed up. Keeping Silo read-only removes that
+whole class of failure.
+
+**Other tools already do this well.** Library managers such as Sonarr and Radarr, and the
+operator's own file manager or shell, own file layout and cleanup. When they change files, Silo's
+scanner picks up the result.
+
+### Not available as a plugin either
+
+A plugin that deletes or moves library files brings back the same write access and the same risk.
+Not in core, not in a plugin, not in a client. The Jellyfin compatibility layer reports items as
+not deletable for the same reason.
+
+### What to do instead
+
+Manage files with the tools built for it: a library manager, a file manager, or the shell. Silo
+reflects the change on its next scan.

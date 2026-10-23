@@ -40,7 +40,7 @@ func TestPlanPlaybackV3NamesTheActiveQuality(t *testing.T) {
 		{name: "auto on the local network under an estimate", quality: QualityAutoV3, local: true, estimateKbps: 100_000, want: QualityRung1080pHighV3},
 		{name: "a resolution the source fits plays the source", quality: "1080p", want: ""},
 		{name: "a lower resolution names its class rung", quality: "720p", want: QualityRung720pMediumV3},
-		{name: "a resolution a cap held to 720p", quality: "1080p", capKbps: 3_000, want: QualityRung720pMediumV3},
+		{name: "a resolution a cap held to its low rung", quality: "1080p", capKbps: 3_000, want: QualityRung1080pLowV3},
 		{name: "a cap between two rungs", quality: "1080p", capKbps: 1_800, want: ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {

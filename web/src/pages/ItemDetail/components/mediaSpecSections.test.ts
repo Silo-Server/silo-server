@@ -85,6 +85,13 @@ describe("formatDolbyVisionLabel", () => {
     expect(formatDolbyVisionLabel({ dolby_vision: "Profile 5", video_range_type: "DOVI" })).toBe(
       "Dolby Vision Profile 5",
     );
+    expect(
+      formatVideoRangeLabel({
+        dolby_vision: "Profile 8",
+        video_range_type: "DOVIWithHDR10Plus",
+        hdr10_plus: true,
+      }),
+    ).toBe("Dolby Vision Profile 8 (HDR10 compatible) · HDR10+");
   });
 
   it("prefers explicit DV side-data fields over the video_range_type fallback", () => {

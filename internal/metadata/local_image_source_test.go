@@ -298,6 +298,7 @@ func TestBuildItemLocalizationRecordSkipsLocalCandidates(t *testing.T) {
 		"de",
 		"movie",
 		&MetadataResult{},
+		&MetadataResult{},
 		[]RemoteImage{
 			{ProviderID: "nfo", URL: "file:///media/movies/Film/poster.jpg", Type: ImagePoster},
 		},

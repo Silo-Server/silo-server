@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 type fakeSubmitter struct {
@@ -451,6 +452,33 @@ func TestContributeDisabledProviderNoop(t *testing.T) {
 	outcomes, _ := svc.ContributeFile(context.Background(), file, ContributeOptions{})
 	if len(sub.submitted) != 0 || len(outcomes) != 0 {
 		t.Errorf("disabled provider must be a no-op, submitted=%d outcomes=%d", len(sub.submitted), len(outcomes))
+	}
+}
+
+// AutoContributors lists only registered submitters with automatic sharing on,
+// carrying each one's own minimum and required IDs.
+func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
+	reg := NewRegistry(nil)
+	for _, sub := range []*fakeSubmitter{
+		{id: "keyed", required: []string{ExternalIDKeyTVDB}},
+		{id: "manual-only"},
+		{id: "disabled"},
+	} {
+		_ = reg.Register(sub)
+	}
+	cfg := fakeConfig{
+		"keyed":       {Provider: "keyed", ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.97},
+		"manual-only": {Provider: "manual-only", ContributeEnabled: true},
+		"disabled":    {Provider: "disabled", ContributeAutoLocal: true},
+		// A configured provider whose plugin is not loaded cannot submit.
+		"unregistered": {Provider: "unregistered", ContributeEnabled: true, ContributeAutoLocal: true},
+	}
+	svc := NewContributionService(reg, fakeResolver{}, cfg, &fakeRecorder{}, nil)
+
+	got := svc.AutoContributors()
+	want := []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}}}
+	if fmt.Sprintf("%+v", got) != fmt.Sprintf("%+v", want) {
+		t.Fatalf("AutoContributors = %+v, want %+v", got, want)
 	}
 }
 

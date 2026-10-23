@@ -74,7 +74,6 @@ type UserStore interface {
 	ListProfiles(ctx context.Context) ([]Profile, error)
 	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error
 	DeleteProfile(ctx context.Context, id string) error
-	VerifyPIN(ctx context.Context, profileID, pin string) (bool, error)
 
 	// Progress
 	UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds ProgressThresholds) error

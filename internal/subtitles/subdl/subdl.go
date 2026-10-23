@@ -47,7 +47,7 @@ func New(cfg Config) *Provider {
 		dlBase = defaultDLBaseURL
 	}
 	return &Provider{
-		client:    &http.Client{Timeout: 15 * time.Second, CheckRedirect: sameOriginRedirects},
+		client:    &http.Client{Timeout: 15 * time.Second, CheckRedirect: subtitles.SameOriginRedirects},
 		baseURL:   base,
 		dlBaseURL: dlBase,
 		apiKey:    cfg.APIKey,

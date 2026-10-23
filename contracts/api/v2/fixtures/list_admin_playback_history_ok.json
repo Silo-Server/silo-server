@@ -16,6 +16,7 @@
       "watched_seconds": 3600,
       "duration_seconds": 5400.5,
       "completed": true,
+      "played_seconds": 120,
       "series_title": "",
       "season_number": null,
       "episode_number": null

@@ -35,7 +35,7 @@ type WatchTogetherSuggestion struct {
 	ContentType        string  `json:"content_type" enum:"movie,episode"`
 	Title              string  `json:"title"`
 	Subtitle           string  `json:"subtitle"`
-	PosterURL          string  `json:"poster_url"`
+	PosterURL          string  `json:"poster_url" doc:"Poster the suggesting member's client sent; not validated as a URI"`
 	Note               string  `json:"note"`
 	VoteCount          int     `json:"vote_count"`
 	VotedByMe          bool    `json:"voted_by_me"`

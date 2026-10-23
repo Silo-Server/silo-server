@@ -36,8 +36,10 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 		{http.MethodGet, "/Items/Filters2"},
 		{http.MethodGet, "/Items/abc/LocalTrailers"},
 		{http.MethodGet, "/Users/u1/Items/abc/LocalTrailers"},
+		{http.MethodGet, "/Videos/abc/AdditionalParts"},
 		{http.MethodGet, "/Sessions"},
 		{http.MethodPost, "/ClientLog/Document"},
+		{http.MethodGet, "/System/Configuration/encoding"},
 	}
 	for _, tc := range authGroup {
 		rec := httptest.NewRecorder()
@@ -78,5 +80,24 @@ func TestRouter_MissingEndpointsRegistered(t *testing.T) {
 		t.Errorf("authed GET /Sessions = %d, want 200", rec.Code)
 	} else if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
 		t.Errorf("authed GET /Sessions body = %q, want []", got)
+	}
+	// Jellyfin Web draws no ASS/SSA subtitle until the encoding config loads, and
+	// the Kodi add-on indexes EnableSubtitleExtraction from it.
+	if rec := authed(http.MethodGet, "/System/Configuration/encoding"); rec.Code != http.StatusOK {
+		t.Errorf("authed GET /System/Configuration/encoding = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	} else if got := strings.TrimSpace(rec.Body.String()); got != `{"EnableFallbackFont":false,"EnableSubtitleExtraction":true}` {
+		t.Errorf("authed GET /System/Configuration/encoding body = %s, want fallback font off and subtitle extraction on", got)
+	}
+	if rec := authed(http.MethodGet, "/System/Configuration/livetv"); rec.Code != http.StatusNotFound {
+		t.Errorf("authed GET /System/Configuration/livetv = %d, want 404", rec.Code)
+	}
+	// Moonfin for Roku asks for additional parts in lowercase (#1097).
+	for _, path := range []string{"/Videos/abc/AdditionalParts", "/videos/abc/additionalparts"} {
+		rec := authed(http.MethodGet, path)
+		if rec.Code != http.StatusOK {
+			t.Errorf("authed GET %s = %d, want 200; body=%s", path, rec.Code, rec.Body.String())
+		} else if !strings.Contains(rec.Body.String(), `"Items":[]`) || !strings.Contains(rec.Body.String(), `"TotalRecordCount":0`) {
+			t.Errorf("authed GET %s body = %s, want an empty QueryResult", path, rec.Body.String())
+		}
 	}
 }

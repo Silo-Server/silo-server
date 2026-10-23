@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/Silo-Server/silo-server/internal/scanbatch"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -1158,10 +1159,26 @@ func (r *FileRepository) UpdateIdentityAndExternalSubtitles(ctx context.Context,
 }
 
 func (r *FileRepository) updateIdentity(ctx context.Context, mf models.MediaFile, externalSubtitlesJSON []byte) (int, error) {
-	groupKeyVersion, identityConfidence, identityJSON := identityColumnDefaults(mf)
+	query := `UPDATE media_files SET ` + identityAssignments + `,
+		match_suppressed_at = NULL,
+		updated_at = NOW()
+	WHERE file_path = $1
+	RETURNING id`
 
-	query := `UPDATE media_files SET
-		media_folder_id = $2,
+	var id int
+	err := r.pool.QueryRow(ctx, query, identityArgs(mf.FilePath, mf, externalSubtitlesJSON)...).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrFileNotFound
+		}
+		return 0, fmt.Errorf("updating media file identity: %w", err)
+	}
+	return id, nil
+}
+
+// identityAssignments sets the path-derived identity columns, and the
+// sidecar list when one is given, from arguments $2 to $24 of identityArgs.
+const identityAssignments = `media_folder_id = $2,
 		canonical_root_path = $3,
 		observed_root_path = $4,
 		content_group_key = $5,
@@ -1183,15 +1200,14 @@ func (r *FileRepository) updateIdentity(ctx context.Context, mf models.MediaFile
 		presentation_part_total = $21,
 		multi_episode_start = $22,
 		multi_episode_end = $23,
-		external_subtitles = COALESCE($24, external_subtitles),
-		match_suppressed_at = NULL,
-		updated_at = NOW()
-	WHERE file_path = $1
-	RETURNING id`
+		external_subtitles = COALESCE($24, external_subtitles)`
 
-	var id int
-	err := r.pool.QueryRow(ctx, query,
-		mf.FilePath,
+// identityArgs returns the arguments for identityAssignments, with key, the
+// row the caller's WHERE clause selects, as $1.
+func identityArgs(key any, mf models.MediaFile, externalSubtitlesJSON []byte) []any {
+	groupKeyVersion, identityConfidence, identityJSON := identityColumnDefaults(mf)
+	return []any{
+		key,
 		mf.MediaFolderID,
 		mf.CanonicalRootPath,
 		mf.ObservedRootPath,
@@ -1215,14 +1231,66 @@ func (r *FileRepository) updateIdentity(ctx context.Context, mf models.MediaFile
 		nilIfZero(mf.MultiEpisodeStart),
 		nilIfZero(mf.MultiEpisodeEnd),
 		externalSubtitlesJSON,
-	).Scan(&id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, ErrFileNotFound
-		}
-		return 0, fmt.Errorf("updating media file identity: %w", err)
 	}
-	return id, nil
+}
+
+// MovedFileCandidates returns the rows in a folder that recorded the same size
+// and OSHash as the file that appeared at filePath, the rows it may have moved
+// from, along with any row already at filePath. A scan whose snapshot predates
+// another scan's write finds that row here and leaves it alone.
+func (r *FileRepository) MovedFileCandidates(ctx context.Context, folderID int, filePath string, fileSize int64, fileHash string) ([]*scanStateFile, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+scanStateColumns+` FROM media_files
+		WHERE media_folder_id = $3
+		  AND (file_path = $4 OR (file_hash = $1 AND file_size = $2 AND extra_id IS NULL))`,
+		fileHash, fileSize, folderID, filePath,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying moved file candidates: %w", err)
+	}
+	return scanScanStateRows(rows)
+}
+
+// RelinkMovedFile moves the row of a file that left moved.FilePath to
+// mf.FilePath, marks it present, and rewrites its path-derived identity and
+// sidecars from mf. Probe data, chapters, markers, and every row keyed to the
+// file's id stay as they are. The update only applies while the row is still
+// the one the caller verified: same path, bytes, modification time, and links.
+// It reports false when the row changed meanwhile or another row holds the new
+// path; the caller then treats the file as new.
+func (r *FileRepository) RelinkMovedFile(ctx context.Context, moved *scanStateFile, mf models.MediaFile) (bool, error) {
+	externalSubtitlesJSON, err := serializeJSONB(mf.ExternalSubtitles)
+	if err != nil {
+		return false, fmt.Errorf("marshaling external_subtitles: %w", err)
+	}
+	args := append(identityArgs(moved.ID, mf, externalSubtitlesJSON),
+		mf.FilePath,
+		moved.FilePath,
+		moved.FileHash,
+		moved.FileSize,
+		moved.FileModifiedAt,
+		nilIfEmpty(moved.ContentID),
+		nilIfEmpty(moved.EpisodeID),
+	)
+	tag, err := r.pool.Exec(ctx, `UPDATE media_files SET `+identityAssignments+`,
+		file_path = $25,
+		missing_since = NULL,
+		updated_at = NOW()
+	WHERE id = $1
+	  AND file_path = $26
+	  AND file_hash = $27
+	  AND file_size = $28
+	  AND file_modified_at IS NOT DISTINCT FROM $29
+	  AND content_id IS NOT DISTINCT FROM $30
+	  AND episode_id IS NOT DISTINCT FROM $31
+	  AND extra_id IS NULL`, args...)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return false, nil
+		}
+		return false, fmt.Errorf("relinking moved media file: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 type ChapterThumbnailFailureState struct {
@@ -3025,11 +3093,14 @@ func claimRepresentativeWindow(limit int) int {
 	return window
 }
 
-// MarkMissing sets the missing_since timestamp for the given media file.
-func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Time) error {
+// MarkMissing sets the missing_since timestamp for the given media file while
+// it is still recorded at filePath. A row that moved to another path since the
+// caller read it (a rename relinked it) is left alone and reported as
+// ErrFileNotFound, like a row deleted meanwhile.
+func (r *FileRepository) MarkMissing(ctx context.Context, id int, filePath string, since time.Time) error {
 	tag, err := r.pool.Exec(ctx,
-		"UPDATE media_files SET missing_since = $1, updated_at = NOW() WHERE id = $2",
-		since, id,
+		"UPDATE media_files SET missing_since = $1, updated_at = NOW() WHERE id = $2 AND file_path = $3",
+		since, id, filePath,
 	)
 	if err != nil {
 		return fmt.Errorf("marking file missing: %w", err)

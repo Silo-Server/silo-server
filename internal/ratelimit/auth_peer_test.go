@@ -122,10 +122,10 @@ func TestAuthEndpointHandlerSpendsPeerBudgetOnlyForForwardedClients(t *testing.T
 			want:   []string{"ip:203.0.113.10", "authip:203.0.113.10:login"},
 		},
 		{
-			name:   "direct IPv6 connection",
+			name:   "direct IPv6 connection counts by its /64",
 			peer:   "[2001:db8::10]:40000",
 			client: "2001:db8::10",
-			want:   []string{"ip:2001:db8::10", "authip:2001:db8::10:login"},
+			want:   []string{"ip:2001:db8::/64", "authip:2001:db8::/64:login"},
 		},
 		{
 			name:   "direct connection with an unparsable peer",

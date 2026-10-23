@@ -81,7 +81,7 @@ interface PlayerControlsProps {
   mediaFileId?: number;
   playerConfig?: PlayerConfig;
   onRefreshSubtitles?: () => void;
-  onSubtitleJobAccepted?: (jobId: string) => void;
+  onSubtitleJobAccepted?: (jobId: string, resultSubtitleId?: string) => void;
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
   subtitleSync?: SubtitleSync;

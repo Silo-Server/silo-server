@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
@@ -25,7 +26,7 @@ const legacyPluginAssets = "/api/v1/plugins/"
 // told to fetch it: the URL has to address this installation's own asset route
 // under the versioned plugin-content mount (or its legacy alias, which is
 // projected there), and the proxy has to report that route as public.
-// Anything else is dropped; a non-local URL is passed through untouched.
+// Anything else is dropped; a non-local URL is passed through when it parses.
 func (reg *Registry) authProviderIcon(ctx context.Context, provider auth.LoginProviderInfo) string {
 	pluginAssets := plugins.ContentPrefix + "/plugins/"
 	prefix := pluginAssets
@@ -34,7 +35,7 @@ func (reg *Registry) authProviderIcon(ctx context.Context, provider auth.LoginPr
 	case strings.HasPrefix(provider.IconURL, legacyPluginAssets):
 		prefix = legacyPluginAssets
 	default:
-		return provider.IconURL
+		return catalogpkg.ImageURLOrEmpty(provider.IconURL)
 	}
 	u, err := url.Parse(provider.IconURL)
 	if err != nil || u.IsAbs() || u.Host != "" || strings.Contains(u.Path, "\\") || path.Clean(u.Path) != u.Path {

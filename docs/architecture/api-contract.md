@@ -691,6 +691,17 @@ Instants are RFC 3339 UTC strings with `Z` and millisecond precision. Date-only 
 milliseconds for client timing and seconds for coarse expiry—unless an existing normative
 protocol such as playback v3 specifies otherwise. User time zones are separate IANA identifiers.
 
+The schema declares these shapes so generated clients can type them, and the spec lint in
+`internal/contractspec` enforces them by member name. A date member declares `format: date`; a
+request member where `""` clears declares a `YYYY-MM-DD` pattern that also admits `""`, and a
+stored date that is not a calendar date is left out of a response rather than sent as text. A
+URL member declares `format: uri` when its value is always absolute and `uri-reference`
+otherwise; a URL-named member whose value the server stores or relays without parsing it as a
+URL carries no format and says "not validated as a URI" in its description. A language or
+country member names its standard (ISO 639, ISO 3166, BCP 47) and carries a `pattern` where every
+value it admits or emits has one shape; members that also accept language names, or emit stored
+values older than canonicalization, carry none.
+
 Enums are lowercase strings, never numbers. Request enums are closed and reject unknown values
 with `422`; response enums are additive and clients retain an unknown/raw fallback. Existing
 values are never renamed or repurposed. Polymorphic objects use a required string discriminator
