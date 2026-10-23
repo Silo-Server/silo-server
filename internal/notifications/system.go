@@ -80,6 +80,8 @@ type System struct {
 	// fallback for tokenized email links (see SetPublicURL).
 	publicURL string
 
+	// outbox enqueues operational deliveries' channel attempts.
+	outbox            channelOutbox
 	webhookRepo       *WebhookRepository
 	webhookDispatcher *WebhookDispatcher
 	webhookRetry      *WebhookRetryWorker
@@ -214,17 +216,11 @@ func NewSystem(
 	dispatchers = append(dispatchers, newNudgeDispatcher(discordWorker))
 
 	multiDispatcher := NewMultiDispatcher(dispatchers...)
+	outbox := channelOutbox{settings: settings, webhooks: webhookRepo, webPush: webPushRepo, pushDevices: pushDeviceRepo}
 	fanout := NewFanoutWorker(pool, releases, interests, deliveries, preferences, settings, scopes, multiDispatcher)
-	if webhookRepo != nil {
-		fanout.SetWebhookOutbox(webhookRepo, newProfileRateLimiter())
-	}
-	if webPushRepo != nil {
-		fanout.SetWebPushOutbox(webPushRepo)
-	}
-	if pushDeviceRepo != nil {
-		fanout.SetPushOutbox(pushDeviceRepo)
-	}
-	detector := NewAvailabilityDetector(releases, settings)
+	fanout.outbox = outbox
+	fanout.rateLimiter = newProfileRateLimiter()
+	detector := NewAvailabilityDetector(releases)
 	detector.SetFanoutNudge(func() {
 		fanout.Nudge()
 		serverChannelSweep.Nudge() // nil-safe
@@ -252,6 +248,7 @@ func NewSystem(
 		emailWorker:         emailWorker,
 		discordWorker:       discordWorker,
 		discordClient:       discordClient,
+		outbox:              outbox,
 		webhookRepo:         webhookRepo,
 		webhookDispatcher:   webhookDispatcher,
 		webhookRetry:        webhookRetry,
@@ -358,8 +355,8 @@ func (s *System) PayloadsForRows(ctx context.Context, rows []DeliveryRow) []Deli
 	return payloads
 }
 
-// Start launches the fanout worker, interest updater, and (when configured)
-// the webhook dispatch pool and retry worker under ctx.
+// Start launches the fanout worker, the interest updater, and every
+// configured channel's dispatch and retry loops under ctx; Wait drains them.
 func (s *System) Start(ctx context.Context) {
 	if s == nil {
 		return
@@ -806,16 +803,24 @@ type RetentionStats struct {
 	EmailVerificationReceiptsDeleted int64
 }
 
+// Retention windows: how long read and unread inbox rows are kept, and how
+// long processed release events are kept for debugging.
+const (
+	readDeliveryRetentionDays   = 90
+	unreadDeliveryRetentionDays = 180
+	releaseEventRetentionDays   = 30
+)
+
 // RunRetention applies the retention policy: read deliveries past the read
 // window, unread past the unread window, processed release events past the
-// debug window, unprocessed release events past the fanout staleness horizon,
-// and inert interest rows.
+// debug window, unprocessed release events past the staleness horizon, and
+// inert interest rows.
 func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 	var stats RetentionStats
 	now := time.Now().UTC()
-	readCutoff := now.AddDate(0, 0, -s.Settings.ReadRetentionDays(ctx))
-	unreadCutoff := now.AddDate(0, 0, -s.Settings.UnreadRetentionDays(ctx))
-	eventCutoff := now.AddDate(0, 0, -s.Settings.EventRetentionDays(ctx))
+	readCutoff := now.AddDate(0, 0, -readDeliveryRetentionDays)
+	unreadCutoff := now.AddDate(0, 0, -unreadDeliveryRetentionDays)
+	eventCutoff := now.AddDate(0, 0, -releaseEventRetentionDays)
 
 	deleted, err := s.Deliveries.DeleteOld(ctx, readCutoff, unreadCutoff)
 	if err != nil {
@@ -829,10 +834,10 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 	}
 	stats.EventsDeleted = events
 
-	// Unprocessed events accumulate without bound when fanout is disabled
-	// while availability detection keeps emitting; the fanout worker would
-	// suppress them as stale anyway, so retention reclaims them directly.
-	staleEvents, err := s.Releases.DeleteUnprocessedBefore(ctx, now.Add(-s.Settings.MaxEventAge(ctx)))
+	// Unprocessed events accumulate while no node runs fanout; the fanout
+	// worker would suppress them as stale anyway, so retention reclaims them
+	// directly.
+	staleEvents, err := s.Releases.DeleteUnprocessedBefore(ctx, now.Add(-maxReleaseEventAge))
 	if err != nil {
 		return stats, fmt.Errorf("prune stale release events: %w", err)
 	}

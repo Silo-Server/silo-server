@@ -102,9 +102,9 @@ series, or a series the viewer may not see, is 404.
 
 `DELETE /series/{series_id}/mute` (`unmuteNotificationSeries`) lifts the mute.
 The series notifies again for its active reasons. Fanout reads the mute when it
-evaluates a new episode, after the release settle delay (30 seconds by
-default): an episode it evaluated while the series was muted is not announced
-later, and one still waiting for fanout when the profile unmutes is announced.
+evaluates a new episode, normally within seconds of the episode arriving: an
+episode it evaluated while the series was muted is not announced later, and one
+still waiting for fanout when the profile unmutes is announced.
 The same holds the other way: a mute made just after an episode arrives can
 still stop its notification. Unmuting a series that is not muted succeeds. Unmute runs no access check, so a
 profile can lift a mute on a series it can no longer open.
@@ -245,6 +245,13 @@ is stored, the push sender self-registers with the configured relay on the
 first send; the explicit register endpoint remains for choosing a relay origin
 or rotating the credential.
 
+Not every inbox row is pushed. A new-episode notification reaches mobile push
+and web push only when the profile had no other new-episode notification for
+the same series in the previous 12 hours, so a season that arrives together
+pushes its first new episode once. The other episodes are ordinary inbox rows
+and appear on the next sync; clients that show an unread count should read it
+from the inbox, not count pushes.
+
 The relay credential maintains itself. The sender renews a capability before
 it expires. When the relay rejects the stored capability for any reason other
 than `deployment_disabled`, the sender registers a new deployment and resends,
@@ -280,8 +287,8 @@ until an administrator turns delivery on. Native clients see the effective
 state through `GET /api/v2/notifications/capabilities` and need no change.
 
 Relay errors become v2 problems, with `Retry-After` retained when supplied.
-Bridge 400 validation becomes 422 and bridge 502 upstream failures become the
-shared 500 `internal_error`; other existing supported statuses retain their
+An invalid `relay_url` keeps its 400 status, and bridge 502 upstream failures
+become the shared 500 `internal_error`; other existing supported statuses retain their
 meaning. V1 response statuses, error codes, timestamp format, and headers remain
 unchanged. Native clients and Jellyfin compatibility do not manage relay
 credentials and need no consumer change.
@@ -516,7 +523,7 @@ This operation is non-retryable. The existing settings action captures ID and au
 
 ### Update personal webhook configuration
 
-`PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state and notification reason flags are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`.
+`PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state and notification reason flags are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`. As with delete, standard conditional-header grammar applies, so `If-Match: *` also passes for an existing row; the UI never sends it.
 
 The repository locks the profile's exact row, checks its current revision, applies existing validation and writes configuration in one transaction. URL replacement preserves type restrictions, destination validation and encrypted URL binding. URL changes and re-enabling retain the existing failure-reset behavior. The write does not copy secret, type or delivery outcome fields from an editor. The reviewed server-owned revision trigger remains required and covers provider bookkeeping and bridge writers; those changes can conservatively invalidate an editor. Legacy writers may still change the row after this operation commits. A successful response is an observation, not a lease.
 

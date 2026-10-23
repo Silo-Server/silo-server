@@ -63,29 +63,6 @@ import { SaveBar } from "@/components/SaveBar";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import ServerNotificationChannels from "./ServerNotificationChannels";
 
-/**
- * Operator kill switches for the whole pipeline. Both default on and only
- * come off to stop a flood or chase a problem, so they sit under Advanced.
- */
-const PIPELINE_KEYS = ["notifications.release_events_enabled", "notifications.fanout_enabled"];
-
-/** Batching and flood control; all advanced. */
-const FANOUT_KEYS = [
-  "notifications.fanout.settle_seconds",
-  "notifications.fanout.max_series_burst",
-  "notifications.fanout.max_event_age_hours",
-];
-
-/** Inbox and event cleanup; all advanced. */
-const RETENTION_KEYS = [
-  "notifications.retention.read_days",
-  "notifications.retention.unread_days",
-  "notifications.retention.event_days",
-];
-
-/** The page's one foot-of-page Advanced area. */
-const PROCESSING_KEYS = [...PIPELINE_KEYS, ...FANOUT_KEYS, ...RETENTION_KEYS];
-
 /** Personal webhook limits and the SSRF escape hatch; all advanced. */
 const WEBHOOK_ADVANCED_KEYS = [
   "notifications.webhooks.max_per_profile",
@@ -136,7 +113,6 @@ const MAIL_STATUS_KEYS = ["email.enabled", "email.smtp_host", "email.from_addres
 const DISCORD_APP_KEYS = ["discord.client_id", "discord.client_secret", "discord.bot_token"];
 
 const KEYS = [
-  ...PIPELINE_KEYS,
   "notifications.ui_enabled",
   "notifications.webhooks_enabled",
   "notifications.web_push_enabled",
@@ -148,7 +124,6 @@ const KEYS = [
   "notifications.push_relay_expires_at",
   "notifications.push_relay_key_prefix",
   "notifications.push_relay_reregistration_required",
-  ...FANOUT_KEYS,
   ...WEBHOOK_ADVANCED_KEYS,
   "notifications.email_enabled",
   "notifications.email.allow_per_episode",
@@ -158,7 +133,6 @@ const KEYS = [
   ...DISCORD_ADVANCED_KEYS,
   "notifications.server_channels_enabled",
   ...SERVER_CHANNELS_ADVANCED_KEYS,
-  ...RETENTION_KEYS,
   ...MAIL_STATUS_KEYS,
   ...DISCORD_APP_KEYS,
 ];
@@ -190,20 +164,6 @@ function Chip({
     >
       {children}
     </span>
-  );
-}
-
-/**
- * A labelled cluster inside an Advanced disclosure. One element per cluster
- * means the disclosure's child rule draws a single hairline between clusters,
- * with the rows keeping their own inside each.
- */
-function AdvancedCluster({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <SettingsSubheading>{label}</SettingsSubheading>
-      {children}
-    </div>
   );
 }
 
@@ -838,11 +798,8 @@ export default function NotificationsAdminSettings() {
   // surface the effective default instead of an empty input.
   const numberValue = (key: string, fallback: string) => form.getValue(key) || fallback;
   const needsRestart = (key: string) => restartKeys.has(key);
-  const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
   const anyDirty = (keys: string[]) => keys.some(form.isDirty);
 
-  const releaseEventsOn = isOn("notifications.release_events_enabled");
-  const fanoutOn = isOn("notifications.fanout_enabled");
   const uiOn = isOn("notifications.ui_enabled");
   const webPushOn = isOn("notifications.web_push_enabled");
   const emailOn = isOn("notifications.email_enabled");
@@ -895,29 +852,11 @@ export default function NotificationsAdminSettings() {
       (channel.last_success_at == null || channel.last_failure_at > channel.last_success_at),
   ).length;
 
-  // The kill switches live under Advanced, so a pipeline someone switched off
-  // has to say so up here: every channel below is idle while it is.
-  const pausedMessage = !releaseEventsOn
-    ? "New content is not being recorded, so nothing can be sent. Turn it back on under Processing."
-    : !fanoutOn
-      ? "Sending is paused; new content waits in the queue. Turn it back on under Processing."
-      : null;
-
   return (
     <div className="flex h-full flex-col">
       <SettingsPageHeader title="Notifications" />
 
       <div className="flex-1 space-y-5">
-        {pausedMessage && (
-          <div
-            role="status"
-            className="flex items-start gap-2 rounded-2xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-xs text-amber-600 dark:text-amber-400"
-          >
-            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>{pausedMessage}</p>
-          </div>
-        )}
-
         {/* ── Delivery channels ── */}
         <FieldGroup
           label="Delivery channels"
@@ -1253,96 +1192,6 @@ export default function NotificationsAdminSettings() {
               </AdvancedSection>
             </div>
           </ChannelCard>
-        </FieldGroup>
-
-        {/* ── Processing: everything here has a working default ── */}
-        <FieldGroup
-          label="Processing"
-          description="How Silo notices new content, groups it into messages, and how long it keeps them."
-          restartAll={allRestart(PROCESSING_KEYS)}
-          dirty={anyDirty(PROCESSING_KEYS)}
-        >
-          <AdvancedSection
-            id="notifications.processing"
-            count={PROCESSING_KEYS.length}
-            // A switched-off pipeline is the one thing in here that stops every
-            // channel, so it does not stay folded away.
-            forceOpen={anyDirty(PROCESSING_KEYS) || pausedMessage !== null}
-          >
-            <AdvancedCluster label="Pipeline">
-              <SettingField
-                label="Notice new content"
-                description="Record new items during library scans."
-                type="toggle"
-                value={toggleValue("notifications.release_events_enabled")}
-                onChange={(v) => form.setValue("notifications.release_events_enabled", v)}
-                restartRequired={needsRestart("notifications.release_events_enabled")}
-              />
-              <SettingField
-                label="Work out who wants it"
-                description="Match each item against everyone's preferences."
-                type="toggle"
-                value={toggleValue("notifications.fanout_enabled")}
-                onChange={(v) => form.setValue("notifications.fanout_enabled", v)}
-                restartRequired={needsRestart("notifications.fanout_enabled")}
-              />
-            </AdvancedCluster>
-            <AdvancedCluster label="Grouping and flood control">
-              <SettingField
-                label="Settle window"
-                description="Items that finish scanning together arrive as one notification."
-                unit="seconds"
-                type="number"
-                value={numberValue("notifications.fanout.settle_seconds", "30")}
-                onChange={(v) => form.setValue("notifications.fanout.settle_seconds", v)}
-                restartRequired={needsRestart("notifications.fanout.settle_seconds")}
-              />
-              <SettingField
-                label="Max messages per show"
-                description="Anything past this is skipped for that batch."
-                type="number"
-                value={numberValue("notifications.fanout.max_series_burst", "3")}
-                onChange={(v) => form.setValue("notifications.fanout.max_series_burst", v)}
-                restartRequired={needsRestart("notifications.fanout.max_series_burst")}
-              />
-              <SettingField
-                label="Max content age"
-                description="Older items are dropped instead of arriving as stale news."
-                unit="hours"
-                type="number"
-                value={numberValue("notifications.fanout.max_event_age_hours", "72")}
-                onChange={(v) => form.setValue("notifications.fanout.max_event_age_hours", v)}
-                restartRequired={needsRestart("notifications.fanout.max_event_age_hours")}
-              />
-            </AdvancedCluster>
-            <AdvancedCluster label="Retention">
-              <SettingField
-                label="Read notifications"
-                unit="days"
-                type="number"
-                value={numberValue("notifications.retention.read_days", "90")}
-                onChange={(v) => form.setValue("notifications.retention.read_days", v)}
-                restartRequired={needsRestart("notifications.retention.read_days")}
-              />
-              <SettingField
-                label="Unread notifications"
-                unit="days"
-                type="number"
-                value={numberValue("notifications.retention.unread_days", "180")}
-                onChange={(v) => form.setValue("notifications.retention.unread_days", v)}
-                restartRequired={needsRestart("notifications.retention.unread_days")}
-              />
-              <SettingField
-                label="Sent history"
-                description="Record of what Silo already notified about."
-                unit="days"
-                type="number"
-                value={numberValue("notifications.retention.event_days", "30")}
-                onChange={(v) => form.setValue("notifications.retention.event_days", v)}
-                restartRequired={needsRestart("notifications.retention.event_days")}
-              />
-            </AdvancedCluster>
-          </AdvancedSection>
         </FieldGroup>
       </div>
 

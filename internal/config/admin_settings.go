@@ -429,15 +429,7 @@ var adminSettingDefaults = map[string]string{
 	"email.smtp_security": "starttls",
 	"email.from_name":     "Silo",
 
-	"notifications.release_events_enabled":                     "true",
-	"notifications.fanout_enabled":                             "true",
 	"notifications.ui_enabled":                                 "true",
-	"notifications.fanout.settle_seconds":                      "30",
-	"notifications.fanout.max_series_burst":                    "3",
-	"notifications.fanout.max_event_age_hours":                 "72",
-	"notifications.retention.read_days":                        "90",
-	"notifications.retention.unread_days":                      "180",
-	"notifications.retention.event_days":                       "30",
 	"notifications.webhooks_enabled":                           "false",
 	"notifications.webhooks.max_per_profile":                   "10",
 	"notifications.webhooks.allow_private_destinations":        "false",
@@ -617,7 +609,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
 		"scanner.empty_trash_after_scan", "scanner.realtime_monitoring", "matcher.enable_tv_series_root_queue",
 		"matcher.enable_tv_series_group_queue", "policy.editor_enabled",
-		"overlays.enabled", "notifications.release_events_enabled", "notifications.fanout_enabled",
+		"overlays.enabled",
 		"notifications.ui_enabled", "notifications.webhooks_enabled",
 		"notifications.webhooks.allow_private_destinations", "media_servers.allow_private_destinations",
 		"notifications.email_enabled",
@@ -728,15 +720,6 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 60000)
 	case "email.smtp_port":
 		return normalizeAdminInt(key, value, 1, 65535)
-	case "notifications.fanout.settle_seconds":
-		return normalizeAdminInt(key, value, 0, 3600)
-	case "notifications.fanout.max_series_burst":
-		return normalizeAdminInt(key, value, 1, 1000)
-	case "notifications.fanout.max_event_age_hours":
-		return normalizeAdminInt(key, value, 1, 24*365)
-	case "notifications.retention.read_days", "notifications.retention.unread_days",
-		"notifications.retention.event_days":
-		return normalizeAdminInt(key, value, 1, 3650)
 	case "notifications.webhooks.max_per_profile":
 		return normalizeAdminInt(key, value, 1, 100)
 	case "notifications.webhooks.deliveries_per_minute_per_profile":

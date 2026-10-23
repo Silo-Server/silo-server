@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -15,10 +16,9 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// webhookRetrySchedule holds the cumulative delay since the first attempt
-// (docs/architecture/notifications.md, "Retry schedule and auto-disable").
-// Index N is the delay before attempt N+1; after the last attempt fails, the
-// webhook is auto-disabled.
+// webhookRetrySchedule is the webhook retry schedule
+// (docs/architecture/notifications.md, "Retry schedule and auto-disable");
+// after the last attempt fails, the webhook is auto-disabled.
 var webhookRetrySchedule = []time.Duration{
 	0,
 	30 * time.Second,
@@ -30,18 +30,6 @@ var webhookRetrySchedule = []time.Duration{
 	12 * time.Hour,
 	18 * time.Hour,
 	24 * time.Hour,
-}
-
-const webhookMaxAttempts = 10
-
-// webhookRetryDelay returns how long to wait after a retryable failure of
-// attempt N (1-based) before the next attempt, or ok=false when the schedule
-// is exhausted.
-func webhookRetryDelay(completedAttempt int) (time.Duration, bool) {
-	if completedAttempt < 1 || completedAttempt >= webhookMaxAttempts {
-		return 0, false
-	}
-	return webhookRetrySchedule[completedAttempt] - webhookRetrySchedule[completedAttempt-1], true
 }
 
 // retryableHTTPStatus reports whether an HTTP failure status is worth
@@ -206,67 +194,52 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	attemptNumber := attempt.AttemptNumber + 1
 
 	if result.OK {
-		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeDelivered,
-			attemptNumber, &result.HTTPStatus, "", nil)
-		if err := s.webhooks.RecordSuccess(ctx, hook.ID); err != nil {
+		done := WebhookAttemptOutcome{AttemptID: attempt.ID, Outcome: WebhookOutcomeDelivered,
+			AttemptNumber: attemptNumber, HTTPStatus: &result.HTTPStatus}
+		if err := s.webhooks.RecordSuccess(ctx, hook.ID, done); err != nil && !errors.Is(err, errAttemptSuperseded) {
 			s.logger.WarnContext(ctx, "webhook success bookkeeping failed", "webhook_id", hook.ID, "error", err)
 		}
 		return
 	}
 
-	var status *int
+	done := WebhookAttemptOutcome{AttemptID: attempt.ID, AttemptNumber: attemptNumber, Message: result.Message}
 	if result.HTTPStatus > 0 {
-		status = &result.HTTPStatus
+		done.HTTPStatus = &result.HTTPStatus
 	}
-	if err := s.webhooks.RecordFailure(ctx, hook.ID, status, result.Message); err != nil {
-		s.logger.WarnContext(ctx, "webhook failure bookkeeping failed", "webhook_id", hook.ID, "error", err)
+	// A deterministic destination-side rejection (a non-retryable 4xx) fails
+	// this delivery now. A single 4xx is not proof the webhook is dead
+	// (CDN/WAF blips), but three consecutive rejected deliveries are.
+	rejected := result.HTTPStatus > 0 && !retryableHTTPStatus(result.HTTPStatus)
+	switch delay, more := retryDelay(webhookRetrySchedule, attemptNumber); {
+	case rejected:
+		done.Outcome = WebhookOutcomeFailed
+	case more:
+		// Retry-After can lengthen the wait but never shorten the schedule: a
+		// destination answering 429 with a few seconds would otherwise use up
+		// every attempt in minutes.
+		nextRetry := time.Now().Add(max(delay, result.RetryAfter))
+		done.Outcome, done.NextRetryAt = WebhookOutcomeRetrying, &nextRetry
+	default:
+		// Retry schedule exhausted (~24h of consecutive failures).
+		done.Outcome = WebhookOutcomeAutoDisabled
 	}
-
-	if result.HTTPStatus > 0 && !retryableHTTPStatus(result.HTTPStatus) {
-		// Deterministic destination-side rejection: fail this delivery now.
-		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
-			attemptNumber, status, result.Message, nil)
-		s.maybeDisableAfter4xx(ctx, hook, result)
-		return
+	rejections, err := s.webhooks.RecordFailure(ctx, hook.ID, done, rejected)
+	if errors.Is(err, errAttemptSuperseded) {
+		return // the worker that finished this send owns its outcome
 	}
-
-	delay, more := webhookRetryDelay(attemptNumber)
-	if result.RetryAfter > 0 {
-		delay = result.RetryAfter
-	}
-	if more {
-		nextRetry := time.Now().Add(delay)
-		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeRetrying,
-			attemptNumber, status, result.Message, &nextRetry)
-		return
-	}
-
-	// Retry schedule exhausted (~24h of consecutive failures).
-	_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeAutoDisabled,
-		attemptNumber, status, result.Message, nil)
-	s.disableWebhook(ctx, hook, result, "Deliveries failed for 24 hours")
-}
-
-// maybeDisableAfter4xx applies the 3-consecutive-non-retryable-4xx rule. A
-// single 4xx is not proof the webhook is dead (CDN/WAF blips), but three
-// consecutive deterministic rejections are.
-func (s *webhookSender) maybeDisableAfter4xx(ctx context.Context, hook *Webhook, result webhookSendResult) {
-	recent, err := s.webhooks.RecentFinalOutcomes(ctx, hook.ID, autoDisableConsecutive4xx)
 	if err != nil {
-		s.logger.WarnContext(ctx, "webhook 4xx history lookup failed", "webhook_id", hook.ID, "error", err)
+		// Nothing was written: the lease expires and the retry worker
+		// reclaims the attempt.
+		s.logger.WarnContext(ctx, "webhook failure bookkeeping failed", "webhook_id", hook.ID, "error", err)
 		return
 	}
-	if len(recent) < autoDisableConsecutive4xx {
-		return
+	switch {
+	case done.Outcome == WebhookOutcomeAutoDisabled:
+		s.disableWebhook(ctx, hook, result, "Deliveries failed for 24 hours")
+	case rejected && rejections >= autoDisableConsecutive4xx:
+		s.disableWebhook(ctx, hook, result,
+			fmt.Sprintf("%d consecutive deliveries rejected by the destination", autoDisableConsecutive4xx))
 	}
-	for _, attempt := range recent {
-		if attempt.Outcome != WebhookOutcomeFailed ||
-			attempt.HTTPStatus == nil || retryableHTTPStatus(*attempt.HTTPStatus) {
-			return
-		}
-	}
-	s.disableWebhook(ctx, hook, result,
-		fmt.Sprintf("%d consecutive deliveries rejected by the destination", autoDisableConsecutive4xx))
 }
 
 // disableWebhook auto-disables the webhook and posts the in-app notice so the
@@ -277,9 +250,13 @@ func (s *webhookSender) disableWebhook(ctx context.Context, hook *Webhook, resul
 	if result.Message != "" {
 		fullReason = fmt.Sprintf("%s (last error: %s)", reason, result.Message)
 	}
-	if err := s.webhooks.Disable(ctx, hook.ID, fullReason); err != nil {
+	disabled, err := s.webhooks.Disable(ctx, hook.ID, fullReason)
+	if err != nil {
 		s.logger.ErrorContext(ctx, "webhook auto-disable failed", "webhook_id", hook.ID, "error", err)
 		return
+	}
+	if !disabled {
+		return // another worker disabled it and posted the notice
 	}
 	s.logger.WarnContext(ctx, "webhook auto-disabled",
 		"webhook_id", hook.ID, "url_host", hook.URLHost, "reason", fullReason)

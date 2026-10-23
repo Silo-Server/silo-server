@@ -193,7 +193,7 @@ func (w *serverChannelWorker) processChannel(ctx context.Context, channelID stri
 	last := events[len(events)-1]
 	watermark := maxCursor(Cursor{CreatedAt: last.CreatedAt, ID: last.ID}, since)
 
-	staleCutoff := time.Now().Add(-w.settings.MaxEventAge(ctx))
+	staleCutoff := time.Now().Add(-maxReleaseEventAge)
 	fresh := make([]ReleaseEvent, 0, len(events))
 	for _, event := range events {
 		if event.CreatedAt.Before(staleCutoff) {

@@ -555,9 +555,9 @@ func (s *interestTrackingStore) RemoveHistoryItems(ctx context.Context, profileI
 // backing store implements is invisible through the wrapper unless it is
 // forwarded explicitly here — and because callers reach these via type
 // assertion with a working fallback, a missing forward is silent: no error, no
-// test failure, just a much slower path in production. Marking a series
-// watched regressed exactly this way. When adding a new optional capability to
-// userstore, forward it here and extend the compile-time assertions below.
+// test failure, just a much slower path in production. When adding a new
+// optional capability to userstore, forward it here and extend the
+// compile-time assertions below.
 
 // MarkWatchedBatch forwards the transactional batch mark-watched write, whose
 // whole purpose is that a large series commits as one unit. Falling through to
