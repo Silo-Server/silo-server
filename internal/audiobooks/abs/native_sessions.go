@@ -24,7 +24,9 @@ type PlaybackSessionManager interface {
 	BeginTransport(sessionID string) error
 	EndTransport(sessionID string) error
 	SetProgressPersistenceDisabled(sessionID string, disabled bool) error
-	StopSession(sessionID string) error
+	// FinishSession ends the play and runs the manager's finish hooks, which
+	// write the admin playback history row.
+	FinishSession(ctx context.Context, sessionID string) error
 }
 
 // PlaybackSessionSyncer flushes the local native-session snapshot into the
@@ -123,9 +125,9 @@ func (h *Handler) stopNativePlaybackSession(ctx context.Context, sessionID strin
 	if h == nil || h.deps.NativeSessions == nil || sessionID == "" {
 		return
 	}
-	if err := h.deps.NativeSessions.StopSession(sessionID); err != nil {
+	if err := h.deps.NativeSessions.FinishSession(ctx, sessionID); err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "abs session close: stop native session failed", "component", "audiobooks",
+			slog.WarnContext(ctx, "abs session close: finish native session failed", "component", "audiobooks",
 				"session_id", sessionID, "error", err)
 		}
 		return
