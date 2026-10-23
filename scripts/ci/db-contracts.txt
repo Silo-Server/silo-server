@@ -382,6 +382,7 @@
 # records, that no secret reaches them, and the locks their writes take.
 ./internal/activitylog TestSelfServiceDomainRowsDB
 ./internal/api/handlers TestProfileAuditDB
+./internal/api/handlers TestProfileWritesQueueBehindAccountLockDB
 ./internal/auth TestImpersonationAuditDB
 ./internal/auth TestOwnershipTransferAuditDB
 ./internal/auth TestPasswordChangeAuditDB

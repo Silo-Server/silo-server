@@ -284,6 +284,11 @@ func (h *ProfileHandler) applyProfileUpdateSettingsSync(
 		audited, recording := profileAuditWriter(ctx, tx)
 		var before *userstore.Profile
 		if recording {
+			// The audit row's account keys come before the profile row lock,
+			// in the order deleting the account takes them.
+			if err := auditmutation.LockActors(ctx, audited.AuditTx()); err != nil {
+				return err
+			}
 			var err error
 			if before, err = audited.GetProfile(ctx, profileID); err != nil {
 				return err
