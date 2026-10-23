@@ -144,9 +144,9 @@ export function FeaturesStep() {
     >
       <StepSection>
         <SettingField
-          label="Skip markers from TheIntroDB and Silo"
+          label="Skip markers from TheIntroDB"
           type="toggle"
-          description="TheIntroDB and Silo's marker service are installed by default to find intros, credits, recaps, and other segments you can skip. Online markers are preferred over local detection."
+          description="TheIntroDB is installed by default to find intros, credits, recaps, and other segments you can skip. Online markers are preferred over local detection."
           value={onlineMarkersEnabled ? "true" : "false"}
           onChange={(value) => setOnlineMarkers(value === "true")}
         />
