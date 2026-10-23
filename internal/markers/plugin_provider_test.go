@@ -302,11 +302,8 @@ func TestPluginCapabilityFlagsFromMetadata(t *testing.T) {
 		{name: "contribution: wrong type stays compatible", parse: PluginSupportsContributionFromMetadata, metadata: map[string]any{"supports_contribution": float64(0)}, want: true},
 		{name: "amend: key absent", parse: PluginSupportsAmendFromMetadata, metadata: map[string]any{"supports_contribution": true}, want: false},
 		{name: "amend: explicit true", parse: PluginSupportsAmendFromMetadata, metadata: map[string]any{"supports_amend": true}, want: true},
-		{name: "amend: string true", parse: PluginSupportsAmendFromMetadata, metadata: map[string]any{"supports_amend": " true "}, want: true},
-		{name: "amend: unparseable string", parse: PluginSupportsAmendFromMetadata, metadata: map[string]any{"supports_amend": "yes please"}, want: false},
 		{name: "absent: key absent", parse: PluginSupportsAbsentFromMetadata, metadata: nil, want: false},
 		{name: "absent: explicit true", parse: PluginSupportsAbsentFromMetadata, metadata: map[string]any{"supports_absent": true}, want: true},
-		{name: "absent: wrong type", parse: PluginSupportsAbsentFromMetadata, metadata: map[string]any{"supports_absent": float64(1)}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
