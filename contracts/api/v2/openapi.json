@@ -17393,7 +17393,7 @@
             "description": "BCP 47 tag or ISO 639 code, any case; stored in canonical form",
             "maxLength": 128,
             "minLength": 1,
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "release_name": {
@@ -19090,7 +19090,7 @@
             ],
             "maxLength": 16,
             "minLength": 1,
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -19117,7 +19117,7 @@
             "description": "BCP 47 tag or ISO 639 code of the language to fill in (de, pt-BR); stored in canonical form",
             "maxLength": 16,
             "minLength": 1,
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -20937,7 +20937,7 @@
             "examples": [
               "en"
             ],
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "audio_track_index": {
@@ -32918,7 +32918,7 @@
             "examples": [
               "en"
             ],
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -32939,7 +32939,7 @@
             "examples": [
               "en"
             ],
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -41282,7 +41282,7 @@
             "examples": [
               "en"
             ],
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "library_restrictions_enabled": {
@@ -41342,7 +41342,7 @@
             "examples": [
               "en"
             ],
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "quality_preference": {
@@ -41372,7 +41372,7 @@
             "examples": [
               "en"
             ],
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -41602,7 +41602,7 @@
             "examples": [
               "en"
             ],
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -41677,7 +41677,7 @@
             "examples": [
               "en"
             ],
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -41709,7 +41709,7 @@
             "examples": [
               "en"
             ],
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": [
               "string",
               "null"
@@ -46224,7 +46224,7 @@
           "target_language": {
             "description": "BCP 47 tag or ISO 639 code to produce; empty only for kind transcribe",
             "maxLength": 64,
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },
@@ -46566,7 +46566,7 @@
             "description": "Language of the chosen result exactly as searchSubtitles returned it (BCP 47)",
             "maxLength": 64,
             "minLength": 1,
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "media_file_id": {
@@ -46814,7 +46814,7 @@
             "examples": [
               "en"
             ],
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           },
           "subtitle_mode": {
@@ -48346,7 +48346,7 @@
             ],
             "maxLength": 16,
             "minLength": 1,
-            "pattern": "^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)\\s*$",
+            "pattern": "^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$",
             "type": "string"
           }
         },

@@ -122,21 +122,21 @@
     {
       "operation_id": "createProfile",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "66ddd972148d95182ff61e4563974ab07963e4df817bc951f22689b0671928b7",
+      "fingerprint": "0efe26f0bf572f8223de084b12a3e96dcc0e77bc1958e930e9e1ce2cdef888f5",
       "reason": "Declares the language tag shape of subtitle_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
     {
       "operation_id": "createProfile",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "995c0df5d4b42349d2fda632df95c0ce8dc060194b2976db8b668d77db346c9e",
+      "fingerprint": "381b4a55870fe82cfa6f4a26df6609d9c8fda98f45043ca07e4f763b76d248c7",
       "reason": "Declares the language tag shape of preferred_metadata_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
     {
       "operation_id": "createProfile",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "e6c24c040f2821b117f3d3759bfe960ac07ba932cc8a9a7d132c65a8a9c51be9",
+      "fingerprint": "b9e2abd48305a205cb5bdee854e9aca3b1e0cf0d5c6d70ed33aea33c0d08f16b",
       "reason": "Declares the language tag shape of language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
@@ -171,7 +171,7 @@
     {
       "operation_id": "createSubtitleAIJob",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "1e391b85b76596d0e213b31cb23b3452a0475395bd29ce698983de2929ac9f4a",
+      "fingerprint": "6a149794e19b23a00686c15867e854f6994047f6eb79cc87fc70b7e7d824591b",
       "reason": "Declares the language tag shape of target_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
@@ -192,7 +192,7 @@
     {
       "operation_id": "downloadSubtitle",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "32d62e92f65e50938eff43efd58e113e56e3d7204b819e3054878d1b5d1a7699",
+      "fingerprint": "a4c7db6dfdf70ab95dd83252fc956b71c30e6dfd5907493a0cc87de697b0bd97",
       "reason": "Declares the language tag shape of language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
@@ -304,21 +304,21 @@
     {
       "operation_id": "translateAdminItemMetadata",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "b2e72f98ce4d9462f1c39889b6c6661fdcfd94392ca846dc6db10076278201a1",
+      "fingerprint": "82bb1a7518bfa4117481120b7516485526083585ca0f27074eebdd9b64b27641",
       "reason": "Declares the language tag shape of target_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
     {
       "operation_id": "translateCatalogItemDescription",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "d307ddae5c27ebb65f1ac8c653ccc48bdad512e27745171b8beb9237d0feb647",
+      "fingerprint": "2d2073be0da0903538fe793c1cb980c14e5e536d74cf7792e107c9182a79f657",
       "reason": "Declares the language tag shape of target_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
     {
       "operation_id": "translateLibraryMetadata",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "61e08cf20b13bc0e7cf3c6481d71fca2fac19ebca0cf54583c8d2333f7eee5d3",
+      "fingerprint": "8b375eeb23fb942ee9c63b666dca02029eeebb36bdab6cbbbd483e768b476db0",
       "reason": "Declares the language tag shape of target_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
@@ -416,14 +416,14 @@
     {
       "operation_id": "updateAdminSubtitleMetadata",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "691d0fbccd186d751bc55c43cfae36003d6b6a39b31802e48b0c82089ad991ae",
+      "fingerprint": "acf183cd8ca878a274e05cf0b8b16ee5bab8365720473652a05eb37a5f29645c",
       "reason": "Declares the language tag shape of language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
     {
       "operation_id": "updateAudioPreference",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "a86388dba00e7dc4b8474b8675d57c303b74b6585abfdbf13e90cdd0a87be1c9",
+      "fingerprint": "b56fe63fdd4840f5b74f0095209e953d0b9c263f9c7f32ca765cc713e26ff213",
       "reason": "Declares the language tag shape of audio_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
@@ -451,14 +451,14 @@
     {
       "operation_id": "updateLibraryPlaybackPreference",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "068bba682b9e47ff76e21fdecaeb7ddffa2ef832ca2873da86a9dc34ff6871ef",
+      "fingerprint": "ef8242a6404498de3c1ea2ea7f3e73d52f52f0cd48d559e96ed09b24f0662a17",
       "reason": "Declares the language tag shape of subtitle_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
     {
       "operation_id": "updateLibraryPlaybackPreference",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "9cf889b2cc146d96c11d6b718656d40771be451825fd648a4fa1589b2e1eb9d9",
+      "fingerprint": "8a7cf54db3c9e3163d2fa4c24416a320cde960ef0aaf6a4df3860dc8fc739852",
       "reason": "Declares the language tag shape of audio_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
@@ -472,21 +472,21 @@
     {
       "operation_id": "updateProfile",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "311ea8acfe14fb6b1d0d2a4c041161628b6c8e0c9ed7235b9135582d0448c5d1",
+      "fingerprint": "7ff9ce68774b6f7e5d177a3364c52e1008a13168e53fc4c032c8baacf6360c40",
       "reason": "Declares the language tag shape of language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
     {
       "operation_id": "updateProfile",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "62646ac6a3c62534a0cee81d428d900efe730be79e57224fd2acffeda305ea95",
+      "fingerprint": "f90f06cc8312931e76474edd3dce7b9f0d414aab8fd08b2856d7be4cb27b2b04",
       "reason": "Declares the language tag shape of subtitle_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
     {
       "operation_id": "updateProfile",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "db1fe2adbb1bba97a97a308abd851f862b7ac5fab12a40c31cbe4df5f7b86f0c",
+      "fingerprint": "85abfd4d92fd9e98c55e1dfdfc5ba1f6220ca73f230749b70e2d351d6f0e0f2b",
       "reason": "Declares the language tag shape of preferred_metadata_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },
@@ -521,7 +521,7 @@
     {
       "operation_id": "updateSubtitlePreference",
       "change_id": "request-property-pattern-added",
-      "fingerprint": "002730b57116298fe285862f57816a2ca1881cef7ff55392aca3d8e2da0f2395",
+      "fingerprint": "07ac53d3edaf37498f74fbd49ffe6f28edf05daed9119a3c2281ac28f972287c",
       "reason": "Declares the language tag shape of subtitle_language before the v2 lock (#2903). The pattern admits every spelling the handler accepts (any case, ISO 639 codes, BCP 47 subtags, x- tags, surrounding spaces); only values it already refused now fail, at the member.",
       "approved_in": "#2903"
     },

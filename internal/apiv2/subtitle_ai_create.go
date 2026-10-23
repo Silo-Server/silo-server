@@ -17,7 +17,7 @@ type SubtitleAICreateBody struct {
 	Kind           string  `json:"kind" enum:"translate,transcribe,transcribe_translate"`
 	SourceIndex    int     `json:"source_index" minimum:"-1"`
 	SourceLanguage string  `json:"source_language" maxLength:"64" doc:"BCP 47 tag of the source language; empty or unrecognized means detect"`
-	TargetLanguage string  `json:"target_language" maxLength:"64" pattern:"^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\\s*$" doc:"BCP 47 tag or ISO 639 code to produce; empty only for kind transcribe"`
+	TargetLanguage string  `json:"target_language" maxLength:"64" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\\s\\v\\x85\\p{Z}]*$" doc:"BCP 47 tag or ISO 639 code to produce; empty only for kind transcribe"`
 	SessionID      string  `json:"session_id,omitempty" maxLength:"128"`
 	StartPosition  float64 `json:"start_position" minimum:"0"`
 }

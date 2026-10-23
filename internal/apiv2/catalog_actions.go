@@ -36,7 +36,7 @@ type TranslateDescriptionInput struct {
 
 // TranslateDescription names the language the viewer wants.
 type TranslateDescription struct {
-	TargetLanguage string `json:"target_language" minLength:"1" maxLength:"16" pattern:"^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)\\s*$" doc:"BCP 47 tag of the wanted language, exactly as this profile's detail document reported it in pending_translation_language. Any other language, or a target with nothing left to translate, is refused with 422 at body.target_language." example:"de"`
+	TargetLanguage string `json:"target_language" minLength:"1" maxLength:"16" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$" doc:"BCP 47 tag of the wanted language, exactly as this profile's detail document reported it in pending_translation_language. Any other language, or a target with nothing left to translate, is refused with 422 at body.target_language." example:"de"`
 }
 
 // PeopleSearchInput is the listPeople query.

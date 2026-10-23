@@ -39,7 +39,7 @@ type AdminSubtitleMetadataInput struct {
 	IfNoneMatch string `header:"If-None-Match"`
 }
 type AdminSubtitleMetadataPatch struct {
-	Language        *string `json:"language,omitempty" nullable:"false" minLength:"1" maxLength:"128" pattern:"^\\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)\\s*$" doc:"BCP 47 tag or ISO 639 code, any case; stored in canonical form"`
+	Language        *string `json:"language,omitempty" nullable:"false" minLength:"1" maxLength:"128" pattern:"^[\\s\\v\\x85\\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\\s\\v\\x85\\p{Z}]*$" doc:"BCP 47 tag or ISO 639 code, any case; stored in canonical form"`
 	ReleaseName     *string `json:"release_name,omitempty" nullable:"false" maxLength:"4096"`
 	HearingImpaired *bool   `json:"hearing_impaired,omitempty" nullable:"false"`
 }

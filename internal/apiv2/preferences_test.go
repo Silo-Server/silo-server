@@ -403,10 +403,10 @@ func TestLanguagePatternsAgreeWithCanonicalTag(t *testing.T) {
 	// Every language or country pattern is one of these, so a copy that drifts
 	// fails here rather than refusing a value the handler accepts.
 	known := map[string]bool{
-		`^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$`:                      true,
-		`^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$`:                     true,
-		`^\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)\s*$`:  true,
-		`^\s*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?\s*$`: true,
+		`^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$`:                                                true,
+		`^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$`:                                               true,
+		`^[\s\v\x85\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\s\v\x85\p{Z}]*$`:  true,
+		`^[\s\v\x85\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\s\v\x85\p{Z}]*$`: true,
 		`^(?:[a-z]{2})?$`: true, `^[a-z]{2,3}$`: true, `^[A-Z]{2}$`: true,
 	}
 	for name, schema := range doc.Components.Schemas {
@@ -429,7 +429,9 @@ func TestLanguagePatternsAgreeWithCanonicalTag(t *testing.T) {
 	}
 	request, response := pattern("ProfileUpdate", "language"), pattern("Profile", "language")
 	for _, value := range []string{"en", "eng", "EN", " en ", "pt-BR", "pt_br", "zh-Hant-TW", "es-419", "fil", "und",
-		"x-silo-original", "i-klingon", "sgn-BE-FR", "ar-EG-u-nu-latn", "", "English", "original", "00", "x"} {
+		"x-silo-original", "i-klingon", "sgn-BE-FR", "ar-EG-u-nu-latn", "", "English", "original", "00", "x",
+		// strings.TrimSpace trims Unicode spaces, not only ASCII ones.
+		"\u00a0en\u00a0", "\ven", "\u2003en\u3000", "\u0085", "\u00a0"} {
 		canonical := lang.CanonicalTag(value)
 		if strings.TrimSpace(value) != "" && canonical == "" {
 			continue // the handler refuses it; the pattern may too
