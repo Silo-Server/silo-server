@@ -1298,9 +1298,7 @@ func main() {
 	// Assigned below when recommendations start; nil (a no-op) otherwise.
 	var settingsRecWorker *recommendations.Worker
 	// Assigned below with the marker plugin providers; nil without plugins.
-	// The first runs in the transaction that turns markers.share_by_default
-	// off, the second after it commits.
-	var stopDefaultMarkerSharing func(context.Context, pgx.Tx) error
+	// Runs after a save that turns markers.share_by_default off commits.
 	var defaultMarkerSharingStopped func(context.Context)
 	var shutdownWork []<-chan struct{}
 	registerShutdownWork := func(done <-chan struct{}) {
@@ -1352,8 +1350,8 @@ func main() {
 			// started sharing because their manifest asked to. It shares the
 			// save's transaction, so a failure fails the save instead of
 			// leaving them sharing.
-			if key == markers.SettingShareByDefault && !markers.ShareByDefaultEnabled(value) && stopDefaultMarkerSharing != nil {
-				return stopDefaultMarkerSharing(ctx, tx)
+			if key == markers.SettingShareByDefault && !markers.ShareByDefaultEnabled(value) {
+				return stopDefaultMarkerSharingInTx(ctx, tx)
 			}
 			return nil
 		},
@@ -1836,16 +1834,6 @@ func main() {
 			markerPluginResolver := markers.NewPluginResolverAdapter(pluginService)
 			var refreshMu sync.Mutex
 			var loadedRevision string
-			// Other nodes reload provider config only on this event, so every
-			// change to a provider's sharing announces it.
-			publishMarkerProviderConfigChanged := func(ctx context.Context) {
-				if deps.EventBus != nil {
-					_ = deps.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{
-						Type:    cache.EventMarkerProviderConfigChanged,
-						Payload: markers.SettingShareByDefault,
-					})
-				}
-			}
 			refreshMarkerProviders = func(ctx context.Context) (err error) {
 				refreshMu.Lock()
 				defer refreshMu.Unlock()
@@ -1872,12 +1860,8 @@ func main() {
 					if err := deps.MarkerProviderConfig.Reload(ctx); err != nil {
 						return err
 					}
-					stoppedSharing, err := reloadMarkerPluginProviders(ctx, deps.MarkerRegistry, deps.MarkerProviderConfig,
-						installationStore, runtimeConfigStore, settingsRepo, markerPluginResolver)
-					if stoppedSharing {
-						publishMarkerProviderConfigChanged(ctx)
-					}
-					if err != nil {
+					if err := reloadMarkerPluginProviders(ctx, deps.MarkerRegistry, deps.MarkerProviderConfig,
+						installationStore, runtimeConfigStore, settingsRepo, markerPluginResolver); err != nil {
 						return err
 					}
 					current, err := deps.MarkerProviderConfig.RuntimeRevision(ctx)
@@ -1896,18 +1880,17 @@ func main() {
 					slog.WarnContext(ctx, "reload marker plugin providers failed", "component", "app", "error", err)
 				}
 			})
-			stopDefaultMarkerSharing = func(ctx context.Context, tx pgx.Tx) error {
-				// Read the manifests from the database, not the registry, so
-				// disabled plugins and ones this node has not loaded stop too.
-				return markers.StopDefaultSharingInTx(ctx, tx, func(ctx context.Context) ([]string, error) {
-					return markerDefaultSharingProviders(ctx, installationStore)
-				})
-			}
 			defaultMarkerSharingStopped = func(ctx context.Context) {
 				if err := deps.MarkerProviderConfig.Reload(ctx); err != nil {
 					slog.WarnContext(ctx, "reload marker provider config failed", "error", err)
 				}
-				publishMarkerProviderConfigChanged(ctx)
+				// Other nodes reload provider config only on this event.
+				if deps.EventBus != nil {
+					_ = deps.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{
+						Type:    cache.EventMarkerProviderConfigChanged,
+						Payload: markers.SettingShareByDefault,
+					})
+				}
 			}
 		}
 		if err := pluginService.PreloadEnabled(appCtx); err != nil {
@@ -4745,7 +4728,7 @@ type markerPluginRuntimeConfigStore interface {
 	PutGlobalConfig(ctx context.Context, installationID int, key string, value map[string]any) error
 }
 
-type markerSettingsStore interface {
+type markerLegacySettingsStore interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
@@ -4754,7 +4737,7 @@ type markerSettingsStore interface {
 type markerProviderConfigDefaults interface {
 	Get(provider string) (markers.ProviderConfig, bool)
 	Ensure(ctx context.Context, c markers.ProviderConfig) error
-	StopSharing(ctx context.Context, providers []string) (bool, error)
+	EnsureDefaultSharing(ctx context.Context, c markers.ProviderConfig) error
 }
 
 // markerContributionDefaults is the contribution config a marker capability's
@@ -4767,41 +4750,29 @@ func markerContributionDefaults(metadata map[string]any) markers.PluginContribut
 	return contribution
 }
 
-type markerPluginInstallationLister interface {
-	List(ctx context.Context) ([]*plugins.Installation, error)
-	ListCapabilities(ctx context.Context, installationID int) ([]*plugins.Capability, error)
-}
-
-// markerDefaultSharingProviders lists the marker providers, enabled or not,
-// whose manifest asks for contribution to start on.
-func markerDefaultSharingProviders(ctx context.Context, store markerPluginInstallationLister) ([]string, error) {
-	installations, err := store.List(ctx)
+// stopDefaultMarkerSharingInTx runs in the transaction that saves
+// markers.share_by_default=false. It reads the manifests from the database, not
+// the registry, so disabled plugins and ones this node has not loaded stop too,
+// and reads them through tx, so the save needs no second connection.
+func stopDefaultMarkerSharingInTx(ctx context.Context, tx pgx.Tx) error {
+	if tx == nil {
+		return errors.New("stop marker sharing needs the settings transaction")
+	}
+	capabilities, err := plugins.ListCapabilitiesOfType(ctx, tx, sdkcapability.MarkerProvider)
 	if err != nil {
-		return nil, fmt.Errorf("list plugin installations: %w", err)
+		return err
 	}
 	var providers []string
-	for _, installation := range installations {
-		if installation == nil || installation.IsBuiltin() {
-			continue
-		}
-		capabilities, err := store.ListCapabilities(ctx, installation.ID)
+	for _, capability := range capabilities {
+		descriptor, err := plugins.DecodeCapability(capability)
 		if err != nil {
-			return nil, fmt.Errorf("list marker provider capabilities for installation %d: %w", installation.ID, err)
+			return fmt.Errorf("decode marker provider capability %d/%s: %w", capability.InstallationID, capability.ID, err)
 		}
-		for _, capability := range capabilities {
-			if capability == nil || capability.Type != sdkcapability.MarkerProvider {
-				continue
-			}
-			descriptor, err := plugins.DecodeCapability(capability)
-			if err != nil {
-				return nil, fmt.Errorf("decode marker provider capability %d/%s: %w", installation.ID, capability.ID, err)
-			}
-			if markerContributionDefaults(markerCapabilityMetadata(descriptor)).Enabled {
-				providers = append(providers, markers.PluginProviderID(installation.ID, capability.ID))
-			}
+		if markerContributionDefaults(markerCapabilityMetadata(descriptor)).Enabled {
+			providers = append(providers, markers.PluginProviderID(capability.InstallationID, capability.ID))
 		}
 	}
-	return providers, nil
+	return markers.StopDefaultSharingInTx(ctx, tx, providers)
 }
 
 func reloadMarkerPluginProviders(
@@ -4810,11 +4781,11 @@ func reloadMarkerPluginProviders(
 	configStore markerProviderConfigDefaults,
 	store markerPluginCapabilityStore,
 	runtimeConfigs markerPluginRuntimeConfigStore,
-	settings markerSettingsStore,
+	legacySettings markerLegacySettingsStore,
 	resolver *markers.PluginResolverAdapter,
-) (stoppedSharing bool, err error) {
+) error {
 	if registry == nil {
-		return stoppedSharing, nil
+		return nil
 	}
 	previous := make(map[string]string)
 	for _, provider := range registry.Providers() {
@@ -4825,12 +4796,12 @@ func reloadMarkerPluginProviders(
 	refreshedRuntimes := make(map[int]bool)
 	var providers []markers.Provider
 	if store == nil || resolver == nil {
-		return stoppedSharing, registry.SetProviders(providers)
+		return registry.SetProviders(providers)
 	}
 
 	installations, err := store.ListEnabled(ctx)
 	if err != nil {
-		return stoppedSharing, fmt.Errorf("list enabled plugin installations: %w", err)
+		return fmt.Errorf("list enabled plugin installations: %w", err)
 	}
 	sort.Slice(installations, func(i, j int) bool {
 		if installations[i] == nil {
@@ -4861,7 +4832,7 @@ func reloadMarkerPluginProviders(
 		}
 		capabilities, err := store.ListCapabilities(ctx, installation.ID)
 		if err != nil {
-			return stoppedSharing, fmt.Errorf("list marker provider capabilities for installation %d: %w", installation.ID, err)
+			return fmt.Errorf("list marker provider capabilities for installation %d: %w", installation.ID, err)
 		}
 		sort.Slice(capabilities, func(i, j int) bool {
 			if capabilities[i] == nil {
@@ -4878,10 +4849,10 @@ func reloadMarkerPluginProviders(
 			}
 			descriptor, err := plugins.DecodeCapability(capability)
 			if err != nil {
-				return stoppedSharing, fmt.Errorf("decode marker provider capability %d/%s: %w", installation.ID, capability.ID, err)
+				return fmt.Errorf("decode marker provider capability %d/%s: %w", installation.ID, capability.ID, err)
 			}
 			metadataMap := markerCapabilityMetadata(descriptor)
-			if err := copyLegacyIntroDBPluginConfig(ctx, runtimeConfigs, settings, installation, capability); err != nil {
+			if err := copyLegacyIntroDBPluginConfig(ctx, runtimeConfigs, legacySettings, installation, capability); err != nil {
 				failClosed(err)
 				continue
 			}
@@ -4922,7 +4893,7 @@ func reloadMarkerPluginProviders(
 				DefaultContributeEnabled: contribution.Enabled,
 			}, resolver)
 			if err != nil {
-				return stoppedSharing, err
+				return err
 			}
 			var provider markers.Provider = pluginProvider
 			if !supportsContribution {
@@ -4944,40 +4915,16 @@ func reloadMarkerPluginProviders(
 					ContributeAutoLocal:     contribution.AutoLocal,
 					ContributeMinConfidence: contribution.MinConfidence,
 				}
-				seedsSharing := false
+				ensure := configStore.Ensure
 				if legacy, ok := legacyIntroDBProviderConfig(configStore, installation, capability, provider.ID()); ok {
 					defaultConfig = legacy
-				} else if _, exists := configStore.Get(provider.ID()); !exists && defaultConfig.ContributeEnabled {
+				} else if defaultConfig.ContributeEnabled {
 					// The manifest's sharing default applies only while the
 					// server shares by default, which the setup wizard records.
-					share, err := markerShareByDefault(ctx, settings)
-					if err != nil {
-						return stoppedSharing, err
-					}
-					seedsSharing = share
-					if !share {
-						defaultConfig.ContributeEnabled, defaultConfig.ContributeAutoLocal = false, false
-					}
+					ensure = configStore.EnsureDefaultSharing
 				}
-				if err := configStore.Ensure(ctx, defaultConfig); err != nil {
-					return stoppedSharing, err
-				}
-				if seedsSharing {
-					// An admin may have turned sharing off between the read
-					// above and the insert, before the row existed for the
-					// setting's save to update. The caller announces the
-					// change to other nodes.
-					share, err := markerShareByDefault(ctx, settings)
-					if err != nil {
-						return stoppedSharing, err
-					}
-					if !share {
-						changed, err := configStore.StopSharing(ctx, []string{provider.ID()})
-						stoppedSharing = stoppedSharing || changed
-						if err != nil {
-							return stoppedSharing, err
-						}
-					}
+				if err := ensure(ctx, defaultConfig); err != nil {
+					return err
 				}
 			}
 		}
@@ -4985,22 +4932,9 @@ func reloadMarkerPluginProviders(
 	// Replace the registry even when configuration reads failed, so a provider
 	// cannot continue serving cached lookups with an unknown credential revision.
 	if err := registry.SetProviders(providers); err != nil {
-		return stoppedSharing, err
+		return err
 	}
-	return stoppedSharing, configErr
-}
-
-// markerShareByDefault reads markers.share_by_default. A server without the
-// setting shares by default.
-func markerShareByDefault(ctx context.Context, settings markerSettingsStore) (bool, error) {
-	if settings == nil {
-		return true, nil
-	}
-	value, err := settings.Get(ctx, markers.SettingShareByDefault)
-	if err != nil {
-		return false, fmt.Errorf("read %s: %w", markers.SettingShareByDefault, err)
-	}
-	return markers.ShareByDefaultEnabled(value), nil
+	return configErr
 }
 
 func legacyIntroDBProviderConfig(
@@ -5030,7 +4964,7 @@ func legacyIntroDBProviderConfig(
 func copyLegacyIntroDBPluginConfig(
 	ctx context.Context,
 	runtimeConfigs markerPluginRuntimeConfigStore,
-	legacySettings markerSettingsStore,
+	legacySettings markerLegacySettingsStore,
 	installation *plugins.Installation,
 	capability *plugins.Capability,
 ) error {

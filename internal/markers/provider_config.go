@@ -187,7 +187,89 @@ func (s *ProviderConfigStore) Ensure(ctx context.Context, c ProviderConfig) erro
 	if _, ok := s.Get(c.Provider); ok {
 		return nil
 	}
-	if _, err := s.pool.Exec(ctx, `
+	if err := insertProviderConfig(ctx, s.pool, c); err != nil {
+		return err
+	}
+	return s.Reload(ctx)
+}
+
+// EnsureDefaultSharing is Ensure for a row whose manifest asks for contribution
+// to start on. It starts with contribution and automatic sharing off when
+// markers.share_by_default is false. The setting read and the insert hold the
+// lock StopDefaultSharingInTx takes, so an opt-out saved meanwhile either
+// commits first and this row starts off, or waits and turns this row off.
+func (s *ProviderConfigStore) EnsureDefaultSharing(ctx context.Context, c ProviderConfig) error {
+	if s == nil || s.pool == nil {
+		return errors.New("marker provider config store unavailable")
+	}
+	if _, ok := s.Get(c.Provider); ok {
+		return nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin marker provider config seed: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockProviderConfig(ctx, tx); err != nil {
+		return err
+	}
+	var share string
+	err = tx.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, SettingShareByDefault).Scan(&share)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("read %s: %w", SettingShareByDefault, err)
+	}
+	if !ShareByDefaultEnabled(share) {
+		c.ContributeEnabled, c.ContributeAutoLocal = false, false
+	}
+	if err := insertProviderConfig(ctx, tx, c); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit marker provider config seed: %w", err)
+	}
+	return s.Reload(ctx)
+}
+
+// StopDefaultSharingInTx turns contribution and automatic sharing off for
+// providers, inside tx, the transaction that saves markers.share_by_default=false,
+// so the setting and the change commit or fail together. Reload every node's
+// store after tx commits.
+func StopDefaultSharingInTx(ctx context.Context, tx pgx.Tx, providers []string) error {
+	if tx == nil {
+		return errors.New("stop marker sharing needs the settings transaction")
+	}
+	if err := lockProviderConfig(ctx, tx); err != nil {
+		return err
+	}
+	if len(providers) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE marker_provider_config
+		SET contribute_enabled = false, contribute_auto_local = false, updated_at = now()
+		WHERE provider = ANY($1) AND (contribute_enabled OR contribute_auto_local)`,
+		providers,
+	); err != nil {
+		return fmt.Errorf("stop marker sharing: %w", err)
+	}
+	return nil
+}
+
+// lockProviderConfig serializes seeding a sharing row with saving the opt-out.
+// SHARE ROW EXCLUSIVE conflicts with itself and with plain writes, so admin
+// edits wait too, but reads do not.
+func lockProviderConfig(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `LOCK TABLE marker_provider_config IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return fmt.Errorf("lock marker provider config: %w", err)
+	}
+	return nil
+}
+
+func insertProviderConfig(ctx context.Context, db interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}, c ProviderConfig,
+) error {
+	if _, err := db.Exec(ctx, `
 		INSERT INTO marker_provider_config (
 			provider, fetch_enabled, fetch_priority, fetch_min_confidence,
 			contribute_enabled, contribute_auto_local, contribute_min_confidence, updated_at
@@ -199,61 +281,5 @@ func (s *ProviderConfigStore) Ensure(ctx context.Context, c ProviderConfig) erro
 	); err != nil {
 		return fmt.Errorf("ensure marker provider config: %w", err)
 	}
-	return s.Reload(ctx)
-}
-
-// StopSharing turns contribution and automatic sharing off for the given
-// providers and reports whether any row changed. A reload calls it for a
-// provider it seeded with sharing on when markers.share_by_default turned off
-// meanwhile.
-func (s *ProviderConfigStore) StopSharing(ctx context.Context, providers []string) (bool, error) {
-	if s == nil || s.pool == nil {
-		return false, errors.New("marker provider config store unavailable")
-	}
-	changed, err := stopSharing(ctx, s.pool, providers)
-	if err != nil || !changed {
-		return false, err
-	}
-	return true, s.Reload(ctx)
-}
-
-// StopDefaultSharingInTx turns sharing off for the providers listProviders
-// returns, inside tx, the transaction that saves markers.share_by_default=false,
-// so the setting and the change commit or fail together. It locks
-// marker_provider_config against writes before listing: a provider row seeded
-// with sharing on either exists by then and is updated here, or its insert waits
-// for this commit and the reload that seeded it then reads the new setting.
-// Reload every node's store after tx commits.
-func StopDefaultSharingInTx(ctx context.Context, tx pgx.Tx, listProviders func(context.Context) ([]string, error)) error {
-	if tx == nil {
-		return errors.New("stop marker sharing needs the settings transaction")
-	}
-	if _, err := tx.Exec(ctx, `LOCK TABLE marker_provider_config IN SHARE ROW EXCLUSIVE MODE`); err != nil {
-		return fmt.Errorf("lock marker provider config: %w", err)
-	}
-	providers, err := listProviders(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = stopSharing(ctx, tx, providers)
-	return err
-}
-
-func stopSharing(ctx context.Context, db interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-}, providers []string,
-) (bool, error) {
-	if len(providers) == 0 {
-		return false, nil
-	}
-	tag, err := db.Exec(ctx, `
-		UPDATE marker_provider_config
-		SET contribute_enabled = false, contribute_auto_local = false, updated_at = now()
-		WHERE provider = ANY($1) AND (contribute_enabled OR contribute_auto_local)`,
-		providers,
-	)
-	if err != nil {
-		return false, fmt.Errorf("stop marker sharing: %w", err)
-	}
-	return tag.RowsAffected() > 0, nil
+	return nil
 }
