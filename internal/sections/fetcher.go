@@ -1193,8 +1193,11 @@ func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profil
 }
 
 // FetchAll runs all section queries in parallel and returns sections with items.
+// The sections share one read of the profile's watched set, which For You and
+// Because You Watched would otherwise each make.
 func (f *Fetcher) FetchAll(ctx context.Context, resolved []ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) []SectionWithItems {
 	start := time.Now()
+	ctx = recommendations.WithWatchedSetMemo(ctx)
 	results := fetchAllWithRunner(ctx, resolved, fetchAllMaxConcurrency, func(ctx context.Context, sec ResolvedSection) (SectionWithItems, error) {
 		return f.FetchOne(ctx, sec, libraryID, libraryIDs, userID, profileID, filter)
 	})
