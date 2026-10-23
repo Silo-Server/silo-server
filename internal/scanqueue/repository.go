@@ -401,7 +401,7 @@ func (r *Repository) ClaimNextAccepted(ctx context.Context, maxRunningLibraries,
 
 // TouchHeartbeat keeps the claim that started at startedAt alive. It reports
 // ErrScanRunNotFound once the run is no longer running under that claim: it
-// was cancelled, possibly on another replica, or requeued as stale and perhaps
+// was canceled, possibly on another replica, or requeued as stale and perhaps
 // claimed again.
 func (r *Repository) TouchHeartbeat(ctx context.Context, id string, startedAt *time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
@@ -589,7 +589,7 @@ func (r *Repository) MarkCancelled(ctx context.Context, id string) (*models.Scan
 	return run, false, nil
 }
 
-// CancelClaim marks a run cancelled for the worker holding the claim that
+// CancelClaim marks a run canceled for the worker holding the claim that
 // started at startedAt. Unlike MarkCancelled, which an admin cancel applies to
 // any active run, it reports ErrScanRunNotFound, and changes nothing, once the
 // run is no longer running under that claim.

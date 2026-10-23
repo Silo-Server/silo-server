@@ -501,7 +501,7 @@ func (s *Service) untrackRunning(runID string) {
 }
 
 // heartbeatLoop keeps the worker's claim on run alive. When the run is no
-// longer that claim, because an admin cancelled it on any replica or it was
+// longer that claim, because an admin canceled it on any replica or it was
 // requeued as stale, it stops the scan through stopScan.
 func (s *Service) heartbeatLoop(ctx context.Context, run *models.ScanRun, stopScan context.CancelFunc, stop <-chan struct{}) {
 	ticker := time.NewTicker(s.heartbeatInterval)
@@ -524,7 +524,7 @@ func (s *Service) heartbeatLoop(ctx context.Context, run *models.ScanRun, stopSc
 					return
 				default:
 				}
-				slog.InfoContext(ctx, "scan queue: stopping scan whose run was cancelled or requeued", "component", "scanqueue", "scan_id", run.ID)
+				slog.InfoContext(ctx, "scan queue: stopping scan whose run was canceled or requeued", "component", "scanqueue", "scan_id", run.ID)
 				stopScan()
 				return
 			}
@@ -544,7 +544,7 @@ func (s *Service) cancelRun(claimed *models.ScanRun) string {
 		return s.claimLost(ctx, claimed)
 	}
 	if err != nil {
-		slog.Warn("scan queue: failed to mark cancelled", "scan_id", claimed.ID, "error", err)
+		slog.Warn("scan queue: failed to mark canceled", "scan_id", claimed.ID, "error", err)
 		return scanRunUnknown
 	}
 	s.publish(context.Background(), "scan.cancelled", run)
@@ -552,11 +552,11 @@ func (s *Service) cancelRun(claimed *models.ScanRun) string {
 }
 
 // claimLost ends an attempt whose terminal write found the run no longer
-// running under its claim: an admin cancelled it, it was requeued as stale and
+// running under its claim: an admin canceled it, it was requeued as stale and
 // perhaps claimed again, or its library was deleted. The run belongs to that
 // cancel or claim, so nothing is published.
 func (s *Service) claimLost(ctx context.Context, claimed *models.ScanRun) string {
-	slog.Info("scan queue: leaving a run that is no longer this worker's claim",
+	slog.InfoContext(ctx, "scan queue: leaving a run that is no longer this worker's claim",
 		"scan_id", claimed.ID,
 		"library_id", claimed.MediaFolderID,
 	)

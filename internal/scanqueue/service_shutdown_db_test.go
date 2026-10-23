@@ -295,7 +295,7 @@ func claimAgain(t *testing.T, ctx context.Context, repo *Repository, run *models
 }
 
 // TestRunningScanStopsWhenItsClaimEndsElsewhereDB pins that a worker stops its
-// scan at the next heartbeat once its run is cancelled on another replica, or
+// scan at the next heartbeat once its run is canceled on another replica, or
 // requeued as stale and claimed again, and leaves the run to that cancel or
 // claim. Before, only the replica that took the cancel stopped its own scans,
 // and a worker kept heartbeating a later claim, so the scan ran to the end.
@@ -307,7 +307,7 @@ func TestRunningScanStopsWhenItsClaimEndsElsewhereDB(t *testing.T) {
 		end func(t *testing.T, ctx context.Context, repo *Repository, run *models.ScanRun) (string, *time.Time)
 	}{
 		{
-			name: "cancelled on another replica",
+			name: "canceled on another replica",
 			end: func(t *testing.T, ctx context.Context, repo *Repository, run *models.ScanRun) (string, *time.Time) {
 				other := NewService(repo, nil, nil, nil, context.Background(), 1, 1)
 				if _, err := other.CancelByLibrary(ctx, run.MediaFolderID); err != nil {
@@ -352,7 +352,7 @@ func TestRunningScanStopsWhenItsClaimEndsElsewhereDB(t *testing.T) {
 // TestStaleWorkerLeavesALaterClaimRunningDB pins that a worker whose run was
 // requeued as stale and claimed again cannot end the later claim, whichever
 // way its own scan ends, even before its heartbeat notices. Before, the stale
-// worker completed, failed or cancelled the run under the later claim.
+// worker completed, failed or canceled the run under the later claim.
 func TestStaleWorkerLeavesALaterClaimRunningDB(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -360,7 +360,7 @@ func TestStaleWorkerLeavesALaterClaimRunningDB(t *testing.T) {
 	}{
 		{name: "scan completes"},
 		{name: "scan fails", err: errors.New("read library: input/output error")},
-		{name: "scan is cancelled", err: context.Canceled},
+		{name: "scan is canceled", err: context.Canceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, _, repo, folderID := openDirectRunTestRepository(t)
