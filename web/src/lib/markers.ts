@@ -44,3 +44,11 @@ export function parseClock(value: string): number | null {
   }
   return total;
 }
+
+/**
+ * What a provider that shares by default receives. The setup wizard's "Share
+ * markers with Silo" toggle and the provider tile of every provider whose
+ * manifest declares default_contribute_enabled show it.
+ */
+export const MARKER_SHARING_DISCLOSURE =
+  "Help other Silo servers skip intros and credits. Silo shares the show and episode IDs, a hash of each file, and the intro and credits times it finds or you edit. It never shares file names, paths or your library list.";

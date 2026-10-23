@@ -41,6 +41,7 @@ function markerProvider(overrides: Partial<MarkerProviderConfig> = {}): MarkerPr
     contribute_enabled: false,
     contribute_auto_local: false,
     contribute_min_confidence: 0.95,
+    default_contribute_enabled: false,
     ...overrides,
   };
 }

@@ -23,6 +23,7 @@ import {
   useValidateMarkerProvider,
 } from "@/hooks/queries/admin/markers";
 import { SETTINGS_NUMBER_WIDTH, SettingField, SettingFieldRow } from "./SettingField";
+import { MARKER_SHARING_DISCLOSURE } from "@/lib/markers";
 import { providerMonogram } from "@/lib/monogram";
 import { pluginPagePath } from "@/lib/pluginPresentation";
 
@@ -328,7 +329,11 @@ function MarkerProviderTile({
         }}
         disabled={!provider.is_submitter}
         description={
-          !provider.is_submitter ? "This provider does not accept shared markers." : undefined
+          !provider.is_submitter
+            ? "This provider does not accept shared markers."
+            : provider.default_contribute_enabled
+              ? MARKER_SHARING_DISCLOSURE
+              : undefined
         }
       />
       <div className="border-border ml-3 border-l pl-4">
