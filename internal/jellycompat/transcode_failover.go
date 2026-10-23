@@ -195,6 +195,7 @@ func (h *PlaybackHandler) resolveCompatMoveRoute(
 	excludedShapes := map[string]struct{}{}
 	if !proxyEgress && !h.compatMoveCanRunLocally(ctx, source, recipe) {
 		excludedShapes["hls_video_api"] = struct{}{}
+		excludedShapes[noderouting.ShapeHLSRemuxAPI] = struct{}{}
 	}
 	policy := h.playbackRoutingPolicy()
 	for range compatMaxMoveRouteAttempts {

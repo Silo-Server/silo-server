@@ -432,24 +432,18 @@ func TestCompatMoveSurvivesOldNodeStop(t *testing.T) {
 	}
 }
 
-// This server takes a moved transcode only when it can run the recipe's
-// frozen tone-map mode. The candidate filter checks transcode nodes, and a
-// local rebuild of a mode this process lacks fails on every request.
-func TestCompatMoveToThisServerRequiresRecipeToneMapMode(t *testing.T) {
+// This server takes a moved transcode only when it can run the recipe: its
+// frozen tone-map mode and its audio downmix. The candidate filter checks
+// transcode nodes, and a local rebuild of a recipe this process cannot run
+// fails on every request. A copy-video downmix routes as a remux, so the
+// check covers both workloads' local shapes.
+func TestCompatMoveToThisServerRequiresLocalRecipeCapabilities(t *testing.T) {
 	hardware := tonemap.Capability{Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV,
 		Filter: tonemap.HardwareFilterOpenCL, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}}
 	software := tonemap.Capability{Mode: tonemap.ModeSoftware, Backend: playback.HWAccelNone,
 		Filter: "zscale", SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}}
-	for _, tt := range []struct {
-		name      string
-		local     tonemap.Capabilities
-		wantLocal bool
-	}{
-		{name: "local runs the mode", local: tonemap.Capabilities{hardware, software}, wantLocal: true},
-		{name: "local lacks the mode", local: tonemap.Capabilities{software}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newCompatMoveFixture(t, false, noderouting.EgressAPI)
+	toneMap := func(local tonemap.Capabilities) func(*testing.T, *compatMoveFixture) {
+		return func(t *testing.T, f *compatMoveFixture) {
 			if err := f.store.Update("play-1", func(current *PlaybackSession) error {
 				current.Recipe.ToneMapMode = tonemap.ModeHardware
 				current.Recipe.ToneMapSourceKind = tonemap.SourcePQ
@@ -459,8 +453,51 @@ func TestCompatMoveToThisServerRequiresRecipeToneMapMode(t *testing.T) {
 			}
 			f.handler.HWAccel = playback.HWAccelNone
 			f.handler.compatToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-				return tt.local, nil
+				return local, nil
 			}
+		}
+	}
+	copyVideoDownmix := func(localDownmix bool) func(*testing.T, *compatMoveFixture) {
+		return func(t *testing.T, f *compatMoveFixture) {
+			if err := f.store.Update("play-1", func(current *PlaybackSession) error {
+				source := &current.MediaSources[0]
+				source.HLSRemux, source.TranscodeAudio, source.TargetAudioChannels = true, true, 2
+				source.Version.AudioTracks[compatAudioTrackIndexOrDefault(*source)].Channels = 6
+				current.Recipe.TargetCodecVideo = compatCopyCodec
+				current.Recipe.SourceAudioChannels = compatHLSRecipeSourceAudioChannels(*source)
+				current.Recipe.RoutingWorkload = string(noderouting.WorkloadRemux)
+				current.RoutingAssignment.Workload = string(noderouting.WorkloadRemux)
+				if current.Recipe.SourceAudioChannels != 6 || !compatRecipeMatchesSource(current.Recipe, *source) {
+					t.Fatal("fixture recipe is not a copy-video downmix of its source")
+				}
+				return nil
+			}); err != nil {
+				t.Fatalf("make the recipe a copy-video downmix: %v", err)
+			}
+			f.handler.compatAudioRegistryProbe = func(context.Context, string, tonemap.Capabilities) (*playback.TransformationRegistryV3, error) {
+				var specs []playback.TransformationSpecV3
+				if localDownmix {
+					specs = append(specs, playback.TransformationSpecV3{
+						Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true,
+					})
+				}
+				return playback.NewTransformationRegistryV3(specs), nil
+			}
+		}
+	}
+	for _, tt := range []struct {
+		name      string
+		setup     func(*testing.T, *compatMoveFixture)
+		wantLocal bool
+	}{
+		{name: "local runs the tone-map mode", setup: toneMap(tonemap.Capabilities{hardware, software}), wantLocal: true},
+		{name: "local lacks the tone-map mode", setup: toneMap(tonemap.Capabilities{software})},
+		{name: "local runs the copy-video downmix", setup: copyVideoDownmix(true), wantLocal: true},
+		{name: "local lacks the copy-video downmix", setup: copyVideoDownmix(false)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newCompatMoveFixture(t, false, noderouting.EgressAPI)
+			tt.setup(t, f)
 
 			nodeURL, err := f.handler.moveCompatTranscodeOffNode(t.Context(), "upstream-1", f.deadURL)
 
@@ -471,7 +508,7 @@ func TestCompatMoveToThisServerRequiresRecipeToneMapMode(t *testing.T) {
 				return
 			}
 			if err == nil {
-				t.Fatalf("moved to %q without an executor for the recipe's tone-map mode", nodeURL)
+				t.Fatalf("moved to %q without an executor that can run the recipe", nodeURL)
 			}
 			if playSession := f.playSession(t); playSession.Recipe.TranscodeNodeURL != f.deadURL {
 				t.Fatalf("compat recipe names %q after a failed move", playSession.Recipe.TranscodeNodeURL)
