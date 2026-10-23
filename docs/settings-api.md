@@ -1063,8 +1063,9 @@ accepted, and `original` turns the fallback off so the original language is
 used, as before the setting existed. A refresh that writes an item in its base
 language fetches the missing text in the fallback language and stores it there.
 Gaps the fallback language cannot fill keep the original-language text. A
-manual refresh replaces stored text; a scheduled refresh fills only fields that
-have none, and does not ask again for text no language had on an earlier pass.
+manual refresh asks for fallback text even where text is stored. A scheduled
+refresh asks only for fields that have no stored text, and not again for text
+no language had on an earlier pass.
 Text in another library's language row is never filled: those rows fall back to
 the base row when read.
 

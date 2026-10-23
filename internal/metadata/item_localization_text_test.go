@@ -228,6 +228,16 @@ func TestLocalizationDropsTextInAnotherLanguage(t *testing.T) {
 			if loc == nil || loc.Title != "Моб Психо 100" || loc.Overview != wantOverview {
 				t.Errorf("fallback %q mode %d: localization = %+v, want the Russian title and overview %q", fallback, mode, loc, wantOverview)
 			}
+
+			// A title marked as another language is no translation either.
+			refreshShared(t, h, mode, "ru", &MetadataResult{Title: "モブサイコ100", TitleLanguage: "ja"})
+			wantTitle := "Моб Психо 100"
+			if fallback == "" && mode == ModeManualRefresh {
+				wantTitle = "モブサイコ100"
+			}
+			if got := locs.rows["series-shared/ru"].Title; got != wantTitle {
+				t.Errorf("fallback %q mode %d: title = %q, want %q", fallback, mode, got, wantTitle)
+			}
 		}
 	}
 }

@@ -60,6 +60,12 @@ func isForeignText(text, language, requested string) bool {
 	return strings.TrimSpace(text) != "" && language != "" && requested != "" && language != requested
 }
 
+// itemTitleMissing reports whether the item has no title in requested: none,
+// a provider's fallback title, or one marked as another language.
+func itemTitleMissing(item *MetadataResult, requested string) bool {
+	return item.TitleIsFallback || textMissing(item.Title, item.TitleLanguage, requested)
+}
+
 // textMissing reports whether text is empty or marked as another language.
 func textMissing(text, language, requested string) bool {
 	return strings.TrimSpace(text) == "" || isForeignText(text, language, requested)
@@ -293,7 +299,7 @@ func (s *MetadataService) fetchFallbackText(
 	if language == "" || req.writesFieldsOnly() || item == nil {
 		return nil
 	}
-	titleMissing := item.TitleIsFallback || strings.TrimSpace(item.Title) == ""
+	titleMissing := itemTitleMissing(item, req.Language)
 	overviewMissing := textMissing(item.Overview, item.OverviewLanguage, req.Language)
 	seasonGaps, episodeGaps := childGaps(seasons, episodes, req.Language)
 	if !titleMissing && !overviewMissing && len(seasonGaps) == 0 && len(episodeGaps) == 0 {
@@ -587,7 +593,7 @@ func (f *fallbackText) applyToItem(item *MetadataResult, requested string, exist
 		found = &MetadataResult{}
 	}
 	keep := f.policy.keepStored && existing != nil
-	if item.TitleIsFallback || strings.TrimSpace(item.Title) == "" {
+	if itemTitleMissing(item, requested) {
 		switch {
 		case found.Title != "":
 			item.Title, item.SortTitle, item.TitleLanguage = found.Title, found.SortTitle, f.language

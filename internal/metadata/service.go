@@ -2860,6 +2860,10 @@ func (s *MetadataService) mergeAndPersist(
 		// Text a provider marked as another language is no translation: the
 		// localization row stays empty and falls back to the base row. With
 		// the fallback off the original language is wanted, so it stays.
+		if isForeignText(accumulator.Title, accumulator.TitleLanguage, req.Language) {
+			// localizedItemText leaves a fallback title out of the row.
+			accumulator.TitleIsFallback = true
+		}
 		dropForeignText(&accumulator.Overview, &accumulator.OverviewLanguage, req.Language)
 		dropForeignText(&accumulator.Tagline, &accumulator.taglineLanguage, req.Language)
 		dropForeignChildText(seasons, episodes, req.Language)
