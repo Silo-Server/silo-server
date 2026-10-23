@@ -103,7 +103,8 @@ func TestLatestRecentlyAddedConfigParity(t *testing.T) {
 // per series via ListBySeriesIDs (the only method the series watch-state rollup
 // uses). Other methods are unused by this path.
 type seriesEpisodeSource struct {
-	bySeries map[string][]*models.Episode
+	bySeries  map[string][]*models.Episode
+	listCalls int
 }
 
 func (s *seriesEpisodeSource) ListBySeason(context.Context, string, int) ([]*models.Episode, error) {
@@ -115,6 +116,7 @@ func (s *seriesEpisodeSource) ListBySeriesGroupedBySeason(context.Context, strin
 }
 
 func (s *seriesEpisodeSource) ListBySeriesIDs(_ context.Context, ids []string) (map[string][]*models.Episode, error) {
+	s.listCalls++
 	out := make(map[string][]*models.Episode, len(ids))
 	for _, id := range ids {
 		if eps, ok := s.bySeries[id]; ok {

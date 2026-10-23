@@ -2598,13 +2598,17 @@ func (h *ItemsHandler) handleLibraryItem(w http.ResponseWriter, r *http.Request,
 // fallback behavior. Individually-unresolvable ids (e.g. season rows, which the
 // item-detail batch path does not handle) are simply absent and likewise fall
 // back to list rendering rather than a per-item detail fetch. Returns nil for an
-// empty input.
+// empty input, and when the batch fails after ctx is done, since each per-item
+// lookup would fail on the same context.
 func (h *ItemsHandler) batchListItemDetails(ctx context.Context, session *Session, contentIDs []string, libraryID *int) map[string]*upstreamItemDetail {
 	if len(contentIDs) == 0 {
 		return nil
 	}
 	if details, err := h.content.GetItemDetailsByIDs(ctx, session, contentIDs, libraryID); err == nil {
 		return details
+	}
+	if ctx.Err() != nil {
+		return nil
 	}
 	details := make(map[string]*upstreamItemDetail, len(contentIDs))
 	for _, id := range contentIDs {

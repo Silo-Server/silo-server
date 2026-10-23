@@ -3,7 +3,6 @@ package jellycompat
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"log/slog"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -408,14 +407,6 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 	if !allFields {
 		dropUnrequestedEmptyLists(&dto, wantField)
 	}
-	slog.Info("jellycompat item detail mapped",
-		"content_id", item.ContentID,
-		"type", item.Type,
-		"is_folder", dto.IsFolder,
-		"media_type", dto.MediaType,
-		"versions", len(item.Versions),
-		"media_sources", len(dto.MediaSources),
-	)
 	return dto
 }
 

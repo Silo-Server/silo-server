@@ -1388,7 +1388,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 		}
 		summaries, err := h.fetcher.ListOverlaySummaries(ctx, contentIDs, viewerAccess)
 		if err != nil {
-			slog.ErrorContext(ctx, "loading overlay summaries", "component", "api", "error", err)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelError), "loading overlay summaries", "component", "api", "error", err)
 			return
 		}
 		overlaySummaries = summaries
@@ -1603,7 +1603,7 @@ func (h *SectionHandler) listSectionMangaChapterItemMeta(ctx context.Context, it
 	}
 	meta, err := h.fetcher.FetchMangaChapterSeriesMeta(ctx, ids)
 	if err != nil {
-		slog.WarnContext(ctx, "loading section manga chapter metadata", "component", "api", "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section manga chapter metadata", "component", "api", "error", err)
 		return map[string]sections.SectionItemMeta{}
 	}
 	return meta
@@ -1639,7 +1639,7 @@ func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withIte
 
 	_, meta, err := h.episodeFetcher.FetchEpisodesByContentIDs(ctx, ids, filter)
 	if err != nil {
-		slog.WarnContext(ctx, "loading section episode metadata", "component", "api", "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section episode metadata", "component", "api", "error", err)
 		return map[string]sections.SectionItemMeta{}
 	}
 	return meta
