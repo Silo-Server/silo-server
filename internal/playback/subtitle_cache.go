@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
@@ -136,21 +137,11 @@ func (c *SubtitleCache) ServeExtract(w http.ResponseWriter, r *http.Request, opt
 	}
 
 	w.Header().Set("Cache-Control", "no-store")
-	var writer io.Writer = w
 	if fill != nil {
-		writer = fill.Tee(w)
+		return c.runViewerFill(r.Context(), w, opts, extract, fill)
 	}
-	opts.Writer = writer
-	err := extract(r.Context(), opts)
-	if fill != nil {
-		if err != nil {
-			fill.Discard()
-		} else if commitErr := fill.Commit(); commitErr != nil {
-			slog.WarnContext(r.Context(), "subtitle cache commit failed",
-				"input", opts.InputPath, "track", opts.TrackIndex, "format", format, "error", commitErr)
-		}
-	}
-	return err
+	opts.Writer = w
+	return extract(r.Context(), opts)
 }
 
 func (c *SubtitleCache) serveCached(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, format string) bool {
@@ -204,22 +195,96 @@ func (c *SubtitleCache) ServeSUPExtract(w http.ResponseWriter, r *http.Request, 
 	// flight (or the cache dir is unusable); this request then streams its
 	// own uncached extract.
 	fill := c.BeginFill(opts.InputPath, opts.TrackIndex)
-	var writer io.Writer = w
 	if fill != nil {
-		writer = fill.Tee(w)
+		return c.runViewerFill(r.Context(), w, opts, extract, fill)
 	}
+	opts.Writer = w
+	return extract(r.Context(), opts)
+}
 
-	opts.Writer = writer
-	err := extract(r.Context(), opts)
-	if fill != nil {
-		if err != nil {
-			fill.Discard()
-		} else if commitErr := fill.Commit(); commitErr != nil {
-			slog.WarnContext(r.Context(), "subtitle cache commit failed",
-				"input", opts.InputPath, "track", opts.TrackIndex, "error", commitErr)
+// runViewerFill streams a full-track extract to one viewer while filling the
+// cache. A viewer that leaves early (a start that gave up, a replan or seek
+// that reloads the item) usually asks for the same track again seconds later,
+// and the whole-file demux behind it can take a minute on a large remux. So
+// when the viewer goes, the extract carries on into the cache in a warm slot
+// and the next request is a cache hit; with every slot busy it stops and the
+// fill is discarded, as before. Returns once the extract has ended: the
+// extract error, or what ended the viewer's response.
+func (c *SubtitleCache) runViewerFill(ctx context.Context, w io.Writer, opts StreamExtractOpts, extract SUPExtractFunc, fill *SubtitleCacheFill) error {
+	extractCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), subtitleCacheWarmTimeout)
+	defer cancel()
+	viewer := &viewerWriter{w: w}
+	viewer.flusher, _ = w.(http.Flusher)
+	var holdsSlot bool
+	var viewerErr error
+	// Runs at most once, from the request's cancellation or a failed write.
+	detach := sync.OnceFunc(func() {
+		viewer.gone.Store(true)
+		select {
+		case c.warmSem <- struct{}{}:
+			holdsSlot = true
+		default:
+			cancel()
 		}
+	})
+	viewer.onError = func(err error) {
+		viewerErr = err
+		detach()
 	}
-	return err
+	stop := context.AfterFunc(ctx, detach)
+	opts.Writer = fill.Tee(viewer)
+	start := time.Now()
+	err := extract(extractCtx, opts)
+	if !stop() {
+		// Wait for a detach the request's cancellation already started.
+		detach()
+	}
+	if holdsSlot {
+		<-c.warmSem
+	}
+	if err != nil {
+		fill.Discard()
+	} else if commitErr := fill.Commit(); commitErr != nil {
+		slog.WarnContext(ctx, "subtitle cache commit failed",
+			"input", opts.InputPath, "track", opts.TrackIndex, "error", commitErr)
+	} else if viewer.gone.Load() {
+		slog.InfoContext(ctx, "subtitle cache fill finished after its viewer left",
+			"input", opts.InputPath, "track", opts.TrackIndex,
+			"elapsed_ms", time.Since(start).Milliseconds())
+	}
+	if !viewer.gone.Load() {
+		return err
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return viewerErr
+}
+
+// viewerWriter forwards an extract to its viewer until the viewer is gone,
+// then drops the bytes so the extract can keep filling the cache. The first
+// failed write reports itself through onError.
+type viewerWriter struct {
+	w       io.Writer
+	flusher http.Flusher
+	gone    atomic.Bool
+	onError func(error)
+}
+
+func (v *viewerWriter) Write(p []byte) (int, error) {
+	if v.gone.Load() {
+		return len(p), nil
+	}
+	if _, err := v.w.Write(p); err != nil {
+		v.onError(err)
+	}
+	return len(p), nil
+}
+
+func (v *viewerWriter) Flush() {
+	if v.flusher != nil && !v.gone.Load() {
+		v.flusher.Flush()
+	}
 }
 
 // serveWindowedSUP streams a windowed slice of the track. The output is a

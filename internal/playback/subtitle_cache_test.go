@@ -139,6 +139,59 @@ func TestServeExtractTextCancelledViewerDoesNotDiscardFill(t *testing.T) {
 	_ = f.Close()
 }
 
+func TestServeExtractFillOutlivesViewerWhenWarmSlotFree(t *testing.T) {
+	for _, slotsBusy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("slotsBusy=%v", slotsBusy), func(t *testing.T) {
+			c, source := newTestCache(t)
+			if slotsBusy {
+				for range cap(c.warmSem) {
+					c.warmSem <- struct{}{}
+				}
+			}
+			ctx, leave := context.WithCancel(t.Context())
+			err := c.ServeExtract(httptest.NewRecorder(), httptest.NewRequestWithContext(ctx, http.MethodGet, "/subtitle", nil),
+				StreamExtractOpts{InputPath: source, SourceCodec: "subrip"}, func(ctx context.Context, opts StreamExtractOpts) error {
+					if _, err := io.WriteString(opts.Writer, "first cues, "); err != nil {
+						return err
+					}
+					leave()
+					if slotsBusy {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-time.After(5 * time.Second):
+							t.Error("extract kept running without a warm slot")
+						}
+					}
+					for len(c.warmSem) == 0 {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-time.After(time.Millisecond):
+						}
+					}
+					_, err := io.WriteString(opts.Writer, "rest of the track")
+					return err
+				})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v, want the viewer's cancellation", err)
+			}
+			f, _, ok := c.lookup(source, 0, "vtt")
+			if ok == slotsBusy {
+				t.Fatalf("cached=%v with slots busy=%v", ok, slotsBusy)
+			}
+			if ok {
+				if got := readAllAndClose(t, f); got != "first cues, rest of the track" {
+					t.Fatalf("cached track = %q", got)
+				}
+			}
+			if !slotsBusy && len(c.warmSem) != 0 {
+				t.Fatalf("fill kept %d warm slots after finishing", len(c.warmSem))
+			}
+		})
+	}
+}
+
 func TestServeExtractOutlivesServerWriteTimeout(t *testing.T) {
 	for _, codec := range []string{"subrip", "ass", "hdmv_pgs_subtitle"} {
 		t.Run(codec, func(t *testing.T) {
