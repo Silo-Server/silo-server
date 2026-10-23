@@ -20,6 +20,14 @@ import (
 // range. Hit in production during the Continuum-to-Silo Postgres migration.
 const pgCheckViolation = "23514"
 
+// pgLockNotAvailable is the SQLSTATE Postgres returns when lock_timeout ends a
+// lock wait.
+const pgLockNotAvailable = "55P03"
+
+// ErrPartitionBusy reports that dropping a partition gave up waiting for a
+// lock another session held on the table. The next scheduled run retries it.
+var ErrPartitionBusy = errors.New("partitioned table busy")
+
 const deleteBatchSize = 10000
 
 // dropLockTimeout bounds each lock wait when dropping a partition. The drop
@@ -226,10 +234,10 @@ func (m *Manager) DropExpiredPartitions(ctx context.Context, cutoff time.Time) (
 		return partitions[i].upper.Before(partitions[j].upper)
 	})
 
-	// A drop that runs out of lock wait fails with lock_not_available (55P03).
-	// Stop at the first failure: the remaining drops need the same parent lock
-	// and would stall the table again. Callers fall back to row deletes, and
-	// the next scheduled run retries the drop.
+	// A drop that runs out of lock wait returns ErrPartitionBusy. Stop at the
+	// first failure: the remaining drops need the same parent lock and would
+	// stall the table again. Callers fall back to row deletes, and the next
+	// scheduled run retries the drop.
 	dropped := make([]string, 0, len(partitions))
 	for _, partition := range partitions {
 		if err := m.dropPartition(ctx, partition.name); err != nil {
@@ -254,6 +262,10 @@ func (m *Manager) dropPartition(ctx context.Context, name string) error {
 		return fmt.Errorf("set lock timeout: %w", err)
 	}
 	if _, err := tx.Exec(ctx, "DROP TABLE public."+quoteIdent(name)); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgLockNotAvailable {
+			return fmt.Errorf("%w: %w", ErrPartitionBusy, err)
+		}
 		return err
 	}
 	return tx.Commit(ctx)

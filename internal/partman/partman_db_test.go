@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -54,9 +53,8 @@ func TestDropExpiredPartitionsGivesUpOnABusyParentDB(t *testing.T) {
 	dropCtx, stopDrop := context.WithTimeout(ctx, 5*time.Second)
 	dropped, err := manager.DropExpiredPartitions(dropCtx, cutoff)
 	stopDrop()
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
-		t.Fatalf("drop behind a reader: %v, want lock_not_available", err)
+	if !errors.Is(err, ErrPartitionBusy) {
+		t.Fatalf("drop behind a reader: %v, want ErrPartitionBusy", err)
 	}
 	if len(dropped) != 0 {
 		t.Fatalf("dropped %v behind a reader", dropped)

@@ -2,12 +2,15 @@ package policy
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/partman"
 )
 
 const decisionLogCleanupBatchSize = 10000
@@ -56,7 +59,9 @@ func CleanupDecisionLogsOnce(
 		if dropped, err := pm.DropExpiredPartitions(ctx, cutoff); err != nil {
 			slog.WarnContext(ctx, "policy decision log partition cleanup error", "component", "policy", "error", err)
 			partitionCleanupFailed = true
-			if firstErr == nil {
+			// A busy table is not a failed pass: the row deletes below still
+			// prune it, and the next run retries the drop.
+			if firstErr == nil && !errors.Is(err, partman.ErrPartitionBusy) {
 				firstErr = err
 			}
 		} else if len(dropped) > 0 {
