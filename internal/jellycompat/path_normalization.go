@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type requestContextKey string
@@ -85,6 +87,13 @@ var compatPathSegments = map[string]string{
 
 func normalizeCompatPathMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// StripSlashes runs first and, inside a chi router, leaves the stripped
+		// path in RoutePath, which chi then matches instead of r.URL.Path.
+		// Without this, "/items/" (jellyfin-roku's search) would route as
+		// "/items" and 404.
+		if rctx := chi.RouteContext(r.Context()); rctx != nil && rctx.RoutePath != "" {
+			rctx.RoutePath = canonicalizeCompatPath(rctx.RoutePath)
+		}
 		normalized := canonicalizeCompatPath(r.URL.Path)
 		if normalized == r.URL.Path {
 			next.ServeHTTP(w, r)
