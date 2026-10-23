@@ -30,7 +30,8 @@ type DecisionLogPartitionManager interface {
 // CleanupDecisionLogsOnce runs one policy decision log retention pass. It
 // returns the number of deleted rows plus the first error encountered, so
 // callers (the task manager) can report a degraded pass instead of silently
-// letting policy_decisions grow unbounded.
+// letting policy_decisions grow unbounded. A partition drop that found the
+// table busy is not returned: the row deletes still prune that pass.
 func CleanupDecisionLogsOnce(
 	ctx context.Context,
 	pool *pgxpool.Pool,
