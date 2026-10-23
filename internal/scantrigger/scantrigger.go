@@ -216,6 +216,20 @@ func normalizeTrigger(trigger string) string {
 // Resolve), and the matched library root must still exist on disk so an
 // unmounted share never resolves to a reconciling scan.
 func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string) (*Target, error) {
+	return r.resolveVanished(ctx, path, trigger, false)
+}
+
+// ResolveVanishedFile is ResolveVanishedPath for a path the caller knows was
+// a file. A file that is neither media nor a sidecar of the library's videos
+// (a tool's temp or backup copy, such as Tdarr's *.partial.old) is rejected
+// with ReasonUnsupportedExtension: no scan catalogs it, and a subtree scan of
+// a file that is gone only fails to read its own root and warns that the
+// scan was partial.
+func (r *Resolver) ResolveVanishedFile(ctx context.Context, path, trigger string) (*Target, error) {
+	return r.resolveVanished(ctx, path, trigger, true)
+}
+
+func (r *Resolver) resolveVanished(ctx context.Context, path, trigger string, file bool) (*Target, error) {
 	if r == nil || r.folders == nil {
 		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: codeUnavailable, Message: msgScannerUnavailable, Reason: ReasonScannerUnavailable}
 	}
@@ -251,6 +265,9 @@ func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string
 	}
 	if dir, ok := localSidecarScope(cleanPath, matchedRoot, folder.Type); ok {
 		return &Target{Folder: folder, Mode: ModeSubtree, Path: dir, Trigger: trigger}, nil
+	}
+	if file {
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgUnsupportedExt, Reason: ReasonUnsupportedExtension}
 	}
 	scope := subtitleFolderScope(cleanPath, matchedRoot, folder.Type)
 	if filepath.Clean(scope) == filepath.Clean(matchedRoot) {
