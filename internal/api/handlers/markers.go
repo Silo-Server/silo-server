@@ -93,8 +93,10 @@ var manualMarkerConfidence = 1.0
 const manualMarkerAlgorithm = "manual:v1"
 
 // markerContributeTimeout bounds the detached contribution run kicked off after
-// a manual save so a slow or rate-limited provider can't leak goroutines.
-const markerContributeTimeout = 30 * time.Second
+// a manual save so a slow or rate-limited provider can't leak goroutines. It
+// leaves room to wait out an earlier in-flight submission to an amend provider
+// until that claim's lease expires; each submission has its own shorter limit.
+const markerContributeTimeout = markers.ContributionInFlightWait
 
 var markerSegmentNames = []string{"intro", "credits", "recap", "preview"}
 

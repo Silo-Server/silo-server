@@ -399,17 +399,18 @@ func TestContributionStoreAmendResubmitsChangedMarkers(t *testing.T) {
 	}
 }
 
-// signalingStore reports each claim that found another submission in flight.
+// signalingStore reports the content hash of each claim that found another
+// submission in flight.
 type signalingStore struct {
 	*ContributionStore
-	inFlight chan struct{}
+	inFlight chan string
 }
 
 func (s signalingStore) Claim(ctx context.Context, row ContributionRow, staleAfter time.Duration) (ContributionClaim, bool, error) {
 	claim, claimed, err := s.ContributionStore.Claim(ctx, row, staleAfter)
 	if errors.Is(err, errContributionInFlight) {
 		select {
-		case s.inFlight <- struct{}{}:
+		case s.inFlight <- row.ContentHash:
 		default:
 		}
 	}
@@ -417,24 +418,55 @@ func (s signalingStore) Claim(ctx context.Context, row ContributionRow, staleAft
 }
 
 // A manual correction saved while an earlier submission to an amend provider
-// is in flight is held until that one settles, then sent; nothing would offer
-// the manual marker again. Without WaitInFlight it is skipped.
+// is in flight is held until that one settles, then sent with a full submit
+// budget; nothing would offer the manual marker again. Without WaitInFlight it
+// is skipped. Of two held corrections only the file's current marker is sent:
+// an older one must never replace a newer one at the provider.
 func TestContributionStoreAmendWaitsOutAnInFlightSubmission(t *testing.T) {
 	fixture := newContributionStoreFixture(t)
 	ctx := context.Background()
-	sub := &fakeSubmitter{id: fixture.provider, amend: true}
+	deadlines := make(chan time.Time, 4)
+	sub := &fakeSubmitter{id: fixture.provider, amend: true, deadline: deadlines}
 	ids := ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 1, EpisodeNumber: 3}
-	store := signalingStore{ContributionStore: fixture.store, inFlight: make(chan struct{}, 16)}
+	store := signalingStore{ContributionStore: fixture.store, inFlight: make(chan string, 64)}
 	reg := NewRegistry(nil)
 	_ = reg.Register(sub)
 	cfg := fakeConfig{sub.id: {Provider: sub.id, ContributeEnabled: true}}
 	svc := NewContributionService(reg, fakeResolver{ids: ids}, cfg, store, nil)
 
-	file := newContribIntroFile(models.MarkerSourceManual)
-	file.ID = fixture.fileIDs[0]
+	save := func(start float64) *models.MediaFile {
+		t.Helper()
+		file := newContribIntroFile(models.MarkerSourceManual)
+		file.ID, file.IntroStart = fixture.fileIDs[0], floatPtr(start)
+		if _, err := fixture.pool.Exec(ctx, `
+			UPDATE media_files SET duration = $2, intro_start = $3, intro_end = $4, intro_markers_source = $5
+			WHERE id = $1`, file.ID, file.Duration, *file.IntroStart, *file.IntroEnd, *file.IntroMarkersSource); err != nil {
+			t.Fatalf("save intro: %v", err)
+		}
+		return file
+	}
+	heldHash := func(file *models.MediaFile) string {
+		startMs, endMs, durMs := int64(*file.IntroStart*1000), int64(*file.IntroEnd*1000), int64(file.Duration)*1000
+		return ContentHash(models.MarkerSegmentIntro, &startMs, &endMs, &durMs, append(contributionTargetParts(ids), models.MarkerSourceManual, "")...)
+	}
+	waitHeld := func(hash string, times int) {
+		t.Helper()
+		for times > 0 {
+			select {
+			case got := <-store.inFlight:
+				if got == hash {
+					times--
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("timed out waiting for a held claim")
+			}
+		}
+	}
+	older := save(5)
 	earlier := ContributionRow{
-		MediaFileID: file.ID, Provider: sub.id, SegmentKind: models.MarkerSegmentIntro, Source: models.MarkerSourceManual,
-		ContentHash: "earlier", TargetKey: contributionTargetKey(ids, nil) + "|file:" + strconv.Itoa(file.ID),
+		MediaFileID: older.ID, Provider: sub.id, SegmentKind: models.MarkerSegmentIntro, Source: models.MarkerSourceManual,
+		SubmittedStartMs: new(int64(5000)), SubmittedEndMs: new(int64(60000)),
+		ContentHash: "earlier", TargetKey: contributionTargetKey(ids, nil) + "|file:" + strconv.Itoa(older.ID),
 		Status: contributionStatusClaim, Amend: true,
 	}
 	claim, claimed, err := fixture.store.Claim(ctx, earlier, time.Minute)
@@ -442,28 +474,45 @@ func TestContributionStoreAmendWaitsOutAnInFlightSubmission(t *testing.T) {
 		t.Fatalf("claim the earlier submission: claimed=%v err=%v", claimed, err)
 	}
 	opts := ContributeOptions{Segments: []MarkerKind{MarkerKindIntro}}
-	outcomes, err := svc.ContributeFile(ctx, file, opts)
+	outcomes, err := svc.ContributeFile(ctx, older, opts)
 	if err != nil || len(outcomes) != 1 || outcomes[0].Reason != contributionInFlightReason || len(sub.submitted) != 0 {
 		t.Fatalf("without waiting: outcomes %+v, err %v, %d submitted; want one in-flight skip", outcomes, err, len(sub.submitted))
 	}
 
-	<-store.inFlight
 	opts.WaitInFlight = true
-	done := make(chan []ContributionOutcome, 1)
-	go func() {
-		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		outcomes, _ := svc.ContributeFile(waitCtx, file, opts)
-		done <- outcomes
-	}()
-	// The first pass and the first try after it both find the target held.
-	<-store.inFlight
-	<-store.inFlight
+	runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	type run struct {
+		name     string
+		outcomes []ContributionOutcome
+	}
+	done := make(chan run, 2)
+	wait := func(name string, file *models.MediaFile) {
+		go func() {
+			outcomes, _ := svc.ContributeFile(runCtx, file, opts)
+			done <- run{name, outcomes}
+		}()
+		// The first pass and the first try after it both find the target held.
+		waitHeld(heldHash(file), 2)
+	}
+	wait("older", older)
+	newer := save(0)
+	wait("newer", newer)
 	earlier.ID, earlier.ClaimToken, earlier.Status = claim.ID, claim.Token, SubmissionStatusPending
 	if err := fixture.store.Record(ctx, earlier); err != nil {
 		t.Fatalf("settle the earlier submission: %v", err)
 	}
-	if outcomes := <-done; len(outcomes) != 1 || outcomes[0].Status != SubmissionStatusPending || len(sub.submitted) != 1 {
-		t.Fatalf("after waiting: outcomes %+v, %d submitted; want the correction sent", outcomes, len(sub.submitted))
+	want := map[string]string{"older": contributionSupersededReason, "newer": ""}
+	for range 2 {
+		r := <-done
+		if len(r.outcomes) != 1 || r.outcomes[0].Reason != want[r.name] {
+			t.Fatalf("%s correction: outcomes %+v, want reason %q", r.name, r.outcomes, want[r.name])
+		}
+	}
+	if len(sub.submitted) != 1 || *sub.submitted[0].Start != 0 {
+		t.Fatalf("submitted %+v, want only the newer correction", sub.submitted)
+	}
+	if deadline, _ := runCtx.Deadline(); !(<-deadlines).After(deadline) {
+		t.Fatal("the held submission was cut to what was left of the run's budget")
 	}
 }

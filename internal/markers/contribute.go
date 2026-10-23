@@ -34,12 +34,21 @@ const (
 )
 
 // contributionInFlightReason is the skip reason for a target another worker's
-// submission holds; a WaitInFlight run tries that claim again every
-// contributionInFlightPoll.
+// submission holds; a WaitInFlight run tries that claim again, first after
+// contributionInFlightPoll and backing off to contributionInFlightPollMax.
+// contributionSupersededReason is the skip reason for a marker a later save
+// replaced.
 const (
-	contributionInFlightReason = "another submission for this item is in flight"
-	contributionInFlightPoll   = 500 * time.Millisecond
+	contributionInFlightReason   = "another submission for this item is in flight"
+	contributionSupersededReason = "a later save replaced this marker"
+	contributionInFlightPoll     = 500 * time.Millisecond
+	contributionInFlightPollMax  = 5 * time.Second
 )
+
+// ContributionInFlightWait is the run budget a WaitInFlight caller should
+// allow: an in-flight claim goes stale after contributionClaimLease, so a
+// held target can be claimed by then even when the worker holding it died.
+const ContributionInFlightWait = contributionClaimLease + time.Minute
 
 // ContributeOptions scopes a contribution run.
 type ContributeOptions struct {
@@ -58,10 +67,12 @@ type ContributeOptions struct {
 	Confirmed map[MarkerKind]string
 	// WaitInFlight makes a provider that supports amend wait, until ctx ends,
 	// for another worker's in-flight submission of a different marker for the
-	// same target, then send this one. The waits come after every other
-	// provider and segment. A manual save needs it: nothing offers a manual
-	// marker again, so skipping it would leave the provider with the earlier
-	// one.
+	// same target, then send this one unless a later save has replaced it.
+	// The waits come after every other provider and segment, and a claim won
+	// by waiting is submitted with its own contributionSubmitLimit, not what
+	// is left of ctx. A manual save needs it: nothing offers a manual marker
+	// again, so skipping it would leave the provider with the earlier one.
+	// Give ctx ContributionInFlightWait.
 	WaitInFlight bool
 }
 
@@ -382,6 +393,9 @@ func (s *ContributionService) contributeSegment(
 	if errors.Is(err, errContributionInFlight) {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: contributionInFlightReason}, true
 	}
+	if errors.Is(err, errContributionSuperseded) {
+		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: contributionSupersededReason}, true
+	}
 	if err != nil {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: err.Error()}, true
 	}
@@ -414,7 +428,13 @@ func (s *ContributionService) contributeSegment(
 		req.Confidence = *seg.confidence
 	}
 
-	submitCtx, cancel := context.WithTimeout(ctx, contributionSubmitLimit)
+	// A claim won after a long wait could otherwise be left a fraction of a
+	// second to submit, fail, release the target, and lose the correction.
+	submitBase := ctx
+	if opts.WaitInFlight {
+		submitBase = context.WithoutCancel(ctx)
+	}
+	submitCtx, cancel := context.WithTimeout(submitBase, contributionSubmitLimit)
 	result, err := sub.SubmitMarker(submitCtx, req)
 	cancel()
 	if err != nil {
@@ -463,16 +483,20 @@ func (s *ContributionService) contributeSegment(
 // claim claims row's target. With wait set, it tries again while another
 // worker's submission for an amend target is in flight, until ctx ends.
 func (s *ContributionService) claim(ctx context.Context, row ContributionRow, wait bool) (ContributionClaim, bool, error) {
+	delay := contributionInFlightPoll
 	for {
 		claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
 		if !wait || !errors.Is(err, errContributionInFlight) {
 			return claim, claimed, err
 		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return claim, claimed, err
-		case <-time.After(contributionInFlightPoll):
+		case <-timer.C:
 		}
+		delay = min(2*delay, contributionInFlightPollMax)
 	}
 }
 

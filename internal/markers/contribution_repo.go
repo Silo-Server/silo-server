@@ -87,12 +87,20 @@ func ptrIntStr(v *int64) string {
 // can be claimed once that submission settles.
 var errContributionInFlight = errors.New("another marker submission for this target is in flight")
 
+// errContributionSuperseded is Claim's answer when row.Amend is set and the
+// file's stored marker for the segment no longer has row's times and source:
+// a later save replaced it, and that save's own contribution sends the new one.
+var errContributionSuperseded = errors.New("the file's marker changed since it was read")
+
 // Claim atomically reserves a provider target before the network call. An
 // active row for the same provider, segment, and target blocks the claim,
 // whatever times it carried, unless row.Amend is set and the row is settled
 // with a different content hash: the provider then replaces its earlier
 // submission. A fresh in-flight row with a different hash returns
-// errContributionInFlight for an amend row. A stale in-flight row, or an
+// errContributionInFlight for an amend row, and an amend row whose marker is
+// no longer the file's stored one returns errContributionSuperseded, checked
+// under the claim lock so an older payload never replaces a newer one at the
+// provider. A stale in-flight row, or an
 // invalid refusal older than contributionInvalidRecheck, can be reclaimed;
 // recording a retryable error releases the claim. The advisory lock and
 // partial unique index serialize claims across local media files and server
@@ -119,6 +127,30 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 			hashtextextended($1 || chr(31) || $2 || chr(31) || $3, 0)
 		)`, row.Provider, row.SegmentKind, row.TargetKey); err != nil {
 		return ContributionClaim{}, false, fmt.Errorf("lock marker contribution claim: %w", err)
+	}
+
+	if row.Amend {
+		var current bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+			    SELECT 1
+			    FROM media_files mf
+			    CROSS JOIN LATERAL (VALUES
+			        ('intro', mf.intro_start, mf.intro_end, mf.intro_markers_source),
+			        ('credits', mf.credits_start, mf.credits_end, mf.credits_markers_source),
+			        ('recap', mf.recap_start, mf.recap_end, mf.recap_markers_source),
+			        ('preview', mf.preview_start, mf.preview_end, mf.preview_markers_source)
+			    ) AS seg(kind, start_s, end_s, source)
+			    WHERE mf.id = $1 AND seg.kind = $2
+			      AND trunc(seg.start_s * 1000)::bigint = $3
+			      AND trunc(seg.end_s * 1000)::bigint = $4
+			      AND seg.source = $5
+			)`, row.MediaFileID, row.SegmentKind, row.SubmittedStartMs, row.SubmittedEndMs, row.Source).Scan(&current); err != nil {
+			return ContributionClaim{}, false, fmt.Errorf("check marker contribution is current: %w", err)
+		}
+		if !current {
+			return ContributionClaim{}, false, errContributionSuperseded
+		}
 	}
 
 	leaseSeconds := int64(staleAfter / time.Second)
