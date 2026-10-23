@@ -21952,6 +21952,32 @@
         ],
         "type": "object"
       },
+      "CatalogAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "have": {
+            "description": "Complete seasons, or episodes in the library",
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Seasons that have aired, or known episodes",
+            "examples": [
+              3
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "have",
+          "total"
+        ],
+        "type": "object"
+      },
       "CatalogBrowseCollection": {
         "additionalProperties": false,
         "properties": {
@@ -22204,6 +22230,10 @@
               "commonsense"
             ],
             "type": "string"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
@@ -22524,6 +22554,10 @@
           },
           "audiobook": {
             "$ref": "#/components/schemas/AudiobookDetailExtension"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
@@ -30621,6 +30655,10 @@
               "commonsense"
             ],
             "type": "string"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
@@ -43969,6 +44007,10 @@
             "format": "date",
             "type": "string"
           },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "Episodes in the library out of the episodes this season lists. Absent for specials and when episode metadata is incomplete."
+          },
           "content_id": {
             "examples": [
               "series:severance-S01"
@@ -51174,6 +51216,10 @@
             ],
             "type": "string"
           },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."
+          },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
             "type": "boolean"
@@ -51546,6 +51592,10 @@
               "commonsense"
             ],
             "type": "string"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",

@@ -220,7 +220,12 @@ func viewerIdentity(ctx context.Context) (int, string, *Problem) {
 // listener does not read a device header, so the access filter carries no
 // device id.
 func sectionViewer(ctx context.Context, art imagesize.Request) handlers.SectionViewer {
-	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: art.Size, ImageWidths: art.Widths}
+	return handlers.SectionViewer{
+		Access:                  handlers.AccessFilterFromContext(ctx, ""),
+		ImageSize:               art.Size,
+		ImageWidths:             art.Widths,
+		IncludeCardAvailability: true,
+	}
 }
 
 func (reg *Registry) librarySections() (LibrarySectionService, *Problem) {

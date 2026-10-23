@@ -21,6 +21,7 @@ interface OverlaySourceItem {
   studios?: string[];
   networks?: string[];
   show_status?: string;
+  availability?: { have: number; total: number } | null;
 }
 
 function firstNonEmpty(values: string[] | undefined): string | undefined {
@@ -58,6 +59,8 @@ function extract(item: OverlaySourceItem): OverlayData {
     studio: firstNonEmpty(item.studios),
     network: firstNonEmpty(item.networks),
     show_status: item.show_status || undefined,
+    availability_have: item.availability?.have ?? null,
+    availability_total: item.availability?.total ?? null,
     // imdb_top_250 / rt_certified_fresh are not yet on either API shape —
     // they stay null until backend data sources land.
     imdb_top_250: null,
@@ -75,6 +78,15 @@ export function overlayDataFromSectionItem(item: SectionItem): OverlayData {
 
 export function overlayDataFromEpisodeListItem(item: EpisodeListItem): OverlayData {
   return extract(item);
+}
+
+export function overlayDataFromSeason(season: {
+  availability?: { have: number; total: number } | null;
+}): OverlayData {
+  return {
+    availability_have: season.availability?.have ?? null,
+    availability_total: season.availability?.total ?? null,
+  };
 }
 
 /**

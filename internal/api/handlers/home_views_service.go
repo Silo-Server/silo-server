@@ -47,7 +47,7 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	}
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
-	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.Artwork(), userStates)
+	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.Artwork(), userStates, viewer.IncludeCardAvailability)
 	itemCount := 0
 	for _, section := range withItems {
 		itemCount += len(section.Items)
@@ -120,7 +120,7 @@ func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.Resolved
 		// filter empties it; only aggregate Home drops such sections.
 		rows, userStates = h.filterWatchedHomeSections(ctx, rows, []sections.ResolvedSection{s})
 	}
-	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates).Sections
+	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates, viewer.IncludeCardAvailability).Sections
 	if len(built) == 0 {
 		return resolvedSectionResponse{
 			ID:          withItems.ID,

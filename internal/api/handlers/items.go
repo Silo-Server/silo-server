@@ -338,24 +338,27 @@ type itemListResponse struct {
 	Overview               string   `json:"overview,omitempty"`
 	posterPath             string
 	backdropPath           string
-	PosterIsEpisodeStill   *bool                       `json:"-"`
-	BackdropIsEpisodeStill *bool                       `json:"-"`
-	PosterURL              string                      `json:"poster_url,omitempty"`
-	PosterThumbhash        string                      `json:"poster_thumbhash,omitempty"`
-	BackdropURL            string                      `json:"backdrop_url,omitempty"`
-	BackdropThumbhash      string                      `json:"backdrop_thumbhash,omitempty"`
-	LogoURL                string                      `json:"-"`
-	ReleaseDate            *string                     `json:"release_date,omitempty"`
-	LastAirDate            *string                     `json:"last_air_date,omitempty"`
-	AddedAt                *time.Time                  `json:"added_at,omitempty"`
-	MangaChapterCount      *int                        `json:"manga_chapter_count,omitempty"`
-	MangaVolumeCount       *int                        `json:"manga_volume_count,omitempty"`
-	OverlaySummary         *models.OverlaySummary      `json:"overlay_summary,omitempty"`
-	SortMetrics            *sortMetricsResponse        `json:"sort_metrics,omitempty"`
-	UserState              *itemUserStateResponse      `json:"user_state,omitempty"`
-	WorkID                 string                      `json:"work_id,omitempty"`
-	WorkTitle              string                      `json:"work_title,omitempty"`
-	WorkFormats            []catalog.WorkFormatSummary `json:"work_formats,omitempty"`
+	PosterIsEpisodeStill   *bool                  `json:"-"`
+	BackdropIsEpisodeStill *bool                  `json:"-"`
+	PosterURL              string                 `json:"poster_url,omitempty"`
+	PosterThumbhash        string                 `json:"poster_thumbhash,omitempty"`
+	BackdropURL            string                 `json:"backdrop_url,omitempty"`
+	BackdropThumbhash      string                 `json:"backdrop_thumbhash,omitempty"`
+	LogoURL                string                 `json:"-"`
+	ReleaseDate            *string                `json:"release_date,omitempty"`
+	LastAirDate            *string                `json:"last_air_date,omitempty"`
+	AddedAt                *time.Time             `json:"added_at,omitempty"`
+	MangaChapterCount      *int                   `json:"manga_chapter_count,omitempty"`
+	MangaVolumeCount       *int                   `json:"manga_volume_count,omitempty"`
+	OverlaySummary         *models.OverlaySummary `json:"overlay_summary,omitempty"`
+	// Availability is the series poster fraction (complete released seasons
+	// over released seasons). json:"-" because /api/v1 is frozen.
+	Availability *catalog.Availability       `json:"-"`
+	SortMetrics  *sortMetricsResponse        `json:"sort_metrics,omitempty"`
+	UserState    *itemUserStateResponse      `json:"user_state,omitempty"`
+	WorkID       string                      `json:"work_id,omitempty"`
+	WorkTitle    string                      `json:"work_title,omitempty"`
+	WorkFormats  []catalog.WorkFormatSummary `json:"work_formats,omitempty"`
 }
 
 type sortMetricsResponse struct {
@@ -395,14 +398,17 @@ type itemFiltersResponse struct {
 
 // seasonResponse is the shape of a season in API responses.
 type seasonResponse struct {
-	ContentID       string                  `json:"content_id"`
-	PlayContentID   string                  `json:"play_content_id,omitempty"`
-	SeasonNumber    int                     `json:"season_number"`
-	IsSpecials      bool                    `json:"is_specials,omitempty"`
-	Title           string                  `json:"title"`
-	Overview        string                  `json:"overview,omitempty"`
-	AirDate         string                  `json:"air_date,omitempty"`
-	EpisodeCount    int                     `json:"episode_count"`
+	ContentID     string `json:"content_id"`
+	PlayContentID string `json:"play_content_id,omitempty"`
+	SeasonNumber  int    `json:"season_number"`
+	IsSpecials    bool   `json:"is_specials,omitempty"`
+	Title         string `json:"title"`
+	Overview      string `json:"overview,omitempty"`
+	AirDate       string `json:"air_date,omitempty"`
+	EpisodeCount  int    `json:"episode_count"`
+	// Availability is episodes in the library over known episodes. json:"-"
+	// because /api/v1 is frozen.
+	Availability    *catalog.Availability   `json:"-"`
 	PosterURL       string                  `json:"poster_url,omitempty"`
 	PosterThumbhash string                  `json:"poster_thumbhash,omitempty"`
 	UserData        *catalog.SeasonUserData `json:"user_data,omitempty"`
@@ -840,6 +846,8 @@ func (h *ItemsHandler) writeCatalogBrowseResponse(w http.ResponseWriter, r *http
 		}
 		items = append(items, resp)
 	}
+	// Availability is json:"-" on itemListResponse: this legacy v1 writer
+	// never emits it, so skip the season aggregation that only /api/v2 reads.
 
 	writeJSON(w, http.StatusOK, browseResponse{
 		Total:      result.Total,
@@ -2421,6 +2429,10 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 type ItemViewer struct {
 	Access    catalog.AccessFilter
 	ProfileID string
+	// IncludeCardAvailability runs the season/series presence lookup for
+	// poster badges. Only /api/v2 sets it: Availability is json:"-" on the
+	// frozen v1 card and season shapes, so v1 must not pay for the aggregation.
+	IncludeCardAvailability bool
 }
 
 // viewerFromRequest pairs an already-resolved access filter with the

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
@@ -58,6 +59,7 @@ type CatalogItem struct {
 	MangaChapterCount      *int                      `json:"manga_chapter_count,omitempty"`
 	MangaVolumeCount       *int                      `json:"manga_volume_count,omitempty"`
 	OverlaySummary         *CatalogItemOverlay       `json:"overlay_summary,omitempty" doc:"Technical badges of the best file"`
+	Availability           *CatalogAvailability      `json:"availability,omitempty" doc:"On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."`
 	Badges                 []string                  `json:"badges,omitempty" doc:"Section-specific badges (new, returning, …)"`
 	ItemSource             string                    `json:"item_source,omitempty" doc:"On a continue-watching card: in_progress or next_up"`
 	SortMetrics            *CatalogItemSortMetrics   `json:"sort_metrics,omitempty" doc:"The values the listing was sorted by"`
@@ -71,6 +73,12 @@ type CatalogItem struct {
 	WorkID                     string              `json:"work_id,omitempty" doc:"The work (book) an audiobook or ebook edition belongs to"`
 	WorkTitle                  string              `json:"work_title,omitempty"`
 	WorkFormats                []CatalogWorkFormat `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
+}
+
+// CatalogAvailability is the poster fraction for a series or season.
+type CatalogAvailability struct {
+	Have  int `json:"have" doc:"Complete seasons, or episodes in the library" example:"2"`
+	Total int `json:"total" doc:"Seasons that have aired, or known episodes" example:"3"`
 }
 
 // CatalogItemOverlay is the technical summary a card overlays.
@@ -126,6 +134,13 @@ type CatalogWorkFormat struct {
 	Type      string `json:"type" example:"audiobook"`
 	ContentID string `json:"content_id" example:"audiobook:dune"`
 	LibraryID ID     `json:"library_id,omitempty" doc:"Absent when the edition is not in a library"`
+}
+
+func catalogAvailabilityOf(a *catalogpkg.Availability) *CatalogAvailability {
+	if a == nil || a.Total <= 0 {
+		return nil
+	}
+	return &CatalogAvailability{Have: a.Have, Total: a.Total}
 }
 
 func catalogOverlayOf(o *models.OverlaySummary) *CatalogItemOverlay {
@@ -193,7 +208,7 @@ func catalogItemOfSection(v handlers.SectionItemView, sel ratingsources.Selectio
 		PositionSeconds: v.PositionSeconds, DurationSeconds: v.DurationSeconds, ProgressUpdatedAt: instantOfRFC3339(v.ProgressUpdatedAt),
 		PosterIsEpisodeStill: v.PosterIsEpisodeStill, BackdropIsEpisodeStill: v.BackdropIsEpisodeStill,
 		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash, LogoURL: v.LogoURL,
-		OverlaySummary: catalogOverlayOf(v.OverlaySummary), Badges: v.Badges, ItemSource: v.ItemSource, UserState: catalogUserStateOf(v.UserState),
+		OverlaySummary: catalogOverlayOf(v.OverlaySummary), Availability: catalogAvailabilityOf(v.Availability), Badges: v.Badges, ItemSource: v.ItemSource, UserState: catalogUserStateOf(v.UserState),
 		PendingTranslationLanguage: v.PendingTranslationLanguage, MachineTranslatedFields: v.MachineTranslatedFields,
 	}
 	if e := v.UpcomingEvent; e != nil {
@@ -216,7 +231,7 @@ func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selec
 		PosterIsEpisodeStill: v.PosterIsEpisodeStill, BackdropIsEpisodeStill: v.BackdropIsEpisodeStill,
 		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash, LogoURL: v.LogoURL,
 		MangaChapterCount: v.MangaChapterCount, MangaVolumeCount: v.MangaVolumeCount,
-		OverlaySummary: catalogOverlayOf(v.OverlaySummary), UserState: catalogUserStateOf(v.UserState),
+		OverlaySummary: catalogOverlayOf(v.OverlaySummary), Availability: catalogAvailabilityOf(v.Availability), UserState: catalogUserStateOf(v.UserState),
 		WorkID: v.WorkID, WorkTitle: v.WorkTitle,
 	}
 	if m := v.SortMetrics; m != nil {

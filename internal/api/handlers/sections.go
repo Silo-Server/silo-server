@@ -437,10 +437,12 @@ type sectionItemResponse struct {
 	BackdropThumbhash      string                 `json:"backdrop_thumbhash,omitempty"`
 	LogoURL                string                 `json:"logo_url,omitempty"`
 	OverlaySummary         *models.OverlaySummary `json:"overlay_summary,omitempty"`
-	Badges                 []string               `json:"badges,omitempty"`
-	ItemSource             string                 `json:"item_source,omitempty"`
-	UserState              *itemUserStateResponse `json:"user_state,omitempty"`
-	UpcomingEvent          *upcomingEventResponse `json:"upcoming_event,omitempty"`
+	// Availability is the series poster fraction. json:"-" because /api/v1 is frozen.
+	Availability *catalog.Availability `json:"-"`
+	Badges       []string              `json:"badges,omitempty"`
+	ItemSource   string                `json:"item_source,omitempty"`
+	UserState    *itemUserStateResponse `json:"user_state,omitempty"`
+	UpcomingEvent *upcomingEventResponse `json:"upcoming_event,omitempty"`
 	// PendingTranslationLanguage and MachineTranslatedFields reach the v2
 	// card only; v1 is frozen.
 	PendingTranslationLanguage string   `json:"-"`
@@ -1336,19 +1338,21 @@ type sectionItemImageURLs struct {
 // already-validated library scope of library-scoped endpoints (nil for the
 // home/profile surfaces) so play-target resolution stays scoped to it.
 func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sections.SectionWithItems, libraryID *int) homeSectionsResponse {
-	return h.buildSections(r.Context(), withItems, libraryID, requestAccessFilter(r), requestArtwork(r))
+	return h.buildSections(r.Context(), withItems, libraryID, requestAccessFilter(r), requestArtwork(r), false)
 }
 
 // buildSections renders sections for a viewer described by its context,
 // access filter and artwork size; it is what v1 and v2 share.
-func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request) homeSectionsResponse {
-	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, art, nil)
+// includeAvailability is only true for native /api/v2 callers: Availability is
+// json:"-" on the frozen v1 card shape.
+func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request, includeAvailability bool) homeSectionsResponse {
+	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, art, nil, includeAvailability)
 }
 
 // buildSectionsWithUserStates is buildSections reusing user states the caller
 // already loaded for these items (the Home hide-watched filter does); nil
 // loads them as buildSections does.
-func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request, knownUserStates map[string]*itemUserStateResponse) homeSectionsResponse {
+func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request, knownUserStates map[string]*itemUserStateResponse, includeAvailability bool) homeSectionsResponse {
 	deduplicateSectionItems(ctx, withItems)
 
 	contentIDs := make([]string, 0)
@@ -1444,6 +1448,20 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			Customized:  s.Customized,
 			Items:       items,
 		})
+	}
+	if includeAvailability {
+		flat := make([]sectionItemResponse, 0)
+		for _, section := range resp.Sections {
+			flat = append(flat, section.Items...)
+		}
+		fillSectionAvailability(ctx, h.fetcher, viewerAccess, flat)
+		n := 0
+		for si := range resp.Sections {
+			for ii := range resp.Sections[si].Items {
+				resp.Sections[si].Items[ii].Availability = flat[n].Availability
+				n++
+			}
+		}
 	}
 	return resp
 }
