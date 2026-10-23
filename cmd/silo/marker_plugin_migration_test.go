@@ -182,7 +182,7 @@ func TestReloadMarkerPluginProvidersCacheRevision(t *testing.T) {
 	resolver := markers.NewPluginResolverAdapter(runtime)
 	reloadRevision := func() string {
 		t.Helper()
-		if err := reloadMarkerPluginProviders(context.Background(), registry, nil, store, runtimeConfigs, nil, resolver); err != nil {
+		if _, err := reloadMarkerPluginProviders(context.Background(), registry, nil, store, runtimeConfigs, nil, resolver); err != nil {
 			t.Fatalf("reloadMarkerPluginProviders: %v", err)
 		}
 		providers := registry.Providers()
@@ -242,7 +242,7 @@ func TestReloadMarkerPluginProvidersRemovesProviderOnConfigReadFailure(t *testin
 	runtimeConfigs := &fakeMarkerRuntimeConfigs{configs: map[int][]*plugins.RuntimeConfig{}}
 	registry := markers.NewRegistry(nil)
 	resolver := markers.NewPluginResolverAdapter(&unusedMarkerPluginResolver{})
-	if err := reloadMarkerPluginProviders(context.Background(), registry, nil, store, runtimeConfigs, nil, resolver); err != nil {
+	if _, err := reloadMarkerPluginProviders(context.Background(), registry, nil, store, runtimeConfigs, nil, resolver); err != nil {
 		t.Fatalf("initial reloadMarkerPluginProviders: %v", err)
 	}
 	if got := len(registry.Providers()); got != 2 {
@@ -251,7 +251,7 @@ func TestReloadMarkerPluginProvidersRemovesProviderOnConfigReadFailure(t *testin
 
 	configErr := errors.New("config unavailable")
 	runtimeConfigs.errors = map[int]error{42: configErr}
-	err := reloadMarkerPluginProviders(context.Background(), registry, nil, store, runtimeConfigs, nil, resolver)
+	_, err := reloadMarkerPluginProviders(context.Background(), registry, nil, store, runtimeConfigs, nil, resolver)
 	if !errors.Is(err, configErr) {
 		t.Fatalf("reload error = %v, want %v", err, configErr)
 	}
@@ -278,6 +278,7 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 		// FetchEnabled and FetchPriority are not compared.
 		wantConfig       markers.ProviderConfig
 		wantShareDefault bool
+		wantStopped      bool
 	}{
 		{
 			name: "manifest without the key keeps submissions", metadata: nil, wantSubmit: true,
@@ -317,6 +318,7 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 			wantSubmit:       true,
 			wantConfig:       markers.ProviderConfig{ContributeMinConfidence: 0.9},
 			wantShareDefault: true,
+			wantStopped:      true,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -330,8 +332,14 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 			registry := markers.NewRegistry(nil)
 			resolver := markers.NewPluginResolverAdapter(&unusedMarkerPluginResolver{})
 			configs := fakeMarkerProviderConfigs{}
-			if err := reloadMarkerPluginProviders(context.Background(), registry, configs, store, runtimeConfigs, test.settings, resolver); err != nil {
+			stoppedSharing, err := reloadMarkerPluginProviders(context.Background(), registry, configs, store, runtimeConfigs, test.settings, resolver)
+			if err != nil {
 				t.Fatalf("reloadMarkerPluginProviders: %v", err)
+			}
+			// Other nodes reload provider config only when the caller announces
+			// the stop.
+			if stoppedSharing != test.wantStopped {
+				t.Fatalf("stoppedSharing = %v, want %v", stoppedSharing, test.wantStopped)
 			}
 			providers := registry.Providers()
 			if len(providers) != 1 {

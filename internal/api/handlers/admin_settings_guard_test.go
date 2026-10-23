@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestAdminSettingsGuardChecksLockedSnapshot(t *testing.T) {
@@ -56,6 +58,36 @@ func TestAdminSettingsGuardRefusesBeforeValidationOrProbes(t *testing.T) {
 			}
 			if !errors.Is(err, stale) || store.atomicCalls != 0 || len(store.values) != 0 {
 				t.Fatalf("err=%v atomic=%d", err, store.atomicCalls)
+			}
+		})
+	}
+}
+
+// A setting whose side effect must land with it, like markers.share_by_default
+// turning provider sharing off, fails the whole save when that effect fails.
+func TestAdminSettingsCommitHookFailureRollsBackSave(t *testing.T) {
+	for _, single := range []bool{false, true} {
+		t.Run(map[bool]string{false: "batch", true: "single"}[single], func(t *testing.T) {
+			store := newSerializedSettingsStore(map[string]string{})
+			callbacks := 0
+			failed := errors.New("stop sharing failed")
+			var hookKey, hookValue string
+			h := &AdminHandler{
+				SettingsRepo:           store,
+				OnServerSettingUpdated: func(context.Context, string, string) { callbacks++ },
+				BeforeServerSettingCommit: func(_ context.Context, _ pgx.Tx, key, value string) error {
+					hookKey, hookValue = key, value
+					return failed
+				},
+			}
+			var err error
+			if single {
+				_, err = h.UpdateAdminSetting(t.Context(), "markers.share_by_default", "false", nil)
+			} else {
+				_, err = h.UpdateAdminSettings(t.Context(), map[string]string{"markers.share_by_default": "false"}, nil)
+			}
+			if err == nil || hookKey != "markers.share_by_default" || hookValue != "false" || len(store.values) != 0 || callbacks != 0 {
+				t.Fatalf("err=%v hook=%s=%q stored=%v callbacks=%d", err, hookKey, hookValue, store.values, callbacks)
 			}
 		})
 	}

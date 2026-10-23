@@ -93,8 +93,9 @@ whose manifest turns sharing on. The server setting `markers.share_by_default`
 (`true` or `false`, default `true`, set by the setup wizard) decides whether
 those defaults apply: when it is `false`, new providers start with sharing off,
 and changing it to `false` also turns contribution and automatic sharing off
-for existing providers whose manifest turns sharing on. Changing it back to
-`true` changes no existing provider.
+for existing providers whose manifest turns sharing on. That change commits
+with the setting: if it fails, the save fails and the setting keeps its old
+value. Changing it back to `true` changes no existing provider.
 
 A manual deletion removes every occurrence of that kind for the selected file.
 The empty range retains manual provenance: provider lookups, local detection,

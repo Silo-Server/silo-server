@@ -29,6 +29,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
@@ -1297,7 +1298,10 @@ func main() {
 	// Assigned below when recommendations start; nil (a no-op) otherwise.
 	var settingsRecWorker *recommendations.Worker
 	// Assigned below with the marker plugin providers; nil without plugins.
-	var stopDefaultMarkerSharing func(context.Context)
+	// The first runs in the transaction that turns markers.share_by_default
+	// off, the second after it commits.
+	var stopDefaultMarkerSharing func(context.Context, pgx.Tx) error
+	var defaultMarkerSharingStopped func(context.Context)
 	var shutdownWork []<-chan struct{}
 	registerShutdownWork := func(done <-chan struct{}) {
 		shutdownWork = append(shutdownWork, done)
@@ -1343,6 +1347,16 @@ func main() {
 			restartReqCh <- struct{}{}
 			return nil
 		},
+		BeforeServerSettingCommit: func(ctx context.Context, tx pgx.Tx, key, value string) error {
+			// Turning sharing by default off also stops providers that
+			// started sharing because their manifest asked to. It shares the
+			// save's transaction, so a failure fails the save instead of
+			// leaving them sharing.
+			if key == markers.SettingShareByDefault && !markers.ShareByDefaultEnabled(value) && stopDefaultMarkerSharing != nil {
+				return stopDefaultMarkerSharing(ctx, tx)
+			}
+			return nil
+		},
 		OnServerSettingUpdated: func(_ context.Context, key, value string) {
 			// Key-scoped reload for the client-IP trust boundary: unlike the
 			// whole-config watcher reload below, this cannot be blocked by an
@@ -1359,10 +1373,8 @@ func main() {
 			if key == config.AccessUnratedContentSettingKey {
 				settingsRecWorker.NotifyUnratedContentChanged(context.Background(), config.UnratedContentCacheTTL+time.Second)
 			}
-			// Turning sharing by default off also stops providers that
-			// started sharing because their manifest asked to.
-			if key == markers.SettingShareByDefault && !markers.ShareByDefaultEnabled(value) && stopDefaultMarkerSharing != nil {
-				stopDefaultMarkerSharing(context.Background())
+			if key == markers.SettingShareByDefault && !markers.ShareByDefaultEnabled(value) && defaultMarkerSharingStopped != nil {
+				defaultMarkerSharingStopped(context.Background())
 			}
 			// Nudge the hot-reload watcher so same-process settings changes
 			// apply immediately even without Redis (the event bus is a no-op
@@ -1824,6 +1836,16 @@ func main() {
 			markerPluginResolver := markers.NewPluginResolverAdapter(pluginService)
 			var refreshMu sync.Mutex
 			var loadedRevision string
+			// Other nodes reload provider config only on this event, so every
+			// change to a provider's sharing announces it.
+			publishMarkerProviderConfigChanged := func(ctx context.Context) {
+				if deps.EventBus != nil {
+					_ = deps.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{
+						Type:    cache.EventMarkerProviderConfigChanged,
+						Payload: markers.SettingShareByDefault,
+					})
+				}
+			}
 			refreshMarkerProviders = func(ctx context.Context) (err error) {
 				refreshMu.Lock()
 				defer refreshMu.Unlock()
@@ -1850,8 +1872,12 @@ func main() {
 					if err := deps.MarkerProviderConfig.Reload(ctx); err != nil {
 						return err
 					}
-					if err := reloadMarkerPluginProviders(ctx, deps.MarkerRegistry, deps.MarkerProviderConfig,
-						installationStore, runtimeConfigStore, settingsRepo, markerPluginResolver); err != nil {
+					stoppedSharing, err := reloadMarkerPluginProviders(ctx, deps.MarkerRegistry, deps.MarkerProviderConfig,
+						installationStore, runtimeConfigStore, settingsRepo, markerPluginResolver)
+					if stoppedSharing {
+						publishMarkerProviderConfigChanged(ctx)
+					}
+					if err != nil {
 						return err
 					}
 					current, err := deps.MarkerProviderConfig.RuntimeRevision(ctx)
@@ -1870,24 +1896,18 @@ func main() {
 					slog.WarnContext(ctx, "reload marker plugin providers failed", "component", "app", "error", err)
 				}
 			})
-			stopDefaultMarkerSharing = func(ctx context.Context) {
+			stopDefaultMarkerSharing = func(ctx context.Context, tx pgx.Tx) error {
 				// Read the manifests from the database, not the registry, so
 				// disabled plugins and ones this node has not loaded stop too.
-				providers, err := markerDefaultSharingProviders(ctx, installationStore)
-				if err != nil {
-					slog.WarnContext(ctx, "stop default marker sharing failed", "error", err)
-					return
+				return markers.StopDefaultSharingInTx(ctx, tx, func(ctx context.Context) ([]string, error) {
+					return markerDefaultSharingProviders(ctx, installationStore)
+				})
+			}
+			defaultMarkerSharingStopped = func(ctx context.Context) {
+				if err := deps.MarkerProviderConfig.Reload(ctx); err != nil {
+					slog.WarnContext(ctx, "reload marker provider config failed", "error", err)
 				}
-				changed, err := deps.MarkerProviderConfig.StopSharing(ctx, providers)
-				if err != nil {
-					slog.WarnContext(ctx, "stop default marker sharing failed", "error", err)
-				}
-				if changed && deps.EventBus != nil {
-					_ = deps.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{
-						Type:    cache.EventMarkerProviderConfigChanged,
-						Payload: markers.SettingShareByDefault,
-					})
-				}
+				publishMarkerProviderConfigChanged(ctx)
 			}
 		}
 		if err := pluginService.PreloadEnabled(appCtx); err != nil {
@@ -4792,9 +4812,9 @@ func reloadMarkerPluginProviders(
 	runtimeConfigs markerPluginRuntimeConfigStore,
 	settings markerSettingsStore,
 	resolver *markers.PluginResolverAdapter,
-) error {
+) (stoppedSharing bool, err error) {
 	if registry == nil {
-		return nil
+		return stoppedSharing, nil
 	}
 	previous := make(map[string]string)
 	for _, provider := range registry.Providers() {
@@ -4805,12 +4825,12 @@ func reloadMarkerPluginProviders(
 	refreshedRuntimes := make(map[int]bool)
 	var providers []markers.Provider
 	if store == nil || resolver == nil {
-		return registry.SetProviders(providers)
+		return stoppedSharing, registry.SetProviders(providers)
 	}
 
 	installations, err := store.ListEnabled(ctx)
 	if err != nil {
-		return fmt.Errorf("list enabled plugin installations: %w", err)
+		return stoppedSharing, fmt.Errorf("list enabled plugin installations: %w", err)
 	}
 	sort.Slice(installations, func(i, j int) bool {
 		if installations[i] == nil {
@@ -4841,7 +4861,7 @@ func reloadMarkerPluginProviders(
 		}
 		capabilities, err := store.ListCapabilities(ctx, installation.ID)
 		if err != nil {
-			return fmt.Errorf("list marker provider capabilities for installation %d: %w", installation.ID, err)
+			return stoppedSharing, fmt.Errorf("list marker provider capabilities for installation %d: %w", installation.ID, err)
 		}
 		sort.Slice(capabilities, func(i, j int) bool {
 			if capabilities[i] == nil {
@@ -4858,7 +4878,7 @@ func reloadMarkerPluginProviders(
 			}
 			descriptor, err := plugins.DecodeCapability(capability)
 			if err != nil {
-				return fmt.Errorf("decode marker provider capability %d/%s: %w", installation.ID, capability.ID, err)
+				return stoppedSharing, fmt.Errorf("decode marker provider capability %d/%s: %w", installation.ID, capability.ID, err)
 			}
 			metadataMap := markerCapabilityMetadata(descriptor)
 			if err := copyLegacyIntroDBPluginConfig(ctx, runtimeConfigs, settings, installation, capability); err != nil {
@@ -4902,7 +4922,7 @@ func reloadMarkerPluginProviders(
 				DefaultContributeEnabled: contribution.Enabled,
 			}, resolver)
 			if err != nil {
-				return err
+				return stoppedSharing, err
 			}
 			var provider markers.Provider = pluginProvider
 			if !supportsContribution {
@@ -4932,7 +4952,7 @@ func reloadMarkerPluginProviders(
 					// server shares by default, which the setup wizard records.
 					share, err := markerShareByDefault(ctx, settings)
 					if err != nil {
-						return err
+						return stoppedSharing, err
 					}
 					seedsSharing = share
 					if !share {
@@ -4940,19 +4960,22 @@ func reloadMarkerPluginProviders(
 					}
 				}
 				if err := configStore.Ensure(ctx, defaultConfig); err != nil {
-					return err
+					return stoppedSharing, err
 				}
 				if seedsSharing {
 					// An admin may have turned sharing off between the read
 					// above and the insert, before the row existed for the
-					// setting's hook to update.
+					// setting's save to update. The caller announces the
+					// change to other nodes.
 					share, err := markerShareByDefault(ctx, settings)
 					if err != nil {
-						return err
+						return stoppedSharing, err
 					}
 					if !share {
-						if _, err := configStore.StopSharing(ctx, []string{provider.ID()}); err != nil {
-							return err
+						changed, err := configStore.StopSharing(ctx, []string{provider.ID()})
+						stoppedSharing = stoppedSharing || changed
+						if err != nil {
+							return stoppedSharing, err
 						}
 					}
 				}
@@ -4962,9 +4985,9 @@ func reloadMarkerPluginProviders(
 	// Replace the registry even when configuration reads failed, so a provider
 	// cannot continue serving cached lookups with an unknown credential revision.
 	if err := registry.SetProviders(providers); err != nil {
-		return err
+		return stoppedSharing, err
 	}
-	return configErr
+	return stoppedSharing, configErr
 }
 
 // markerShareByDefault reads markers.share_by_default. A server without the

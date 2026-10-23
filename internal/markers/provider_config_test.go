@@ -55,14 +55,23 @@ func TestProviderConfigStopSharingDB(t *testing.T) {
 		}
 	}
 
-	for _, wantChanged := range []bool{true, false} {
-		changed, err := store.StopSharing(ctx, []string{sharing})
-		if err != nil {
-			t.Fatalf("StopSharing: %v", err)
-		}
-		if changed != wantChanged {
-			t.Fatalf("changed = %v, want %v", changed, wantChanged)
-		}
+	// The settings save stops sharing in its own transaction.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := StopDefaultSharingInTx(ctx, tx, func(context.Context) ([]string, error) { return []string{sharing}, nil }); err != nil {
+		t.Fatalf("StopDefaultSharingInTx: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	// A reload's later stop finds nothing left to change.
+	if changed, err := store.StopSharing(ctx, []string{sharing}); err != nil || changed {
+		t.Fatalf("StopSharing = %v, %v; want no change", changed, err)
+	}
+	if err := store.Reload(ctx); err != nil {
+		t.Fatalf("reload: %v", err)
 	}
 	if got, _ := store.Get(sharing); got.ContributeEnabled || got.ContributeAutoLocal || !got.FetchEnabled || got.ContributeMinConfidence != 0.9 {
 		t.Fatalf("stopped provider = %+v, want only contribution off", got)

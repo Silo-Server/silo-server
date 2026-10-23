@@ -7,6 +7,8 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -201,18 +203,50 @@ func (s *ProviderConfigStore) Ensure(ctx context.Context, c ProviderConfig) erro
 }
 
 // StopSharing turns contribution and automatic sharing off for the given
-// providers. The server calls it for providers whose manifest declares
-// default_contribute_enabled once an admin turns markers.share_by_default off,
-// which may happen after such a provider was installed with contribution on. It
-// reports whether any row changed.
+// providers and reports whether any row changed. A reload calls it for a
+// provider it seeded with sharing on when markers.share_by_default turned off
+// meanwhile.
 func (s *ProviderConfigStore) StopSharing(ctx context.Context, providers []string) (bool, error) {
 	if s == nil || s.pool == nil {
 		return false, errors.New("marker provider config store unavailable")
 	}
+	changed, err := stopSharing(ctx, s.pool, providers)
+	if err != nil || !changed {
+		return false, err
+	}
+	return true, s.Reload(ctx)
+}
+
+// StopDefaultSharingInTx turns sharing off for the providers listProviders
+// returns, inside tx, the transaction that saves markers.share_by_default=false,
+// so the setting and the change commit or fail together. It locks
+// marker_provider_config against writes before listing: a provider row seeded
+// with sharing on either exists by then and is updated here, or its insert waits
+// for this commit and the reload that seeded it then reads the new setting.
+// Reload every node's store after tx commits.
+func StopDefaultSharingInTx(ctx context.Context, tx pgx.Tx, listProviders func(context.Context) ([]string, error)) error {
+	if tx == nil {
+		return errors.New("stop marker sharing needs the settings transaction")
+	}
+	if _, err := tx.Exec(ctx, `LOCK TABLE marker_provider_config IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return fmt.Errorf("lock marker provider config: %w", err)
+	}
+	providers, err := listProviders(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = stopSharing(ctx, tx, providers)
+	return err
+}
+
+func stopSharing(ctx context.Context, db interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}, providers []string,
+) (bool, error) {
 	if len(providers) == 0 {
 		return false, nil
 	}
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := db.Exec(ctx, `
 		UPDATE marker_provider_config
 		SET contribute_enabled = false, contribute_auto_local = false, updated_at = now()
 		WHERE provider = ANY($1) AND (contribute_enabled OR contribute_auto_local)`,
@@ -221,8 +255,5 @@ func (s *ProviderConfigStore) StopSharing(ctx context.Context, providers []strin
 	if err != nil {
 		return false, fmt.Errorf("stop marker sharing: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return false, nil
-	}
-	return true, s.Reload(ctx)
+	return tag.RowsAffected() > 0, nil
 }
