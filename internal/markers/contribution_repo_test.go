@@ -430,16 +430,33 @@ func TestContributionStoreAmendResubmitsChangedMarkers(t *testing.T) {
 	if candidate(amend.id) {
 		t.Fatal("the amended marker is still a candidate")
 	}
-
-	var active int
-	var targetKey string
-	if err := fixture.pool.QueryRow(ctx, `
-		SELECT count(*) FILTER (WHERE claim_active), max(target_key) FILTER (WHERE claim_active)
-		FROM marker_contributions WHERE provider = $1`, amend.id).Scan(&active, &targetKey); err != nil {
-		t.Fatalf("read amend claims: %v", err)
+	// A corrected episode ID can name another episode at the provider.
+	if _, err := fixture.pool.Exec(ctx, `UPDATE episodes SET tvdb_id = '349232' WHERE content_id = $1`, file.EpisodeID); err != nil {
+		t.Fatalf("correct the episode's TVDB ID: %v", err)
 	}
-	if want := fmt.Sprintf("episode|tmdb:1396|2|4|file:%d", file.ID); active != 1 || targetKey != want {
-		t.Fatalf("active amend claims = %d on %q, want 1 on %q", active, targetKey, want)
+	if !candidate(amend.id) || candidate(once.id) {
+		t.Fatal("after an episode ID correction, want a candidate for the amend provider only")
+	}
+	contribute()
+	if len(amend.submitted) != 3 || amend.submitted[2].EpisodeExternalIDs[ExternalIDKeyTVDB] != "349232" {
+		t.Fatalf("submissions after the episode ID correction: %d; want the corrected episode sent", len(amend.submitted))
+	}
+	wantOneActiveClaim(t, fixture, amend.id, amendTargetKey(file.ID))
+}
+
+// wantOneActiveClaim checks that provider holds exactly one active claim, on
+// targetKey.
+func wantOneActiveClaim(t *testing.T, fixture contributionStoreFixture, provider, targetKey string) {
+	t.Helper()
+	var active int
+	var got string
+	if err := fixture.pool.QueryRow(context.Background(), `
+		SELECT count(*) FILTER (WHERE claim_active), COALESCE(max(target_key) FILTER (WHERE claim_active), '')
+		FROM marker_contributions WHERE provider = $1`, provider).Scan(&active, &got); err != nil {
+		t.Fatalf("read active claims: %v", err)
+	}
+	if active != 1 || got != targetKey {
+		t.Fatalf("active claims = %d on %q, want 1 on %q", active, got, targetKey)
 	}
 }
 
@@ -573,10 +590,13 @@ func (m *manualCorrections) submitted(want ...float64) {
 
 // sendsTheFilesCurrentState checks, after the file's correction at 4 s was
 // sent, that a run that read the file before its duration or IDs changed
-// cannot claim, that new IDs send the correction again, and that a claim left
-// on a target the IDs no longer name does not hold a restored correction.
+// cannot claim, that new series or episode IDs send the correction again, and
+// that a submission in flight under the earlier IDs holds back one under the
+// new IDs until it settles.
 func (m *manualCorrections) sendsTheFilesCurrentState(save, daily ContributeOptions) {
 	m.t.Helper()
+	ctx := context.Background()
+	sent := []float64{2, 3, 4}
 	// A run that read the file before a re-probe changed its duration
 	// cannot claim; the file's current state is sent instead.
 	held := m.save(5, ManualAlgorithm)
@@ -586,33 +606,61 @@ func (m *manualCorrections) sendsTheFilesCurrentState(save, daily ContributeOpti
 	}
 	m.setDuration(1800)
 	m.contribute(held, daily)
-	m.submitted(2, 3, 4, 5)
+	sent = append(sent, 5)
+	m.submitted(sent...)
 
 	// New IDs send the correction again, and a payload built from the
-	// earlier IDs can no longer take the target.
-	before := m.ids()
-	m.exec(`UPDATE media_items SET imdb_id = 'tt9999999' WHERE content_id = $1`)
-	if !m.candidate() {
-		m.t.Fatal("a correction is not offered after the item's IDs changed")
+	// earlier IDs can no longer take the target. An episode's own IDs count:
+	// the provider resolves the episode by them first.
+	changes := []string{`UPDATE media_items SET imdb_id = 'tt9999999' WHERE content_id = $1`}
+	if m.file.EpisodeID != "" {
+		changes = append(changes, `UPDATE episodes SET tvdb_id = '349232' WHERE series_id = $1`)
 	}
-	m.contribute(held, daily)
-	m.submitted(2, 3, 4, 5, 5)
-	seg := fileSegments(held)[slices.IndexFunc(fileSegments(held), func(s segmentData) bool { return s.kind == m.kind })]
-	if _, _, err := m.fixture.store.Claim(context.Background(), newContributionRow(m.sub, held, before, seg, models.MarkerSourceManual), time.Minute); !errors.Is(err, errContributionSuperseded) {
-		m.t.Fatalf("claim with the earlier IDs: %v, want errContributionSuperseded", err)
+	row := func(file *models.MediaFile, ids ExternalIDs) ContributionRow {
+		segs := fileSegments(file)
+		seg := segs[slices.IndexFunc(segs, func(s segmentData) bool { return s.kind == m.kind })]
+		return newContributionRow(m.sub, file, ids, seg, models.MarkerSourceManual)
+	}
+	for _, change := range changes {
+		before := m.ids()
+		m.exec(change)
+		if !m.candidate() {
+			m.t.Fatalf("a correction is not offered after %s", change)
+		}
+		m.contribute(held, daily)
+		sent = append(sent, 5)
+		m.submitted(sent...)
+		if _, _, err := m.fixture.store.Claim(ctx, row(held, before), time.Minute); !errors.Is(err, errContributionSuperseded) {
+			m.t.Fatalf("claim with the IDs before %s: %v, want errContributionSuperseded", change, err)
+		}
 	}
 
-	// A new TMDB ID names a new target. The claim left on the old one
-	// matches a restored correction by value but does not hold it.
-	m.exec(`UPDATE media_items SET tmdb_id = '1397' WHERE content_id = $1`)
-	m.contribute(held, daily)
-	m.contribute(m.save(6, ManualAlgorithm), save)
-	restored := m.save(5, ManualAlgorithm)
-	if !m.candidate() {
-		m.t.Fatal("a claim on the item's old target holds back the restored correction")
+	// A submission still in flight when the IDs change holds the file's
+	// target: a save under the new IDs waits for it, then the daily task
+	// sends the save.
+	inFlight := m.save(7, ManualAlgorithm)
+	pending := row(inFlight, m.ids())
+	claim, claimed, err := m.fixture.store.Claim(ctx, pending, time.Minute)
+	if err != nil || !claimed {
+		m.t.Fatalf("claim the submission in flight: claimed=%v err=%v", claimed, err)
 	}
-	m.contribute(restored, daily)
-	m.submitted(2, 3, 4, 5, 5, 5, 6, 5)
+	m.exec(`UPDATE media_items SET tmdb_id = '1397' WHERE content_id = $1`)
+	latest := m.save(6, ManualAlgorithm)
+	if got := m.contribute(latest, save); got.Reason != contributionInFlightReason {
+		m.t.Fatalf("save under new IDs behind a submission in flight: %+v, want an in-flight skip", got)
+	}
+	if m.candidate() {
+		m.t.Fatal("a correction is offered while a submission under the earlier IDs is in flight")
+	}
+	pending.ID, pending.ClaimToken, pending.Status = claim.ID, claim.Token, SubmissionStatusPending
+	if err := m.fixture.store.Record(ctx, pending); err != nil {
+		m.t.Fatalf("settle the submission in flight: %v", err)
+	}
+	if !m.candidate() {
+		m.t.Fatal("the save under new IDs is not offered after the earlier submission settled")
+	}
+	m.contribute(latest, daily)
+	m.submitted(append(sent, 6)...)
 }
 
 // An amend provider that holds an earlier submission for a file gets the
@@ -623,8 +671,8 @@ func (m *manualCorrections) sendsTheFilesCurrentState(save, daily ContributeOpti
 // before claiming. A manual marker the provider never had anything for is not
 // offered, and an older correction, or one read before the file's duration or
 // IDs changed, never replaces a newer one. A change to the IDs sends the
-// correction again, and a claim under IDs the item no longer has does not
-// count as holding it. A save that kept a provider's marker is never offered
+// correction again, and a submission in flight under the earlier IDs holds
+// back one under the new IDs. A save that kept a provider's marker is never offered
 // nor sent by any path, even after the item's IDs change.
 func TestContributionStoreAmendSendsAnUnsentManualCorrection(t *testing.T) {
 	daily := ContributeOptions{Corrections: true}
@@ -652,7 +700,7 @@ func TestContributionStoreAmendSendsAnUnsentManualCorrection(t *testing.T) {
 			earlier := ContributionRow{
 				MediaFileID: m.file.ID, Provider: m.sub.id, SegmentKind: markerKindName(kind), Source: models.MarkerSourceScanner,
 				SubmittedStartMs: new(int64(9000)), SubmittedEndMs: new(int64(60000)),
-				ContentHash: "earlier", TargetKey: fmt.Sprintf("%s|file:%d", contributionTargetKey(m.ids(), nil), m.file.ID),
+				ContentHash: "earlier", TargetKey: amendTargetKey(m.file.ID),
 				Status: contributionStatusClaim,
 			}
 			claim, claimed, err := m.fixture.store.Claim(ctx, earlier, time.Minute)
@@ -706,6 +754,7 @@ func TestContributionStoreAmendSendsAnUnsentManualCorrection(t *testing.T) {
 			// A save that kept a provider's marker is withheld from every path,
 			// and a change to the series' IDs does not release it.
 			withheld := m.save(5, ManualWithheldAlgorithm)
+			sent := len(m.sub.submitted)
 			for range 2 {
 				if m.candidate() {
 					t.Fatal("a withheld save is offered as a correction")
@@ -717,7 +766,9 @@ func TestContributionStoreAmendSendsAnUnsentManualCorrection(t *testing.T) {
 				}
 				m.exec(`UPDATE media_items SET imdb_id = 'tt7777777' WHERE content_id = $1`)
 			}
-			m.submitted(2, 3, 4, 5, 5, 5, 6, 5)
+			if len(m.sub.submitted) != sent {
+				t.Fatalf("a withheld save was submitted: %d submissions, want %d", len(m.sub.submitted), sent)
+			}
 		})
 	}
 }

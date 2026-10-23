@@ -92,9 +92,10 @@ func ptrIntStr(v *int64) string {
 // currentAmendHashSQL is the content hash newContributionRow gives an amend
 // provider's row for the segment seg (kind, start_s, end_s, source,
 // algorithm) of media file mf, from the database's current state: the
-// marker, the file's duration, and the IDs DBExternalIDResolver reads for the
-// file. It is NULL when the resolver would find no item.
-const currentAmendHashSQL = `left(encode(sha256(convert_to(
+// marker, the file's duration, and the IDs and numbering DBExternalIDResolver
+// reads for the file. It is NULL when the resolver would find no item. Claim
+// and both daily candidate queries use it, so they cannot disagree.
+var currentAmendHashSQL = `left(encode(sha256(convert_to(
 	    seg.kind
 	    || '|' || trunc(seg.start_s * 1000)::bigint
 	    || '|' || trunc(seg.end_s * 1000)::bigint
@@ -105,10 +106,12 @@ const currentAmendHashSQL = `left(encode(sha256(convert_to(
 	                                               ELSE COALESCE(e.season_number, 0) END, 0)::text, '')
 	                || '|' || COALESCE(NULLIF(CASE WHEN COALESCE(e.episode_number, 0) <= 0 THEN COALESCE(mf.episode_number, 0)
 	                                               ELSE e.episode_number END, 0)::text, '')
+	                || '|' || COALESCE(BTRIM(e.tmdb_id), '') || '|' || COALESCE(BTRIM(e.imdb_id), '') || '|' || COALESCE(BTRIM(e.tvdb_id), '')
+	                || '|' || ` + episodeNumberingSQL("mf.media_folder_id") + `
 	         FROM episodes e
 	         LEFT JOIN media_items si ON si.content_id = e.series_id
 	         WHERE e.content_id = NULLIF(BTRIM(mf.episode_id), '')),
-	        (SELECT 'movie|' || COALESCE(mi.tmdb_id, '') || '|' || COALESCE(mi.imdb_id, '') || '|' || COALESCE(mi.tvdb_id, '') || '||'
+	        (SELECT 'movie|' || COALESCE(mi.tmdb_id, '') || '|' || COALESCE(mi.imdb_id, '') || '|' || COALESCE(mi.tvdb_id, '') || '||||||'
 	         FROM media_items mi
 	         WHERE NULLIF(BTRIM(mf.episode_id), '') IS NULL
 	           AND mi.content_id = NULLIF(BTRIM(mf.content_id), '') AND mi.type = 'movie'))
@@ -382,9 +385,7 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 	}
 	// series_ids holds the series' non-blank external IDs. The target key
 	// follows contributionTargetKey: the provider's first required ID, or else
-	// TMDB, TVDB, then IMDb, and the file for an amend provider. amend.hash
-	// follows contributeSegment's ContentHash call for an amend provider, over
-	// the IDs as the resolver reads them.
+	// TMDB, TVDB, then IMDb; an amend provider's is amendTargetKey.
 	rows, err := s.pool.Query(ctx, `
 		SELECT mf.id, seg.confidence
 		FROM media_files mf
@@ -399,17 +400,6 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		    ('intro', mf.intro_markers_source, mf.intro_start, mf.intro_end, COALESCE(mf.intro_markers_confidence, 0), mf.intro_markers_algorithm),
 		    ('credits', mf.credits_markers_source, mf.credits_start, mf.credits_end, COALESCE(mf.credits_markers_confidence, 0), mf.credits_markers_algorithm)
 		) AS seg(kind, source, start_s, end_s, confidence, algorithm)
-		CROSS JOIN LATERAL (SELECT left(encode(sha256(convert_to(
-		    seg.kind
-		    || '|' || trunc(seg.start_s * 1000)::bigint
-		    || '|' || trunc(seg.end_s * 1000)::bigint
-		    || '|' || COALESCE(mf.duration, 0) * 1000
-		    || '|episode|' || COALESCE(series.tmdb_id, '')
-		    || '|' || COALESCE(series.imdb_id, '')
-		    || '|' || COALESCE(series.tvdb_id, '')
-		    || '|' || e.season_number || '|' || e.episode_number
-		    || '|' || seg.source || '|' || COALESCE(seg.algorithm, ''),
-		    'UTF8')), 'hex'), 32) AS hash) AS amend
 		WHERE seg.kind = $11
 		  AND mf.episode_id IS NOT NULL
 		  AND seg.source = $1
@@ -430,16 +420,16 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		            WHERE mc.provider = p.provider
 		              AND mc.segment_kind = seg.kind
 		              AND mc.claim_active
-		              AND mc.target_key = 'episode|' || COALESCE(
-		                  req.keys[1] || ':' || (series_ids.ids ->> req.keys[1]),
-		                  'tmdb:' || (series_ids.ids ->> 'tmdb'),
-		                  'tvdb:' || (series_ids.ids ->> 'tvdb'),
-		                  'imdb:' || (series_ids.ids ->> 'imdb')
-		              ) || '|' || e.season_number || '|' || e.episode_number
-		                || CASE WHEN p.amend THEN '|file:' || mf.id ELSE '' END
+		              AND mc.target_key = CASE WHEN p.amend THEN 'file:' || mf.id
+		                  ELSE 'episode|' || COALESCE(
+		                      req.keys[1] || ':' || (series_ids.ids ->> req.keys[1]),
+		                      'tmdb:' || (series_ids.ids ->> 'tmdb'),
+		                      'tvdb:' || (series_ids.ids ->> 'tvdb'),
+		                      'imdb:' || (series_ids.ids ->> 'imdb')
+		                  ) || '|' || e.season_number || '|' || e.episode_number END
 		              AND NOT (mc.status = $7 AND mc.updated_at < now() - ($8 * interval '1 second'))
 		              AND NOT (mc.status = $9 AND mc.updated_at < now() - ($10 * interval '1 second'))
-		              AND (NOT p.amend OR mc.status = $7 OR mc.content_hash = amend.hash)
+		              AND (NOT p.amend OR mc.status = $7 OR mc.content_hash = `+currentAmendHashSQL+`)
 		        )
 		  )
 		ORDER BY seg.confidence DESC, mf.id
@@ -471,8 +461,8 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 // and does not hold yet: the provider has a row for the file's segment, none
 // of its active claims there has the content hash the file's current state
 // gives (currentAmendHashSQL), and none is a fresh in-flight claim, which
-// Claim would refuse. A claim on a target the file's IDs no longer name never
-// matches, since the hash covers those IDs. A stale in-flight claim and an
+// Claim would refuse. The hash covers the item's IDs, so a claim taken under
+// IDs the item no longer has never matches. A stale in-flight claim and an
 // invalid refusal due for its recheck do not count. Paging is by keyset: pass
 // the last candidate returned (nil for the first page).
 func (s *ContributionStore) CandidateManualCorrections(ctx context.Context, providers []string, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {

@@ -455,8 +455,10 @@ func (s *ContributionService) contributeSegment(
 
 // newContributionRow is the claim row for submitting seg's marker, from
 // source, to sub. An amend provider replaces this file's earlier submission,
-// so the file is its own target and a new detection version is a change worth
-// sending. CandidateLocalMarkerFiles derives the same hash and key in SQL.
+// so the file alone is its target (amendTargetKey), and its hash covers
+// everything the request identifies the episode by and a new detection
+// version, each a change worth sending. currentAmendHashSQL derives the same
+// amend hash in SQL, and CandidateLocalMarkerFiles the same keys.
 func newContributionRow(sub Submitter, file *models.MediaFile, ids ExternalIDs, seg segmentData, source string) ContributionRow {
 	reqs := submissionRequirements(sub)
 	startMs := int64(*seg.start * 1000)
@@ -469,8 +471,10 @@ func newContributionRow(sub Submitter, file *models.MediaFile, ids ExternalIDs, 
 	hashParts := contributionTargetParts(ids)
 	targetKey := contributionTargetKey(ids, reqs.RequiredExternalIDs)
 	if reqs.SupportsAmend {
-		hashParts = append(hashParts, source, algorithm)
-		targetKey += "|file:" + strconv.Itoa(file.ID)
+		hashParts = append(hashParts,
+			ids.Episode.TmdbID, ids.Episode.ImdbID, ids.Episode.TvdbID, ids.EpisodeNumbering,
+			source, algorithm)
+		targetKey = amendTargetKey(file.ID)
 	}
 	return ContributionRow{
 		MediaFileID:      file.ID,
@@ -507,11 +511,18 @@ func contributionTargetParts(ids ExternalIDs) []string {
 	}
 }
 
+// amendTargetKey is the target of every claim an amend provider holds for a
+// file's segment. It names no external ID, so a claim taken before a metadata
+// change still holds the target and serializes the next submission behind it.
+func amendTargetKey(fileID int) string {
+	return "file:" + strconv.Itoa(fileID)
+}
+
 // contributionTargetKey names the provider-side item a segment is submitted
 // against, independent of the submitted times. Most providers accept one
 // submission per account for each item and segment and offer no way to amend
 // it, so an active claim on this key blocks every later payload for the same
-// item. contributeSegment appends the file for a provider that supports amend.
+// item. A provider that supports amend uses amendTargetKey instead.
 //
 // The item is identified by the first external ID the provider keys
 // submissions by, or else by TMDB, TVDB, then IMDb. The candidate query

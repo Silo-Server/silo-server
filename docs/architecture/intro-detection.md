@@ -418,22 +418,25 @@ each item. A stale in-flight claim, a retryable error, and an `invalid`
 refusal older than 30 days free the target.
 
 A provider whose marker capability declares `supports_amend` replaces its
-earlier submission instead. For it, the target key adds `|file:<media_file_id>`,
-so each file is its own target, and the content hash also covers the marker's
-source and algorithm, so a new detection version is a change. A claim whose
+earlier submission instead. For it, the target key is `file:<media_file_id>`,
+so each file is its own target. The key names no external ID, so a submission
+still in flight when the item's IDs change holds the target, and the next one
+waits for it. The content hash also covers the episode's own IDs, the
+numbering it follows, and the marker's source and algorithm, so a corrected
+episode ID or a new detection version is a change. A claim whose
 content hash differs from the new one is taken over once it is settled, even
 as a `conflict`. Before taking over a target, `Claim` checks under its lock
 that the payload's content hash is still the one the file's current state
 gives (`currentAmendHashSQL`: the stored marker, the file's duration, and the
-item's IDs as the resolver reads them), so an older save, or a run that read
+item's IDs and episode numbering as the resolver reads them), so an older save, or a run that read
 the file before a save, a new detection, a re-probe, or a metadata change,
 never replaces a newer payload at the provider.
 
-The daily candidate queries recompute the amend hash in SQL. They must hash
-exactly as `contributeSegment` does; the database contract tests
+`Claim` and both daily candidate queries use `currentAmendHashSQL`, which
+must hash exactly as `newContributionRow` does; the database contract tests
 `TestContributionStoreAmendResubmitsChangedMarkers` and
-`TestContributionStoreAmendSendsAnUnsentManualCorrection` check that. It offers a
-scanner marker again when it no longer matches its active claim.
+`TestContributionStoreAmendSendsAnUnsentManualCorrection` check that. The
+queries offer a marker again when it no longer matches its active claim.
 
 A save's background contribution tries each provider once and never waits,
 and stops at a rate limit like any run. At a provider that supports amend,
@@ -443,8 +446,7 @@ stopped. `CandidateManualCorrections` offers a manual marker of any kind, on
 a movie or an episode, when the provider already has a `marker_contributions`
 row for that file and segment and none of its active claims there has the
 marker's current content hash. A change to the item's IDs therefore sends a
-correction again, and a claim left on a target the IDs no longer name never
-counts as holding it. The run uses
+correction again. The run uses
 `ContributeOptions.Corrections`, which `Claim` accepts only with such a row
 (`ContributionRow.Correction`). It runs for every provider with contribution
 enabled that supports amend, whether or not automatic sharing is on, before
