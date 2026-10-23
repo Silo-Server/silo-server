@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "report": {
+    "type": "abnormal_exit",
+    "captured_at": "2026-07-19T22:05:11Z",
+    "capture_session_id": "run_tvos_exit_007",
+    "app_version": "1.4.2",
+    "app_build": "20841",
+    "platform": "tvos",
+    "os_version": "26.0",
+    "profile_id": "prof_den",
+    "occurrence_count": 0
+  },
+  "destination": {
+    "server_instance_id": "srv_home_01"
+  },
+  "consent": {
+    "mode": "prompt",
+    "notice_version": 1
+  },
+  "crash": {
+    "summary": "Silo did not shut down cleanly last time",
+    "thread": "unknown",
+    "foreground": true,
+    "source": "exit_sentinel",
+    "provenance": "post_restart",
+    "occurred_at": "2026-07-19T22:05:11Z"
+  },
+  "device_summary": {
+    "manufacturer": "Apple",
+    "model": "Apple TV",
+    "os": "26.0",
+    "form_factor": "tv"
+  },
+  "playback_session_ids": [
+    "ps_tvos_11",
+    "ps_tvos_10"
+  ],
+  "log_summary": {
+    "lines": 120,
+    "bytes_gz": 12044,
+    "dropped_lines": 3,
+    "categories": [
+      "lifecycle",
+      "playback"
+    ],
+    "debug_logging": false
+  },
+  "archive": {
+    "entries": [
+      "manifest.json",
+      "device.json",
+      "logs.jsonl",
+      "crash/summary.json",
+      "breadcrumbs.jsonl"
+    ],
+    "bytes": 30001,
+    "uncompressed_bytes": 104000,
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
+}

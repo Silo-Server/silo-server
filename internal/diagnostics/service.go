@@ -66,6 +66,11 @@ type Status struct {
 	// upload is rejected by a reverse proxy's request-body cap. Absent/zero on
 	// older servers, which clients must treat as "chunking unsupported".
 	UploadChunkBytes int64 `json:"upload_chunk_bytes"`
+	// AcceptedCrashSources lists the crash.source values the manifest
+	// validator accepts. Absent on older servers, which accept only
+	// ueh, exit_info, metrickit and exit_sentinel; a client must not send
+	// any other source to them.
+	AcceptedCrashSources []string `json:"accepted_crash_sources"`
 }
 
 type IngestResult struct {
@@ -319,6 +324,7 @@ func (s *Service) statusFromSettings(settings Settings) Status {
 		RetentionDays:          settings.RetentionDays,
 		ConsentNoticeVersion:   settings.ConsentNoticeVersion,
 		UploadChunkBytes:       UploadChunkBytes,
+		AcceptedCrashSources:   contract.CrashSources(),
 	}
 }
 
