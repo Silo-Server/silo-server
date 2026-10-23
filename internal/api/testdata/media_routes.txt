@@ -468,6 +468,8 @@ GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
+GET /api/v2/catalog/box-sets	non-media
+GET /api/v2/catalog/box-sets/{id}	non-media
 GET /api/v2/catalog/filters	non-media
 GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media
@@ -1753,6 +1755,8 @@ GET /api/v2/capabilities/ratings	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
+GET /api/v2/catalog/box-sets	non-media
+GET /api/v2/catalog/box-sets/{id}	non-media
 GET /api/v2/catalog/filters	non-media
 GET /api/v2/catalog/filters/search	non-media
 GET /api/v2/catalog/items/{id}	non-media

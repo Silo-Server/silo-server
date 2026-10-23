@@ -32,6 +32,13 @@
 ./internal/scanner TestScanKeepsFileRowAcrossRenameDB
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
+# Movie box sets: grouping by viewer access and the minimum, grouped browse
+# and letters, search, sync bookkeeping, and collection artwork.
+./internal/catalog TestBoxSetGroupsDB
+./internal/catalog TestBoxSetGroupedBrowseDB
+./internal/catalog TestBoxSetSearchAndSyncDB
+./internal/catalog TestBoxSetCollectionArtworkDB
+
 # A watched special does not anchor Next Up for a series with regular seasons.
 ./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
 

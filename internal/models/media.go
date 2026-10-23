@@ -27,6 +27,12 @@ type MediaFolder struct {
 	// TrickplayEnabled generates seek-bar previews for the library's video
 	// files (internal/trickplay). Off by default.
 	TrickplayEnabled bool
+	// BoxSetsEnabled browses the movies TMDB lists in one collection as a
+	// single box set card once at least BoxSetMinMovies of them are in the
+	// library. BoxSetsInSearch also lists matching box sets in search.
+	BoxSetsEnabled  bool
+	BoxSetMinMovies int
+	BoxSetsInSearch bool
 	// RealtimeMonitoring is the library's real-time monitoring switch. It
 	// takes effect only while the server-wide scanner.realtime_monitoring
 	// setting is on and the library is enabled.

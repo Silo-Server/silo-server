@@ -476,6 +476,8 @@ type Dependencies struct {
 	People PeopleService
 	// LiteraryWorks answers literary works (*handlers.LiteraryWorkHandler).
 	LiteraryWorks LiteraryWorkService
+	// BoxSets answers box set search and detail (*handlers.CatalogHandler).
+	BoxSets BoxSetService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.

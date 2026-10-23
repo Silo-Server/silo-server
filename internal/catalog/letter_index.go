@@ -63,7 +63,7 @@ func (e *QueryExecutor) LetterIndex(ctx context.Context, def QueryDefinition, ac
 	if e == nil || e.Pool == nil {
 		return LetterIndex{}, fmt.Errorf("query executor requires a database pool")
 	}
-	if e.GroupByWork {
+	if e.GroupByWork && len(e.BoxSetCollections) == 0 {
 		return LetterIndex{}, fmt.Errorf("%w: the letter index does not group by work", ErrInvalidCatalogRequest)
 	}
 	if NormalizeQuerySort(def.Sort).Field != querySortTitle {
@@ -179,5 +179,9 @@ func (r *CatalogResolver) LetterIndex(ctx context.Context, req CatalogRequest, a
 	// lets it be cached.
 	executor := r.queryExecutorForScope(req.Query.MediaScope, nil)
 	executor.LetterIndexes = r.letterIndexes
+	if len(req.BoxSetCollections) > 0 {
+		executor.GroupByWork = true
+		executor.BoxSetCollections = req.BoxSetCollections
+	}
 	return executor.LetterIndex(ctx, req.Query, access)
 }

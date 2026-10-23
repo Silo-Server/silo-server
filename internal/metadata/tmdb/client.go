@@ -857,10 +857,29 @@ func (c *Client) GetCollection(ctx context.Context, id int) (*Collection, error)
 	}
 
 	return &Collection{
-		ID:    resp.ID,
-		Name:  resp.Name,
-		Parts: parts,
+		ID:           resp.ID,
+		Name:         resp.Name,
+		Overview:     resp.Overview,
+		PosterPath:   resp.PosterPath,
+		BackdropPath: resp.BackdropPath,
+		Parts:        parts,
 	}, nil
+}
+
+// GetMovieCollection returns the collection a movie belongs to, or nil when
+// it belongs to none.
+func (c *Client) GetMovieCollection(ctx context.Context, movieID int) (*CollectionRef, error) {
+	if movieID <= 0 {
+		return nil, fmt.Errorf("tmdb: movie id must be > 0 (got %d)", movieID)
+	}
+	var resp movieCollectionResponse
+	if err := c.doGet(ctx, fmt.Sprintf("/movie/%d", movieID), &resp); err != nil {
+		return nil, err
+	}
+	if resp.BelongsToCollection == nil || resp.BelongsToCollection.ID <= 0 {
+		return nil, nil
+	}
+	return &CollectionRef{ID: resp.BelongsToCollection.ID, Name: resp.BelongsToCollection.Name}, nil
 }
 
 // GetList fetches the entries of a public, user-authored TMDB list in list

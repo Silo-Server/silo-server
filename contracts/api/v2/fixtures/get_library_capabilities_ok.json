@@ -1,9 +1,10 @@
 {
-  "revision": "6fcbb994aa4a8925a3276d419d1a8d73147ac1dee0abfad0fb8c18a1f42accba",
+  "revision": "160ec1ce4b69b216c999f29715ed4ddda5458d4075c48748406c3e993537fa18",
   "state": "available",
   "allowed": true,
   "realtime_monitoring": true,
   "trickplay": true,
   "trickplay_supported": false,
-  "ignore_unmatched": true
+  "ignore_unmatched": true,
+  "box_sets": true
 }

@@ -217,3 +217,55 @@ describe("ItemCard poster loading", () => {
     expect(screen.queryByRole("img", { name: "The Last of Us" })).toBeNull();
   });
 });
+
+describe("ItemCard box sets", () => {
+  const boxSetItem = {
+    ...baseItem,
+    content_id: "box_set:1241",
+    type: "box_set" as const,
+    title: "Harry Potter Collection",
+    play_content_id: "movie-671",
+    box_set: {
+      id: "1241",
+      library_id: "3",
+      title: "Harry Potter Collection",
+      movie_count: 8,
+      played_count: 5,
+      first_year: 2001,
+      last_year: 2011,
+    },
+  };
+
+  it("opens the box set page instead of a title page and offers no play", () => {
+    const markup = renderCard({ item: boxSetItem, libraryId: 3 });
+
+    expect(markup).toContain('href="/box-sets/1241?library_id=3"');
+    expect(markup).not.toContain("/item/");
+    expect(markup).not.toContain("Play Harry Potter Collection");
+    expect(markup).toContain("Box set");
+    expect(markup).toContain("8 films");
+  });
+
+  it("shows how many films are watched", () => {
+    render(
+      <MemoryRouter>
+        <ItemCard item={boxSetItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("progressbar", { name: "Films watched" })).toHaveAttribute(
+      "aria-valuenow",
+      "5",
+    );
+    expect(screen.getByText("5 / 8 watched")).toBeInTheDocument();
+  });
+
+  it("shows the year range before any film is watched", () => {
+    const markup = renderCard({
+      item: { ...boxSetItem, box_set: { ...boxSetItem.box_set, played_count: 0 } },
+    });
+
+    expect(markup).toContain("2001 – 2011");
+    expect(markup).not.toContain("progressbar");
+  });
+});

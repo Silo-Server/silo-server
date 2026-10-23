@@ -5,7 +5,8 @@
       "name": "Movies",
       "type": "movies",
       "sort_order": 2,
-      "poster_url": "https://images.example/poster"
+      "poster_url": "https://images.example/poster",
+      "box_sets_enabled": false
     }
   ]
 }

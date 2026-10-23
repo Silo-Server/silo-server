@@ -16,6 +16,7 @@ type CatalogSearchCapabilities struct {
 	VideoWithEpisodes     bool   `json:"video_with_episodes_scope,omitzero" doc:"listCatalogItems and queryCatalogItems accept type=video_with_episodes on the query source (text search over movies, series, and episodes), and listPeople accepts it as media_scope"`
 	ExtendedQueryRules    bool   `json:"extended_query_rules,omitzero" doc:"Rule groups in catalog queries, sections, and Smart collections accept the title, decade, runtime, rating_tmdb, rating_rt_critic, rating_rt_audience, latest_episode_added, and last_air_date fields, the not_contains, begins_with, and ends_with operators on title, and not_in_last on date fields"`
 	LetterIndex           bool   `json:"letter_index,omitzero" doc:"queryCatalogLetters answers how many titles of a title-ordered query-source browse file under each letter and where each letter's first title sits, for an alphabetical jump bar"`
+	BoxSets               bool   `json:"box_sets,omitzero" doc:"listCatalogItems, queryCatalogItems, and queryCatalogLetters accept group=box_set, and searchCatalogBoxSets and getCatalogBoxSet answer; listUserLibraries reports which libraries have box sets on"`
 	Provider              string `json:"provider,omitempty" enum:"postgres,meilisearch"`
 	ResultWindowLimit     int    `json:"result_window_limit,omitzero" doc:"Maximum candidates in a Meilisearch ranked window; absent for PostgreSQL live queries"`
 	SessionTTLSeconds     int    `json:"session_ttl_seconds,omitzero" doc:"Fixed Meilisearch ranking-session lifetime; requests do not extend it"`
@@ -52,6 +53,7 @@ func registerCatalogSearchCapabilities(reg *Registry) {
 				VideoWithEpisodes:  true,
 				ExtendedQueryRules: true,
 				LetterIndex:        true,
+				BoxSets:            reg.deps.BoxSets != nil,
 				ResultWindowLimit:  result.ResultWindowLimit, SessionTTLSeconds: result.SessionTTLSeconds, MaxSessionsPerAccount: result.MaxSessionsPerAccount,
 			}}, nil
 		})

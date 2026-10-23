@@ -628,6 +628,16 @@ func (s *MetadataService) SetImageCacher(c ImageCacher) {
 	s.imageCacher = c
 }
 
+// AutoImageCacher returns the image cacher while metadata.cache_images is on
+// and an artwork store is configured, so other owners of provider artwork
+// (movie box sets) cache under the same switch as item artwork; nil otherwise.
+func (s *MetadataService) AutoImageCacher() ImageCacher {
+	if s == nil || s.imageCacher == nil || !s.autoCacheImages.Load() {
+		return nil
+	}
+	return s.imageCacher
+}
+
 func (s *MetadataService) SetImageCacheJobEnqueuer(enqueuer ImageCacheJobEnqueuer) {
 	s.imageCacheJobs = enqueuer
 }

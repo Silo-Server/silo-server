@@ -18,6 +18,7 @@ import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
+import BoxSetCard from "@/components/boxsets/BoxSetCard";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
 function formatDate(value?: string | null) {
@@ -186,6 +187,57 @@ export default function ItemCard({
   onToggleSelect,
 }: {
   item: BrowseItem;
+  libraryId?: number;
+  sortField?: string;
+  overlayPrefs?: CardOverlayPrefs | null;
+  quickActionMode?: CardQuickActionMode;
+  narrowPosterActions?: boolean;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (item: BrowseItem) => void;
+}) {
+  // A box set card opens the box set, not a title page, and has no play or
+  // item menu of its own.
+  if (item.type === "box_set") {
+    if (!item.box_set) return null;
+    return (
+      <BoxSetCard
+        boxSet={item.box_set}
+        posterUrl={item.poster_url || undefined}
+        posterThumbhash={item.poster_thumbhash || undefined}
+      />
+    );
+  }
+  return (
+    <TitleCard
+      // BrowseItem is not a union, so the type check above cannot narrow it.
+      item={item as TitleCardItem}
+      libraryId={libraryId}
+      sortField={sortField}
+      overlayPrefs={overlayPrefs}
+      quickActionMode={quickActionMode}
+      narrowPosterActions={narrowPosterActions}
+      selectionMode={selectionMode}
+      selected={selected}
+      onToggleSelect={onToggleSelect}
+    />
+  );
+}
+
+type TitleCardItem = BrowseItem & { type: Exclude<BrowseItem["type"], "box_set"> };
+
+function TitleCard({
+  item,
+  libraryId,
+  sortField,
+  overlayPrefs,
+  quickActionMode = "none",
+  narrowPosterActions = false,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+}: {
+  item: TitleCardItem;
   libraryId?: number;
   sortField?: string;
   overlayPrefs?: CardOverlayPrefs | null;

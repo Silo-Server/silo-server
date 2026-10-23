@@ -18,7 +18,7 @@ import (
 type CatalogItem struct {
 	ContentID              string                    `json:"content_id" doc:"Deterministic catalog identifier" example:"movie:heat-1995"`
 	PlayContentID          string                    `json:"play_content_id,omitempty" doc:"The item to play when the card is a series or season; absent when the item plays itself"`
-	Type                   string                    `json:"type" doc:"movie, series, season, episode, audiobook, ebook, podcast, podcast_episode" example:"movie"`
+	Type                   string                    `json:"type" doc:"movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse" example:"movie"`
 	Title                  string                    `json:"title" example:"Heat"`
 	SeriesID               string                    `json:"series_id,omitempty" doc:"Owning series of an episode or season"`
 	SeriesTitle            string                    `json:"series_title,omitempty"`
@@ -70,6 +70,7 @@ type CatalogItem struct {
 	WorkID                     string              `json:"work_id,omitempty" doc:"The work (book) an audiobook or ebook edition belongs to"`
 	WorkTitle                  string              `json:"work_title,omitempty"`
 	WorkFormats                []CatalogWorkFormat `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
+	BoxSet                     *CatalogBoxSet      `json:"box_set,omitempty" doc:"The box set a box_set card stands for; open it with getCatalogBoxSet"`
 }
 
 // CatalogItemOverlay is the technical summary a card overlays.
@@ -194,6 +195,9 @@ func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selec
 		MangaChapterCount: v.MangaChapterCount, MangaVolumeCount: v.MangaVolumeCount,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), UserState: catalogUserStateOf(v.UserState),
 		WorkID: v.WorkID, WorkTitle: v.WorkTitle,
+	}
+	if v.BoxSet != nil {
+		item.BoxSet = new(catalogBoxSetOf(*v.BoxSet))
 	}
 	if m := v.SortMetrics; m != nil {
 		item.SortMetrics = &CatalogItemSortMetrics{ReleaseDate: m.ReleaseDate, RuntimeMinutes: m.RuntimeMinutes, Resolution: m.Resolution, BitrateKbps: m.BitrateKbps,

@@ -46,6 +46,11 @@ interface DetailHeroProps {
   scoreRow?: ReactNode;
   crewLine?: ReactNode;
   variant?: "full" | "compact" | "episode" | "series" | "season";
+  /**
+   * Shortens the full hero so the first row of the content below it starts
+   * inside the viewport, for pages whose hero leads into a grid of titles.
+   */
+  shortHero?: boolean;
   topNav?: ReactNode;
 }
 
@@ -77,6 +82,7 @@ export default function DetailHero({
   scoreRow,
   crewLine,
   variant = "full",
+  shortHero = false,
   topNav,
 }: DetailHeroProps) {
   const {
@@ -181,7 +187,9 @@ export default function DetailHero({
               // taller than the hero would otherwise overflow out the top, under
               // the floating back button.
               "min-h-[max(35vh,300px)] pt-20 lg:min-h-[42vh]"
-            : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
+            : shortHero
+              ? "min-h-[50dvh] pt-24 lg:min-h-[54dvh]"
+              : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
         }`}
       >
         <div

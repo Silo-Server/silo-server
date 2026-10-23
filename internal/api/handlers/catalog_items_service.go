@@ -80,7 +80,11 @@ func (h *CatalogHandler) Browse(ctx context.Context, v ItemViewer, req catalog.C
 		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 	}
-	if groupedByWork {
+	boxSets, err := h.prepareBoxSetBrowse(ctx, &req, v.Access)
+	if err != nil {
+		return CatalogBrowseView{}, catalogResolveError(ctx, err, true)
+	}
+	if groupedByWork || boxSets != nil {
 		result, entries, err := h.resolveGroupedCatalogByWork(ctx, req, v.Access)
 		if err != nil {
 			return CatalogBrowseView{}, catalogResolveError(ctx, err, true)
@@ -91,6 +95,9 @@ func (h *CatalogHandler) Browse(ctx context.Context, v ItemViewer, req catalog.C
 			if i < len(entries) && entries[i].summary != nil {
 				applyWorkSummaryToCatalogItem(&items[i], entries[i].summary)
 			}
+		}
+		if boxSets != nil {
+			h.applyBoxSets(ctx, v, playableTargetLibraryIDs(req)[0], items, boxSets)
 		}
 		return catalogBrowseView(result, items), nil
 	}
@@ -112,6 +119,9 @@ func (h *CatalogHandler) LetterIndex(ctx context.Context, v ItemViewer, req cata
 	// window seek.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if _, err := h.prepareBoxSetBrowse(ctx, &req, v.Access); err != nil {
+		return catalog.LetterIndex{}, catalogResolveError(ctx, err, false)
+	}
 	index, err := h.resolver.LetterIndex(ctx, req, v.Access)
 	if err != nil {
 		return catalog.LetterIndex{}, catalogResolveError(ctx, err, false)

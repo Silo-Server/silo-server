@@ -356,6 +356,8 @@ type itemListResponse struct {
 	WorkID                 string                      `json:"work_id,omitempty"`
 	WorkTitle              string                      `json:"work_title,omitempty"`
 	WorkFormats            []catalog.WorkFormatSummary `json:"work_formats,omitempty"`
+	// BoxSet describes a box set card (type box_set). Served by v2 only.
+	BoxSet *BoxSetView `json:"-"`
 }
 
 type sortMetricsResponse struct {

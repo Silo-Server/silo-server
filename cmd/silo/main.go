@@ -51,6 +51,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/blobgc"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/boxsets"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -3083,6 +3084,16 @@ func main() {
 			taskMgr.Register(tasks.NewBackfillHDR10PlusTask(deps.DB, scanner.NewHDR10PlusBackfiller(deps.FileRepo, scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath))))
 		}
 		taskMgr.Register(tasks.NewRefreshSeriesAirDatesTask(catalog.NewEpisodeRepository(deps.DB)))
+		boxSetSyncer := boxsets.NewSyncer(catalog.NewBoxSetRepository(deps.DB), tmdb.NewClient(cfg.TMDBAPIKey, 20))
+		if metadataService != nil {
+			boxSetSyncer.WithImages(metadataService.AutoImageCacher)
+		}
+		taskMgr.Register(tasks.NewSyncMovieBoxSetsTask(deps.DB, boxSetSyncer))
+		go boxsets.Watch(appCtx, deps.EventsHub, func() {
+			if _, err := taskMgr.StartTask(tasks.SyncMovieBoxSetsTaskKey); err != nil {
+				slog.Debug("box set sync not started", "component", "app", "error", err)
+			}
+		})
 		if deps.Blobs.Assets != nil {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),

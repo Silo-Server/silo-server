@@ -311,6 +311,8 @@ export const v2Operations = {
   "GET /api/v2/capabilities/trailers": "getTrailersCapability",
   "GET /api/v2/catalog": "listCatalogItems",
   "GET /api/v2/catalog/audiobook-groups": "listAudiobookGroups",
+  "GET /api/v2/catalog/box-sets": "searchCatalogBoxSets",
+  "GET /api/v2/catalog/box-sets/{id}": "getCatalogBoxSet",
   "GET /api/v2/catalog/filters": "getCatalogFilters",
   "GET /api/v2/catalog/filters/search": "searchCatalogFacet",
   "GET /api/v2/catalog/items/{id}": "getCatalogItem",

@@ -21850,6 +21850,198 @@
         ],
         "type": "object"
       },
+      "CatalogBoxSet": {
+        "additionalProperties": false,
+        "properties": {
+          "backdrop_thumbhash": {
+            "type": "string"
+          },
+          "backdrop_url": {
+            "description": "The collection's backdrop, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none",
+            "type": "string"
+          },
+          "first_year": {
+            "description": "Release year of the earliest of those movies",
+            "examples": [
+              2001
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "description": "The TMDB collection ID",
+            "examples": [
+              "1241"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_year": {
+            "description": "Release year of the latest of those movies",
+            "examples": [
+              2011
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "library_id": {
+            "description": "The library whose movies make up the box set; pass it to getCatalogBoxSet",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "movie_count": {
+            "description": "The collection's movies in the library that the viewer can see",
+            "examples": [
+              8
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "played_count": {
+            "description": "How many of those movies the profile has played",
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "poster_thumbhash": {
+            "type": "string"
+          },
+          "poster_url": {
+            "description": "The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none",
+            "type": "string"
+          },
+          "title": {
+            "examples": [
+              "Harry Potter Collection"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "library_id",
+          "title",
+          "movie_count",
+          "played_count"
+        ],
+        "type": "object"
+      },
+      "CatalogBoxSetDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "backdrop_thumbhash": {
+            "type": "string"
+          },
+          "backdrop_url": {
+            "description": "The collection's backdrop, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none",
+            "type": "string"
+          },
+          "first_year": {
+            "description": "Release year of the earliest of those movies",
+            "examples": [
+              2001
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "description": "The TMDB collection ID",
+            "examples": [
+              "1241"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "items": {
+            "description": "The box set's movies in the library that the viewer can see, in collection (release) order",
+            "items": {
+              "$ref": "#/components/schemas/CatalogItem"
+            },
+            "type": "array"
+          },
+          "last_year": {
+            "description": "Release year of the latest of those movies",
+            "examples": [
+              2011
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "library_id": {
+            "description": "The library whose movies make up the box set; pass it to getCatalogBoxSet",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "movie_count": {
+            "description": "The collection's movies in the library that the viewer can see",
+            "examples": [
+              8
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "played_count": {
+            "description": "How many of those movies the profile has played",
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "poster_thumbhash": {
+            "type": "string"
+          },
+          "poster_url": {
+            "description": "The collection's poster, cached like item artwork (presigned, short-lived), or TMDB's URL while it is not cached; absent when TMDB has none",
+            "type": "string"
+          },
+          "title": {
+            "examples": [
+              "Harry Potter Collection"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "id",
+          "library_id",
+          "title",
+          "movie_count",
+          "played_count"
+        ],
+        "type": "object"
+      },
+      "CatalogBoxSetList": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "Matching box sets, best match first; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/CatalogBoxSet"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "CatalogBrowseCollection": {
         "additionalProperties": false,
         "properties": {
@@ -22119,6 +22311,10 @@
             },
             "type": "array"
           },
+          "box_set": {
+            "$ref": "#/components/schemas/CatalogBoxSet",
+            "description": "The box set a box_set card stands for; open it with getCatalogBoxSet"
+          },
           "content_id": {
             "description": "Deterministic catalog identifier",
             "examples": [
@@ -22307,7 +22503,7 @@
             "type": "string"
           },
           "type": {
-            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse",
             "examples": [
               "movie"
             ],
@@ -22445,6 +22641,10 @@
           "banner_url": {
             "description": "Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork",
             "type": "string"
+          },
+          "box_set": {
+            "$ref": "#/components/schemas/CatalogBoxSet",
+            "description": "The box set a box_set card stands for; open it with getCatalogBoxSet"
           },
           "cast": {
             "description": "Empty, never null",
@@ -22803,7 +23003,7 @@
             "type": "string"
           },
           "type": {
-            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse",
             "examples": [
               "movie"
             ],
@@ -23160,6 +23360,13 @@
       "CatalogLettersQuery": {
         "additionalProperties": false,
         "properties": {
+          "group": {
+            "description": "Count the list a group=box_set browse pages, with each box set counted once under its first title",
+            "enum": [
+              "box_set"
+            ],
+            "type": "string"
+          },
           "groups": {
             "description": "Rule groups, as on queryCatalogItems; empty matches everything",
             "items": {
@@ -23211,8 +23418,10 @@
             "type": "string"
           },
           "group": {
+            "description": "As the listCatalogItems group parameter",
             "enum": [
-              "work"
+              "work",
+              "box_set"
             ],
             "type": "string"
           },
@@ -23444,6 +23653,10 @@
         "properties": {
           "allowed": {
             "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "box_sets": {
+            "description": "listCatalogItems, queryCatalogItems, and queryCatalogLetters accept group=box_set, and searchCatalogBoxSets and getCatalogBoxSet answer; listUserLibraries reports which libraries have box sets on",
             "type": "boolean"
           },
           "extended_query_rules": {
@@ -30494,6 +30707,10 @@
             },
             "type": "array"
           },
+          "box_set": {
+            "$ref": "#/components/schemas/CatalogBoxSet",
+            "description": "The box set a box_set card stands for; open it with getCatalogBoxSet"
+          },
           "content_id": {
             "description": "Deterministic catalog identifier",
             "examples": [
@@ -30682,7 +30899,7 @@
             "type": "string"
           },
           "type": {
-            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse",
             "examples": [
               "movie"
             ],
@@ -32011,6 +32228,28 @@
             ],
             "type": "boolean"
           },
+          "box_set_min_movies": {
+            "description": "The fewest of a collection's movies the library must hold for them to form a box set",
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "box_sets_enabled": {
+            "description": "Browse the movies TMDB lists in one collection (a franchise such as Harry Potter) as one box set; movie and mixed libraries only",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "box_sets_in_search": {
+            "description": "List matching box sets of this library in search, ahead of their movies",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "chapter_thumbnails_enabled": {
             "examples": [
               false
@@ -32160,6 +32399,9 @@
           "intro_detection_enabled",
           "trickplay_enabled",
           "trickplay_supported",
+          "box_sets_enabled",
+          "box_set_min_movies",
+          "box_sets_in_search",
           "trailer_kinds",
           "realtime_monitoring",
           "sort_order"
@@ -32171,6 +32413,13 @@
         "properties": {
           "allowed": {
             "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "box_sets": {
+            "description": "This build supports the per-library box set settings (box_sets_enabled, box_set_min_movies, box_sets_in_search), group=box_set on the catalog, and the box set reads",
+            "examples": [
+              true
+            ],
             "type": "boolean"
           },
           "ignore_unmatched": {
@@ -32221,6 +32470,7 @@
           "trickplay",
           "trickplay_supported",
           "ignore_unmatched",
+          "box_sets",
           "revision",
           "state",
           "allowed"
@@ -32415,6 +32665,30 @@
       "LibraryCreate": {
         "additionalProperties": false,
         "properties": {
+          "box_set_min_movies": {
+            "description": "The fewest of a collection's movies that form a box set; default 2",
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "maximum": 10,
+            "minimum": 2,
+            "type": "integer"
+          },
+          "box_sets_enabled": {
+            "description": "Group movies of one TMDB collection into a box set; movie and mixed libraries only",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "box_sets_in_search": {
+            "description": "List matching box sets in search; omitted means true",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "chapter_thumbnails_enabled": {
             "description": "Requires public asset storage",
             "examples": [
@@ -33200,6 +33474,30 @@
           "auto_translate_metadata": {
             "examples": [
               false
+            ],
+            "type": "boolean"
+          },
+          "box_set_min_movies": {
+            "description": "The fewest of a collection's movies that form a box set",
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "maximum": 10,
+            "minimum": 2,
+            "type": "integer"
+          },
+          "box_sets_enabled": {
+            "description": "Group movies of one TMDB collection into a box set; movie and mixed libraries only. Turning it on looks up the collections of the library's movies in the background",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "box_sets_in_search": {
+            "description": "List matching box sets in search",
+            "examples": [
+              true
             ],
             "type": "boolean"
           },
@@ -48311,6 +48609,13 @@
       "UserLibrary": {
         "additionalProperties": false,
         "properties": {
+          "box_sets_enabled": {
+            "description": "The library browses movies of one TMDB collection as a box set; request group=box_set when browsing it",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "id": {
             "description": "Opaque identifier",
             "examples": [
@@ -48337,7 +48642,8 @@
           "id",
           "name",
           "type",
-          "sort_order"
+          "sort_order",
+          "box_sets_enabled"
         ],
         "type": "object"
       },
@@ -50906,6 +51212,10 @@
             },
             "type": "array"
           },
+          "box_set": {
+            "$ref": "#/components/schemas/CatalogBoxSet",
+            "description": "The box set a box_set card stands for; open it with getCatalogBoxSet"
+          },
           "cast": {
             "description": "Up to four cast members; empty, never null",
             "items": {
@@ -51101,7 +51411,7 @@
             "type": "string"
           },
           "type": {
-            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse",
             "examples": [
               "movie"
             ],
@@ -51271,6 +51581,10 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "box_set": {
+            "$ref": "#/components/schemas/CatalogBoxSet",
+            "description": "The box set a box_set card stands for; open it with getCatalogBoxSet"
           },
           "content_id": {
             "description": "Deterministic catalog identifier",
@@ -51460,7 +51774,7 @@
             "type": "string"
           },
           "type": {
-            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse",
             "examples": [
               "movie"
             ],
@@ -135023,14 +135337,15 @@
             }
           },
           {
-            "description": "group=work collapses editions of one book into one card",
+            "description": "group=work collapses editions of one book into one card. group=box_set, on a source=query browse of one library with box sets on and no search text, collapses the movies of each TMDB collection into one box_set card; elsewhere it returns the ordinary list",
             "explode": false,
             "in": "query",
             "name": "group",
             "schema": {
-              "description": "group=work collapses editions of one book into one card",
+              "description": "group=work collapses editions of one book into one card. group=box_set, on a source=query browse of one library with box sets on and no search text, collapses the movies of each TMDB collection into one box_set card; elsewhere it returns the ordinary list",
               "enum": [
-                "work"
+                "work",
+                "box_set"
               ],
               "type": "string"
             }
@@ -135652,6 +135967,464 @@
           }
         ],
         "summary": "Page the authors, narrators, or series of an audiobook library with aggregate stats and cover stacks.",
+        "tags": [
+          "catalog"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/catalog/box-sets": {
+      "get": {
+        "operationId": "searchCatalogBoxSets",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Search text; a box set matches when its name contains every word, or when two or more of its movies' titles do",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Search text; a box set matches when its name contains every word, or when two or more of its movies' titles do",
+              "examples": [
+                "harry potter"
+              ],
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only box sets of this library; absent searches every library with box sets in search",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "Only box sets of this library; absent searches every library with box sets in search",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Most box sets to return; default 5, maximum 20",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 5,
+              "description": "Most box sets to return; default 5, maximum 20",
+              "format": "int64",
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogBoxSetList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Search the box sets of libraries with box sets in search, for listing ahead of their movies.",
+        "tags": [
+          "catalog"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/catalog/box-sets/{id}": {
+      "get": {
+        "operationId": "getCatalogBoxSet",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The TMDB collection ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The TMDB collection ID",
+              "examples": [
+                "1241"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library whose movies make up the box set",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "description": "The library whose movies make up the box set",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
+            "explode": false,
+            "in": "query",
+            "name": "image_size",
+            "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
+              "enum": [
+                "small",
+                "medium",
+                "large",
+                "original"
+              ],
+              "examples": [
+                "medium"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogBoxSetDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "One box set of a library with its movies the viewer can see there, in collection order. 404 when the library has box sets off or the viewer can see too few of its movies.",
         "tags": [
           "catalog"
         ],

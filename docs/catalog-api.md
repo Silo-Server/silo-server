@@ -721,7 +721,46 @@ The letter index sorts the whole result to number it, so its cost grows with
 the result like an exact count; it has the same 10-second deadline as a window
 seek. It covers the query source only and takes no search text or
 `name_prefix`. `getCatalogSearchCapabilities` reports `letter_index: true` when
-the operation is available.
+the operation is available. With `group: "box_set"` it counts a box set browse
+(see Movie box sets) the way `queryCatalogItems` pages it.
+
+## Movie box sets
+
+A movie or mixed library can browse the movies TMDB lists in one collection (a
+franchise such as Harry Potter) as one box set. An administrator turns it on
+with the library's `box_sets_enabled`; `box_set_min_movies` (2 to 10, default
+2) is the fewest of a collection's movies the library must hold, and
+`box_sets_in_search` (default true) lists the library's box sets in search.
+`getCatalogSearchCapabilities` reports `box_sets: true` to viewers when the
+server supports them (`getLibraryCapabilities` reports the same to
+administrators), and `listUserLibraries` reports each viewer library's `box_sets_enabled`
+so a client knows which libraries to browse with `group=box_set`.
+
+`listCatalogItems` and `queryCatalogItems` with `group=box_set`, on a
+`source=query` browse of one library with box sets on and no search text,
+return a box set card in place of the collection's movies once the viewer can
+see at least `box_set_min_movies` of them there. The card has `type:
+"box_set"`, `content_id: "box_set:<tmdb collection id>"`, the collection's
+title, overview, and artwork, and a `box_set` object with its `id`,
+`library_id`, `movie_count`, `played_count`, `first_year`, and `last_year`.
+The card stands at its first movie in the requested order and carries that
+movie's `sort_metrics`; totals, cursors, and `seek` count the grouped list.
+`name_prefix` matches that first movie, so a box set is listed under one
+letter, the one the letter index files it under.
+Any other request with `group=box_set` returns the ordinary list. Send the
+same `group` to `queryCatalogLetters` so the letter index counts the grouped
+list. A collection's artwork is cached like item artwork when the server
+caches metadata images; until then its URLs point at TMDB.
+
+`GET /api/v2/catalog/box-sets/{id}?library_id=` (`getCatalogBoxSet`) answers a
+box set with its movies in that library that the viewer can see, in collection
+(release) order; it is `404` when the library has box sets off or the viewer
+can see too few of its movies. `GET /api/v2/catalog/box-sets?q=`
+(`searchCatalogBoxSets`) answers the box sets of libraries with
+`box_sets_in_search` whose name contains every word of `q`, or that have two
+or more movies in those libraries whose titles do, best match first.
+`library_id` limits the search to one library. Search results keep listing the
+movies themselves; clients show matching box sets ahead of them.
 
 ## History ordering
 

@@ -37,6 +37,8 @@ import {
 interface LibraryBrowseProps {
   libraryId: number;
   libraryType: string;
+  /** The library groups a TMDB collection's movies into box sets. */
+  boxSetsEnabled?: boolean;
   browseType: LibraryBrowseType;
   queryDefinition: QueryDefinition;
   onBrowseTypeChange: (
@@ -126,6 +128,7 @@ function NoMatchingItems({ onClearFilters }: { onClearFilters?: () => void }) {
 export default function LibraryBrowse({
   libraryId,
   libraryType,
+  boxSetsEnabled = false,
   browseType,
   queryDefinition,
   onBrowseTypeChange,
@@ -193,6 +196,7 @@ export default function LibraryBrowse({
     source: "query",
     library_id: libraryId,
     type_override: libraryType === "series" ? browseType : undefined,
+    group: boxSetsEnabled ? "box_set" : undefined,
     query_definition: scopedQueryDefinition,
   };
 
