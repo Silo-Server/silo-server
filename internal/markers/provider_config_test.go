@@ -65,28 +65,6 @@ func TestProviderConfigDefaultSharingDB(t *testing.T) {
 			t.Fatalf("seed %s: %v", id, err)
 		}
 	}
-	// waitForLockWaiter returns once a transaction waits on the table lock.
-	waitForLockWaiter := func(done <-chan error, what string) {
-		t.Helper()
-		for {
-			var waiting bool
-			if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks
-				WHERE NOT granted AND relation = 'marker_provider_config'::regclass
-				AND database = (SELECT oid FROM pg_database WHERE datname = current_database()))`).Scan(&waiting); err != nil {
-				t.Fatalf("read locks: %v", err)
-			}
-			if waiting {
-				return
-			}
-			select {
-			case err := <-done:
-				t.Fatalf("%s finished without waiting for the lock: %v", what, err)
-			case <-ctx.Done():
-				t.Fatalf("%s never waited for the lock", what)
-			case <-time.After(10 * time.Millisecond):
-			}
-		}
-	}
 
 	// A seed is committing a sharing row when the opt-out starts. The opt-out
 	// waits for it, and its list, which here reads the committed rows in place
@@ -115,7 +93,7 @@ func TestProviderConfigDefaultSharingDB(t *testing.T) {
 	}
 	stopDone := make(chan error, 1)
 	go func() { stopDone <- StopDefaultSharingInTx(ctx, tx, listSeeded) }()
-	waitForLockWaiter(stopDone, "opt-out")
+	waitForProviderConfigLockWaiter(ctx, t, pool, stopDone, "opt-out")
 	if err := seedTx.Commit(ctx); err != nil {
 		t.Fatalf("commit seed: %v", err)
 	}
@@ -131,7 +109,7 @@ func TestProviderConfigDefaultSharingDB(t *testing.T) {
 	}
 	seedDone := make(chan error, 1)
 	go func() { seedDone <- store.EnsureDefaultSharing(ctx, on(seeded)) }()
-	waitForLockWaiter(seedDone, "seed")
+	waitForProviderConfigLockWaiter(ctx, t, pool, seedDone, "seed")
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -153,5 +131,29 @@ func TestProviderConfigDefaultSharingDB(t *testing.T) {
 	}
 	if got, ok := store.Get(seeded); !ok || got.ContributeEnabled || got.ContributeAutoLocal || got.ContributeMinConfidence != 0.9 {
 		t.Fatalf("seeded provider = %+v (exists %v), want a row with sharing off", got, ok)
+	}
+}
+
+// waitForProviderConfigLockWaiter returns once a transaction waits on the
+// marker_provider_config table lock, and fails if done reports first.
+func waitForProviderConfigLockWaiter(ctx context.Context, t *testing.T, pool *pgxpool.Pool, done <-chan error, what string) {
+	t.Helper()
+	for {
+		var waiting bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks
+			WHERE NOT granted AND relation = 'marker_provider_config'::regclass
+			AND database = (SELECT oid FROM pg_database WHERE datname = current_database()))`).Scan(&waiting); err != nil {
+			t.Fatalf("read locks: %v", err)
+		}
+		if waiting {
+			return
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("%s finished without waiting for the lock: %v", what, err)
+		case <-ctx.Done():
+			t.Fatalf("%s never waited for the lock", what)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
