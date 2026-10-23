@@ -42,9 +42,10 @@ type providerConfigResponse struct {
 	ContributeEnabled       bool    `json:"contribute_enabled"`
 	ContributeAutoLocal     bool    `json:"contribute_auto_local"`
 	ContributeMinConfidence float64 `json:"contribute_min_confidence"`
-	// FetchMinConfidence is newer than the frozen v1 response, so only v2
-	// emits it (json:"-").
-	FetchMinConfidence float64 `json:"-"`
+	// FetchMinConfidence and DefaultContributeEnabled are newer than the
+	// frozen v1 response, so only v2 emits them (json:"-").
+	FetchMinConfidence       float64 `json:"-"`
+	DefaultContributeEnabled bool    `json:"-"`
 }
 
 type markerUserStatsResponse struct {
@@ -184,19 +185,20 @@ func (h *AdminMarkerProvidersHandler) HandleValidateProvider(w http.ResponseWrit
 
 func toProviderConfigResponse(c markers.ProviderConfig, isSubmitter bool, desc markers.ProviderDescriptor) providerConfigResponse {
 	return providerConfigResponse{
-		Provider:                c.Provider,
-		DisplayName:             desc.DisplayName,
-		SourceType:              desc.SourceType,
-		PluginID:                desc.PluginID,
-		PluginInstallationID:    desc.PluginInstallationID,
-		CapabilityID:            desc.CapabilityID,
-		IsSubmitter:             isSubmitter,
-		FetchEnabled:            c.FetchEnabled,
-		FetchPriority:           c.FetchPriority,
-		ContributeEnabled:       c.ContributeEnabled,
-		ContributeAutoLocal:     c.ContributeAutoLocal,
-		ContributeMinConfidence: c.ContributeMinConfidence,
-		FetchMinConfidence:      c.FetchMinConfidence,
+		Provider:                 c.Provider,
+		DisplayName:              desc.DisplayName,
+		SourceType:               desc.SourceType,
+		PluginID:                 desc.PluginID,
+		PluginInstallationID:     desc.PluginInstallationID,
+		CapabilityID:             desc.CapabilityID,
+		IsSubmitter:              isSubmitter,
+		FetchEnabled:             c.FetchEnabled,
+		FetchPriority:            c.FetchPriority,
+		ContributeEnabled:        c.ContributeEnabled,
+		ContributeAutoLocal:      c.ContributeAutoLocal,
+		ContributeMinConfidence:  c.ContributeMinConfidence,
+		FetchMinConfidence:       c.FetchMinConfidence,
+		DefaultContributeEnabled: desc.DefaultContributeEnabled,
 	}
 }
 

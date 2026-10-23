@@ -26,6 +26,10 @@ const (
 	// local detection finds. Each is independent; an unset value means enabled.
 	SettingDetectIntros  = "markers.detect_intros"
 	SettingDetectCredits = "markers.detect_credits"
+	// SettingShareByDefault lets a provider whose manifest declares
+	// default_contribute_enabled start with contribution on. An unset value
+	// means enabled.
+	SettingShareByDefault = "markers.share_by_default"
 )
 
 type OnlineStorage string
@@ -64,6 +68,10 @@ type ProviderDescriptor struct {
 	PluginID             string
 	PluginInstallationID int
 	CapabilityID         string
+	// DefaultContributeEnabled means the provider's manifest asks for
+	// contribution to start on, so the admin UI discloses what it shares and
+	// turning markers.share_by_default off stops it.
+	DefaultContributeEnabled bool
 }
 
 type DescribedProvider interface {
@@ -550,6 +558,12 @@ func DetectionToggleEnabled(raw string) bool {
 	return strings.ToLower(strings.TrimSpace(raw)) != settingDisabled
 }
 
+// ShareByDefaultEnabled reads a markers.share_by_default value. Only an
+// explicit false turns it off.
+func ShareByDefaultEnabled(raw string) bool {
+	return strings.ToLower(strings.TrimSpace(raw)) != settingDisabled
+}
+
 func NormalizeSetting(key, value string) (string, error) {
 	switch key {
 	case SettingMode:
@@ -558,7 +572,7 @@ func NormalizeSetting(key, value string) (string, error) {
 			return "", fmt.Errorf("%w: %s must be one of off, local, online, both", ErrInvalidSetting, SettingMode)
 		}
 		return normalized, nil
-	case SettingLazyPlayback, SettingDetectIntros, SettingDetectCredits:
+	case SettingLazyPlayback, SettingDetectIntros, SettingDetectCredits, SettingShareByDefault:
 		normalized := strings.ToLower(strings.TrimSpace(value))
 		if normalized != settingEnabled && normalized != settingDisabled {
 			return "", fmt.Errorf("%w: %s must be true or false", ErrInvalidSetting, key)

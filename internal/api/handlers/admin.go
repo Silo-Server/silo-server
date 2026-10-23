@@ -2352,7 +2352,7 @@ func (h *AdminHandler) normalizeBatchSetting(
 
 	switch key {
 	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage,
-		markers.SettingDetectIntros, markers.SettingDetectCredits:
+		markers.SettingDetectIntros, markers.SettingDetectCredits, markers.SettingShareByDefault:
 		normalized, err = markers.NormalizeSetting(key, normalized)
 	case clientip.SettingTrustedProxies:
 		normalized, err = clientip.NormalizeCIDRList(normalized)
@@ -2899,7 +2899,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 
 	switch key {
 	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage,
-		markers.SettingDetectIntros, markers.SettingDetectCredits:
+		markers.SettingDetectIntros, markers.SettingDetectCredits, markers.SettingShareByDefault:
 		if normalized, err := markers.NormalizeSetting(key, req.Value); err != nil {
 			return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: err.Error()}
 		} else {

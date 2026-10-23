@@ -66,6 +66,20 @@ func (f fakeMarkerLegacySettings) Get(_ context.Context, key string) (string, er
 	return f[key], nil
 }
 
+type fakeMarkerProviderConfigs map[string]markers.ProviderConfig
+
+func (f fakeMarkerProviderConfigs) Get(provider string) (markers.ProviderConfig, bool) {
+	c, ok := f[provider]
+	return c, ok
+}
+
+func (f fakeMarkerProviderConfigs) Ensure(_ context.Context, c markers.ProviderConfig) error {
+	if _, ok := f[c.Provider]; !ok {
+		f[c.Provider] = c
+	}
+	return nil
+}
+
 func TestCopyLegacyIntroDBPluginConfigCopiesAPIKeyOnce(t *testing.T) {
 	runtimeConfigs := &fakeMarkerRuntimeConfigs{configs: map[int][]*plugins.RuntimeConfig{}}
 	installation := &plugins.Installation{ID: 42, PluginID: "silo.theintrodb"}
@@ -215,19 +229,53 @@ func TestReloadMarkerPluginProvidersRemovesProviderOnConfigReadFailure(t *testin
 }
 
 func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
+	sharingDefaults := map[string]any{
+		"default_contribute_enabled":        true,
+		"default_contribute_auto_local":     "true",
+		"default_contribute_min_confidence": 0.9,
+	}
 	for _, test := range []struct {
 		name       string
 		metadata   map[string]any
+		settings   fakeMarkerLegacySettings
 		wantSubmit bool
 		wantAmend  bool
 		wantAbsent bool
+		// wantConfig is the row created for the provider; Provider,
+		// FetchEnabled and FetchPriority are not compared.
+		wantConfig       markers.ProviderConfig
+		wantShareDefault bool
 	}{
-		{name: "manifest without the key keeps submissions", metadata: nil, wantSubmit: true},
-		{name: "fetch-only manifest", metadata: map[string]any{"metadata": map[string]any{"supports_contribution": false}}, wantSubmit: false},
+		{
+			name: "manifest without the key keeps submissions", metadata: nil, wantSubmit: true,
+			wantConfig: markers.ProviderConfig{ContributeMinConfidence: 0.95},
+		},
+		{
+			name:       "fetch-only manifest ignores sharing defaults",
+			metadata:   map[string]any{"metadata": map[string]any{"supports_contribution": false, "default_contribute_enabled": true}},
+			wantSubmit: false,
+			wantConfig: markers.ProviderConfig{ContributeMinConfidence: 0.95},
+		},
 		{
 			name:       "amend and absent declared",
 			metadata:   map[string]any{"metadata": map[string]any{"supports_amend": true, "supports_absent": true}},
 			wantSubmit: true, wantAmend: true, wantAbsent: true,
+			wantConfig: markers.ProviderConfig{ContributeMinConfidence: 0.95},
+		},
+		{
+			name:             "sharing defaults start contribution on",
+			metadata:         map[string]any{"metadata": sharingDefaults},
+			wantSubmit:       true,
+			wantConfig:       markers.ProviderConfig{ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.9},
+			wantShareDefault: true,
+		},
+		{
+			name:             "share_by_default=false keeps contribution off",
+			metadata:         map[string]any{"metadata": sharingDefaults},
+			settings:         fakeMarkerLegacySettings{markers.SettingShareByDefault: "false"},
+			wantSubmit:       true,
+			wantConfig:       markers.ProviderConfig{ContributeMinConfidence: 0.9},
+			wantShareDefault: true,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -240,12 +288,22 @@ func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
 			runtimeConfigs := &fakeMarkerRuntimeConfigs{configs: map[int][]*plugins.RuntimeConfig{}}
 			registry := markers.NewRegistry(nil)
 			resolver := markers.NewPluginResolverAdapter(&unusedMarkerPluginResolver{})
-			if err := reloadMarkerPluginProviders(context.Background(), registry, nil, store, runtimeConfigs, nil, resolver); err != nil {
+			configs := fakeMarkerProviderConfigs{}
+			if err := reloadMarkerPluginProviders(context.Background(), registry, configs, store, runtimeConfigs, test.settings, resolver); err != nil {
 				t.Fatalf("reloadMarkerPluginProviders: %v", err)
 			}
 			providers := registry.Providers()
 			if len(providers) != 1 {
 				t.Fatalf("providers = %d, want 1", len(providers))
+			}
+			got := configs[providers[0].ID()]
+			if got.ContributeEnabled != test.wantConfig.ContributeEnabled ||
+				got.ContributeAutoLocal != test.wantConfig.ContributeAutoLocal ||
+				got.ContributeMinConfidence != test.wantConfig.ContributeMinConfidence {
+				t.Fatalf("config = %+v, want contribution like %+v", got, test.wantConfig)
+			}
+			if share := providers[0].(markers.DescribedProvider).ProviderDescription().DefaultContributeEnabled; share != test.wantShareDefault {
+				t.Fatalf("DefaultContributeEnabled = %v, want %v", share, test.wantShareDefault)
 			}
 			if _, ok := providers[0].(markers.Submitter); ok != test.wantSubmit {
 				t.Fatalf("provider %T implements Submitter = %v, want %v", providers[0], ok, test.wantSubmit)

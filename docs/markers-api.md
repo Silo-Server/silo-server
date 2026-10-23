@@ -83,6 +83,19 @@ every external ID the provider requires, and the provider has not already
 claimed the episode. A file that every provider declines is not selected again
 until one of those inputs changes, for example when the series gains a TMDB ID.
 
+Contribution is off for a new provider unless its plugin manifest asks
+otherwise. The capability metadata keys `default_contribute_enabled`,
+`default_contribute_auto_local`, and `default_contribute_min_confidence` set the
+provider's contribution settings when its config row is first created; later
+admin changes stick, and a reinstall starts from the defaults again.
+`default_contribute_enabled` on the v2 provider configuration reports a provider
+whose manifest turns sharing on. The server setting `markers.share_by_default`
+(`true` or `false`, default `true`, set by the setup wizard) decides whether
+those defaults apply: when it is `false`, new providers start with sharing off,
+and changing it to `false` also turns contribution and automatic sharing off
+for existing providers whose manifest turns sharing on. Changing it back to
+`true` changes no existing provider.
+
 A manual deletion removes every occurrence of that kind for the selected file.
 The empty range retains manual provenance: provider lookups, local detection,
 rescans, and file-identity changes cannot restore it. An explicit manual set
