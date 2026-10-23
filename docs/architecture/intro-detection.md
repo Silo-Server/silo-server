@@ -110,8 +110,11 @@ scheduled run, a re-detection, or a playback or admin refresh that starts local
 analysis because a file of the episode lacks a marker. Playback analyzes the
 kinds the played file lacks; admin refresh then analyzes every enabled kind.
 Both cover every version of the episode. The nightly movie pass does not list
-movies whose credits came online, so a movie's credits chapter replaces weaker
-online credits only on re-detection.
+movies whose online credits are a range, so a movie's credits chapter replaces
+weaker online credits only on re-detection. It does list movies whose credits
+are a provider's absent answer (below), since their bounds are NULL; there a
+stronger credits chapter replaces the absent answer on the nightly run, and a
+movie without one is skipped before its file is read.
 
 ### Absent answers
 
