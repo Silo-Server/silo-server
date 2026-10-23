@@ -46,9 +46,8 @@ type ContributionRow struct {
 	// the file's stored marker for an amend row. It is not stored.
 	Algorithm string
 	// Correction makes Claim take a manual marker only as a correction of
-	// an earlier submission: the provider has a row for the file's segment,
-	// and no save withheld this payload from it (see Withhold). The daily task
-	// sends a manual marker this way. It is not stored.
+	// an earlier submission: the provider has a row for the file's segment.
+	// The daily task resends manual markers this way. It is not stored.
 	Correction bool
 }
 
@@ -168,18 +167,13 @@ func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow, stal
 		}
 	}
 	if row.Correction {
-		// CandidateLocalMarkerFiles applies the same rule.
+		// CandidateManualCorrections applies the same rule.
 		var correction bool
 		if err := tx.QueryRow(ctx, `
 			SELECT EXISTS (
 			    SELECT 1 FROM marker_contributions
 			    WHERE media_file_id = $1 AND provider = $2 AND segment_kind = $3
-			) AND NOT EXISTS (
-			    SELECT 1 FROM marker_contributions
-			    WHERE media_file_id = $1 AND provider = $2 AND segment_kind = $3
-			      AND content_hash = $4 AND status = $5
-			)`, row.MediaFileID, row.Provider, row.SegmentKind, row.ContentHash,
-			OutcomeStatusSkipped).Scan(&correction); err != nil {
+			)`, row.MediaFileID, row.Provider, row.SegmentKind).Scan(&correction); err != nil {
 			return ContributionClaim{}, false, fmt.Errorf("check manual marker correction: %w", err)
 		}
 		if !correction {
@@ -308,44 +302,6 @@ func (s *ContributionStore) Record(ctx context.Context, row ContributionRow) err
 	return nil
 }
 
-// Withhold records that the provider must never receive row's payload as a
-// correction: a skipped row, inactive, carrying reason. It writes nothing when
-// the provider has no row for the file's segment, since the daily task sends
-// no correction there, and leaves an active claim on the payload alone. A
-// later claim of the same payload, as from a save that may send it, replaces
-// the record.
-func (s *ContributionStore) Withhold(ctx context.Context, row ContributionRow, reason string) error {
-	if s == nil || s.pool == nil {
-		return errors.New("contribution store unavailable")
-	}
-	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO marker_contributions (
-			media_file_id, provider, segment_kind, source,
-			submitted_start_ms, submitted_end_ms, video_duration_ms,
-			content_hash, target_key, status, error, claim_active, updated_at
-		)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, now()
-		WHERE EXISTS (
-		    SELECT 1 FROM marker_contributions
-		    WHERE media_file_id = $1 AND provider = $2 AND segment_kind = $3
-		)
-		ON CONFLICT (media_file_id, provider, segment_kind, content_hash) DO UPDATE SET
-			target_key = EXCLUDED.target_key,
-			submission_id = NULL,
-			status = EXCLUDED.status,
-			http_status = NULL,
-			error = EXCLUDED.error,
-			updated_at = now()
-		WHERE NOT marker_contributions.claim_active`,
-		row.MediaFileID, row.Provider, row.SegmentKind, row.Source,
-		row.SubmittedStartMs, row.SubmittedEndMs, row.VideoDurationMs,
-		row.ContentHash, row.TargetKey, OutcomeStatusSkipped, reason,
-	); err != nil {
-		return fmt.Errorf("withhold marker contribution: %w", err)
-	}
-	return nil
-}
-
 // ContributionCandidate is one auto-contribution candidate and its keyset
 // position.
 type ContributionCandidate struct {
@@ -368,9 +324,7 @@ type AutoContributor struct {
 
 // CandidateLocalMarkerFiles returns episode files carrying a local (scanner)
 // marker of kind, an intro or credits, that at least one of providers would
-// submit, highest confidence first. For a provider that supports amend it also
-// returns a manual marker the provider may take as a correction (see
-// ContributionRow.Correction). A provider would submit a file when the
+// submit, highest confidence first. A provider would submit a file when the
 // marker meets its minimum confidence, the series carries every external ID it
 // requires, and it holds no claim on the file's current target for that
 // segment, from this file or another version of the episode, that Claim would
@@ -435,7 +389,7 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		    'UTF8')), 'hex'), 32) AS hash) AS amend
 		WHERE seg.kind = $11
 		  AND mf.episode_id IS NOT NULL
-		  AND seg.source IN ($1, $15)
+		  AND seg.source = $1
 		  AND seg.start_s IS NOT NULL AND seg.end_s IS NOT NULL
 		  AND seg.confidence >= $2
 		  AND e.season_number > 0 AND e.episode_number > 0
@@ -447,23 +401,6 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		      CROSS JOIN LATERAL (SELECT string_to_array(NULLIF(p.required, ''), ',') AS keys) AS req
 		      WHERE seg.confidence >= p.min_confidence
 		        AND series_ids.ids ?& COALESCE(req.keys, '{}')
-		        AND (seg.source = $1 OR (p.amend
-		            AND EXISTS (
-		                SELECT 1
-		                FROM marker_contributions earlier
-		                WHERE earlier.provider = p.provider
-		                  AND earlier.media_file_id = mf.id
-		                  AND earlier.segment_kind = seg.kind
-		            )
-		            AND NOT EXISTS (
-		                SELECT 1
-		                FROM marker_contributions withheld
-		                WHERE withheld.provider = p.provider
-		                  AND withheld.media_file_id = mf.id
-		                  AND withheld.segment_kind = seg.kind
-		                  AND withheld.content_hash = amend.hash
-		                  AND withheld.status = $16
-		            )))
 		        AND NOT EXISTS (
 		            SELECT 1
 		            FROM marker_contributions mc
@@ -488,7 +425,6 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		contributionStatusClaim, int64(contributionClaimLease/time.Second),
 		OutcomeStatusInvalid, int64(contributionInvalidRecheck/time.Second),
 		markerKindName(kind), minimums, required, amend,
-		models.MarkerSourceManual, OutcomeStatusSkipped,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query contribution candidates: %w", err)
@@ -500,6 +436,80 @@ func (s *ContributionStore) CandidateLocalMarkerFiles(ctx context.Context, kind 
 		var c ContributionCandidate
 		if err := rows.Scan(&c.FileID, &c.Confidence); err != nil {
 			return nil, fmt.Errorf("scan contribution candidate: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// CandidateManualCorrections returns files, by ascending id, carrying a manual
+// marker (ManualAlgorithm, any kind, movie or episode) that one of providers,
+// all supporting amend, may take as a correction (ContributionRow.Correction)
+// and does not hold yet: the provider has a row for the file's segment, none
+// of its active claims there carries the marker's source, times, and
+// duration, and none is a fresh in-flight claim, which Claim would refuse.
+// A stale in-flight claim and an invalid refusal due for its recheck do not
+// count. The marker is compared by value, not by content hash, since the hash
+// covers external IDs this query does not resolve. Paging is by keyset: pass
+// the last candidate returned (nil for the first page).
+func (s *ContributionStore) CandidateManualCorrections(ctx context.Context, providers []string, after *ContributionCandidate, limit int) ([]ContributionCandidate, error) {
+	if s == nil || s.pool == nil || len(providers) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	afterID := 0
+	if after != nil {
+		afterID = after.FileID
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT mf.id
+		FROM media_files mf
+		WHERE mf.id > $2
+		  AND mf.id IN (SELECT media_file_id FROM marker_contributions WHERE provider = ANY($1::text[]))
+		  AND EXISTS (
+		      SELECT 1
+		      FROM (VALUES
+		          ('intro', mf.intro_markers_source, mf.intro_markers_algorithm, mf.intro_start, mf.intro_end),
+		          ('credits', mf.credits_markers_source, mf.credits_markers_algorithm, mf.credits_start, mf.credits_end),
+		          ('recap', mf.recap_markers_source, mf.recap_markers_algorithm, mf.recap_start, mf.recap_end),
+		          ('preview', mf.preview_markers_source, mf.preview_markers_algorithm, mf.preview_start, mf.preview_end)
+		      ) AS seg(kind, source, algorithm, start_s, end_s)
+		      CROSS JOIN unnest($1::text[]) AS p(provider)
+		      WHERE seg.source = $4 AND seg.algorithm = $5
+		        AND seg.start_s IS NOT NULL AND seg.end_s IS NOT NULL
+		        AND EXISTS (
+		            SELECT 1 FROM marker_contributions mc
+		            WHERE mc.media_file_id = mf.id AND mc.provider = p.provider AND mc.segment_kind = seg.kind
+		        )
+		        AND NOT EXISTS (
+		            SELECT 1 FROM marker_contributions mc
+		            WHERE mc.media_file_id = mf.id AND mc.provider = p.provider AND mc.segment_kind = seg.kind
+		              AND mc.claim_active
+		              AND NOT (mc.status = $6 AND mc.updated_at < now() - ($7 * interval '1 second'))
+		              AND NOT (mc.status = $8 AND mc.updated_at < now() - ($9 * interval '1 second'))
+		              AND (mc.status = $6
+		                   OR (mc.source = seg.source
+		                       AND mc.submitted_start_ms = trunc(seg.start_s * 1000)::bigint
+		                       AND mc.submitted_end_ms = trunc(seg.end_s * 1000)::bigint
+		                       AND mc.video_duration_ms = COALESCE(mf.duration, 0) * 1000))
+		        )
+		  )
+		ORDER BY mf.id
+		LIMIT $3`,
+		providers, afterID, limit,
+		models.MarkerSourceManual, ManualAlgorithm,
+		contributionStatusClaim, int64(contributionClaimLease/time.Second),
+		OutcomeStatusInvalid, int64(contributionInvalidRecheck/time.Second),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query manual correction candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ContributionCandidate
+	for rows.Next() {
+		var c ContributionCandidate
+		if err := rows.Scan(&c.FileID); err != nil {
+			return nil, fmt.Errorf("scan manual correction candidate: %w", err)
 		}
 		out = append(out, c)
 	}

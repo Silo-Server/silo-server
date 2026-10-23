@@ -10,7 +10,6 @@ import (
 )
 
 type adminContributionCapture struct {
-	noManualSaves
 	calls  int
 	opts   markers.ContributeOptions
 	fileID int

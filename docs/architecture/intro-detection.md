@@ -430,39 +430,44 @@ detection never replaces a newer marker at the provider.
 The daily candidate query recomputes the amend hash in SQL. It must hash
 exactly as `contributeSegment` does; the database contract test
 `TestContributionStoreAmendResubmitsChangedMarkers` checks that. It offers a
-scanner marker again when it no longer matches its active claim. It also
-offers a manual intro or credits as a correction, sent with the same claim
-rules, when the provider already has a `marker_contributions` row for that
-file and segment and no save withheld this payload from it (below). A save's
-background contribution tries each provider once and never waits, and stops
-at a rate limit like any run. Whatever it did not send reaches the provider
-from the daily task: a skip behind another submission in flight, a rate
-limit or other retryable error, or a run lost when its server stopped. The
-state is in the database, so this works whichever server saved. A manual
-marker at a provider that holds nothing for the file is never offered, as
-before. Providers without `supports_amend` get only scanner markers from the
-daily task. The daily task covers only providers with automatic sharing on,
-and only intros and credits.
+scanner marker again when it no longer matches its active claim.
 
-A manual save that keeps an online or plugin provider's marker, with both
-bounds within a second of it, is a confirmation of that provider's data
-(`markers.ConfirmedProvider`). The background contribution that follows the
-save sends it to that provider only. The rule compares the save with the
-markers shown before it (`PopulationService.ShownMarkers`): the stored row, or
-with `markers.online_storage` set to `on_demand`, the stored row with the
+A save's background contribution tries each provider once and never waits,
+and stops at a rate limit like any run. At a provider that supports amend,
+the daily task sends what it did not: a skip behind another submission in
+flight, a rate limit or other retryable error, or a run lost when its server
+stopped. `CandidateManualCorrections` offers a manual marker of any kind, on
+a movie or an episode, when the provider already has a `marker_contributions`
+row for that file and segment and none of its active claims there carries
+the marker's source, times, and duration. The run uses
+`ContributeOptions.Corrections`, which `Claim` accepts only with such a row
+(`ContributionRow.Correction`). It runs for every provider with contribution
+enabled that supports amend, whether or not automatic sharing is on, before
+the scanner passes. The state is in the database, so this works whichever
+server saved. A manual marker at a provider that holds nothing for the file
+is never offered, and a correction that differs from the provider's claim
+only in the series' external IDs is not offered again. Providers without
+`supports_amend` get only scanner markers from the daily task.
+
+A manual save of a kind whose bounds are both within a second of a marker an
+online or plugin provider supplied, as the user was shown it, may repeat
+that provider's data (`markers.KeepsProviderMarker`). The save stores that
+kind with source `manual` and algorithm `manual:withheld:v1` instead of
+`manual:v1`, and no contribution path sends it: not the save's own run, the
+daily task, an admin contribution, or an amend resend, to any provider,
+including the one whose marker it kept. A save that keeps an earlier withheld
+marker stays withheld. The comparison uses the markers shown before the save
+(`PopulationService.ShownMarkers`): the stored row, or with
+`markers.online_storage` set to `on_demand`, the stored row with the
 on-demand lookup laid over it, as `GetMarkers` returns it. That lookup leaves
 out, without an error, a provider in cooldown or error backoff, one whose
 fetch lease another pass holds, and one a short read skips. When it fails or
-leaves any provider out, the save is withheld from every provider, since it
-may have kept a marker the lookup could not show. The lookup runs only when
-some provider takes contributions; a save made while none does is withheld
-too. Before the save is written, `ContributionService.WithholdManualSave`
-records the decision at each provider that supports amend and already has a
-row for the file and segment: a `skipped` row for the payload's content hash,
-inactive, giving the reason. The daily task never offers a payload with such
-a row. A later claim of the same payload replaces the record, so a later
-save of the same times that may reach the provider still sends it. The rule
-does not cover an admin contribution of the file.
+leaves any provider out, every kind the save sets is withheld. Provenance is
+written with the marker in one statement, so it survives restarts, races
+between saves, and changes to the item's metadata. Everywhere else,
+including write priority, local detection, the API, and jellycompat,
+`manual:withheld:v1` is a manual marker like `manual:v1`; the API reports the
+stored algorithm.
 
 ## Measuring accuracy
 

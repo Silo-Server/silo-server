@@ -418,63 +418,76 @@ func TestContributionStoreAmendResubmitsChangedMarkers(t *testing.T) {
 	}
 }
 
-// manualCorrections drives one amend provider and a seeded episode file whose
-// intro a test saves by hand.
+// manualCorrections drives one amend provider, with automatic sharing off,
+// and a seeded episode file whose marker of kind a test saves by hand.
 type manualCorrections struct {
 	t       *testing.T
 	fixture contributionStoreFixture
 	sub     *fakeSubmitter
 	svc     *ContributionService
+	kind    MarkerKind
 	fileID  int
 	episode string
 }
 
-func newManualCorrections(t *testing.T) *manualCorrections {
+func newManualCorrections(t *testing.T, kind MarkerKind) *manualCorrections {
 	fixture := newContributionStoreFixture(t)
 	file := fixture.seedEpisodeFile(t, "manual", 1, 3)
 	sub := &fakeSubmitter{id: fixture.provider, amend: true}
 	reg := NewRegistry(nil)
 	_ = reg.Register(sub)
-	cfg := fakeConfig{sub.id: {Provider: sub.id, ContributeEnabled: true, ContributeAutoLocal: true, ContributeMinConfidence: 0.9}}
+	cfg := fakeConfig{sub.id: {Provider: sub.id, ContributeEnabled: true}}
 	svc := NewContributionService(reg, NewDBExternalIDResolver(fixture.pool), cfg, fixture.store, nil)
-	return &manualCorrections{t: t, fixture: fixture, sub: sub, svc: svc, fileID: file.ID, episode: file.EpisodeID}
+	return &manualCorrections{t: t, fixture: fixture, sub: sub, svc: svc, kind: kind, fileID: file.ID, episode: file.EpisodeID}
 }
 
-// save stores a manual intro from start to 60 s and returns the file read then.
-func (m *manualCorrections) save(start float64) *models.MediaFile {
+// save stores a manual marker from start to 60 s with algorithm and returns
+// the file read then.
+func (m *manualCorrections) save(start float64, algorithm string) *models.MediaFile {
 	m.t.Helper()
-	if _, err := m.fixture.pool.Exec(context.Background(), `
-		UPDATE media_files SET intro_start = $2, intro_end = 60, intro_markers_source = 'manual',
-		       intro_markers_confidence = 1, intro_markers_algorithm = 'manual:v1'
-		WHERE id = $1`, m.fileID, start); err != nil {
-		m.t.Fatalf("save intro: %v", err)
+	name := markerKindName(m.kind)
+	if _, err := m.fixture.pool.Exec(context.Background(), fmt.Sprintf(`
+		UPDATE media_files SET %[1]s_start = $2, %[1]s_end = 60, %[1]s_markers_source = 'manual',
+		       %[1]s_markers_confidence = 1, %[1]s_markers_algorithm = $3
+		WHERE id = $1`, name), m.fileID, start, algorithm); err != nil {
+		m.t.Fatalf("save %s: %v", name, err)
 	}
-	return &models.MediaFile{
-		ID: m.fileID, EpisodeID: m.episode, Duration: 1800,
-		IntroStart: floatPtr(start), IntroEnd: floatPtr(60),
-		IntroMarkersSource: strPtr(models.MarkerSourceManual), IntroMarkersConfidence: floatPtr(1),
-		IntroMarkersAlgorithm: strPtr("manual:v1"),
+	file := &models.MediaFile{ID: m.fileID, EpisodeID: m.episode, Duration: 1800}
+	source := models.MarkerSourceManual
+	for _, seg := range []struct {
+		kind              MarkerKind
+		start, end        **float64
+		source, algorithm **string
+		confidence        **float64
+	}{
+		{MarkerKindIntro, &file.IntroStart, &file.IntroEnd, &file.IntroMarkersSource, &file.IntroMarkersAlgorithm, &file.IntroMarkersConfidence},
+		{MarkerKindRecap, &file.RecapStart, &file.RecapEnd, &file.RecapMarkersSource, &file.RecapMarkersAlgorithm, &file.RecapMarkersConfidence},
+	} {
+		if seg.kind == m.kind {
+			*seg.start, *seg.end, *seg.source, *seg.algorithm, *seg.confidence = floatPtr(start), floatPtr(60), &source, &algorithm, floatPtr(1)
+		}
 	}
+	return file
 }
 
 func (m *manualCorrections) candidate() bool {
 	m.t.Helper()
-	contributors, err := m.svc.AutoContributors(context.Background())
+	amenders, err := m.svc.AmendContributors(context.Background())
 	if err != nil {
-		m.t.Fatalf("AutoContributors: %v", err)
+		m.t.Fatalf("AmendContributors: %v", err)
 	}
-	page, err := m.fixture.store.CandidateLocalMarkerFiles(context.Background(), MarkerKindIntro, contributors, nil, 10_000)
+	page, err := m.fixture.store.CandidateManualCorrections(context.Background(), amenders, nil, 10_000)
 	if err != nil {
-		m.t.Fatalf("CandidateLocalMarkerFiles: %v", err)
+		m.t.Fatalf("CandidateManualCorrections: %v", err)
 	}
 	return slices.ContainsFunc(page, func(c ContributionCandidate) bool { return c.FileID == m.fileID })
 }
 
-// contribute runs file's intro, as the daily task when auto is set and as a
-// save otherwise, and returns the outcome, or a zero one when not attempted.
-func (m *manualCorrections) contribute(file *models.MediaFile, auto bool) ContributionOutcome {
+// contribute runs file with opts and returns the outcome, or a zero one when
+// not attempted.
+func (m *manualCorrections) contribute(file *models.MediaFile, opts ContributeOptions) ContributionOutcome {
 	m.t.Helper()
-	outcomes, err := m.svc.ContributeFile(context.Background(), file, ContributeOptions{Segments: []MarkerKind{MarkerKindIntro}, Auto: auto})
+	outcomes, err := m.svc.ContributeFile(context.Background(), file, opts)
 	if err != nil || len(outcomes) > 1 {
 		m.t.Fatalf("ContributeFile: outcomes %+v, err %v; want at most one", outcomes, err)
 	}
@@ -491,93 +504,104 @@ func (m *manualCorrections) submitted(want ...float64) {
 		got = append(got, req.Start.Seconds())
 	}
 	if !slices.Equal(got, want) {
-		m.t.Fatalf("submitted intro starts %v, want %v", got, want)
+		m.t.Fatalf("submitted starts %v, want %v", got, want)
 	}
 }
 
 // An amend provider that holds an earlier submission for a file gets the
-// file's manual correction from the daily task when the save's own attempt
-// did not send it, whichever server saved it: one skipped behind another
-// submission in flight once that one settles, one whose submit was rate
-// limited, and one whose server stopped before claiming. A manual marker the
-// provider never had anything for is not offered, nor one a save withheld from
-// it, and an older correction never replaces a newer one.
+// file's manual correction of any kind from the daily task when the save's
+// own attempt did not send it, whichever server saved it and with automatic
+// sharing off: one skipped behind another submission in flight once that one
+// settles, one whose submit was rate limited, and one whose server stopped
+// before claiming. A manual marker the provider never had anything for is not
+// offered, and an older correction never replaces a newer one. A save that
+// kept a provider's marker is never offered nor sent by any path, even after
+// the series' IDs change.
 func TestContributionStoreAmendSendsAnUnsentManualCorrection(t *testing.T) {
-	m := newManualCorrections(t)
-	ctx := context.Background()
+	daily := ContributeOptions{Corrections: true}
+	for _, kind := range []MarkerKind{MarkerKindIntro, MarkerKindRecap} {
+		t.Run(markerKindName(kind), func(t *testing.T) {
+			m := newManualCorrections(t, kind)
+			ctx := context.Background()
+			save := ContributeOptions{Segments: []MarkerKind{kind}}
 
-	// Nothing was ever submitted for the file, so nothing is corrected.
-	if first := m.save(1); m.candidate() || m.contribute(first, true).Provider != "" {
-		t.Fatal("a manual marker is offered to a provider that holds nothing for the file")
-	}
+			// Nothing was ever submitted for the file, so nothing is corrected.
+			if first := m.save(1, ManualAlgorithm); m.candidate() || m.contribute(first, daily).Provider != "" {
+				t.Fatal("a manual marker is offered to a provider that holds nothing for the file")
+			}
 
-	// Behind a submission in flight: skipped now, offered once it settles.
-	earlier := ContributionRow{
-		MediaFileID: m.fileID, Provider: m.sub.id, SegmentKind: models.MarkerSegmentIntro, Source: models.MarkerSourceScanner,
-		SubmittedStartMs: new(int64(9000)), SubmittedEndMs: new(int64(60000)),
-		ContentHash: "earlier", TargetKey: fmt.Sprintf("episode|tmdb:1396|1|3|file:%d", m.fileID),
-		Status: contributionStatusClaim,
-	}
-	claim, claimed, err := m.fixture.store.Claim(ctx, earlier, time.Minute)
-	if err != nil || !claimed {
-		t.Fatalf("claim the earlier submission: claimed=%v err=%v", claimed, err)
-	}
-	older := m.save(2)
-	if got := m.contribute(older, false); got.Reason != contributionInFlightReason {
-		t.Fatalf("correction behind a submission in flight: %+v, want an in-flight skip", got)
-	}
-	if m.candidate() {
-		t.Fatal("a correction is offered while the earlier submission is still in flight")
-	}
-	earlier.ID, earlier.ClaimToken, earlier.Status = claim.ID, claim.Token, SubmissionStatusPending
-	if err := m.fixture.store.Record(ctx, earlier); err != nil {
-		t.Fatalf("settle the earlier submission: %v", err)
-	}
-	if !m.candidate() {
-		t.Fatal("the correction is not offered after the earlier submission settled")
-	}
-	m.contribute(older, true)
-	m.submitted(2)
-	if m.candidate() {
-		t.Fatal("the sent correction is still a candidate")
-	}
+			// Behind a submission in flight: skipped now, offered once it settles.
+			earlier := ContributionRow{
+				MediaFileID: m.fileID, Provider: m.sub.id, SegmentKind: markerKindName(kind), Source: models.MarkerSourceScanner,
+				SubmittedStartMs: new(int64(9000)), SubmittedEndMs: new(int64(60000)),
+				ContentHash: "earlier", TargetKey: fmt.Sprintf("episode|tmdb:1396|1|3|file:%d", m.fileID),
+				Status: contributionStatusClaim,
+			}
+			claim, claimed, err := m.fixture.store.Claim(ctx, earlier, time.Minute)
+			if err != nil || !claimed {
+				t.Fatalf("claim the earlier submission: claimed=%v err=%v", claimed, err)
+			}
+			older := m.save(2, ManualAlgorithm)
+			if got := m.contribute(older, save); got.Reason != contributionInFlightReason {
+				t.Fatalf("correction behind a submission in flight: %+v, want an in-flight skip", got)
+			}
+			if m.candidate() {
+				t.Fatal("a correction is offered while the earlier submission is still in flight")
+			}
+			earlier.ID, earlier.ClaimToken, earlier.Status = claim.ID, claim.Token, SubmissionStatusPending
+			if err := m.fixture.store.Record(ctx, earlier); err != nil {
+				t.Fatalf("settle the earlier submission: %v", err)
+			}
+			if !m.candidate() {
+				t.Fatal("the correction is not offered after the earlier submission settled")
+			}
+			m.contribute(older, daily)
+			m.submitted(2)
+			if m.candidate() {
+				t.Fatal("the sent correction is still a candidate")
+			}
 
-	// A rate-limited submit is offered again; so is a newer save whose server
-	// stopped before claiming, and the older payload can no longer take the
-	// target.
-	m.sub.err = &RetryAfterError{Provider: m.sub.id, RetryAfter: time.Minute, Message: "usage limited"}
-	limited := m.save(3)
-	if got := m.contribute(limited, false); got.Status != OutcomeStatusRateLimited {
-		t.Fatalf("rate-limited correction: %+v", got)
-	}
-	m.sub.err = nil
-	if !m.candidate() {
-		t.Fatal("a correction whose submit was rate limited is not offered")
-	}
-	newer := m.save(4)
-	if !m.candidate() {
-		t.Fatal("a correction never attempted after its save is not offered")
-	}
-	if got := m.contribute(limited, false); got.Reason != contributionSupersededReason {
-		t.Fatalf("older correction after a newer save: %+v, want a superseded skip", got)
-	}
-	m.contribute(newer, true)
-	m.submitted(2, 3, 4) // 3 was the attempt the rate limit refused
+			// A rate-limited submit is offered again; so is a newer save whose
+			// server stopped before claiming, and the older payload can no
+			// longer take the target.
+			m.sub.err = &RetryAfterError{Provider: m.sub.id, RetryAfter: time.Minute, Message: "usage limited"}
+			limited := m.save(3, ManualAlgorithm)
+			if got := m.contribute(limited, save); got.Status != OutcomeStatusRateLimited {
+				t.Fatalf("rate-limited correction: %+v", got)
+			}
+			m.sub.err = nil
+			if !m.candidate() {
+				t.Fatal("a correction whose submit was rate limited is not offered")
+			}
+			newer := m.save(4, ManualAlgorithm)
+			if !m.candidate() {
+				t.Fatal("a correction never attempted after its save is not offered")
+			}
+			if got := m.contribute(limited, save); got.Reason != contributionSupersededReason {
+				t.Fatalf("older correction after a newer save: %+v, want a superseded skip", got)
+			}
+			m.contribute(newer, daily)
+			m.submitted(2, 3, 4) // 3 was the attempt the rate limit refused
 
-	// A save that kept another provider's marker is withheld from this one,
-	// before it is written; a later save of the same times that may reach it
-	// still sends it.
-	if err := m.svc.WithholdManualSave(ctx, newer, ManualSave{
-		Segments:  []ManualSegment{{Kind: MarkerKindIntro, Start: 5, End: 60}},
-		Algorithm: "manual:v1",
-		Confirmed: map[MarkerKind]string{MarkerKindIntro: "another-provider"},
-	}); err != nil {
-		t.Fatalf("WithholdManualSave: %v", err)
+			// A save that kept a provider's marker is withheld from every path,
+			// and a change to the series' IDs does not release it.
+			withheld := m.save(5, ManualWithheldAlgorithm)
+			for range 2 {
+				if m.candidate() {
+					t.Fatal("a withheld save is offered as a correction")
+				}
+				for _, opts := range []ContributeOptions{save, daily, {Auto: true}, {Provider: m.sub.id}} {
+					if got := m.contribute(withheld, opts); got.Provider != "" {
+						t.Fatalf("a withheld save was attempted with %+v: %+v", opts, got)
+					}
+				}
+				if _, err := m.fixture.pool.Exec(ctx, `
+					UPDATE media_items SET imdb_id = 'tt9999999'
+					WHERE content_id = (SELECT series_id FROM episodes WHERE content_id = $1)`, m.episode); err != nil {
+					t.Fatalf("change the series IMDb ID: %v", err)
+				}
+			}
+			m.submitted(2, 3, 4)
+		})
 	}
-	confirmation := m.save(5)
-	if m.candidate() || m.contribute(confirmation, true).Provider != "" {
-		t.Fatal("a withheld confirmation is offered to the provider")
-	}
-	m.contribute(confirmation, false)
-	m.submitted(2, 3, 4, 5)
 }

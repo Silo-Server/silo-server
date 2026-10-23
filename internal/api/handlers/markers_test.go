@@ -196,16 +196,7 @@ func TestSetFileMarkersClearsOnNull(t *testing.T) {
 	}
 }
 
-// noManualSaves completes a test MarkerContributor that ignores manual saves.
-type noManualSaves struct{}
-
-func (noManualSaves) Contributes(context.Context) bool { return true }
-func (noManualSaves) WithholdManualSave(context.Context, *models.MediaFile, markers.ManualSave) error {
-	return nil
-}
-
 type captureMarkerContributor struct {
-	noManualSaves
 	opts markers.ContributeOptions
 }
 
@@ -215,20 +206,9 @@ func (c *captureMarkerContributor) ContributeFile(_ context.Context, _ *models.M
 }
 
 // signalContributor reports every ContributeFile call on a channel so a test
-// can wait for the detached background contribution kicked off by a save. It
-// keeps the last save WithholdManualSave was given in withheld, when set.
+// can wait for the detached background contribution kicked off by a save.
 type signalContributor struct {
-	called   chan markers.ContributeOptions
-	off      bool
-	withheld *markers.ManualSave
-}
-
-func (s signalContributor) Contributes(context.Context) bool { return !s.off }
-func (s signalContributor) WithholdManualSave(_ context.Context, _ *models.MediaFile, save markers.ManualSave) error {
-	if s.withheld != nil {
-		*s.withheld = save
-	}
-	return nil
+	called chan markers.ContributeOptions
 }
 
 func (s signalContributor) ContributeFile(_ context.Context, _ *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error) {
@@ -274,65 +254,56 @@ func (p onDemandMarkerPopulation) ShownMarkers(_ context.Context, file *models.M
 	return p.shown, !p.incomplete, nil
 }
 
-// A manual save that keeps an online provider's marker, both bounds within a
-// second, names that provider so its data is not passed on to another one,
-// and records that before the save is written so the daily task never sends
-// it elsewhere. In on_demand mode the marker kept is the one the lookup
-// showed, never stored. When that lookup fails or leaves a provider out, or
-// no provider takes contributions, the save is withheld from every provider.
-func TestSetFileMarkersNamesTheProviderASaveKeeps(t *testing.T) {
+// A manual save that keeps a provider's marker, both bounds within a second,
+// stores the withheld algorithm so no contribution passes the provider's data
+// on. In on_demand mode the marker kept is the one the lookup showed, never
+// stored; when that lookup fails or leaves a provider out, the save is
+// withheld too. A save that keeps an earlier withheld save stays withheld.
+func TestSetFileMarkersWithholdsASaveThatKeepsAProviderMarker(t *testing.T) {
 	plugin := func() *models.MediaFile {
 		return &models.MediaFile{ID: 5, Duration: 1800, IntroStart: new(10.0), IntroEnd: new(70.0),
 			IntroMarkersSource: new(models.MarkerSourcePlugin), IntroMarkersProvider: new("theintrodb")}
 	}
-	scanner := plugin()
-	scanner.IntroMarkersSource = new(models.MarkerSourceScanner)
-	const withheld = "(withheld)"
+	local := func(source, algorithm string) *models.MediaFile {
+		file := plugin()
+		file.IntroMarkersSource, file.IntroMarkersProvider, file.IntroMarkersAlgorithm = new(source), nil, new(algorithm)
+		return file
+	}
+	unmarked := &models.MediaFile{ID: 5, Duration: 1800}
+	const kept = `{"intro":{"start":10.5,"end":70.9}}`
 	for _, tc := range []struct {
 		name       string
 		stored     *models.MediaFile
 		population MarkerPopulationService
-		off        bool
 		body       string
-		want       string
+		withheld   bool
 	}{
-		{"kept within a second", plugin(), nil, false, `{"intro":{"start":10.5,"end":70.9}}`, "theintrodb"},
-		{"moved", plugin(), nil, false, `{"intro":{"start":11.5,"end":70}}`, ""},
-		{"local marker", scanner, nil, false, `{"intro":{"start":10,"end":70}}`, ""},
-		{"kept an on-demand lookup", &models.MediaFile{ID: 5, Duration: 1800}, onDemandMarkerPopulation{shown: plugin()}, false, `{"intro":{"start":10.5,"end":70.9}}`, "theintrodb"},
-		{"on-demand lookup failed", &models.MediaFile{ID: 5, Duration: 1800}, onDemandMarkerPopulation{err: context.DeadlineExceeded}, false, `{"intro":{"start":10.5,"end":70.9}}`, withheld},
-		{"on-demand lookup left a provider out", &models.MediaFile{ID: 5, Duration: 1800}, onDemandMarkerPopulation{shown: &models.MediaFile{ID: 5, Duration: 1800}, incomplete: true}, false, `{"intro":{"start":10.5,"end":70.9}}`, withheld},
-		{"no provider takes contributions", plugin(), nil, true, `{"intro":{"start":10.5,"end":70.9}}`, withheld},
+		{"kept within a second", plugin(), nil, kept, true},
+		{"moved", plugin(), nil, `{"intro":{"start":11.5,"end":70}}`, false},
+		{"local marker", local(models.MarkerSourceScanner, "chapter:v1"), nil, kept, false},
+		{"own correction", local(models.MarkerSourceManual, markers.ManualAlgorithm), nil, kept, false},
+		{"kept an earlier withheld save", local(models.MarkerSourceManual, markers.ManualWithheldAlgorithm), nil, kept, true},
+		{"kept an on-demand lookup", unmarked, onDemandMarkerPopulation{shown: plugin()}, kept, true},
+		{"on-demand lookup found nothing", unmarked, onDemandMarkerPopulation{shown: unmarked}, kept, false},
+		{"on-demand lookup failed", unmarked, onDemandMarkerPopulation{err: context.DeadlineExceeded}, kept, true},
+		{"on-demand lookup left a provider out", unmarked, onDemandMarkerPopulation{shown: unmarked, incomplete: true}, kept, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			called := make(chan markers.ContributeOptions, 1)
-			var save markers.ManualSave
-			h := newTestMarkersHandler(fakeMarkerFiles{file: tc.stored}, &fakeMarkerWriter{}, signalContributor{called: called, off: tc.off, withheld: &save}, nil, nil, nil)
+			writer := &fakeMarkerWriter{}
+			h := newTestMarkersHandler(fakeMarkerFiles{file: tc.stored}, writer, nil, nil, nil, nil)
 			h.MarkerPopulation = tc.population
 
 			rec := httptest.NewRecorder()
 			h.HandleSetFileMarkers(rec, markerPutRequest(tc.body))
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			if rec.Code != http.StatusOK || len(writer.upserts) != 1 {
+				t.Fatalf("status = %d, upserts = %d; want 200 and one; body=%s", rec.Code, len(writer.upserts), rec.Body.String())
 			}
-			if save.Withheld != (tc.want == withheld) || save.Confirmed[markers.MarkerKindIntro] != strings.TrimSuffix(tc.want, withheld) {
-				t.Fatalf("recorded save = %+v, want %q", save, tc.want)
+			algorithm := writer.upserts[0].MarkersAlgorithm
+			if p := writer.upserts[0].IntroProvenance; p != nil {
+				algorithm = p.Algorithm
 			}
-			if tc.want == withheld {
-				select {
-				case <-called:
-					t.Fatal("a withheld save must not be contributed")
-				case <-time.After(200 * time.Millisecond):
-				}
-				return
-			}
-			select {
-			case opts := <-called:
-				if got := opts.Confirmed[markers.MarkerKindIntro]; got != tc.want {
-					t.Fatalf("confirmed provider = %q, want %q", got, tc.want)
-				}
-			case <-time.After(2 * time.Second):
-				t.Fatal("expected a background contribution for the saved intro")
+			if want := map[bool]string{false: markers.ManualAlgorithm, true: markers.ManualWithheldAlgorithm}[tc.withheld]; algorithm != want {
+				t.Fatalf("intro algorithm = %q, want %q", algorithm, want)
 			}
 		})
 	}

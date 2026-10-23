@@ -39,12 +39,9 @@ type ManualMarkerWriter interface {
 	UpsertAndClearMarkers(ctx context.Context, fileID int, update scanner.MarkerUpdate, clearSegments []string) (bool, error)
 }
 
-// MarkerContributor submits a file's eligible markers to enabled providers
-// (satisfied by *markers.ContributionService).
+// MarkerContributor submits a file's eligible markers to enabled providers.
 type MarkerContributor interface {
 	ContributeFile(ctx context.Context, file *models.MediaFile, opts markers.ContributeOptions) ([]markers.ContributionOutcome, error)
-	Contributes(ctx context.Context) bool
-	WithholdManualSave(ctx context.Context, file *models.MediaFile, save markers.ManualSave) error
 }
 
 // MarkerContributionLister reads contribution history for a file.
@@ -92,8 +89,6 @@ func NewMarkersHandler(files MarkerFileResolver, writer ManualMarkerWriter, cont
 }
 
 var manualMarkerConfidence = 1.0
-
-const manualMarkerAlgorithm = "manual:v1"
 
 // markerContributeTimeout bounds the detached contribution run kicked off after
 // a manual save so a slow or rate-limited provider can't leak goroutines.
@@ -584,20 +579,25 @@ func (h *MarkersHandler) reloadAndNotify(ctx context.Context, fileID int) (*mode
 }
 
 // maybeContribute fires a best-effort, detached contribution run for the
-// segments a manual save just set, unless the save is withheld.
-// ContributeFile self-gates on each provider's contribute_enabled flag, only
-// submits scanner/manual-sourced segments, and is idempotent — so this is a
+// segments just set by a manual save. ContributeFile self-gates on each
+// provider's contribute_enabled flag, only submits scanner/manual-sourced
+// segments, never one the save withheld, and is idempotent — so this is a
 // no-op when contribution is off or the marker was already submitted. It runs
 // in the background so the save responds immediately and is never blocked by
 // provider rate limits. It tries each provider once; at a provider that
 // supports amend, the daily task sends a correction this run did not.
-func (h *MarkersHandler) maybeContribute(file *models.MediaFile, save markers.ManualSave) {
-	if h == nil || h.Contributor == nil || file == nil || save.Withheld || len(save.Segments) == 0 {
+func (h *MarkersHandler) maybeContribute(file *models.MediaFile, segments []string) {
+	if h == nil || h.Contributor == nil || file == nil || len(segments) == 0 {
 		return
 	}
-	kinds := make([]markers.MarkerKind, len(save.Segments))
-	for i, seg := range save.Segments {
-		kinds[i] = seg.Kind
+	kinds := make([]markers.MarkerKind, 0, len(segments))
+	for _, seg := range segments {
+		if kind, ok := markerKindForName(seg); ok {
+			kinds = append(kinds, kind)
+		}
+	}
+	if len(kinds) == 0 {
+		return
 	}
 	base := h.BaseContext
 	if base == nil {
@@ -606,7 +606,7 @@ func (h *MarkersHandler) maybeContribute(file *models.MediaFile, save markers.Ma
 	go func() {
 		ctx, cancel := context.WithTimeout(base, markerContributeTimeout)
 		defer cancel()
-		if _, err := h.Contributor.ContributeFile(ctx, file, markers.ContributeOptions{Segments: kinds, Confirmed: save.Confirmed}); err != nil {
+		if _, err := h.Contributor.ContributeFile(ctx, file, markers.ContributeOptions{Segments: kinds}); err != nil {
 			h.logger.Warn("markers: background contribution failed", "file_id", file.ID, "error", err)
 		}
 	}()

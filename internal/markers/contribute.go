@@ -51,32 +51,13 @@ type ContributeOptions struct {
 	// Auto marks a background run: a segment is only contributed when the
 	// provider has contribute_auto_local enabled and the segment is a local
 	// (scanner) intro or credits at or above the provider's confidence
-	// threshold. A provider that supports amend also gets a manual intro or
-	// credits as a correction (see ContributionRow.Correction).
+	// threshold.
 	Auto bool
-	// Confirmed maps a kind to the online provider whose marker a manual save
-	// kept (see ConfirmedProvider). The manual marker repeats that provider's
-	// data, so it goes to that provider alone, as a human check of its marker.
-	Confirmed map[MarkerKind]string
-}
-
-// ManualSave describes a manual save for WithholdManualSave.
-type ManualSave struct {
-	// Segments are the kinds the save sets, with their new bounds.
-	Segments []ManualSegment
-	// Algorithm is the algorithm the save stores on its markers.
-	Algorithm string
-	// Confirmed is as in ContributeOptions.
-	Confirmed map[MarkerKind]string
-	// Withheld keeps the save from every provider: the markers shown before
-	// it are unknown, so it may repeat any provider's data.
-	Withheld bool
-}
-
-// ManualSegment is one segment a manual save sets, in seconds.
-type ManualSegment struct {
-	Kind       MarkerKind
-	Start, End float64
+	// Corrections marks the daily task's resend of manual markers: only a
+	// manual marker is contributed, only to a provider that supports amend,
+	// and only as a correction of an earlier submission for the file's segment
+	// (see ContributionRow.Correction).
+	Corrections bool
 }
 
 // ContributionOutcome is the per (provider, segment) result of a run.
@@ -102,7 +83,6 @@ type providerConfigReader interface {
 type contributionRecorder interface {
 	Claim(ctx context.Context, row ContributionRow, staleAfter time.Duration) (ContributionClaim, bool, error)
 	Record(ctx context.Context, row ContributionRow) error
-	Withhold(ctx context.Context, row ContributionRow, reason string) error
 }
 
 // ContributionService submits a file's eligible markers to enabled submitter
@@ -130,46 +110,49 @@ type segmentData struct {
 	start      *float64
 	end        *float64
 	source     *string
-	provider   *string
 	confidence *float64
 	algorithm  *string
 }
 
 func fileSegments(file *models.MediaFile) []segmentData {
 	return []segmentData{
-		{MarkerKindIntro, models.MarkerSegmentIntro, file.IntroStart, file.IntroEnd, file.IntroMarkersSource, file.IntroMarkersProvider, file.IntroMarkersConfidence, file.IntroMarkersAlgorithm},
-		{MarkerKindCredits, models.MarkerSegmentCredits, file.CreditsStart, file.CreditsEnd, file.CreditsMarkersSource, file.CreditsMarkersProvider, file.CreditsMarkersConfidence, file.CreditsMarkersAlgorithm},
-		{MarkerKindRecap, models.MarkerSegmentRecap, file.RecapStart, file.RecapEnd, file.RecapMarkersSource, file.RecapMarkersProvider, file.RecapMarkersConfidence, file.RecapMarkersAlgorithm},
-		{MarkerKindPreview, models.MarkerSegmentPreview, file.PreviewStart, file.PreviewEnd, file.PreviewMarkersSource, file.PreviewMarkersProvider, file.PreviewMarkersConfidence, file.PreviewMarkersAlgorithm},
+		{MarkerKindIntro, models.MarkerSegmentIntro, file.IntroStart, file.IntroEnd, file.IntroMarkersSource, file.IntroMarkersConfidence, file.IntroMarkersAlgorithm},
+		{MarkerKindCredits, models.MarkerSegmentCredits, file.CreditsStart, file.CreditsEnd, file.CreditsMarkersSource, file.CreditsMarkersConfidence, file.CreditsMarkersAlgorithm},
+		{MarkerKindRecap, models.MarkerSegmentRecap, file.RecapStart, file.RecapEnd, file.RecapMarkersSource, file.RecapMarkersConfidence, file.RecapMarkersAlgorithm},
+		{MarkerKindPreview, models.MarkerSegmentPreview, file.PreviewStart, file.PreviewEnd, file.PreviewMarkersSource, file.PreviewMarkersConfidence, file.PreviewMarkersAlgorithm},
 	}
 }
 
-// manualConfirmTolerance is how far, in seconds, each bound of a manual save
-// may move from a provider's marker and still count as keeping it.
-const manualConfirmTolerance = 1.0
+// Manual marker algorithms. A manual save stores ManualWithheldAlgorithm
+// instead of ManualAlgorithm for a kind that may repeat a provider's marker
+// (KeepsProviderMarker). No contribution path ever sends such a marker, to any
+// provider; everything else treats the two alike.
+const (
+	ManualAlgorithm         = "manual:v1"
+	ManualWithheldAlgorithm = "manual:withheld:v1"
+)
 
-// ConfirmedProvider returns the online provider whose marker of kind a manual
-// save of start-end keeps: before, the file as it was before the save, held
-// that provider's marker, and neither bound moved by more than a second. It
-// returns "" otherwise.
-func ConfirmedProvider(before *models.MediaFile, kind MarkerKind, start, end float64) string {
-	if before == nil {
-		return ""
+// manualKeepTolerance is how far, in seconds, each bound of a manual save may
+// move from a marker and still count as keeping it.
+const manualKeepTolerance = 1.0
+
+// KeepsProviderMarker reports whether a manual save of kind from start to end
+// keeps a provider's marker: shown, the file as the user saw it before the
+// save, held an online or plugin marker of kind, or a manual one an earlier
+// save withheld, and neither bound moved by more than a second.
+func KeepsProviderMarker(shown *models.MediaFile, kind MarkerKind, start, end float64) bool {
+	if shown == nil {
+		return false
 	}
-	for _, seg := range fileSegments(before) {
-		if seg.kind != kind {
+	for _, seg := range fileSegments(shown) {
+		if seg.kind != kind || seg.start == nil || seg.end == nil || seg.source == nil {
 			continue
 		}
-		if seg.start == nil || seg.end == nil || seg.source == nil || seg.provider == nil ||
-			(*seg.source != models.MarkerSourceOnline && *seg.source != models.MarkerSourcePlugin) {
-			return ""
-		}
-		if math.Abs(*seg.start-start) > manualConfirmTolerance || math.Abs(*seg.end-end) > manualConfirmTolerance {
-			return ""
-		}
-		return *seg.provider
+		fromProvider := *seg.source == models.MarkerSourceOnline || *seg.source == models.MarkerSourcePlugin ||
+			(seg.algorithm != nil && *seg.algorithm == ManualWithheldAlgorithm)
+		return fromProvider && math.Abs(*seg.start-start) <= manualKeepTolerance && math.Abs(*seg.end-end) <= manualKeepTolerance
 	}
-	return ""
+	return false
 }
 
 // AutoContributedKinds lists the local segment kinds automatic contribution
@@ -225,65 +208,25 @@ func (s *ContributionService) AutoContributors(ctx context.Context) ([]AutoContr
 	return out, nil
 }
 
-// Contributes reports whether any registered provider takes contributions.
-// It reads the stored provider config; a failed read reports none.
-func (s *ContributionService) Contributes(ctx context.Context) bool {
+// AmendContributors lists the registered submitters with contribution enabled
+// that support amend. The daily task resends manual corrections to them
+// whether or not they share local markers automatically. It reads the stored
+// provider config; a failed read lists none.
+func (s *ContributionService) AmendContributors(ctx context.Context) ([]string, error) {
 	if s == nil || s.config == nil {
-		return false
+		return nil, nil
 	}
 	configs, err := s.config.Load(ctx)
 	if err != nil {
-		return false
+		return nil, err
 	}
+	var out []string
 	for _, sub := range s.submitters() {
-		if cfg, ok := configs[sub.ID()]; ok && cfg.ContributeEnabled {
-			return true
+		if cfg, ok := configs[sub.ID()]; ok && cfg.ContributeEnabled && submissionRequirements(sub).SupportsAmend {
+			out = append(out, sub.ID())
 		}
 	}
-	return false
-}
-
-// WithholdManualSave records, at each provider that supports amend, a manual
-// save that provider must never receive: a confirmation of another provider's
-// marker, or every kind of a Withheld save. The daily task sends a manual
-// marker to such a provider as a correction (ContributionRow.Correction)
-// unless this record names it, so call it before the save is written. The
-// save's own contribution, with the same Confirmed, skips the same providers.
-func (s *ContributionService) WithholdManualSave(ctx context.Context, file *models.MediaFile, save ManualSave) error {
-	if s == nil || file == nil || s.resolver == nil || s.store == nil || len(save.Segments) == 0 {
-		return nil
-	}
-	var amenders []Submitter
-	for _, sub := range s.submitters() {
-		if submissionRequirements(sub).SupportsAmend {
-			amenders = append(amenders, sub)
-		}
-	}
-	if len(amenders) == 0 {
-		return nil
-	}
-	ids, err := s.resolver.ResolveForFile(ctx, file)
-	if err != nil || !ids.HasAnyID() {
-		return err
-	}
-	source := models.MarkerSourceManual
-	for _, sub := range amenders {
-		for _, saved := range save.Segments {
-			reason := "the markers shown before this save are unknown"
-			if !save.Withheld {
-				confirmed := save.Confirmed[saved.Kind]
-				if confirmed == "" || confirmed == sub.ID() {
-					continue
-				}
-				reason = "this save kept " + confirmed + "'s marker"
-			}
-			seg := segmentData{kind: saved.Kind, name: markerKindName(saved.Kind), start: &saved.Start, end: &saved.End, source: &source, algorithm: &save.Algorithm}
-			if err := s.store.Withhold(ctx, newContributionRow(sub, file, ids, seg, source), reason); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return out, nil
 }
 
 // ContributeFile submits the file's eligible markers and returns one outcome
@@ -365,15 +308,15 @@ func (s *ContributionService) contributeSegment(
 	if source != models.MarkerSourceScanner && source != models.MarkerSourceManual {
 		return ContributionOutcome{}, false
 	}
-	// Nor another provider's marker that a manual save only kept.
-	if confirmed := opts.Confirmed[seg.kind]; source == models.MarkerSourceManual && confirmed != "" && confirmed != providerID {
+	// Nor a manual marker that may repeat a provider's.
+	if seg.algorithm != nil && *seg.algorithm == ManualWithheldAlgorithm {
 		return ContributionOutcome{}, false
 	}
-	// An automatic run sends a manual marker only as a correction, and only to
-	// a provider that supports amend.
-	correction := opts.Auto && source == models.MarkerSourceManual
+	if opts.Corrections && (source != models.MarkerSourceManual || !submissionRequirements(sub).SupportsAmend) {
+		return ContributionOutcome{}, false
+	}
 	if opts.Auto {
-		if !cfg.ContributeAutoLocal || !autoContributedKind(seg.kind) || (correction && !submissionRequirements(sub).SupportsAmend) {
+		if !cfg.ContributeAutoLocal || source != models.MarkerSourceScanner || !autoContributedKind(seg.kind) {
 			return ContributionOutcome{}, false
 		}
 		confidence := 0.0
@@ -404,7 +347,7 @@ func (s *ContributionService) contributeSegment(
 	}
 
 	row := newContributionRow(sub, file, ids, seg, source)
-	row.Correction = correction
+	row.Correction = opts.Corrections
 	claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
 	if errors.Is(err, errContributionNotCorrection) {
 		return ContributionOutcome{}, false

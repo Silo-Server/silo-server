@@ -107,9 +107,8 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 			return FileMarkersView{}, apiError(http.StatusBadRequest, "bad_request", "Unknown marker segment")
 		}
 	}
-	update := scanner.MarkerUpdate{MarkersSource: models.MarkerSourceManual, MarkersConfidence: &manualMarkerConfidence, MarkersAlgorithm: manualMarkerAlgorithm}
-	var clears []string
-	var sets []markers.ManualSegment
+	update := scanner.MarkerUpdate{MarkersSource: models.MarkerSourceManual, MarkersConfidence: &manualMarkerConfidence, MarkersAlgorithm: markers.ManualAlgorithm}
+	var clears, sets []string
 	// Intro comes before credits in markerSegmentNames, so by the credits
 	// check this is the intro the change leaves the file with.
 	introEnd := file.IntroEnd
@@ -138,20 +137,10 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 			}
 		}
 		applyManualSegment(&update, segment, start, end)
-		if kind, ok := markerKindForName(segment); ok {
-			sets = append(sets, markers.ManualSegment{Kind: kind, Start: start, End: end})
-		}
+		sets = append(sets, segment)
 	}
-	save := markers.ManualSave{Segments: sets, Algorithm: manualMarkerAlgorithm}
-	if h.Contributor != nil && len(sets) > 0 {
-		save.Confirmed, save.Withheld = h.confirmedProviders(ctx, file, sets)
-		if err := h.Contributor.WithholdManualSave(ctx, file, save); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return FileMarkersView{}, err
-			}
-			h.logger.ErrorContext(ctx, "markers: record withheld contribution failed", "file_id", file.ID, "error", err)
-			return FileMarkersView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to save markers")
-		}
+	if len(sets) > 0 {
+		h.withholdKeptProviderMarkers(ctx, file, &update)
 	}
 	if _, err := h.Writer.UpsertAndClearMarkers(ctx, file.ID, update, clears); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -168,7 +157,7 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 		h.logger.ErrorContext(ctx, "markers: reload after save failed", "file_id", file.ID, "error", err)
 		return FileMarkersView{}, apiError(http.StatusInternalServerError, "internal_error", "Markers saved but failed to reload")
 	}
-	h.maybeContribute(refreshed, save)
+	h.maybeContribute(refreshed, sets)
 	return h.fileMarkersView(ctx, refreshed), nil
 }
 
@@ -180,37 +169,41 @@ type markerShownReader interface {
 
 var _ markerShownReader = (*markers.PopulationService)(nil)
 
-// confirmedProviders returns, for each kind whose save kept an online
-// provider's marker, that provider (markers.ConfirmedProvider), or withheld
-// when it cannot tell. It compares the save with the markers a player was
-// shown before it, which in on_demand mode means running the lookup
-// GetMarkers runs; a lookup that cannot account for every provider leaves the
-// save withheld, since it may have kept a marker the lookup could not see.
-// When no provider takes contributions it looks nothing up and withholds.
-func (h *MarkersHandler) confirmedProviders(ctx context.Context, file *models.MediaFile, sets []markers.ManualSegment) (map[markers.MarkerKind]string, bool) {
-	if !h.Contributor.Contributes(ctx) {
-		return nil, true
-	}
-	shown := file
+// withholdKeptProviderMarkers stores markers.ManualWithheldAlgorithm on each
+// kind update sets that keeps a provider's marker (markers.KeepsProviderMarker),
+// so that no contribution ever sends it. It compares the save with the markers
+// a player was shown before it, which in on_demand mode means running the
+// lookup GetMarkers runs. When that lookup fails or leaves a provider out,
+// every kind is withheld, since the save may keep a marker the lookup could
+// not show.
+func (h *MarkersHandler) withholdKeptProviderMarkers(ctx context.Context, file *models.MediaFile, update *scanner.MarkerUpdate) {
+	shown, known := file, true
 	if reader, ok := h.MarkerPopulation.(markerShownReader); ok {
 		lookupCtx, cancel := context.WithTimeout(ctx, markerReadTimeout)
 		view, complete, err := reader.ShownMarkers(lookupCtx, file)
 		cancel()
-		if !complete {
-			h.logger.InfoContext(ctx, "markers: manual save not contributed; the provider markers it may have kept could not all be read", "file_id", file.ID, "error", err)
-			return nil, true
-		}
-		if view != nil {
+		switch {
+		case !complete:
+			known = false
+			h.logger.InfoContext(ctx, "markers: manual save withheld from contribution; the provider markers it may keep could not all be read", "file_id", file.ID, "error", err)
+		case view != nil:
 			shown = view
 		}
 	}
-	confirmed := make(map[markers.MarkerKind]string)
-	for _, seg := range sets {
-		if provider := markers.ConfirmedProvider(shown, seg.Kind, seg.Start, seg.End); provider != "" {
-			confirmed[seg.Kind] = provider
+	for _, seg := range []struct {
+		kind       markers.MarkerKind
+		start, end *float64
+		provenance **scanner.SegmentProvenance
+	}{
+		{markers.MarkerKindIntro, update.IntroStart, update.IntroEnd, &update.IntroProvenance},
+		{markers.MarkerKindCredits, update.CreditsStart, update.CreditsEnd, &update.CreditsProvenance},
+		{markers.MarkerKindRecap, update.RecapStart, update.RecapEnd, &update.RecapProvenance},
+		{markers.MarkerKindPreview, update.PreviewStart, update.PreviewEnd, &update.PreviewProvenance},
+	} {
+		if seg.start != nil && seg.end != nil && (!known || markers.KeepsProviderMarker(shown, seg.kind, *seg.start, *seg.end)) {
+			*seg.provenance = &scanner.SegmentProvenance{Source: models.MarkerSourceManual, Confidence: &manualMarkerConfidence, Algorithm: markers.ManualWithheldAlgorithm}
 		}
 	}
-	return confirmed, false
 }
 
 // v2-only projection; the legacy writer retains its frozen response shape.

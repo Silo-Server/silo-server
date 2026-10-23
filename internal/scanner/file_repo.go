@@ -2143,7 +2143,7 @@ func clearSegmentState(state *segmentState) bool {
 }
 
 func clearManualSegmentState(state *segmentState, mutationAt time.Time) bool {
-	source, algorithm, confidence := models.MarkerSourceManual, "manual:v1", 1.0
+	source, algorithm, confidence := models.MarkerSourceManual, markers.ManualAlgorithm, 1.0
 	next := segmentState{source: &source, algorithm: &algorithm, confidence: &confidence, detectedAt: &mutationAt}
 	if segmentEqual(*state, next) {
 		return false

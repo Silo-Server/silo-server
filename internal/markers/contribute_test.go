@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -111,8 +112,6 @@ func (f *fakeRecorder) Record(ctx context.Context, row ContributionRow) error {
 	return nil
 }
 
-func (f *fakeRecorder) Withhold(context.Context, ContributionRow, string) error { return nil }
-
 func floatPtr(v float64) *float64 { return &v }
 func strPtr(v string) *string     { return &v }
 
@@ -172,27 +171,6 @@ func TestContributeSubmitsManualOnDemand(t *testing.T) {
 	}
 	if len(outcomes) != 1 || outcomes[0].Status != SubmissionStatusPending {
 		t.Errorf("outcomes = %+v", outcomes)
-	}
-}
-
-// A manual save that only kept one provider's marker goes back to that
-// provider as a check of its data, and to no other.
-func TestContributeSendsAConfirmedMarkerOnlyToItsProvider(t *testing.T) {
-	reg := NewRegistry(nil)
-	origin, other := &fakeSubmitter{id: "origin"}, &fakeSubmitter{id: "other"}
-	_ = reg.Register(origin)
-	_ = reg.Register(other)
-	cfg := fakeConfig{"origin": {Provider: "origin", ContributeEnabled: true}, "other": {Provider: "other", ContributeEnabled: true}}
-	resolver := fakeResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TmdbID: "1234", SeasonNumber: 1, EpisodeNumber: 3}}
-	svc := NewContributionService(reg, resolver, cfg, &fakeRecorder{}, nil)
-
-	file := newContribIntroFile(models.MarkerSourceManual)
-	opts := ContributeOptions{Segments: []MarkerKind{MarkerKindIntro}, Confirmed: map[MarkerKind]string{MarkerKindIntro: "origin"}}
-	if _, err := svc.ContributeFile(context.Background(), file, opts); err != nil {
-		t.Fatalf("ContributeFile: %v", err)
-	}
-	if len(origin.submitted) != 1 || len(other.submitted) != 0 {
-		t.Fatalf("submissions: origin %d, other %d; want 1 and 0", len(origin.submitted), len(other.submitted))
 	}
 }
 
@@ -504,14 +482,15 @@ func TestContributeDisabledProviderNoop(t *testing.T) {
 }
 
 // AutoContributors lists only registered submitters with automatic sharing on,
-// carrying each one's own minimum and required IDs, and lists none when the
-// stored config cannot be read.
+// carrying each one's own minimum and required IDs. AmendContributors lists
+// every enabled one that supports amend, automatic sharing on or off. Both
+// list none when the stored config cannot be read.
 func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 	reg := NewRegistry(nil)
 	for _, sub := range []*fakeSubmitter{
 		{id: "keyed", required: []string{ExternalIDKeyTVDB}, amend: true},
-		{id: "manual-only"},
-		{id: "disabled"},
+		{id: "manual-only", amend: true},
+		{id: "disabled", amend: true},
 	} {
 		_ = reg.Register(sub)
 	}
@@ -523,15 +502,17 @@ func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 		"unregistered": {Provider: "unregistered", ContributeEnabled: true, ContributeAutoLocal: true},
 	}
 	tests := []struct {
-		name    string
-		config  providerConfigReader
-		want    []AutoContributor
-		wantErr bool
+		name      string
+		config    providerConfigReader
+		want      []AutoContributor
+		wantAmend []string
+		wantErr   bool
 	}{
 		{
-			name:   "stored config",
-			config: stored,
-			want:   []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}, SupportsAmend: true}},
+			name:      "stored config",
+			config:    stored,
+			want:      []AutoContributor{{Provider: "keyed", MinConfidence: 0.97, RequiredExternalIDs: []string{ExternalIDKeyTVDB}, SupportsAmend: true}},
+			wantAmend: []string{"keyed", "manual-only"},
 		},
 		{
 			name:    "config unreadable",
@@ -545,6 +526,10 @@ func TestAutoContributorsListsRegisteredAutoSubmitters(t *testing.T) {
 			got, err := svc.AutoContributors(context.Background())
 			if (err != nil) != test.wantErr || fmt.Sprintf("%+v", got) != fmt.Sprintf("%+v", test.want) {
 				t.Fatalf("AutoContributors = %+v, %v; want %+v, error %v", got, err, test.want, test.wantErr)
+			}
+			amend, err := svc.AmendContributors(context.Background())
+			if (err != nil) != test.wantErr || !slices.Equal(amend, test.wantAmend) {
+				t.Fatalf("AmendContributors = %v, %v; want %v, error %v", amend, err, test.wantAmend, test.wantErr)
 			}
 		})
 	}
