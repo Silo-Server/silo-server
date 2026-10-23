@@ -100,7 +100,10 @@ func redisWindowLimits(limit Rate) (secLimit, minLimit, effectiveLimit int) {
 	return secLimit, minLimit, secLimit
 }
 
-// NewRedisLimiter creates a new Redis-backed rate limiter.
+// NewRedisLimiter creates a new Redis-backed rate limiter. A call gives up
+// after its timeout only when client honors context deadlines, as one from
+// cache.NewDeadlineRedisClientForRole does; on another client a stalled read
+// waits for the client's read timeout.
 func NewRedisLimiter(client *redis.Client) *RedisLimiter {
 	return &RedisLimiter{client: client, callTimeout: redisCallTimeout}
 }
@@ -120,9 +123,12 @@ func (rl *RedisLimiter) allowAt(ctx context.Context, key string, limit Rate, now
 	if err != nil {
 		// Fail-open: allow request if Redis is unreachable. A caller that
 		// gave up says nothing about Redis, so it does not pause the limiter.
+		// A pause already set is left alone: this check started before it,
+		// and overwriting it would stop a background count that finds Redis
+		// answering from ending it.
 		if ctx.Err() != nil {
 			slog.WarnContext(ctx, "rate limit Redis error, allowing request", "component", "ratelimit", "error", err, "key", key)
-		} else if rl.pausedUntil.Swap(pauseTime(now.Add(redisOutagePause))) == 0 {
+		} else if rl.pausedUntil.CompareAndSwap(0, pauseTime(now.Add(redisOutagePause))) {
 			logRedisPause(ctx, err, key)
 		}
 		return redisFailOpen(effectiveLimit, now)
